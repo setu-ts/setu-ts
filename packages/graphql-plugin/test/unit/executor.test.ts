@@ -5,8 +5,7 @@
  * arms (`'http'` and `'stream'`) and the `executeGraphql` pipeline.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   checkOperation,
   codedError,

@@ -3,8 +3,7 @@
  * round-trips the shared protocol against the echo-task fixture (which wires
  * itself with `defineWorkerTask`).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { WorkerTaskReply } from '@setu-ts/common';
 import { isWorkerReadySignal, isWorkerTaskReply } from '@setu-ts/common';

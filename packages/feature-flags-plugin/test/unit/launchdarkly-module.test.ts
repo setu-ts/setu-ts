@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   adaptLaunchDarklyModule,
   LaunchDarklyModuleError,
@@ -66,7 +65,9 @@ describe('toLoadFailure', () => {
       new Error('Module not found "npm:@launchdarkly/node-server-sdk"'),
     );
     expect(wrapped).toBeInstanceOf(LaunchDarklyModuleError);
-    expect(wrapped.message).toContain('Install it to use the');
+    expect(wrapped.message).toContain(
+      'Failed to load @launchdarkly/node-server-sdk. Install it to use the',
+    );
     expect(wrapped.message).toContain('options.client');
     expect(wrapped.message).toContain('Module not found');
   });

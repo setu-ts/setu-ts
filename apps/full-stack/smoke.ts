@@ -135,6 +135,18 @@ try {
     fail('The /docs body did not render the Swagger UI page.');
   }
 
+  // 2d — a document refusal belongs to React Router's HTML error boundary.
+  const refused = await app.fetch(new Request(`${ORIGIN}/forbidden`));
+  if (refused.status !== 403) {
+    fail(`Expected the refused document to answer 403, received ${refused.status}.`);
+  }
+  if (!(refused.headers.get('content-type') ?? '').includes('text/html')) {
+    fail('The refused React Router document was not HTML.');
+  }
+  if (!(await refused.text()).includes('Route boundary refusal:')) {
+    fail('The refused document did not render its route ErrorBoundary.');
+  }
+
   // 3 — the session and its form CSRF token, through the same SSR path.
   const loginPage = await app.fetch(new Request(`${ORIGIN}/login`));
   if (loginPage.status !== 200) {

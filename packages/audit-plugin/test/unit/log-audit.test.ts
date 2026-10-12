@@ -1,8 +1,7 @@
 /**
  * Tests for LogAuditStorage.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { LogAuditStorage } from '../../src/storage/log-audit.ts';
 import type { ILogger } from '@setu-ts/common';
 import type { StoredAuditEntry } from '../../src/interfaces/index.ts';

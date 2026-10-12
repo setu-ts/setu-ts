@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   columnAddress,
   resolveBigtableTarget,
@@ -116,5 +115,17 @@ describe('columnAddress', () => {
     const target = resolveBigtableTarget('User', undefined);
     expect(() => columnAddress(target, 'not a field'))
       .toThrow(/not a usable column identifier/);
+  });
+});
+
+describe('field names that are inherited object members (M105 audit O4)', () => {
+  it('resolve as ordinary unmapped fields, never as the inherited member', () => {
+    const target = resolveBigtableTarget('User', undefined);
+    for (const field of ['constructor', 'toString', 'hasOwnProperty']) {
+      expect(tryColumnAddress(target, field)).toEqual({
+        family: target.defaultFamily,
+        qualifier: field,
+      });
+    }
   });
 });

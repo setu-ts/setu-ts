@@ -1,0 +1,90 @@
+{
+  "name": "@setu-ts/cli",
+  "version": "0.9.0",
+  "description": "setu — project scaffolding and plugin-aware code generation",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/cli",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": [
+    "./dist/bin.js"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./main": {
+      "types": "./dist/main.d.ts",
+      "default": "./dist/main.js"
+    }
+  },
+  "bin": {
+    "setu": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.0"
+  },
+  "devDependencies": {
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/cloudflare-plugin": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/cqrs-plugin": "workspace:^",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/events-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/feature-flags-plugin": "workspace:^",
+    "@setu-ts/graphql-plugin": "workspace:^",
+    "@setu-ts/grpc-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/http-security-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/messaging-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/multi-tenancy-plugin": "workspace:^",
+    "@setu-ts/notification-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/react-router-plugin": "workspace:^",
+    "@setu-ts/realtime-backplane-plugin": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/service-discovery-plugin": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
+    "@setu-ts/sse-plugin": "workspace:^",
+    "@setu-ts/static-plugin": "workspace:^",
+    "@setu-ts/storage-plugin": "workspace:^",
+    "@setu-ts/telemetry-plugin": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@types/deno": "2.7.0",
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

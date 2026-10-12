@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * §3.7 real-outage bar: drives a **real** Redis backend through a **real**
  * stop and restart for the Redis backplane, asserting
@@ -16,8 +16,7 @@
  * `false` forever against a healthy Redis, so the baseline `up` assertion
  * would fail if F2 regresses.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IRealtimeBackplane,
   IRealtimeDiagnosticsSource,
@@ -32,7 +31,7 @@ import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 // ── Docker stop/start helpers ───────────────────────────────────────────────
 
 async function docker(args: string[]): Promise<string> {
-  const out = await new Deno.Command('docker', { args }).output();
+  const out = await runProcess('docker', { args });
   if (!out.success) {
     throw new Error(
       `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
@@ -69,24 +68,13 @@ function toIpv4(url: string): string {
 }
 
 describe('REAL Redis backplane outage (§3.7)', () => {
-  it('up → stop → down → restart → up (X3-2 self-heals)', async () => {
-    const url = Deno.env.get('REDIS_URL');
-    if (url === undefined) {
-      console.log('SKIP: REDIS_URL not set');
-      return;
-    }
+  it('up → stop → down → restart → up (X3-2 self-heals)', {
+    skip: process.env['REDIS_URL'] === undefined,
+  }, async () => {
+    const url = process.env['REDIS_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
-    let ioredisPresent = false;
-    try {
-      await import('npm:ioredis@5.x');
-      ioredisPresent = true;
-    } catch {
-      // npm:ioredis not available
-    }
-    if (!ioredisPresent) {
-      console.log('SKIP: npm:ioredis@5.x not available');
-      return;
-    }
+    await import('ioredis');
 
     const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
     const containerId = await containerIdForPort(port);
@@ -119,14 +107,14 @@ describe('REAL Redis backplane outage (§3.7)', () => {
       expect(await probe()).toBe(true);
     } finally {
       await backplane.close();
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
+      await runProcess('docker', { args: ['start', containerId] });
     }
   });
 });
 
 // ── A publish on a failed connection is reported, not lost ────────────────────
 
-const REDIS_URL = Deno.env.get('REDIS_URL');
+const REDIS_URL = process.env['REDIS_URL'];
 /** Short enough to keep the suite fast; the default is 15 s. */
 const COMMAND_TIMEOUT_MS = 1_500;
 
@@ -150,7 +138,7 @@ function settleWithin(promise: Promise<void>, ms: number): Promise<string> {
 
 describe('REAL Redis backplane: a publish on a failed connection', () => {
   it('rejects, is recorded failed, and publishing recovers — silent and dropped connections', {
-    ignore: REDIS_URL === undefined,
+    skip: REDIS_URL === undefined,
   }, async () => {
     const port = new URL(REDIS_URL!).port === '' ? 6379 : Number(new URL(REDIS_URL!).port);
     const containerId = await containerIdForPort(port);
@@ -216,9 +204,9 @@ describe('REAL Redis backplane: a publish on a failed connection', () => {
       expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
     } finally {
       if (paused) {
-        await new Deno.Command('docker', { args: ['unpause', containerId] }).output();
+        await runProcess('docker', { args: ['unpause', containerId] });
       }
-      await new Deno.Command('docker', { args: ['start', containerId] }).output();
+      await runProcess('docker', { args: ['start', containerId] });
       await app.stop();
     }
   });

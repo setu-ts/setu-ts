@@ -1,3 +1,5 @@
+import { denoBinary, run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The e2e bar for the standalone broker flags (M72): a `--broker`/`--queue`
  * scaffold is formatted, linted, type-checked against this workspace, and —
@@ -13,9 +15,8 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
@@ -25,20 +26,20 @@ import {
   useWorkspacePackages,
 } from '../fixtures/generated-project.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /** Whether a real broker backs the boot half: CI sets this at job level. */
-const REDIS_AVAILABLE = Deno.env.get('REDIS_URL') !== undefined;
+const REDIS_AVAILABLE = process.env['REDIS_URL'] !== undefined;
 
 let root = '';
 
 beforeEach(async () => {
-  root = await Deno.makeTempDir({ prefix: 'setu-broker-scaffold-' });
+  root = await tempDir({ prefix: 'setu-broker-scaffold-' });
 });
 
 afterEach(async () => {
-  await Deno.remove(root, { recursive: true }).catch(() => {});
+  await nodeFs.rm(root, { recursive: true }).catch(() => {});
 });
 
 /**
@@ -68,13 +69,14 @@ async function denoRun(
   project: string,
   args: readonly string[],
 ): Promise<{ code: number; output: string }> {
-  const command = new Deno.Command(Deno.execPath(), {
-    args: [...args],
-    cwd: project,
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const { code, stdout, stderr } = await command.output();
+  const command = () =>
+    runProcess(denoBinary(), {
+      args: [...args],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+  const { code, stdout, stderr } = await command();
   return {
     code,
     output: `${new TextDecoder().decode(stdout)}${new TextDecoder().decode(stderr)}`,
@@ -83,10 +85,12 @@ async function denoRun(
 
 describe('a --broker redis --queue redis scaffold', () => {
   it('renders a config that differs from the default one', async () => {
-    await run(['new', 'plain', '--template', 'microservice']);
+    await run(['new', '--runtime', 'deno', 'plain', '--template', 'microservice']);
     expect(
       await run([
         'new',
+        '--runtime',
+        'deno',
         'svc',
         '--template',
         'microservice',
@@ -97,21 +101,25 @@ describe('a --broker redis --queue redis scaffold', () => {
       ]),
     ).toBe(0);
 
-    const plain = await Deno.readTextFile(`${root}/plain/setu.config.ts`);
-    const brokered = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
+    const plain = await nodeFs.readFile(`${root}/plain/setu.config.ts`, 'utf8');
+    const brokered = await nodeFs.readFile(`${root}/svc/setu.config.ts`, 'utf8');
     expect(brokered).not.toBe(plain);
     expect(plain).toContain('MessagingPlugin()');
     expect(brokered).toContain("broker: 'redis-streams'");
     expect(brokered).toContain("adapter: 'redis'");
     // The dotenv pair names the variable; the Compose file starts the broker.
-    expect(await Deno.readTextFile(`${root}/svc/.env`)).toContain('REDIS_URL=');
-    expect(await Deno.readTextFile(`${root}/svc/docker/compose.yaml`)).toContain('image: redis:7');
+    expect(await nodeFs.readFile(`${root}/svc/.env`, 'utf8')).toContain('REDIS_URL=');
+    expect(await nodeFs.readFile(`${root}/svc/docker/compose.yaml`, 'utf8')).toContain(
+      'image: redis:7',
+    );
   });
 
   it('is formatted, lints clean, and type-checks against this workspace', async () => {
     expect(
       await run([
         'new',
+        '--runtime',
+        'deno',
         'svc',
         '--template',
         'microservice',
@@ -138,7 +146,18 @@ describe('a --broker redis --queue redis scaffold', () => {
   // scaffold fail its OWN `deno fmt --check` — the M63 bar, and invisible to
   // every other arm. Reverting `nestConnection` fails exactly this case.
   it('emits a --broker kafka scaffold that passes its own deno fmt --check', async () => {
-    expect(await run(['new', 'kf', '--template', 'microservice', '--broker', 'kafka'])).toBe(0);
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'kf',
+        '--template',
+        'microservice',
+        '--broker',
+        'kafka',
+      ]),
+    ).toBe(0);
     const project = `${root}/kf`;
     await useWorkspacePackages(project);
 
@@ -149,7 +168,18 @@ describe('a --broker redis --queue redis scaffold', () => {
   });
 
   it('type-checks a --broker rabbitmq scaffold too', async () => {
-    expect(await run(['new', 'mq', '--template', 'microservice', '--broker', 'rabbitmq'])).toBe(0);
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'mq',
+        '--template',
+        'microservice',
+        '--broker',
+        'rabbitmq',
+      ]),
+    ).toBe(0);
     const project = `${root}/mq`;
     await useWorkspacePackages(project);
     const checked = await denoCheck(project, await collectSources(project));
@@ -160,26 +190,26 @@ describe('a --broker redis --queue redis scaffold', () => {
   // real redis:7 service container, so the boot half runs there every time.
   // Locally without a broker it reports `ignored` with its reason, never a
   // false pass.
-  it({
-    name: 'boots under its own permissions and answers /health once the broker runs',
-    ignore: !REDIS_AVAILABLE,
-    fn: async () => {
-      expect(
-        await run([
-          'new',
-          'svc',
-          '--template',
-          'microservice',
-          '--broker',
-          'redis',
-          '--queue',
-          'redis',
-        ]),
-      ).toBe(0);
-      const project = `${root}/svc`;
-      await useWorkspacePackages(project);
-      const outcome = await bootWithGeneratedPermissions(project, ['/health']);
-      expect(outcome.statuses['/health'], outcome.output).toBe(200);
-    },
+  it('boots under its own permissions and answers /health once the broker runs', {
+    skip: !REDIS_AVAILABLE,
+  }, async () => {
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'svc',
+        '--template',
+        'microservice',
+        '--broker',
+        'redis',
+        '--queue',
+        'redis',
+      ]),
+    ).toBe(0);
+    const project = `${root}/svc`;
+    await useWorkspacePackages(project);
+    const outcome = await bootWithGeneratedPermissions(project, ['/health']);
+    expect(outcome.statuses['/health'], outcome.output).toBe(200);
   });
 });

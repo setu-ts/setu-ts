@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
@@ -20,7 +19,7 @@ describe('the generated config module factory signature', () => {
       'export function createApp(\n' +
         '  _env?: Readonly<Record<string, unknown>>,\n' +
         '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
-        '): IApplication {',
+        '): IKernelApplication {',
     );
   });
 
@@ -46,6 +45,7 @@ describe('the generated config module factory signature', () => {
   it('keeps the starter factory async with the parameter accepted and unread', () => {
     const source = config('deno', FULL_STACK_TEMPLATE);
     expect(source).toContain('export async function createApp(');
+    expect(source).toContain('): Promise<IKernelApplication> {');
     expect(source).toContain('  env?: Readonly<Record<string, unknown>>,');
     expect(source).toContain('_devtool?: { plugins?: readonly IPlugin[];');
     expect(source).not.toContain('...(devtool?.plugins ?? [])');
@@ -101,7 +101,8 @@ describe('the generated config module factory signature', () => {
 
   it('imports the kernel on every target because the parameter names its type', () => {
     for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
-      expect(config(runtime)).toContain('@setu-ts/kernel');
+      expect(config(runtime)).toContain('type IKernelApplication');
+      expect(config(runtime)).not.toContain('IApplication');
     }
   });
 });

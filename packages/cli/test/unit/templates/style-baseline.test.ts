@@ -1,9 +1,10 @@
+import * as nodeFs from 'node:fs/promises';
 /**
- * M99e §3.7: the byte identity of every existing template's output.
+ * The byte identity of every existing template's output.
  *
  * `template-baseline.json` was captured by the NAMED script
  * `test/fixtures/capture-template-baseline.ts` BEFORE any template change in
- * this milestone:
+ * M99e, refreshed for M101g's reviewed factory and smoke-test changes:
  *
  *   deno run --allow-read --allow-write packages/cli/test/fixtures/capture-template-baseline.ts
  *
@@ -16,8 +17,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { TARGET_RUNTIMES, type TargetRuntime } from '../../../src/constants.ts';
 import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
 import type { TemplateHost } from '../../../src/templates/registry.ts';
@@ -25,11 +25,11 @@ import {
   BASELINE_HOSTS,
   BASELINE_NAME,
   BASELINE_PAIRS,
-  sha256Hex,
+  baselineHash,
 } from '../../fixtures/capture-template-baseline.ts';
 
 const baseline = JSON.parse(
-  await Deno.readTextFile(new URL('../../fixtures/template-baseline.json', import.meta.url)),
+  await nodeFs.readFile(new URL('../../fixtures/template-baseline.json', import.meta.url), 'utf8'),
 ) as Record<string, Record<string, string>>;
 
 /**
@@ -46,7 +46,7 @@ async function render(
 ): Promise<Record<string, string>> {
   const files = projectFiles(BASELINE_NAME, runtime, resolveHost(host, runtime));
   const hashes: Record<string, string> = {};
-  for (const file of files) hashes[file.path] = await sha256Hex(file.contents);
+  for (const file of files) hashes[file.path] = await baselineHash(file.contents);
   return hashes;
 }
 

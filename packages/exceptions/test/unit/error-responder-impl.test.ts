@@ -12,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createErrorResponder } from '../../src/middleware/error-responder-impl.ts';
 import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';

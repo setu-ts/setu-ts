@@ -1,21 +1,17 @@
 /**
  * The prompt seam — how `setu new` asks a question when it may.
  *
- * Everything DECIDABLE lives here, because this file is measured by the
- * coverage bar and `src/main.ts` never is: no test imports `main.ts`, so Deno
- * never loads it and it never appears in the table. Hence the three effects a
- * terminal prompter needs — "may I ask at all", "read one line", "print" — are
- * parameters, and the branching around them is unit-tested against fakes.
+ * Everything DECIDABLE lives here, so the three effects a terminal prompter
+ * needs — "may I ask at all", "read one line", "print" — are parameters, and
+ * the branching around them is unit-tested against fakes.
  *
- * Three facts were measured on deno 2.9.5 rather than read (plan §1.1), and
- * each shaped this design:
- * - `prompt()` returns `null` in ~1 ms when stdin is not a terminal, so the
- *   built-in cannot hang a non-interactive run;
- * - bare Enter returns `''`, which means "accept the default" — distinct from
- *   `null`, which means "cannot ask";
- * - the second `prompt()` argument PRE-FILLS an editable buffer, not a
- *   fallback, so it is deliberately unused: the default is rendered inside the
- *   question text instead.
+ * The read is asynchronous and abortable. A blocking read cannot dispatch the
+ * SIGINT handler `src/main.ts` registers, so a question pending when the user
+ * pressed Ctrl+C would wait for Enter; the line reader instead receives the
+ * run's interrupt signal and resolves `null` when it fires. Two answers keep
+ * their meaning: `null` means "cannot or will not answer" and `''` (bare
+ * Enter) means "accept the default", which is rendered inside the question
+ * text rather than pre-filled.
  *
  * @module
  */
@@ -30,6 +26,16 @@ export interface PromptChoice {
   readonly label: string;
 }
 
+/**
+ * The outcome of asking one interactive CLI question.
+ *
+ * @since 0.9.0
+ */
+export type PromptSelection =
+  | { readonly kind: 'answer'; readonly value: string }
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'cancelled' };
+
 /** Asks the scaffold questions `setu new` accepts as flags. */
 export interface Prompter {
   /**
@@ -37,14 +43,17 @@ export interface Prompter {
    *
    * @param question - The question text; the default is rendered inside it
    * @param choices - The acceptable answers, first being the default
-   * @returns The chosen value, or undefined when no answer could be taken
+   * @returns The answer, cancellation, or inability to ask
+   *
+   * In 0.9.0 the return changed to {@linkcode PromptSelection}; earlier versions returned a string
+   * or `undefined`.
    */
-  select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined>;
+  select(question: string, choices: readonly PromptChoice[]): Promise<PromptSelection>;
 }
 
 /**
- * Builds the terminal implementation of {@linkcode Prompter} over Deno's
- * built-in `prompt()`.
+ * Builds the terminal implementation of {@linkcode Prompter} over an
+ * asynchronous line reader.
  *
  * NOT barrel-exported on purpose: its only consumer is `src/main.ts`, which
  * imports it directly, and a second export with no reader is dead surface. A
@@ -56,40 +65,55 @@ export interface Prompter {
  * looping forever.
  *
  * @param isTerminal - Whether stdin is an interactive terminal right now
- * @param promptFn - Reads one line, returning null when it cannot
+ * @param promptFn - Reads one line, resolving null when it cannot or when
+ *   the signal it is handed aborts first
  * @param log - Prints the choice list and retry hints; every line is passed
  *   through `escapeTerminalControls` first, because this sink is not the one
  *   `runCli` wraps. That escape keeps the line feed, and an answer CAN carry
- *   one — Deno's `prompt()` keeps a newline inside a bracketed paste, turns a
- *   pasted CR into one, and inserts one on Ctrl-V Ctrl-J (measured, Deno 2.9.6)
+ *   one — a terminal line reader keeps a newline inside a bracketed paste and
+ *   inserts one on Ctrl-V Ctrl-J
  *   — so the echoed answer is also escaped where it is quoted
  * @returns The prompter
  */
 export function createTerminalPrompter(
   isTerminal: () => boolean,
-  promptFn: (message: string) => string | null,
+  promptFn: (message: string, signal?: AbortSignal) => Promise<string | null>,
   log: (message: string) => void,
+  interrupt?: AbortSignal,
 ): Prompter {
   const print = (message: string): void => log(escapeTerminalControls(message));
+  // A function rather than an inline read: the signal can fire WHILE
+  // `promptFn` awaits, which property narrowing across the call cannot see.
+  const interrupted = (): boolean => interrupt?.aborted === true;
   return {
-    select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined> {
+    async select(question: string, choices: readonly PromptChoice[]): Promise<PromptSelection> {
       // The SECOND line of defense against blocking a non-interactive run: the
       // primary guarantee is that `ask` is optional and gates do not pass it,
-      // and the third is `prompt()`'s own measured null return here.
-      if (!isTerminal() || choices.length === 0) return Promise.resolve(undefined);
+      // and the third is the reader resolving null when it cannot read.
+      if (!isTerminal() || choices.length === 0) {
+        return { kind: 'unavailable' };
+      }
 
       const fallback = choices[0];
       const menu = choices.map((choice) => `  ${choice.value} — ${choice.label}`).join('\n');
 
       for (;;) {
+        // Checked BEFORE each prompt as well as after: an interrupt that has
+        // already fired must not open a read it would then wait on.
+        if (interrupted()) return { kind: 'cancelled' };
         print(menu);
-        const answer = promptFn(`${question} [${fallback.value}] `);
+        // Again after printing: the write itself can be where the interrupt
+        // lands, and the read below would then block on input nobody sends.
+        if (interrupted()) return { kind: 'cancelled' };
+        const answer = await promptFn(`${question} [${fallback.value}] `, interrupt);
         // Both "stdin was never a terminal" and "the user pressed Ctrl-D"
         // arrive here; both mean stop asking, never "take the default".
-        if (answer === null) return Promise.resolve(undefined);
-        if (answer === '') return Promise.resolve(fallback.value);
+        if (answer === null || interrupted()) {
+          return { kind: 'cancelled' };
+        }
+        if (answer === '') return { kind: 'answer', value: fallback.value };
         const match = choices.find((choice) => choice.value === answer);
-        if (match !== undefined) return Promise.resolve(match.value);
+        if (match !== undefined) return { kind: 'answer', value: match.value };
         print(
           `"${escapeName(answer)}" is not one of: ${
             choices.map((choice) => choice.value).join(', ')

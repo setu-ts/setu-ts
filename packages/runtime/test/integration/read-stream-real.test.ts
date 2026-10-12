@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * REAL-filesystem tests for `IFileSystem.readStream`.
  *
@@ -13,8 +15,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildNodeHost, createNodeRuntimeServices } from '../../src/adapters/node/node-runtime.ts';
 import { buildBunHost, createBunRuntimeServices } from '../../src/adapters/bun/bun-runtime.ts';
@@ -23,10 +24,17 @@ import { createDenoRuntimeServices } from '../../src/adapters/deno/deno-runtime.
 /** Deterministic body: 256 bytes, each equal to its own index. */
 const BODY = new Uint8Array(256).map((_, i) => i);
 
+const fixtures: string[] = [];
+afterEach(async () => {
+  for (const directory of fixtures.splice(0)) await nodeFs.rm(directory, { recursive: true });
+});
+
 /** Writes {@link BODY} to a fresh temp file and returns its path. */
 async function writeFixture(): Promise<string> {
-  const path = await Deno.makeTempFile({ prefix: 'setu-readstream-' });
-  await Deno.writeFile(path, BODY);
+  const directory = await tempDir({ prefix: 'setu-readstream-' });
+  fixtures.push(directory);
+  const path = `${directory}/body.bin`;
+  await nodeFs.writeFile(path, BODY);
   return path;
 }
 
@@ -59,7 +67,7 @@ describe('readStream against the real filesystem — Node default host', () => {
       expect(Array.from(bytes.slice(0, 4))).toEqual([0, 1, 2, 3]);
       expect(Array.from(bytes.slice(-2))).toEqual([254, 255]);
     } finally {
-      await Deno.remove(path);
+      await nodeFs.rm(path);
     }
   });
 
@@ -73,7 +81,7 @@ describe('readStream against the real filesystem — Node default host', () => {
       expect(bytes.length).toBe(10);
       expect(Array.from(bytes)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     } finally {
-      await Deno.remove(path);
+      await nodeFs.rm(path);
     }
   });
 });
@@ -89,7 +97,7 @@ describe('readStream against the real filesystem — Bun default host', () => {
       expect(bytes.length).toBe(BODY.length);
       expect(Array.from(bytes.slice(0, 4))).toEqual([0, 1, 2, 3]);
     } finally {
-      await Deno.remove(path);
+      await nodeFs.rm(path);
     }
   });
 
@@ -102,48 +110,52 @@ describe('readStream against the real filesystem — Bun default host', () => {
       expect(bytes.length).toBe(10);
       expect(Array.from(bytes)).toEqual([200, 201, 202, 203, 204, 205, 206, 207, 208, 209]);
     } finally {
-      await Deno.remove(path);
+      await nodeFs.rm(path);
     }
   });
 });
 
-describe('readStream against the real filesystem — Deno', () => {
-  it('streams a whole file through the real Deno global', async () => {
-    const path = await writeFixture();
-    try {
-      const fs = createDenoRuntimeServices().fs;
-      const bytes = await drain(await fs!.readStream!(path));
+describe(
+  'readStream against the real filesystem — Deno',
+  { skip: typeof Deno === 'undefined' },
+  () => {
+    it('streams a whole file through the real Deno global', async () => {
+      const path = await writeFixture();
+      try {
+        const fs = createDenoRuntimeServices().fs;
+        const bytes = await drain(await fs!.readStream!(path));
 
-      expect(bytes.length).toBe(BODY.length);
-      expect(Array.from(bytes.slice(-2))).toEqual([254, 255]);
-    } finally {
-      await Deno.remove(path);
-    }
-  });
+        expect(bytes.length).toBe(BODY.length);
+        expect(Array.from(bytes.slice(-2))).toEqual([254, 255]);
+      } finally {
+        await nodeFs.rm(path);
+      }
+    });
 
-  it('honours an inclusive byte range and terminates at the limit', async () => {
-    const path = await writeFixture();
-    try {
-      const fs = createDenoRuntimeServices().fs;
-      const bytes = await drain(await fs!.readStream!(path, { start: 0, end: 3 }));
+    it('honours an inclusive byte range and terminates at the limit', async () => {
+      const path = await writeFixture();
+      try {
+        const fs = createDenoRuntimeServices().fs;
+        const bytes = await drain(await fs!.readStream!(path, { start: 0, end: 3 }));
 
-      expect(bytes.length).toBe(4);
-      expect(Array.from(bytes)).toEqual([0, 1, 2, 3]);
-    } finally {
-      await Deno.remove(path);
-    }
-  });
+        expect(bytes.length).toBe(4);
+        expect(Array.from(bytes)).toEqual([0, 1, 2, 3]);
+      } finally {
+        await nodeFs.rm(path);
+      }
+    });
 
-  it('reads to end of file when only start is given', async () => {
-    const path = await writeFixture();
-    try {
-      const fs = createDenoRuntimeServices().fs;
-      const bytes = await drain(await fs!.readStream!(path, { start: 250 }));
+    it('reads to end of file when only start is given', async () => {
+      const path = await writeFixture();
+      try {
+        const fs = createDenoRuntimeServices().fs;
+        const bytes = await drain(await fs!.readStream!(path, { start: 250 }));
 
-      expect(bytes.length).toBe(6);
-      expect(Array.from(bytes)).toEqual([250, 251, 252, 253, 254, 255]);
-    } finally {
-      await Deno.remove(path);
-    }
-  });
-});
+        expect(bytes.length).toBe(6);
+        expect(Array.from(bytes)).toEqual([250, 251, 252, 253, 254, 255]);
+      } finally {
+        await nodeFs.rm(path);
+      }
+    });
+  },
+);

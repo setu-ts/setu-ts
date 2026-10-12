@@ -2,8 +2,8 @@
  * Loading the target project's application factory.
  *
  * This is the one place the CLI imports user code. It resolves
- * `setu.config.ts` (or `--config <path>`), imports it with a REAL dynamic
- * `import()`, and validates that it exports the factory the contract requires
+ * `setu.config.ts` (or `--config <path>`), imports it for real through `tsx`
+ * (`utils/ts-loader.ts`), and validates that it exports the factory the contract requires
  * — each failure naming the resolved path and what was expected.
  *
  * @module
@@ -12,6 +12,8 @@
 import type { IApplication } from '@setu-ts/common';
 import { CONFIG_EXPORT, CONFIG_MODULE } from './constants.ts';
 import { joinPath, toFileUrl } from './utils/file-writer.ts';
+import { escapeName } from './utils/names.ts';
+import { MEMBERS_DIR, readWorkspaceManifest, WORKSPACE_MANIFEST } from './workspace/manifest.ts';
 import { importModule, type ModuleLoader } from './schematics/custom.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -133,6 +135,127 @@ function isApplication(value: unknown): value is IApplication {
     typeof candidate.services === 'object' && candidate.services !== null;
 }
 
+/** The Deno manifests whose presence marks a project as a Deno target. */
+const DENO_MANIFESTS = ['deno.json', 'deno.jsonc'] as const;
+
+/** Whether a path exists on the CLI's filesystem. */
+async function exists(fs: IFileSystem, path: string): Promise<boolean> {
+  try {
+    await fs.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The directory above `path`, or `undefined` at a root.
+ *
+ * Splits on either separator, because a Windows path arrives with backslashes:
+ * cutting at the last `/` alone would turn `C:\repo\apps\api` into the
+ * PREFIX `C:\repo\apps\ap` — a sibling Node never resolves through.
+ * `joinPath` never resolves `..`, so the parent is the text before the last
+ * separator; a POSIX root, a drive root (`C:\`, `C:`) and a UNC share root
+ * (`\\server\share`) have none.
+ *
+ * @param path - An absolute directory
+ * @returns Its parent, or `undefined` when it is a root
+ */
+export function parentDir(path: string): string | undefined {
+  const trimmed = path.length > 1 ? path.replace(/[\\/]+$/, '') : path;
+  if (trimmed === '' || trimmed === '/' || /^[A-Za-z]:$/.test(trimmed)) return undefined;
+  if (/^\\\\[^\\]+\\[^\\]+$/.test(trimmed)) return undefined;
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  if (cut < 0) return undefined;
+  if (cut === 0) return '/';
+  const parent = trimmed.slice(0, cut);
+  return /^[A-Za-z]:$/.test(parent) ? `${parent}\\` : parent;
+}
+
+/**
+ * The directories whose `node_modules` may install a Deno project's framework:
+ * the project, and — when it is a member of a workspace — each ancestor up to
+ * and including that workspace's root. Outside a workspace, the project alone.
+ *
+ * An ancestor counts as this project's workspace only when its
+ * {@linkcode WORKSPACE_MANIFEST} is one this CLI can read AND lists a member at
+ * exactly `<ancestor>/apps/<name>` = the project. The mere presence of the file
+ * is not enough: a `setu.workspace.json` planted beside a planted
+ * `node_modules/@setu-ts/kernel` in a shared parent would otherwise widen the
+ * search to reach it.
+ *
+ * @param fs - The CLI's filesystem
+ * @param dir - The project root (absolute)
+ * @returns The directories, nearest first
+ */
+export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<string[]> {
+  // Compared with one separator: `joinPath` joins with `/` while a native Windows path keeps
+  // `\`, so `C:\ws/apps/api` and `C:\ws\apps\api` must read as the same member.
+  const slashes = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const project = slashes(dir);
+  const chain: string[] = [];
+  for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
+    chain.push(current);
+    if (!(await exists(fs, joinPath(current, WORKSPACE_MANIFEST)))) continue;
+    const read = await readWorkspaceManifest(fs, current);
+    const listed = read.ok &&
+      read.manifest.members.some((member) =>
+        slashes(joinPath(current!, joinPath(MEMBERS_DIR, member.name))) === project
+      );
+    return listed ? chain : [dir];
+  }
+  return [dir];
+}
+
+/**
+ * Why a Deno project's config cannot be imported by this Node CLI, if it can't.
+ *
+ * The CLI imports `setu.config.ts` through Node resolution, which cannot read a
+ * Deno import map. A generated Deno project sets `nodeModulesDir: "auto"`, so
+ * after `deno install` its framework packages are linked into a `node_modules`
+ * the import resolves through. Without that link the import would fail inside
+ * module resolution with a message naming a package rather than the cause, so
+ * it is refused here, by name, first. A workspace member is satisfied by its
+ * workspace root's `node_modules`, where a Deno workspace links its packages.
+ *
+ * The search is bounded: the project itself, then — only when it is a listed
+ * member — its ancestors up to its workspace root, and no further (see
+ * {@linkcode installSearchDirs}). An unbounded walk would accept a `node_modules/@setu-ts/kernel`
+ * planted in a shared parent such as `/tmp` as "installed", and Node would then
+ * import and run it (M111d audit round 2, N1). With the bound, a kernel is found
+ * only where the project's own resolution reaches it first.
+ *
+ * @param fs - The CLI's filesystem
+ * @param dir - The project root (absolute)
+ * @returns The refusal, or `undefined` when the project is not a Deno project
+ *   or its packages are installed
+ */
+export async function denoInstallRefusal(
+  fs: IFileSystem,
+  dir: string,
+): Promise<string | undefined> {
+  let manifest: string | undefined;
+  for (const name of DENO_MANIFESTS) {
+    if (await exists(fs, joinPath(dir, name))) manifest = joinPath(dir, name);
+  }
+  if (manifest === undefined) return undefined;
+
+  for (const current of await installSearchDirs(fs, dir)) {
+    if (await exists(fs, joinPath(current, 'node_modules', '@setu-ts', 'kernel'))) {
+      return undefined;
+    }
+  }
+
+  const text = new TextDecoder().decode(await fs.readFile(manifest));
+  if (text.includes('jsr:@setu-ts/')) {
+    return `${escapeName(manifest)} pins the framework from JSR, which this CLI cannot load. ` +
+      `Move the project to the npm packages first — see docs/upgrading.md.`;
+  }
+  return `This Deno project's packages are not installed where Node can import them. ` +
+    `Run \`deno install\` in ${escapeName(dir)} (its manifest sets nodeModulesDir: "auto"), ` +
+    `then run this command again.`;
+}
+
 /**
  * Imports the project's config module and calls its factory.
  *
@@ -141,7 +264,7 @@ function isApplication(value: unknown): value is IApplication {
  *
  * @param dir - The project root (absolute)
  * @param config - The `--config` override, when supplied
- * @param load - The module loader; defaults to a real dynamic `import()`
+ * @param load - The module loader; defaults to a real import through `tsx`
  * @returns The unstarted application
  * @throws {Error} If the module cannot be imported, exports no
  * {@linkcode CONFIG_EXPORT} function, or that function does not produce an
@@ -156,10 +279,12 @@ export async function loadApp(
 
   let module: Record<string, unknown>;
   try {
-    module = await load(url);
+    module = await load(url, dir);
   } catch (cause) {
     throw new Error(
-      `Cannot load ${url}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Cannot load ${escapeName(String(url))}: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
       { cause },
     );
   }
@@ -167,7 +292,9 @@ export async function loadApp(
   const factory = module[CONFIG_EXPORT];
   if (typeof factory !== 'function') {
     throw new Error(
-      `${url} must export a '${CONFIG_EXPORT}' function returning the application; ` +
+      `${
+        escapeName(String(url))
+      } must export a '${CONFIG_EXPORT}' function returning the application; ` +
         `found ${typeof factory}.`,
     );
   }
@@ -179,9 +306,9 @@ export async function loadApp(
     // runtime from here without reading a second manifest.
     app = await (factory as (env: Readonly<Record<string, unknown>>) => unknown)(discoveryEnv());
   } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
+    const detail = escapeName(cause instanceof Error ? cause.message : String(cause));
     throw new Error(
-      `${CONFIG_EXPORT}() in ${url} threw: ${detail}\n` +
+      `${CONFIG_EXPORT}() in ${escapeName(String(url))} threw: ${detail}\n` +
         `  Plugin commands are unavailable in this project because building the ` +
         `application failed. \`setu\` constructs it to discover them, with inert ` +
         `platform bindings — anything a plugin READS at construction time will not ` +
@@ -192,7 +319,7 @@ export async function loadApp(
 
   if (!isApplication(app)) {
     throw new Error(
-      `${CONFIG_EXPORT}() in ${url} must return the application from ` +
+      `${CONFIG_EXPORT}() in ${escapeName(String(url))} must return the application from ` +
         `createApplication(); got ${app === null ? 'null' : typeof app}.`,
     );
   }

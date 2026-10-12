@@ -133,6 +133,49 @@ export { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
 // Services
 export { DatabaseService } from './services/database-service.ts';
 
+// Tenant data-store bridge (M101c, V8-8) — the one shipped `ITenantDataStore`
+// over `IDatabaseService`, for the multi-tenancy plugin's `dataStore` option.
+export {
+  createDatabaseTenantDataStore,
+  DatabaseTenantDataStore,
+  TenantStoreStrategyUnsupportedError,
+} from './tenancy/database-tenant-data-store.ts';
+
+// Scoped RBAC sources (M110b) — grants and per-scope custom roles read from the
+// application's database, for AuthPlugin's `scopedRbac` option.
+export {
+  createDatabaseGrantSource,
+  createDatabaseRoleSource,
+} from './authorization/database-grant-source.ts';
+export type {
+  DatabaseGrantSourceOptions,
+  DatabaseRoleSourceOptions,
+  GrantFields,
+  RoleFields,
+} from './authorization/database-grant-source.ts';
+
+// Transactional outbox store bridge (M107) — the shipped `IOutboxStore` over
+// `IDatabaseService`, for the messaging plugin's `outbox.store` option. The
+// store class stays internal: it reaches an application only as `IOutboxStore`.
+export { createDatabaseOutboxStore } from './outbox/database-outbox-store.ts';
+export type { DatabaseOutboxStoreOptions } from './outbox/database-outbox-store.ts';
+export { OutboxStoreUnavailableError } from './outbox/errors.ts';
+
+// Consumer inbox store bridge (M108) — the shipped `IInboxStore` over
+// `IDatabaseService`, for the messaging plugin's `inbox.store` option. The
+// store class stays internal: it reaches an application only as `IInboxStore`.
+export { createDatabaseInboxStore } from './inbox/database-inbox-store.ts';
+export type { DatabaseInboxStoreOptions } from './inbox/database-inbox-store.ts';
+export { InboxStoreUnavailableError } from './inbox/errors.ts';
+
+// Tier-C idempotency store bridge (M109b) — the shipped
+// `ITransactionalIdempotencyStore` over `IDatabaseService`, for the idempotency
+// plugin's `transactional.store` option. The store class stays internal: it
+// reaches an application only as `ITransactionalIdempotencyStore`.
+export { createDatabaseIdempotencyStore } from './idempotency/database-idempotency-store.ts';
+export type { DatabaseIdempotencyStoreOptions } from './idempotency/database-idempotency-store.ts';
+export { TransactionalStoreUnavailableError } from './idempotency/errors.ts';
+
 // Typed native Drizzle query access
 export {
   createDrizzleDatabase,

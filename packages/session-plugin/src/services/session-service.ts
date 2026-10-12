@@ -15,7 +15,7 @@ import type {
   ISessionStore,
   SessionView,
 } from '@setu-ts/common';
-import { parseCookie, serializeCookie } from '@setu-ts/common';
+import { parseCookie, serializeCookie, SESSION_STATE_KEY } from '@setu-ts/common';
 
 import type { KeyRing } from '../codec/crypto.ts';
 import { open, seal } from '../codec/crypto.ts';
@@ -33,8 +33,12 @@ import { createSession, parseSnapshot, restoreSession } from './session.ts';
  * every producer — the kernel, the testing package's `createTestContext`, and
  * every hand-rolled double — to construct one, and would type it as present on
  * requests the middleware never touched.
+ *
+ * Re-exported from `@setu-ts/common`, where it is defined so the
+ * multi-tenancy plugin's tenant-side tenant-binding compare (M101c, V8-7)
+ * reads the same key; exactly one definition exists.
  */
-export const SESSION_STATE_KEY = 'session-plugin:session';
+export { SESSION_STATE_KEY };
 
 /** Runtime capabilities the service needs, injected for testability. */
 export interface SessionServiceDeps {

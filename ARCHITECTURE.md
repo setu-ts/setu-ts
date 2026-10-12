@@ -1063,6 +1063,7 @@ graph TB
 
     subgraph Feature Plugins
         feature-flags[feature-flags-plugin]
+        idempotency[idempotency-plugin]
         multi-tenancy[multi-tenancy-plugin]
         resilience[resilience-plugin]
         session[session-plugin]
@@ -1080,6 +1081,7 @@ graph TB
         react-router[react-router-plugin]
         static[static-plugin]
         view[view-plugin]
+        localization[localization-plugin]
         worker-pool[worker-pool-plugin]
     end
 
@@ -1155,6 +1157,7 @@ graph TB
     kernel --> feature-flags
     common --> multi-tenancy
     kernel --> multi-tenancy
+    common --> idempotency
     common --> service-discovery
     common --> cloudflare
     common --> session
@@ -1175,6 +1178,8 @@ graph TB
     kernel --> static
     common --> view
     kernel --> view
+    common --> localization
+    kernel --> localization
     common --> worker-pool
     kernel --> worker-pool
     common --> rest-starter
@@ -1365,6 +1370,17 @@ then deletes the source message, with separate diagnostics for send vs delete fa
 `SnsPublisher` export is a separate AWS SNS fan-out helper (not a `QueueAdapter`): it publishes to a
 single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam as `SqsQueue`.
 
+#### @setu-ts/idempotency-plugin
+
+| Aspect               | Detail                                                                                                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Purpose**          | One idempotency core that answers a repeat of completed work from its record (or skips it), reachable from HTTP, ingress and plain code. It deduplicates; it cannot make a handler's external side effects atomic with the record |
+| **Responsibilities** | The `claim`/`complete`/`release` state machine; memory, Redis (three Lua scripts) and Cloudflare Durable Object stores; the HTTP `idempotent()` middleware; the `idempotentIngress()` behaviour; the `idempotency` health indicator                     |
+| **Dependencies**     | `common` only — ioredis is injected or lazy-loaded, and the Durable Object store lives in `cloudflare-plugin` because no plugin imports a plugin                                                                                                   |
+| **Public API**       | `IdempotencyPlugin()`; `idempotent()`; `derivedIdempotencyKey()`; `idempotentIngress()`; `IdempotencyRefusedError`; `IdempotencyConfigurationError`; `IDEMPOTENCY_KEY_HEADER`; `IDEMPOTENT_REPLAYED_HEADER`; and the types `IdempotencyPluginOptions`, `IdempotencyStoreConfig`, `IRedisIdempotencyClient`, `IdempotencyRefusalReason`. The stores and `IIdempotencyService`/`IIdempotencyStore` are internal or owned by `common`, not barrel exports |
+| **Extension Points** | A custom `IIdempotencyStore` through the `store` option; the `scope`, `key` and `fingerprint` callbacks; `@Idempotent()` in `decorator-plugin` resolves the same capability token                                                                  |
+| **Rules**            | `idempotent()` and `@Idempotent()` are appended AFTER guards and validation, so a refused request consumes no key; the Redis tier owns its client rather than widening `ICacheStore`; tier A is per process, so Workers HTTP uses the Durable Object store |
+
 #### @setu-ts/auth-plugin
 
 | Aspect               | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -1491,10 +1507,10 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | Aspect               | Detail                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Email sending                                                                                     |
-| **Responsibilities** | SMTP, SES, SendGrid providers; template engine                                                    |
-| **Dependencies**     | `common`, `kernel`                                                                                |
+| **Responsibilities** | SMTP, SES, SendGrid providers; template engine (`{{ variable }}` strings and view components)     |
+| **Dependencies**     | `common`, `kernel`; optionally the `view` capability (component templates, M102)                  |
 | **Public API**       | `MailPlugin()`; `IMailer`                                                                         |
-| **Extension Points** | Custom mail provider; custom template engine                                                      |
+| **Extension Points** | Custom mail provider; component templates through `CAPABILITIES.VIEW`                            |
 | **Rules**            | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
 
 #### @setu-ts/notification-plugin
@@ -1685,10 +1701,21 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Server-rendered HTML as a capability — views named by reference, never by path                                                          |
 | **Responsibilities** | Register an `IViewEngine` under `CAPABILITIES.VIEW`; `'hono-jsx'` / `'hono-html'` / `'custom'` arms; `view` health indicator; the `Suspense` refusal |
-| **Dependencies**     | `common`, `@hono/hono` (both default arms add no new third-party package to the resolution set)                                          |
+| **Dependencies**     | `common`, `hono` (both default arms add no new third-party package to the resolution set)                                          |
 | **Public API**       | `ViewPlugin()`; `renderView()`; `raw`; `ViewRenderError`; `UnresolvedSuspenseError`; `ViewPluginOptions`                                 |
 | **Extension Points** | The `'custom'` engine arm; `@Render(Component)` in `decorator-plugin` resolves the same token                                            |
 | **Rules**            | No filesystem lookup, so Workers-portable by construction; output is a buffered primitive string, never a stream; rendering is stateless, so no `onClose` |
+
+#### @setu-ts/localization-plugin
+
+| Aspect               | Detail                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**          | Message catalogues per locale, request locale resolution, and a formatter shared with the browser                                       |
+| **Responsibilities** | Register an `ILocalizer` under `CAPABILITIES.LOCALIZATION`; validate catalogues at `register()`; resolve `IRequest.locale` in middleware at 45; write `Vary` and `Content-Language`; the opt-in catalogue route; `localization` health indicator |
+| **Dependencies**     | `common` only; no npm package — plurals, numbers and dates come from the platform's `Intl`                                              |
+| **Public API**       | `LocalizationPlugin()`; `localizerFor()`; `localeMiddleware()`; three error classes; the `/format` subpath (`format`, `negotiateLocale`, `parseAcceptLanguage`) |
+| **Extension Points** | `IMessageSource` for catalogues kept outside the code; `tenantLocale` for a per-tenant default; other plugins resolve `ILocalizer` from `common` |
+| **Rules**            | Client text only ever selects a CONFIGURED locale and never reaches a header; the `/format` subpath has no runtime dependency outside itself (enforced by a `deno info` gate); the formatter escapes nothing; `cache-plugin` keys on the resolved locale |
 
 #### @setu-ts/service-discovery-plugin
 
@@ -1870,6 +1897,7 @@ last outbound).
 | 20       | MetricsMiddleware         | Record metrics           |
 | 30       | TelemetryMiddleware       | Propagate trace context  |
 | 40       | TenantMiddleware          | Resolve request tenant   |
+| 45       | LocaleMiddleware          | Resolve request locale   |
 | 50       | LoggingMiddleware         | Log incoming request     |
 | 100      | RequestIdMiddleware       | Generate request ID      |
 | 150      | CorrelationIdMiddleware   | Propagate correlation ID |
@@ -1882,11 +1910,12 @@ last outbound).
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
 
-These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40), HTTP
-security (120–270), session (260/275), and authentication (300) are self-registered by their own
-plugins. The application (or a starter) adds the error handler and any application middleware.
-`AuthPluginOptions.middleware` can move authentication, exclude selected paths, or disable its
-global registration when the application attaches `authMiddleware()` per route.
+These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40),
+locale resolution (45), HTTP security (120–270), session (260/275), and authentication (300) are
+self-registered by their own plugins. The application (or a starter) adds the error handler and any
+application middleware. `AuthPluginOptions.middleware` can move authentication, exclude selected
+paths, or disable its global registration when the application attaches `authMiddleware()` per
+route.
 
 The session sits below authentication so an auth strategy can read it — `SessionStrategy`
 (configured by `AuthPluginOptions.session`) is that reader. It opens the cookie through
@@ -2429,6 +2458,77 @@ guard.
 - `requireAnyRole(roles)` — Require any of the specified roles.
 - `requireAllPermissions(permissions)` — Require all specified permissions.
 - `publicRoute()` — Explicitly allow unauthenticated access (named `publicRoute`, not `public`).
+
+### Policies (Milestone 110a)
+
+Roles answer "does this principal hold this role, anywhere"; a **policy** answers "may this
+principal do this, to this target". `IAuthorizationService` is synchronous and takes a principal
+plus a role or permission string, so a target cannot reach it — which is why policies are a second
+capability, `IAuthorizationPolicyService` under `CAPABILITIES.AUTHORIZATION_POLICIES`, beside RBAC
+rather than a widening of it. AuthPlugin always registers it.
+
+**Why one evaluator.** The route guard (`requirePolicy`), the decorator (`@RequirePolicy`), and the
+imperative `can`/`authorize` all reach the same service, so the four entry points cannot disagree
+about an outcome; a parity test drives all four under one non-default configuration.
+`@RequirePolicy` and `requirePolicy` are two thin middlewares rather than one because
+decorator-plugin may not import auth-plugin (§2.2); both call the public contract, so an
+application's replacement provider serves them too.
+
+**Why the rules are fixed.** Only a literal `true` allows; a throw denies (and is logged without the
+target); an anonymous principal is refused `401` unless the ability opted in. Configurable
+fail-open-ish semantics are exactly the knobs an authorization layer should not have.
+
+**Why unknown names fail at startup.** A functional guard is a value the application builds, so no
+`register()` ever sees it. AuthPlugin's `onBootstrap` hook scans every registered route for the
+policy-guard brand and fails `start()` before the server listens, then seals the registry.
+`@RequirePolicy` is validated in DecoratorPlugin's own `register()`. A route added after `start()`
+is not scanned and fails closed per request.
+
+**Where attribute rules go.** Into policies. The framework ships no attribute language — ASP.NET
+Core, NestJS and Spring make the same choice. An external engine (OpenFGA, Casbin) is wrapped as a
+policy. Scoped grants (a role held in one tenant) are built on this layer — see Scoped Roles below.
+Non-HTTP ingress has no policy behaviour yet: `IngressContext` carries no principal, and a check
+that silently evaluated as anonymous would be worse than none; the imperative calls work there
+because the principal is an argument.
+
+### Scoped Roles (Milestone 110b)
+
+The RBAC layer below holds roles **globally**: "Ann is an approver". Scoped RBAC holds them **in a
+scope** — "Ann is an approver in the Acme tenant", or in one organisation, team or region. It
+extends the global model rather than contradicting it: the role catalogue is unchanged and still the
+only source of role and permission names; what a grant adds is where it applies.
+
+**Why a built-in policy, not a capability.** `scopedRbac` makes AuthPlugin define one reserved
+policy, `scoped-rbac`, on the M110a evaluator: each catalogue permission is an ability
+`perm:<name>`, each role `role:<name>`, and the target is the scope. So the guards
+(`requireScopedRole`/`requireScopedPermission`), the decorators
+(`@ScopedRoles`/`@ScopedPermissions`) and the imperative `can` reach the same evaluator and inherit
+its fixed rules, and the M110a startup scan refuses a typo in a scoped guard for free — a typo is a
+configuration error, not a `403`.
+
+**One mechanism for hierarchy and delegation.** `inheritsFrom(scope)` names the scopes whose grants
+also apply; a parent is one hop and a delegating tenant another. It is walked transitively,
+depth-first, with cycle refusal and depth/node bounds, so a malformed hierarchy denies rather than
+loops. Grants flow down only: a child request inherits a parent's grants, never the reverse.
+
+**Why the request tenant bounds the scope.** A scope taken from a route parameter is
+caller-controlled. A check whose own scope is a tenant other than the resolved request tenant
+denies, so a parameter cannot reach outside the caller's tenant; a parent reached through
+`inheritsFrom` still applies.
+
+**Why one failing source denies.** Grant sources are unioned. Answering from the sources that did
+reply would allow on a partial view — the one grant that says "no longer" may be the one that
+failed. Every source call has a deadline, every result is validated and bounded, and the deny is
+logged with the source name, the scope type and the error class — never an identifier.
+
+**Why custom roles bundle permissions.** A tenant may define its own roles at runtime, but only from
+catalogue permissions, resolved against the defining scope only, and checked through permissions.
+The permission catalogue stays static, so the startup check stays total.
+
+**Why timing is a choice.** Resolving per request makes a revocation immediate; a TTL cache or
+sign-in resolution trades revocation latency for fewer reads. Sign-in grants live under a private
+session key, never in principal claims, so a federated token carrying a same-named claim grants
+nothing.
 
 ### RBAC
 

@@ -55,6 +55,19 @@ export interface IRedisQueueClient {
    * @since 0.3.0
    */
   expire?(key: string, seconds: number): Promise<number>;
+  /**
+   * Runs a Lua script atomically (ioredis `eval(script, numKeys, ...keys,
+   * ...args)`). OPTIONAL so an existing injected fake still type-checks. When
+   * present, every multi-command transition (`enqueue`, `reserve`, `ack`,
+   * `requeue`, dead-lettering) runs as one script, so a command timeout can
+   * leave it applied entirely or not at all. Without it those transitions run
+   * as separate commands, and a command that times out locally but is applied
+   * by the server afterwards can leave a job in neither the ready nor the
+   * processing set. The client the adapter builds itself always has it.
+   *
+   * @since 0.9.0
+   */
+  eval?(script: string, numKeys: number, ...keysAndArgs: (string | number)[]): Promise<unknown>;
   /** Connect to Redis (optional). */
   connect?(): Promise<void>;
   /**
@@ -74,6 +87,15 @@ export interface IRedisQueueClient {
 export interface IAmqpQueueConnection {
   /** Create a channel. */
   createChannel(): Promise<IAmqpQueueChannel>;
+  /**
+   * Create a channel in publisher-confirm mode (optional). A real amqplib
+   * connection always has it; when present every job publish waits for the
+   * broker to accept it. A facade without it keeps a plain channel, and the
+   * adapter reports once that its publishes are unconfirmed.
+   *
+   * @since 0.9.0
+   */
+  createConfirmChannel?(): Promise<IAmqpQueueChannel>;
   /**
    * M70c: registers a fault listener. The real amqplib connection exposes
    * `'error'`/`'close'`; the adapter sets a fault flag when either fires, which
@@ -96,12 +118,16 @@ export interface IAmqpQueueConnection {
 export interface IAmqpQueueChannel {
   /** Assert a queue. */
   assertQueue(queue: string, options?: unknown): Promise<{ queue: string }>;
-  /** Publish a message. */
+  /**
+   * Publish a message. On a confirm channel `confirm` is called once the
+   * broker has accepted (`null`) or refused (an error) the message.
+   */
   publish(
     exchange: string,
     routingKey: string,
     content: Buffer,
     options?: unknown,
+    confirm?: (err: unknown) => void,
   ): boolean;
   /** Get a message (polling). */
   get(queue: string, options?: unknown): Promise<IAmqpQueueMessage | false>;
@@ -205,8 +231,42 @@ export interface QueuePluginOptions {
   defaultMaxAttempts?: number;
   /** Poll interval for worker loop (default 1000ms). */
   pollIntervalMs?: number;
-  /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
+  /**
+   * Queue name prefix for RabbitMQ adapter (default 'he.queue'). Queue names are
+   * `<prefix>.<name>.ready|.delay|.dead`, each at most 255 UTF-8 bytes; a prefix
+   * over 247 bytes is refused at construction, and a job name that does not fit
+   * is refused before the channel is touched.
+   */
   prefix?: string;
+  /**
+   * Publish every job persistent (`delivery_mode` 2) — adapter `'rabbitmq'`
+   * only. Default `true`.
+   *
+   * The adapter's ready/delay/dead queues are durable, and a durable queue
+   * keeps only PERSISTENT messages across a broker restart: before 0.9.0 every
+   * job was published transient, so a RabbitMQ restart silently discarded
+   * every job not yet processed. `false` restores that behaviour.
+   *
+   * @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one job publish, in milliseconds — adapter `'rabbitmq'` only.
+   * Default `15000`; `0` waits without a bound.
+   *
+   * It covers every broker round trip the publish makes — the job's queue
+   * declarations and, on a confirm channel (a real amqplib connection always
+   * opens one), the wait for RabbitMQ to accept the job. `add()` resolves once
+   * RabbitMQ has accepted the job and rejects when it refuses it or the bound
+   * expires; a retry or dead-letter acknowledges the reserved job only after
+   * its replacement is accepted, so a broker failure between the two cannot
+   * lose it. A rejection is not proof the job was dropped: the broker may
+   * still accept it after the bound. A value outside `0`–`2147483647`
+   * (including `NaN`) throws `RangeError` when `QueuePlugin(...)` is called.
+   *
+   * @since 0.9.0
+   */
+  publishTimeoutMs?: number;
   /**
    * How long a dead-lettered job's payload is retained, in milliseconds.
    *
@@ -233,6 +293,27 @@ export interface QueuePluginOptions {
    * @since 0.3.0
    */
   deadLetterTtlMs?: number;
+  /**
+   * Bound on one Redis command, in milliseconds (adapter `'redis'` only;
+   * ignored by every other adapter). Default `15000`; `0` disables it. A
+   * paused or partitioned server keeps its socket open, so without a bound a
+   * command waits forever; with it `add()` rejects and a poll records the
+   * failure. Applied as ioredis `commandTimeout` to the client the adapter
+   * BUILDS — never to an injected `client`, which keeps its own configuration.
+   * A value outside `0`–`2147483647` (including `NaN`) throws `RangeError`.
+   *
+   * A timeout rejects the command LOCALLY; the server may still apply it once
+   * it answers. So a rejected `add()` is not proof the job was not enqueued —
+   * a caller that retries on rejection can run the job twice, and should give
+   * the job an idempotent handler. Each queue transition runs as one Lua script
+   * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
+   * `reserve` applied after its timeout leaves the job and its payload in the
+   * processing set. Nothing reclaims a processing-set member, so that job is
+   * not dispatched again until it is moved back to the ready set by hand.
+   *
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
   /** SQS-specific options (required when adapter is 'sqs'). */
   sqs?: import('../adapters/sqs-queue.ts').SqsQueueOptions;
   /**
@@ -423,6 +504,27 @@ export interface RedisQueueOptions {
    * @since 0.8.0
    */
   connectionErrorReporter?: ConnectionErrorReporter;
+  /**
+   * Bound on one Redis command, in milliseconds (adapter `'redis'` only;
+   * ignored by every other adapter). Default `15000`; `0` disables it. A
+   * paused or partitioned server keeps its socket open, so without a bound a
+   * command waits forever; with it `add()` rejects and a poll records the
+   * failure. Applied as ioredis `commandTimeout` to the client the adapter
+   * BUILDS — never to an injected `client`, which keeps its own configuration.
+   * A value outside `0`–`2147483647` (including `NaN`) throws `RangeError`.
+   *
+   * A timeout rejects the command LOCALLY; the server may still apply it once
+   * it answers. So a rejected `add()` is not proof the job was not enqueued —
+   * a caller that retries on rejection can run the job twice, and should give
+   * the job an idempotent handler. Each queue transition runs as one Lua script
+   * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
+   * `reserve` applied after its timeout leaves the job and its payload in the
+   * processing set. Nothing reclaims a processing-set member, so that job is
+   * not dispatched again until it is moved back to the ready set by hand.
+   *
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
 }
 
 /**
@@ -435,4 +537,22 @@ export interface RabbitMqQueueOptions {
   client?: IAmqpQueueConnection;
   /** Queue name prefix (default 'he.queue'). */
   prefix?: string;
+  /**
+   * Publish jobs persistent (default `true`). See
+   * {@linkcode QueuePluginOptions.persistentMessages}.
+   * @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one job publish, including its confirm, in ms (default `15000`,
+   * `0` unbounded). See {@linkcode QueuePluginOptions.publishTimeoutMs}.
+   * @since 0.9.0
+   */
+  publishTimeoutMs?: number;
+  /**
+   * Receives the one warning the adapter emits when the connection cannot
+   * open a confirm channel. `QueuePlugin` supplies one backed by its logger.
+   * @since 0.9.0
+   */
+  reportWarning?: (message: string) => void;
 }

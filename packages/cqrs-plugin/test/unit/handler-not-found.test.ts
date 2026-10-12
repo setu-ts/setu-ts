@@ -1,8 +1,7 @@
 /**
  * HandlerNotFoundError tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { HandlerNotFoundError } from '../../src/errors/handler-not-found.ts';
 
 describe('HandlerNotFoundError', () => {

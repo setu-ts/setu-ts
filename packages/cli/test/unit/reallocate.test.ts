@@ -1,7 +1,7 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
+import { devEntryVariants } from '../../src/devtool/dev-entry.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
 import {
@@ -22,6 +22,12 @@ function harness(members: readonly WorkspaceMember[]) {
       members,
     }),
     '/ws/deno.json': '{"workspace":["./apps/*"]}',
+    ...Object.fromEntries(
+      members.filter((member) => member.devtoolPort !== undefined).map((
+        member,
+      ) => [`/ws/apps/${member.name}/main.dev.ts`, devEntryVariants(member.devtoolPort!)[0]]),
+    ),
+    ...Object.fromEntries(members.map((member) => [`/ws/apps/${member.name}/.setu-member`, ''])),
   });
   const log = createRecorder();
   return {
@@ -50,10 +56,10 @@ describe('ports --reallocate', () => {
       members: WorkspaceMember[];
     };
     expect(manifest.members[0].port).toBe(3000);
-    expect(manifest.members[0].devtoolPort).toBe(3001);
+    expect(manifest.members[0].devtoolPort).toBe(4000);
     // The second member's application port starts AFTER the first member's
     // devtool port — the two addresses moved as one unit.
-    expect(manifest.members[1].port).toBe(3002);
+    expect(manifest.members[1].port).toBe(3001);
     expect(manifest.members[1].devtoolPort).toBeUndefined();
 
     // The devtool port the discovery modules render is the application port,
@@ -81,6 +87,8 @@ describe('ports --reallocate', () => {
         members: [{ name: 'orders', port: 3000, devtoolPort: 4919 }],
       }),
       '/ws/deno.json': '{"workspace":["./apps/*"]}',
+      '/ws/apps/orders/.setu-member': '',
+      '/ws/apps/orders/main.dev.ts': devEntryVariants(4919)[0],
     });
     const occupied = new Set([3000, 3001]);
     let code = 0;
@@ -96,6 +104,6 @@ describe('ports --reallocate', () => {
       members: WorkspaceMember[];
     };
     expect(manifest.members[0].port).toBe(3002);
-    expect(manifest.members[0].devtoolPort).toBe(3003);
+    expect(manifest.members[0].devtoolPort).toBe(4000);
   });
 });

@@ -1,7 +1,13 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as common from '@setu-ts/common';
 import * as database from '../../src/index.ts';
+
+describe('conditional fallback helper', () => {
+  it('stays internal', () => {
+    expect('conditionalUpdate' in database).toBe(false);
+    expect('conditionalDelete' in database).toBe(false);
+  });
+});
 import type {
   BigtableAdapterOptions,
   BigtableAdapterOptionsBase,
@@ -98,6 +104,21 @@ describe('database-plugin barrel exports — M90f driver classifications', () =>
 
   it('keeps the classifier INTERNAL — classifyDriverError is not public surface', () => {
     expect(Object.hasOwn(database, 'classifyDriverError')).toBe(false);
+  });
+
+  it('keeps the M101a saturation and progress internals OUT of the public surface', () => {
+    for (
+      const name of [
+        'isPoolExhaustion',
+        'PoolSaturatedProbeSkipped',
+        'QueryProgressTracker',
+        'readQueryProgress',
+        'DATABASE_QUERY_PROGRESS',
+      ]
+    ) {
+      expect(Object.hasOwn(database, name)).toBe(false);
+      expect(Object.hasOwn(common, name)).toBe(false);
+    }
   });
 });
 
@@ -488,5 +509,97 @@ describe('database-plugin barrel exports', () => {
     ) {
       expect(Object.hasOwn(common, name)).toBe(false);
     }
+  });
+});
+
+describe('database-plugin barrel exports — M101c tenant store bridge', () => {
+  it('exports createDatabaseTenantDataStore, DatabaseTenantDataStore and the named refusal', () => {
+    // Pinned against the BARREL: an application reaches these from
+    // `@setu-ts/database-plugin` and the multi-tenancy plugin's `dataStore`
+    // option resolves the factory in `onInit` (the M56 defect class).
+    expect(typeof database.createDatabaseTenantDataStore).toBe('function');
+    expect(typeof database.DatabaseTenantDataStore).toBe('function');
+    expect(typeof database.TenantStoreStrategyUnsupportedError).toBe('function');
+
+    const error = new database.TenantStoreStrategyUnsupportedError('x');
+    expect(error.name).toBe('TenantStoreStrategyUnsupportedError');
+
+    // The factory returns an ITenantDataStore (declared against the common
+    // barrel, which the bridge implements by name).
+    const services = {
+      get: () => ({}),
+    } as unknown as common.IServiceRegistry;
+    const store = database.createDatabaseTenantDataStore()(services);
+    expect(typeof store.findAll).toBe('function');
+    expect(typeof store.useIsolation).toBe('function');
+  });
+});
+
+describe('database-plugin barrel exports — M107 outbox store bridge', () => {
+  it('exports createDatabaseOutboxStore, its options type and OutboxStoreUnavailableError', () => {
+    // Pinned against the BARREL: an application passes the factory to the
+    // messaging plugin's `outbox.store` option and `instanceof`s the refusal at
+    // startup (the M56 defect class). The options type is checked at compile
+    // time — dropping it from the barrel is a TS2305 here.
+    const options: database.DatabaseOutboxStoreOptions = { entity: 'Outbox', database: 'main' };
+    expect(typeof database.createDatabaseOutboxStore).toBe('function');
+    expect(typeof database.OutboxStoreUnavailableError).toBe('function');
+
+    const refusal = new database.OutboxStoreUnavailableError('Outbox', 'bigtable');
+    expect(refusal.name).toBe('OutboxStoreUnavailableError');
+    expect(refusal.reason).toBe('bigtable');
+
+    // The factory returns an IOutboxStore — the port in the common barrel.
+    const services = { get: () => ({}) } as unknown as common.IServiceRegistry;
+    const store: common.IOutboxStore = database.createDatabaseOutboxStore(options)(services);
+    expect(typeof store.verify).toBe('function');
+  });
+
+  it('keeps the store class and the cause walk internal', () => {
+    for (const name of ['DatabaseOutboxStore', 'causeChain']) {
+      expect(Object.hasOwn(database, name)).toBe(false);
+    }
+  });
+});
+
+describe('database-plugin barrel exports — M108 inbox store bridge', () => {
+  it('exports createDatabaseInboxStore, its options type and InboxStoreUnavailableError', () => {
+    // Pinned against the BARREL (the M56 class); the options type is checked
+    // at compile time.
+    const options: database.DatabaseInboxStoreOptions = { entity: 'Inbox', database: 'main' };
+    expect(typeof database.createDatabaseInboxStore).toBe('function');
+
+    const refusal = new database.InboxStoreUnavailableError('Inbox', 'cosmos-unsupported');
+    expect(refusal.name).toBe('InboxStoreUnavailableError');
+    expect(refusal.reason).toBe('cosmos-unsupported');
+
+    // The factory returns an IInboxStore — the port in the common barrel.
+    const services = { get: () => ({ uuid: () => 'u' }) } as unknown as common.IServiceRegistry;
+    const store: common.IInboxStore = database.createDatabaseInboxStore(options)(services);
+    expect(typeof store.verify).toBe('function');
+  });
+
+  it('keeps the store class and the adapter-type lookup internal', () => {
+    for (const name of ['DatabaseInboxStore', 'adapterInfoOf']) {
+      expect(Object.hasOwn(database, name)).toBe(false);
+    }
+  });
+});
+
+describe('scoped RBAC source exports (M110b)', () => {
+  it('exports both factories and their option types, implementing the common ports', () => {
+    const grants: database.DatabaseGrantSourceOptions = {
+      entity: 'grants',
+      fields: { subject: 'subject' } satisfies database.GrantFields,
+    };
+    const roles: database.DatabaseRoleSourceOptions = {
+      entity: 'roles',
+      fields: { permission: 'permission' } satisfies database.RoleFields,
+    };
+    const services = { get: () => ({}) } as unknown as common.IServiceRegistry;
+    const grantSource: common.IGrantSource = database.createDatabaseGrantSource(grants)(services);
+    const roleSource: common.IScopedRoleSource = database.createDatabaseRoleSource(roles)(services);
+    expect(typeof grantSource.grantsFor).toBe('function');
+    expect(typeof roleSource.rolesFor).toBe('function');
   });
 });

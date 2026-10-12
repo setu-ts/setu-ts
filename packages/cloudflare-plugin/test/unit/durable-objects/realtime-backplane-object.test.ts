@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The Durable Object fan-out hub.
  *
@@ -8,8 +17,7 @@
  * core over the same state — the only shape that fails if a field creeps back.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   RealtimeBackplaneObjectCore,

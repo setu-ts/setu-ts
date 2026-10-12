@@ -3,8 +3,7 @@
  * alias), DTO projection against the exact field allowlist, fixed error
  * bodies/statuses, and the client-side projection validators.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ConfigDiagnosticsSnapshot } from '@setu-ts/common';
 
@@ -674,7 +673,10 @@ describe('Protocol — configuration target and projection (M98e)', () => {
     }
     // C1 (U+0085) and DEL are refused too; a non-control code point is not.
     for (
-      const [alias, accepted] of [['a\u0085b', false], ['a\u007fb', false], ['a\u00a0b', true]]
+      const [alias, accepted] of [['a\u202eb', false], ['a\u0085b', false], ['a\u007fb', false], [
+        'a\u00a0b',
+        true,
+      ]]
     ) {
       const projected = projectConfigSnapshot({
         ...readySnapshot(),

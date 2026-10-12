@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IContainer,
@@ -136,7 +135,9 @@ describe('non-HTTP ingress registration', () => {
     expect(plugin.optionalDependencies).toEqual([
       CAPABILITIES.VALIDATION,
       CAPABILITIES.AUTHORIZATION,
+      CAPABILITIES.AUTHORIZATION_POLICIES,
       CAPABILITIES.VIEW,
+      CAPABILITIES.IDEMPOTENCY,
     ]);
     await plugin.register(ctx);
     expect(lifecycleHooks.some((hook) => hook.phase === 'onInit')).toBe(false);

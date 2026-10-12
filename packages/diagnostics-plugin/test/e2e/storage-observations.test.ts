@@ -11,8 +11,7 @@
  * bytes, and the client DTO. The approved counters are asserted PRESENT
  * alongside, so dropping every record cannot pass.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IStorage, IStorageDiagnosticsSource } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';

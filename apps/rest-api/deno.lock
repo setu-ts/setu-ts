@@ -16,9 +16,11 @@
     "npm:@azure/cosmos@4": "4.10.0",
     "npm:@google-cloud/bigtable@6": "6.5.1_@opentelemetry+core@1.30.1",
     "npm:@hono/node-server@2": "2.1.0_hono@4.13.0",
+    "npm:@node-saml/node-saml@5": "5.1.0",
     "npm:@prisma/client@7.8.0": "7.8.0",
     "npm:drizzle-orm@0.45.2": "0.45.2_@opentelemetry+api@1.9.1_@prisma+client@7.8.0",
     "npm:graphql@16": "16.14.2",
+    "npm:hono@^4.12.30": "4.13.0",
     "npm:ioredis@5": "5.11.1",
     "npm:mongodb@^6.21.0": "6.21.0",
     "npm:pino@10": "10.3.1",
@@ -517,6 +519,23 @@
         "sparse-bitfield"
       ]
     },
+    "@node-saml/node-saml@5.1.0": {
+      "integrity": "sha512-t3cJnZ4aC7HhPZ6MGylGZULvUtBOZ6FzuUndaHGXjmIZHXnLfC/7L8a57O9Q9V7AxJGKAiRM5zu2wNm9EsvQpw==",
+      "dependencies": [
+        "@types/debug",
+        "@types/qs",
+        "@types/xml-encryption",
+        "@types/xml2js",
+        "@xmldom/is-dom-node",
+        "@xmldom/xmldom",
+        "debug",
+        "xml-crypto",
+        "xml-encryption",
+        "xml2js",
+        "xmlbuilder@15.1.1",
+        "xpath@0.0.34"
+      ]
+    },
     "@opentelemetry/api@1.9.1": {
       "integrity": "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="
     },
@@ -637,14 +656,26 @@
         "tslib"
       ]
     },
+    "@types/debug@4.1.13": {
+      "integrity": "sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==",
+      "dependencies": [
+        "@types/ms"
+      ]
+    },
     "@types/long@4.0.2": {
       "integrity": "sha512-MqTGEo5bj5t157U6fA/BiDynNkn0YknVdh48CMPkTSpFTVmvao5UQmm7uEF6xBEo7qIMAlY/JSleYaE6VOdpaA=="
+    },
+    "@types/ms@2.1.0": {
+      "integrity": "sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA=="
     },
     "@types/node@26.4.0": {
       "integrity": "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ==",
       "dependencies": [
         "undici-types"
       ]
+    },
+    "@types/qs@6.15.1": {
+      "integrity": "sha512-GZHUBZR9hckSUhrxmp1nG6NwdpM9fCunJwyThLW1X3AyHgd9IlHb6VANpQQqDr2o/qQp6McZ3y/IA2rVzKzSbw=="
     },
     "@types/webidl-conversions@7.0.3": {
       "integrity": "sha512-CiJJvcRtIgzadHCYXw7dqEnMNRjhGZlYK05Mj9OyktqV8uVT8fD2BFOB7S1uwBE3Kj2Z+4UyPmFw/Ixgw/LAlA=="
@@ -655,6 +686,18 @@
         "@types/webidl-conversions"
       ]
     },
+    "@types/xml-encryption@1.2.4": {
+      "integrity": "sha512-I69K/WW1Dv7j6O3jh13z0X8sLWJRXbu5xnHDl9yHzUNDUBtUoBY058eb5s+x/WG6yZC1h8aKdI2EoyEPjyEh+Q==",
+      "dependencies": [
+        "@types/node"
+      ]
+    },
+    "@types/xml2js@0.4.14": {
+      "integrity": "sha512-4YnrRemBShWRO2QjvUin8ESA41rH+9nQGLUGZV/1IDhi3SL9OhdpNC/MrulTWuptXKwhx/aDxE7toV0f/ypIXQ==",
+      "dependencies": [
+        "@types/node"
+      ]
+    },
     "@typespec/ts-http-runtime@0.3.8": {
       "integrity": "sha512-bLMpVcWZNzq6lYOybwFwOAR1IXKcHnhUNqYeHjl1bET/qE3jFPFH+p8Wrh3rU4xwdnifPxmKNESBYnvnmc75aA==",
       "dependencies": [
@@ -662,6 +705,12 @@
         "https-proxy-agent",
         "tslib"
       ]
+    },
+    "@xmldom/is-dom-node@1.0.1": {
+      "integrity": "sha512-CJDxIgE5I0FH+ttq/Fxy6nRpxP70+e2O048EPe85J2use3XKdatVM7dDVvFNjQudd9B49NPoZ+8PG49zj4Er8Q=="
+    },
+    "@xmldom/xmldom@0.8.15": {
+      "integrity": "sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA=="
     },
     "abort-controller@3.0.0": {
       "integrity": "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==",
@@ -858,6 +907,9 @@
     },
     "escalade@3.2.0": {
       "integrity": "sha512-WUj2qlxaQtO4g6Pq5c29GTcWGDyd8itL8zTlipgECz3JesAiiOKotd8JU6otB3PACgG6xkJUyVhboMS+bje/jA=="
+    },
+    "escape-html@1.0.3": {
+      "integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow=="
     },
     "escape-string-regexp@4.0.0": {
       "integrity": "sha512-TtpcNJ3XAzx3Gq8sWRzJaVajRs0uVxA2YAkdb1jm2YkPz4G6egUFAyA3n5vtEIZefPk5Wa4UXbKuS5fKkJWdgA=="
@@ -1411,6 +1463,9 @@
     "safe-stable-stringify@2.5.0": {
       "integrity": "sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA=="
     },
+    "sax@1.6.1": {
+      "integrity": "sha512-42tBVwLWnaQvW5zc4HbZrTuWccECCZfBi92FDuwtqxasH+JbPB3/FOKb1m222K42R4WxuxzzMsTswfzgtSu64Q=="
+    },
     "semaphore@1.1.0": {
       "integrity": "sha512-O4OZEaNtkMd/K0i6js9SL+gqy0ZCBMgUvlSqHKi4IBdjhe7wB8pwztUk1BbZ1fmrvpwFrPbHzqd2w5pTcJH6LA=="
     },
@@ -1630,6 +1685,44 @@
     "ws@8.21.2": {
       "integrity": "sha512-54dMVAo4WIe6SKy3vBgN+9bJZqqQ8IMRevAkOLQALhi49qkkQDQfWdAZ8KQlXiEabw88ARXXdUrlvtbKQX+aKw=="
     },
+    "xml-crypto@6.3.2": {
+      "integrity": "sha512-XoUdpErePlpyFdNYVzG2Sfw5ghvqUCQMT3dQ0tAxs0JKzk9gLzwALFkvHZ/D0OyfD/OyxoXsCcYZzbDzgY18RA==",
+      "dependencies": [
+        "@xmldom/is-dom-node",
+        "@xmldom/xmldom",
+        "xpath@0.0.33"
+      ]
+    },
+    "xml-encryption@3.1.0": {
+      "integrity": "sha512-PV7qnYpoAMXbf1kvQkqMScLeQpjCMixddAKq9PtqVrho8HnYbBOWNfG0kA4R7zxQDo7w9kiYAyzS/ullAyO55Q==",
+      "dependencies": [
+        "@xmldom/xmldom",
+        "escape-html",
+        "xpath@0.0.32"
+      ]
+    },
+    "xml2js@0.6.2": {
+      "integrity": "sha512-T4rieHaC1EXcES0Kxxj4JWgaUQHDk+qwHcYOCFHfiwKz7tOVPLq7Hjq9dM1WCMhylqMEfP7hMcOIChvotiZegA==",
+      "dependencies": [
+        "sax",
+        "xmlbuilder@11.0.1"
+      ]
+    },
+    "xmlbuilder@11.0.1": {
+      "integrity": "sha512-fDlsI/kFEx7gLvbecc0/ohLG50fugQp8ryHzMTuW9vSa1GJ0XYWKnhsUx7oie3G98+r56aTQIUB4kht42R3JvA=="
+    },
+    "xmlbuilder@15.1.1": {
+      "integrity": "sha512-yMqGBqtXyeN1e3TGYvgNgDVZ3j84W4cwkOXQswghol6APgZWaff9lnbvN7MHYJOiXsvGPXtjTYJEiC9J2wv9Eg=="
+    },
+    "xpath@0.0.32": {
+      "integrity": "sha512-rxMJhSIoiO8vXcWvSifKqhvV96GjiD5wYb8/QHdoRyQvraTpp4IEv944nhGausZZ3u7dhQXteZuZbaqfpB7uYw=="
+    },
+    "xpath@0.0.33": {
+      "integrity": "sha512-NNXnzrkDrAzalLhIUc01jO2mOzXGXh1JwPgkihcLLzw98c0WgYDmmjSh1Kl3wzaxSVWMuA+fe0WTWOBDWCBmNA=="
+    },
+    "xpath@0.0.34": {
+      "integrity": "sha512-FxF6+rkr1rNSQrhUNYrAFJpRXNzlDoMxeXN5qI84939ylEv3qqPFKa85Oxr6tDaJKqwW6KKyo2v26TSv3k6LeA=="
+    },
     "y18n@5.0.8": {
       "integrity": "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA=="
     },
@@ -1657,224 +1750,700 @@
       "npm:zod@^3.24.0"
     ],
     "links": {
-      "jsr:@setu-ts/audit-plugin@0.8.0": {},
-      "jsr:@setu-ts/auth-plugin@0.8.0": {},
-      "jsr:@setu-ts/cache-plugin@0.8.0": {},
-      "jsr:@setu-ts/cli@0.8.0": {
+      "jsr:@setu-ts/audit-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/runtime@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/cloudflare-plugin@0.8.0": {},
-      "jsr:@setu-ts/common@0.8.0": {},
-      "jsr:@setu-ts/config-plugin@0.8.0": {
+      "jsr:@setu-ts/auth-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8"
+          "npm:@node-saml/node-saml@5",
+          "npm:@simplewebauthn/server@14.0.3",
+          "npm:ioredis@5",
+          "npm:vitest@5.0.3",
+          "npm:xml-crypto@6"
         ]
       },
-      "jsr:@setu-ts/cqrs-plugin@0.8.0": {},
-      "jsr:@setu-ts/database-plugin@0.8.0": {
+      "jsr:@setu-ts/cache-plugin@0.9.0": {
         "dependencies": [
+          "npm:ioredis@5",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/cli@0.9.0": {
+        "dependencies": [
+          "npm:prettier@^3.9.10",
+          "npm:tsx@^4.23.0",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/cloudflare-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/common@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/config-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3",
+          "npm:zod@^3.24.0"
+        ]
+      },
+      "jsr:@setu-ts/cqrs-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/create@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/database-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@aws-sdk/client-dynamodb@3",
+          "npm:@azure/cosmos@4",
+          "npm:@google-cloud/bigtable@6",
+          "npm:@prisma/adapter-pg@^7.10.0",
           "npm:@prisma/client@^7.10.0",
-          "npm:mongodb@^6.21.0"
+          "npm:drizzle-orm@0.45.2",
+          "npm:mongodb@^6.21.0",
+          "npm:pg@8",
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/decorator-plugin@0.8.0": {
+      "jsr:@setu-ts/decorator-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8"
+          "npm:vitest@5.0.3",
+          "npm:zod@^3.24.0"
         ]
       },
-      "jsr:@setu-ts/di-plugin@0.8.0": {
+      "jsr:@setu-ts/di-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/events-plugin@0.8.0": {},
-      "jsr:@setu-ts/exceptions@0.8.0": {},
-      "jsr:@setu-ts/feature-flags-plugin@0.8.0": {},
-      "jsr:@setu-ts/full-stack-starter@0.8.0": {
+      "jsr:@setu-ts/diagnostics-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/audit-plugin@0.8",
-          "jsr:@setu-ts/auth-plugin@0.8",
-          "jsr:@setu-ts/cache-plugin@0.8",
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/config-plugin@0.8",
-          "jsr:@setu-ts/cqrs-plugin@0.8",
-          "jsr:@setu-ts/database-plugin@0.8",
-          "jsr:@setu-ts/decorator-plugin@0.8",
-          "jsr:@setu-ts/events-plugin@0.8",
-          "jsr:@setu-ts/exceptions@0.8",
-          "jsr:@setu-ts/feature-flags-plugin@0.8",
-          "jsr:@setu-ts/graphql-plugin@0.8",
-          "jsr:@setu-ts/health-plugin@0.8",
-          "jsr:@setu-ts/http-security-plugin@0.8",
-          "jsr:@setu-ts/kernel@0.8",
-          "jsr:@setu-ts/logger-plugin@0.8",
-          "jsr:@setu-ts/mail-plugin@0.8",
-          "jsr:@setu-ts/messaging-plugin@0.8",
-          "jsr:@setu-ts/metrics-plugin@0.8",
-          "jsr:@setu-ts/microservice-starter@0.8",
-          "jsr:@setu-ts/multi-tenancy-plugin@0.8",
-          "jsr:@setu-ts/notification-plugin@0.8",
-          "jsr:@setu-ts/openapi-plugin@0.8",
-          "jsr:@setu-ts/queue-plugin@0.8",
-          "jsr:@setu-ts/react-router-plugin@0.8",
-          "jsr:@setu-ts/resilience-plugin@0.8",
-          "jsr:@setu-ts/runtime@0.8",
-          "jsr:@setu-ts/scheduler-plugin@0.8",
-          "jsr:@setu-ts/secrets-plugin@0.8",
-          "jsr:@setu-ts/session-plugin@0.8",
-          "jsr:@setu-ts/static-plugin@0.8",
-          "jsr:@setu-ts/storage-plugin@0.8",
-          "jsr:@setu-ts/telemetry-plugin@0.8",
-          "jsr:@setu-ts/validation-plugin@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/graphql-plugin@0.8.0": {},
-      "jsr:@setu-ts/grpc-plugin@0.8.0": {},
-      "jsr:@setu-ts/health-plugin@0.8.0": {},
-      "jsr:@setu-ts/http-security-plugin@0.8.0": {},
-      "jsr:@setu-ts/kernel@0.8.0": {
+      "jsr:@setu-ts/events-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@hono/hono@^4.12.30",
-          "jsr:@setu-ts/common@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/logger-plugin@0.8.0": {
+      "jsr:@setu-ts/exceptions@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/mail-plugin@0.8.0": {},
-      "jsr:@setu-ts/messaging-plugin@0.8.0": {
+      "jsr:@setu-ts/feature-flags-plugin@0.9.0": {
         "dependencies": [
+          "npm:@launchdarkly/node-server-sdk@9",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/full-stack-starter@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/graphql-plugin@0.9.0": {
+        "dependencies": [
+          "npm:graphql@16",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/grpc-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@bufbuild/protobuf@^2.7.0",
+          "npm:@connectrpc/connect@^2.1.2",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/health-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/http-security-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/idempotency-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@aws-sdk/client-dynamodb@3",
+          "npm:drizzle-orm@0.45.2",
+          "npm:ioredis@5",
+          "npm:mongodb@^6.21.0",
+          "npm:pg@8",
+          "npm:vitest@5.0.3",
+          "npm:zod@^3.24.0"
+        ]
+      },
+      "jsr:@setu-ts/kernel@0.9.0": {
+        "dependencies": [
+          "npm:hono@^4.12.30",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/localization-plugin@0.9.0": {
+        "dependencies": [
+          "npm:hono@^4.12.30",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/logger-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@opentelemetry/api@^1.9.0",
+          "npm:@opentelemetry/resources@^2.9.0",
+          "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+          "npm:pino@10",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/mail-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@aws-sdk/client-sesv2@3",
+          "npm:hono@^4.12.30",
+          "npm:nodemailer@10",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/messaging-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@aws-sdk/client-dynamodb@3",
+          "npm:@azure/cosmos@4",
           "npm:@azure/service-bus@7",
-          "npm:@google-cloud/pubsub@6"
+          "npm:@google-cloud/pubsub@6",
+          "npm:@opentelemetry/api@^1.9.0",
+          "npm:@opentelemetry/resources@^2.9.0",
+          "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+          "npm:amqplib@0.10",
+          "npm:ioredis@5",
+          "npm:kafkajs@2",
+          "npm:mongodb@^6.21.0",
+          "npm:nats@2",
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/metrics-plugin@0.8.0": {
+      "jsr:@setu-ts/metrics-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/microservice-starter@0.8.0": {
+      "jsr:@setu-ts/microservice-starter@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/auth-plugin@0.8",
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/config-plugin@0.8",
-          "jsr:@setu-ts/database-plugin@0.8",
-          "jsr:@setu-ts/decorator-plugin@0.8",
-          "jsr:@setu-ts/exceptions@0.8",
-          "jsr:@setu-ts/graphql-plugin@0.8",
-          "jsr:@setu-ts/health-plugin@0.8",
-          "jsr:@setu-ts/http-security-plugin@0.8",
-          "jsr:@setu-ts/kernel@0.8",
-          "jsr:@setu-ts/logger-plugin@0.8",
-          "jsr:@setu-ts/messaging-plugin@0.8",
-          "jsr:@setu-ts/metrics-plugin@0.8",
-          "jsr:@setu-ts/openapi-plugin@0.8",
-          "jsr:@setu-ts/queue-plugin@0.8",
-          "jsr:@setu-ts/resilience-plugin@0.8",
-          "jsr:@setu-ts/rest-starter@0.8",
-          "jsr:@setu-ts/runtime@0.8",
-          "jsr:@setu-ts/session-plugin@0.8",
-          "jsr:@setu-ts/telemetry-plugin@0.8",
-          "jsr:@setu-ts/validation-plugin@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/multi-tenancy-plugin@0.8.0": {},
-      "jsr:@setu-ts/notification-plugin@0.8.0": {},
-      "jsr:@setu-ts/openapi-plugin@0.8.0": {
+      "jsr:@setu-ts/multi-tenancy-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/kernel@0.8",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/notification-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/openapi-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3",
           "npm:zod@^3.24.0",
           "npm:zod@^4.4.0"
         ]
       },
-      "jsr:@setu-ts/queue-plugin@0.8.0": {
+      "jsr:@setu-ts/queue-plugin@0.9.0": {
         "dependencies": [
           "npm:@aws-sdk/client-sns@3",
-          "npm:@aws-sdk/client-sqs@3"
+          "npm:@aws-sdk/client-sqs@3",
+          "npm:@opentelemetry/api@^1.9.0",
+          "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+          "npm:amqplib@0.10",
+          "npm:ioredis@5",
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/react-router-plugin@0.8.0": {},
-      "jsr:@setu-ts/realtime-backplane-plugin@0.8.0": {},
-      "jsr:@setu-ts/resilience-plugin@0.8.0": {},
-      "jsr:@setu-ts/rest-starter@0.8.0": {
+      "jsr:@setu-ts/react-router-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/auth-plugin@0.8",
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/config-plugin@0.8",
-          "jsr:@setu-ts/database-plugin@0.8",
-          "jsr:@setu-ts/decorator-plugin@0.8",
-          "jsr:@setu-ts/di-plugin@0.8",
-          "jsr:@setu-ts/exceptions@0.8",
-          "jsr:@setu-ts/graphql-plugin@0.8",
-          "jsr:@setu-ts/health-plugin@0.8",
-          "jsr:@setu-ts/http-security-plugin@0.8",
-          "jsr:@setu-ts/kernel@0.8",
-          "jsr:@setu-ts/logger-plugin@0.8",
-          "jsr:@setu-ts/metrics-plugin@0.8",
-          "jsr:@setu-ts/openapi-plugin@0.8",
-          "jsr:@setu-ts/realtime-backplane-plugin@0.8",
-          "jsr:@setu-ts/runtime@0.8",
-          "jsr:@setu-ts/service-discovery-plugin@0.8",
-          "jsr:@setu-ts/session-plugin@0.8",
-          "jsr:@setu-ts/sse-plugin@0.8",
-          "jsr:@setu-ts/validation-plugin@0.8",
-          "jsr:@setu-ts/websocket-plugin@0.8"
+          "npm:react-router@8",
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/runtime@0.8.0": {
+      "jsr:@setu-ts/realtime-backplane-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/kernel@0.8"
+          "npm:ioredis@5",
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/scheduler-plugin@0.8.0": {},
-      "jsr:@setu-ts/sdk@0.8.0": {
+      "jsr:@setu-ts/resilience-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8.0"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/secrets-plugin@0.8.0": {},
-      "jsr:@setu-ts/service-discovery-plugin@0.8.0": {},
-      "jsr:@setu-ts/session-plugin@0.8.0": {},
-      "jsr:@setu-ts/sse-plugin@0.8.0": {},
-      "jsr:@setu-ts/static-plugin@0.8.0": {
+      "jsr:@setu-ts/rest-starter@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/kernel@0.8",
-          "jsr:@setu-ts/runtime@0.8",
-          "jsr:@setu-ts/testing@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/storage-plugin@0.8.0": {},
-      "jsr:@setu-ts/telemetry-plugin@0.8.0": {
+      "jsr:@setu-ts/runtime@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8"
+          "npm:@hono/node-server@2",
+          "npm:vitest@5.0.3",
+          "npm:ws@^8.18.0"
         ]
       },
-      "jsr:@setu-ts/testing@0.8.0": {
+      "jsr:@setu-ts/scheduler-plugin@0.9.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/kernel@0.8"
+          "npm:ioredis@5",
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/validation-plugin@0.8.0": {},
-      "jsr:@setu-ts/view-plugin@0.8.0": {
+      "jsr:@setu-ts/sdk@0.9.0": {
         "dependencies": [
-          "jsr:@hono/hono@^4.12.30",
-          "jsr:@setu-ts/common@0.8",
-          "jsr:@setu-ts/decorator-plugin@0.8",
-          "jsr:@setu-ts/runtime@0.8",
-          "jsr:@setu-ts/testing@0.8"
+          "npm:vitest@5.0.3"
         ]
       },
-      "jsr:@setu-ts/websocket-plugin@0.8.0": {},
-      "jsr:@setu-ts/worker-pool-plugin@0.8.0": {}
+      "jsr:@setu-ts/secrets-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@aws-sdk/client-secrets-manager@3",
+          "npm:@azure/identity@4",
+          "npm:@azure/keyvault-secrets@4",
+          "npm:@google-cloud/secret-manager@5",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/service-discovery-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/session-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/sse-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/static-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/storage-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@aws-sdk/client-s3@3",
+          "npm:@aws-sdk/s3-request-presigner@3",
+          "npm:@azure/storage-blob@12",
+          "npm:@google-cloud/storage@7",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/telemetry-plugin@0.9.0": {
+        "dependencies": [
+          "npm:@opentelemetry/api@^1.9.0",
+          "npm:@opentelemetry/context-async-hooks@2",
+          "npm:@opentelemetry/exporter-trace-otlp-http@0.220",
+          "npm:@opentelemetry/instrumentation-amqplib@0.67",
+          "npm:@opentelemetry/instrumentation-http@0.220",
+          "npm:@opentelemetry/instrumentation-ioredis@0.68",
+          "npm:@opentelemetry/instrumentation-kafkajs@0.29",
+          "npm:@opentelemetry/instrumentation-undici@0.30",
+          "npm:@opentelemetry/resources@^2.9.0",
+          "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/testing@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/validation-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3",
+          "npm:zod@^3.24.0",
+          "npm:zod@^4.4.0"
+        ]
+      },
+      "jsr:@setu-ts/view-plugin@0.9.0": {
+        "dependencies": [
+          "npm:hono@^4.12.30",
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/websocket-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3",
+          "npm:ws@^8.18.0"
+        ]
+      },
+      "jsr:@setu-ts/worker-pool-plugin@0.9.0": {
+        "dependencies": [
+          "npm:vitest@5.0.3"
+        ]
+      },
+      "npm:@setu-ts/audit-plugin@0.9.0": {},
+      "npm:@setu-ts/auth-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@node-saml/node-saml@5",
+          "npm:ioredis@5"
+        ],
+        "peerDependenciesMeta": {
+          "@node-saml/node-saml": {
+            "optional": true
+          },
+          "ioredis": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/cache-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:ioredis@5"
+        ],
+        "peerDependenciesMeta": {
+          "ioredis": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/cli@0.9.0": {
+        "dependencies": [
+          "npm:prettier@^3.9.10",
+          "npm:tsx@^4.23.0"
+        ]
+      },
+      "npm:@setu-ts/cloudflare-plugin@0.9.0": {},
+      "npm:@setu-ts/common@0.9.0": {},
+      "npm:@setu-ts/config-plugin@0.9.0": {},
+      "npm:@setu-ts/cqrs-plugin@0.9.0": {},
+      "npm:@setu-ts/create@0.9.0": {},
+      "npm:@setu-ts/database-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@aws-sdk/client-dynamodb@3",
+          "npm:@azure/cosmos@4",
+          "npm:@google-cloud/bigtable@6",
+          "npm:drizzle-orm@0.45.2",
+          "npm:mongodb@^6.21.0"
+        ],
+        "peerDependenciesMeta": {
+          "@aws-sdk/client-dynamodb": {
+            "optional": true
+          },
+          "@azure/cosmos": {
+            "optional": true
+          },
+          "@google-cloud/bigtable": {
+            "optional": true
+          },
+          "drizzle-orm": {
+            "optional": true
+          },
+          "mongodb": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/decorator-plugin@0.9.0": {},
+      "npm:@setu-ts/di-plugin@0.9.0": {},
+      "npm:@setu-ts/diagnostics-plugin@0.9.0": {},
+      "npm:@setu-ts/events-plugin@0.9.0": {},
+      "npm:@setu-ts/exceptions@0.9.0": {},
+      "npm:@setu-ts/feature-flags-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@launchdarkly/node-server-sdk@9"
+        ],
+        "peerDependenciesMeta": {
+          "@launchdarkly/node-server-sdk": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/full-stack-starter@0.9.0": {},
+      "npm:@setu-ts/graphql-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:graphql@16"
+        ],
+        "peerDependenciesMeta": {
+          "graphql": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/grpc-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@bufbuild/protobuf@^2.7.0",
+          "npm:@connectrpc/connect@^2.1.2"
+        ],
+        "peerDependenciesMeta": {
+          "@bufbuild/protobuf": {
+            "optional": true
+          },
+          "@connectrpc/connect": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/health-plugin@0.9.0": {},
+      "npm:@setu-ts/http-security-plugin@0.9.0": {},
+      "npm:@setu-ts/idempotency-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:ioredis@5"
+        ],
+        "peerDependenciesMeta": {
+          "ioredis": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/kernel@0.9.0": {
+        "dependencies": [
+          "npm:hono@^4.12.30"
+        ]
+      },
+      "npm:@setu-ts/localization-plugin@0.9.0": {},
+      "npm:@setu-ts/logger-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:pino@10"
+        ],
+        "peerDependenciesMeta": {
+          "pino": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/mail-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@aws-sdk/client-sesv2@3",
+          "npm:nodemailer@10"
+        ],
+        "peerDependenciesMeta": {
+          "@aws-sdk/client-sesv2": {
+            "optional": true
+          },
+          "nodemailer": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/messaging-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@azure/service-bus@7",
+          "npm:@google-cloud/pubsub@6",
+          "npm:amqplib@0.10",
+          "npm:ioredis@5",
+          "npm:kafkajs@2",
+          "npm:nats@2"
+        ],
+        "peerDependenciesMeta": {
+          "@azure/service-bus": {
+            "optional": true
+          },
+          "@google-cloud/pubsub": {
+            "optional": true
+          },
+          "amqplib": {
+            "optional": true
+          },
+          "ioredis": {
+            "optional": true
+          },
+          "kafkajs": {
+            "optional": true
+          },
+          "nats": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/metrics-plugin@0.9.0": {},
+      "npm:@setu-ts/microservice-starter@0.9.0": {},
+      "npm:@setu-ts/multi-tenancy-plugin@0.9.0": {},
+      "npm:@setu-ts/notification-plugin@0.9.0": {},
+      "npm:@setu-ts/openapi-plugin@0.9.0": {},
+      "npm:@setu-ts/queue-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@aws-sdk/client-sns@3",
+          "npm:@aws-sdk/client-sqs@3",
+          "npm:amqplib@0.10",
+          "npm:ioredis@5"
+        ],
+        "peerDependenciesMeta": {
+          "@aws-sdk/client-sns": {
+            "optional": true
+          },
+          "@aws-sdk/client-sqs": {
+            "optional": true
+          },
+          "amqplib": {
+            "optional": true
+          },
+          "ioredis": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/react-router-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:react-router@8"
+        ],
+        "peerDependenciesMeta": {
+          "react-router": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/realtime-backplane-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:ioredis@5"
+        ],
+        "peerDependenciesMeta": {
+          "ioredis": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/resilience-plugin@0.9.0": {},
+      "npm:@setu-ts/rest-starter@0.9.0": {},
+      "npm:@setu-ts/runtime@0.9.0": {
+        "dependencies": [
+          "npm:@hono/node-server@2"
+        ],
+        "peerDependencies": [
+          "npm:ws@^8.18.0"
+        ],
+        "peerDependenciesMeta": {
+          "ws": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/scheduler-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:ioredis@5"
+        ],
+        "peerDependenciesMeta": {
+          "ioredis": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/sdk@0.9.0": {},
+      "npm:@setu-ts/secrets-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@aws-sdk/client-secrets-manager@3",
+          "npm:@azure/identity@4",
+          "npm:@azure/keyvault-secrets@4",
+          "npm:@google-cloud/secret-manager@5"
+        ],
+        "peerDependenciesMeta": {
+          "@aws-sdk/client-secrets-manager": {
+            "optional": true
+          },
+          "@azure/identity": {
+            "optional": true
+          },
+          "@azure/keyvault-secrets": {
+            "optional": true
+          },
+          "@google-cloud/secret-manager": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/service-discovery-plugin@0.9.0": {},
+      "npm:@setu-ts/session-plugin@0.9.0": {},
+      "npm:@setu-ts/sse-plugin@0.9.0": {},
+      "npm:@setu-ts/static-plugin@0.9.0": {},
+      "npm:@setu-ts/storage-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@aws-sdk/client-s3@3",
+          "npm:@aws-sdk/s3-request-presigner@3",
+          "npm:@azure/storage-blob@12",
+          "npm:@google-cloud/storage@7"
+        ],
+        "peerDependenciesMeta": {
+          "@aws-sdk/client-s3": {
+            "optional": true
+          },
+          "@aws-sdk/s3-request-presigner": {
+            "optional": true
+          },
+          "@azure/storage-blob": {
+            "optional": true
+          },
+          "@google-cloud/storage": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/telemetry-plugin@0.9.0": {
+        "peerDependencies": [
+          "npm:@opentelemetry/api@^1.9.0",
+          "npm:@opentelemetry/context-async-hooks@2",
+          "npm:@opentelemetry/exporter-trace-otlp-http@0.220",
+          "npm:@opentelemetry/instrumentation-amqplib@0.67",
+          "npm:@opentelemetry/instrumentation-http@0.220",
+          "npm:@opentelemetry/instrumentation-ioredis@0.68",
+          "npm:@opentelemetry/instrumentation-kafkajs@0.29",
+          "npm:@opentelemetry/instrumentation-undici@0.30",
+          "npm:@opentelemetry/resources@^2.9.0",
+          "npm:@opentelemetry/sdk-trace-base@^2.9.0"
+        ],
+        "peerDependenciesMeta": {
+          "@opentelemetry/api": {
+            "optional": true
+          },
+          "@opentelemetry/context-async-hooks": {
+            "optional": true
+          },
+          "@opentelemetry/exporter-trace-otlp-http": {
+            "optional": true
+          },
+          "@opentelemetry/instrumentation-amqplib": {
+            "optional": true
+          },
+          "@opentelemetry/instrumentation-http": {
+            "optional": true
+          },
+          "@opentelemetry/instrumentation-ioredis": {
+            "optional": true
+          },
+          "@opentelemetry/instrumentation-kafkajs": {
+            "optional": true
+          },
+          "@opentelemetry/instrumentation-undici": {
+            "optional": true
+          },
+          "@opentelemetry/resources": {
+            "optional": true
+          },
+          "@opentelemetry/sdk-trace-base": {
+            "optional": true
+          }
+        }
+      },
+      "npm:@setu-ts/testing@0.9.0": {},
+      "npm:@setu-ts/validation-plugin@0.9.0": {},
+      "npm:@setu-ts/view-plugin@0.9.0": {
+        "dependencies": [
+          "npm:hono@^4.12.30"
+        ]
+      },
+      "npm:@setu-ts/websocket-plugin@0.9.0": {},
+      "npm:@setu-ts/worker-pool-plugin@0.9.0": {},
+      "npm:setu-ts": {}
     }
   }
 }

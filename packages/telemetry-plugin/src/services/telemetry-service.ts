@@ -147,6 +147,7 @@ export class TelemetryService implements ITelemetryService {
       kind?: number;
       attributes?: Record<string, unknown>;
       parentContext?: TelemetryContext;
+      root?: boolean;
     } = {};
     if (options?.kind) {
       startSpanOptions.kind = SPAN_KIND_MAP[options.kind];
@@ -157,6 +158,11 @@ export class TelemetryService implements ITelemetryService {
     // Use parentContext directly from SpanOptions (F5: no bridge).
     if (options?.parentContext) {
       startSpanOptions.parentContext = options.parentContext;
+    }
+    // Omitted rather than assigned `false`, so a caller that never asked for a
+    // root span hands the host exactly the options it always did.
+    if (options?.root === true) {
+      startSpanOptions.root = true;
     }
     const span = this.#tracerHost.startSpan(name, startSpanOptions) as SpanHandle;
     const heSpan = new OtelSpan(span);

@@ -2,8 +2,7 @@
  * Tests for document-cache.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DocumentCache } from '../../src/execution/document-cache.ts';
 
 describe('DocumentCache', () => {

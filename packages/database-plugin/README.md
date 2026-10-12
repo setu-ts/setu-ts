@@ -88,6 +88,244 @@ isolation through the database service; an omitted declaration is refused rather
 the adapter default. Prisma needs a resolved `provider` for an isolation request: when its client
 provider cannot be detected, set `options.provider` explicitly.
 
+## Tenant data-store bridge
+
+`createDatabaseTenantDataStore` is the one shipped `ITenantDataStore` over `IDatabaseService`. Pass
+it to the multi-tenancy plugin's `dataStore` option and tenant-scoped repositories read and write
+through this backend:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createDatabaseTenantDataStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin({ type: 'memory' }),
+    MultiTenancyPlugin({
+      resolver: 'header',
+      database: 'column-per-tenant',
+      dataStore: createDatabaseTenantDataStore(),
+    }),
+  ],
+});
+await app.start({ port: 3000 });
+```
+
+The factory is resolved in `onInit`, so `DatabasePlugin` may be registered before OR after the
+tenancy plugin — every `register()` phase completes before any `onInit`.
+
+The bridge supports the **`'column-per-tenant'`** strategy only: it conjoins the tenant column to
+every read and stamps it on every write (the column is spread LAST, so a caller's filter cannot
+override it, and stripped from every `update` payload, so no write can move a row between tenants).
+`'schema-per-tenant'` and `'database-per-tenant'` throw `TenantStoreStrategyUnsupportedError` at
+startup, because `IRepository` offers no schema or database switch. The tenant column comes from
+that strategy — `'tenant_id'` by default, `database: new ColumnPerTenant('org_id')` for another — so
+there is one place to name it. Lookups by key go through the repository's own `findById`, so an
+entity whose primary key is not `id` (a MongoDB `primaryKey: 'user_id'`, a composite key) is
+addressed the way its adapter is configured; the tenant column is then checked on the row that comes
+back. `update` and `delete` guard the tenant column in the write itself through `updateWhere` /
+`deleteWhere`, which every built-in non-transactional data source offers. A custom data source
+without them falls back to an ownership read followed by a key-addressed write: if the row is
+deleted and a row from another tenant is created under the same caller-supplied key in between, the
+write lands on that row (a `delete` still reports `true`; an `update` refuses to return the foreign
+row, but has already written it). Generated keys never reuse a key, so let the backend generate
+them, or implement the two members. `DatabaseTenantDataStore` is also exported for an application
+that holds its own `IDatabaseService` and constructs the store directly; its optional second
+constructor argument names the column for a store used outside the multi-tenancy plugin.
+
+## Transactional outbox store
+
+`createDatabaseOutboxStore` is the shipped `IOutboxStore` (the port in `@setu-ts/common`) over
+`IDatabaseService`. Pass it to the messaging plugin's `outbox.store` option: the outbox writes each
+integration event as a row in the SAME transaction as the business change, through your own unit of
+work, and a relay publishes the rows afterwards.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    // The relay is a scheduled job: without a scheduler (or `relay: { schedule:
+    // false }` and your own trigger) `start()` rejects OutboxRelayUnscheduledError.
+    SchedulerPlugin(),
+    DatabasePlugin({ type: 'memory' }),
+    MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }),
+  ],
+});
+await app.start();
+```
+
+The write, the relay, its promise and the per-backend provisioning are documented in the
+[messaging-plugin README](https://github.com/setu-ts/setu-ts/tree/main/packages/messaging-plugin#transactional-outbox).
+
+The factory resolves `CAPABILITIES.DATABASE` in `onInit`, so the two plugins may be registered in
+either order. Options: `entity` (default `'Outbox'`) and `database`, which selects a named
+connection (`DatabasePlugin({ name })` → `database.<name>`). That connection must be the database
+your unit of work belongs to: a row written through another database's unit of work is never relayed
+by this store.
+
+**The discriminator.** Every row carries `kind: 'setu-outbox'`; every read requires it, and a lookup
+by id treats a row of another `kind` as missing. An outbox sharing an entity with business data (a
+Cosmos container is queried as a whole) never reads, counts, transitions or deletes a business
+document that happens to carry `status: 'pending'` or `'sent'`.
+
+**Transitions are conditional.** `claim` compares `kind`, `pending` and the read `claimVersion`,
+increments the version once and writes the lease. `markSent` and `markFailure` require the held
+version; `deleteNow` uses the same predicate through `deleteWhere`. A version miss on a pending row
+answers `claim-lost` and writes nothing. `markFailure` clears the lease; `markInvalid` requires only
+`kind` and `pending`, writes `failed`/`invalid-row`, clears the lease and preserves attempts.
+`release('retry')` requires `failed`, resets attempts, the lease and `lastError`, and keeps the
+version — so a row poisoned for an exhausted `claimVersion` (`MAX_SAFE_INTEGER`, stored by a normal
+claim of a row at `MAX_SAFE_INTEGER - 1`, which takes 2^53 − 1 claims of one row or an edit) is
+poisoned again by the next sweep; `release('discard')` or editing the row are the only ways out. A
+miss is re-read for classification; unexplained misses retry at most three rounds. Sources without
+native conditional support are refused; there is no fallback. Absent optional columns are written as
+`NULL` and read back as absent. `sentBy` is an operator diagnostic only.
+
+**Startup check.** `verify()`, run by the outbox before it schedules the relay or accepts a write,
+runs the relay's first query, a transactional read, and two conditional capability probes on the
+fixed non-UUID id `setu-outbox-claim-probe` with `{ kind, status: 'pending', claimVersion: -1 }`: an
+`updateWhere` writing `{ claimVersion: 0 }` and a `deleteWhere` (needed because `retainSentMs: 0`
+deletes a sent row conditionally after publishing it). No row can carry version `-1`, so neither
+probe writes, even to a row appended under the probe id. `verify()` rejects with
+`OutboxStoreUnavailableError` (`reason`, `entity`, the adapter error as `cause`) when any step
+fails:
+
+| Backend               | Verdict                                                                                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| memory                | supported (single process)                                                                                                                           |
+| Prisma                | supported; the table must exist                                                                                                                      |
+| Drizzle               | supported; `drizzleTables` must register the outbox table                                                                                            |
+| D1                    | supported; the table must exist                                                                                                                      |
+| MongoDB               | supported on a replica set; a standalone server is refused (`reason: 'mongodb-replica-set'`)                                                         |
+| DynamoDB              | supported with a GSI `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`; refused without it (`'dynamodb-index'`)                    |
+| Cosmos                | supported when the outbox entity maps to the business container and its partition-key path is a column the row carries (`tenantId` or `orderingKey`) |
+| No conditional writes | refused (`'conditional-writes-unsupported'`): `updateWhere` or `deleteWhere` is absent, or either rejects `conditional-write`                        |
+| Bigtable              | refused (`'bigtable'`): no secondary index, so the relay query cannot run — use a change-data-capture relay                                          |
+
+Any other refusal — a missing or unreadable table — is `reason: 'entity-unavailable'`. On the memory
+adapter and MongoDB a missing entity cannot be detected (both create lazily), so that check passes
+there by construction. No portable migration exists (`migrate()` always rejects): create the table
+yourself. The old M107 SQL schema lacks the claim fields and is refused at startup as
+`entity-unavailable`. A claim reads a version in `[0, Number.MAX_SAFE_INTEGER - 1]` and stores one
+more, so the stored value reaches `Number.MAX_SAFE_INTEGER`, which is exhausted; PostgreSQL uses
+`bigint`, SQLite/D1 use 64-bit `INTEGER`, and JSON backends store the number. For PostgreSQL:
+
+```sql
+CREATE TABLE setu_outbox (
+  id            text    PRIMARY KEY,
+  kind          text    NOT NULL,
+  topic         text    NOT NULL,
+  envelope      text    NOT NULL,
+  options       text    NOT NULL,
+  ordering_key  text,
+  tenant_id     text,
+  traceparent   text,
+  position      text    NOT NULL,
+  created_at    bigint  NOT NULL,
+  status        text    NOT NULL,
+  attempts      integer NOT NULL,
+  available_at  bigint  NOT NULL,
+  claim_version bigint  NOT NULL,
+  lease_until   bigint  NOT NULL,
+  last_error    text,
+  settled_at    bigint,
+  sent_by       text
+);
+CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
+CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settled_at);
+```
+
+Map it with `drizzleTables: { Outbox: pgTable('setu_outbox', { … }) }` (JS keys `orderingKey`,
+`tenantId`, `createdAt`, `availableAt`, `claimVersion`, `leaseUntil`, `lastError`, `settledAt`,
+`sentBy` over the snake_case columns; `claim_version` and `lease_until` must be 64-bit; the `bigint`
+columns in `{ mode: 'number' }`).
+
+## Consumer inbox store
+
+`createDatabaseInboxStore` is the shipped `IInboxStore` (the port in `@setu-ts/common`) over
+`IDatabaseService`. Pass it to the messaging plugin's `inbox.store` option: an
+`onIntegrationEvent(..., { inbox: { consumer } })` subscription then records each event it applied
+as a marker in the SAME transaction as the handler's writes, and hands the handler that
+transaction's unit of work.
+
+The delivery path, its promise, the failure and parking policy and the per-backend notes are
+documented in the
+[messaging-plugin README](https://github.com/setu-ts/setu-ts/tree/main/packages/messaging-plugin#consumer-inbox).
+
+The factory resolves `CAPABILITIES.DATABASE` (or `database.<name>` with `database`) in `onInit`.
+Options: `entity` (default `'Inbox'`) and `database`. The handlers must write to that database: the
+marker is created in its transaction, so a handler writing elsewhere gets no once-only guarantee.
+
+**The marker's insert is the authority.** `run` opens one transaction, creates the marker in it
+first, then runs the handler; any rejection rolls both back. Every row carries `kind: 'setu-inbox'`
+and every read requires it. The failure count compares `kind` and the read `attempts` value in the
+write, retrying at most five rounds; `release` requires `kind` and `status: 'parked'`. Without
+conditional support, or for a non-safe-integer stored count, the two-call fallback can lose an
+increment under concurrent failures.
+
+**Startup check.** `verify()` refuses Cosmos DB and Bigtable by adapter arm or class
+(`'cosmos-unsupported'`, `'bigtable-unsupported'`), runs retention's first query, and runs a
+transaction that writes two probe rows and always rolls back — which is what refuses a standalone
+MongoDB (`'mongodb-standalone'`) and an adapter bounded to one row per transaction
+(`'transaction-scope'`). Anything else is `'entity-unavailable'`. Nothing the probe writes survives.
+Create the table yourself; for PostgreSQL:
+
+```sql
+CREATE TABLE setu_inbox (
+  id          text    PRIMARY KEY,
+  kind        text    NOT NULL,
+  consumer    text    NOT NULL,
+  topic       text    NOT NULL,
+  envelope_id text,
+  status      text    NOT NULL,
+  attempts    integer NOT NULL,
+  updated_at  bigint  NOT NULL,
+  last_error  text,
+  envelope    text
+);
+CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
+```
+
+Map it with `drizzleTables: { Inbox: pgTable('setu_inbox', { … }) }` (JS keys `envelopeId`,
+`updatedAt`, `lastError` over the snake_case columns; `updated_at` in `{ mode: 'number' }`).
+
+## Scoped RBAC sources
+
+`createDatabaseGrantSource({ entity })` and `createDatabaseRoleSource({ entity })` feed AuthPlugin's
+`scopedRbac` option from the application's own database — one row per grant, and one row per (scope,
+role, permission) for roles a tenant defines at runtime. Both return factories AuthPlugin resolves
+at `onInit`, read the default database through the repository surface with portable filters (so
+every adapter works), and refuse a non-identifier column name when called.
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { createDatabaseGrantSource, createDatabaseRoleSource } from '@setu-ts/database-plugin';
+
+export const auth = AuthPlugin({
+  rbac: { roles: { approver: { permissions: ['invoices:approve'] } } },
+  scopedRbac: {
+    // Columns default to subject / role / scopeType / scopeId; both scope
+    // columns null is a global grant.
+    sources: [{ kind: 'custom', source: createDatabaseGrantSource({ entity: 'role_grants' }) }],
+    // Columns default to scopeType / scopeId / role / permission.
+    customRoles: createDatabaseRoleSource({ entity: 'tenant_roles' }),
+  },
+});
+```
+
+A check's question is one query: the subject's rows that are global or in one of the asked scopes.
+More than `limit` matching rows (default 10 001 for grants, 100 000 for role rows) refuse the
+question, so the check denies, rather than answering with an arbitrary subset.
+
 ## Options
 
 | Option    | Type                                                                                                 | Default     | Description                              |
@@ -305,9 +543,13 @@ case-insensitive collation leaves `contains` case-sensitive.
 `IDatabaseService.query()` is unavailable on this arm and an application reaches the injected client
 directly for native commands (`aggregate`, `runCommand`), exactly as it does for a Prisma raw query.
 
-**Transactions** use a driver session. They require a replica set, and the refusal is late and named
-— `beginTransaction()` throws `MongoTransactionUnavailableError`, never `connect()` — so a
-standalone `mongod` remains a valid deployment for an application that never opens one.
+**Transactions** use a driver session. They require a replica set, and the refusal is late — never
+at `connect()` — so a standalone `mongod` remains a valid deployment for an application that never
+opens one. On the real driver it surfaces at the first operation inside the transaction, not at
+`beginTransaction()`: `startTransaction()` resolves, and that operation rejects with the driver's
+own `MongoServerError` (`code: 20`, `codeName: 'IllegalOperation'`), unwrapped (measured, M107).
+`MongoTransactionUnavailableError` wraps only a `startTransaction()` that itself throws, which the
+real driver does not.
 
 ## The Azure Cosmos DB backend
 
@@ -665,16 +907,20 @@ Drizzle, and an unenforced rule becomes a 500 in production.
 | ----------------------------------- | --------------------------------------------- | ---------------- |
 | Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name  |
 | Unknown `where` / `filter` field    | Matches nothing                               | Refused          |
+| Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused          |
+| Changing a primary key by `update`  | **Refused**                                   | Refused (Mongo)  |
 | Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced         |
 | Column types                        | Not enforced — a string into an Int is stored | Enforced         |
 | Foreign keys, checks, defaults      | Not enforced                                  | Enforced         |
 
-Only the first row is something this adapter can decide, and it does: a `select` or `orderBy` field
-that **no stored row carries** is refused with the entity, the clause and the observed column list,
-matching what Drizzle answers for the same call. Two consequences of measuring rather than declaring
-are worth knowing: a field carried by at least one row counts as known (so a sparse optional column
-works), and an entity holding no rows at all accepts anything, because there is nothing to observe
-and nothing to return.
+The first two rows are things this adapter can decide, and it does. The primary key is the one
+constraint it knows, and every lookup by id addresses the first match, so a `create` whose
+caller-supplied key is already stored is refused instead of leaving a second, unaddressable row. For
+`select`/`orderBy`: a `select` or `orderBy` field that **no stored row carries** is refused with the
+entity, the clause and the observed column list, matching what Drizzle answers for the same call.
+Two consequences of measuring rather than declaring are worth knowing: a field carried by at least
+one row counts as known (so a sparse optional column works), and an entity holding no rows at all
+accepts anything, because there is nothing to observe and nothing to return.
 
 `where` and `filter` are deliberately **not** checked. Without a schema this adapter cannot tell an
 unknown column from one that is absent on every row, and returning no rows is a defensible answer to
@@ -694,20 +940,29 @@ test.
 
 ## What a driver condition returns to the client
 
-Two driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
-answered as the package's own errors, so a caller can `instanceof` them instead of matching message
-text:
+Three driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
+answered as typed errors, so a caller can `instanceof` them instead of matching message text:
 
 | Condition                                                                                                                                                                                                                                           | Thrown as                    | Served status |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
 | The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                          | `SerializationConflictError` | `409`         |
 | The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, the pg pool timeout, `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
+| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                         | `DuplicateKeyError`          | `409`         |
 
-Both carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
-reachable for the log (M90j) — and neither serves driver text: the body's `detail` is a fixed
-sentence. **No classified answer carries `Retry-After`**: the hint channel has no header, and the
-framework holds no honest horizon for a pool's saturation. Catch-then-throw sites and the typed
-Drizzle builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's row.
+`DuplicateKeyError` is exported from `@setu-ts/common`, not from this package, because more than one
+package raises or recognises it (the D1 adapter in `@setu-ts/cloudflare-plugin`, and any store that
+records "already processed" with a unique insert). Unlike a serialization conflict it is **not**
+retryable: the same write fails the same way. The memory, DynamoDB and Bigtable adapters raise it
+themselves, and it carries the targeted `entity` when the failing call names one. A duplicate found
+at `commit()` (D1's batch, a Cosmos transactional batch, a DynamoDB `TransactWriteItems` cancelled
+by a create's guard, a buffered memory or Bigtable create) is mapped too; every other commit
+rejection is still rethrown unchanged, because its outcome can be unknown.
+
+All three carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
+reachable for the log (M90j) — and none serves driver text: the body's `detail` is a fixed sentence.
+**No classified answer carries `Retry-After`**: the hint channel has no header, and the framework
+holds no honest horizon for a pool's saturation. Catch-then-throw sites and the typed Drizzle
+builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's row.
 
 ## What a refused query returns to the client
 
@@ -767,20 +1022,39 @@ The `database` indicator gates on the service's lifecycle first (a closed databa
 immediately), then reports reachability from the adapter's own probe. **Since M95b** the payload
 carries `reachable` whenever the adapter can probe:
 
-| `reachable` | Status     | `/ready` |
-| ----------- | ---------- | -------- |
-| `true`      | `up`       | 200      |
-| `false`     | `down`     | 503      |
-| `'unknown'` | `degraded` | 503      |
-| omitted     | `up`       | 200      |
+| `reachable`                                                        | Status     | `/ready` |
+| ------------------------------------------------------------------ | ---------- | -------- |
+| `true`                                                             | `up`       | 200      |
+| `false`                                                            | `down`     | 503      |
+| `'unknown'`                                                        | `degraded` | 503      |
+| `'unknown'` while the pool is saturated and queries are completing | `up`       | 200      |
+| omitted                                                            | `up`       | 200      |
 
-The rows are the whole decision. A probe that **exists and did not answer** inside the 2-second
-bound is evidence of trouble and reports `degraded` — never `up`, which is the claim that let a
-stopped database keep taking traffic (X51-1: the indicator used to read the lifecycle `isReady()`,
-which only says `connect()` once succeeded). An adapter that ships **no probe** is the opposite
-case: a probe that was never written is evidence of nothing, so the payload omits `reachable` and
-the status is today's — mapping a missing probe to `degraded` would fail `/ready` for every healthy
-Cosmos, Bigtable and DynamoDB application on upgrade.
+The rows are the whole decision. **Since M101a** a saturated pool is not an outage. When the Drizzle
+adapter's `poolStats` reports every connection busy with callers waiting (`idle === 0` and
+`waiting > 0`), the probe queues no `SELECT 1` behind the callers it would be measuring, and the
+indicator reports `up` with `reachable: 'unknown'` and the snapshot in `data.capacity` — failing
+`/ready` there would pull every saturated replica out of rotation at once. A full pool is ALSO what
+a hung database looks like (every connection stuck on a server that never answers, callers piling
+up), so the row additionally requires that a query through the adapter completed within the last 10
+seconds. The indicator samples the adapter's completed-query count on each poll, so a hang is
+detected at most one poll interval plus that window after the last completion; a saturated pool
+whose queries have all stopped completing reports `degraded` and `/ready` answers 503. Only queries
+the adapter runs are counted (`query()`, repositories, the Unit of Work's data sources): once
+`getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native instance, its queries
+bypass the adapter, so progress is unobservable and a saturated pool keeps reading `up` — the
+indicator cannot then tell a hang from load. Queries the application runs on its own Drizzle
+instance are not counted either; an application that queries mainly that way should expect a busy
+pool to read `degraded`. That row needs `poolStats`: without it the indicator cannot tell saturation
+from trouble, so a pool connection timeout or a probe that does not answer reports `degraded`. A
+pool connection timeout used to report `down` (it answered `false`); it is now `degraded`, because
+the database never answered either way. A probe that **exists and did not answer** inside the
+2-second bound is evidence of trouble and reports `degraded` — never `up`, which is the claim that
+let a stopped database keep taking traffic (X51-1: the indicator used to read the lifecycle
+`isReady()`, which only says `connect()` once succeeded). An adapter that ships **no probe** is the
+opposite case: a probe that was never written is evidence of nothing, so the payload omits
+`reachable` and the status is today's — mapping a missing probe to `degraded` would fail `/ready`
+for every healthy Cosmos, Bigtable and DynamoDB application on upgrade.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without
@@ -803,6 +1077,12 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
+| `createDatabaseGrantSource`               | function  |
+| `createDatabaseIdempotencyStore`          | function  |
+| `createDatabaseInboxStore`                | function  |
+| `createDatabaseOutboxStore`               | function  |
+| `createDatabaseRoleSource`                | function  |
+| `createDatabaseTenantDataStore`           | function  |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
 | `createInjectedBigtableLoader`            | function  |
@@ -824,16 +1104,21 @@ imperative begin/commit.
 | `CosmosConcurrentModificationError`       | class     |
 | `CosmosTransactionScopeError`             | class     |
 | `DatabaseService`                         | class     |
+| `DatabaseTenantDataStore`                 | class     |
 | `DatabaseUnavailableError`                | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
 | `DynamoAdapter`                           | class     |
+| `InboxStoreUnavailableError`              | class     |
 | `MemoryAdapter`                           | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
+| `OutboxStoreUnavailableError`             | class     |
 | `PrismaAdapter`                           | class     |
 | `PrismaRepository`                        | class     |
 | `SerializationConflictError`              | class     |
+| `TenantStoreStrategyUnsupportedError`     | class     |
+| `TransactionalStoreUnavailableError`      | class     |
 | `UnitOfWork`                              | class     |
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedIsolationLevelError`          | class     |
@@ -873,7 +1158,12 @@ imperative begin/commit.
 | `CustomDatabaseOptions`                   | interface |
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
+| `DatabaseGrantSourceOptions`              | interface |
+| `DatabaseIdempotencyStoreOptions`         | interface |
+| `DatabaseInboxStoreOptions`               | interface |
+| `DatabaseOutboxStoreOptions`              | interface |
 | `DatabasePoolCapacity`                    | interface |
+| `DatabaseRoleSourceOptions`               | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
 | `DrizzleDatabase`                         | interface |
@@ -908,6 +1198,7 @@ imperative begin/commit.
 | `DynamoUpdateItemCommandInput`            | interface |
 | `DynamoUpdateItemCommandOutput`           | interface |
 | `FindOptions`                             | interface |
+| `GrantFields`                             | interface |
 | `IAdapterTransaction`                     | interface |
 | `IBigtableClient`                         | interface |
 | `IBigtableInstance`                       | interface |
@@ -944,6 +1235,7 @@ imperative begin/commit.
 | `PrismaAdapterOptions`                    | interface |
 | `PrismaCompositeKeyOptions`               | interface |
 | `PrismaDatabaseOptions`                   | interface |
+| `RoleFields`                              | interface |
 | `TransactionOptions`                      | interface |
 | `BigtableAdapterOptions`                  | type      |
 | `BigtableFilter`                          | type      |

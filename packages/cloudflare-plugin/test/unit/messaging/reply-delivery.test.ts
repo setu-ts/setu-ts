@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * `deliverReply` must never throw. It runs inside a queue-consumer invocation
  * whose message still has to be acked: an escaping failure would retry the
@@ -5,8 +14,7 @@
  * retry until the queue dead-lettered it.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IDurableObjectNamespace, IServiceBinding } from '../../../src/bindings/facades.ts';
 import { encodeReplyEnvelope } from '../../../src/messaging/message-envelope.ts';

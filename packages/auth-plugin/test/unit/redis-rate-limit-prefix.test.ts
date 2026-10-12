@@ -11,8 +11,7 @@
  * would restart service B's pods.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_RATE_LIMIT_KEY_PREFIX,
   RedisRateLimitStore,

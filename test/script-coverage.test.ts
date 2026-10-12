@@ -67,11 +67,27 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly eleven canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(11);
-    // The publication hold's decision; `publish-packages.ts` is its process seam.
+  it('has exactly twenty-one canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(21);
+    // M111a: the manifest generator whole, and the boot gate's core but not
+    // its spawning runner.
+    for (const file of ['side-effects', 'npm-release-gate', 'npm-placeholders', 'tar-read']) {
+      expect(SCRIPT_TARGETS).toContain(`scripts/${file}.ts`);
+    }
+    expect(SCRIPT_TARGETS).not.toContain('scripts/write-npm-placeholders.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/node-manifests.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/node-build-gate.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/version-sites.ts');
+    expect(SCRIPT_TARGETS).not.toContain('scripts/check-node-build.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/release-shape.ts');
+    // The release bump and the changelog PR check: each has a thin I/O seam
+    // (`main`'s injected deps; `mergedPullRequests`'s git runner) and a
+    // decidable core that carries the bar.
+    expect(SCRIPT_TARGETS).toContain('scripts/bump-version.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/changelog-prs.ts');
+    // The publication hold's decision; `npm-publish.ts` is its process seam.
     expect(SCRIPT_TARGETS).toContain('scripts/publication-hold.ts');
-    expect(SCRIPT_TARGETS).not.toContain('scripts/publish-packages.ts');
+    expect(SCRIPT_TARGETS).not.toContain('scripts/npm-publish.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
     // The suite partition's classifier. Its runner is deliberately NOT a target
     // — the decidable logic was extracted out of it, and its failure mode is a

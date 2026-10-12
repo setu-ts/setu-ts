@@ -7,8 +7,7 @@
  * verification, sequence serialization, tampering, bounds, deadlines, and
  * terminal failures.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { DiagnosticsClientOptions } from '../../src/interfaces/index.ts';
 import { CLIENT_ERRORS, createDiagnosticsClient } from '../../src/client/client.ts';
@@ -96,6 +95,7 @@ function fakeServer(
     configBody?: Record<string, unknown>;
     /** The body to serve for `/v1/cache`; defaults to a one-source ready response. */
     cacheBody?: Record<string, unknown>;
+    eventSnapshotBody?: Record<string, unknown>;
     /** The body to serve for `/v1/realtime`; defaults to a three-source response. */
     realtimeBody?: Record<string, unknown>;
     /** The body to serve for `/v1/storage`; defaults to a one-source ready response. */
@@ -225,6 +225,18 @@ function fakeServer(
             droppedEntries: 0,
           },
         );
+      } else if (target === '/v1/event') {
+        bodyText = JSON.stringify(
+          overrides.eventSnapshotBody ??
+            { version: 1, instanceId: TEST_INSTANCE_ID, state: 'ready', sources: [] },
+        );
+      } else if (target === '/v1/scheduler') {
+        bodyText = JSON.stringify({
+          version: 1,
+          instanceId: TEST_INSTANCE_ID,
+          state: 'unsupported',
+          sources: [],
+        });
       } else if (target === '/v1/cache') {
         bodyText = JSON.stringify(overrides.cacheBody ?? cacheResponseBody());
       } else if (target === '/v1/outbound-http') {
@@ -2176,4 +2188,89 @@ describe('Client — storage negotiation (M98m)', () => {
       client.close();
     });
   }
+});
+
+describe('Client event inspector negotiation', () => {
+  it('pairs and returns a frozen event snapshot', async () => {
+    const { client, requests } = buildClient();
+    try {
+      const result = await client.events();
+      expect(result).toEqual({
+        version: 1,
+        instanceId: TEST_INSTANCE_ID,
+        state: 'ready',
+        sources: [],
+      });
+      expect(Object.isFrozen(result.sources)).toBe(true);
+      expect(requests.map((request) => request.target)).toEqual(['/v1/status', '/v1/event']);
+    } finally {
+      client.close();
+    }
+  });
+  it('answers an absent inspector locally and refuses malformed signed data', async () => {
+    const unsupported = buildClient({
+      server: { statusInspectors: { ...currentInspectorsManifest(), events: false } },
+    });
+    try {
+      expect((await unsupported.client.events()).state).toBe('unsupported');
+      expect(unsupported.requests.map((request) => request.target)).toEqual(['/v1/status']);
+    } finally {
+      unsupported.client.close();
+    }
+    for (
+      const body of [{ version: 1, instanceId: TEST_INSTANCE_ID, state: 'bogus', sources: [] }, {
+        version: 1,
+        instanceId: 'other',
+        state: 'ready',
+        sources: [],
+      }]
+    ) {
+      const { client, requests } = buildClient({ server: { eventSnapshotBody: body } });
+      try {
+        await expect(client.events()).rejects.toThrow(CLIENT_ERRORS.connection);
+        expect(requests.at(-1)!.target).toBe('/v1/event');
+      } finally {
+        client.close();
+      }
+    }
+  });
+});
+
+const addonOperations = [
+  'health',
+  'configuration',
+  'cache',
+  'scheduler',
+  'realtime',
+  'storage',
+  'outboundHttp',
+  'events',
+] as const;
+for (const operation of addonOperations) {
+  it(`automatically pairs and freezes the ${operation} addon response`, async () => {
+    const { client, requests } = buildClient();
+    try {
+      const result = await client[operation]();
+      expect(result.instanceId).toBe(TEST_INSTANCE_ID);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(requests[0]?.target).toBe('/v1/status');
+      expect(requests).toHaveLength(2);
+    } finally {
+      client.close();
+    }
+  });
+  it(`answers a legacy ${operation} addon locally and refuses it after close`, async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    const result = await client[operation]();
+    expect(result.state).toBe('unsupported');
+    expect(requests).toHaveLength(1);
+    client.close();
+    await expect(client[operation]()).rejects.toThrow();
+  });
+}
+
+it('refuses a successful HTTP response without a body', async () => {
+  const { client } = buildClient({ client: { fetch: () => Promise.resolve(new Response(null)) } });
+  await expect(client.session()).rejects.toThrow(CLIENT_ERRORS.connection);
+  client.close();
 });

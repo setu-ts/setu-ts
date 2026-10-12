@@ -18,7 +18,7 @@
  * A structural subset of the driver `ObjectId` — enough for the conversion
  * rules the mapping owns.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IMongoObjectId {
   /** Serializes the id to its 24-hex string, the value callers address. */
@@ -28,7 +28,7 @@ export interface IMongoObjectId {
 /**
  * The driver `ObjectId` constructor shape.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IMongoObjectIdCtor {
   /**
@@ -51,7 +51,7 @@ export interface IMongoObjectIdCtor {
  * A structural subset of the driver `ClientSession` — the members the
  * transaction path calls.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IMongoSession {
   /**
@@ -83,7 +83,7 @@ export interface IMongoSession {
 /**
  * The native driver `findOneAndUpdate` options the adapter passes through.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IMongoCollectionFindOneAndUpdateOptions {
   /** Returns the updated document (rather than the original). */
@@ -109,7 +109,7 @@ export interface IMongoCursor {
  * reproduces those shapes is assignable here — the recurring contract-violating
  * double this seam exists to prevent.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IMongoCollection {
   /**
@@ -214,7 +214,7 @@ export interface IMongoCollection {
  * Operation options the data source passes to every driver call — the session
  * a transaction-scoped data source binds to.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoOptions {
   /** The session a transaction-scoped operation runs under. */
@@ -224,7 +224,7 @@ export interface MongoOptions {
 /**
  * Write-path operation options the data source passes to the driver.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type MongoWriteOptions = MongoOptions;
 
@@ -232,7 +232,7 @@ export type MongoWriteOptions = MongoOptions;
  * A structural subset of the driver `MongoClient` — the members the adapter
  * drives.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IMongoClient {
   /**
@@ -272,7 +272,7 @@ export interface IMongoClient {
  * A structural subset of the driver `Database` — what the collection resolver
  * reads.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface IMongoDatabase {
   /**

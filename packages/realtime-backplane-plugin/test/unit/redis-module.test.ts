@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   adaptRedisModule,
   RedisModuleError,
@@ -83,7 +82,7 @@ describe('toRedisLoadFailure', () => {
   it('wraps a resolution failure with installation guidance', () => {
     const wrapped = toRedisLoadFailure(new Error('Module not found "npm:ioredis"'));
     expect(wrapped).toBeInstanceOf(RedisModuleError);
-    expect(wrapped.message).toContain('Install it to use the');
+    expect(wrapped.message).toContain('Failed to load ioredis. Install it to use the');
     expect(wrapped.message).toContain('Module not found');
   });
 

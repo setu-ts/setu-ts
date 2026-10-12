@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryProvider } from '../../../src/providers/memory-provider.ts';
 
 describe('MemoryProvider health (M70c)', () => {

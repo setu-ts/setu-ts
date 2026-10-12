@@ -9,8 +9,7 @@
  * spread or serialize the whole job) while SQS names each field in an explicit
  * envelope, so SQS is the one that can silently drop it.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { StoredJob } from '../../src/interfaces/index.ts';
 import type { QueueAdapter } from '../../src/adapters/queue-adapter.ts';
 

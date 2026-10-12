@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IPluginContext, MiddlewareFunction } from '@setu-ts/common';
 

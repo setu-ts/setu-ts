@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * A hand-written module in a seam directory (M70g — register rows X4-4 and F2).
  *
@@ -14,14 +16,13 @@
  *
  * @module
  */
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { bootAndProbe, denoCheck, useWorkspacePackages } from '../fixtures/generated-project.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs = runtime.fs as IFileSystem;
 
 /** A routes module a developer wrote themselves, matching the family's convention. */
@@ -63,23 +64,23 @@ describe('a hand-written module in a seam directory', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-adopt-' });
+    root = await tempDir({ prefix: 'setu-adopt-' });
     err.length = 0;
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   it('stays hand-wired, and the generated project still boots and serves both', async () => {
-    expect(await run(['new', 'shop'])).toBe(0);
+    expect(await run(['new', 'shop', '--runtime', 'deno'])).toBe(0);
     const project = `${root}/shop`;
 
     // The developer's own module, registered from their own config — the exact
     // arrangement X4-4 reported.
-    await Deno.writeTextFile(`${project}/src/controllers/admin.routes.ts`, HAND_WRITTEN);
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(`${project}/src/controllers/admin.routes.ts`, HAND_WRITTEN);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
+    await nodeFs.writeFile(
       `${project}/setu.config.ts`,
       config
         .replace(
@@ -96,7 +97,7 @@ describe('a hand-written module in a seam directory', () => {
     // An UNRELATED generate. This is what used to claim the file.
     expect(await run(['g', 'route', 'report', '--dir', project])).toBe(0);
 
-    const barrel = await Deno.readTextFile(`${project}/src/controllers/index.ts`);
+    const barrel = await nodeFs.readFile(`${project}/src/controllers/index.ts`, 'utf8');
     expect(barrel).toContain('registerReportRoutes');
     expect(barrel).not.toContain('registerAdminRoutes');
     const report = err.join('\n');

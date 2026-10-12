@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ITraceDiagnosticsSource } from '@setu-ts/common';
 
@@ -46,6 +45,10 @@ describe('compileTraceDiagnosticsPolicy', () => {
     );
     expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'a'.repeat(65) }))
       .toThrow(TRACE_COLLECTOR_ERRORS.aliasBytes);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\u202ealias' })
+    )
+      .toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
     expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\nalias' }))
       .toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
     expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 7 as never }))

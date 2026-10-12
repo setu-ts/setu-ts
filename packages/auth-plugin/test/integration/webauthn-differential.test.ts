@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   createCeremoniesHarness,
@@ -20,11 +19,11 @@ import { fromBase64Url, VirtualAuthenticator } from '../fixtures/virtual-authent
  * exercises the real oracle wherever the package is installed.
  */
 
-type Oracle = typeof import('npm:@simplewebauthn/server@14.0.3');
+type Oracle = typeof import('@simplewebauthn/server');
 
 let oracle: Oracle | null = null;
 try {
-  oracle = await import('npm:@simplewebauthn/server@14.0.3');
+  oracle = await import('@simplewebauthn/server');
 } catch {
   // The oracle is unavailable; the differential steps skip below.
 }
@@ -83,7 +82,7 @@ async function oracleAuthentication(
 describe('webauthn differential', () => {
   it(
     'agrees with the reference implementation on a valid registration',
-    { ignore: oracle === null },
+    { skip: oracle === null },
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
@@ -104,7 +103,7 @@ describe('webauthn differential', () => {
 
   it(
     'agrees with the reference implementation on a foreign origin',
-    { ignore: oracle === null },
+    { skip: oracle === null },
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
@@ -130,7 +129,7 @@ describe('webauthn differential', () => {
 
   it(
     'agrees with the reference implementation on a valid authentication',
-    { ignore: oracle === null },
+    { skip: oracle === null },
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
@@ -167,7 +166,7 @@ describe('webauthn differential', () => {
 
   it(
     'agrees with the reference implementation on a lowered counter',
-    { ignore: oracle === null },
+    { skip: oracle === null },
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
@@ -215,7 +214,7 @@ describe('webauthn differential', () => {
 
   it(
     'agrees with the reference implementation on a foreign-origin assertion',
-    { ignore: oracle === null },
+    { skip: oracle === null },
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');

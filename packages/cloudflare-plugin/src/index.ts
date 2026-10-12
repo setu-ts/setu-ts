@@ -108,6 +108,13 @@ export { DurableObjectBackplane } from './realtime/durable-object-backplane.ts';
 export type { DurableObjectBackplaneOptions } from './realtime/durable-object-backplane.ts';
 export { DurableObjectLock } from './lock/durable-object-lock.ts';
 export type { DurableObjectLockOptions } from './lock/durable-object-lock.ts';
+export { IdempotencyObjectCore } from './durable-objects/idempotency-object.ts';
+export type {
+  IdempotencyObjectCoreOptions,
+  IIdempotencyObjectState,
+} from './durable-objects/idempotency-object.ts';
+export { DurableObjectIdempotencyStore } from './stores/durable-object-idempotency-store.ts';
+export type { DurableObjectIdempotencyStoreOptions } from './stores/durable-object-idempotency-store.ts';
 
 // Background work
 export type { LoggerSource, WaitUntilHost } from './background/wait-until.ts';

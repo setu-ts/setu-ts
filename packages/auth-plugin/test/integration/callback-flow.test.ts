@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { afterEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterEach, describe, expect, it } from 'vitest';
 import { errorHandler } from '@setu-ts/exceptions';
 
 import { encodeBase64Url } from '../../src/utils/base64url.ts';

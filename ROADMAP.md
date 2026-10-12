@@ -4624,6 +4624,78 @@ omitted on Deno, whose web `Worker` emits nothing at all when a worker ends itse
 
 ---
 
+## Milestone 45c: Worker Pool Sizing — a Global Worker Budget and a Runnable Example ✅ COMPLETE
+
+**Objective:** Bound the total number of worker threads an application can hold, across every task
+module, and give the worker pool its first runnable example. Every worker is a full JavaScript
+isolate: measured on this repository's development machine with a trivial task module, about 12 MB
+of resident memory per worker on Deno, about 13.5 MB on Node (both V8), and about 1.5 MB on Bun
+(JavaScriptCore). A real task module costs more, because each worker loads its own copy of the
+module's imports.
+
+> **Why this is a milestone and not a tuning note.** One pool exists per task-module specifier, and
+> each pool's size defaults to the host's `availableParallelism()`
+> (`services/worker-pool-service.ts:117`). Nothing bounds the sum, so an application with three task
+> modules on a 32-core host can grow to 96 isolates. A container's CPU limit does lower the default
+> (measured: `--cpus=2` makes both Deno and Node report 2), but a Kubernetes pod deployed without a
+> CPU limit sees the node's full core count, and a burst can then exceed the pod's memory limit.
+> Workers spawn on demand and are never terminated while the pool lives, so whatever a burst creates
+> stays resident.
+
+### Package: `@setu-ts/worker-pool-plugin` (no new package)
+
+- **`WorkerPoolPluginOptions.maxWorkers`** — a plugin-wide bound on live workers across every task
+  module. The default is the largest of `availableParallelism()`, `defaultPoolSize`, and the SUM of
+  every explicitly listed `pools[*].size`, so an application with one task module keeps today's
+  behaviour and every pool it sized itself can be at that size at once. Modules that fall back to
+  the default size share what remains. `Infinity` restores the unbounded behaviour. `NaN`, zero,
+  negative and fractional values are refused when the plugin is constructed, because every
+  comparison against `NaN` is false and an unvalidated bound would fail open (the M90a precedent).
+- **Sharing the budget without starving a module.** A cap alone deadlocks: with no idle reaping,
+  module A's idle workers would hold the whole budget and module B could never spawn. The budget
+  therefore evicts an idle worker from another pool when a pool needs one and the budget is full,
+  and a worker that becomes idle while another pool is waiting is retired rather than kept. A pool
+  waiting with no worker at all is served first, so every module with queued work eventually gets at
+  least one worker. No timer is involved; this is not idle reaping.
+- **`worker-pool` health payload** gains `budget: { maxWorkers, workers }`.
+- **A spawn that throws no longer leaves a ghost task.** Today a synchronous `host.spawn` failure
+  rejects `run()` but leaves the task queued with its timeout armed; the budget makes `pump()`
+  reachable from another pool, where that throw would escape as an unhandled rejection, so the
+  failure now settles the task inside `pump()`.
+
+### Not this milestone
+
+- **Timed idle reaping and prewarming** (`idleTimeoutMs`, `minWorkers`). Reaping frees memory
+  between bursts, but a container's memory limit must fit the peak anyway, and the global budget is
+  what lowers the peak. Deferred until an application reports memory pressure between bursts.
+- **Workers that run several task modules**, and an `IWorkerHandle.postMessage` transfer list. Both
+  are larger changes; the second is a `common` widening.
+- **A native (Rust) or bare-isolate backend.** Researched and rejected for now: a native thread
+  cannot be killed on timeout and a crash takes the process down, and a bare-isolate backend is
+  Node-only with no imports inside tasks.
+
+### Example application: `apps/worker-pool`
+
+The worker pool has had no runnable example; its only end-to-end proof was an exercise outside the
+repository, run against published versions. The smoke check proves three things: a CPU-bound task
+runs off the event loop (main-thread timers keep firing while it runs), two task modules sharing
+`maxWorkers: 1` both complete without one starving the other, and a `SharedArrayBuffer` in a task's
+input is written by the worker and read back by the caller without a copy.
+
+### Doc Deliverables (to ship in this milestone's PR)
+
+- [x] **PUBLIC_API.md** — `maxWorkers` in the Worker pool options table; the budget in the health
+      payload; the `SharedArrayBuffer` notes.
+- [x] **README** — `packages/worker-pool-plugin/README.md`: sizing in containers, measured
+      per-worker memory, `SharedArrayBuffer` usage and its caveats, task granularity.
+- [x] **apps/README.md** and **docs/examples.md** — the new example.
+- [x] **CHANGELOG.md** and **docs/upgrading.md** — the behaviour change for applications with
+      several task modules, and how `maxWorkers: Infinity` restores the old behaviour.
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `45c`.
+- [x] **CLAUDE.md** — Current status `45c` entry.
+
+---
+
 ## Milestone 46: WebSocket Plugin — Bidirectional Real-Time Across All Four Runtimes ✅ COMPLETE
 
 **Objective:** Give applications full-duplex, bidirectional real-time messaging, completing the
@@ -9532,7 +9604,9 @@ finishing successfully; the messaging README's current dispatch timing remains t
 write business state and an integration-event envelope atomically, relay persisted rows with
 at-least-once delivery, and de-duplicate per consumer by stable event ID. It must decide ordering,
 retention, replay, and failure observability across the database and messaging contracts; none of
-those choices belongs in a local recorder or a typed publishing convenience API.
+those choices belongs in a local recorder or a typed publishing convenience API. That design is now
+M107 (outbox) and M108 (inbox), relayed with the publish-side primitive M106 shipped — a
+per-aggregate ordering key, a stable de-duplication ID and transport headers.
 
 ---
 
@@ -10648,7 +10722,7 @@ merging beyond what the schema itself expresses.
   plugin covers it, and the part applications get wrong — cancelling the loop on shutdown — is an
   `AbortSignal` threading question that belongs with the runtime lifecycle, not here.
 - **Localization.** `IStringLocalizer` has no counterpart here and the framework has no i18n of any
-  kind. That is a real gap and a milestone in its own right, not an ergonomic.
+  kind. That is a real gap and a milestone in its own right, not an ergonomic — opened as M103.
 
 ---
 
@@ -12232,7 +12306,7 @@ a package where the shapes differ: `messaging-plugin` is in M101a (health) and M
 | **M101d** | two sides of a service call that disagree                                 | V8-10, V8-11, V8-27, V8-28, V8-29                    | `sdk`, `telemetry`, `react-router`, `full-stack-starter`                    |
 | **M101e** | CLI commands that write where or when they should not                     | V8-16, V8-17, V8-35, V8-36, V8-37, V8-38, V8-41      | `cli`                                                                       |
 | **M101f** | the devtool lifecycle                                                     | V8-18, V8-19, V8-20, V8-21, V8-22, V8-34             | `cli`, `common`, every diagnostics source                                   |
-| **M101g** | scaffolds that are not wired                                              | V8-12–V8-15, V8-31–V8-33, V8-39, V8-40, + no-row gap | `cli`, `testing`, full-stack template                                       |
+| **M101g** | scaffolds that are not wired                                              | V8-12–V8-15, V8-31–V8-33, V8-39, V8-40, + no-row gap | `cli`, full-stack template                                                  |
 | **M101h** | documentation, plus redaction setup that takes extra work                 | V8-30, V8-42, V8-43, V8-44                           | `common`, docs                                                              |
 
 **Sequence.** M101a first — it holds the only regression, and it is live in every deployment that
@@ -12303,6 +12377,13 @@ failure — applied across seven packages, with one outage test per package driv
 **Regression note.** Only V8-1 regressed, and only through M99a's fix for V7-4. The rest are
 identical on `0.7.0` or concern `0.8.0` diagnostics surface.
 
+**Shipped.** One rule, `withDeadline` in `common`: every backend call is bounded and an expired
+bound is a recorded failure. Service Bus answers a retained outage at once; a saturated Drizzle pool
+(with `poolStats`) is `up` with `reachable: 'unknown'` and a pool timeout `degraded`; Vault requests
+are bounded and answer `503`; cache, queue and scheduler-lock Redis commands carry a
+`commandTimeoutMs`; a hung lock acquire is a counted `lockFailed`; an unread depth row is absent.
+Proven against a real paused Redis 7, PostgreSQL 16, Vault, and the Service Bus emulator.
+
 ---
 
 ### Milestone 101b: Message Transports That Fail Against the Real Broker
@@ -12329,15 +12410,41 @@ fails the same way. Encode the durable name, and add a real-NATS RPC case — `n
 drives no `request()`.
 
 **V8-26 — a Kafka subscription to a not-yet-existing topic kills boot** with a raw
-`KafkaJSProtocolError` naming no topic. kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION` (five
-retries, about nine seconds, the error is marked retriable) — what escaped was budget exhaustion on
-a broker with auto-create off, so no second retry loop: throw a named error naming the topic (the
-`JetStreamStreamError` precedent), forward the existing `retry` option, and document pre-creation.
+`KafkaJSProtocolError` naming no topic. ~~kafkajs already retries `UNKNOWN_TOPIC_OR_PARTITION`~~ —
+**corrected by measurement in M101b**: kafkajs 2.2.4's `brokerPool.refreshMetadata` retries ONLY
+`LEADER_NOT_AVAILABLE` and `bail()`s every other error, so an unknown topic rejects in milliseconds,
+unwrapped, whatever its `retriable` flag says. And on Kafka 4.0 (KRaft) with
+`auto.create.topics.enable=true` the metadata request that CREATES the topic answers exactly
+`UNKNOWN_TOPIC_OR_PARTITION` — the topic exists a moment later. So the run's failure was not budget
+exhaustion on a non-auto broker; it was the ordinary auto-creating broker, with nothing retrying.
+The fix is therefore a bounded broker-owned retry of that one error within the forwarded `retry`
+budget, then a named error naming the topic (the `JetStreamStreamError` precedent), and documented
+pre-creation for a broker that does not auto-create.
 
 **Why they are one letter.** Each is a broker-specific naming or startup rule — a subscription's
 topic binding, a durable-name grammar, topic leadership at subscribe — that a permissive fake
 accepts. All three need the same deliverable: a real-backend case per arm that exercises RPC and a
 second topic, not one topic at a time. None is a regression; V8-2's arm was never run on `0.7.0`.
+
+**Shipped.** Pub/Sub derives `<defaultQueue>.<topic ID>` and, on `ALREADY_EXISTS`, reads the
+existing subscription's topic through a new `getMetadata` facade member and refuses one bound
+elsewhere with `PubSubSubscriptionBoundElsewhereError`. NATS encodes each character the client
+refuses as `_` + two hex digits, records the raw queue as `setu.queue` consumer metadata, and
+refuses a collision — in process, and across processes on the server's
+`10148 consumer already exists` (the code the old `'consumer name already exists'`/`'duplicate'`
+match never saw) — with `NatsConsumerNameCollisionError`. Kafka retries an unknown topic within
+`KafkaOptions.retry` (now validated and forwarded), then throws `KafkaTopicUnavailableError`, and a
+`run()` rejection reaches the logger. Each arm's real suite drives two topics and RPC in one
+application: real NATS, Kafka 4.0 (CI's image), and the Pub/Sub emulator run twice against one
+instance. Every negative control reproduced the run's own signature —
+`invalid durable name - durable name cannot contain '.'`, a fresh-topic boot dying with the topic
+named, and with both Pub/Sub halves reverted a cross-topic misdelivery on run 1 and the second run's
+`RequestTimeoutError`. Two deployment facts surfaced and are documented rather than fixed: a NATS
+account admits only ONE stream owning `rr.inbox.>`, and the consumer metadata needs NATS 2.10+.
+Verification then found a failed-start leak (the close hook registered after the declared
+subscriptions), a fully-qualified Pub/Sub topic deriving an illegal default name, a cross-project
+binding the suffix match accepted, and a pre-existing Kafka shutdown leak (`stop()` without
+`disconnect()`, which hung every Kafka app after `app.stop()`) — all fixed on this branch.
 
 ---
 
@@ -12517,6 +12624,17 @@ member.
 diagnostics sources and `createObservedFetch` were hand-written (`X60-X65-FINDINGS.md`, generator
 gap #1). `devtool enable` or `setu add` must offer the option for installed plugins.
 
+**Second no-row deliverable — a browser gate for the full-stack scaffold.** Since M37c, hydration,
+static-asset delivery and client-side navigation of the full-stack example have been verified
+"manually against Chrome via Playwright" and never on a merge, because CI installs no browser. The
+gate is a Playwright suite run in its own CI job (a browser installed there and nowhere else, so the
+four ordinary gates stay browser-free) against BOTH `apps/full-stack` and a freshly scaffolded
+`--template full-stack` project, asserting the eleven M37c checks: SSR content, hydration, the eight
+referenced assets served by the framework's handler, a `<Form>` submit as a client-side transition,
+the `HttpOnly` session cookie, and the degraded real-POST login with JavaScript disabled. It is
+deliberately NOT in `ALLOW_SKIP`, so a runner without a browser fails rather than passes over it. It
+is also the instrument the `v0.9.0` client-brief run (M104) uses for its UI acceptance criteria.
+
 **Why they are one letter.** Every row is generated output missing its registration, its build path
 or its harness — the M60 "generated code that is wired" bar, applied to what has shipped since.
 
@@ -12524,9 +12642,11 @@ or its harness — the M60 "generated code that is wired" bar, applied to what h
 
 ### Milestone 101h: Documentation, Plus Redaction Setup That Takes Extra Work
 
-**Package(s):** `packages/common` (the only `src` change), plus the READMEs of `storage-plugin`,
-`auth-plugin`, `events-plugin` and the five further diagnostics-carrying plugins, `PUBLIC_API.md`
-and docs
+**Package(s):** `packages/common` (the only `src` change), plus the READMEs of `common`,
+`storage-plugin`, `multi-tenancy-plugin`, `telemetry-plugin`, `logger-plugin`, `auth-plugin` and
+`events-plugin`, `PUBLIC_API.md` and docs. The five further diagnostics-carrying plugins this line
+named before are out: health, config, queue, scheduler and telemetry already document their option
+under their own headings, and V8-44 names only auth and events (plan C6)
 
 **Objective:** the code is correct and a reader following the documentation still cannot set it up.
 
@@ -12541,6 +12661,1319 @@ export-table rows.
 
 **Why they are one letter.** M95d's precedent: documentation that does not survive contact, carried
 on one branch with no behavioural risk — V8-30 is the one code change, and it is additive.
+
+---
+
+## Milestone 102: Mail Bodies Rendered Through the View Engine
+
+**Package:** `@setu-ts/mail-plugin`
+
+**Objective:** Let an application author an email body the way it authors a page — as a component
+the view engine renders — instead of a `{{ variable }}` string, without a second rendering mechanism
+and without the two plugins importing each other.
+
+**The gap is the shape of what M29 shipped, not a defect in it.** `TemplateEngine`
+(`mail-plugin/src/templates/template-engine.ts`) is 94 lines of named `{{ variable }}` substitution:
+no conditionals, no loops, no layouts, no components. That is the right size for a welcome mail and
+the wrong size for the invoice, the digest, and the order summary a client application sends on day
+two — every one of which an application today builds by concatenating strings by hand, which is
+exactly what M92 removed from HTTP responses. Meanwhile M92 shipped an `IViewEngine` under
+`CAPABILITIES.VIEW` (`common/src/services/view.ts:51`) whose `render` answers a primitive HTML
+string for a JSX component, an `html` tagged template, or a plain `(props) => string` function, with
+escaping owned by the rendering runtime. The capability exists; nothing lets a mail body reach it.
+
+**The bridge lives in `mail-plugin`, resolved as an OPTIONAL capability, and the committed `IMailer`
+contract does not change.** Three shapes were weighed. A free function in `view-plugin`
+(`sendRenderedMail(services, Component, props, envelope)`) would type-check props against the
+component, but it is the three lines an application already writes, bypasses the named-template
+registry, and would have no reader but its own test — the dead-surface rule. Shipping both would put
+two public surfaces on one capability. So `MailPluginOptions.templates` gains a **component arm**
+beside the string arm, `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and
+resolves the engine once at `register()` — the `@Render` precedent
+(`decorator-plugin/src/plugin/decorator-plugin.ts:422-431`) — and
+`sendTemplate(name, envelope,
+data)` renders a component template through `IViewEngine.render` with
+`data` as its props. Every holder of `IMailer` that calls `sendTemplate` gets the new arm with no
+code change.
+
+**Deliverables.**
+
+- **`MailTemplate` becomes a union of two arms.** The string arm is the released
+  `{ html?: string; text?: string }`, unchanged. The component arm is
+  `{ view: Component<never>; text?: Component<never> }`: `view` renders the HTML body, `text` the
+  plain-text body, both through the SAME `IViewEngine.render`. A plain-string component is a valid
+  `Component` whose output the engine returns unchanged (M92 §3.15), so a text body is simply a
+  function returning a string. Each arm carries `never`-typed members forbidding the other arm's
+  keys, so a template mixing `view` with `html` is a compile error rather than a silent precedence
+  rule.
+- **A component template with no `CAPABILITIES.VIEW` provider fails at `register()`**, naming both
+  remedies (register `ViewPlugin` or any other provider of the token, or drop the component
+  templates) — never at the first `sendTemplate`, where the failure would be a request-time throw on
+  a path the application has already shipped. The check is per application, so one with only string
+  templates needs no view plugin at all. The `optionalDependencies` edge is what makes the
+  `register()`-time lookup a contract rather than plugin-order luck; `view-plugin` declares no
+  dependency and no `optionalDependencies`, so the edge cannot form a cycle (the M90i P1 class is
+  re-established from source, not inherited).
+- **`TemplateEngine.render` becomes asynchronous** (`Promise<RenderedTemplate>`), because
+  `IViewEngine.render` answers `string | Promise<string>` and an async component's render genuinely
+  is a promise. This is the milestone's one **breaking change** — a direct caller of the exported
+  class must `await` — and it is CHANGELOG'd with migration text and recorded in
+  `docs/upgrading.md`. `MailService.sendTemplate` already awaited the provider and now awaits the
+  render too; `send` is untouched.
+- **`data` is the props bag, passed verbatim, with no missing-key check.** The string arm throws on
+  a placeholder whose key is absent from `data`; a component reads whatever it reads, so no such
+  check is possible, and the docs say so rather than imply parity. The committed signature keeps
+  `data` as `Readonly<Record<string, unknown>>`, so a mistyped prop through `sendTemplate` is a
+  runtime defect; the compile-time route is to call `engine.render(Component, props)` and
+  `mailer.send` by hand, which the README shows beside the template form.
+- **Escaping is the rendering runtime's, exactly as for a page.** An `html` tagged template and a
+  JSX component escape their interpolations; a hand-written template literal does not, and the
+  caveat M92 states for `IViewEngine.render` applies unchanged to a mail body. The text body is used
+  verbatim, matching the string arm's raw text substitution.
+- **Docs.** The `mail-plugin` README gains the component arm in its options table and Templates
+  section with a compilable example; `PUBLIC_API.md`'s Mail section gains the arm, the `register()`
+  refusal, the async `render`, and the no-missing-key note; ARCHITECTURE's `@setu-ts/mail-plugin`
+  row gains the optional `view` dependency; CHANGELOG and `docs/upgrading.md` carry the breaking
+  change.
+
+**Not a deliverable.** No `common` change and no new capability token — `IMailer`, `IViewEngine`,
+`Component<P>`, `CAPABILITIES.MAIL` and `CAPABILITIES.VIEW` are all committed. No new package. No
+layout mechanism (a layout is a component taking `children`, M92's rule). No subject templating —
+`subject` stays verbatim from the envelope, as the committed `sendTemplate` signature requires. No
+CSS inlining, MJML, or `react-email` integration: each is reachable today as a component that
+returns a string, through the `'custom'` engine arm, or by rendering ahead of `send`, and none needs
+a seam this milestone does not already give it. A container-supplied engine
+(`@Injectable({ token: CAPABILITIES.VIEW })` under `DiPlugin`) is NOT consulted — `DecoratorPlugin`
+registers it into `ctx.container` during its own `register()`, which runs after this plugin's, so
+there is nothing to find at the time the lookup runs; the refusal message says to register a
+provider of the token in the registry.
+
+**Folded in at the maintainer's direction (pre-existing, found by verification).** The log and
+SendGrid providers now refuse a send while disconnected, as SMTP and SES already did — a send after
+`app.stop()` had reported success on the log provider and POSTed a real email through SendGrid. And
+the `@since` gate, which skipped every `@since 0.1.0` tag because that line shipped only as
+prereleases, now checks such a tag against the line's last prerelease; the 62 wrong tags it surfaced
+are corrected to the version the registry shows first shipping each symbol.
+
+## Milestone 103: Localization — Messages, Locale Resolution and a Shared Formatter
+
+**Package(s):** new `@setu-ts/localization-plugin`; `packages/common` (one token, one contract, one
+optional `IRequest` member); `packages/cache-plugin` (a default locale segment in the cache key)
+
+**Objective:** Give an application one place to keep its user-facing strings per locale, one way to
+learn which locale a request wants, and one formatter implementation shared by the server and the
+browser — so a server-rendered page, a React Router loader, a mail body and an SPA client all read
+the same catalogue and never disagree about how a message is spelled.
+
+**The gap is total, not partial.** `grep -rn "Accept-Language\|Intl\.\|locale" packages/*/src`
+returns no framework-owned localization of any kind; the M97 comparison recorded it as "a real gap
+and a milestone in its own right" and stopped there. Today a client application that must answer in
+two languages writes its own `Accept-Language` parser (which is harder than it looks — q-values,
+wildcards, `de-AT` → `de` fallback), its own message lookup, and, if it hydrates in a browser, a
+second formatter whose output drifts from the first. Every piece of that is the kind of code this
+framework exists to own once.
+
+**Backend capability, browser-safe formatter.** The plugin is a backend capability and reaches the
+browser through the three rendering paths the framework already has, each a different story:
+
+- **Server-rendered views** (`view-plugin`, `@Render`, M102 mail bodies) are fully covered with no
+  client code: the handler resolves `t()` for the request's locale and passes strings into component
+  props. The browser receives finished HTML. This is where most of the value lands cheapest.
+- **React Router full-stack** (SSR + hydration): a loader resolves the localizer through the
+  `servicesContext` M44 already populates (`react-router-plugin/src/handler/load-context.ts:28`),
+  and returns formatted strings or the locale plus its bundle as loader data. Client-side navigation
+  still calls loaders on the server, so resolution never moves to the browser. What DOES need client
+  code is formatting a runtime value after hydration, which needs the catalogue in the browser and a
+  formatter that runs there.
+- **SPA clients using `@setu-ts/sdk`**: the same need, without SSR — a resource route serving one
+  locale's catalogue and the client-side formatter.
+
+So the frontend half is one decision, and it is taken: **ship the formatter as a pure, zero-import
+subpath export** (`@setu-ts/localization-plugin/format`, the `@setu-ts/runtime/worker` subpath
+precedent at `runtime/deno.json:7`) that the server's `t()` and a browser both call. The alternative
+— letting each application write its own client formatter — is two implementations of one behaviour
+that pass every gate while drifting (the M70f/M56 class). `Intl.PluralRules`, `Intl.NumberFormat`
+and `Intl.DateTimeFormat` exist in every browser and on all four runtimes, so neither side needs an
+npm dependency.
+
+**Deliverables.**
+
+- **`common`: `CAPABILITIES.LOCALIZATION = 'localization'`** (passes the `createCapabilityToken`
+  grammar) **and `common/src/services/localization.ts`** carrying `ILocalizer` — `t(key, values?)`,
+  `locale`, `locales` (the supported set), `forLocale(tag)` returning a bound `ILocalizer` — plus
+  `LocalizationMessage` (a string, or a plural-form record keyed by the CLDR categories
+  `zero`/`one`/`two`/`few`/`many`/`other`) and `MessageCatalogue`. The contract lives in `common` so
+  a plugin that formats text (mail, notification, a future error-page renderer) can resolve it
+  without importing this plugin (§2.2).
+- **`IRequest.locale?: string` is a first-class request field, the `tenant` precedent exactly** — a
+  BCP 47 tag, optional, populated by this plugin's middleware, absent when the plugin is not
+  registered or nothing resolved, and read STRUCTURALLY by any plugin holding a request context. It
+  is a field rather than a `ctx.state` key because the second reader already exists: a state key
+  read by another package must live as a constant in `common` anyway (`common/src/state-keys.ts:5`),
+  so the "no widening" alternative was the same `common` change in a less discoverable place. It
+  gets the M71 one-implicit-write seal and a `replaceLocale(request, tag)` beside `replaceTenant`
+  (`common/src/request-identity.ts:161`), so two independent writers fail loudly and an intentional
+  override — a user preference loaded after authentication — has a named spelling. **Three things to
+  watch, none of them a reason not to do it:** (1) it is a flagged `common` widening, so it ships
+  with its `PUBLIC_API.md` entry and CHANGELOG line; additive and optional, so no implementor or
+  test double breaks. (2) The seal is per request — M87 measured the existing two-field seal at ~0.5
+  µs, and a third field adds to it; consistency with `user`/`tenant` is worth that, and the plan
+  records the measurement rather than assuming it. (3) A reader at a LOWER priority than 45 sees
+  `undefined` on every request — the same hazard `tenant` has at 40, with the same answer: the
+  priority table says who runs first, and the field's JSDoc says so.
+- **`cache-plugin` keys on the locale by default.** `cacheMiddleware` already composes a
+  length-prefixed tenant segment from `ctx.request.tenant?.id`
+  (`cache-plugin/src/utils/cache-key.ts:42`), which is how M70b closed X4-1; it gains a locale
+  segment from `ctx.request.locale` the same way, so one locale's cached body is never served to
+  another WITHOUT the application remembering a `vary` callback. Absent locale → empty segment →
+  every existing key is byte-identical (pinned by a test), so nothing released changes.
+- **Catalogues are validated at `register()`, never at the first request.** `supportedLocales` (at
+  least one; the first is the default) and a `catalogues` record, or an injected `IMessageSource`
+  that loads them once at `register()` — the inject-or-static shape, no filesystem convention, so
+  the plugin stays Workers-portable by construction (M92's rule for views). Every supported locale's
+  catalogue must carry every key of the default locale's, or `register()` refuses naming the locale
+  and the missing keys; `allowPartialCatalogues: true` downgrades that to a warning per locale and
+  the default locale's message fills the gap. A key absent EVERYWHERE answers the key itself and
+  warns ONCE per key through `ctx.logger` (read at call time — the M52b lesson), because a request
+  must never `500` over a missing translation; `onMissing: 'throw'` is the strict arm for tests.
+- **Locale resolution is middleware at priority 45** — after `TenantMiddleware` (40), so a tenant
+  default can participate, and before `LoggingMiddleware` (50), so a log line can carry the locale
+  (ARCHITECTURE §10 table gains the row). The chain is fixed and documented: an explicit query
+  parameter, a cookie, `Accept-Language` (RFC 9110 §12.5.4 — q-values, `*`, and BCP 47 fallback
+  `de-AT` → `de`), a `tenantLocale(tenant)` callback, then the default. Every candidate is matched
+  ONLY against `supportedLocales`; a tag is canonicalized with `Intl.getCanonicalLocales` inside a
+  guard, because that call THROWS `RangeError` on a malformed tag and the header is attacker-
+  controlled. The header parse is bounded — at most 16 language ranges, each at most 35 bytes (the
+  BCP 47 practical maximum) — so a 64 KiB `Accept-Language` costs one slice, not one parse per range
+  (the M90a `maxBodyBytes` class: a bound applied after the cost is paid is not a bound).
+- **Two response headers, both load-bearing for caches.** The middleware appends
+  `Vary: Accept-Language` (plus `Cookie` while the cookie source is enabled, a stated cost for CDN
+  cacheability that `cookie: false` removes) on every governed response, whether or not the header
+  won (through `appendHeader`, which never consults `#ended` — M48 verified this in source), and
+  every governed response carries `Content-Language` with the FINAL tag, written after `next()` so a
+  later `replaceLocale` wins. Without `Vary`, `cache-plugin`'s middleware and any CDN serve one
+  locale's body to another: `cacheMiddleware` keys on method, URL, tenant and a caller-supplied
+  `vary` (`cache-plugin/src/interfaces/index.ts:165`) — the locale segment above makes that
+  automatic, and a test through the REAL `cacheMiddleware` proves two locales produce two entries.
+- **The catalogue resource route is opt-in.** `exposeCatalogues: { basePath }` registers
+  `GET <basePath>/:locale` serving one SUPPORTED locale's catalogue (anything else is a 404, never a
+  lookup) under a configurable `Cache-Control`, so a browser can fetch exactly what the formatter
+  needs. Off by default: an application whose strings never leave the server exposes nothing.
+- **The formatter is one module with no imports.** `format(message, values, locale)` substitutes
+  `{name}` placeholders, selects a plural form through `Intl.PluralRules(locale).select(count)` when
+  the message is a plural record (the `count` value is required for one, refused by name when
+  absent), and renders a `number` through `Intl.NumberFormat` and a `Date` through
+  `Intl.DateTimeFormat` for the locale. **It escapes nothing** — a value is substituted as text and
+  the RENDERING runtime owns escaping, the same rule M92 states for `IViewEngine.render` and M102
+  restates for mail; the docs say so in three sites rather than imply the formatter is a sanitizer.
+  There is no ICU message grammar (`select`, nested plurals, offsets); that is named below as the
+  follow-on, and the plural record is chosen precisely because it needs no grammar to parse.
+- **A `localization` health indicator** reporting `up` with the supported locale count and the
+  catalogue source (`'static'` or the injected source's name); no `onClose` (stateless after
+  `register()`).
+- **Docs.** A package README whose fences compile under the fence-compiler gate, covering all three
+  rendering paths — a `view-plugin` page, a React Router loader reading `servicesContext`, and an
+  SDK client fetching the catalogue and calling the shared formatter; `PUBLIC_API.md` sections for
+  the `common` additions and the plugin; the ARCHITECTURE priority-table row and package row; a
+  `docs/localization.md` guide; CHANGELOG `Added`.
+
+**Scope rules, each the reason this can run beside the open M101 letters.** No `src` change in
+`react-router-plugin`, `full-stack-starter` or `cli` — the React Router half is loader code over a
+seam that exists, and wiring localization into the scaffolded full-stack template is **M101g's
+deliverable (or a later CLI milestone)**, since M101g owns that template and M101d is editing
+`react-router-plugin` underneath it. No change to `view-plugin`, `mail-plugin` or
+`decorator-plugin`: a component receives strings as props, and a `@Params(Custom('locale'))`
+resolver is the application's two lines, shown in the README rather than shipped as a decorator
+(`decorator-plugin` may not import this plugin). `cache-plugin`'s change is one segment in one
+function and a test, nothing on its options surface.
+
+**Not a deliverable, named rather than implied.** ICU MessageFormat syntax (`select`, nested plural,
+`offset`) — a follow-on once the catalogue shape has a consumer. Translation-file tooling
+(extraction of keys from source, `.po`/`.xliff` import) — a CLI concern, and the CLI is M101e–g's.
+Right-to-left layout, locale-aware sorting (`Intl.Collator` is one line an application can call),
+and database- stored translations beyond what an injected `IMessageSource` already permits.
+Per-tenant catalogue OVERRIDES (tenant A spells "cart" as "basket") — expressible today as a
+tenant-selected locale tag such as `en-GB-x-acme`, which BCP 47 permits, and documented as the
+pattern rather than built as a mechanism.
+
+**Verification bar.** Beyond the four gates, both publish gates (a new package: `release:verify`
+moves to 50 and the first-publish runbook step applies) and the per-file bar: a real kernel app
+drives the resolution chain end to end for all five sources with a negative control per source; the
+`Vary`/cache test produces two entries for two locales; a `deno info --json` gate refuses any
+runtime dependency outside the formatter subpath's own modules, and a subprocess with `Deno` deleted
+checks import independence (output parity across runtimes is NOT claimed: `Intl` data and time zones
+differ, so dates take an explicit `timeZone`); and the bounded header parse is driven with a 64 KiB
+header and a malformed tag, each observed refused without a throw escaping the middleware. The plan
+records a design security review (its §10), since `Accept-Language`, the cookie and the query
+parameter are all network input reaching `Intl`.
+
+**Shipped.** As planned, with four corrections recorded in the plan's §11: `@setu-ts/testing` joined
+the package list (its mock request dropped a seeded `locale`); the plugin declares
+`optionalDependencies: [CAPABILITIES.LOGGER]`, because a partial-catalogue warning is raised during
+`register()`; `localizerFor` negotiates an unsupported `request.locale` instead of throwing; and the
+React Router recipe hands the loader the request's localizer through `populateLoadContext` rather
+than a catalogue. One `packages/cli` data line was required despite the scope rule: the CLI's static
+table of plugin health-indicator names, which a root gate keeps complete. The security audit found
+the Cloudflare Cache API middleware keyed on a bare URL — which the platform matches with no request
+headers, so `Vary` could not separate locales — and its default key now carries the locale; five
+re-audit rounds then tightened that key until no two URL-and-locale pairs can share an entry,
+serving uncached the requests no key can separate. The catalogue route serves each locale overlaid
+on the default, so a browser falls back exactly as `t()` does. The third sealed `IRequest` field
+costs about 170 ns per request (measured against `develop`), inside the 1 µs threshold. Twenty
+negative controls were observed failing and reverted.
+
+## Milestone 104: The `v0.9.0` Client-Brief Run
+
+**Package(s):** none — an exercise block, run against the PUBLISHED `0.9.0` artifacts; its findings
+become `smoke/DEFECTS.md` rows (V9-…) and its defects become the `v0.9.0` closeout letters.
+
+**Objective:** measure the two things no exercise so far has measured — whether the framework is
+production-ready for a WHOLE product rather than for one capability at a time, and how fast one
+product gets delivered with it — by handing a fresh agent a fictional client's requirements document
+and a deadline, and judging the result the way the client would.
+
+**Why a brief rather than another catalogue block.** Every block since Part 5 probes one capability
+per exercise (`X2` the REST API, `X11` the generated SDK, `X60` the devtool) and asks "does this
+work?". The regression runs ask "did this stop working?". Neither asks the question a team adopting
+the framework asks: "can I ship my product with it, and how long does that take?" The per-capability
+blocks also cannot see the seams BETWEEN capabilities under one deadline — the moment a session
+cookie, a tenant resolver, an outside issuer and a cached page have to agree in one application,
+with the clock running. M103's audit found exactly one such seam (the Cloudflare cache key knew the
+locale and not the tenant) by accident, nine rounds in; a product build finds them on purpose.
+
+**The brief.** Written as a client writes one, never naming a plugin or a package:
+
+- **A product with a shape.** A multi-tenant B2B application with a browser UI and an API — tenants
+  and users, a billing or ordering domain with real state transitions, notifications by mail, an
+  audit trail, an admin area, and a public REST surface a partner integrates against.
+- **Functional requirements** as user stories with acceptance criteria the agent can run.
+- **Non-functional requirements** stated as a client states them: sign-in through the client's
+  identity provider, tenant data never crossing, personal data redacted from logs and exports, a
+  readiness story the client's platform team can probe, a stated availability target, localized UI
+  for two markets, and a named deploy target (Kubernetes) with a container image.
+- **A deadline** in wall-clock hours, and a definition of done: the acceptance criteria pass against
+  the deployed product, from a browser and from the partner's generated client.
+
+The brief itself lives with the register (`smoke/v0.9.0/CLIENT-BRIEF.md`, local-only like every
+brief before it); this section carries the mechanism, which is the durable half.
+
+**Method.**
+
+1. **Cold start against the published packages** (Part 6's rule): the agent has the brief, the
+   public docs and jsr.io, and nothing from this repository's history. It scaffolds with the CLI and
+   records the Part 14 table — what the CLI wrote versus what was hand-written, every document
+   consulted and whether it misled, every failed attempt, and wall-clock per step. That table is the
+   delivery-speed baseline; later runs of the same brief against later releases are compared against
+   it.
+2. **Build to the brief's definition of done**, not to a probe: the acceptance criteria are executed
+   against the deployed product — through a browser for the UI stories (the M101g browser harness is
+   the instrument, which is why that gate lands before this run), and through a client generated
+   from the product's own `/openapi.json` for the partner stories.
+3. **Then the usual passes against the finished product**: the outage block (each backend stopped
+   and restarted, `/ready` and the UI observed), a security pass by a second fresh agent following
+   `.roo/skills/security-audit/SKILL.md` against the product rather than a package, and the
+   regression rows the `0.9.0` release claims.
+4. **Record by shape.** Findings enter `smoke/DEFECTS.md` as V9-rows and are grouped by SHAPE into
+   closeout letters, the rule since M70. Three outcomes are recorded separately and never folded: a
+   defect in the framework, a gap in the documentation, and time the agent spent that the framework
+   could have saved (the generator-gap list Part 14 started).
+
+**What "production ready" and "fast" mean here, so the run can fail.** The run fails as a readiness
+measure if any acceptance criterion cannot be met without changing framework source, or if the
+outage or security pass finds a High. It fails as a speed measure if the hand-written share of the
+application's own wiring exceeds what Part 14 measured for X60 (~100 of 144 lines were the
+diagnostics options M101g's no-row deliverable removes), or if any single step in the table exceeds
+the brief's deadline budget for it. Those thresholds are the first ones written down; the next run
+revises them against this one's table.
+
+**Dependencies.** Runs AFTER the `v0.9.0` cut (the brief targets published artifacts) and after
+M101g (the browser harness it uses for UI acceptance). M101c and M101e–h closing first is preferred
+but not required — a row already owned by an open letter is recorded against that letter, not
+re-filed.
+
+**Deliverables**
+
+- [ ] `smoke/v0.9.0/CLIENT-BRIEF.md` — the brief, with acceptance criteria and the deadline budget
+- [ ] The product built cold against `0.9.0`, with the Part 14 delivery table completed
+- [ ] Acceptance criteria executed from a browser and from a generated partner client
+- [ ] Outage pass and a fresh-agent security pass against the deployed product
+- [ ] V9-rows in `smoke/DEFECTS.md`, grouped by shape into closeout letters, plus the generator-gap
+      list and the delivery-speed baseline recorded in `smoke/EXERCISES.md` Part 15
+
+---
+
+## Milestone 105: Conditional Writes on `IRepository`
+
+**Package(s):** `packages/database-plugin`, `packages/cloudflare-plugin` (`D1Adapter`) and
+`packages/common`. **Corrected by the plan (C1):** this line named `common` "only if a filter type
+must move there", but `IDataSource` — the port every adapter implements — lives in `common`, so it
+changes unconditionally.
+
+**Objective:** a write that applies only when a predicate still holds, so a check and the write it
+guards are one operation rather than two.
+
+**Why (raised in review of M101c, PR #411).** `DatabaseTenantDataStore.update` and `.delete` check
+that a row belongs to the tenant, then write by key alone, because `IRepository.update(id, data)`
+and `delete(id)` take no predicate. If tenant A's row is deleted in that window and tenant B creates
+a row with the SAME caller-supplied key, the write lands on B's row: `update` refuses to return it
+but has already written, and `delete` returns `true` with nothing to check. The row hit is always
+one created inside the window, so the race cannot be aimed at existing data, and generated keys
+never produce it — which is why M101c shipped the limit documented (the bridge's class JSDoc) rather
+than fixed. A transaction does not close it in general: PostgreSQL's default read-committed
+isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit.
+
+**Scope.**
+
+- `updateWhere(id, where, data)` and `deleteWhere(id, where)` on `IRepository` (and on the
+  `IDataSource` port), each applied as ONE native operation per adapter (a
+  `WHERE key = ? AND
+  col = ?` statement, a Mongo filter, a DynamoDB `ConditionExpression`, a
+  Bigtable CheckAndMutateRow), returning "not matched" rather than writing when the predicate fails.
+  Cosmos has no predicate-conditioned delete, so it reads and then writes guarded by the read's
+  `_etag` (`IfMatch`) — a version compare-and-swap, not a check-then-write: probed on the emulator,
+  a delete-and-recreate under the same id fails the guard with `412` (corrected by the plan, C3). A
+  data source that cannot express it atomically omits the member and the repository refuses by name
+  — never an emulated check-then-write, which would reproduce the defect.
+- The predicate is an equality map on string and number values. Per the versioning policy below, the
+  members ship OPTIONAL — and stay optional permanently: absence means "this data source cannot
+  write conditionally", the `IDataSource.findPage?` arrangement, and a required form would break
+  out-of-repo implementors while removing no fallback (the deferred-write transactions below keep
+  refusing either way).
+- **Three callers switch over, not one** (widened by the plan, C2, maintainer-approved 2026-10-10):
+  `DatabaseTenantDataStore`, AND the M107 outbox store's status transitions and the M108 inbox
+  store's failure count and release — the database-plugin README and PUBLIC_API.md already promised
+  that this milestone closes those two races. Each keeps today's two-call path when the bound data
+  source lacks the member, through one shared fallback helper.
+- **Not covered, and not owned by the framework.** (1) A conditional write inside a transaction that
+  defers its writes to commit (memory, D1, DynamoDB, Cosmos, Bigtable): the outcome is not known
+  when the call returns, so those transaction data sources omit the members. (2) Predicates beyond
+  equality (`null`, booleans, `Date`, ranges, `contains`, `or`). Neither ASP.NET Core nor NestJS
+  owns either: both are ORM features — EF Core's concurrency tokens checked at `SaveChanges` and
+  `ExecuteUpdateAsync` with an arbitrary `Where`; TypeORM's `@VersionColumn`; MikroORM's `version`
+  checked at `flush()`. An application needing either uses its ORM directly through the existing
+  seams: `getDrizzleDatabase`/`getDrizzleTransaction` (M69), the application-supplied Prisma client,
+  and the injected MongoDB/DynamoDB/Cosmos/Bigtable clients.
+- **Not this milestone:** fencing a stale outbox relay and running several relays at once — M107b.
+
+**Deliverables**
+
+- [x] The two members, implemented natively by every built-in adapter or omitted and refused by name
+- [x] A per-adapter conformance table (the `filter-conformance.test.ts` shape) driving a predicate
+      that fails between read and write, against the real backend where CI has one
+- [x] The tenant bridge switched over, with a negative control reproducing the M101c race
+- [x] The outbox and inbox stores switched over, with a negative control for each race
+- [x] PUBLIC_API.md, the database-plugin README, and the bridge JSDoc updated
+
+---
+
+## Milestone 106: Publish Options — Ordering Key, Deduplication ID and Headers
+
+**Package(s):** `packages/common`, `packages/messaging-plugin`, `packages/cloudflare-plugin`
+(`WorkersBroker`), and `packages/queue-plugin` — added after the security audit, at the maintainer's
+direction, for the pre-existing AMQP 255-byte name defect in `RabbitMqQueue` (the same class the
+audit found in `RabbitMqBroker`; plan §10 rows A6, A7, A9).
+
+**Objective:** let a producer say which messages must stay in order, which re-send is a duplicate,
+and what metadata travels with a message — the three things `IMessageBroker.publish(topic, message)`
+cannot express today. It is step 3 of the reliability order (broker redelivery fixes #418–#421, the
+portable duplicate-key error #420, then this, then the outbox and inbox milestones): the outbox
+relay publishes at least once and needs both a per-aggregate ordering key and a stable deduplication
+ID to hand the broker.
+
+**Why.** Measured against real backends (2026-10-07): Kafka with no message key spread one
+aggregate's messages over all three partitions of a test topic, so the framework's Kafka publish
+loses per-aggregate order today, while the same messages with a key landed on one partition in
+order. NATS JetStream answered a repeated `msgID` with `duplicate: true` and stored one copy, inside
+a 2-minute default window. Service Bus delivered a repeated `messageId` twice to a subscription
+without duplicate detection, and ignored `sessionId` on a non-session subscription. The Pub/Sub
+emulator accepted an `orderingKey`. None of it is reachable through the contract.
+
+**Scope.**
+
+- `IMessageBroker.publish(topic, message, options?: PublishOptions)` with `orderingKey`,
+  `deduplicationId` and `headers` — an optional trailing parameter, so no caller and no implementor
+  breaks.
+- Each option maps natively where the broker has the primitive (Kafka message key, Pub/Sub
+  `orderingKey`, NATS `Nats-Msg-Id`, Service Bus `messageId`) and is carried as a transport header
+  on every broker, so it is observable everywhere and never silently dropped. A per-broker guarantee
+  table is the documentation, and a conformance test iterates it.
+- `publishIntegrationEvent` passes its envelope ID as the deduplication ID, and
+  `defineIntegrationEvent` takes an opt-in `orderingKey` selector (for example the envelope's
+  `aggregateId`), so ordering is configured per event type and no existing producer re-partitions.
+- The documentation states what `orderingKey` promises: where a message is placed, not the order
+  handlers finish in once a retry occurs; consumers needing order compare `aggregateVersion`.
+- Shaped by a survey of nine frameworks (NestJS, Encore.ts, Moleculer, Dapr, CloudEvents, Spring
+  Cloud Stream, MassTransit, NServiceBus, Watermill): none refuses an option the broker cannot
+  honour, and the plan records each precedent it follows or rejects.
+
+**Prerequisite (found while designing this, 2026-10-07):** `NatsBroker.publish` never awaits
+JetStream's acknowledgement. A publish to a subject no stream covers resolves as a success while the
+server's refusal becomes an unhandled rejection, which terminates a Deno or Node process by default.
+That is a defect in merged code and ships first on a `fix/…` branch; the NATS deduplication mapping
+depends on reading the acknowledgement.
+
+**Deliverables**
+
+- [x] `PublishOptions` and the two header-name constants in `common`; the optional parameter on
+      `IMessageBroker.publish`
+- [x] Native mappings for Kafka, Pub/Sub, NATS and Service Bus; header carriage on all seven brokers
+      and `WorkersBroker`; both decorators forward the options
+- [x] Invalid options rejected by name (never a synchronous throw from a `Promise` method)
+- [x] Header names a broker or its server acts on (`CC`/`BCC`, `Nats-*`, `x-setu-*`, the trace
+      headers) refused case-insensitively; one portable count/byte bound; the validated copy is the
+      value on the wire; refusals never quote the value (plan §3.4)
+- [x] README "Publish options and trust" section (plan §3.9); committed-tree security audit against
+      the plan's §10 design review
+- [x] A conformance test over all brokers, plus real-backend tests for Kafka partition affinity and
+      NATS deduplication in CI, and guarded emulator tests for Pub/Sub and Service Bus
+- [x] The opt-in ordering selector on `defineIntegrationEvent`, and a real RabbitMQ test pinning the
+      documented retry-reorders limit
+- [x] PUBLIC_API.md, the messaging README's per-broker table and ordering statement, and CHANGELOG
+
+---
+
+## Milestone 107: Transactional Outbox
+
+**Package(s):** `packages/messaging-plugin` (the `outbox` arm, `IOutbox` and the relay),
+`packages/common` (the `IOutboxStore` port another plugin implements, `CAPABILITIES.OUTBOX` and
+`SpanOptions.root`), `packages/database-plugin` (the `createDatabaseOutboxStore` bridge),
+`packages/telemetry-plugin` (carrying `root` to OTel) and `packages/cli` (one claim-table line).
+**Corrected by the plan (C1, C2):** this list first named `packages/cloudflare-plugin` for the
+Workers relay; no source there changes — `WorkersCron` calls `outbox.sweep()`, `waitUntil` is the
+outbox's `background` hook, and D1 is reached through the bridge as a `'custom'` adapter.
+
+**Objective:** a service that changes its own data and announces the change does both or neither.
+The integration event is written as a row in the SAME database transaction as the business change,
+and a relay publishes persisted rows afterwards — at least once, per ordering key in write order
+among committed rows (see the promise below for the two conditions).
+
+**Why.** Publishing after commit loses the event when the process dies between the two; publishing
+before commit announces a change that may roll back. Every service that emits integration events
+(M93b) has this window today, and closing it by hand is the most commonly mis-built piece of an
+event-driven system. The prerequisites shipped first, each confirmed against a real broker: RabbitMQ
+publishes are persistent and confirmed (#418), Redis Streams and RabbitMQ redeliver a failed message
+(#419, #421), a unique violation is a portable `DuplicateKeyError` (#420), NATS reports a refused
+publish (#425), and M106 gives a publish an ordering key and a deduplication id.
+
+**Scope.**
+
+- **Atomic write.** An API that writes an envelope into an outbox entity through the caller's
+  `IUnitOfWork`, built at WRITE time (the envelope id is the end-to-end deduplication key and must
+  not change across re-sends), capturing the active `traceparent`, tenant and `aggregateId`, and
+  refusing an envelope too large to ever publish inside the business transaction rather than writing
+  an unsendable row. Per backend: SQL, MongoDB (replica set), DynamoDB (with a
+  `{ partitionKey: 'status', sortKey: 'position' }` GSI) and D1 support it; Cosmos only when the
+  outbox entity maps to the business CONTAINER and its partition-key path is a column the row
+  carries (`tenantId` or `orderingKey`) — and because Cosmos queries a whole container, every outbox
+  read carries a `kind: 'setu-outbox'` discriminator (corrected by the plan, C5); Bigtable is
+  refused by name at STARTUP, by the bridge's `verify()`, because the relay query cannot run there —
+  not at the write (C4).
+- **The relay queries the pending set, never a watermark.** "Everything after the last id or
+  timestamp" skips a row whose transaction took an earlier id and committed later; every sweep reads
+  all rows still pending. Rows are published in `position` order — one fixed-width column from the
+  writer's clock (clamped per process) and the envelope id, not `createdAt` — with M106's
+  `orderingKey` and `deduplicationId` (the envelope id), then marked sent. The watermark trap is
+  measured on real PostgreSQL and committed as `outbox-watermark-real.test.ts`.
+- **One relay at a time.** The portable repository has no `SKIP LOCKED` and had no conditional
+  update (M105 added the latter, and makes each status transition conditional on the expected
+  status), so the only portable mode is a single relay per database. The relay is a job on
+  `CAPABILITIES.SCHEDULER`, whose slot lock and handler mutex (M70l) keep a job to one replica — but
+  only with a SHARED `distributedLock` (Redis or a Durable Object); the default `MemoryLock` is per
+  process. The plugin CANNOT tell which lock is in use — `IScheduler` exposes no lock accessor — so
+  it does not refuse; it DETECTS an overlap (a status write finding the row already `sent` by
+  another instance) and degrades health, and the README states the rule. `IDistributedLock` itself
+  lives in `scheduler-plugin`, which this package may not import, so this is the route to it. The
+  lock has no renewal, so the plan bounds every sweep instead: one `sweepDeadlineMs` on the
+  monotonic clock, kept at least 10 s below the lock's TTL (a rule the README states, since the
+  plugin cannot read the TTL), with every publish and store call bounded inside it, so a relay stops
+  starting rows before its lock can expire. That is a time bound, not fencing: a publish abandoned
+  at its timeout, or in flight while the process is paused, can still reach the broker later.
+  Ordering of FIRST deliveries survives, because a key's later row cannot publish until the earlier
+  one is marked sent, so the late arrival is always a DUPLICATE, which the inbox (M108) absorbs and
+  `aggregateVersion` orders. M105's conditional transitions stop a stale relay REGRESSING a row's
+  status but not PUBLISHING it; true fencing and multi-relay are M107b.
+- **Latency.** Optionally publish right after commit, best effort, with the relay sweeping whatever
+  that missed. On Cloudflare Workers, where `SchedulerPlugin` refuses to register (M70l) and Cron
+  Triggers fire at most once a minute, the immediate publish runs in `waitUntil` and the cron sweep
+  is the relay.
+- **Trace continuity.** `TracedBroker` injects the trace active AT PUBLISH, which is the relay's
+  tick, not the request that wrote the row. The relay re-parents each publish to the stored
+  `traceparent` through `withSpan({ parentContext })`, so a request → row → publish → consume is one
+  trace again. **One optional contract widening after all:** a row WITHOUT a valid `traceparent`,
+  swept by a `dispatch()` from inside a request, would otherwise parent to that unrelated request,
+  so `common` gains `SpanOptions.root?` and `telemetry-plugin` carries it to OTel's own `root`.
+- **Poison rows.** `attempts`, `lastError` and an `availableAt` backoff; a row that fails
+  `maxAttempts` times, or cannot be decoded, becomes `failed` and turns health `degraded`
+  (`failed-rows`). The plan decided that a `failed` row keeps BLOCKING its aggregate's later rows,
+  since letting them pass would publish them out of order. Recovery is an operator call,
+  `IOutbox.release(id, 'retry' | 'discard')`: `retry` returns the row to `pending`, and `discard`
+  settles it unpublished. So at-least-once covers every committed row an operator does not discard.
+- **Observability.** Health reports the age of the oldest pending row (degraded above a threshold —
+  the M90b backlog pattern); metrics for published, failed, poisoned, and relay lag. A stuck relay
+  is otherwise silent.
+- **Tenancy.** Column isolation is one table with the tenant in the row — NOT in the headers
+  (corrected by the plan, C3: a tenant header would ride the framework channel custom brokers drop,
+  and a delivered header is a hint a consumer may never authorize on; an event that needs its tenant
+  carries it in the payload). Database-per-tenant needs the relay to iterate tenants, and no tenant
+  catalog exists (M89c cut `tenantById`), so the application supplies the list.
+- **Provisioning.** There is no portable `migrate()`, so the plugin checks at startup that the
+  outbox entity exists and refuses by name if not (the M52c binding-guard pattern); a migration
+  template ships for the SQL adapters.
+
+**Decided in the plan.** Placement: inside `messaging-plugin` (it owns the envelope, the internal
+`createEnvelope`, `onIntegrationEvent` and the broker capability). **Corrected by the plan (C1):**
+this paragraph said the plugin "reaches the database structurally the way `multi-tenancy-plugin`
+does"; source shows multi-tenancy reaches it through a PORT in `common` and a bridge in
+`database-plugin`, never by resolving `CAPABILITIES.DATABASE` itself, and the outbox follows that
+real precedent (`IOutboxStore` + `createDatabaseOutboxStore`). A poisoned row BLOCKS its key until
+an operator `release`s it. The column set is the plan's §3.2 record.
+
+**The promise, stated once and nowhere stronger:** at-least-once delivery from a committed write;
+per-ordering-key publish order among COMMITTED rows, provided rows of one key commit in the order
+they were written and, across replicas, provided the writers' clocks agree; delivery order as the
+broker gives it, corrected by the consumer comparing `aggregateVersion`. Never "exactly once".
+**Corrected by the plan (C6):** "per-aggregate publish order" was unconditional; measured on real
+PostgreSQL, a pending-set relay cannot order a row whose transaction commits after a later row of
+its key was published — it publishes it, but after.
+
+**Other plan corrections, shipped with the milestone.** C7: `ITelemetryService.withSpan`'s JSDoc
+named a `parentSpan` option; the option is `parentContext`. C8: the M101a pin that kept
+`POSTGRES_URL` out of CI was a substring match, so the outbox suite's PostgreSQL service uses a
+distinct `OUTBOX_POSTGRES_URL` and the pin became a prefix-aware match. C9: `MongoAdapter`'s JSDoc
+said a standalone server fails at `beginTransaction`; measured, the real driver fails at the first
+operation INSIDE the transaction, unwrapped (the behaviour fix is a `fix/…` branch).
+
+**Out of scope.** Change-data-capture relays (PostgreSQL logical decoding, MongoDB change streams,
+DynamoDB Streams, Cosmos change feed) — a later milestone, and the natural relay for the backends
+where "all pending rows in order" is expensive or impossible. The consumer side is M108.
+
+**Deliverables**
+
+- [x] The atomic-write API, implemented per backend or refused by name
+- [x] A pending-set relay as a scheduled job, with the watermark trap as a committed negative
+      control (two transactions committing out of id order — both rows are published)
+- [x] Crash-injection tests at each point of the crash table: before commit (nothing published),
+      after commit (published by the relay), after publish before mark-sent (published twice, by
+      design)
+- [x] Trace re-parenting proven with the real OTel SDK (one trace, request to consumer)
+- [x] Poison handling, health and metrics; real-broker runs on RabbitMQ and Redis (the fakes hid
+      both redelivery defects)
+- [ ] The Workers hybrid driven on real workerd — **not done.** Covered in process instead:
+      `outbox-workers.test.ts` drives the real `D1Adapter` over a real SQLite engine (the one D1
+      runs) through `WorkersCron` (covering `dispatch()` through `waitUntil`, the Cron Trigger sweep
+      and purge); `apps/cloudflare` has no D1 binding to drive it against, so a workerd run is left
+      for a follow-up that adds one
+- [x] README, PUBLIC_API.md, a design security review in the plan, and a committed-tree audit
+
+---
+
+## Milestone 107b: Outbox Relay Fencing and Multi-Relay Sweeping
+
+**Package(s):** `packages/messaging-plugin` (the relay), `packages/common` (the `IOutboxStore` port,
+if a claim or epoch member is needed) and `packages/database-plugin` (the
+`createDatabaseOutboxStore` bridge). The plan settles the list against source.
+
+**Depends on:** M105 (conditional writes) for the fencing arm.
+
+**Objective:** fence a relay before it starts publishing past its row lease, and allow several
+relays to drain one outbox, with the duplicate windows stated explicitly.
+
+**Why.** M107 runs one relay per database under the scheduler's lock, and that lock has a TTL with
+no renewal. The sweep deadline keeps a healthy relay inside it, but a relay paused past the TTL — a
+GC pause, a frozen container, a slow broker call — can still publish a row a second relay has
+already sent. The inbox (M108) absorbs that duplicate, so it is not a correctness hole for a
+Setu-to-Setu consumer, but a foreign consumer sees it, and throughput is capped at one relay. M105's
+conditional transitions stop the stale relay regressing the row; they do not stop the publish.
+
+**Prior art (researched 2026-10-10).** Every comparable library owns relay coordination, and none
+promises more than at-least-once:
+
+- **MassTransit** claims one outbox entry inside a database transaction with
+  `SELECT … ORDER BY … LIMIT 1 FOR UPDATE SKIP LOCKED` (verified in
+  `PostgresLockStatementFormatter`). The lock IS the transaction, so it cannot expire under a paused
+  relay: the database releases it only when the transaction ends.
+- **Wolverine** elects one leader through Postgres advisory locks; the leader assigns recovery
+  agents to nodes and reassigns a dead node's work.
+- **CAP** offers `UseStorageLock` (off by default), a database lock around retry fetching only, and
+  documents that it does not bound retries cluster-wide.
+- **NServiceBus** has no separate relay — the outbox is dispatched while handling the incoming
+  message — and deduplicates by message id on the receiving side.
+
+**Scope — approved in `plans/archive/milestone-107b-outbox-relay-fencing.md`.**
+
+One per-row versioned lease on every supported backend, using M105's native conditional writes
+outside a transaction: `claimVersion` increases once per claim, `leaseUntil` gates takeover, and
+each status write compares the held version. The two arms first proposed here were not built, for
+reasons established from source by the plan:
+
+- **No `SKIP LOCKED` arm.** `IUnitOfWork` exposes neither raw SQL nor a lock option, so it would
+  need a portable-query widening that Prisma's builder, MongoDB, DynamoDB, Cosmos and D1 cannot
+  honour. It would not fence any better: a paused relay's session is killed by the server, its lock
+  released, and it can still publish on waking. And it holds a pooled connection and an open
+  transaction across every broker call.
+- **No lock epoch.** The outbox cannot observe the scheduler's lock — `IScheduler` has no lock
+  accessor, and `IDistributedLock` lives in `scheduler-plugin` with no epoch — so the fence lives in
+  the row.
+- **No separate arm for the deferred-write backends.** D1, DynamoDB and Cosmos defer writes only
+  inside a transaction; every relay write runs outside one, where each has a native `updateWhere`.
+
+Bigtable stays refused. A pre-publish fence requires time for the publish, status write and clock
+skew; a pause after that check and a late broker acceptance remain duplicate windows, inside
+at-least-once delivery. Multiple relays keep per-key first-publish order under M107's commit-order
+and writer-clock conditions.
+
+**Deliverables**
+
+- [x] Versioned claims and a pre-publish fence, proven with a relay paused past its lease
+- [x] Four relays draining 200 rows once each, preserving per-key first-publish order
+- [x] README and PUBLIC_API.md stating the shared protocol and exact promise
+
+---
+
+## Milestone 108: Consumer Inbox
+
+**Package(s):** `packages/messaging-plugin`, `packages/common` (the `IInboxStore` port and the
+`CAPABILITIES.INBOX` token) and `packages/database-plugin` (the `createDatabaseInboxStore` bridge),
+because `IUnitOfWork` is declared in `database-plugin` and the port must be implemented there by
+name (the M107 C1 shape); `packages/cli` (one health-indicator claim-table line).
+
+**Objective:** a consumer applies an integration event's database effects once, even though the
+outbox (M107) and every broker deliver at least once.
+
+**Why.** At-least-once delivery means duplicates by design: a relay that crashes after publishing
+re-publishes, and a broker redelivers after a lost acknowledgement. Without an inbox, every consumer
+hand-rolls the same check, usually against the wrong key.
+
+**Scope.**
+
+- **The key is `(consumer group, envelope id)`.** Not the envelope id alone — two consumer groups
+  must each process the same `hired` event — and not `MessageMetadata.messageId`, which the broker
+  assigns and which changes on a re-send. `IntegrationEventEnvelope.id` is producer-assigned (M93b)
+  and stable through the outbox, which is why it is the key. As shipped the topic is part of the key
+  too, `(consumer, topic, envelope id)`: the committed-tree security audit showed one consumer name
+  reading two topics let a publisher on one suppress the other's events by reusing an id.
+- **Handler-level, in the consumer's transaction.** `IngressContext` is readonly with no state bag,
+  and handlers take `(message, metadata)`, so an ingress behaviour cannot hand a transaction to the
+  handler. The API is on `onIntegrationEvent`, whose released shape is
+  `(definition, handler, options?)` with the handler called as `(payload, envelope, metadata)`. The
+  inbox arrives through the options argument, e.g.
+  `onIntegrationEvent(definition, handler, { inbox: { consumer: 'payroll' } })`. The inbox record is
+  inserted through the same `IUnitOfWork` as the handler's writes, and a handler failure rolls back
+  both. **Corrected by the plan (C2):** a `DuplicateKeyError` alone does NOT mean "already handled"
+  — one raised at commit carries no entity, so it cannot be told from a duplicate in the handler's
+  own writes, and a concurrent loser on a MongoDB replica set is a write conflict instead. After any
+  rejection the inbox re-reads its marker; only a present marker means "already handled". **Decided
+  (C3):** a separate `IntegrationEventInboxHandler<T, S>` type whose fourth argument is the unit of
+  work, selected by an overload on the `inbox` option; the call then returns a
+  `RegistryFactory<SubscriptionDefinition>`. Every existing call keeps its type and meaning.
+- **Effects outside the database are a stated choice, not a guarantee.** Sending an email or calling
+  a provider cannot join the transaction; the README names the three options — record before (at
+  most once), record after (at least once), or forward a derived key the provider de-duplicates
+  (once where the provider supports it). **Corrected at verification:** "record before" is not
+  reachable inside the handler — the inbox runs nothing after the commit, so an effect performed in
+  the handler is at least once whatever its position; at most once needs the application's own claim
+  committed in a separate transaction before the effect, which the README now states.
+- **Poison messages.** A failing handler keeps being redelivered (and blocks a Kafka partition).
+  Failures are counted OUTSIDE the rolled-back transaction, or the broker's own delivery limit is
+  used; `IngressContext.attempt` is absent for messaging by contract.
+- **Retention.** Inbox rows are kept at least as long as broker redelivery plus the outbox's replay
+  window; replaying anything older than that produces duplicates, documented.
+- **Backends.** SQL, a MongoDB replica set, DynamoDB and D1 support it. **Corrected by the plan
+  (C4):** Cosmos is refused at startup — a transaction is one partition, and the inbox row cannot
+  share the business partition without a per-application partition selector (unowned follow-up);
+  Bigtable is refused by name.
+- **The discriminator hazard is inherited.** An inbox sharing a table, collection or Cosmos
+  container with business documents must carry a discriminator on every row and require it on every
+  read, count, transition and delete, exactly as M107's `kind: 'setu-outbox'` does — Cosmos queries
+  a container as a whole, so without it the inbox reads, counts or deletes business documents.
+
+**Depends on** broker redelivery being real, which #419 and #421 fixed — an inbox on a broker that
+discards failed messages has nothing to de-duplicate. **Corrected by the plan (C6):** that holds for
+a durable NAMED RabbitMQ queue and for Redis Streams; a queue-less RabbitMQ subscriber discards a
+failure, so the inbox defaults the broker `queue` to a named one (as shipped, `inbox.` plus a hash
+of the consumer and topic — the security audit found a per-consumer queue split two topics), and
+NATS (no `max_deliver`) and Kafka (no per-message dead-letter) need the inbox's own `maxAttempts`.
+
+**Deliverables**
+
+- [x] The handler-level inbox on `onIntegrationEvent`, per backend or refused by name
+- [x] A duplicate delivery skipped and acknowledged; a handler failure rolling back both the effect
+      and the inbox row, then succeeding on redelivery — on real RabbitMQ and Redis
+- [x] Two consumer groups each processing the same event once
+- [x] An end-to-end run with M107: a forced double publish handled once
+- [x] Retention, README (the three non-database effect choices), PUBLIC_API.md, and a design
+      security review (plan §10)
+- [x] A committed-tree security audit (three rounds; round 3's two Low doc findings fixed after it,
+      not re-audited, at the maintainer's direction)
+
+---
+
+## Milestone 109: Idempotency
+
+**Package(s):** 109a: a new `packages/idempotency-plugin`; `packages/common` (the store port, the
+service contract and a capability token, because §2.2 forbids a plugin importing a plugin);
+`packages/decorator-plugin` (`@Idempotent`); `packages/cloudflare-plugin` (the Durable Object
+store); `packages/messaging-plugin` and `packages/queue-plugin` (the `IngressContext.consumer`
+dispatch identity); `packages/cli` (the health-indicator claim table). 109b: `packages/common` (the
+tier-C port and its option types), `packages/idempotency-plugin` (`within`),
+`packages/database-plugin` (the store bridge) and `packages/sdk` (the `idempotencyKey` request
+option).
+
+**Objective:** one configurable mechanism that makes a repeated request, message, job or outbound
+call do its work once, reachable from HTTP routes, ingress, plain code and the SDK.
+
+**Why.** A client that retries a payment after a lost response, a provider redelivering a webhook, a
+queue redelivering a job after a crash: each needs "do this once per key", and each application
+builds it differently. The design must state which of three guarantees it gives — no duplicate
+processing; the work and its idempotency record committed together; external side effects once — and
+the framework can only deliver the first two. The third it can only support by forwarding a derived
+key to a provider that de-duplicates.
+
+**Scope.**
+
+- **One core state machine.** `claim(key, fingerprint, lease)` → `claimed` with a fencing token,
+  then `complete(token, record)` or `release(token)`. A claim answers claimed (with `takeover: true`
+  when it displaces a LAPSED lease, so a lapsed lease is taken over INSIDE the claim, never surfaced
+  as its own outcome), completed (with the stored record), in-progress, fingerprint-mismatch, or
+  capacity-exceeded (tier A only). The lease must exceed the longest the work can take, or a retry
+  claims mid-work.
+- **Four entry points.**
+  - HTTP: a route-level `idempotent(options)` middleware and an `@Idempotent()` decorator, appended
+    after authentication, authorization and route validation (the M89a precedent) so that a refused
+    or invalid request consumes no key. **No global switch.**
+  - Ingress: an ingress behaviour for queue jobs and messages, acting ONLY on an explicit
+    `topics`/`jobNames` allow-list so unrelated and internal traffic (the realtime backplane) is
+    untouched; its key includes the consumer identity, so two subscribers on one topic each run once
+    (C9, §3.7, §3.19).
+  - Code: `within(options, fn)`, for the transactional tier. The STORE opens the transaction — a
+    caller-owned unit of work would surface a lost race OUTSIDE `within` (a PostgreSQL insert aborts
+    the caller's transaction, so no re-read is possible inside it), and the winner's result could
+    never be returned (C1).
+  - SDK: `ClientRequest.idempotencyKey` (the caller's own key) AND client-level
+    `ClientOptions.idempotency` (generated keys, since a generated client's operations take no
+    per-call options beyond their document's header parameters). One key per logical call, reused on
+    every attempt, which is also what makes a POST or PATCH retryable (C5).
+- **Configurable, with safe defaults:** key source (header, body field, a message's
+  `x-setu-deduplication-id` header, a job id) with a bounded length and character set; scope of
+  tenant + principal + route or topic — principal scope is a SECURITY requirement, since without it
+  one user replays another's stored response; the fingerprint (method, path, raw query and raw body
+  by default) with a mismatch answering `422`; a concurrent duplicate answering `409`; a missing key
+  on a `required` route answering `400`; failure classification (a RETURNED `4xx` is recorded, a
+  returned 5xx/408/425/429 or any THROWN error releases the key, a failed message or job always
+  releases); replay rules (an ALLOW list of headers plus a fixed DENY list — `Set-Cookie`,
+  `Content-Language`, request ids, `RateLimit-*`, `Retry-After`, `Date` — never stored or replayed,
+  `Idempotent-Replayed: true` added, a body size cap); and a TTL.
+- **Three store tiers.** A: memory, single process. B: Redis via THREE Lua scripts (a bare
+  `SET NX PX` cannot detect a lapsed lease, compare a fingerprint or fence a settle; the scripts
+  read the server clock with `TIME`) or a Cloudflare Durable Object — across replicas, but not
+  atomic with the business write. C: a record written inside the business transaction — the work
+  happens once — which cannot be plain middleware, so it is `within()` only, built on the same
+  transaction seam as M108's inbox. Tier C per backend: SQL (PostgreSQL, SQLite), MongoDB (replica
+  set) and DynamoDB yes; D1 through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })` with
+  the deferred-write caveat; **Cosmos DB is REFUSED**, like M108's inbox — a Cosmos transaction is
+  one partition, and the record cannot share the business partition; Bigtable refused (C2).
+- **Not this mechanism:** business uniqueness ("one payroll run per company and period") is a unique
+  constraint, and a scheduled tick is already de-duplicated by M70l's slot locks. The README says
+  so.
+
+**Known contract gap — resolved in 109a.** `ICacheStore` has no atomic member, so the Redis tier-B
+store lives in `idempotency-plugin` and owns its own inject-or-lazy ioredis client; the cache
+contract is NOT widened.
+
+**Split.** 109a (`feat/m109a-idempotency-core`): the core, tiers A and B (memory, Redis, and a
+Cloudflare Durable Object), the HTTP entry points (`idempotent()` and `@Idempotent()`) and the
+ingress entry point (`idempotentIngress()`), with `derivedIdempotencyKey()` exposing the key for
+forwarding — the plan's §3.1–§3.20. A D1 store is not built (D1 is the Workers tier C, 109b). 109b:
+tier C `within()` (after M108, sharing its seam) and the SDK `idempotencyKey` option.
+
+**Security and privacy, for the plan's design review:** cross-user replay (principal scope); store
+growth as a denial-of-service (rate limiting runs earlier, TTL, key and body caps); stored responses
+carrying personal data (a status-only mode, M96 redaction, and retention counting toward erasure);
+and `409` versus `422` revealing that a key exists, acceptable once keys are principal-scoped.
+
+**Prior art, to verify live before the plan relies on it:** Stripe's idempotency keys, the IETF
+`Idempotency-Key` header draft, AWS Lambda Powertools idempotency (the closest configurable design),
+and Brandur Leach's Postgres idempotency article.
+
+**Deliverables**
+
+- [x] The store port and token in `common`; tiers A and B; memory, Redis and Durable Object stores
+- [x] Route middleware and decorator; `@Idempotent` on a safe method is refused at registration, and
+      a streaming response is recorded status-only at request time (no registration-time signal
+      exists for it — plan §2 C3)
+- [x] The ingress behaviour, releasing on a failed job or message
+- [x] `within()` tier C per backend, or refused by name
+- [x] The SDK `idempotencyKey` option, with a test that every retry carries the same key
+- [x] A design security review in each plan, and a committed-tree audit (109b: three rounds; round
+      3's one Low finding is the purge race plan §3.10 accepts, documented afterwards, not
+      re-audited)
+
+---
+
+## Milestone 110: Authorization Beyond Global Roles
+
+**Package(s):** `packages/common`, `packages/auth-plugin`, `packages/decorator-plugin` in both
+letters; 110a possibly `packages/openapi-plugin`; 110b also `packages/database-plugin`.
+
+**Objective:** take authorization past "does this principal hold this role, anywhere". 110a adds the
+general-purpose layer — an async check that can see the target — and 110b builds scoped RBAC as one
+implementation of it, so an application preferring an external engine (Casbin, OpenFGA) plugs in at
+the same seam. **110a ships first; 110b depends on it.**
+
+**Does the framework need ABAC?** No — and this pair is the answer to that question rather than an
+ABAC engine. Checked against current documentation (2026-10-09), every comparable framework ships
+this layer and none ships an attribute engine — attribute logic lives in the policies they let you
+write:
+
+| Framework       | The layer                                                                                                | Async | Target                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------- |
+| ASP.NET Core    | `IAuthorizationService.AuthorizeAsync(user, resource, policy)` + `AuthorizationHandler<TReq, TResource>` | yes   | loaded resource, imperative only             |
+| NestJS          | documented recipe: `@CheckPolicies(handler)` + a `PoliciesGuard` over a CASL `AbilityFactory`            | no    | subject type; record checks in the handler   |
+| Spring Security | `@PreAuthorize("hasPermission(#id, 'Type', 'READ')")` → `PermissionEvaluator`                            | no    | object, or `(targetId, targetType)` unloaded |
+
+Two surveyed production applications (multi-tenant B2B portals, one TypeScript and one .NET) confirm
+the shape from the other side: each hand-rolled a throwing check plus a non-throwing twin for UI
+flags, and each had to make the two share one evaluator after they disagreed in production.
+
+The gap those applications exposed is not attribute logic (both keep it in ordinary code) but SCOPE:
+a role held in one tenant, organisation or region rather than everywhere. No framework core in the
+table ships that either; libraries do (spatie/laravel-permission "teams", Casbin "RBAC with
+domains"). 110b brings it into the framework on top of 110a's seam.
+
+### Milestone 110a: Authorization Policies — An Async, Target-Aware Check
+
+**Package(s):** `packages/common`, `packages/auth-plugin`, `packages/decorator-plugin`, with
+`packages/openapi-plugin` only if the M57 security brand needs a new reader.
+
+**Objective:** one place to answer "may this principal do this, to this target?" — asynchronously,
+with the target (a loaded resource, a `{ type, id }` reference, or a scope) as an argument — reached
+declaratively from a route and imperatively from a service, failing closed. It is the layer every
+comparable framework ships and Setu-TS does not, and it is the seam 110b's scoped RBAC is built on.
+
+**Why.** `IAuthorizationService` (`common/src/services/auth.ts:152`) is synchronous and its four
+members take a principal and a role or permission STRING — there is no parameter through which a
+target can reach a decision. So "the author of this document", "an approver in this tenant", or any
+rule an application derives from attributes has no framework home: the only option is a hand-written
+`MiddlewareFunction`, which gets none of the guards' guarantees (the `501`/`401`/`403` split in
+`auth-plugin/src/guards/index.ts`, the shared responder in
+`common/src/errors/authorization-responder.ts`, the M57 OpenAPI brand) unless the author re-derives
+each one.
+
+**Scope.**
+
+- A new capability token and contract beside `CAPABILITIES.AUTHORIZATION`, which stays byte-for-byte
+  unchanged (it is consumed by the six guards, by `decorator-plugin`'s `@Roles`/`@Permissions`
+  middleware, and by M98h's authorization explanations). Settled by the plan (C3):
+  `can(...) →
+  Promise<boolean>` and `authorize(...) → Promise<void>`, which REJECTS a denial with
+  a status-hinted error — the "throwing check plus a non-throwing twin" the surveyed applications
+  needed — both funnelling through ONE evaluator. No public decision type: nothing would read it.
+- Policies registered by name, each a set of abilities
+  `(principal, target?) → boolean |
+  Promise<boolean>` — an ability sees a `null` principal only
+  when it opts in with `{ anonymous: true, check }`, so the default is fail-closed (plan C2) — with
+  an optional `before()` that may allow or deny every ability of the policy (NestJS's admin bypass).
+  Functional form in `auth-plugin`; a class form (`@Policy`) in `decorator-plugin`, matching the
+  framework's functional-default / class-based-opt-in split (M65).
+- Entry points: a route guard `requirePolicy(policy, ability, target?)` (named by AI_GUIDELINES
+  §10.4's `requireXxx` convention, plan C1) where `target` is a value or an extractor
+  `(ctx) => target | undefined | Promise<target | undefined>`; `@RequirePolicy(...)` in
+  `decorator-plugin`; imperative `authorize()` for checks on records a handler loads (ASP.NET's
+  lesson: a declarative check runs before the record exists).
+- **Fixed semantics, not configuration:** only a literal `true` allows; an anonymous principal that
+  is denied gets `401`, a signed-in one `403`, through the existing responder so the body matches
+  the guards; a policy that throws or rejects DENIES and is reported to the logger, never answers
+  `200`; an unknown policy or ability named by a decorator fails at `register()` and one named by a
+  functional guard fails `app.start()` (no `register()` sees a guard value — plan C4), and an
+  unknown one passed imperatively rejects by name.
+- The six existing role/permission guards are NOT rerouted through the new evaluator in this
+  milestone — their responses are pinned byte-identical and rewiring them buys nothing yet.
+- Non-HTTP ingress: `IngressContext` (`common/src/services/ingress.ts:55`) carries no principal, so
+  an ingress behaviour form needs a principal source. The plan either defines one or names the gap
+  with an owner — it does not ship a behaviour that silently evaluates as anonymous. **Named, owner
+  M110c** (below); the imperative calls already work in any ingress handler, since the principal is
+  an argument.
+- `docs/` gains the page that answers "where does ABAC go": attribute rules are policies.
+
+**Deliverables**
+
+- [x] The contract, the token, and the evaluator, with the guard and the yes/no check proven to
+      agree under a non-default configuration
+- [x] Functional and class policy forms, the route guard, `@RequirePolicy`, and `authorize()`
+- [x] Fixed-semantics tests: literal-`true`, `401`/`403`, throwing policy denies, unknown names
+      refused — each with a negative control
+- [x] M57 brand on `requirePolicy`/`@RequirePolicy` routes so `deriveSecurity` documents them
+- [x] PUBLIC_API.md, the auth-plugin and decorator-plugin READMEs, and the ABAC guidance page
+      (`docs/authorization.md`)
+- [x] A design security review in the plan (written — plan §10), and a committed-tree audit
+
+**Breaking for implementors:** none expected — a new token and new exports. The plan confirms it.
+
+### Milestone 110b: Scoped RBAC
+
+**Package(s):** `packages/common`, `packages/auth-plugin`, `packages/decorator-plugin`, with
+`packages/database-plugin` for a repository-backed grant source (the M101c `DatabaseTenantDataStore`
+precedent). Depends on 110a.
+
+**Objective:** a role granted IN a scope — a tenant, an organisation, a team, a region — rather than
+everywhere, evaluated as one implementation of 110a's evaluator, and configurable enough that the
+reference scenarios below need configuration only, no custom code.
+
+**Why.** Today a role is global: `RbacConfig` is one static `roles` map
+(`common/src/services/auth.ts:98`) and `hasPermission(principal, permission)` has no scope argument,
+so "may approve invoices in tenant X" can only be faked by packing tenant-prefixed strings into
+`principal.permissions`. Both surveyed applications are built on exactly this missing shape — one
+grants roles per tenant with `null` meaning platform-wide and delegates through parent/child tenant
+relationships, the other merges grants keyed by role × country, role × channel, and per user. No
+mainstream framework core ships it (ASP.NET, NestJS and Spring leave scope to the application); it
+lives in libraries — spatie/laravel-permission "teams" (`team_id`, `null` = global role) and Casbin
+"RBAC with domains" (`g = _, _, _`: user, role, domain) — and in identity providers (Keycloak 26
+Organizations). Shipping it puts the framework level with those libraries rather than behind them.
+
+**The model.** A grant is `(principal, role, scope | null)`: the ASSIGNMENT carries the scope, so
+roles stay one catalogue reused across scopes (Casbin), and `null` is a global grant (spatie). A
+scope is a typed reference `{ type, id }`.
+
+**Configuration axes** — each with a default that reproduces today's single global scope:
+
+1. **Scope shape** — flat, hierarchical (a `parentOf(scope)` resolver, cycle-refused,
+   depth-bounded), or several independent scope types at once.
+2. **Where a check's scope comes from** — the request's tenant (default, `IRequest.tenant`), a route
+   parameter, a value the handler loaded, or an explicit argument. With none, only global grants are
+   consulted — never "any scope".
+3. **Grant source** — static configuration, token claims (a mapper over `principal.claims`, the
+   Keycloak Organizations shape), a repository, or `'custom'`; several sources are unioned.
+4. **Carry-over across scopes** — whether global grants apply everywhere (default yes, narrowed per
+   role by `grantableIn`), and ONE `inheritsFrom(scope)` resolver naming the scopes whose grants
+   also apply: a parent is one hop of it and a delegating tenant another, walked transitively with
+   cycle refusal and depth/node bounds. (Corrected in the plan, C2: the original text listed parent
+   descent and relationship-based delegation as two mechanisms; one resolver expresses both.)
+5. **Role catalogue** — the global catalogue, with optional per-role limits on which scope types it
+   may be granted in; per-scope custom roles are ACCEPTED (maintainer, 2026-10-10, C4): a custom
+   role bundles catalogue permissions only, resolves against the grant's own scope, and is checked
+   through permissions — a guard naming a custom role is refused at startup.
+6. **Resolution timing** — per request, memoised by (principal, scope) (default); a bounded
+   cross-request cache with a stated revocation latency; or computed at sign-in and stored in the
+   auth session under a PRIVATE key beside the principal — never in `principal.claims`, where a
+   federated token carrying the same claim name would be indistinguishable from it (C3).
+
+**Fixed, not configurable:**
+
+- Fail closed: an unresolved scope, or a grant source that rejects or exceeds its deadline (M101a's
+  `withDeadline`), denies. A permission or role absent from the catalogue is REFUSED AT STARTUP for
+  every route guard and decorator (each is an ability of the built-in policy, so M110a's scan
+  catches a typo); an imperative check naming one rejects rather than silently denying. (Corrected
+  in the plan, C1: a request-time deny cannot tell a typo from an unheld permission.)
+- One evaluator for the guard, the decorator and the yes/no check.
+- Grants only — no deny rules. Deny-overrides is where policy combination gets hard; the plan leaves
+  room for it and names it deferred.
+- Bounded: grants per principal per scope, scope-chain depth, and source time.
+
+**Reference scenarios** — acceptance criteria, each driven through a real kernel application with
+configuration alone:
+
+- A. Tenant scope, platform-wide grants, delegation from a parent tenant to its children,
+  repository-backed.
+- B. Grants unioned from three keyed lists (role × region, role × channel, per user), resolved once
+  at sign-in from a remote source.
+- C. An organisation → team → project hierarchy where a grant descends.
+- D. Grants carried in token claims, no store.
+- E. Per-tenant custom roles (accepted, C4).
+
+**Security review must cover:** a route-parameter scope that disagrees with the resolved request
+tenant; scope identifiers reaching logs or M98h explanations (aliased, never raw); cache poisoning
+across principals; and revocation latency under each timing mode.
+
+**Deliverables**
+
+- [x] The grant model, the grant-source port with its built-in arms, and the scope resolvers
+- [x] Scoped forms of the guard and of `@Permissions`/`@Roles`, built on 110a's evaluator
+      (`requireScopedRole`/`requireScopedPermission`, `@ScopedRoles`/`@ScopedPermissions`)
+- [x] Reference scenarios A–E as integration tests, each with a negative control
+- [x] A repository grant source driven against a real database in CI (PostgreSQL and MongoDB)
+- [x] PUBLIC_API.md, the auth-plugin README, and a scoped-RBAC guide
+- [ ] A design security review in the plan, and a committed-tree audit
+
+**Breaking for implementors:** none expected — the existing global `RbacConfig` path is unchanged.
+
+### Milestone 110c (proposed): An Ingress Principal Source
+
+**Package(s):** to be settled by its plan — `packages/common` at least.
+
+**Objective:** a policy check for non-HTTP ingress. `IngressContext`
+(`common/src/services/ingress.ts:55`) carries no principal, so M110a deliberately shipped no ingress
+behaviour form: one that evaluated every job, message or frame as anonymous would deny everything
+or, worse, pass every anonymous ability, silently. The imperative `can`/`authorize` already work in
+an ingress handler, because the application supplies the principal from a payload it trusts. This
+milestone would define where an ingress principal comes from — a verified token carried in message
+headers, a principal resolver over the payload, or the WebSocket upgrade's principal — and only then
+add a behaviour. Opened by M110a as the named owner of that gap; not scheduled.
+
+---
+
+## Milestone 111: Node-First Toolchain and npm Publishing
+
+**Package(s):** every workspace member; root tooling (`deno.json`, `scripts/`, `.github/workflows/`,
+`compat/`); the governing documents (`CLAUDE.md`, `AI_GUIDELINES.md`, `ARCHITECTURE.md`,
+`PUBLIC_API.md`, `README.md`, `docs/`). Six letters, `111a`–`111f`, in dependency order.
+
+**Objective:** move the framework's development toolchain, test suite and package registry off Deno,
+onto Node, pnpm and npm, while every gate stays green at every step. Deno stays a SUPPORTED RUNTIME;
+it stops being the toolchain the repository is built, tested and published with.
+
+**Why now.** On 2026-10-09 the Deno team announced it is joining Cloudflare
+([deno.com/blog/cloudflare](https://deno.com/blog/cloudflare)). Three commitments matter here:
+
+- the Deno runtime gets "another year with monthly releases containing bug fixes and security
+  updates", after which development ends, so roughly October 2027;
+- Deno Deploy shuts down after six months, which affects nothing here (nothing deploys there);
+- "JSR will continue operating, with its infrastructure moving to Cloudflare", so every version
+  already published stays installable, including through JSR's npm mirror (`@jsr/setu-ts__*`), which
+  is how Node and Bun consumers install the framework today.
+
+So this is a **planned** migration with a twelve-month runway, not an outage. What cannot continue
+is a toolchain — formatter, linter, type-checker, test runner, coverage, publisher, task runner —
+that lives on a runtime whose development is ending.
+
+**Decisions (maintainer, 2026-10-10):**
+
+| Question                    | Decision                                    | Rejected                                                |
+| --------------------------- | ------------------------------------------- | ------------------------------------------------------- |
+| Test runner                 | **Vitest**                                  | `node:test` (a different assertion API in ~1,500 files) |
+| Workspace / package manager | **pnpm workspaces**                         | npm workspaces (loose hoisting hides missing deps)      |
+| Registry                    | **npm only**; JSR keeps published versions  | dual npm + JSR publishing until Deno's end of life      |
+| Deno as a runtime           | **kept** — the Deno adapter stays supported | dropping Deno support outright                          |
+| Formatter / linter          | **Prettier + ESLint** (`typescript-eslint`) | Biome                                                   |
+
+**Measured coupling (2026-10-10, `develop` at `329c689b`).** Package SOURCE is barely coupled to
+Deno: the toolchain is what is coupled.
+
+| Area                     | Measurement                                                                                                                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Deno.*` in `src`        | `runtime` (6 files, the Deno adapter — stays) and `cli` (19 files). Elsewhere only in comments.                                                                                                             |
+| `npm:` specifiers in src | ~100 `import('npm:<pkg>@<range>')` sites across ~45 distinct packages (the AI_GUIDELINES §12.2 lazy-import pattern). Node resolves none of them.                                                            |
+| `jsr:` specifiers in src | 6 inline `jsr:@setu-ts/common` specifiers in `packages/sdk`; `@std/jsonc`, `@std/testing` and `@std/expect` inline in `cli`.                                                                                |
+| Cross-package imports    | ~1,050 `@setu-ts/*` bare imports resolved by the Deno import map; `@hono/hono` from JSR (npm name: `hono`).                                                                                                 |
+| Relative imports         | 2,975 end in `.ts`. TypeScript 5.7's `rewriteRelativeImportExtensions` emits them as `.js`, so they are NOT rewritten by hand.                                                                              |
+| Tests                    | 1,683 files. ~1,520 import `describe`/`it` from `@std/testing/bdd` (built on `Deno.test`) and `expect` from `@std/expect`; 188 use `Deno.*` directly (subprocesses, env, temp dirs, `Deno.connect`).        |
+| Permission-scoped tests  | 30 packages declare `test.permissions` (e.g. M53's endpoint-scoped `net` grants, M63's boot-without-`-A`). Node has no equivalent sandbox for tests, so those properties need a different proof (see 111b). |
+| Scripts                  | 33 of 39 `scripts/*.ts` use `Deno.*`.                                                                                                                                                                       |
+| CI                       | `ci.yml`, `release.yml`, `drift.yml`, `website.yml` run Deno; `compat.yml` already runs Node 24 and Bun against the PUBLISHED packages.                                                                     |
+| CLI                      | Deno is the default target of every generated project; `src/main.ts` is the Deno process boundary; `--runtime node` projects install `@jsr/…` packages through `.npmrc`.                                    |
+| npm scope                | `@setu-ts` claimed 2026-10-10 by `dkpaul91`; `@setu-ts/kernel` → 404 until the first npm publish.                                                                                                           |
+
+**What the move changes in meaning, not only in syntax** — each needs a decision inside its letter,
+not a silent loss:
+
+- **The coverage gate starts failing for real.** Vitest's per-file `thresholds` (`perFile: true`)
+  fail the run, which retires the long-standing "`deno task test:coverage` exits 0 with a file under
+  the bar" caveat in CLAUDE.md — a gain, recorded so the caveat is removed rather than kept stale.
+- **The test permission sandbox disappears.** Tests that proved "this code needs no more than X" by
+  running under a scoped Deno grant need either Node's `--permission` model (experimental; covers fs
+  and child processes, not network) run as a subprocess, or an explicit assertion of what the code
+  touches. The CLI's boot-without-`-A` gate keeps its meaning for GENERATED Deno projects only.
+- **JSR's publish-time rules stop applying.** Slow types (M51), `@module`-first entrypoints
+  (`release:verify` check 5) and JSR README rendering no longer constrain the source. Explicit
+  return types on exports stay mandatory — enforced by `isolatedDeclarations`, which keeps `.d.ts`
+  generation cheap and per-file.
+- **`deno compile`** (`apps/compiled-binary`) has no Node equivalent of the same weight. Node's
+  single-executable applications are the candidate; whether the example survives is 111e's call.
+- **The release tooling's checks move registry.** Version agreement, specifier resolvability,
+  workspace coverage, `@since` against the registry (M95d), the changelog shape check — each is
+  re-pointed at npm or retired with a stated reason, never dropped silently.
+
+### Milestone 111a: A Node Build for Every Package
+
+**Objective:** every package builds to `dist/` with `tsc` and installs and imports on Node, while
+the existing Deno gates still pass on the same sources.
+
+- `pnpm-workspace.yaml` + a `package.json` per member (`"type": "module"`, `exports` pointing at
+  `dist/*.js` + `dist/*.d.ts`, `files`, `engines`), with `workspace:^` internal deps. No
+  `sideEffects` yet: a wrong `false` lets a consumer's bundler drop module code, so it is decided in
+  111c behind an audit (plan C2).
+- One shared `tsconfig.base.json` carrying today's `compilerOptions` (`strict`,
+  `exactOptionalPropertyTypes`, …) plus `module: nodenext`, `rewriteRelativeImportExtensions`,
+  `isolatedDeclarations`, `declaration`; one project reference per member so `tsc -b` builds the
+  graph in dependency order.
+- The ~100 `import('npm:<pkg>@<range>')` sites become bare `import('<pkg>')`, each package listed as
+  an OPTIONAL `peerDependency` (`peerDependenciesMeta`) carrying today's range. The §12.2 rule
+  stays: never a hard dependency. `scripts/npm-specifier-audit.ts` (M70e) is rewritten to require a
+  LITERAL bare specifier — the property it exists for (bundlers and static analysis can see the
+  import) is unchanged.
+- `sdk`'s inline `jsr:` specifiers and `@hono/hono` → `hono` from npm. (`cli` imports no
+  `@std/jsonc`: the string is a step in the Dockerfile it emits for generated Deno projects, which
+  111d owns — plan C1.)
+- **Exit:** `pnpm -r build` clean; a throwaway Node 24 project installing the packed tarballs
+  (`pnpm pack`) boots `kernel` + `runtime` and serves a request; a decorated controller serves on
+  Node from compiled output (proves TC39 decorator emit and the `Symbol.metadata` fallback M76
+  measured); the four Deno gates still pass.
+- **To probe first:** that `tsc`'s decorator emit and the decorator-plugin metadata bridge agree on
+  Node 24; that `rewriteRelativeImportExtensions` covers the dynamic `import()` sites too.
+
+### Milestone 111b: The Test Suite on Node
+
+**Objective:** the whole suite runs on Node under Vitest, with the per-file 90% bar enforced by the
+runner, before anything is published to npm.
+
+- A codemod for the ~1,520 import-only files (`@std/testing/bdd` → `vitest`, `@std/expect` →
+  `vitest`), committed under `scripts/` so the change is reproducible, then hand conversion of the
+  188 files using `Deno.*` — `Deno.Command` → `node:child_process`, `Deno.makeTempDir` →
+  `fs.mkdtemp`, `Deno.connect` → `node:net` (M73's raw RFC 6455 client and the forbidden-header
+  probes depend on a raw socket; `fetch` is not a substitute).
+- `@std/expect` → Vitest `expect` is not 1:1 everywhere; the codemod lists the matchers it could not
+  map rather than guessing.
+- Vitest coverage (`v8`) with
+  `thresholds: { perFile: true, branches: 90, functions: 90, lines: 90 }` — the gate CLAUDE.md has
+  asked a human to enforce by reading a table becomes a failing exit code. The per-file tables
+  before and after are compared so the swap itself cannot drop a file below the bar unnoticed.
+- The guarded real-backend suites keep their `skip` guards and their CI-reachability pins in
+  `test/apps-gate.test.ts`; the env block that un-skips them is unchanged.
+- Permission-scoped proofs (see above) are each given a Node-side replacement or are listed, by
+  test, as retired with the reason.
+- Vitest 5 uses OXC, which leaves standard decorators unlowered. An `enforce: 'pre'` Vite plugin
+  uses esbuild 0.28.2 to lower TC39 decorators before OXC.
+- Package tests move in 111b; root tests and repository scripts stay on Deno until 111e. Deno-only
+  runtime proofs retain their named lane over the same converted files.
+- **Exit:** `pnpm test` and `pnpm test:coverage` green on Node 24; the test COUNT matches the Deno
+  run (a converted suite that silently collects fewer tests is the failure this guards against); one
+  run under Bun as a smoke, not a gate.
+
+### Milestone 111c: npm Publishing Machinery
+
+**Objective:** build and prove the npm publishing machinery with dry runs; do not cut a release.
+
+- The `@setu-ts` npm organization was claimed on 2026-10-10 by `dkpaul91`.
+- Generate publish metadata and per-member licences; ship `dist/`, `src/`, README and LICENSE. Audit
+  `sideEffects`; retain the decorator metadata module and prove it under esbuild.
+- Pack all 51 members with `pnpm pack`, verify the packed manifest, look up each version even in a
+  dry run, and publish the tarball with npm in dependency order. Refuse stale internal ranges.
+- Split `release.yml` into gates, publish and release; only publish holds `id-token: write`,
+  installs/packs/publishes with scripts disabled, and uses environment `npm`. No npm token.
+- Switch release verification, CI dry runs and compat to npm. Keep historical `@since` claims
+  through 0.8.x on JSR and read later claims from npm tarballs' shipped source.
+- Generate README-only `0.0.0-bootstrap.0` placeholders for the maintainer's one-time name creation.
+- **Exit:** all 51 dry runs, Node 24/22 and Bun pack-and-boot proofs, bundle proof and negative
+  controls pass on a committed tree. Publishing and live provenance belong to the cut after 111d.
+
+### Milestone 111d: The CLI Goes Node-First
+
+**Objective:** `npx @setu-ts/cli new` (or `npm create @setu-ts`) on Node is the documented first
+run.
+
+- `setu` ships as an npm `bin`; `src/main.ts` becomes a Node process boundary.
+- The emitted Deno Dockerfile's `jsr:@std/jsonc` step moves with the generated-Deno-target text.
+- The default `--runtime` becomes `node`; generated Node projects depend on `@setu-ts/*` from npm
+  (no `.npmrc`, no `@jsr/` aliases) and run with `tsx`/compiled output as today. Deno, Bun and
+  Workers targets stay, their projects also installing from npm.
+- The scaffold e2e gates (`scaffold-runs-e2e`, the hostile-name sweep, the drift gate) run the NODE
+  target first; the Deno target keeps one boot gate.
+- **Exit:** every template scaffolds, installs, type-checks, lints and boots on Node from a clean
+  checkout.
+
+**Shipped.** `setu` is a Node `bin` (`@setu-ts/cli`) and the new `@setu-ts/create` package makes
+`npm create @setu-ts` the same as `setu new`; project TypeScript loads through `tsx`. Every target
+pins the framework from npm, Node is the default, and an npm-target scaffold carries `tsc`, ESLint
+and Prettier, with everything the CLI writes Prettier-formatted. A selected broker, queue or gRPC
+transport now declares its client package. The scaffold gates did not move wholesale onto Node: the
+type-drift e2e keep their Deno checks, and Node is proved end to end by `node-scaffold-e2e` (every
+host installed from a local registry overlay of the tree's own packs, then run through its own
+`check`, `lint`, `format:check`, `test` and `start`), `bin-e2e` and `plugin-commands-e2e`, whose
+control proves the installed tarballs — not workspace source — are what load. The deploy gate's
+`--generated` mode (`check:deploy`) builds the generated image against that overlay. The plan's
+§3.17 records every correction made by measurement, including the deletion of the `lock.jsr`
+hardening.
+
+### The v0.9.0 cut — after 111c and 111d
+
+The first npm release is `v0.9.0`; `v0.8.0` remains the last JSR release. The CLI must first
+scaffold npm projects, because it pins generated projects to its own version.
+
+1. The maintainer publishes the README-only placeholders locally with npm login and 2FA under tag
+   `bootstrap`, creating all 52 names without a token.
+2. Configure each package to trust `release.yml`, repository `setu-ts/setu-ts`, environment `npm`
+   using npm ≥11.15.0. Configure trust immediately before tagging: each configuration must complete
+   its first successful OIDC publish within two days or it expires.
+3. Tag `v0.9.0`: CI publishes the first real versions through OIDC, validating all configurations
+   and producing provenance. Deprecate placeholders, remove their tag, and disallow tokens.
+4. **Exit:** a bare npm install of kernel/runtime serves a request on Node 24 and Bun, and npm
+   reports provenance on all 52 real packages.
+
+pnpm is the repository's pack tool; consumers may use npm, Yarn, pnpm or Bun. The exit proof uses
+plain npm in an empty directory. See `docs/releasing.md` for commands and partial-failure recovery.
+
+### Milestone 111e: Tooling, Scripts and CI
+
+**Objective:** nothing in the repository requires a `deno` binary except the Deno runtime adapter's
+own tests and the Deno-target CLI gate.
+
+- Prettier and ESLint with `typescript-eslint`, configured to keep the rules the gates enforce
+  today: `no-explicit-any`, `consistent-type-imports` (in place of `verbatim-module-syntax`),
+  `no-console` outside `cli`/`scripts`, unused-variable errors with no underscore escape, and a
+  restricted-syntax rule for `new Function` (which `deno lint` never caught — a gain).
+- Root `test/` moves to Vitest alongside the scripts it tests.
+- The Deno scripts ported to Node (`tsx` or compiled); the doc gates (`check:docs`, `check:plan`,
+  fence compilers, `@since`, doc-lint ratchet) re-pointed. The JSDoc ratchet's baseline is
+  re-measured on the new linter, not carried over as a number.
+- `ci.yml`, `release.yml`, `drift.yml`, `website.yml` rewritten on `actions/setup-node` + pnpm; the
+  service containers and emulator steps are unchanged.
+- `apps/*` move to pnpm; `check:apps` runs them on Node; `apps/compiled-binary` moves to Node SEA or
+  is retired with the reason recorded.
+- **Exit:** `deno.json`, `deno.lock` and every `deno task` are gone from the root; CI green.
+
+### Milestone 111f: Governing Documents and the JSR Sunset
+
+**Objective:** the documents describe the toolchain the repository actually uses.
+
+- `CLAUDE.md`, `AI_GUIDELINES.md` (the Deno-first statement, §12.2's `npm:` lazy-import wording, the
+  test-style rule), `ARCHITECTURE.md`, `PUBLIC_API.md` install lines, every package README, `docs/`,
+  and the remaining toolchain prose in `docs/releasing.md`.
+- `docs/upgrading.md` entry: switching an existing project from `jsr:@setu-ts/*` / `@jsr/setu-ts__*`
+  to `@setu-ts/*`.
+- Each JSR package's README and description point to npm; the JSR versions stay (JSR versions are
+  immutable, and yanking them would break every existing lockfile).
+- **Exit:** `check:docs` green and a repo-wide search for `deno task`, `jsr:@setu-ts` and
+  `Deno-first` returns only historical records and the Deno adapter.
+
+**Sequencing.** 111a → 111b → 111c (machinery) → 111d (Node-first CLI) → the `v0.9.0` cut →
+111e/111f. The cut is held until both 111c and 111d are complete. M104 is re-pointed at npm
+artifacts. Deno gates stay authoritative until the later tooling milestones replace them.
+
+---
+
+## Versioning Policy From `0.9.0`
+
+**Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
+…) and a **minor** is the exception that carries batched breaking changes. README's Versioning table
+has promised since `v0.2.0` that a `0.x` patch is safe to take unread and a minor carries the
+breaks; nothing enforced the first half, and every release after the label drop (`0.2.0` through
+`0.8.0`, and `0.9.0` itself) was a minor carrying them. The adopter-facing cost is that a caret pin
+stopped at every release.
+
+**What it demands of a milestone.** Reading how the previous minors' breaks arose, three habits
+change:
+
+- **A required member added to a published interface** ("breaking for implementors" — M73, M74, M91,
+  M95b each added one) ships as an OPTIONAL member, and the required form is deferred to a named
+  minor. The ambiguity an optional member introduces ("absent" versus "not offered", the M70k
+  `reportsExit?` reasoning) is weighed against the release cost, and the plan says which won.
+- **A behaviour correction that changes a default** (a refusal moving from a masked `500` to `501`,
+  a default redaction turning on) ships behind its previous behaviour for one release — a flag, or
+  AI_GUIDELINES §9.2's deprecate-then-remove — and flips in a minor.
+- **Breaking changes are batched.** Patches as the norm; a minor when enough deferred breaks have
+  accumulated to be worth every caret pin moving at once. The deferred list lives in the CHANGELOG's
+  `Unreleased` section as entries marked for the next minor, so it is read at every cut.
+
+**Two gates, so the rule does not live in a runbook.** `deno task check:plan` requires every plan's
+"Exported surface" section to carry `**Breaking for implementors:** none` or a statement naming the
+break AND the minor that carries it — the release is chosen when the break is designed.
+`release:verify` check 10 (`scripts/release-shape.ts`) classifies the bump from the previous `v*`
+tag and refuses a PATCH whose shipping section carries a `BREAKING` entry, and a MINOR whose section
+carries none unless `--allow-quiet-minor` says the quiet minor is deliberate. Both landed before
+`0.9.0` so the first patch release has them.
+
+**What this does not change.** `0.x` stays pre-1.0: the GitHub Release keeps its `prerelease` flag
+(the `0.*` arm — drop it at 1.0), and 1.0 stays gated on M40. A `hotfix/…` branch from `main` is a
+patch by construction and gains nothing new here.
 
 ---
 
@@ -12613,6 +14046,7 @@ on one branch with no behavioural risk — V8-30 is the one code change, and it 
 | 44        | ✅     | react-router-plugin                                                                                                                                                                                                                           |
 | 45        | ✅     | worker-pool-plugin                                                                                                                                                                                                                            |
 | 45b       | ✅     | worker-pool-plugin (metrics)                                                                                                                                                                                                                  |
+| 45c       | ✅     | worker-pool-plugin (sizing)                                                                                                                                                                                                                   |
 | 46        | ✅     | websocket-plugin                                                                                                                                                                                                                              |
 | 47        | ✅     | alpha-3 limitations                                                                                                                                                                                                                           |
 | 48        | ✅     | session-plugin                                                                                                                                                                                                                                |
@@ -12727,11 +14161,30 @@ on one branch with no behavioural risk — V8-30 is the one code change, and it 
 | 100d      | ✅     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
 | 100e      | ✅     | auth-plugin — passkeys (WebAuthn) ([#391](https://github.com/setu-ts/setu-ts/pull/391))                                                                                                                                                       |
 | 100f      | ✅     | auth-plugin — SAML 2.0 service provider (PR #393)                                                                                                                                                                                             |
-| 101a      | ⬜     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
-| 101b      | ⬜     | messaging-plugin — message transports that fail against the real broker                                                                                                                                                                       |
-| 101c      | ⬜     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose                                                                                                                                 |
-| 101d      | ⬜     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree                                                                                                                                               |
-| 101e      | ⬜     | cli — CLI commands that write where or when they should not                                                                                                                                                                                   |
-| 101f      | ⬜     | cli + common + diagnostics sources — the devtool lifecycle                                                                                                                                                                                    |
-| 101g      | ⬜     | cli + testing + full-stack template — scaffolds that are not wired                                                                                                                                                                            |
-| 101h      | ⬜     | common + docs — documentation, plus redaction setup that takes extra work                                                                                                                                                                     |
+| 101a      | ✅     | messaging + database + health + secrets + cache + queue + scheduler — health that reports healthy, and calls that hang                                                                                                                        |
+| 101b      | ✅     | messaging-plugin — message transports that fail against the real broker (PR #404)                                                                                                                                                             |
+| 101c      | ✅     | session + multi-tenancy + database + auth + http-security — tenancy and identity features that do not compose ([#411](https://github.com/setu-ts/setu-ts/pull/411))                                                                           |
+| 101d      | ✅     | sdk + telemetry + react-router + full-stack-starter — two sides of a service call that disagree ([#403](https://github.com/setu-ts/setu-ts/pull/403))                                                                                         |
+| 101e      | ✅     | cli — CLI commands that write where or when they should not ([#412](https://github.com/setu-ts/setu-ts/pull/412))                                                                                                                             |
+| 101f      | ✅     | cli + common + kernel + diagnostics-plugin + sdk + diagnostics sources — the devtool lifecycle (PR #414)                                                                                                                                      |
+| 101g      | ✅     | cli + full-stack template — scaffolds that are not wired (PR #415)                                                                                                                                                                            |
+| 101h      | ✅     | common + docs — documentation, plus redaction setup that takes extra work (PR #445)                                                                                                                                                           |
+| 102       | ✅     | mail-plugin — mail bodies rendered through the view engine (component templates beside the string arm; optional `CAPABILITIES.VIEW`) ([#400](https://github.com/setu-ts/setu-ts/pull/400))                                                    |
+| 103       | ✅     | localization-plugin (new) + common + cache-plugin + cloudflare-plugin + testing + cli claim table — message catalogues, request locale resolution (`IRequest.locale`), a browser-safe shared formatter (PR #405)                              |
+| 104       | ⬜     | none — the `v0.9.0` client-brief run: a fictional client's requirements and a deadline, built cold against the published artifacts, judged from a browser and a generated partner client; delivery-speed baseline and V9-rows by shape        |
+| 105       | ✅     | database-plugin + cloudflare-plugin + common — conditional writes on `IRepository` (closes the M101c tenant-bridge, outbox-transition and inbox-count check-then-write races)                                                                 |
+| 106       | ✅     | common + messaging-plugin + cloudflare-plugin + queue-plugin — publish options: ordering key, deduplication ID and headers                                                                                                                    |
+| 107       | ✅     | messaging-plugin + common + database-plugin + telemetry-plugin (+ one cli claim-table line) — transactional outbox: atomic write, pending-set relay as a scheduled job, trace re-parenting, poison rows, health                               |
+| 107b      | ✅     | messaging-plugin + common + database-plugin — outbox relay fencing and multi-relay sweeping (depends on M105) ([#441](https://github.com/setu-ts/setu-ts/pull/441))                                                                           |
+| 108       | ✅     | messaging-plugin + common + database-plugin (+ one cli claim-table line) — consumer inbox keyed by (consumer, topic, envelope id), in the handler's transaction                                                                               |
+| 109       | ✅     | idempotency-plugin (new) + common + sdk + cloudflare-plugin — one idempotency core, three store tiers, four entry points                                                                                                                      |
+| 109a      | ✅     | idempotency-plugin (new) + common + decorator-plugin + cloudflare-plugin + messaging-plugin + queue-plugin + cli — idempotency core, tiers A and B, and the HTTP and ingress entry points                                                     |
+| 109b      | ✅     | common + idempotency-plugin + database-plugin + sdk — idempotency tier C (`within`) and the SDK idempotency key ([#438](https://github.com/setu-ts/setu-ts/pull/438))                                                                         |
+| 110a      | ✅     | common + auth-plugin + decorator-plugin — authorization policies: an async, target-aware check (the seam 110b builds on)                                                                                                                      |
+| 110b      | ✅     | common + auth-plugin + decorator-plugin + database-plugin — scoped RBAC: grants carrying a scope, pluggable grant sources, fail-closed                                                                                                        |
+| 111a      | ✅     | every member — a Node build: pnpm workspaces, `tsc` to `dist/`, `npm:` lazy imports as optional peers ([#446](https://github.com/setu-ts/setu-ts/pull/446))                                                                                   |
+| 111b      | ✅     | every member — the test suite on Node under Vitest, per-file 90% enforced by the runner ([#447](https://github.com/setu-ts/setu-ts/pull/447))                                                                                                 |
+| 111c      | ✅     | every member + release tooling — npm publishing machinery (dry runs; the cut follows 111d) ([#448](https://github.com/setu-ts/setu-ts/pull/448))                                                                                              |
+| 111d      | ✅     | cli — Node-first: npm `bin`, Node as the default generated target ([#450](https://github.com/setu-ts/setu-ts/pull/450))                                                                                                                       |
+| 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
+| 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |

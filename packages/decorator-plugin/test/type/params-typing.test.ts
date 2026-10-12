@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { Controller } from '../../src/decorators/controller.ts';
 import { Get, Post } from '../../src/decorators/http.ts';
@@ -32,6 +31,28 @@ describe('@Params type checking', () => {
       list(all: Readonly<Record<string, string>>, tenant: { id: string }): string {
         return `${Object.keys(all).length}${tenant.id}`;
       }
+    }
+    expect(typeof C).toBe('function');
+  });
+
+  it('lets a validated whole-query source declare the schema output type', () => {
+    interface ListQuery {
+      page: number;
+      limit: number;
+    }
+
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @Params(Query<ListQuery>())
+      list(query: ListQuery): number {
+        return query.page + query.limit;
+      }
+
+      @Get('/raw')
+      // @ts-expect-error A bare Query() is the raw string record, not ListQuery.
+      @Params(Query())
+      raw(_query: ListQuery): void {}
     }
     expect(typeof C).toBe('function');
   });

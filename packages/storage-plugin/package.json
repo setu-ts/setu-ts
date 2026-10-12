@@ -1,0 +1,75 @@
+{
+  "name": "@setu-ts/storage-plugin",
+  "version": "0.9.0",
+  "description": "Object storage over S3, B2, GCS, Azure Blob, local, or memory, with uploads",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/storage-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/storage-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/s3-request-presigner": "^3",
+    "@azure/storage-blob": "^12",
+    "@google-cloud/storage": "^7"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "optional": true
+    },
+    "@azure/storage-blob": {
+      "optional": true
+    },
+    "@google-cloud/storage": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/s3-request-presigner": "^3",
+    "@azure/storage-blob": "^12",
+    "@google-cloud/storage": "^7",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

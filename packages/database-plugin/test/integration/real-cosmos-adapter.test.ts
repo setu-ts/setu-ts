@@ -22,9 +22,11 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
+import { DuplicateKeyError } from '@setu-ts/common';
+import { DatabaseService } from '../../src/services/database-service.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import type {
@@ -33,9 +35,9 @@ import type {
 } from '../../src/adapters/cosmos/cosmos-client-types.ts';
 
 /** The account endpoint; absent, every case below is ignored. */
-const endpoint = Deno.env.get('COSMOS_ENDPOINT');
+const endpoint = process.env['COSMOS_ENDPOINT'];
 /** The well-known emulator key, overridable for a real account. */
-const key = Deno.env.get('COSMOS_KEY') ??
+const key = process.env['COSMOS_KEY'] ??
   'C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==';
 const skipReal = endpoint === undefined;
 /** The database every case shares; created once by the setup helper. */
@@ -71,7 +73,7 @@ const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
  * @returns The created container's id
  */
 async function provision(containerId: string, partitionKeyPath: string): Promise<string> {
-  const { CosmosClient } = await import('npm:@azure/cosmos@^4');
+  const { CosmosClient } = await import('@azure/cosmos');
   const client = new CosmosClient({ endpoint: endpoint as string, key });
   const { database } = await client.databases.createIfNotExists({ id: databaseId });
   await database.containers.createIfNotExists({
@@ -82,8 +84,48 @@ async function provision(containerId: string, partitionKeyPath: string): Promise
 }
 
 describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
+  it('M105 conditional writes match, miss, and guard delete-and-recreate with IfMatch', {
+    skip: skipReal,
+  }, async () => {
+    const containerId = await provision(`conditional_${suffix}`, '/id');
+    const adapter = new CosmosAdapter({
+      endpoint: endpoint as string,
+      key,
+      database: databaseId,
+      containers: { Row: { container: containerId, partitionKey: 'id' } },
+    });
+    await adapter.connect();
+    try {
+      await conditionalContract(
+        adapter.createDataSource('Row'),
+        'a',
+        'missing',
+        { id: 'a', status: 'pending', name: 'old' },
+        { status: 'pending' },
+        { name: 'new' },
+      );
+      const { CosmosClient } = await import('@azure/cosmos');
+      const native = new CosmosClient({ endpoint: endpoint as string, key }).database(databaseId)
+        .container(containerId);
+      for (const operation of ['replace', 'delete'] as const) {
+        await native.items.create({ id: operation, status: 'pending' });
+        const item = native.item(operation, operation);
+        const { resource } = await item.read();
+        await item.delete();
+        await native.items.create({ id: operation, status: 'sent', name: 'secret' });
+        const options = { accessCondition: { type: 'IfMatch', condition: resource!._etag } };
+        const refusal = operation === 'replace'
+          ? item.replace({ id: operation, status: 'pending', name: 'bad' }, options)
+          : item.delete(options);
+        await expect(refusal).rejects.toMatchObject({ code: 412 });
+        expect((await item.read()).resource).toMatchObject({ status: 'sent', name: 'secret' });
+      }
+    } finally {
+      await adapter.disconnect();
+    }
+  });
   it('lazily imports the SDK and reads CRUD operations back through IDataSource', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const container = await provision(`orders_${suffix}`, '/tenantId');
     const adapter = new CosmosAdapter({
@@ -132,7 +174,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('refuses a mapping whose partition key disagrees with the container', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const container = await provision(`mismatch_${suffix}`, '/tenantId');
     const adapter = new CosmosAdapter({
@@ -151,7 +193,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('names a container that does not exist rather than failing on the first read', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const adapter = new CosmosAdapter({
       endpoint: endpoint as string,
@@ -169,7 +211,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('walks a keyset page over TIED sort values without skipping or repeating', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const container = await provision(`paged_${suffix}`, '/tenantId');
     const adapter = new CosmosAdapter({
@@ -208,7 +250,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('serves offset/limit pagination natively, including the unlimited sentinel', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // All three branches of the pagination clause, EXECUTED rather than asserted
     // as text: the contract's `limit: -1` sentinel cannot be passed through
@@ -250,7 +292,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('serves a wide update through the replace path and a narrow one through patch', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const container = await provision(`wide_${suffix}`, '/tenantId');
     const adapter = new CosmosAdapter({
@@ -285,7 +327,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('commits a transactional batch atomically and sends nothing on rollback', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const container = await provision(`tx_${suffix}`, '/tenantId');
     const adapter = new CosmosAdapter({
@@ -324,7 +366,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('lands both updates when a transaction writes one row twice', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // The defect: both updates were whole-document replaces built from the same
     // committed read, so the batch answered 200 with the first update's field
@@ -366,7 +408,7 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('answers every portable filter case exactly as the Memory reference does', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // The sixth adapter's leg of `filter-conformance.test.ts`. That file
     // evaluates each backend's translated predicate against a shared row set;
@@ -481,10 +523,10 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
   });
 
   it('accepts an injected client, so the lazy import never runs', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const container = await provision(`injected_${suffix}`, '/tenantId');
-    const { CosmosClient } = await import('npm:@azure/cosmos@^4');
+    const { CosmosClient } = await import('@azure/cosmos');
     const real = new CosmosClient({ endpoint: endpoint as string, key });
     let containerReads = 0;
     // A thin recording wrapper over the real client, so the injected branch is
@@ -520,3 +562,31 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
 
 /** The shape of the database `read()` the recording wrapper delegates. */
 type ICosmosDatabaseRead = () => Promise<{ statusCode: number }>;
+
+describe('CosmosAdapter against a real emulator — duplicate key', () => {
+  it('an existing id in the partition is a DuplicateKeyError (409)', {
+    skip: skipReal,
+  }, async () => {
+    const container = await provision(`dupkey_${suffix}`, '/tenantId');
+    const adapter = new CosmosAdapter({
+      endpoint: endpoint as string,
+      key,
+      database: databaseId,
+      containers: { Order: { container, partitionKey: 'tenantId' } },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'cosmos');
+    try {
+      const repo = service.getRepository('Order');
+      await repo.create({ id: 'o1', tenantId: 't1', total: 10 });
+
+      const refusal = await repo.create({ id: 'o1', tenantId: 't1', total: 20 })
+        .catch((e: unknown) => e);
+      expect(refusal).toBeInstanceOf(DuplicateKeyError);
+      expect((refusal as DuplicateKeyError).entity).toBe('Order');
+      expect(((refusal as Error).cause as { code?: unknown }).code).toBe(409);
+    } finally {
+      await service.close();
+    }
+  });
+});

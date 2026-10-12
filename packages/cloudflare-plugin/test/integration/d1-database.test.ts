@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * D1 as a first-class database backend, driven through a REAL kernel
  * application and the REAL `DatabasePlugin`.
@@ -11,11 +20,10 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, DuplicateKeyError } from '@setu-ts/common';
 import type { HealthCheckResult, IApplication } from '@setu-ts/common';
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
@@ -52,6 +60,26 @@ async function bootApp(): Promise<{
 }
 
 describe('D1 through DatabasePlugin — the repository surface', () => {
+  it('conditional writes persist matches and leave misses unchanged through the repository', async () => {
+    const { app, db } = await bootApp();
+    try {
+      const repo = db.getRepository<User>('User');
+      await repo.create({ id: 'a', name: 'old', age: 1 });
+      expect(await repo.updateWhere!('a', { age: 2 }, { name: 'bad' })).toBeNull();
+      expect(await repo.deleteWhere!('a', { age: 2 })).toBe(false);
+      expect(await repo.updateWhere!('missing', { age: 1 }, { name: 'bad' })).toBeNull();
+      expect(await repo.deleteWhere!('missing', { age: 1 })).toBe(false);
+      expect(await repo.findById('a')).toEqual({ id: 'a', name: 'old', age: 1 });
+      expect(await repo.updateWhere!('a', { age: 1 }, { name: 'new' })).toMatchObject({
+        name: 'new',
+      });
+      expect(await repo.findById('a')).toMatchObject({ name: 'new' });
+      expect(await repo.deleteWhere!('a', { age: 1, name: 'new' })).toBe(true);
+      expect(await repo.findById('a')).toBeNull();
+    } finally {
+      await app.stop();
+    }
+  });
   it('creates a user and reads it back through findById', async () => {
     const { app, db } = await bootApp();
     const users = db.getRepository<User>('User');
@@ -262,6 +290,42 @@ describe('D1 through DatabasePlugin — Unit of Work', () => {
 
     expect(d1.batches).toEqual([]);
     expect(await db.getRepository<User>('User').count()).toBe(0);
+
+    await app.stop();
+  });
+});
+
+describe('D1 through DatabasePlugin — duplicate keys', () => {
+  // D1 carries no error code: its only signal is SQLite's own
+  // `UNIQUE constraint failed` text, which the fake's real SQLite produces too.
+  it('refuses a duplicate primary key as a DuplicateKeyError naming the entity', async () => {
+    const { app, db } = await bootApp();
+    const users = db.getRepository<User>('User');
+    await users.create({ id: 'u1', name: 'ada', age: 36 });
+
+    const refusal = await users.create({ id: 'u1', name: 'bob', age: 24 })
+      .catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(DuplicateKeyError);
+    expect((refusal as DuplicateKeyError).entity).toBe('User');
+    // The first row is untouched.
+    expect(await users.findById('u1')).toMatchObject({ name: 'ada' });
+
+    await app.stop();
+  });
+
+  it('refuses a duplicate found at commit and applies none of the batch', async () => {
+    const { app, db } = await bootApp();
+    await db.getRepository<User>('User').create({ id: 'u1', name: 'ada', age: 36 });
+
+    const refusal = await db.transaction(async (uow) => {
+      const users = uow.getRepository<User>('User');
+      await users.create({ id: 'u2', name: 'bob', age: 24 });
+      await users.create({ id: 'u1', name: 'eve', age: 51 });
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(DuplicateKeyError);
+    // The batch is atomic: `u2`, written before the duplicate, is absent too.
+    expect(await db.getRepository<User>('User').count()).toBe(1);
 
     await app.stop();
   });

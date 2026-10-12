@@ -14,6 +14,11 @@ import { StoragePlugin } from '@setu-ts/storage-plugin';
 
 ## Usage
 
+In a full-stack starter composition, configure its `storage` arm in `setu.config.ts`. The starter
+owns that registration; adding another `app.register(StoragePlugin(...))` can duplicate it. See the
+[starter options](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/full-stack-starter/README.md).
+The registration below applies when your application owns its plugin list.
+
 ```typescript
 import { createUploadMiddleware, getUploadedFile, StoragePlugin } from '@setu-ts/storage-plugin';
 import { CAPABILITIES, type IStorage } from '@setu-ts/common';
@@ -88,6 +93,12 @@ optional only on the memory arm, which is the default.
 | `'s3'` / `'b2'` | `S3ProviderOptions`           | `bucket`        |
 | `'gcs'`         | `GcsProviderOptions`          | `bucket`        |
 | `'azure'`       | `AzureBlobProviderOptions`    | `containerName` |
+
+The `'local'` provider's `LocalStorageProviderOptions` has one optional field:
+
+| Field     | Type     | Default | Description                                                                                                                                                        |
+| --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rootDir` | `string` | `'.'`   | Root directory objects are written under. It must be **writable** — see [The `local` provider needs write permission](#the-local-provider-needs-write-permission). |
 
 ### Upload middleware options
 

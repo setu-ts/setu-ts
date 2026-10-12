@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   findPluginIndicatorClaim,
@@ -18,6 +17,13 @@ describe('findPluginIndicatorClaim', () => {
       .toBe('database-plugin');
     expect(findPluginIndicatorClaim('static-files', new Set(['static-plugin'])))
       .toBe('static-plugin');
+    // A plugin may claim more than one name (M107/M108: the outbox and inbox indicators).
+    expect(findPluginIndicatorClaim('messaging', new Set(['messaging-plugin'])))
+      .toBe('messaging-plugin');
+    expect(findPluginIndicatorClaim('outbox', new Set(['messaging-plugin'])))
+      .toBe('messaging-plugin');
+    expect(findPluginIndicatorClaim('inbox', new Set(['messaging-plugin'])))
+      .toBe('messaging-plugin');
   });
 
   it('reports nothing when the claiming plugin is not installed', () => {

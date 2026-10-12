@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { collectStream, inject } from '../../src/inject.ts';
 import type { StreamingBody } from '../../src/inject.ts';
 import type { IKernelApplication, InjectRequest, InjectResponse } from '@setu-ts/kernel';

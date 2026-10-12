@@ -12,8 +12,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseService } from '../../src/services/database-service.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IDatabaseAdapter, NormalizedQuery, PageResult } from '@setu-ts/common';

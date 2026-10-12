@@ -47,7 +47,7 @@ export const MAX_EVENT_SOURCES = 16;
  *
  * @internal
  */
-export const MAX_EVENT_RESPONSE_BYTES = 256 * 1024;
+export const MAX_EVENT_RESPONSE_BYTES: number = 256 * 1024;
 
 const SOURCE_STATES: ReadonlySet<string> = new Set<EventDiagnosticsState>([
   'disabled',

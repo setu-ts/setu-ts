@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -13,6 +12,7 @@ import {
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
 import { LEGACY_DENO_RUN_ALL } from '../../src/workspace/runtime-profile.ts';
+import { VERSION } from '../../src/version.ts';
 
 /** The emitted config module a current CLI writes — the signature `enable` accepts. */
 const CONFIG = `import { createApplication, type KernelDiagnosticsOptions } from '@setu-ts/kernel';
@@ -133,7 +133,7 @@ describe('the one devtool planner', () => {
     const manifest = JSON.parse(enabled.fs.read('/ws/setu.workspace.json')) as {
       members: WorkspaceMember[];
     };
-    expect(manifest.members[0].devtoolPort).toBe(3001);
+    expect(manifest.members[0].devtoolPort).toBe(4000);
   });
 
   it('emits byte-identical files from `new --devtool` and `devtool enable` standalone', async () => {
@@ -141,7 +141,7 @@ describe('the one devtool planner', () => {
     // already on disk.
     const created = harnessOver(createFakeFs());
     const createdCode = await created.runNew(
-      ['shop', '--devtool', '--devtool-port', '4919'],
+      ['shop', '--runtime', 'deno', '--devtool', '--devtool-port', '4919'],
       '/ws',
     );
     expect(createdCode, created.err.text()).toBe(0);
@@ -161,5 +161,28 @@ describe('the one devtool planner', () => {
     expect(viaCommand).toBe(viaFlag);
     expect(commandTasks.tasks['dev']).toBe(flagTasks.tasks['dev']);
     expect(commandTasks.tasks['check']).toBe(flagTasks.tasks['check']);
+  });
+
+  // PR #415 review: a configuration the CLI declines to edit gets the binding its
+  // manual lines read, before those lines.
+  it('prints the sources import and declaration beside a manual line on `enable`', async () => {
+    const h = harnessOver(createFakeFs({
+      '/ws/shop/deno.json': `${
+        JSON.stringify({
+          tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
+          imports: { '@setu-ts/cache-plugin': `npm:@setu-ts/cache-plugin@^${VERSION}` },
+        })
+      }\n`,
+      '/ws/shop/setu.config.ts': CONFIG + 'const banner = `unclassified`;\n',
+    }));
+    expect(await h.runDevtool(['enable', '--devtool-port', '4919'], '/ws/shop'), h.err.text())
+      .toBe(0);
+    const out = h.out.text();
+    expect(out).toContain(
+      "In setu.config.ts: Add the import: import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';",
+    );
+    expect(out.indexOf('devtool === undefined ? {} : DEVTOOL_SOURCES;')).toBeLessThan(
+      out.indexOf('Configure the development source in setu.config.ts: CachePlugin('),
+    );
   });
 });

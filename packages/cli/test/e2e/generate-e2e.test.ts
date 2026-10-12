@@ -1,3 +1,6 @@
+import { connect } from '../../../../test/node-helpers.ts';
+import { denoBinary, run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Drives `runCli` against a REAL temp directory through the REAL Deno
  * filesystem services — the same wiring `src/main.ts` builds — and reads every
@@ -6,15 +9,14 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { CUSTOM_SCHEMATIC_DIR } from '../../src/schematics/custom.ts';
-import { useWorkspacePackages } from '../fixtures/generated-project.ts';
+import { useWorkspacePackages, withGeneratedServer } from '../fixtures/generated-project.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 describe('setu end-to-end on a real filesystem', () => {
@@ -32,113 +34,244 @@ describe('setu end-to-end on a real filesystem', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-e2e-' });
+    root = await tempDir({ prefix: 'setu-e2e-' });
     out = [];
     err = [];
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
+  });
+
+  it('boots a functional websocket route after add and completes an RFC 6455 handshake', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    expect(await run(['add', 'websocket', '--dir', project])).toBe(0);
+    expect(await run(['g', 'ws-route', 'board', '--dir', project])).toBe(0);
+    await useWorkspacePackages(project);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    await nodeFs.writeFile(
+      `${project}/probe.ts`,
+      "import { createApp } from './setu.config.ts';\nawait (await createApp()).start();\n",
+    );
+    try {
+      await nodeFs.writeFile(configPath, config.replace('      WebSocketPlugin(),\n', ''));
+      const broken = await runProcess(denoBinary(), {
+        args: ['run', '-A', '--node-modules-dir=none', 'probe.ts'],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      expect(broken.code).not.toBe(0);
+      expect(new TextDecoder().decode(broken.stderr)).toContain(
+        "depends on capability 'websocket-plugin'",
+      );
+    } finally {
+      await nodeFs.writeFile(configPath, config);
+    }
+    await withGeneratedServer(project, async (origin) => {
+      const url = new URL(origin);
+      const connection = await connect({ hostname: url.hostname, port: Number(url.port) });
+      try {
+        const request = `GET /ws/board HTTP/1.1\r\nHost: ${url.host}\r\n` +
+          'Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n' +
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n';
+        await connection.write(new TextEncoder().encode(request));
+        // One read is not guaranteed to return the whole header block, so read
+        // until the terminator, refusing EOF and an unbounded response.
+        let response = '';
+        const decoder = new TextDecoder();
+        const buffer = new Uint8Array(4096);
+        while (!response.includes('\r\n\r\n')) {
+          const read = await connection.read(buffer);
+          if (read === null) throw new Error(`Handshake ended early: ${response}`);
+          response += decoder.decode(buffer.subarray(0, read), { stream: true });
+          if (response.length > 16_384) throw new Error('Handshake headers exceed 16 KiB.');
+        }
+        expect(response).toContain('101 Switching Protocols');
+        expect(response.toLowerCase()).toContain(
+          'sec-websocket-accept: s3pplmbitxaq9kygzzhzrbk+xoo=',
+        );
+      } finally {
+        connection.close();
+      }
+    });
+  });
+
+  it('runs a generated permission guard through real auth for 401, 403 and 200', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    expect(await run(['add', 'auth', '--dir', project])).toBe(0);
+    expect(await run(['g', 'guard', 'reports', '--dir', project])).toBe(0);
+    await useWorkspacePackages(project);
+    await nodeFs.writeFile(
+      `${project}/guard-probe.ts`,
+      `import { CAPABILITIES, type IJwtService } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { requireReports } from './src/guards/reports.guard.ts';
+const app = createApplication({ plugins: [RuntimePlugin(), AuthPlugin({
+  jwt: { secret: 'a-generated-guard-test-secret-at-least-32-bytes' },
+  rbac: { roles: { reader: { permissions: [] }, reporter: { permissions: ['reports'] } } },
+})] });
+app.router.get('/reports', { middleware: [requireReports()], handler: (ctx) => ctx.response.json({ ok: true }) });
+await app.start();
+try {
+  const jwt = app.services.get<IJwtService>(CAPABILITIES.JWT);
+  const statuses: number[] = [];
+  for (const role of [undefined, 'reader', 'reporter']) {
+    const headers = role === undefined ? {} : { authorization: 'Bearer ' + await jwt.sign({ sub: 'user', roles: [role] }) };
+    statuses.push((await app.fetch(new Request('http://localhost/reports', { headers }))).status);
+  }
+  console.log(JSON.stringify(statuses));
+} finally { await app.stop(); }
+`,
+    );
+    const result = await runProcess(denoBinary(), {
+      args: ['run', '-A', '--node-modules-dir=none', 'guard-probe.ts'],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    expect(result.code, new TextDecoder().decode(result.stderr)).toBe(0);
+    expect(new TextDecoder().decode(result.stdout)).toContain('[401,403,200]');
   });
 
   it('scaffolds a project whose files exist on disk', async () => {
-    expect(await run(['new', 'shop-api'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop-api'])).toBe(0);
     for (const name of ['deno.json', 'main.ts', 'README.md', '.gitignore']) {
-      const info = await Deno.stat(`${root}/shop-api/${name}`);
-      expect(info.isFile).toBe(true);
+      const info = await nodeFs.stat(`${root}/shop-api/${name}`);
+      expect(info.isFile()).toBe(true);
     }
   });
 
   it('scaffolds a deno.json that parses and pins the framework', async () => {
-    await run(['new', 'shop-api']);
-    const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop-api/deno.json`));
-    expect(manifest.imports['@setu-ts/kernel']).toContain('jsr:@setu-ts/kernel@');
+    await run(['new', '--runtime', 'deno', 'shop-api']);
+    const manifest = JSON.parse(await nodeFs.readFile(`${root}/shop-api/deno.json`, 'utf8'));
+    expect(manifest.imports['@setu-ts/kernel']).toContain('npm:@setu-ts/kernel@');
     // No compiler options: standard decorators need none, so emitting a key
     // here would assert a setting nothing reads.
     expect(manifest.compilerOptions).toBeUndefined();
   });
 
   it('generates into the scaffolded project and reads the file back', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     expect(await run(['g', 'service', 'user-profile', '--dir', project])).toBe(0);
 
-    const written = await Deno.readTextFile(`${project}/src/services/user-profile.service.ts`);
+    const written = await nodeFs.readFile(
+      `${project}/src/services/user-profile.service.ts`,
+      'utf8',
+    );
     expect(written).toContain('export function describeUserProfile');
     expect(written).toContain("return 'user-profile';");
   });
 
+  it('refuses generation in an empty directory without creating src', async () => {
+    expect(await run(['generate', 'controller', 'orders'])).toBe(1);
+    await expect(nodeFs.stat(`${root}/src`)).rejects.toThrow();
+    expect(err.join('\n')).toContain('holds no deno.json');
+  });
+
+  it('refuses generation at a workspace root without creating src', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace'])).toBe(0);
+    const workspace = `${root}/acme`;
+
+    expect(await run(['generate', 'controller', 'orders', '--dir', workspace])).not.toBe(0);
+    await expect(nodeFs.stat(`${workspace}/src`)).rejects.toThrow();
+    expect(err.join('\n')).toContain('workspace root');
+  });
+
+  it('reads a commented manifest when enforcing a schematic plugin gate', async () => {
+    await nodeFs.writeFile(
+      `${root}/deno.json`,
+      `{
+  // The plugin gate must read JSONC without rewriting it.
+  "imports": {
+    "@setu-ts/auth-plugin": "npm:@setu-ts/auth-plugin@^0.8.0",
+  },
+}
+`,
+    );
+
+    expect(await run(['generate', 'guard', 'admin'])).toBe(0);
+    expect((await nodeFs.stat(`${root}/src/guards/admin.guard.ts`)).isFile()).toBe(true);
+  });
+
   it('creates nested directories that did not exist', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     // `src/jobs` rather than `src` itself: a scaffolded project now carries the
     // three seam barrels that need no plugin, so `src/routes`, `src/middleware`
     // and `src/plugins` exist from the start. `job` hosts no seam, so its
     // directory is still created by the generate rather than by the scaffold.
-    const info = await Deno.stat(`${root}/shop-api/src/jobs`).catch(() => undefined);
+    const info = await nodeFs.stat(`${root}/shop-api/src/jobs`).catch(() => undefined);
     expect(info).toBeUndefined();
 
     await run(['g', 'job', 'send-invoice', '--dir', `${root}/shop-api`]);
-    expect((await Deno.stat(`${root}/shop-api/src/jobs`)).isDirectory).toBe(true);
+    expect((await nodeFs.stat(`${root}/shop-api/src/jobs`)).isDirectory()).toBe(true);
   });
 
   // The milestone's own claim, end to end on a real filesystem: the ONE HTTP
   // handler a decorator-free project can generate reaches a registration site
   // with no edit to a file the developer owns.
   it('wires a generated route into a template-less project with no hand edit', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     expect(await run(['g', 'route', 'orders', '--dir', project])).toBe(0);
 
-    const barrel = await Deno.readTextFile(`${project}/src/controllers/index.ts`);
+    const barrel = await nodeFs.readFile(`${project}/src/controllers/index.ts`, 'utf8');
     expect(barrel).toContain('registerOrdersRoutes,');
     expect(barrel).toContain('register(router, services);');
 
     // The scaffolded config already calls the barrel, so nothing further is needed.
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain("from './src/controllers/index.ts'");
     expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
   });
 
   it('honours the plugin gate against a real manifest on disk', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     // auth-plugin is absent from the scaffolded manifest.
     expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(1);
-    await expect(Deno.stat(`${project}/src/guards/admin.guard.ts`)).rejects.toThrow();
+    await expect(nodeFs.stat(`${project}/src/guards/admin.guard.ts`)).rejects.toThrow();
 
-    const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`));
-    manifest.imports['@setu-ts/auth-plugin'] = 'jsr:@setu-ts/auth-plugin@^0.1.0';
-    await Deno.writeTextFile(`${project}/deno.json`, JSON.stringify(manifest, null, 2));
+    const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8'));
+    manifest.imports['@setu-ts/auth-plugin'] = 'npm:@setu-ts/auth-plugin@^0.1.0';
+    await nodeFs.writeFile(`${project}/deno.json`, JSON.stringify(manifest, null, 2));
 
     expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(0);
-    expect(await Deno.readTextFile(`${project}/src/guards/admin.guard.ts`))
+    expect(await nodeFs.readFile(`${project}/src/guards/admin.guard.ts`, 'utf8'))
       .toContain('requireAdmin');
   });
 
   it('writes nothing to disk under --dry-run', async () => {
-    expect(await run(['new', 'shop-api', '--dry-run'])).toBe(0);
-    await expect(Deno.stat(`${root}/shop-api`)).rejects.toThrow();
+    expect(await run(['new', '--runtime', 'deno', 'shop-api', '--dry-run'])).toBe(0);
+    await expect(nodeFs.stat(`${root}/shop-api`)).rejects.toThrow();
     expect(out.some((line) => line.startsWith('would create'))).toBe(true);
   });
 
   it('refuses to overwrite a real file and leaves it byte-identical', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
     await run(['g', 'service', 'billing', '--dir', project]);
 
     const path = `${project}/src/services/billing.service.ts`;
-    await Deno.writeTextFile(path, 'HAND WRITTEN');
+    await nodeFs.writeFile(path, 'HAND WRITTEN');
 
     expect(await run(['g', 'service', 'billing', '--dir', project])).toBe(1);
-    expect(await Deno.readTextFile(path)).toBe('HAND WRITTEN');
+    expect(await nodeFs.readFile(path, 'utf8')).toBe('HAND WRITTEN');
   });
 
   it('loads a custom schematic from disk through the real import path', async () => {
-    await Deno.mkdir(`${root}/${CUSTOM_SCHEMATIC_DIR}`, { recursive: true });
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(`${root}/deno.json`, '{}');
+    await nodeFs.mkdir(`${root}/${CUSTOM_SCHEMATIC_DIR}`, { recursive: true });
+    await nodeFs.writeFile(
       `${root}/${CUSTOM_SCHEMATIC_DIR}/readme.ts`,
       `export function schematic(names) {
   return [{ path: \`docs/\${names.kebab}.md\`, contents: \`# \${names.pascal}\\n\` }];
@@ -147,7 +280,7 @@ describe('setu end-to-end on a real filesystem', () => {
     );
 
     expect(await run(['g', 'custom', 'readme', 'order-item'])).toBe(0);
-    expect(await Deno.readTextFile(`${root}/docs/order-item.md`)).toBe('# OrderItem\n');
+    expect(await nodeFs.readFile(`${root}/docs/order-item.md`, 'utf8')).toBe('# OrderItem\n');
   });
 
   // D3. The gate the CLI shipped pointed at a step it would not take: `setu
@@ -155,7 +288,7 @@ describe('setu end-to-end on a real filesystem', () => {
   // so unlocking a gated schematic meant hand-editing `deno.json`. This is the
   // whole round trip on a REAL filesystem — refused, added, accepted.
   it('unlocks a gated schematic through setu add', async () => {
-    expect(await run(['new', 'svc'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc'])).toBe(0);
     const project = `${root}/svc`;
 
     // Refused first, so the test cannot pass because the gate was never there.
@@ -165,24 +298,24 @@ describe('setu end-to-end on a real filesystem', () => {
     expect(await run(['add', 'auth', '--dir', project])).toBe(0);
 
     const manifest = JSON.parse(
-      await Deno.readTextFile(`${project}/deno.json`),
+      await nodeFs.readFile(`${project}/deno.json`, 'utf8'),
     ) as { imports: Record<string, string> };
-    expect(manifest.imports['@setu-ts/auth-plugin']).toContain('jsr:@setu-ts/auth-plugin@');
+    expect(manifest.imports['@setu-ts/auth-plugin']).toContain('npm:@setu-ts/auth-plugin@');
 
     // And now the same command succeeds — which is only possible because
     // `detectPlugins` reads the manifest `add` just wrote.
     expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(0);
-    expect((await Deno.stat(`${project}/src/guards/admin.guard.ts`)).isFile).toBe(true);
+    expect((await nodeFs.stat(`${project}/src/guards/admin.guard.ts`)).isFile()).toBe(true);
   });
 
   it('activates an added ingress provider before generating its class-based artifact', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
     const project = `${root}/svc`;
 
     expect(await run(['add', 'events', '--dir', project])).toBe(0);
     expect(await run(['g', 'event-handler', 'user-created', '--dir', project])).toBe(0);
 
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain(`import { EventsPlugin } from '@setu-ts/events-plugin';`);
     expect(config).toContain('      EventsPlugin(),');
 
@@ -190,7 +323,7 @@ describe('setu end-to-end on a real filesystem', () => {
     // registration pass rather than the last published version. Before the
     // activation write, start() failed while resolving CAPABILITIES.EVENTS.
     await useWorkspacePackages(project);
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${project}/boot-ingress.ts`,
       `import { createApp } from './setu.config.ts';
 
@@ -199,7 +332,7 @@ await app.start();
 await app.stop();
 `,
     );
-    const booted = await new Deno.Command(Deno.execPath(), {
+    const booted = await runProcess(denoBinary(), {
       args: [
         'run',
         '-A',
@@ -211,7 +344,7 @@ await app.stop();
       cwd: project,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     expect(booted.code, new TextDecoder().decode(booted.stderr)).toBe(0);
   });
 
@@ -225,12 +358,12 @@ await app.stop();
   // The guard existed (M60) but returned early for any project without
   // `decorator-plugin`, on a premise E8 and M65 had both invalidated.
   it('refuses a controller whose HTTP path a route already claims, functionally', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
 
     // The default composition: no decorator-plugin, which is exactly the case the
     // guard used to skip.
-    const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
+    const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
       imports: Record<string, string>;
     };
     expect(Object.keys(manifest.imports)).not.toContain('@setu-ts/decorator-plugin');
@@ -239,7 +372,7 @@ await app.stop();
     expect(await run(['g', 'controller', 'widget', '--dir', project])).toBe(1);
 
     // Refused BEFORE writing: the colliding file must not exist.
-    await expect(Deno.stat(`${project}/src/controllers/widget.controller.ts`)).rejects.toThrow();
+    await expect(nodeFs.stat(`${project}/src/controllers/widget.controller.ts`)).rejects.toThrow();
 
     // A distinct name is still generated, so the guard did not over-refuse.
     expect(await run(['g', 'controller', 'gadget', '--dir', project])).toBe(0);
@@ -248,12 +381,12 @@ await app.stop();
     // the assertion the unit test cannot make: TS2300 is a property of the emitted
     // file, not of the guard's return value.
     await useWorkspacePackages(project);
-    const checked = await new Deno.Command(Deno.execPath(), {
+    const checked = await runProcess(denoBinary(), {
       args: ['check', `${project}/src/controllers/index.ts`],
       cwd: project,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     expect(checked.code, new TextDecoder().decode(checked.stderr)).toBe(0);
   });
 
@@ -261,7 +394,7 @@ await app.stop();
   // imported and nothing could run, so every project that used it hand-wrote the
   // same runner. Type-checking it is not enough — the point is that it RUNS.
   it('generates a migration runner that actually applies migrations', async () => {
-    expect(await run(['new', 'svc'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc'])).toBe(0);
     const project = `${root}/svc`;
     expect(await run(['add', 'database', '--dir', project])).toBe(0);
     expect(await run(['g', 'migration', 'add-users', '--dir', project])).toBe(0);
@@ -269,7 +402,7 @@ await app.stop();
 
     await useWorkspacePackages(project);
 
-    const applied = await new Deno.Command(Deno.execPath(), {
+    const applied = await runProcess(denoBinary(), {
       args: [
         'run',
         '-A',
@@ -281,7 +414,7 @@ await app.stop();
       cwd: project,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
 
     const out = new TextDecoder().decode(applied.stdout);
     expect(applied.code, new TextDecoder().decode(applied.stderr)).toBe(0);
@@ -289,7 +422,7 @@ await app.stop();
     expect(out).toContain('up ');
     expect(out.match(/^up /gm)?.length).toBe(2);
 
-    const reversed = await new Deno.Command(Deno.execPath(), {
+    const reversed = await runProcess(denoBinary(), {
       args: [
         'run',
         '-A',
@@ -302,13 +435,13 @@ await app.stop();
       cwd: project,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     expect(reversed.code).toBe(0);
     expect(new TextDecoder().decode(reversed.stdout).match(/^down /gm)?.length).toBe(2);
   });
 
   it('generates every ungated schematic into one project', async () => {
-    await run(['new', 'shop-api']);
+    await run(['new', '--runtime', 'deno', 'shop-api']);
     const project = `${root}/shop-api`;
 
     // `controller` is gated on decorator-plugin, which this project lacks.
@@ -317,7 +450,7 @@ await app.stop();
     }
 
     const found: string[] = [];
-    for await (const entry of Deno.readDir(`${project}/src`)) found.push(entry.name);
+    for await (const entry of await nodeFs.opendir(`${project}/src`)) found.push(entry.name);
     expect(found.sort()).toEqual([
       // One HTTP directory since M70h/E8 — `controllers` holds both kinds.
       'controllers',

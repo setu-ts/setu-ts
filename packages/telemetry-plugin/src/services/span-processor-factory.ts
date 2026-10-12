@@ -21,7 +21,7 @@ export interface SpanProcessorSdkModule {
  * Creates a span processor of the requested kind.
  *
  * Both `SimpleSpanProcessor` and `BatchSpanProcessor` are imported from the
- * already-pinned `npm:@opentelemetry/sdk-trace-base@^2.9.0` and passed in via
+ * already-pinned `@opentelemetry/sdk-trace-base` and passed in via
  * `sdkMod` — this factory does NOT perform lazy imports itself.
  *
  * @param kind - The processor kind (`'simple'` or `'batch'`).

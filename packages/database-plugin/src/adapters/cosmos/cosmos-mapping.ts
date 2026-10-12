@@ -16,6 +16,7 @@
  *
  * @module
  */
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
 /** The identity field every Cosmos document carries. */
 const DOCUMENT_ID_FIELD = 'id';
@@ -209,7 +210,15 @@ export function fromDocument(
   const row: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(document)) {
     if (SYSTEM_PROPERTIES.includes(key)) continue;
-    row[key] = value;
+    // Defined, never assigned: on Node and Bun `row['__proto__'] = value`
+    // replaces the row's prototype, so a document carrying that field (written
+    // by anything) would hand every reader inherited members.
+    Object.defineProperty(row, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
   if (
     target.primaryKey !== DOCUMENT_ID_FIELD &&
@@ -234,6 +243,7 @@ export function toDocument(
   row: Record<string, unknown>,
   target: CosmosTarget,
 ): Record<string, unknown> {
+  assertNoPrototypeField(row);
   const document: Record<string, unknown> = { ...row };
   if (
     target.primaryKey !== DOCUMENT_ID_FIELD &&
@@ -243,6 +253,27 @@ export function toDocument(
     delete document[target.primaryKey];
   }
   return document;
+}
+
+/**
+ * Refuses a payload carrying an own `__proto__` field. The field cannot round
+ * trip portably — MongoDB and Prisma drop it on Node and Bun, and DynamoDB's
+ * SDK returns it without a value — so the adapters that would store it refuse
+ * it, as `checkWritePrecondition` does for the conditional members. The
+ * refusal names no caller value.
+ *
+ * @param payload - A create or update payload
+ * @throws {UnsupportedQueryFeatureError} When the payload has an own `__proto__` field
+ * @internal
+ */
+export function assertNoPrototypeField(payload: Record<string, unknown>): void {
+  if (Object.prototype.hasOwnProperty.call(payload, '__proto__')) {
+    throw new UnsupportedQueryFeatureError(
+      'attribute-value',
+      'cosmos',
+      'A Cosmos DB document field may not be named __proto__.',
+    );
+  }
 }
 
 /**

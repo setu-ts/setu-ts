@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/queue-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
   "test": {
@@ -25,7 +25,12 @@
     }
   },
   "imports": {
+    "@aws-sdk/client-sns": "npm:@aws-sdk/client-sns@^3",
     "@aws-sdk/client-sqs": "npm:@aws-sdk/client-sqs@^3",
-    "@aws-sdk/client-sns": "npm:@aws-sdk/client-sns@^3"
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+    "amqplib": "npm:amqplib@0.10.x",
+    "ioredis": "npm:ioredis@5.x",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

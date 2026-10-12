@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateMigration } from '../../../src/schematics/migration.ts';
 import { gateOf, options } from './_shared.ts';
@@ -99,4 +98,44 @@ describe('migration schematic', () => {
   it('produces contents ending in a newline', () => {
     expect(file.contents.endsWith('\n')).toBe(true);
   });
+});
+
+describe('the migration runner, per target', () => {
+  /** The runner a project of `runtime` gets. */
+  const runnerFor = (runtime: 'deno' | 'node' | 'bun' | 'cloudflare-workers'): string => {
+    const files = generateMigration(deriveNames('add-orders'), { ...options(), runtime });
+    return files.find((file) => file.path === 'src/migrations/run.ts')!.contents;
+  };
+
+  it('runs as a Deno main module on Deno', () => {
+    const runner = runnerFor('deno');
+    expect(runner).toContain('//   deno run -A src/migrations/run.ts          # apply');
+    expect(runner).toContain('if (import.meta.main) {');
+    expect(runner).toContain("Deno.args.includes('--down')");
+    expect(runner).not.toContain('node:url');
+    expect(runner).not.toContain('process.');
+  });
+
+  // Node gained `import.meta.main` only in 24.2 and the floor is 22, so an npm
+  // target compares its own URL with the script it was asked to run. A Deno
+  // global there would not even type-check.
+  for (
+    const [runtime, command] of [
+      ['node', 'npx tsx src/migrations/run.ts'],
+      ['cloudflare-workers', 'npx tsx src/migrations/run.ts'],
+      ['bun', 'bun run src/migrations/run.ts'],
+    ] as const
+  ) {
+    it(`runs as the entry script on ${runtime}`, () => {
+      const runner = runnerFor(runtime);
+      expect(runner).toContain(`//   ${command}          # apply`);
+      expect(runner).toContain("import { pathToFileURL } from 'node:url';");
+      expect(runner).toContain(
+        "if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {",
+      );
+      expect(runner).toContain("process.argv.includes('--down')");
+      expect(runner).not.toContain('Deno.');
+      expect(runner).not.toContain('import.meta.main');
+    });
+  }
 });

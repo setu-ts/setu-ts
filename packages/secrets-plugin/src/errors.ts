@@ -66,3 +66,57 @@ export class ReadOnlySecretProviderError extends Error {
     });
   }
 }
+
+/**
+ * Thrown when a secrets provider cannot be reached: the request failed on the
+ * network, or it did not answer within the provider's bound (M101a V8-4).
+ *
+ * Branded with a `503 Service Unavailable` status hint, so `errorHandler`
+ * answers a retryable status with a fixed, caller-safe sentence instead of
+ * masking an outage into a `500`. The transport error rides as `cause` for
+ * the log and never reaches the response body (the M89b rule). An HTTP
+ * error status from a provider that DID answer is not this error: the
+ * provider was reachable.
+ *
+ * @example
+ * ```typescript
+ * import { SecretProviderUnavailableError } from '@setu-ts/secrets-plugin';
+ * try {
+ *   await secrets.get('database/password');
+ * } catch (err) {
+ *   if (err instanceof SecretProviderUnavailableError) {
+ *     // Vault did not answer — retry later, or fail the request with 503.
+ *   }
+ * }
+ * ```
+ * @since 0.9.0
+ */
+export class SecretProviderUnavailableError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'SecretProviderUnavailableError';
+
+  /** The provider that could not be reached (e.g. `'HashiCorpVaultProvider'`). */
+  readonly provider: string;
+
+  /**
+   * Creates the error. The `message` is the full diagnostic — safe to log,
+   * never to serve.
+   *
+   * @param provider - The name of the unreachable provider
+   * @param cause - The transport failure or deadline error, kept for the log
+   */
+  constructor(provider: string, cause: unknown) {
+    super(`${provider} is unreachable: ${describe(cause)}`, { cause });
+    this.provider = provider;
+    withHttpStatusHint(this, {
+      status: 503,
+      title: 'Service Unavailable',
+      detail: 'The secrets provider is temporarily unreachable.',
+    });
+  }
+}
+
+/** Renders a cause for the diagnostic message without trusting its shape. */
+function describe(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}

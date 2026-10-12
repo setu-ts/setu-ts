@@ -3,9 +3,8 @@
  *
  * @module
  */
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import type { HandlerResult } from '@setu-ts/common';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { HandlerResult, JsonValue } from '@setu-ts/common';
 import { SseConnection } from '../../src/connection/sse-connection.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -696,4 +695,40 @@ describe('SseConnection', () => {
       response: resp as unknown as IResponse,
     };
   }
+});
+
+it('ignores a late heartbeat and unserializable sends after close', async () => {
+  let heartbeat: (() => void) | undefined;
+  let cleared = 0;
+  let closed = 0;
+  const runtime = createFakeRuntime();
+  const controlled = {
+    ...runtime,
+    setInterval(callback: () => void) {
+      heartbeat = callback;
+      return runtime.setInterval(() => {}, 60_000);
+    },
+    clearInterval(handle: Parameters<IRuntimeServices['clearInterval']>[0]) {
+      cleared++;
+      runtime.clearInterval(handle);
+    },
+  };
+  const ctx = createFakeContext({ runtime: controlled });
+  const conn = new SseConnection(ctx, controlled, 10, undefined, () => closed++);
+  expect(heartbeat).toBeDefined();
+  heartbeat!();
+  conn.close();
+  heartbeat!();
+  const cyclic: { self?: JsonValue } = {};
+  cyclic.self = cyclic;
+  expect(() => conn.send({ data: cyclic })).not.toThrow();
+  conn.comment('late');
+  conn.close();
+  expect(cleared).toBe(1);
+  expect(closed).toBe(1);
+  expect(conn.isOpen).toBe(false);
+  const body = ctx.response.snapshot().body;
+  expect(body).toBeInstanceOf(ReadableStream);
+  const text = await new Response(body as ReadableStream<Uint8Array>).text();
+  expect(text).toBe(': heartbeat\n\n');
 });

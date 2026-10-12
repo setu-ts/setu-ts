@@ -3,8 +3,7 @@
  * service registration, dispatch, and shutdown.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { GrpcService } from '../../src/services/grpc-service.ts';
 import {
   createFakeConnectRuntime,

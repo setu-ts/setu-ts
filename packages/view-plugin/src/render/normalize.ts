@@ -1,7 +1,7 @@
 /**
  * Rendered-value normalization — the one conversion every arm funnels through.
  *
- * Two runtime facts (measured against `@hono/hono@4.13.0`, M92 §1) make the
+ * Two runtime facts (measured against `hono@4.13.0`, M92 §1) make the
  * obvious implementation a silent defect, invisible to the type-checker:
  *
  * 1. `JSXNode.toString()` is statically typed `string` and returns a
@@ -24,7 +24,7 @@
  * @since 0.6.0
  */
 import type { Component } from '@setu-ts/common';
-import type { HtmlEscapedString } from '@hono/hono/utils/html';
+import type { HtmlEscapedString } from 'hono/utils/html';
 
 import { UnresolvedSuspenseError, ViewRenderError } from '../errors.ts';
 
@@ -65,7 +65,7 @@ export async function normalizeRendered(
   }
   // The rendering runtime's own "render nothing" values, matched here so a
   // top-level return behaves exactly as the same expression does nested.
-  // Measured against @hono/hono@4.13.0: as a CHILD, false / true / null /
+  // Measured against hono@4.13.0: as a CHILD, false / true / null /
   // undefined / '' all render as nothing while 0 and NaN render their text.
   // Without this, `(p) => p.show && <Banner/>` served the four-character body
   // `false` under a 200 — the whole page being the word "false".

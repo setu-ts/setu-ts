@@ -27,14 +27,21 @@ import type {
   TransactionIsolationLevel,
 } from '@setu-ts/common';
 import {
+  checkWritePrecondition,
   decodeCursor,
   keysetPredicate,
   mintNextCursor,
   resolveKeysetSort,
   sortFingerprint,
 } from '@setu-ts/common';
-import { DATABASE_POOL_CAPACITY } from '../../health/database-capacity.ts';
-import type { DatabasePoolCapacity } from '../../interfaces/index.ts';
+import {
+  DATABASE_POOL_CAPACITY,
+  DATABASE_QUERY_PROGRESS,
+  isSaturated,
+  PoolSaturatedProbeSkipped,
+  readPoolCapacity,
+} from '../../health/database-capacity.ts';
+import { isPoolExhaustion } from '../../errors/classify.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
 import { UnsupportedIsolationLevelError, UnsupportedQueryFeatureError } from '../../errors.ts';
@@ -204,12 +211,24 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Internal capacity-reader seam (M90b). Attached in the constructor ONLY
-   * when `poolStats` is configured; `DatabasePlugin` feature-detects it, and
-   * every other adapter — built-in or custom — carries no member, so
-   * `common`'s port and every non-Drizzle registration stay unchanged.
+   * The internal capacity-reader seams (M90b, M101a V8-3) are attached in the
+   * constructor under their symbol keys — see the constructor for what is
+   * attached when. They are NOT declared as class members: a computed-key
+   * member cannot be emitted under `isolatedDeclarations` (TS9038) even with
+   * an explicit type, so the keys are assigned through a symbol-keyed record
+   * cast and read back the same way (`database-capacity.ts`), leaving the
+   * runtime shape and the feature-detection contract unchanged.
    */
-  [DATABASE_POOL_CAPACITY]?: () => DatabasePoolCapacity;
+
+  /** Queries this adapter has seen resolve: `rawQuery` and every data-source call. */
+  #completedQueries = 0;
+
+  /**
+   * Whether the typed query seam (`getDrizzleDatabase` /
+   * `getDrizzleTransaction`) has handed out a native instance. Its queries
+   * bypass {@link #completedQueries}, so from then on progress is unobservable.
+   */
+  #nativeHandleIssued = false;
 
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
@@ -238,8 +257,21 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // what it returns, validated at read time by the plugin.
     const poolStats = (this._options as DrizzleAdapterOptions | undefined)?.poolStats;
     if (poolStats !== undefined) {
-      this[DATABASE_POOL_CAPACITY] = poolStats;
+      const seams = this as unknown as Record<symbol, unknown>;
+      seams[DATABASE_POOL_CAPACITY] = poolStats;
+      seams[DATABASE_QUERY_PROGRESS] = () =>
+        this.#nativeHandleIssued ? null : this.#completedQueries;
     }
+    // The typed-query seam (M70j) is attached here rather than declared as a
+    // computed-key method for the same TS9038 reason recorded on the capacity
+    // seams above; `readDrizzleQueryHandle` reads it structurally.
+    (this as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE] = () => {
+      if (!this._db || !this._configuredDatabase) {
+        throw new Error('DrizzleAdapter is not connected — call connect() first');
+      }
+      this.#nativeHandleIssued = true;
+      return { database: this._configuredDatabase, query: this._db, scope: 'outer' };
+    };
   }
 
   /** @inheritdoc */
@@ -251,7 +283,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._supportsIsolation = configured.supportsIsolation;
 
     try {
-      const orm = await import('npm:drizzle-orm@0.45.2');
+      const orm = await import('drizzle-orm');
       const ns = orm as Record<string, unknown>;
       // The explicit option wins; otherwise the instance's own dialect object
       // names it. Drizzle publishes no dialect discriminant, so the class name
@@ -363,22 +395,33 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * `rawQuery`, so the probe cannot diverge from the query path. `false`
    * for an adapter that lost its connection or was refused, so an outage
    * reads as a fact.
+   *
+   * Pool saturation is NOT an outage (M101a V8-3), and the probe REJECTS for
+   * it rather than answering `false`, so the service reports `undefined`:
+   *
+   * - When `poolStats` reports every connection busy with callers waiting
+   *   (`idle === 0 && waiting > 0`), no `SELECT 1` is queued at all — a
+   *   queued probe is one more waiter on the pool it is measuring.
+   * - A rejection that IS pool exhaustion (the node-postgres connection
+   *   timeout) is rethrown, since the database never answered either way.
+   *
+   * The `database` indicator then reads the capacity snapshot to tell a
+   * saturated pool (`up`, `reachable: 'unknown'`) from an unanswered probe.
    */
   async #probeWithRawQuery(): Promise<boolean> {
+    const capacity = readPoolCapacity(this);
+    if (capacity !== undefined && isSaturated(capacity)) {
+      throw new PoolSaturatedProbeSkipped();
+    }
     try {
       await this.rawQuery('SELECT 1');
       return true;
-    } catch {
+    } catch (error) {
+      if (isPoolExhaustion(error)) {
+        throw error;
+      }
       return false;
     }
-  }
-
-  /** Provide the exact configured instance to the package's typed Drizzle accessor. */
-  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
-    if (!this._db || !this._configuredDatabase) {
-      throw new Error('DrizzleAdapter is not connected — call connect() first');
-    }
-    return { database: this._configuredDatabase, query: this._db, scope: 'outer' };
   }
 
   /**
@@ -422,13 +465,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const rollbackSentinel = { code: 'ROLLBACK_SENTINEL' };
 
     const handle: IAdapterTransaction & DrizzleQueryHandleProvider = {
-      [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
+      [DRIZZLE_QUERY_HANDLE]: (): NativeDrizzleQueryHandle => {
+        this.#nativeHandleIssued = true;
         return { database: configuredDatabase, query: tx, scope: 'transaction' };
       },
 
-      createDataSource(entity: string): DataSource {
-        return createDrizzleDataSourceInner(tx, entity, tables, operators, entities);
-      },
+      createDataSource: (entity: string): DataSource =>
+        this.#countingCompletions(
+          createDrizzleDataSourceInner(tx, entity, tables, operators, entities),
+        ),
 
       async commit(): Promise<void> {
         hold.resolve();
@@ -477,6 +522,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // function`, so `query()` could never work on any driver.
     const statement = new sqlClass(bindRawStatement(sql, params ?? [], tag));
     const result = await execute.call(this._db, statement);
+    this.#completedQueries++;
     return (result as { rows?: T[] }).rows ?? result as T[];
   }
 
@@ -490,13 +536,33 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
     const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
-    return createDrizzleDataSourceInner(
+    return this.#countingCompletions(createDrizzleDataSourceInner(
       this._db,
       entity,
       this.resolveTables(),
       this._operators!,
       entities,
-    );
+    ));
+  }
+
+  /**
+   * Wraps every method of a data source so each call that RESOLVES counts as
+   * a completed query (M101a V8-3). A rejection is not progress: a hung
+   * database rejects at the pool's connection timeout, if at all.
+   *
+   * @param source - The data source to wrap
+   * @returns A data source with the same methods and behavior
+   */
+  #countingCompletions(source: DataSource): DataSource {
+    const wrapped: Record<string, unknown> = {};
+    for (const [name, method] of Object.entries(source)) {
+      wrapped[name] = async (...args: unknown[]): Promise<unknown> => {
+        const result = await (method as (...a: unknown[]) => Promise<unknown>)(...args);
+        this.#completedQueries++;
+        return result;
+      };
+    }
+    return wrapped as unknown as DataSource;
   }
 
   /**
@@ -701,6 +767,51 @@ function createDrizzleDataSourceInner(
       return rows.length > 0;
     },
 
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', checked.problem);
+      }
+      where = checked.where;
+      data = checked.data;
+      assertPreconditionColumns(drizzleTable, where);
+      const values = keyValues(id, keyColumns, `updateWhere on '${entity}'`);
+      const keyPredicates = keyColumns.map((col, index) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+      );
+      const predicate = operators.and(
+        ...keyPredicates,
+        predicateFor(drizzleTable, entity, where, operators),
+      );
+      const rows = await returningRows(
+        instance.update(drizzleTable).set(data).where!(predicate),
+        entity,
+        'update',
+      );
+      return rows[0] ?? null;
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', checked.problem);
+      }
+      where = checked.where;
+      assertPreconditionColumns(drizzleTable, where);
+      const values = keyValues(id, keyColumns, `deleteWhere on '${entity}'`);
+      const keyPredicates = keyColumns.map((col, index) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+      );
+      const predicate = operators.and(
+        ...keyPredicates,
+        predicateFor(drizzleTable, entity, where, operators),
+      );
+      const rows = await returningRows(
+        instance.delete(drizzleTable).where(predicate),
+        entity,
+        'delete',
+      );
+      return rows.length > 0;
+    },
     async count(where, filter) {
       // `count(*)` is selected so the database returns one aggregate row. A
       // bare `select()` would stream every matching row back just to measure
@@ -874,6 +985,23 @@ function hasColumn(value: unknown, field: string): boolean {
   return value !== null && typeof value === 'object' &&
     Object.prototype.hasOwnProperty.call(value, field) &&
     (value as Record<string, unknown>)[field] !== undefined;
+}
+
+/**
+ * Refuses a write precondition naming a column the table lacks, before any
+ * statement is built. The refusal names neither the field nor its value, which
+ * {@linkcode columnFor}'s message would.
+ */
+function assertPreconditionColumns(table: DrizzleTable, where: Record<string, unknown>): void {
+  for (const field of Object.keys(where)) {
+    if (!hasColumn(table, field)) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'drizzle',
+        'The write precondition names a column the table does not have.',
+      );
+    }
+  }
 }
 
 function columnFor(table: DrizzleTable, entity: string, field: string): unknown {

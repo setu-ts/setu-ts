@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -325,4 +324,19 @@ describe('InMemoryBroker request-reply', () => {
     expect([r1, r2].sort()).toEqual(['a:1', 'b:2']);
     await broker.disconnect();
   });
+});
+
+it('makes repeated unsubscribe safe across disconnect', async () => {
+  const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
+  await broker.connect();
+  let deliveries = 0;
+  const sub = await broker.subscribe('topic', () => {
+    deliveries++;
+  });
+  await sub.unsubscribe();
+  await sub.unsubscribe();
+  await broker.publish('topic', 'ignored');
+  await broker.disconnect();
+  await sub.unsubscribe();
+  expect(deliveries).toBe(0);
 });

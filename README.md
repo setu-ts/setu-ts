@@ -25,18 +25,19 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: all 49 packages are published in `v0.8.0` and are live on JSR.**
+> **Status: `v0.9.0` publishes 52 packages to npm under `@setu-ts`** — the first npm release. Every
+> earlier version remains on JSR; nothing new is published there.
 >
 > <!-- version:history -->
 >
-> The kernel, the runtime layer, 37 plugins, the three starters, the test utilities, the client SDK,
+> The kernel, the runtime layer, 41 plugins, the three starters, the test utilities, the client SDK,
 > and the `setu` CLI are implemented, tested, and documented.
 >
 > <!-- version:history -->
 >
-> **Every release from `v0.2.0` on is a normal release rather than a prerelease.** JSR points
-> `latest` at the current one, so a bare `deno add jsr:@setu-ts/kernel` resolves, where every
-> `alpha` version had to be pinned by hand.
+> **Every release from `v0.2.0` on is a normal release rather than a prerelease.** The registry
+> points `latest` at the current one, so a bare install resolves, where every `alpha` version had to
+> be pinned by hand.
 >
 > The label changed; the stability promise did not. This is pre-1.0 software — under semver `0.x`
 > the public API is not stable, and a minor bump carries breaking changes. See
@@ -65,8 +66,8 @@ opinion vs. flexibility.**
 - 🌍 **Runtime independence** — Write once, run on Node.js, Deno, Bun, and Cloudflare Workers.
 - 🧩 **Plugin-first architecture** — Every capability is a plugin. Start minimal, add what you need,
   replace what you do not like.
-- 🏢 **Enterprise capabilities** — Authentication, RBAC, CQRS, event sourcing, multi-tenancy, audit
-  logging, secrets management, and more.
+- 🏢 **Enterprise capabilities** — Authentication, RBAC, CQRS, domain and integration events,
+  multi-tenancy, audit logging, secrets management, and more.
 
 Without becoming heavyweight. Without forcing opinions. Without locking you in.
 
@@ -84,7 +85,7 @@ Without becoming heavyweight. Without forcing opinions. Without locking you in.
 | **Type safety**         | Strict TypeScript throughout. No `any` in public APIs. Full type inference for services, config, and routes.         |
 | **Tree-shakeable**      | Every package uses ES modules and subpath exports. You ship only what you use.                                       |
 | **Production ready**    | Built for scale: graceful shutdown, distributed locking, circuit breakers, audit trails, and observability.          |
-| **Enterprise focused**  | Patterns that large organizations need: multi-tenancy, feature flags, secrets management, CQRS, event sourcing.      |
+| **Enterprise focused**  | Patterns that large organizations need: multi-tenancy, feature flags, secrets management, CQRS, domain events.       |
 
 ---
 
@@ -121,12 +122,12 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Data
 
-| Feature       | Status | Package                | Description                                                                      |
-| ------------- | ------ | ---------------------- | -------------------------------------------------------------------------------- |
-| Database      | ✅     | `database-plugin`      | Memory, Prisma, Drizzle, MongoDB, DynamoDB — repository pattern and Unit of Work |
-| Caching       | ✅     | `cache-plugin`         | Memory (LRU), Redis, noop; transparent response caching                          |
-| Storage       | ✅     | `storage-plugin`       | S3, B2, GCS, Azure Blob, local, memory; upload middleware                        |
-| Multi-tenancy | ✅     | `multi-tenancy-plugin` | Subdomain/header/path/JWT resolution; schema/database/column isolation           |
+| Feature       | Status | Package                | Description                                                                                           |
+| ------------- | ------ | ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| Database      | ✅     | `database-plugin`      | Memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable — repository pattern and Unit of Work |
+| Caching       | ✅     | `cache-plugin`         | Memory (LRU), Redis, noop; transparent response caching                                               |
+| Storage       | ✅     | `storage-plugin`       | S3, B2, GCS, Azure Blob, local, memory; upload middleware                                             |
+| Multi-tenancy | ✅     | `multi-tenancy-plugin` | Subdomain/header/path/JWT resolution; column isolation, schema/database strategies for a custom store |
 
 ### Messaging and background work
 
@@ -150,25 +151,27 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Real-time and rendering
 
-| Feature               | Status | Package                     | Description                                                   |
-| --------------------- | ------ | --------------------------- | ------------------------------------------------------------- |
-| Server-Sent Events    | ✅     | `sse-plugin`                | One-way streaming, named channels, heartbeat, `Last-Event-ID` |
-| WebSocket             | ✅     | `websocket-plugin`          | Full-duplex on all four runtimes; rooms, heartbeat, limits    |
-| Cross-replica fan-out | ✅     | `realtime-backplane-plugin` | Rooms and channels reach clients on other replicas            |
-| React SSR             | ✅     | `react-router-plugin`       | React Router v7 framework mode with file-based routing        |
-| Server-rendered views | ✅     | `view-plugin`               | `@Render` + `renderView` over hono-jsx / hono-html engines    |
+| Feature               | Status | Package                     | Description                                                                        |
+| --------------------- | ------ | --------------------------- | ---------------------------------------------------------------------------------- |
+| Server-Sent Events    | ✅     | `sse-plugin`                | One-way streaming, named channels, heartbeat, `Last-Event-ID`                      |
+| WebSocket             | ✅     | `websocket-plugin`          | Full-duplex on all four runtimes; rooms, heartbeat, limits                         |
+| Cross-replica fan-out | ✅     | `realtime-backplane-plugin` | Rooms and channels reach clients on other replicas                                 |
+| React SSR             | ✅     | `react-router-plugin`       | React Router v8 framework mode with file-based routing                             |
+| Server-rendered views | ✅     | `view-plugin`               | `@Render` + `renderView` over hono-jsx / hono-html engines                         |
+| Localization          | ✅     | `localization-plugin`       | Message catalogues, request locale resolution, a formatter shared with the browser |
 
 ### Operations
 
-| Feature       | Status | Package             | Description                                                  |
-| ------------- | ------ | ------------------- | ------------------------------------------------------------ |
-| Health checks | ✅     | `health-plugin`     | `/health`, `/live`, `/ready` with pluggable indicators       |
-| Metrics       | ✅     | `metrics-plugin`    | Prometheus counters, gauges, histograms, summaries           |
-| Telemetry     | ✅     | `telemetry-plugin`  | OpenTelemetry tracing, W3C propagation, auto-instrumentation |
-| OpenAPI       | ✅     | `openapi-plugin`    | OpenAPI 3.1 from routes, Zod transform, Swagger UI           |
-| Audit logging | ✅     | `audit-plugin`      | Immutable trail over memory, log, database, or file          |
-| Resilience    | ✅     | `resilience-plugin` | Circuit breaker, retry, timeout, bulkhead                    |
-| Secrets       | ✅     | `secrets-plugin`    | Env, AWS KMS, GCP Secret Manager, Azure Key Vault, Vault     |
+| Feature       | Status | Package              | Description                                                                                     |
+| ------------- | ------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| Health checks | ✅     | `health-plugin`      | `/health`, `/live`, `/ready` with pluggable indicators                                          |
+| Metrics       | ✅     | `metrics-plugin`     | Prometheus counters, gauges, histograms, summaries                                              |
+| Telemetry     | ✅     | `telemetry-plugin`   | OpenTelemetry tracing, W3C propagation, auto-instrumentation                                    |
+| OpenAPI       | ✅     | `openapi-plugin`     | OpenAPI 3.1 from routes, Zod transform, Swagger UI                                              |
+| Audit logging | ✅     | `audit-plugin`       | Immutable trail over memory, log, database, or file                                             |
+| Resilience    | ✅     | `resilience-plugin`  | Circuit breaker, retry, timeout, bulkhead                                                       |
+| Idempotency   | ✅     | `idempotency-plugin` | Answers a repeat of completed work from its record or skips it (memory, Redis, Durable Objects) |
+| Secrets       | ✅     | `secrets-plugin`     | Env, AWS KMS, GCP Secret Manager, Azure Key Vault, Vault                                        |
 
 ### Delivery and ergonomics
 
@@ -194,19 +197,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 ## Installation
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/kernel@^0.8.0 jsr:@setu-ts/runtime@^0.8.0
-
-# Node
-npx jsr add @setu-ts/kernel@^0.8.0 @setu-ts/runtime@^0.8.0
+# Node (pnpm add / yarn add work the same way)
+npm install @setu-ts/kernel@^0.9.0 @setu-ts/runtime@^0.9.0
 
 # Bun
-bunx jsr add @setu-ts/kernel@^0.8.0 @setu-ts/runtime@^0.8.0
+bun add @setu-ts/kernel@^0.9.0 @setu-ts/runtime@^0.9.0
+
+# Deno
+deno add npm:@setu-ts/kernel@^0.9.0 npm:@setu-ts/runtime@^0.9.0
 ```
 
-**The `@^0.8.0` is recommended, not required.** `v0.8.0` is a normal release, so a bare
-`deno add jsr:@setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet the
-next breaking release as a deliberate upgrade than as a surprise — see [Versioning](#versioning).
+**The `@^0.9.0` is recommended, not required.** npm points `latest` at the current release, so a
+bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
+the next breaking release as a deliberate upgrade than as a surprise — see
+[Versioning](#versioning). Earlier releases are on JSR only; see the
+[upgrading guide](docs/upgrading.md) to move an existing project to npm.
 
 <!-- version:history -->
 
@@ -219,17 +224,18 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
-
-setu new my-app
-cd my-app && setu generate service billing
+npx @setu-ts/cli new my-app --template rest      # or: npm create @setu-ts my-app -- --template rest
+cd my-app && npm install && npm start
 ```
 
-The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
+`setu` is a Node program on npm; `npm install --global @setu-ts/cli` puts it on your `PATH`. Node is
+the default target — `--runtime deno`, `bun` or `cloudflare-workers` scaffolds the others, each
+installing the framework from npm with its own package manager.
 
-All 49 workspace members are published on JSR, in `v0.8.0`: the core (`common`, `kernel`, `runtime`,
-`exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, and the
-`cli`.
+All 52 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
+`exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, the `cli`
+and `create` — on npm from `v0.9.0`, which publishes `localization-plugin`, `idempotency-plugin` and
+`create` for the first time. Earlier releases were published on JSR.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -246,8 +252,14 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 | **Minor** — `0.5` → `0.6`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
 | **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
 
-Under semver a `^0.8.0` range means `>=0.8.0 <0.9.0`, so a caret pin absorbs patches and stops at
+Under semver a `^0.9.0` range means `>=0.9.0 <0.10.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
+
+From `0.9.0` the **patch is the normal release** and breaking changes are batched into an occasional
+minor: a change that would break a caller or an implementor ships behind its old behaviour first (a
+flag, an optional member, a deprecation) and the removal waits for the next minor. Two gates hold
+the line — a milestone plan must state what it breaks and which minor carries it, and
+`release:verify` refuses a patch whose changelog carries a `BREAKING` entry.
 
 <!-- version:history -->
 
@@ -260,7 +272,8 @@ Node/Bun compatibility suites as release gates. Until then, read the CHANGELOG b
 
 ## Quick Example
 
-The smallest possible application — just the kernel and a runtime:
+A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
+installed above (`npm install @setu-ts/logger-plugin@^0.9.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -281,24 +294,33 @@ app.router.get('/', (ctx) => {
 await app.start({ port: 3000 });
 ```
 
+and run it with `deno run --allow-net --allow-env main.ts` (`--allow-env` because the runtime plugin
+reads the process environment).
+
 No decorators. No DI. No modules. Just a router, a runtime, and a logger.
 
 Add capabilities as you need them:
 
 ```typescript
-import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { ConfigPlugin, loadConfig } from '@setu-ts/config-plugin';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
-app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
+// Plugin options are built before any plugin registers, so a value a plugin
+// needs at construction comes from configuration loaded first. The same
+// snapshot is then registered, so handlers read exactly these values.
+const config = await loadConfig(createRuntimeServices(), { validationSchema: AppConfigSchema });
+
+app.register(ConfigPlugin({ instance: config }));
 app.register(ValidationPlugin());
 // A Prisma v7 client is generated into an application-owned output path and
 // needs a driver adapter, so the application constructs it and injects it.
 app.register(DatabasePlugin({ type: 'prisma', options: { prismaClient } }));
-// Secrets come from the config capability — never process.env (runtime independence)
-app.register(AuthPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
+// Secrets come from configuration, never process.env (runtime independence).
+app.register(AuthPlugin({ jwt: { secret: config.getOrThrow<string>('JWT_SECRET') } }));
 app.register(OpenApiPlugin({ title: 'My API', version: '1.0.0' }));
 ```
 
@@ -349,17 +371,18 @@ graph TB
 
 ## Repository Structure
 
-A Deno 2 workspace. Every package is published independently to JSR.
+A Deno 2 workspace. Every package is published independently to npm; releases before `v0.9.0` were
+published to JSR.
 
 ```
 setu-ts/
-├── packages/              # 49 workspace members, all published on JSR
+├── packages/              # 52 workspace members, published on npm (JSR before v0.9.0)
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)
 │   ├── exceptions/        # Exception factories and error-handler middleware
 │   ├── testing/           # Test utilities
-│   ├── *-plugin/          # 33 capability plugins
+│   ├── *-plugin/          # 41 capability plugins
 │   ├── cli/               # CLI tool — `setu`, project scaffolding and code generation
 │   ├── sdk/               # Client SDK — HTTP client, interceptors, resilience, OpenAPI codegen
 │   └── starters/          # Plugin bundles — REST, microservice, full-stack starters (M36)

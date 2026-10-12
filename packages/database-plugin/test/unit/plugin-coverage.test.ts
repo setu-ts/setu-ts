@@ -6,8 +6,7 @@
  * and named-connection token branch to raise database-plugin.ts function
  * coverage to ≥90%.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 import { createDrizzleDatabase } from '../../src/index.ts';

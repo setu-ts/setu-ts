@@ -13,6 +13,8 @@
  *
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import { methodDecorator } from '../metadata/context-bridge.ts';
 import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
 

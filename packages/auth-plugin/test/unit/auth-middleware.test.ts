@@ -2,8 +2,7 @@
  * Tests for auth middleware.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
 import { sealRequestIdentity } from '@setu-ts/common';
 import type {

@@ -27,7 +27,7 @@
  */
 
 import type { IClientTiming } from '../http/contracts.ts';
-import type { CircuitBreakerPolicy } from 'jsr:@setu-ts/common@^0.8.0';
+import type { CircuitBreakerPolicy } from '@setu-ts/common';
 import { ClientCircuitOpenError } from '../errors.ts';
 
 interface State {
@@ -48,7 +48,7 @@ export function createCircuitBreaker(
   policy: CircuitBreakerPolicy,
   timing: IClientTiming,
   isFailure: (error: unknown) => boolean,
-) {
+): { execute: <T>(fn: () => Promise<T>) => Promise<T> } {
   const state: State = { failures: [], openedAt: null, halfOpenInFlight: false };
 
   const execute = async <T>(fn: () => Promise<T>): Promise<T> => {

@@ -14,6 +14,32 @@ import { loadConfig } from '@setu-ts/config-plugin';
 import type { FullStackStarterOptions } from './options.ts';
 import { createFullStackApp } from './app.ts';
 
+const CONFIG_SNAPSHOTS = new WeakMap<IKernelApplication, IConfig>();
+
+/** Error thrown when an application was not built by the config-driven factory. @since 0.9.0 */
+export class FullStackConfigUnavailableError extends Error {
+  /** Stable error-class name for logs and cross-realm diagnostics. */
+  override readonly name = 'FullStackConfigUnavailableError';
+
+  constructor() {
+    super('No full-stack configuration snapshot is associated with this application.');
+  }
+}
+
+/**
+ * Returns the exact configuration snapshot used to compose an application.
+ *
+ * @param app - Application returned by {@linkcode createFullStackAppFromConfig}
+ * @returns The configuration snapshot passed to the factory callback
+ * @throws {FullStackConfigUnavailableError} When the app came from another factory
+ * @since 0.9.0
+ */
+export function fullStackConfigOf(app: IKernelApplication): IConfig {
+  const config = CONFIG_SNAPSHOTS.get(app);
+  if (config === undefined) throw new FullStackConfigUnavailableError();
+  return config;
+}
+
 /**
  * Options for {@linkcode createFullStackAppFromConfig}.
  *
@@ -150,11 +176,13 @@ export async function createFullStackAppFromConfig(
 
   const built = build(config);
 
-  return createFullStackApp({
+  const app = createFullStackApp({
     ...built,
     // `instance` last so the snapshot always wins: without it the plugin would
     // load configuration a second time, and an application could branch on one
     // snapshot while serving another.
     config: { ...configOptions, ...built.config, instance: config },
   });
+  CONFIG_SNAPSHOTS.set(app, config);
+  return app;
 }

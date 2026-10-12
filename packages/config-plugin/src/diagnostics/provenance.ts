@@ -20,6 +20,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 
 import type {
   ConfigDiagnosticsSnapshot,
@@ -45,7 +46,8 @@ export const CONFIG_DIAGNOSTICS_ERRORS = {
   tooManyKeys: 'Config diagnostics: more than 128 approved keys.',
   tooManyFiles: 'Config diagnostics: more than eight approved files.',
   aliasBytes: 'Config diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Config diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Config diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Config diagnostics: an alias is not unique.',
   badInstanceId: 'Config diagnostics: snapshot requires a non-empty instance identifier.',
 } as const;
@@ -66,17 +68,6 @@ export const MAX_OVERRIDDEN_ALIASES = 8;
  * @internal
  */
 export const MAX_CONFIG_SNAPSHOT_BYTES = 262_144;
-
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /** Reports whether a value is a plain non-null, non-array object. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -156,7 +147,7 @@ export function compileConfigDiagnosticsPolicy(
     if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
       throw new RangeError(CONFIG_DIAGNOSTICS_ERRORS.aliasBytes);
     }
-    if (hasControlCharacter(alias)) {
+    if (hasForbiddenAliasCharacter(alias)) {
       throw new RangeError(CONFIG_DIAGNOSTICS_ERRORS.aliasControl);
     }
     if (seenKeyAliases.has(alias)) {
@@ -185,7 +176,7 @@ export function compileConfigDiagnosticsPolicy(
       if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
         throw new RangeError(CONFIG_DIAGNOSTICS_ERRORS.aliasBytes);
       }
-      if (hasControlCharacter(alias)) {
+      if (hasForbiddenAliasCharacter(alias)) {
         throw new RangeError(CONFIG_DIAGNOSTICS_ERRORS.aliasControl);
       }
       if (seenFileAliases.has(alias)) {

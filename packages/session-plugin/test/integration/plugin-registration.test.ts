@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -237,13 +236,13 @@ describe('SessionPlugin registration', () => {
       plugins: [RuntimePlugin(), SessionPlugin({ secretName: 'M48_TEST_SESSION_SECRET' })],
     });
 
-    Deno.env.set('M48_TEST_SESSION_SECRET', SECRET);
+    process.env['M48_TEST_SESSION_SECRET'] = SECRET;
     try {
       await app.start();
       expect(app.services.has(CAPABILITIES.SESSION)).toBe(true);
       await app.stop();
     } finally {
-      Deno.env.delete('M48_TEST_SESSION_SECRET');
+      delete process.env['M48_TEST_SESSION_SECRET'];
     }
   });
 });

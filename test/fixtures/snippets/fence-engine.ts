@@ -74,19 +74,21 @@ export function fenceExtension(lang: string): 'ts' | 'tsx' {
   return lang === 'tsx' || lang === 'jsx' ? 'tsx' : 'ts';
 }
 
-/** The eleven curated guides whose copyable fences must compile or be classified. */
+/** The thirteen curated guides whose copyable fences must compile or be classified. */
 export const GUIDES = [
   'docs/getting-started.md',
   'docs/programmatic-api.md',
   'docs/custom-plugins.md',
   'docs/cli.md',
   'docs/plugin-architecture.md',
+  'docs/how-it-fits-together.md',
   'docs/examples.md',
   'docs/decorators.md',
   'docs/mvc.md',
   'docs/migration-fastify.md',
   'docs/migration-nestjs.md',
   'docs/runtime-deployment.md',
+  'docs/authorization.md',
 ] as const;
 
 /** The committed snippet import map used for all fence compilation. */
@@ -843,21 +845,24 @@ export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' 
  * fence still type-checks `createApp()`'s result against the real
  * `IKernelApplication`.
  *
- * Both fence compilers write their fences one directory below `.tmp`, so one
- * stub at `.tmp/setu.config.ts` serves `../setu.config.ts` from either.
+ * Both fence compilers write their fences one directory below `.tmp`. Tests
+ * import `../setu.config.ts`, while entry modules import `./setu.config.ts`,
+ * so each layout needs a stub.
  *
  * @param scratchDir - The directory the caller writes its fences into
  */
 export async function writeProjectStubs(scratchDir: string): Promise<void> {
   const parent = scratchDir.replace(/\/[^/]+$/, '');
-  await Deno.mkdir(parent, { recursive: true });
+  await Deno.mkdir(scratchDir, { recursive: true });
+  const source = "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
+    'export function createApp(): IKernelApplication {\n' +
+    '  return createApplication({ plugins: [] });\n' +
+    '}\n';
   await Deno.writeTextFile(
     `${parent}/setu.config.ts`,
-    "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
-      'export function createApp(): IKernelApplication {\n' +
-      '  return createApplication({ plugins: [] });\n' +
-      '}\n',
+    source,
   );
+  await Deno.writeTextFile(`${scratchDir}/setu.config.ts`, source);
 }
 
 /**

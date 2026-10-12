@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createStaticHandler, normalizePrefix } from '../../src/handler/static-handler.ts';
 import type { RouteHandler } from '@setu-ts/common';
 

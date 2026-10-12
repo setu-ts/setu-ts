@@ -3,8 +3,7 @@
  * RuntimePlugin, driven through `app.inject` so the resolved IResilienceService
  * runs against the real runtime clock and timers (the REAL path, not the fake).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IResilienceService } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

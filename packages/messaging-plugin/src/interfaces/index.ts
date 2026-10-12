@@ -6,12 +6,18 @@
 
 import type {
   ConnectionErrorReporter,
+  IInboxStore,
   IIngressBehavior,
+  IOutboxStore,
+  IOutboxWriteScope,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RegistryFactory,
   SubscribeOptions,
 } from '@setu-ts/common';
+import type { IntegrationEventDefinition } from '../integration/definition.ts';
+import type { IntegrationEventMetadata } from '../integration/publish.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 
 /**
@@ -31,11 +37,23 @@ export interface IRedisStreamsClient {
   ): Promise<string>;
   /** Create or manage consumer groups. */
   xgroup(
-    command: 'CREATE' | 'DELETE' | 'SETID',
+    command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
     ...args: string[]
-  ): Promise<string | 'OK'>;
+  ): Promise<string | number>;
   /** Read messages from consumer groups. */
   xreadgroup(...args: string[]): Promise<unknown[][] | null>;
+  /** Extended PEL query: [id, owner, idle milliseconds, delivery count]. */
+  xpending(...args: string[]): Promise<Array<[string, string, number, number]>>;
+  /** Atomically claims idle entries, returning [id, field/value list]. */
+  xclaim(...args: string[]): Promise<Array<[string, string[]] | null>>;
+  /** Consumer information as alternating field/value arrays (ioredis RESP2). */
+  xinfo(...args: string[]): Promise<unknown[][]>;
+  /**
+   * Optional ioredis command surface, used for an atomic foreign-consumer sweep.
+   * Without it, foreign consumers are retained: a snapshot followed by
+   * DELCONSUMER could drop work delivered in between. Self-cleanup still runs.
+   */
+  call?(command: string, ...args: string[]): Promise<unknown>;
   /** Acknowledge processed messages. */
   xack(name: string, group: string, ...ids: string[]): Promise<number>;
   /** Quit/close the connection. */
@@ -65,6 +83,19 @@ export interface IRedisStreamsClient {
 export interface IAmqpConnection {
   /** Create a channel. */
   createChannel(): Promise<unknown>;
+  /**
+   * Create a channel in publisher-confirm mode (optional).
+   *
+   * Real amqplib connections always have it. When present the broker
+   * publishes on a confirm channel, so `publish()` resolves only once the
+   * broker has accepted the message and rejects when it refuses it. A facade
+   * without it keeps a plain channel — `publish()` then resolves before the
+   * broker has stored anything — and the broker logs one warning saying so.
+   *
+   * @returns A channel whose `publish` takes a confirmation callback
+   * @since 0.9.0
+   */
+  createConfirmChannel?(): Promise<unknown>;
   /** Close the connection. */
   close(): Promise<void>;
   /**
@@ -243,8 +274,8 @@ export interface MessagingCommonOptions {
    * the topic as `name`, the delivered message as `payload`, and the
    * transport `headers` from `MessageMetadata` (absent when the transport
    * carried no channel — there is deliberately NO `attempt`: brokers
-   * redeliver and none tracks a delivery count), and runs in declared order
-   * ahead of the handler. A behaviour that returns without calling `next()`
+   * redeliver, but `MessageMetadata` exposes no delivery count), and runs in
+   * declared order ahead of the handler. A behaviour that returns without calling `next()`
    * short-circuits: the handler never sees the message. A behaviour that
    * throws follows the messaging handler's existing rejection path. The chain
    * wraps SUBSCRIBE handlers only — `respond` (RPC) is deliberately not
@@ -290,6 +321,45 @@ export interface MessagingCommonOptions {
    * @since 0.4.0
    */
   readonly chainReadyTimeoutMs?: number;
+  /**
+   * The transactional outbox (M107). When set, the plugin registers an
+   * {@linkcode IOutbox} under `CAPABILITIES.OUTBOX` (`outbox.<name>` for a
+   * named instance) and an `outbox` health indicator. At `onInit` it resolves
+   * the store(s), runs each store's `verify()` — a refusal fails `start()` —
+   * and, unless `relay.schedule` is `false`, schedules the relay
+   * (`outbox-relay[.<name>]`, every `relay.intervalMs`) and the purge
+   * (`outbox-purge[.<name>]`, every `purgeIntervalMs`) on
+   * `CAPABILITIES.SCHEDULER`; with no scheduler registered `start()` rejects
+   * `OutboxRelayUnscheduledError`. On shutdown the relay is drained in an
+   * `onShutdown` hook, before any close hook — the broker's included.
+   *
+   * Every numeric option is validated when `MessagingPlugin(...)` is called.
+   * Absent, nothing changes: no capability, hook, indicator or ordering edge
+   * is added.
+   *
+   * @since 0.9.0
+   */
+  readonly outbox?: OutboxOptions;
+  /**
+   * The consumer inbox (M108). When set, the plugin registers an
+   * {@linkcode IInbox} under `CAPABILITIES.INBOX` (`inbox.<name>` for a named
+   * instance) and an `inbox` health indicator, so that
+   * `onIntegrationEvent(definition, handler, { inbox: { consumer } })`
+   * subscriptions apply each event's database writes once per consumer. At
+   * `onInit` it resolves the store, runs its `verify()` — a refusal fails
+   * `start()` — and, unless `purge.schedule` is `false`, schedules the
+   * retention purge (`inbox-purge[.<name>]`) on `CAPABILITIES.SCHEDULER`;
+   * with no scheduler registered `start()` rejects
+   * `InboxPurgeUnscheduledError`. The inbox closes after the broker
+   * disconnects, so no in-flight delivery is refused during a stop.
+   *
+   * Every numeric option is validated when `MessagingPlugin(...)` is called.
+   * Absent, nothing changes: no capability, hook, indicator or ordering edge
+   * is added.
+   *
+   * @since 0.9.0
+   */
+  readonly inbox?: InboxOptions;
 }
 
 /**
@@ -360,11 +430,41 @@ export interface MemoryMessagingOptions extends MessagingCommonOptions {
 }
 
 /**
+ * Consumer delivery budget, tiered delays, and application failure classification.
+ * Defaults and delivery lease semantics depend on the broker.
+ * @since 0.9.0
+ */
+export interface ConsumerRetryOptions {
+  /** Positive safe integer delivery budget, including the initial attempt. @since 0.9.0 */
+  readonly maxAttempts?: number;
+  /** Nonempty, nondecreasing positive integer milliseconds ≤2147483647. @since 0.9.0 */
+  readonly delaysMs?: readonly number[];
+  /** False dead-letters immediately; a throwing classifier is logged and retries. @since 0.9.0 */
+  readonly isRetryable?: (error: unknown) => boolean;
+}
+
+/**
  * Redis Streams arm.
  *
  * @since 0.1.0
  */
 export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Consumer retry policy. maxAttempts includes the initial delivery (default 5).
+   * delaysMs defaults to [30000, 60000, 300000, 600000]; a nonempty,
+   * nondecreasing list of positive integer milliseconds ≤2147483647.
+   * The first delay must exceed the longest handler run to avoid concurrent
+   * processing by another replica. No false arm: failed messages are retried.
+   * @since 0.9.0
+   */
+  consumerRetry?: ConsumerRetryOptions;
+  /** Reclaim timer in positive integer ms ≤2147483647. Default 5000. @since 0.9.0 */
+  reclaimIntervalMs?: number;
+  /** Approximate DLQ MAXLEN, a positive safe integer. Default 10000. @since 0.9.0 */
+  deadLetterMaxLen?: number;
+  /** Foreign-consumer inactivity in positive integer ms ≤2147483647. Default 3600000. @since 0.9.0 */
+  consumerIdleSweepMs?: number;
+
   broker: 'redis-streams';
   url?: string;
   client?: IRedisStreamsClient;
@@ -379,11 +479,59 @@ export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Durable group retries; false retains nack-and-discard for operator DLX policies.
+   * Default maxAttempts 5, delaysMs [5000, 30000, 120000, 600000].
+   * Deterministic failures dead-letter immediately. Private queues and RPC reply inboxes discard.
+   * With retries enabled, group suffixes .dead and .retry.<digits>ms are reserved.
+   * Generated helper names must fit 255 UTF-8 bytes; a retrying group on an injected channel without
+   * confirms and on/off return listeners is refused at subscribe().
+   * @since 0.9.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /**
+   * Q.dead retention cap (positive safe integer, default 10000).
+   * Changing it requires draining and deleting the existing dead queue before restart.
+   * @since 0.9.0
+   */
+  deadLetterMaxLength?: number;
+  /** Per-consumer unacked delivery limit, integer 1–65535, default 32. @since 0.9.0 */
+  prefetch?: number;
   broker: 'rabbitmq';
   url?: string;
   client?: IAmqpConnection;
   exchangeName?: string;
   defaultQueue?: string;
+  /**
+   * Publish every message persistent (`delivery_mode` 2). Default `true`.
+   *
+   * Consumer-group queues are declared durable, and a durable queue keeps
+   * only PERSISTENT messages across a broker restart: before 0.9.0 every
+   * message was published transient, so a RabbitMQ restart emptied every
+   * queue of messages not yet consumed. `false` restores that behaviour, for
+   * deliberately ephemeral traffic where losing in-flight messages on a
+   * restart is acceptable in exchange for skipping the broker's disk write.
+   *
+   * @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one `publish()`, in milliseconds. Default `15000`; `0` waits
+   * without a bound.
+   *
+   * It covers every broker round trip a publish makes — the exchange assert,
+   * and, on a confirm channel (a real amqplib connection always opens one),
+   * the wait for RabbitMQ to accept the message. `publish()` resolves once
+   * RabbitMQ has accepted it, rejects when it refuses it or the channel closes
+   * first, and rejects when the bound expires: a paused broker keeps its
+   * socket open, so without a bound the call would stay pending forever. A
+   * rejection is not proof the message was dropped — the broker may still
+   * accept it after the bound. A value outside `0`–`2147483647` (including
+   * `NaN`) throws `RangeError` when `MessagingPlugin(...)` is called.
+   *
+   * @since 0.9.0
+   */
+  publishTimeoutMs?: number;
 }
 
 /**
@@ -404,7 +552,7 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
    *
    * @example
    * ```typescript
-   * import * as nats from 'npm:nats@2.x';
+   * import * as nats from 'nats';
    * MessagingPlugin({ broker: 'nats', client, headersFactory: () => nats.headers() });
    * ```
    */
@@ -448,6 +596,8 @@ export interface KafkaMessagingOptions extends MessagingCommonOptions {
   clientId?: string;
   defaultQueue?: string;
   replyTopic?: string;
+  /** kafkajs retry policy; see {@linkcode KafkaOptions.retry}. */
+  retry?: KafkaOptions['retry'];
 }
 
 /**
@@ -465,6 +615,13 @@ export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   projectId?: string;
   /** Service-account credentials. Optional when {@link client} is injected. */
   credentials?: unknown;
+  /**
+   * Not accepted with an injected {@link client}: the broker creates
+   * subscriptions through the injected transport, so it cannot switch ordering
+   * on. Pass `enableMessageOrdering` to `adaptPubSubModule` when building the
+   * transport instead.
+   */
+  enableMessageOrdering?: never;
   defaultQueue?: string;
   replyTopic?: string;
 }
@@ -482,6 +639,13 @@ export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions
   projectId: string;
   /** Service-account credentials (object or key path). SDK ADC is used when omitted. */
   credentials?: unknown;
+  /**
+   * Create the transport's own subscriptions with message ordering enabled
+   * (default `false`), required before a native `orderingKey` is delivered in
+   * order. Fixed at subscription creation and it costs throughput, so it is
+   * opt-in (M106 §3.5).
+   */
+  enableMessageOrdering?: boolean;
   /** Mutually exclusive with production arm — use {@link PubSubMessagingOptionsInjected} instead. */
   client?: never;
   defaultQueue?: string;
@@ -619,6 +783,14 @@ export type MessagingPluginOptions =
  * @since 0.1.0
  */
 export interface RedisStreamsOptions {
+  /** Shared retry shape used by the Redis plugin arm. */
+  consumerRetry?: RedisStreamsMessagingOptions['consumerRetry'];
+  /** Reclaim interval; see RedisStreamsMessagingOptions. */
+  reclaimIntervalMs?: number;
+  /** Approximate dead-letter retention; see RedisStreamsMessagingOptions. */
+  deadLetterMaxLen?: number;
+  /** Foreign idle-consumer sweep threshold; see RedisStreamsMessagingOptions. */
+  consumerIdleSweepMs?: number;
   /** Redis connection URL. */
   url?: string;
   /** Injected Redis client. */
@@ -637,7 +809,7 @@ export interface RedisStreamsOptions {
    * the console. Never attached to an injected `client`, which belongs to the
    * caller. `MessagingPlugin` supplies one backed by its logger.
    *
-   * @since 0.8.0
+   * @since 0.9.0
    */
   connectionErrorReporter?: ConnectionErrorReporter;
 }
@@ -648,6 +820,12 @@ export interface RedisStreamsOptions {
  * @since 0.1.0
  */
 export interface RabbitMqOptions {
+  /** Durable group retry policy. See RabbitMqMessagingOptions. @since 0.9.0 */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /** Dead queue retention cap, default 10000. @since 0.9.0 */
+  deadLetterMaxLength?: number;
+  /** Per-consumer delivery limit, default 32. @since 0.9.0 */
+  prefetch?: number;
   /** RabbitMQ connection URL. */
   url?: string;
   /** Injected AMQP connection. */
@@ -656,8 +834,18 @@ export interface RabbitMqOptions {
   exchangeName?: string;
   /** Default consumer group/queue name. */
   defaultQueue?: string;
-  /** Optional logger for error reporting. */
-  logger?: { error: (msg: string) => void };
+  /**
+   * Mark every published message persistent (default `true`). See
+   * {@linkcode RabbitMqMessagingOptions.persistentMessages}.
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one publish, including its confirm, in ms (default `15000`, `0`
+   * unbounded). See {@linkcode RabbitMqMessagingOptions.publishTimeoutMs}.
+   */
+  publishTimeoutMs?: number;
+  /** Optional logger for error reporting; `warn` is used when present. */
+  logger?: { error: (msg: string) => void; warn?: (msg: string) => void };
 }
 
 /**
@@ -714,10 +902,46 @@ export interface KafkaOptions {
   /** Default consumer group name. */
   defaultQueue?: string;
   /**
+   * Retry budget (M101b). Forwarded verbatim to `new Kafka({ retry })`, where
+   * kafkajs uses it for its own retries; and read by the broker to retry a
+   * subscription whose topic the Kafka broker reports unknown.
+   *
+   * kafkajs does not retry `UNKNOWN_TOPIC_OR_PARTITION` (its metadata retrier
+   * gives up on every error but `LEADER_NOT_AVAILABLE`), and a KRaft broker
+   * with `auto.create.topics.enable` answers exactly that to the request that
+   * creates the topic — measured on Kafka 4.0, the next attempt succeeds. So
+   * `subscribe()` retries that one error with exponential backoff: `retries`
+   * attempts after the first, waiting `initialRetryTime` and growing by
+   * `multiplier` up to `maxRetryTime` — kafkajs's defaults, 5 / 300 ms / 2 /
+   * 30 s, about 9 s in all. A topic still unknown after that rejects with
+   * `KafkaTopicUnavailableError`; `retries: 0` names it at once. Every field
+   * is validated at construction, `factor` (kafkajs's jitter) included, held
+   * to [0, 1]. The forwarding to kafkajs is skipped when
+   * {@link client} is injected (the application built that `Kafka`); the
+   * subscribe retry applies either way.
+   */
+  retry?: {
+    /** Maximum wait between retries, in ms (kafkajs default 30000). */
+    maxRetryTime?: number;
+    /** Initial wait, in ms (kafkajs default 300). */
+    initialRetryTime?: number;
+    /** Randomization factor, between 0 and 1 (kafkajs default 0.2). */
+    factor?: number;
+    /** Exponential growth factor (kafkajs default 2). */
+    multiplier?: number;
+    /** Maximum number of retries (kafkajs default 5). */
+    retries?: number;
+  };
+  /**
    * Topic every request-reply response is published to and read back from.
    *
    * Kafka topics are durable cluster resources and this broker creates none, so
    * the topic must already exist (or `auto.create.topics.enable` must be on).
+   * The same holds for every SUBSCRIBED topic: on a broker that does not
+   * auto-create, subscribing a topic that does not exist makes `subscribe()`
+   * (and so `start()` for a declared subscription) reject, once the
+   * {@link retry} budget is spent, with `KafkaTopicUnavailableError` naming
+   * the topic and the consumer group.
    * Each broker instance reads it under its own consumer group, so every
    * instance sees every reply and discards those it did not originate — give a
    * high-traffic service its own reply topic to bound that fan-out.
@@ -725,7 +949,11 @@ export interface KafkaOptions {
    * @defaultValue `'messaging.replies'`
    */
   replyTopic?: string;
-  /** Optional logger for error reporting. */
+  /**
+   * Optional logger. Reads a consumer whose `consumer.run()` rejects —
+   * kafkajs's crash handler rethrows a disconnect that fails — which would
+   * otherwise be an unhandled rejection.
+   */
   logger?: { error: (msg: string) => void };
 }
 
@@ -760,4 +988,427 @@ export interface EventsMessagingBridgeOptions {
    * @defaultValue Logs via optional logger, then swallows
    */
   errorHandler?: (error: unknown, eventType: string) => void;
+}
+
+// ─── Transactional outbox (M107) ───────────────────────────────────────────────
+
+/**
+ * One outbox store: an {@linkcode IOutboxStore} instance, or a
+ * {@linkcode RegistryFactory} producing one (for example
+ * `createDatabaseOutboxStore()` from `@setu-ts/database-plugin`), resolved in
+ * the plugin's `onInit`.
+ *
+ * @since 0.9.0
+ */
+export type OutboxStoreEntry = IOutboxStore | RegistryFactory<IOutboxStore>;
+
+/**
+ * The outbox relay's schedule, budgets and failure policy (M107 §3.6–§3.8).
+ *
+ * Every numeric option must be a finite integer in its range, and
+ * `publishTimeoutMs + 2 * storeTimeoutMs` must be less than `sweepDeadlineMs`;
+ * a violation is refused at construction, naming the option.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxRelayOptions {
+  /**
+   * Register the relay on `CAPABILITIES.SCHEDULER` at `onInit`. Set `false` on
+   * Cloudflare Workers and call `outbox.sweep()` from a Cron Trigger.
+   * Default `true`.
+   */
+  readonly schedule?: boolean;
+  /** Milliseconds between scheduled sweeps. Default `1000`. */
+  readonly intervalMs?: number;
+  /** Rows read per `scanPending` page. Default `100`. */
+  readonly pageSize?: number;
+  /** Rows examined per sweep, skips included. Default `1000`. */
+  readonly scanLimit?: number;
+  /** Publishes and poison transitions per sweep. Default `100`. */
+  readonly publishLimit?: number;
+  /** Failed keys read at lap start; a full answer caps the lap. Default `1000`. */
+  readonly maxFailedScan?: number;
+  /** Publish attempts before a row becomes `failed`. Default `10`. */
+  readonly maxAttempts?: number;
+  /** First retry delay; doubled per attempt. Default `1000`. */
+  readonly baseBackoffMs?: number;
+  /** Retry delay ceiling. Default `300000`. */
+  readonly maxBackoffMs?: number;
+  /**
+   * One deadline over the whole sweep, measured on the monotonic clock.
+   * Default `30000`. Must be greater than publishTimeoutMs + 2 * storeTimeoutMs.
+   * Rows start while the remaining budget covers that reserve: the first
+   * `15000` ms with default options.
+   */
+  readonly sweepDeadlineMs?: number;
+  /** Bound on one publish. Default `5000`. */
+  readonly publishTimeoutMs?: number;
+  /** Bound on one store call. Default `5000`. */
+  readonly storeTimeoutMs?: number;
+  /**
+   * Row lease in ms, integer 1–3600000. Default `30000`. Must cover
+   * publishTimeoutMs + 2 * storeTimeoutMs + maxClockSkewMs.
+   * @since 0.9.0
+   */
+  readonly claimLeaseMs?: number;
+  /**
+   * Assumed maximum wall-clock disagreement in ms, integer 0–60000. Default
+   * `5000`. Zero assumes perfectly agreeing clocks and is unsafe across hosts.
+   * @since 0.9.0
+   */
+  readonly maxClockSkewMs?: number;
+}
+
+/**
+ * Thresholds for the outbox health indicator (M107 §3.11).
+ *
+ * @since 0.9.0
+ */
+export interface OutboxHealthOptions {
+  /** The oldest pending row's age that degrades health. Default `60000`. */
+  readonly degradedAfterMs?: number;
+  /** How long any observed relay overlap degrades health. Default `600000`. */
+  readonly overlapWindowMs?: number;
+}
+
+/**
+ * Options shared by both store forms of {@linkcode OutboxOptions}.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxCommonOptions {
+  /** Largest serialized envelope `write` accepts, in UTF-8 bytes. Default `262144`. */
+  readonly maxEnvelopeBytes?: number;
+  /**
+   * Receives the promise of a sweep `dispatch()` requests. Default: detached,
+   * with a rejection logged. On Cloudflare Workers pass `waitUntil`.
+   */
+  readonly background?: (promise: Promise<unknown>) => void;
+  /** The relay schedule, budgets and failure policy. */
+  readonly relay?: OutboxRelayOptions;
+  /** Health thresholds. */
+  readonly health?: OutboxHealthOptions;
+  /**
+   * How long `sent` and `discarded` rows are kept. Default 7 days. `0` deletes
+   * a row at mark-sent, which also disables overlap detection.
+   */
+  readonly retainSentMs?: number;
+  /** Rows deleted per status per purge run. Default `100`. */
+  readonly purgeBatch?: number;
+  /** Milliseconds between purge runs. Default `60000`. */
+  readonly purgeIntervalMs?: number;
+}
+
+/**
+ * The outbox option arm: ONE store (column isolation — the tenant, when any,
+ * is recorded in the row), or per-tenant `stores` (database per tenant).
+ * Supplying both is a compile error.
+ *
+ * @since 0.9.0
+ */
+export type OutboxOptions =
+  & OutboxCommonOptions
+  & (
+    | {
+      /** The one store every write and the relay use. */
+      readonly store: OutboxStoreEntry;
+      readonly stores?: never;
+    }
+    | {
+      /** A store per tenant id, selected by the `tenantId` a call names. */
+      readonly stores: Readonly<Record<string, OutboxStoreEntry>>;
+      readonly store?: never;
+    }
+  );
+
+/**
+ * The optional input of {@linkcode IOutbox.write}.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxWriteInput {
+  /** Causal metadata, as for `publishIntegrationEvent`. */
+  readonly metadata?: IntegrationEventMetadata;
+  /**
+   * Publish options, resolved with the same precedence as
+   * `publishIntegrationEvent`: the caller's `orderingKey` beats the
+   * definition's selector, and `deduplicationId` defaults to the envelope id.
+   */
+  readonly options?: PublishOptions;
+  /**
+   * The tenant the row belongs to. Recorded in the row with a single store;
+   * selects the store (and is required) with per-tenant `stores`.
+   */
+  readonly tenantId?: string;
+}
+
+/**
+ * The result of one sweep.
+ *
+ * @since 0.9.0
+ */
+export interface OutboxSweepResult {
+  /** What requested the sweep. */
+  readonly origin: 'scheduled' | 'dispatch';
+  /** Rows examined, skips included. */
+  readonly scanned: number;
+  /** Rows published and marked sent. */
+  readonly published: number;
+  /** Publish failures recorded. */
+  readonly failures: number;
+  /** Rows made `failed` (attempts exhausted, or undecodable). */
+  readonly poisoned: number;
+  /**
+   * Why the sweep ended: every store's lap reached its end (`complete`), a
+   * budget ran out, a store call rejected (`store-failure`), or the outbox is
+   * closing.
+   */
+  readonly endedBy:
+    | 'complete'
+    | 'scan-limit'
+    | 'publish-limit'
+    | 'deadline'
+    | 'store-failure'
+    | 'closing';
+}
+
+/**
+ * The transactional outbox, registered under `CAPABILITIES.OUTBOX`
+ * (`outbox.<name>` for a named messaging instance).
+ *
+ * **The promise.** At-least-once delivery of every committed row. At most one
+ * relay holds a row's claim, provided relays' wall clocks agree within
+ * `relay.maxClockSkewMs`. A relay starts publishing only while its claim has
+ * room for the publish, status write and skew. Per-key order among first
+ * publishes across any number of relays assumes rows commit in write order
+ * and writers' clocks agree. Delivery order is the broker's; consumers compare
+ * `aggregateVersion`. A pause after the fence check or a publish the broker
+ * accepts after abandonment can cause repeats, including out of order. Never
+ * exactly once: repeats carry the same envelope and de-duplication id.
+ *
+ * @since 0.9.0
+ */
+export interface IOutbox {
+  /**
+   * Writes an integration event as an outbox row inside the caller's
+   * transaction, through the unit of work the caller's `transaction(...)`
+   * handed it. Every refusal is a rejected promise, so the business write
+   * rolls back with it.
+   *
+   * **Caller obligation:** the selected store must read the database `scope`
+   * belongs to. A per-tenant store for another tenant, or a store bound to
+   * another `database.<name>`, receives a row its relay never sees.
+   *
+   * @param scope - The caller's unit of work
+   * @param definition - The integration-event contract
+   * @param payload - The event payload
+   * @param input - Metadata, publish options and tenant
+   * @returns The envelope id
+   */
+  write<T>(
+    scope: IOutboxWriteScope,
+    definition: IntegrationEventDefinition<T>,
+    payload: T,
+    input?: OutboxWriteInput,
+  ): Promise<string>;
+
+  /**
+   * Requests a sweep without waiting for it — call it after the transaction
+   * resolves. Coalesced: at most one sweep runs and one follow-up waits. Never
+   * throws; a no-op once the outbox is closing.
+   */
+  dispatch(): void;
+
+  /**
+   * Runs (or joins) a sweep and resolves with its result.
+   *
+   * @returns The sweep result
+   */
+  sweep(): Promise<OutboxSweepResult>;
+
+  /**
+   * Deletes `sent` and `discarded` rows older than `retainSentMs`, at most
+   * `purgeBatch` per status per store. One deadline, `relay.sweepDeadlineMs`,
+   * bounds the whole run across every store; a store call still running at
+   * the deadline rejects the purge, and rows already deleted stay deleted.
+   *
+   * @returns The number of rows deleted
+   */
+  purge(): Promise<number>;
+
+  /**
+   * Releases a `failed` row: `retry` returns it to `pending`; `discard`
+   * settles it without publishing. Takes effect for the relay at its next lap.
+   * An operator capability: the application gates the route that calls it.
+   *
+   * @param id - The row (envelope) id
+   * @param action - `retry` or `discard`
+   * @param options - The tenant, required with per-tenant `stores`
+   */
+  release(
+    id: string,
+    action: 'retry' | 'discard',
+    options?: { readonly tenantId?: string },
+  ): Promise<void>;
+}
+
+/**
+ * One inbox store: an {@linkcode IInboxStore} instance, or a
+ * {@linkcode RegistryFactory} producing one (for example
+ * `createDatabaseInboxStore()` from `@setu-ts/database-plugin`), resolved in
+ * the plugin's `onInit`.
+ *
+ * @since 0.9.0
+ */
+export type InboxStoreEntry = IInboxStore | RegistryFactory<IInboxStore>;
+
+/**
+ * The inbox's retention purge schedule (M108 §3.11).
+ *
+ * @since 0.9.0
+ */
+export interface InboxPurgeOptions {
+  /**
+   * Register the purge on `CAPABILITIES.SCHEDULER` at `onInit`. Set `false` on
+   * Cloudflare Workers and call `inbox.purge()` from a Cron Trigger. Default
+   * `true`.
+   */
+  readonly schedule?: boolean;
+  /** Milliseconds between purge runs. Default `60000`. */
+  readonly intervalMs?: number;
+  /** Rows deleted per status per purge run, 1–100 000. Default `100`. */
+  readonly batch?: number;
+}
+
+/**
+ * The inbox option arm (M108 §3.11). Every numeric option must be a finite
+ * integer in its range; a violation is refused at construction, naming the
+ * option.
+ *
+ * @since 0.9.0
+ */
+export interface InboxOptions {
+  /** The store every inbox subscription records deliveries through. */
+  readonly store: InboxStoreEntry;
+  /**
+   * Park a delivery after this many handler failures (1–1000), acknowledging
+   * it so a Kafka partition or a NATS consumer is no longer blocked. Absent
+   * (the default), a failure is rethrown and the broker's own retry budget
+   * applies — RabbitMQ and Redis Streams retry and dead-letter, while NATS
+   * redelivers without limit and Kafka blocks the partition, so set it there.
+   * On RabbitMQ and Redis Streams both budgets apply and the smaller wins:
+   * keep it at or below `consumerRetry.maxAttempts` (or disable
+   * `consumerRetry`), or the broker dead-letters before the inbox parks.
+   */
+  readonly maxAttempts?: number;
+  /**
+   * How long a marker is kept, in milliseconds (at least 60 000). A
+   * redelivery older than this is processed again, so it must exceed the
+   * broker's redelivery window plus the outbox's re-send window. Default 7
+   * days. Parked markers are purged by the same window, envelope included:
+   * release or discard a parked delivery before it ages out.
+   */
+  readonly retainMs?: number;
+  /**
+   * Bound on every store call the inbox makes except the handler's own
+   * transaction, in milliseconds. Default `5000`.
+   */
+  readonly storeTimeoutMs?: number;
+  /**
+   * Largest envelope, in UTF-8 bytes, stored on a parked marker for
+   * `release('retry')`; a larger one is parked without it. `0` stores none.
+   * Default `262144`.
+   */
+  readonly maxParkedEnvelopeBytes?: number;
+  /** The retention purge schedule. */
+  readonly purge?: InboxPurgeOptions;
+}
+
+/**
+ * One parked delivery, as {@linkcode IInbox.parked} lists it — never with its
+ * envelope.
+ *
+ * @since 0.9.0
+ */
+export interface ParkedInboxEntry {
+  /** The marker id, for {@linkcode IInbox.release}. */
+  readonly rowId: string;
+  /** The consumer name. */
+  readonly consumer: string;
+  /** The subscription topic. */
+  readonly topic: string;
+  /** The envelope id, when it was stored (a valid publish id). */
+  readonly envelopeId?: string;
+  /** Handler failures recorded before the delivery was parked. */
+  readonly attempts: number;
+  /** Epoch milliseconds the delivery was parked. */
+  readonly updatedAt: number;
+  /** The last handler failure, one bounded line. */
+  readonly lastError?: string;
+}
+
+/**
+ * What {@linkcode IInbox.release} answers.
+ *
+ * @since 0.9.0
+ */
+export interface InboxReleaseResult {
+  /** The topic the parked delivery arrived on. */
+  readonly topic: string;
+  /**
+   * The parked envelope, parsed, for `retry` — absent for `discard`, and when
+   * it was larger than `maxParkedEnvelopeBytes` or unreadable.
+   */
+  readonly envelope?: unknown;
+}
+
+/**
+ * The consumer inbox, registered under `CAPABILITIES.INBOX`
+ * (`inbox.<name>` for a named messaging instance).
+ *
+ * **The promise.** For one consumer name, the handler's writes through the
+ * supplied unit of work are committed at most once per topic and envelope id while the
+ * marker is retained; a delivery after the marker is purged is processed
+ * again. Nothing is promised about effects outside that unit of work, about
+ * two processes using one consumer name with different handlers, or about a
+ * database other than the store's.
+ *
+ * The delivery path is internal; these are the operator's methods. Each is an
+ * operator capability: the application gates any route that calls it.
+ *
+ * @since 0.9.0
+ */
+export interface IInbox {
+  /**
+   * Lists parked deliveries, never their envelopes.
+   *
+   * @param limit - At most this many, 1–1000. Default `100`
+   * @returns The parked deliveries
+   */
+  parked(limit?: number): Promise<readonly ParkedInboxEntry[]>;
+
+  /**
+   * Releases a parked delivery. `retry` deletes the parked marker and answers
+   * the stored envelope; re-publish it with `broker.publish(topic, envelope)`
+   * — WITHOUT a `deduplicationId`, which NATS and Service Bus would use to
+   * drop the re-publish — and the next delivery runs the handler. `discard`
+   * keeps the marker as `discarded` with its envelope cleared, so redeliveries
+   * stay skipped. The inbox never re-runs a handler itself: that would bypass
+   * the messaging behaviour chain.
+   *
+   * @param rowId - A marker id from {@linkcode IInbox.parked}
+   * @param action - `retry` or `discard`
+   * @returns The topic, and for `retry` the envelope
+   */
+  release(rowId: string, action: 'retry' | 'discard'): Promise<InboxReleaseResult>;
+
+  /**
+   * Deletes rows of every status — processed, discarded and parked markers
+   * and failure-count rows — last written before `retainMs` ago, at most
+   * `purge.batch` per status per run. The table stays within the window only
+   * while inflow per status stays below that rate.
+   *
+   * @returns The number of rows deleted
+   */
+  purge(): Promise<number>;
 }

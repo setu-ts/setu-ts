@@ -33,6 +33,17 @@ export interface QueueDepths {
  */
 export interface QueueAdapter {
   /**
+   * Why this backend cannot use a job name, or `null` when it can. Optional:
+   * an adapter with no naming limit omits it. `QueueService` calls it when a
+   * processor or recurring job is registered, so a name the backend will
+   * always refuse fails there instead of on every poll (M106 audit R4-1).
+   *
+   * @param name - The job name
+   * @returns The refusal text, or `null`
+   */
+  jobNameProblem?(name: string): string | null;
+
+  /**
    * Connects the adapter to its backend.
    *
    * @returns Resolves when connected

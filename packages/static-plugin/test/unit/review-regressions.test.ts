@@ -8,8 +8,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 import { createStaticHandler } from '../../src/handler/static-handler.ts';

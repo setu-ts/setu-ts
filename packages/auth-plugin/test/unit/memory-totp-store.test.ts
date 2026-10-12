@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryTotpStore, sweepExpiredAttempts } from '../../src/stores/totp-store.ts';
 
 /** A store holding a CONFIRMED factor whose last claimed step is `step`. */

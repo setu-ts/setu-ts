@@ -4,8 +4,7 @@
  * Uses createApplication() with a runtime-provider test plugin and ConfigPlugin,
  * then resolves config through the real service registry/context.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 
@@ -74,7 +73,7 @@ describe('ConfigPlugin E2E — with real application', () => {
 
   it('validates config with Zod at startup', async () => {
     // Import Zod dynamically to test real Zod coercion/defaults/validation.
-    const mod = await import('npm:zod@^3.24.0');
+    const mod = await import('zod-v3');
     const z = mod.z;
 
     const schema = z.object({
@@ -103,7 +102,7 @@ describe('ConfigPlugin E2E — with real application', () => {
   });
 
   it('resolves a typed section from the real application service registry', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL', 'POOL_SIZE'],
@@ -135,7 +134,7 @@ describe('ConfigPlugin E2E — with real application', () => {
   });
 
   it('fails startup when Zod validation fails', async () => {
-    const mod = await import('npm:zod@^3.24.0');
+    const mod = await import('zod-v3');
     const z = mod.z;
 
     const schema = z.object({

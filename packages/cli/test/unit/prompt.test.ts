@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTerminalPrompter, type PromptChoice } from '../../src/prompt.ts';
 
 // Generic fallback contract only: Enter takes the FIRST choice. WHICH value
@@ -12,43 +11,53 @@ const CHOICES: readonly PromptChoice[] = [
 ];
 
 describe('createTerminalPrompter', () => {
-  it('never reaches the prompt function on a non-terminal and resolves undefined', async () => {
+  it('never reaches the prompt function on a non-terminal and reports unavailable', async () => {
     let asked = false;
     const prompter = createTerminalPrompter(
       () => false,
       () => {
         asked = true;
-        return 'rest';
+        return Promise.resolve('rest');
       },
       () => {},
     );
-    expect(await prompter.select('Template?', CHOICES)).toBeUndefined();
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'unavailable' });
     expect(asked).toBe(false);
   });
 
-  it('treats a null answer as "cannot ask" and resolves undefined', async () => {
-    const prompter = createTerminalPrompter(() => true, () => null, () => {});
-    expect(await prompter.select('Template?', CHOICES)).toBeUndefined();
+  it('treats a null answer as cancellation', async () => {
+    const prompter = createTerminalPrompter(() => true, () => Promise.resolve(null), () => {});
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
   });
 
   it('resolves the fallback for a bare Enter', async () => {
-    const prompter = createTerminalPrompter(() => true, () => '', () => {});
-    expect(await prompter.select('Template?', CHOICES)).toBe('rest');
+    const prompter = createTerminalPrompter(() => true, () => Promise.resolve(''), () => {});
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'answer', value: 'rest' });
   });
 
   it('resolves an exact answer to itself', async () => {
-    const prompter = createTerminalPrompter(() => true, () => 'microservice', () => {});
-    expect(await prompter.select('Template?', CHOICES)).toBe('microservice');
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => Promise.resolve('microservice'),
+      () => {},
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({
+      kind: 'answer',
+      value: 'microservice',
+    });
   });
 
   it('re-asks after an unrecognized answer and resolves the next valid one', async () => {
     const answers = ['aaa', 'microservice'];
     const prompter = createTerminalPrompter(
       () => true,
-      () => answers.shift() ?? null,
+      () => Promise.resolve(answers.shift() ?? null),
       () => {},
     );
-    expect(await prompter.select('Template?', CHOICES)).toBe('microservice');
+    expect(await prompter.select('Template?', CHOICES)).toEqual({
+      kind: 'answer',
+      value: 'microservice',
+    });
   });
 
   it('stops asking when EOF follows an unrecognized answer', async () => {
@@ -57,10 +66,77 @@ describe('createTerminalPrompter', () => {
     const answers = ['aaa', null];
     const prompter = createTerminalPrompter(
       () => true,
-      () => answers.shift() ?? null,
+      () => Promise.resolve(answers.shift() ?? null),
       () => {},
     );
-    expect(await prompter.select('Template?', CHOICES)).toBeUndefined();
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+  });
+
+  it('never opens the prompt when the interrupt has already fired', async () => {
+    // A blocking prompt opened after Ctrl-C would hold cancellation hostage
+    // until the user typed something.
+    let asked = false;
+    const controller = new AbortController();
+    controller.abort();
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        asked = true;
+        return Promise.resolve('rest');
+      },
+      () => {},
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(asked).toBe(false);
+  });
+
+  it('cancels when the interrupt fires while the prompt is open', async () => {
+    const controller = new AbortController();
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        controller.abort();
+        return Promise.resolve('rest');
+      },
+      () => {},
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+  });
+
+  it('never opens the prompt when printing the menu is where the interrupt lands', async () => {
+    const controller = new AbortController();
+    let asked = false;
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        asked = true;
+        return Promise.resolve('rest');
+      },
+      () => controller.abort(),
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(asked).toBe(false);
+  });
+
+  it('stops re-asking once the interrupt fires between attempts', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => {
+        calls++;
+        return Promise.resolve('aaa');
+      },
+      (message) => {
+        if (message.includes('is not one of')) controller.abort();
+      },
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(calls).toBe(1);
   });
 
   it('prints the choice list through log and asks the question through the prompt', async () => {
@@ -70,15 +146,14 @@ describe('createTerminalPrompter', () => {
       () => true,
       (message) => {
         question = message;
-        return '';
+        return Promise.resolve('');
       },
       (message) => printed.push(message),
     );
     await prompter.select('Template?', CHOICES);
     expect(printed.join('\n')).toContain('rest — REST set');
     expect(printed.join('\n')).toContain('microservice — microservice set');
-    // The default is rendered INSIDE the question text; the second argument of
-    // Deno's prompt() pre-fills an editable buffer and is deliberately unused.
+    // The default is rendered INSIDE the question text, never pre-filled.
     expect(question).toContain('Template? [rest]');
   });
 
@@ -96,10 +171,10 @@ describe('createTerminalPrompter', () => {
     const printed: string[] = [];
     const prompter = createTerminalPrompter(
       () => true,
-      () => answers.shift() ?? null,
+      () => Promise.resolve(answers.shift() ?? null),
       (message) => printed.push(message),
     );
-    expect(await prompter.select('Template?', CHOICES)).toBe('rest');
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'answer', value: 'rest' });
     const retries = printed.filter((line) => line.includes('is not one of'));
     expect(retries).toEqual([
       '"x\\u001b[31m\\u0007\\u0008y" is not one of: rest, microservice.',
@@ -109,7 +184,7 @@ describe('createTerminalPrompter', () => {
     for (const code of [7, 8, 27, 0x2028]) {
       expect(printed.join('\n').includes(String.fromCharCode(code))).toBe(false);
     }
-    // A pasted line feed survives prompt() and the sink escape keeps it, so
+    // A pasted line feed survives the line reader and the sink escape keeps it, so
     // only the per-site escape stops it forging a line of its own.
     expect(printed.flatMap((line) => line.split('\n')).filter((l) => l.startsWith('INJECTED')))
       .toEqual([]);
@@ -122,11 +197,32 @@ describe('createTerminalPrompter', () => {
     const esc = String.fromCharCode(27);
     const prompter = createTerminalPrompter(
       () => true,
-      () => '',
+      () => Promise.resolve(''),
       (message) => printed.push(message),
     );
     await prompter.select('Template?', [{ value: 'rest', label: `${esc}[2Kfake` }]);
     expect(printed.join('\n').includes(esc)).toBe(false);
     expect(printed.join('\n')).toContain('\\u001b[2Kfake');
+  });
+
+  it('hands the interrupt signal to the reader and cancels when it aborts mid-read', async () => {
+    // A reader awaiting input when Ctrl+C lands resolves null, and the
+    // prompter reports cancellation rather than taking the default.
+    const controller = new AbortController();
+    let received: AbortSignal | undefined;
+    const prompter = createTerminalPrompter(
+      () => true,
+      (_message, signal) => {
+        received = signal;
+        return new Promise((resolve) => {
+          signal?.addEventListener('abort', () => resolve(null), { once: true });
+          queueMicrotask(() => controller.abort());
+        });
+      },
+      () => {},
+      controller.signal,
+    );
+    expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
+    expect(received).toBe(controller.signal);
   });
 });

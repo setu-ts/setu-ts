@@ -8,8 +8,7 @@
  * loaded), and `publish:check` — while making that symbol unimportable for
  * consumers. This file closes that gap.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import * as api from '../../src/index.ts';
 

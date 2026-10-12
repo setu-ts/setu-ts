@@ -6,14 +6,14 @@
  *
  * @module
  */
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import {
   CreateTableCommand,
   DeleteTableCommand,
   DescribeTableCommand,
   DynamoDBClient,
-} from 'npm:@aws-sdk/client-dynamodb@^3';
+} from '@aws-sdk/client-dynamodb';
 import {
   CAPABILITIES,
   type IDataSource,
@@ -34,8 +34,9 @@ import {
   type IDatabaseService,
 } from '../../src/index.ts';
 import { DatabaseUnavailableError } from '../../src/errors.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
 
-const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
+const dynamoEndpoint = process.env['DYNAMODB_ENDPOINT'];
 const skipReal = dynamoEndpoint === undefined;
 const endpoint = dynamoEndpoint ?? '';
 // DynamoDB Local's signer rejects hyphens in these otherwise fake access keys.
@@ -207,6 +208,25 @@ function loggerPlugin(logger: ILogger): IPlugin {
 }
 
 describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
+  it(
+    'M105 conditional writes persist matches and leave misses unchanged',
+    { skip: skipReal },
+    async () => {
+      const { adapter, source } = await connectedSource('Crud', mapping(tables.crud, 'id'));
+      try {
+        await conditionalContract(
+          source,
+          'conditional',
+          'missing',
+          { id: 'conditional', role: 'owner', name: 'old' },
+          { role: 'owner' },
+          { name: 'new' },
+        );
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
   beforeAll(async () => {
     if (skipReal) return;
     admin = new DynamoDBClient({ endpoint, region, credentials });
@@ -235,7 +255,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
     admin = undefined;
   });
 
-  it('creates, reads, updates, and deletes through IDataSource', { ignore: skipReal }, async () => {
+  it('creates, reads, updates, and deletes through IDataSource', { skip: skipReal }, async () => {
     const { adapter, source } = await connectedSource('Crud', mapping(tables.crud, 'id'));
     try {
       await expect(source.create({ id: 'one', name: 'first' })).resolves.toEqual({
@@ -257,7 +277,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
 
   it(
     'keeps a duplicate original and does not create a missing update',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const { adapter, source } = await connectedSource('Crud', mapping(tables.crud, 'id'));
       try {
@@ -280,7 +300,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
   );
 
   it('walks sparse filtered pages in their exact [1, 0, 1, 0] server-page shape', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const { adapter, source } = await connectedSource(
       'Sparse',
@@ -321,7 +341,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
 
   it(
     'keeps a stable complete order across equal GSI sort-key tie values',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const { adapter, source } = await connectedSource(
         'Gsi',
@@ -360,7 +380,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
 
   it(
     'retrieves an item collection using its mapped key columns',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const { adapter, source } = await connectedSource(
         'Collection',
@@ -383,7 +403,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
   );
 
   it('filters nested fields and declared dates while rejecting an undeclared date', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const { adapter, source } = await connectedSource(
       'Dates',
@@ -434,7 +454,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
   });
 
   it('carries all four GSI and table key values through a two-page cursor walk', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const gsiMapping = mapping(tables.gsi, 'pk', 'sk', {
       indexes: { byCustomer: { partitionKey: 'customerId', sortKey: 'createdAt' } },
@@ -475,7 +495,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
     }
   });
 
-  it('counts through DynamoDB Local pages beyond one megabyte', { ignore: skipReal }, async () => {
+  it('counts through DynamoDB Local pages beyond one megabyte', { skip: skipReal }, async () => {
     const { adapter, source } = await connectedSource('Count', mapping(tables.count, 'pk', 'sk'));
     try {
       const wide = 'x'.repeat(40_000);
@@ -489,7 +509,7 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
   });
 
   it('flushes deferred transaction writes on commit and sends none on rollback', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const entityMapping = mapping(tables.transaction, 'id');
     const adapter = adapterFor('Transaction', entityMapping);
@@ -511,8 +531,41 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
     }
   });
 
+  it('a duplicate key reaches the caller as DuplicateKeyError, directly and at commit', {
+    skip: skipReal,
+  }, async () => {
+    const entityMapping = mapping(tables.transaction, 'id');
+    const adapter = adapterFor('Transaction', entityMapping);
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'dynamodb');
+    try {
+      const repo = service.getRepository('Transaction');
+      await repo.create({ id: 'dup', value: 1 });
+
+      const direct = await repo.create({ id: 'dup', value: 2 }).catch((e: unknown) => e);
+      expect(direct).toBeInstanceOf(DuplicateKeyError);
+      expect((direct as DuplicateKeyError).entity).toBe('Transaction');
+      expect(((direct as Error).cause as Error).name).toBe('ConditionalCheckFailedException');
+
+      // In a transaction the guard fails at TransactWriteItems, which DynamoDB
+      // reports as a cancellation with one reason per write.
+      const atCommit = await service.transaction(async (uow) => {
+        const scoped = uow.getRepository('Transaction');
+        await scoped.create({ id: 'dup-tx-fresh', value: 3 });
+        await scoped.create({ id: 'dup', value: 4 });
+      }).catch((e: unknown) => e);
+      expect(atCommit).toBeInstanceOf(DuplicateKeyError);
+      expect(((atCommit as Error).cause as Error).name).toBe('TransactionCanceledException');
+      // The transaction is atomic: the fresh write did not land either.
+      await expect(repo.findById('dup-tx-fresh')).resolves.toBeNull();
+      await expect(repo.findById('dup')).resolves.toMatchObject({ value: 1 });
+    } finally {
+      await service.close();
+    }
+  });
+
   it('reports Query and Scan choices through the public logQueries service seam', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const logger = new CapturingLogger();
     const app = createApplication({

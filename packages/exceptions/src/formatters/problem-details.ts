@@ -34,7 +34,7 @@ export const ERROR_TYPE_BASE = 'https://setu-ts.dev/errors';
  *
  * @since 0.1.0
  */
-export const VALIDATION_TYPE = `${ERROR_TYPE_BASE}/validation`;
+export const VALIDATION_TYPE: string = `${ERROR_TYPE_BASE}/validation`;
 
 /**
  * The RFC 9457 default problem type, meaning "no semantics beyond the HTTP

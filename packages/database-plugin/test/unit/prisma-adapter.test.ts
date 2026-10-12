@@ -11,8 +11,7 @@
  *
  * @module
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaDataSource, PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import {
   UnsupportedFilterOperatorError,
@@ -1161,4 +1160,19 @@ describe('Prisma key handling — M79 review regressions', () => {
       'tenantId_userId',
     );
   }
+});
+
+it('refuses a nested JSON path on an unspecified connector by name', async () => {
+  const client = createFakePrismaClient();
+  Reflect.deleteProperty(client, '_activeProvider');
+  const adapter = new PrismaAdapter({ prismaClient: client });
+  await adapter.connect();
+  const ds = adapter.createDataSource('User');
+  expect(() =>
+    ds.findAll(
+      query({ filter: { type: 'comparison', field: ['data', 'key'], operator: 'eq', value: 'x' } }),
+    )
+  ).toThrow(/unknown/);
+  expect(client.recordedCalls.filter((call) => call.action === 'findMany')).toEqual([]);
+  await adapter.disconnect();
 });

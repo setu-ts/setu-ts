@@ -7,8 +7,7 @@
  * without it, a collector that threw or mis-wired when metrics are missing
  * would only be discovered by an application that does not use them.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';

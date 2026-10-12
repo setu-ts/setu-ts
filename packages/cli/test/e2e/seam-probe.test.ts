@@ -1,3 +1,5 @@
+import { denoBinary, run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The functional bar: a scaffolded project is booted and every wired artifact is
  * observed doing its job.
@@ -16,14 +18,13 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { bootAndProbe, useWorkspacePackages } from '../fixtures/generated-project.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /**
@@ -67,8 +68,8 @@ const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] 
  *
  * This is the shape the class-based template's own showcase cannot reach — its service
  * has no dependencies and its controller injects an explicit provider — which is why
- * `DiPlugin()`'s `autoRegister: false` default shipped through five releases with every
- * gate green. `autoRegister` gates BOTH the container's external resolver and its
+ * `DiPlugin()`'s `autoRegister: false` default (through 0.8.0) shipped through five
+ * releases with every gate green. `autoRegister` gates BOTH the container's external resolver and its
  * registry fallback, so without it this class cannot be constructed at all and
  * `app.start()` never completes.
  *
@@ -382,20 +383,20 @@ describe('generated artifacts are wired — end to end', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-seam-' });
+    root = await tempDir({ prefix: 'setu-seam-' });
     out = [];
     err = [];
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   // The no-template host. AI_GUIDELINES promise "no feature requires decorators", and
   // this is the project shape that has none — so it is the one where the promise is
   // either true or merely documented.
   it('serves every wired artifact in a project scaffolded with no template', async () => {
-    expect(await run(['new', 'bare'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'bare'])).toBe(0);
     const project = `${root}/bare`;
 
     for (const [schematic, name] of MINIMAL_ARTIFACTS) {
@@ -426,7 +427,7 @@ describe('generated artifacts are wired — end to end', () => {
   // until it was listed no generated artifact had ever been booted in one.
   for (const template of ['rest', 'class-based', 'microservice'] as const) {
     it(`serves every wired artifact on --template ${template}`, async () => {
-      expect(await run(['new', 'shop', '--template', template])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
 
       const classBased = template === 'class-based';
@@ -444,7 +445,7 @@ describe('generated artifacts are wired — end to end', () => {
         // E3. The generated service is the DEVELOPER'S file, so editing it is exactly
         // what a developer does next — and it is the only way to reach the case the
         // template's own showcase cannot: an injected framework capability.
-        await Deno.writeTextFile(
+        await nodeFs.writeFile(
           `${project}/src/services/gadget-svc.service.ts`,
           CAPABILITY_INJECTING_SERVICE,
         );
@@ -481,9 +482,9 @@ describe('generated artifacts are wired — end to end', () => {
         expect(result['serviceToken']).toBe('widget-svc');
         // E3: a decorated service constructor-injecting a FRAMEWORK CAPABILITY resolves,
         // and what arrived is the live config service rather than a placeholder. This
-        // fails outright — `app.start()` never completes — if the template goes back to
-        // emitting a bare `DiPlugin()`, because `autoRegister` gates the container's
-        // only route to the kernel registry.
+        // fails outright — `app.start()` never completes — if the template ever emits
+        // `autoRegister: false`, because that option gates the container's only route
+        // to the kernel registry.
         expect(result['capabilityInjected']).toBe('config:function');
       }
       if (cqrs) {
@@ -504,7 +505,18 @@ describe('generated artifacts are wired — end to end', () => {
   // handler placed there would be registered twice. This arm boots it once with
   // every ingress family and asserts the single registration site.
   it('serves every ingress artifact on microservice --style class-based', async () => {
-    expect(await run(['new', 'shop', '--template', 'microservice', '--style', 'class-based'])).toBe(
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'shop',
+        '--template',
+        'microservice',
+        '--style',
+        'class-based',
+      ]),
+    ).toBe(
       0,
     );
     const project = `${root}/shop`;
@@ -517,15 +529,15 @@ describe('generated artifacts are wired — end to end', () => {
     // E3. The generated service is the DEVELOPER'S file, so editing it is exactly
     // what a developer does next — and it is the only way to reach the case the
     // template's own showcase cannot: an injected framework capability.
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${project}/src/services/gadget-svc.service.ts`,
       CAPABILITY_INJECTING_SERVICE,
     );
     // The event and job handlers are rewritten to record their deliveries, as the
     // scratch probe did — a publish that reaches nothing would be indistinguishable
     // from one that does.
-    await Deno.writeTextFile(`${project}/src/ingress/evt.ingress.ts`, RECORDING_EVENT);
-    await Deno.writeTextFile(`${project}/src/ingress/job.ingress.ts`, RECORDING_JOB);
+    await nodeFs.writeFile(`${project}/src/ingress/evt.ingress.ts`, RECORDING_EVENT);
+    await nodeFs.writeFile(`${project}/src/ingress/job.ingress.ts`, RECORDING_JOB);
 
     await useWorkspacePackages(project);
     const probe = PROBE
@@ -558,10 +570,10 @@ describe('generated artifacts are wired — end to end', () => {
     // makes this assertion fail, which is the negative control.
     const dirGone = async (dir: string): Promise<boolean> => {
       try {
-        await Deno.stat(dir);
+        await nodeFs.stat(dir);
         return false;
       } catch (error) {
-        return error instanceof Deno.errors.NotFound;
+        return error instanceof Error && 'code' in error && error.code === 'ENOENT';
       }
     };
     expect(await dirGone(`${project}/src/cqrs`)).toBe(true);
@@ -588,10 +600,10 @@ export function auditLogMiddleware(): MiddlewareFunction {
 `;
 
     it('leaves the regenerated barrel compiling', async () => {
-      expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
-      await Deno.mkdir(`${project}/src/middleware`, { recursive: true });
-      await Deno.writeTextFile(
+      await nodeFs.mkdir(`${project}/src/middleware`, { recursive: true });
+      await nodeFs.writeFile(
         `${project}/src/middleware/audit-log.middleware.ts`,
         OLD_MIDDLEWARE,
       );
@@ -605,12 +617,13 @@ export function auditLogMiddleware(): MiddlewareFunction {
 
       await useWorkspacePackages(project);
       const barrel = `${project}/src/middleware/index.ts`;
-      const command = new Deno.Command(Deno.execPath(), {
-        args: ['check', '--node-modules-dir=none', '--config', `${project}/deno.json`, barrel],
-        stdout: 'piped',
-        stderr: 'piped',
-      });
-      const { code, stderr } = await command.output();
+      const command = () =>
+        runProcess(denoBinary(), {
+          args: ['check', '--node-modules-dir=none', '--config', `${project}/deno.json`, barrel],
+          stdout: 'piped',
+          stderr: 'piped',
+        });
+      const { code, stderr } = await command();
       const output = new TextDecoder().decode(stderr);
 
       // Without the scanner's export check this is TS2305: "has no exported member
@@ -701,12 +714,12 @@ await app.stop();
 `;
 
     it('the edited factory survives an unrelated generate and its dependency arrives', async () => {
-      expect(await run(['new', 'shop', '--template', 'microservice'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'microservice'])).toBe(0);
       const project = `${root}/shop`;
 
       // Generate the command handler, then the developer edits its factory.
       expect(await run(['g', 'command-handler', 'widget', '--dir', project])).toBe(0);
-      await Deno.writeTextFile(
+      await nodeFs.writeFile(
         `${project}/src/cqrs/widget.command-handler.ts`,
         EDITED_FACTORY,
       );
@@ -716,7 +729,10 @@ await app.stop();
       expect(await run(['g', 'query-handler', 'gadget', '--dir', project])).toBe(0);
 
       // The developer's factory edit survived the unrelated generate.
-      const artifact = await Deno.readTextFile(`${project}/src/cqrs/widget.command-handler.ts`);
+      const artifact = await nodeFs.readFile(
+        `${project}/src/cqrs/widget.command-handler.ts`,
+        'utf8',
+      );
       expect(artifact).toContain('createWidgetCommandHandler');
       expect(artifact).toContain('CAPABILITIES.EVENTS');
 
@@ -735,7 +751,7 @@ await app.stop();
   // failures — a 500 on every module request, and a silently unreachable route.
   describe('the collision refusal', () => {
     it('refuses each colliding pair, and writes nothing', async () => {
-      expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);
       expect(await run(['g', 'controller', 'gizmo', '--dir', project])).toBe(0);
@@ -744,13 +760,13 @@ await app.stop();
       err = [];
       expect(await run(['g', 'service', 'widget', '--dir', project])).toBe(1);
       expect(err.join('\n')).toContain("the injection token 'widget-service'");
-      await expect(Deno.stat(`${project}/src/services/widget.service.ts`)).rejects.toThrow();
+      await expect(nodeFs.stat(`${project}/src/services/widget.service.ts`)).rejects.toThrow();
 
       // A route would claim the controller's HTTP path.
       err = [];
       expect(await run(['g', 'route', 'gizmo', '--dir', project])).toBe(1);
       expect(err.join('\n')).toContain('the HTTP path /gizmo');
-      await expect(Deno.stat(`${project}/src/routes/gizmo.routes.ts`)).rejects.toThrow();
+      await expect(nodeFs.stat(`${project}/src/routes/gizmo.routes.ts`)).rejects.toThrow();
 
       // A free name still works, so the guard is not blanket.
       expect(await run(['g', 'service', 'unrelated', '--dir', project])).toBe(0);

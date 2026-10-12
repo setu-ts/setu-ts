@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for the M98k scheduler-observations protocol: canonical target
  * parsing, the inspector manifest flip, copy-once source reading against
@@ -5,8 +6,7 @@
  * dispatch isolation, the client's negotiated short-circuit, and the
  * plugin's 16-source startup bound.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IPlugin, IResponse, ISchedulerDiagnosticsSource } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -474,20 +474,17 @@ describe('DiagnosticsPlugin — scheduler source bound', () => {
     return { snapshot: () => DISABLED as never };
   }
 
-  function port(): number {
-    const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const value = (probe.addr as Deno.NetAddr).port;
-    probe.close();
-    return value;
+  function port(): Promise<number> {
+    return nodeUnusedPort();
   }
 
-  function boot(count: number) {
+  async function boot(count: number) {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
         DiagnosticsPlugin({
           enabled: true,
-          port: port(),
+          port: await port(),
           sessionId: TEST_SESSION_ID,
           sessionKey: TEST_KEY_BYTES,
         }),
@@ -498,10 +495,13 @@ describe('DiagnosticsPlugin — scheduler source bound', () => {
     return app.start().then(() => app);
   }
 
-  it(`boots with exactly the ${MAX_SCHEDULER_SOURCES}-source bound`, async () => {
-    const app = await boot(MAX_SCHEDULER_SOURCES);
-    await app.stop();
-  });
+  it.skipIf(!('Deno' in globalThis))(
+    `boots with exactly the ${MAX_SCHEDULER_SOURCES}-source bound`,
+    async () => {
+      const app = await boot(MAX_SCHEDULER_SOURCES);
+      await app.stop();
+    },
+  );
 
   it(`refuses startup above ${MAX_SCHEDULER_SOURCES} scheduler sources`, async () => {
     await expect(boot(MAX_SCHEDULER_SOURCES + 1)).rejects.toThrow(

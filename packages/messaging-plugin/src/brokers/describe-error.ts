@@ -34,14 +34,31 @@ interface DescriptionBudget {
  * @returns A one-line diagnostic safe for the broker's string logger sink
  */
 export function describeError(value: unknown): string {
-  const budget: DescriptionBudget = {
+  const budget = createDescriptionBudget();
+  describeSerializedError(serializeError(value), budget);
+  return `${budget.segments.join('')}${budget.truncated ? TRUNCATION_MARKER : ''}`;
+}
+
+/**
+ * Normalizes and bounds a complete diagnostic for a broker's string log sink.
+ *
+ * @param value - Diagnostic text, including application-supplied names
+ * @returns A single bounded line with control and format characters removed
+ */
+export function describeLogText(value: string): string {
+  const budget = createDescriptionBudget();
+  append(budget, value);
+  return `${budget.segments.join('')}${budget.truncated ? TRUNCATION_MARKER : ''}`;
+}
+
+/** Creates the shared budget for error rendering and complete diagnostics. */
+function createDescriptionBudget(): DescriptionBudget {
+  return {
     segments: [],
     length: 0,
     pendingWhitespace: false,
     truncated: false,
   };
-  describeSerializedError(serializeError(value), budget);
-  return `${budget.segments.join('')}${budget.truncated ? TRUNCATION_MARKER : ''}`;
 }
 
 /** Appends one serialized failure while preserving the shared output budget. */

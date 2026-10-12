@@ -11,10 +11,11 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext } from 'jsr:@setu-ts/common@^0.8.0';
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 import type { IClientTiming } from './contracts.ts';
 import { createDefaultFetch, type FetchTransport } from './default-fetch.ts';
+import { drawHexBytes } from './random-hex.ts';
 import { createDefaultClientTiming } from './timing.ts';
 import {
   compileOutboundAlias,
@@ -38,7 +39,7 @@ export const OUTBOUND_HTTP_DIAGNOSTICS_TOKEN = 'outbound-http-diagnostics';
  *
  * @internal
  */
-export const SDK_VERSION = '0.8.0';
+export const SDK_VERSION = '0.9.0';
 
 /**
  * The fixed, value-free construction and registration refusals.
@@ -104,17 +105,7 @@ export interface ObservedFetch {
 
 /** Draws the per-helper plugin-name nonce: 16 random bytes, hex-encoded. */
 function drawNonce(): string {
-  const crypto = (globalThis as { crypto?: { getRandomValues?: unknown } }).crypto;
-  if (crypto === undefined || typeof crypto.getRandomValues !== 'function') {
-    throw new TypeError(OBSERVED_FETCH_ERRORS.random);
-  }
-  const bytes = new Uint8Array(16);
-  (crypto as { getRandomValues(array: Uint8Array): Uint8Array }).getRandomValues(bytes);
-  let hex = '';
-  for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, '0');
-  }
-  return hex;
+  return drawHexBytes(16, OBSERVED_FETCH_ERRORS.random);
 }
 
 /** Validates and returns the timing object, probing `now()` once as a method. */

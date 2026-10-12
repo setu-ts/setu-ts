@@ -7,8 +7,7 @@
  * that are not strings, so each arm is pinned here rather than left to an
  * assertion at the call site.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { normalizeTransportHeaders } from '../../src/brokers/header-normalize.ts';
 
 describe('normalizeTransportHeaders', () => {

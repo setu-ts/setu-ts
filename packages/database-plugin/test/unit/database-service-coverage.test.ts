@@ -5,8 +5,7 @@
  * and reads writes back. Covers wrapDataSource logging, scoped UoW factory,
  * and the repository-delegation wrapper functions.
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createMemoryDataSource, DatabaseService } from '../../src/services/database-service.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';

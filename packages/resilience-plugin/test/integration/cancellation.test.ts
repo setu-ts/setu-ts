@@ -6,8 +6,7 @@
  * These are the tests that fail against the pre-Milestone-47 implementation,
  * which raced the protected call against a timer and left it running.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HardenedCall, IResilienceService } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

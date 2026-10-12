@@ -2,8 +2,7 @@
  * Tests for AuthPlugin factory options and registration.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
@@ -187,7 +186,10 @@ describe('AuthPlugin', () => {
       CAPABILITIES.JWT,
       CAPABILITIES.AUTH,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+      // M110a: the policy service is provided whether or not rbac is set.
+      CAPABILITIES.AUTHORIZATION_POLICIES,
     ]);
+    expect(registered.has(CAPABILITIES.AUTHORIZATION_POLICIES)).toBe(true);
     expect(registered.has(CAPABILITIES.JWT)).toBe(true);
     expect(registered.has(CAPABILITIES.AUTH)).toBe(true);
     expect(registered.has(CAPABILITIES.AUTHORIZATION)).toBe(false);

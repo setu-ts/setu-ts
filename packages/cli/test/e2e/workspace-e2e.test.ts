@@ -1,3 +1,10 @@
+import {
+  denoBinary,
+  run as runProcess,
+  spawnProcess,
+  tempDir,
+} from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The workspace gate: scaffolds a monorepo, adds two members, type-checks both,
  * and then BOOTS them — one member resolving and calling the other through the
@@ -12,9 +19,8 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
@@ -22,11 +28,12 @@ import {
   denoCheck,
   unusedPort,
   useWorkspacePackages,
+  withGeneratedServer,
 } from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /**
@@ -89,14 +96,14 @@ describe('workspace scaffolding — end to end', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-ws-' });
+    root = await tempDir({ prefix: 'setu-ws-' });
     out = [];
     err = [];
-    base = unusedPort();
+    base = await unusedPort();
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   /**
@@ -106,12 +113,79 @@ describe('workspace scaffolding — end to end', () => {
    * @returns The workspace root directory
    */
   async function twoMembers(): Promise<string> {
-    expect(await run(['new', 'acme', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
     expect(await run(['g', 'app', 'billing', '--template', 'microservice', '--dir', ws])).toBe(0);
     return ws;
   }
+
+  it('builds and serves a custom-scoped workspace library through SSR, and ignores node_modules', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]))
+      .toBe(0);
+    const ws = `${root}/shop`;
+    // Exercise the upgrade of a root created before node_modules was ignored.
+    await nodeFs.writeFile(`${ws}/.gitignore`, 'coverage/\n');
+    expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
+    expect(await run(['g', 'library', 'shared', '--scope', 'custom', '--dir', ws])).toBe(0);
+    const project = `${ws}/apps/web`;
+    await useWorkspacePackages(project);
+    await nodeFs.writeFile(
+      `${project}/app/lib/workspace.server.ts`,
+      "export { shared } from '@custom/shared';\n",
+    );
+    const routePath = `${project}/app/routes/_app/_index.tsx`;
+    const route = await nodeFs.readFile(routePath, 'utf8');
+    await nodeFs.writeFile(
+      routePath,
+      "import { shared } from '~/lib/workspace.server.ts';\n" + route.replace(
+        "session.get<string>('userEmail') ?? null",
+        "shared('served-from-library')",
+      ),
+    );
+
+    const build = async () => {
+      const result = await runProcess(denoBinary(), {
+        args: ['task', 'build'],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      return {
+        code: result.code,
+        output: new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr),
+      };
+    };
+    // The server bundle loads the library from the workspace at runtime rather
+    // than freezing a copy of it at build time. Before M111d the generated
+    // externals rule was the only way Vite could resolve the library at all, and
+    // a control removing it failed the build. A Deno workspace now links its
+    // members into node_modules (`nodeModulesDir: "auto"`), so Vite resolves the
+    // library and externalizes it by its node_modules default with or without
+    // the rule (measured) — no control can tell those two apart any more.
+    const serverBundle = async () =>
+      await nodeFs.readFile(`${project}/build/server/index.js`, 'utf8');
+    const built = await build();
+    expect(built.code, built.output).toBe(0);
+    expect(await serverBundle()).toMatch(/from ["']@custom\/shared["']/);
+    await withGeneratedServer(project, async (origin) => {
+      const response = await fetch(origin);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('shared: served-from-library');
+    }, base);
+    const git = async (args: string[]) =>
+      await runProcess('git', {
+        args,
+        cwd: ws,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+    expect((await git(['init'])).code).toBe(0);
+    const status = await git(['status', '--porcelain', '--untracked-files=all']);
+    expect(status.code).toBe(0);
+    expect(new TextDecoder().decode(status.stdout)).not.toContain('node_modules/');
+  });
 
   it('is formatted and lints clean, like a scaffolded project', async () => {
     // M63 established this bar for `setu new <name>` and `scaffold-runs-e2e`
@@ -123,12 +197,12 @@ describe('workspace scaffolding — end to end', () => {
     const ws = await twoMembers();
 
     for (const argv of [['fmt', '--check'], ['lint']]) {
-      const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
+      const { code, stdout, stderr } = await runProcess(denoBinary(), {
         args: argv,
         cwd: ws,
         stdout: 'piped',
         stderr: 'piped',
-      }).output();
+      });
       const decoder = new TextDecoder();
       expect(code, `${argv.join(' ')}: ${decoder.decode(stdout)}${decoder.decode(stderr)}`).toBe(0);
     }
@@ -140,18 +214,20 @@ describe('workspace scaffolding — end to end', () => {
   // renderer, and the gate above could not see it because it only ever used the
   // default. `setu generate command-handler` had the same defect independently.
   it('is formatted and lints clean with a BROKER transport, and after generating', async () => {
-    expect(await run(['new', 'acme', '--workspace', '--transport', 'rabbitmq'])).toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--transport', 'rabbitmq']),
+    ).toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
 
     /** Runs one Deno subcommand in the workspace and returns its outcome. */
     const check = async (argv: readonly string[]) => {
-      const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
+      const { code, stdout, stderr } = await runProcess(denoBinary(), {
         args: [...argv],
         cwd: ws,
         stdout: 'piped',
         stderr: 'piped',
-      }).output();
+      });
       const decoder = new TextDecoder();
       return { code, output: `${decoder.decode(stdout)}${decoder.decode(stderr)}` };
     };
@@ -183,7 +259,7 @@ describe('workspace scaffolding — end to end', () => {
   // family is swept because the width was a per-caller guess: six of the eight
   // call sites never overrode the default.
   it('stays formatted after generating THREE artifacts of every family', async () => {
-    expect(await run(['new', 'shop', '--template', 'microservice'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'microservice'])).toBe(0);
     const project = `${root}/shop`;
 
     const families = [
@@ -206,12 +282,26 @@ describe('workspace scaffolding — end to end', () => {
       }
     }
 
-    const formatted = await new Deno.Command(Deno.execPath(), {
+    // The gated families too. `ws-route` and `sse` emitted lines past the width
+    // on every name and survived because this sweep never installed the plugins
+    // that unlock them. Each name is prefixed with its family: `ws-route` and
+    // `plugin` share `src/plugins/`, and `sse` and `route` share a registrar name.
+    for (const pkg of ['websocket', 'sse', 'auth', 'database']) {
+      expect(await run(['add', pkg, '--dir', project]), pkg).toBe(0);
+    }
+    for (const name of ['payment-gateway', 'user-directory', 'order-archive']) {
+      for (const family of ['ws-route', 'sse', 'guard', 'job', 'migration']) {
+        const artifact = `${family}-${name}`;
+        expect(await run(['g', family, artifact, '--dir', project]), artifact).toBe(0);
+      }
+    }
+
+    const formatted = await runProcess(denoBinary(), {
       args: ['fmt', '--check'],
       cwd: project,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     const decoder = new TextDecoder();
     expect(
       formatted.code,
@@ -221,7 +311,9 @@ describe('workspace scaffolding — end to end', () => {
     // Belt and braces on the property itself, so a future `fmt` default that
     // tolerated a long line could not silently retire this check.
     for (const family of ['plugins', 'services', 'metrics', 'health', 'cqrs', 'events']) {
-      const barrel = await Deno.readTextFile(`${project}/src/${family}/index.ts`).catch(() => '');
+      const barrel = await nodeFs.readFile(`${project}/src/${family}/index.ts`, 'utf8').catch(() =>
+        ''
+      );
       for (const line of barrel.split('\n')) {
         expect(line.length, `${family}/index.ts: ${line}`).toBeLessThanOrEqual(100);
       }
@@ -229,15 +321,15 @@ describe('workspace scaffolding — end to end', () => {
   });
 
   it('creates a root whose files exist on disk', async () => {
-    expect(await run(['new', 'acme', '--workspace'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace'])).toBe(0);
     for (const name of ['deno.json', WORKSPACE_MANIFEST, 'README.md', '.gitignore']) {
-      expect((await Deno.stat(`${root}/acme/${name}`)).isFile).toBe(true);
+      expect((await nodeFs.stat(`${root}/acme/${name}`)).isFile()).toBe(true);
     }
   });
 
   it('records both members with distinct ports', async () => {
     const ws = await twoMembers();
-    const manifest = JSON.parse(await Deno.readTextFile(`${ws}/${WORKSPACE_MANIFEST}`)) as {
+    const manifest = JSON.parse(await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8')) as {
       members: { name: string; port: number }[];
     };
     // `healthProbes` records what the Kubernetes renderer cannot otherwise know:
@@ -249,10 +341,25 @@ describe('workspace scaffolding — end to end', () => {
     ]);
   });
 
+  it('refuses to add a member while the manifest names a deleted member', async () => {
+    const ws = await twoMembers();
+    await nodeFs.rm(`${ws}/apps/billing`, { recursive: true });
+    const manifestBefore = await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8');
+
+    expect(
+      await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws]),
+    ).toBe(1);
+    await expect(nodeFs.stat(`${ws}/apps/billing`)).rejects.toThrow();
+    await expect(nodeFs.stat(`${ws}/apps/shipping`)).rejects.toThrow();
+    expect(await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8')).toBe(manifestBefore);
+    expect(err.join('\n')).toContain('billing');
+    expect(err.join('\n')).toContain('Remove');
+  });
+
   it('gives each member the other address', async () => {
     const ws = await twoMembers();
-    const orders = await Deno.readTextFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`);
-    const billing = await Deno.readTextFile(`${ws}/apps/billing/${DISCOVERY_MODULE}`);
+    const orders = await nodeFs.readFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`, 'utf8');
+    const billing = await nodeFs.readFile(`${ws}/apps/billing/${DISCOVERY_MODULE}`, 'utf8');
     expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
     expect(orders).toContain(`port: ${base + 1},`);
     expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
@@ -273,21 +380,21 @@ describe('workspace scaffolding — end to end', () => {
     });
 
     expect(code).toBe(0);
-    const manifest = await Deno.readTextFile(`${ws}/${WORKSPACE_MANIFEST}`);
+    const manifest = await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8');
     expect(manifest).toContain(`"port": ${base + 1}`);
     expect(manifest).toContain(`"port": ${base + 3}`);
-    expect(await Deno.readTextFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`)).toContain(
+    expect(await nodeFs.readFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`, 'utf8')).toContain(
       `port: ${base + 3}`,
     );
-    expect(await Deno.readTextFile(`${ws}/docker/compose.yaml`)).toContain(`${base + 1}:`);
-    expect(await Deno.readTextFile(`${ws}/k8s/members.yaml`)).toContain(
+    expect(await nodeFs.readFile(`${ws}/docker/compose.yaml`, 'utf8')).toContain(`${base + 1}:`);
+    expect(await nodeFs.readFile(`${ws}/k8s/members.yaml`, 'utf8')).toContain(
       `containerPort: ${base + 3}`,
     );
   });
 
   it('gives every member the start task the root dev task runs', async () => {
     const ws = await twoMembers();
-    const root = JSON.parse(await Deno.readTextFile(`${ws}/deno.json`)) as {
+    const root = JSON.parse(await nodeFs.readFile(`${ws}/deno.json`, 'utf8')) as {
       tasks?: Record<string, string>;
     };
     // The scoped `--allow-env` is how the runner reads the three credential
@@ -301,7 +408,7 @@ describe('workspace scaffolding — end to end', () => {
     );
     for (const member of ['orders', 'billing']) {
       const manifest = JSON.parse(
-        await Deno.readTextFile(`${ws}/apps/${member}/deno.json`),
+        await nodeFs.readFile(`${ws}/apps/${member}/deno.json`, 'utf8'),
       ) as { tasks?: Record<string, string> };
       expect(manifest.tasks?.['start']).toContain('main.ts');
     }
@@ -315,7 +422,7 @@ describe('workspace scaffolding — end to end', () => {
   it('emits a Dockerfile whose start survives the generated read-only posture', async () => {
     const ws = await twoMembers();
     const dockerfilePath = `${ws}/docker/Dockerfile`;
-    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--frozen"');
+    expect(await nodeFs.readFile(dockerfilePath, 'utf8')).toContain('"run", "--frozen"');
 
     // The file is emitted `managed`, so regeneration re-renders it — an
     // existing workspace picks the change up on its next `generate app` with
@@ -323,11 +430,12 @@ describe('workspace scaffolding — end to end', () => {
     expect(await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws])).toBe(
       0,
     );
-    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--frozen"');
+    expect(await nodeFs.readFile(dockerfilePath, 'utf8')).toContain('"run", "--frozen"');
   });
 
   it('does not start a dependent until its prerequisite answers /ready', async () => {
-    expect(await run(['new', 'acme', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
     expect(
@@ -346,8 +454,8 @@ describe('workspace scaffolding — end to end', () => {
     for (const member of ['orders', 'billing']) await useWorkspacePackages(`${ws}/apps/${member}`);
 
     const ordersMain = `${ws}/apps/orders/main.ts`;
-    const original = await Deno.readTextFile(ordersMain);
-    await Deno.writeTextFile(
+    const original = await nodeFs.readFile(ordersMain, 'utf8');
+    await nodeFs.writeFile(
       ordersMain,
       original.replace(
         'const app = await createApp();',
@@ -355,12 +463,12 @@ describe('workspace scaffolding — end to end', () => {
       ),
     );
 
-    const dev = new Deno.Command(Deno.execPath(), {
+    const dev = spawnProcess(denoBinary(), {
       args: ['task', 'dev'],
       cwd: ws,
       stdout: 'piped',
       stderr: 'piped',
-    }).spawn();
+    });
     const stdout = new Response(dev.stdout).text();
     const stderr = new Response(dev.stderr).text();
     try {
@@ -419,13 +527,14 @@ describe('workspace scaffolding — end to end', () => {
       );
     }
 
-    const command = new Deno.Command(Deno.execPath(), {
-      args: ['check', '--node-modules-dir=none', ...sources],
-      cwd: ws,
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const { code, stderr } = await command.output();
+    const command = () =>
+      runProcess(denoBinary(), {
+        args: ['check', '--node-modules-dir=none', ...sources],
+        cwd: ws,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+    const { code, stderr } = await command();
     const text = new TextDecoder().decode(stderr);
     expect(text).not.toContain('SyntaxError');
     expect(code).toBe(0);
@@ -438,7 +547,17 @@ describe('workspace scaffolding — end to end', () => {
   // resolve every `@setu-ts/*` pin from the member's own manifest.
   it('type-checks a class-based member in a broker workspace, from the root', async () => {
     expect(
-      await run(['new', 'acme', '--workspace', '--transport', 'rabbitmq', '--port', String(base)]),
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'acme',
+        '--workspace',
+        '--transport',
+        'rabbitmq',
+        '--port',
+        String(base),
+      ]),
     )
       .toBe(0);
     const ws = `${root}/acme`;
@@ -460,7 +579,7 @@ describe('workspace scaffolding — end to end', () => {
     await useWorkspacePackages(project);
 
     // The member is the styled host: it registers the decorator and DI pair.
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain('DecoratorPlugin');
     expect(config).toContain('DiPlugin');
     // The transport overlay reached the styled member's wirings.
@@ -471,23 +590,24 @@ describe('workspace scaffolding — end to end', () => {
       `${project}/setu.config.ts`,
       `${project}/${DISCOVERY_MODULE}`,
     ];
-    const command = new Deno.Command(Deno.execPath(), {
-      args: ['check', '--node-modules-dir=none', ...sources],
-      cwd: ws,
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const { code, stderr } = await command.output();
+    const command = () =>
+      runProcess(denoBinary(), {
+        args: ['check', '--node-modules-dir=none', ...sources],
+        cwd: ws,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+    const { code, stderr } = await command();
     const text = new TextDecoder().decode(stderr);
     expect(text).not.toContain('SyntaxError');
     expect(code, text).toBe(0);
 
-    const formatted = await new Deno.Command(Deno.execPath(), {
+    const formatted = await runProcess(denoBinary(), {
       args: ['fmt', '--check'],
       cwd: ws,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     const decoder = new TextDecoder();
     expect(
       formatted.code,
@@ -500,12 +620,13 @@ describe('workspace scaffolding — end to end', () => {
   // exactly the shape no unit test can check — the two-member case above never
   // exercises it, because by then both maps have an entry.
   it('type-checks a lone member, whose map is empty', async () => {
-    expect(await run(['new', 'solo', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'solo', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/solo`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
 
     const project = `${ws}/apps/orders`;
-    expect(await Deno.readTextFile(`${project}/${DISCOVERY_MODULE}`)).toContain(
+    expect(await nodeFs.readFile(`${project}/${DISCOVERY_MODULE}`, 'utf8')).toContain(
       'export const SERVICE_ENDPOINTS = {};',
     );
 
@@ -528,11 +649,12 @@ describe('workspace scaffolding — end to end', () => {
   // What it CAN check is everything up to the build: the member exists, the root
   // gained exactly one field, and the server-side modules type-check.
   it('adds a full-stack member and enables node_modules at the root', async () => {
-    expect(await run(['new', 'shop', '--workspace', '--port', String(base)])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]))
+      .toBe(0);
     const ws = `${root}/shop`;
     expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
 
-    const rootManifest = JSON.parse(await Deno.readTextFile(`${ws}/deno.json`)) as {
+    const rootManifest = JSON.parse(await nodeFs.readFile(`${ws}/deno.json`, 'utf8')) as {
       nodeModulesDir?: string;
       workspace?: string[];
       tasks?: Record<string, string>;
@@ -551,7 +673,7 @@ describe('workspace scaffolding — end to end', () => {
     // full-stack project. Asserted as a file because proving it functionally
     // needs the real build.
     const project = `${ws}/apps/web`;
-    expect((await Deno.stat(`${project}/app/routes/_app/_index.tsx`)).isFile).toBe(true);
+    expect((await nodeFs.stat(`${project}/app/routes/_app/_index.tsx`)).isFile()).toBe(true);
 
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, [
@@ -564,15 +686,16 @@ describe('workspace scaffolding — end to end', () => {
   });
 
   it('type-checks a full-stack member in a grpc workspace', async () => {
-    expect(await run(['new', 'shop', '--workspace', '--transport', 'grpc'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--transport', 'grpc']))
+      .toBe(0);
     const ws = `${root}/shop`;
     expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
 
     const project = `${ws}/apps/web`;
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
     expect(config).toContain("app.register(GrpcPlugin({ basePath: '/grpc' }));");
-    expect(config).toContain('csrf: { exclude: [/^\\/grpc(?:\\/|$)/] },');
+    expect(config).toContain("csrf: { exclude: [new RegExp('^/grpc(?:/|$)')] },");
 
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, [
@@ -596,11 +719,11 @@ describe('workspace scaffolding — end to end', () => {
     const project = `${ws}/apps/orders`;
     // The member's own manifest is NOT touched by the library command, which is
     // exactly what makes this test meaningful.
-    const before = await Deno.readTextFile(`${project}/deno.json`);
+    const before = await nodeFs.readFile(`${project}/deno.json`, 'utf8');
     expect(before).not.toContain('@acme/shared');
 
     // A module in the member that imports the library and uses its export.
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${project}/src/uses-library.ts`,
       `import { shared } from '@acme/shared';\n\n` +
         `export const describeIt = (): string => shared('orders');\n`,
@@ -618,7 +741,7 @@ describe('workspace scaffolding — end to end', () => {
     const ws = await twoMembers();
     expect(await run(['g', 'module', 'invoice', '--dir', `${ws}/apps/billing`])).toBe(0);
     expect(
-      (await Deno.stat(`${ws}/apps/billing/src/controllers/invoice.routes.ts`)).isFile,
+      (await nodeFs.stat(`${ws}/apps/billing/src/controllers/invoice.routes.ts`)).isFile(),
     ).toBe(true);
   });
 
@@ -631,12 +754,12 @@ describe('workspace scaffolding — end to end', () => {
     // `billing` is a real server on the port the CLI allocated it, started
     // through its own generated entry — so the port under test is the one the
     // member actually binds, not one this test chose.
-    const server = new Deno.Command(Deno.execPath(), {
+    const server = spawnProcess(denoBinary(), {
       args: ['run', '-A', '--node-modules-dir=none', 'main.ts'],
       cwd: `${ws}/apps/billing`,
       stdout: 'piped',
       stderr: 'piped',
-    }).spawn();
+    });
 
     // ONE teardown path, idempotent, reached from both the failure and the
     // success route. It returns what the sibling printed, so a failure can name

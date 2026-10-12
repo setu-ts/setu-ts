@@ -57,6 +57,16 @@ export const CAPABILITIES = {
   AUTH: 'authentication',
   /** Authorization service (RBAC, permissions). */
   AUTHORIZATION: 'authorization',
+  /**
+   * Authorization policies — an `IAuthorizationPolicyService` the AuthPlugin
+   * always registers: an asynchronous, target-aware check over named
+   * policies, beside (never replacing) the synchronous RBAC service under
+   * `AUTHORIZATION`. Consumed by the `requirePolicy` guard and by
+   * DecoratorPlugin's `@RequirePolicy` and class-form policies.
+   *
+   * @since 0.9.0
+   */
+  AUTHORIZATION_POLICIES: 'authorization-policies',
   /** JWT sign/verify service. */
   JWT: 'jwt',
   /**
@@ -260,6 +270,39 @@ export const CAPABILITIES = {
    * with markup it did not concatenate by hand.
    */
   VIEW: 'view',
+  /**
+   * Localization — an `ILocalizer` holding the application's message
+   * catalogues per locale, bound to a request's resolved `IRequest.locale`
+   * through the localization plugin's `localizerFor(ctx)`.
+   */
+  LOCALIZATION: 'localization',
+  /**
+   * Transactional outbox — the `IOutbox` the messaging plugin registers when
+   * its `outbox` option is set (`outbox.<name>` for a named messaging
+   * instance). Writes an integration event in the caller's own database
+   * transaction and relays it to the broker afterwards.
+   *
+   * @since 0.9.0
+   */
+  OUTBOX: 'outbox',
+  /**
+   * Consumer inbox — the `IInbox` the messaging plugin registers when its
+   * `inbox` option is set (`inbox.<name>` for a named messaging instance).
+   * Records each handled integration event in the handler's own database
+   * transaction, so a duplicate delivery is acknowledged without running the
+   * handler again.
+   *
+   * @since 0.9.0
+   */
+  INBOX: 'inbox',
+  /**
+   * Idempotency — an `IIdempotencyService` whose `middleware` and `behavior`
+   * members build the HTTP and ingress idempotency paths over one store. The
+   * request/reply types and the entry points live in
+   * `@setu-ts/idempotency-plugin`; only the port, the service contract, the
+   * option types and this token live in `common`.
+   */
+  IDEMPOTENCY: 'idempotency',
   /**
    * Runtime-owned local diagnostics listener — the single IPv4-loopback port
    * the RuntimePlugin can bind for the local diagnostics connector

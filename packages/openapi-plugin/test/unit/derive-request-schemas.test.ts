@@ -8,9 +8,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { z } from 'npm:zod@^3.24.0';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod-v3';
 import type { MiddlewareFunction, RouteInfo, ValidationTarget } from '@setu-ts/common';
 import { VALIDATION_METADATA, withValidationMetadata } from '@setu-ts/common';
 

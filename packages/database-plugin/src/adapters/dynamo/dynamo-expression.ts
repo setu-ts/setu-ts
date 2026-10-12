@@ -90,7 +90,7 @@ const MATCH_NOTHING: TranslatedFilter = { kind: 'match-nothing' };
  * reuses the alias it already has, which is safe because the alias map is
  * name → attribute.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoExpressionBuilder {
   /**
@@ -139,7 +139,7 @@ export interface DynamoExpressionBuilder {
  * commands.
  *
  * @returns A fresh builder with no aliases and no values
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function createDynamoExpressionBuilder(): DynamoExpressionBuilder {
   const names: Record<string, string> = {};
@@ -380,7 +380,7 @@ function matchNothing(builder: DynamoExpressionBuilder): string {
  *   the match-all identity (an empty `and` group) and no filter need be sent
  * @throws {UnsupportedQueryFeatureError} When a path array is empty, or a
  *   `Date` filter names an attribute with no declared encoding
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function translateDynamoFilter(
   filter: FilterExpression,
@@ -425,7 +425,7 @@ export function translateDynamoFilter(
  * @param builder - The command's accumulator
  * @returns The `ProjectionExpression` text, e.g. `#n0, #n1`, or `undefined`
  *   when nothing projectable remains
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function buildDynamoProjection(
   select: readonly string[],

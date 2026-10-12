@@ -115,13 +115,18 @@ export interface ReactRouterPluginOptions {
    * application module, derive one with
    * `new URL('./build/server/index.js', import.meta.url).href`.
    *
+   * In the npm build, a relative specifier is also passed through TypeScript's
+   * `rewriteRelativeImportExtensions` helper, which turns a trailing
+   * `.ts`/`.tsx`/`.mts`/`.cts` into its `.js` counterpart before the import.
+   * An absolute path or `file:` URL is passed through unchanged.
+   *
    * @since 0.1.0
    */
   readonly serverBuildPath: string;
 
   /**
    * Injectable seam for lazy loading the RR runtime. When omitted, the default
-   * performs `await import(serverBuildPath)` + `await import('npm:react-router@8')`.
+   * performs `await import(serverBuildPath)` + `await import('react-router')`.
    *
    * Also the supported hook for a development server: return a handler built
    * over a build thunk (`createRequestHandler(() => vite.ssrLoadModule(...))`)

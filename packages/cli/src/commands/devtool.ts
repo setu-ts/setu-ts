@@ -20,7 +20,12 @@
  * @module
  */
 
+import { FRAMEWORK_RANGE, frameworkSpecifier } from '../templates/framework-specifier.ts';
 import type { IFileSystem } from '@setu-ts/common';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
+import { DOCKERFILE, DOCKERIGNORE, workspaceContainerFiles } from '../workspace/compose.ts';
+import { transportSpec } from '../workspace/transport.ts';
+import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import { escapeName } from '../utils/names.ts';
 
 import type { ParsedArgs } from '../args.ts';
@@ -28,12 +33,21 @@ import { stringFlag } from '../args.ts';
 import {
   CONFIG_MODULE,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   PROGRAM_NAME,
   VERSION,
 } from '../constants.ts';
-import { renderDevEntry } from '../devtool/dev-entry.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
+import { readJsonManifest } from '../utils/manifest-reader.ts';
+import { detectPlugins } from '../utils/plugin-detector.ts';
+import {
+  readDevtoolSourceNames,
+  renderDevtoolSources,
+  withDevtoolSourceWiring,
+} from '../devtool/sources.ts';
+import { devEntryPort, devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
   deriveDevTask,
@@ -42,14 +56,16 @@ import {
   devtoolDevRunner,
   devtoolRunnerRefusal,
   devtoolRuntimeRefusal,
-  legacyFactoryRefusal,
+  factoryRefusal,
+  standaloneDevtoolPort,
   starterConfigRefusal,
 } from '../devtool/planner.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery-module.ts';
 import {
-  allocatePort,
+  allocateDevtoolPort,
+  devtoolRangeStart,
   MAX_PORT,
   MEMBERS_DIR,
   readPortFlag,
@@ -70,7 +86,7 @@ const DEVTOOL_DEPENDENCY = '@setu-ts/diagnostics-plugin';
  * `--devtool` and one enabled later carry the identical entry — which is what
  * makes the byte-identical no-op outcome reachable on both.
  */
-const DEVTOOL_IMPORT = `jsr:${DEVTOOL_DEPENDENCY}@^${VERSION}`;
+const DEVTOOL_IMPORT = frameworkSpecifier('diagnostics-plugin', 'deno');
 
 /** Dependencies reached by the devtool command. */
 export interface DevtoolCommandDependencies {
@@ -84,6 +100,8 @@ export interface DevtoolCommandDependencies {
   readonly error: (message: string) => void;
   /** Checks whether a candidate port is currently bindable. */
   readonly portAvailable?: PortProbe;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /** One planned change to an existing file, or a new file this command creates. */
@@ -127,8 +145,11 @@ interface DenoJsonHandle {
  * @throws {SyntaxError} When the source is not JSON — callers refuse with
  * the file named rather than letting this escape
  */
-function openDenoJson(path: string, source: string): DenoJsonHandle {
-  const record = JSON.parse(source) as Record<string, unknown>;
+function openDenoJson(path: string, value: unknown): DenoJsonHandle {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('manifest root must be an object');
+  }
+  const record = value as Record<string, unknown>;
   const rawTasks = record['tasks'];
   const tasks: Record<string, string> = rawTasks !== null && typeof rawTasks === 'object'
     ? { ...(rawTasks as Record<string, string>) }
@@ -156,6 +177,51 @@ function openDenoJson(path: string, source: string): DenoJsonHandle {
   };
 }
 
+type WritableManifestRead =
+  | { readonly kind: 'ok'; readonly handle: DenoJsonHandle }
+  | { readonly kind: 'missing'; readonly expectedPath: string }
+  | { readonly kind: 'refused'; readonly message: string };
+
+async function readWritableDenoManifest(
+  fs: IFileSystem,
+  directory: string,
+): Promise<WritableManifestRead> {
+  const candidates = ['deno.json', 'deno.jsonc'] as const;
+  for (const file of candidates) {
+    const path = joinPath(directory, file);
+    const read = await readJsonManifest(fs, path);
+    if (read.kind === 'missing') continue;
+    if (read.kind === 'unreadable') {
+      return {
+        kind: 'refused',
+        message: `Cannot read ${escapeName(path)} as JSON: ${escapeName(read.reason)}`,
+      };
+    }
+    if (read.format === 'jsonc' || file === 'deno.jsonc') {
+      return {
+        kind: 'refused',
+        message:
+          `${
+            escapeName(path)
+          } is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+          `Add this line under "imports" yourself: ` +
+          `"${DEVTOOL_DEPENDENCY}": "${DEVTOOL_IMPORT}"`,
+      };
+    }
+    try {
+      return { kind: 'ok', handle: openDenoJson(path, read.value) };
+    } catch (cause) {
+      return {
+        kind: 'refused',
+        message: `Cannot read ${escapeName(path)}: ${
+          escapeName(cause instanceof Error ? cause.message : String(cause))
+        }`,
+      };
+    }
+  }
+  return { kind: 'missing', expectedPath: joinPath(directory, 'deno.json') };
+}
+
 /**
  * Merges one task into a handle's map.
  *
@@ -176,9 +242,9 @@ function mergeTask(
   if (current === expected) return undefined;
   if (current !== undefined) {
     return (
-      `Refusing to replace the existing "${key}" task in ${handle.path}:\n` +
-      `  current: ${current}\n` +
-      `  would write: ${expected}\n` +
+      `Refusing to replace the existing "${key}" task in ${escapeName(handle.path)}:\n` +
+      `  current: ${escapeName(current)}\n` +
+      `  would write: ${escapeName(expected)}\n` +
       `A task you wrote is yours to change; update it to match, or remove it, and run this again.`
     );
   }
@@ -209,9 +275,11 @@ function mergeImport(
   if (current === expected) return undefined;
   if (current !== undefined) {
     return (
-      `Refusing to replace the existing "${DEVTOOL_DEPENDENCY}" import in ${handle.path}:\n` +
-      `  current: ${current}\n` +
-      `  would write: ${expected}\n` +
+      `Refusing to replace the existing "${DEVTOOL_DEPENDENCY}" import in ${
+        escapeName(handle.path)
+      }:\n` +
+      `  current: ${escapeName(current)}\n` +
+      `  would write: ${escapeName(expected)}\n` +
       `A pin you rewrote is yours to change; update it to match, or remove it, and run this again.`
     );
   }
@@ -235,6 +303,35 @@ function planManifestWrites(planned: PlannedWrite[], handles: readonly DenoJsonH
     const importsChanged = JSON.stringify(handle.imports) !== handle.originalImports;
     if (!tasksChanged && !importsChanged) continue;
     planned.push({ path: handle.path, contents: handle.serialize(), creating: false });
+  }
+}
+
+/** Shares source generation with scaffolding; all reads precede the write transaction. */
+async function planSourceWrites(
+  deps: DevtoolCommandDependencies,
+  dir: string,
+  configPath: string,
+  config: string,
+  planned: PlannedWrite[],
+): Promise<void> {
+  const installed = await detectPlugins(deps.fs, dir);
+  const names = await readDevtoolSourceNames(deps.fs, dir, installed, config);
+  const module = renderDevtoolSources(installed, names);
+  const modulePath = joinPath(dir, module.path);
+  let existing: string | undefined;
+  try {
+    existing = new TextDecoder().decode(await deps.fs.readFile(modulePath));
+  } catch { /* Created below. */ }
+  if (existing !== module.contents) {
+    planned.push({ path: modulePath, contents: module.contents, creating: existing === undefined });
+  }
+  const wiring = withDevtoolSourceWiring(config, installed, names.customBackplane === true);
+  if (wiring.source !== config) {
+    planned.push({ path: configPath, contents: wiring.source, creating: false });
+  }
+  for (const line of wiring.setup) deps.log(`  In setu.config.ts: ${escapeName(line)}`);
+  for (const line of wiring.manual) {
+    deps.log(`  Configure the development source in setu.config.ts: ${escapeName(line)}`);
   }
 }
 
@@ -302,9 +399,11 @@ export async function runDevtoolCommand(
   // directory. Refused with the same treatment every other command gives it.
   if (read.problem.kind !== 'absent') {
     deps.error(
-      `A ${WORKSPACE_MANIFEST} exists in ${dir} but cannot be read (version` +
+      `A ${WORKSPACE_MANIFEST} exists in ${escapeName(dir)} but cannot be read (version` +
         ` ${
-          read.problem.kind === 'unsupported-version' ? read.problem.version : 'unknown or invalid'
+          read.problem.kind === 'unsupported-version'
+            ? escapeName(String(read.problem.version))
+            : 'unknown or invalid'
         }),` +
         ` so the devtool cannot tell whether this is a workspace. Fix or remove the manifest first.`,
     );
@@ -345,7 +444,9 @@ async function enableInWorkspace(
   if (memberName === undefined) {
     deps.error(
       `A member name is required inside a workspace: \`${PROGRAM_NAME} devtool enable <member>\`.` +
-        ` Members: ${manifest.members.map((member) => member.name).join(', ') || 'none'}.`,
+        ` Members: ${
+          manifest.members.map((member) => escapeName(member.name)).join(', ') || 'none'
+        }.`,
     );
     return EXIT_USAGE;
   }
@@ -354,21 +455,12 @@ async function enableInWorkspace(
   if (member === undefined) {
     deps.error(
       `Workspace member "${escapeName(memberName)}" is not in ${WORKSPACE_MANIFEST}.` +
-        ` Members: ${manifest.members.map((entry) => entry.name).join(', ') || 'none'}.`,
+        ` Members: ${
+          manifest.members.map((entry) => escapeName(entry.name)).join(', ') || 'none'
+        }.`,
     );
     return EXIT_ERROR;
   }
-  // Idempotent, per the merge contract: a member already carrying a devtool
-  // port has nothing left to merge, so the command reports and writes
-  // nothing rather than refusing — running it twice is not an error.
-  if (member.devtoolPort !== undefined) {
-    deps.log(
-      `Member "${member.name}" already carries a devtool port (${member.devtoolPort});` +
-        ` the devtool is already enabled for it, so there is nothing to do.`,
-    );
-    return EXIT_OK;
-  }
-
   const memberRoot = joinPath(MEMBERS_DIR, member.name);
 
   const configPath = joinPath(dir, memberRoot, CONFIG_MODULE);
@@ -378,7 +470,9 @@ async function enableInWorkspace(
   } catch {
     return reportInapplicable(
       deps,
-      `No ${CONFIG_MODULE} in ${joinPath(memberRoot)} — this is not a Setu-TS project member.`,
+      `No ${CONFIG_MODULE} in ${
+        escapeName(joinPath(memberRoot))
+      } — this is not a Setu-TS project member.`,
     );
   }
   // Starter FIRST. `LEGACY_FACTORY_SHAPES` carries the pre-devtool starter
@@ -392,36 +486,36 @@ async function enableInWorkspace(
   // that shape is not async and never matches it.
   const starter = starterConfigRefusal(configSource);
   if (starter !== undefined) return reportInapplicable(deps, starter);
-  const legacy = legacyFactoryRefusal(configSource);
+  const legacy = factoryRefusal(configSource);
   if (legacy !== undefined) return reportInapplicable(deps, legacy);
 
   const handles: DenoJsonHandle[] = [];
   const planned: PlannedWrite[] = [];
 
-  const memberManifestPath = joinPath(dir, memberRoot, 'deno.json');
-  let memberSource: string;
-  try {
-    memberSource = new TextDecoder().decode(await deps.fs.readFile(memberManifestPath));
-  } catch {
+  const memberRead = await readWritableDenoManifest(deps.fs, joinPath(dir, memberRoot));
+  if (memberRead.kind === 'missing') {
     return reportInapplicable(
       deps,
-      `No deno.json in ${joinPath(memberRoot)} — this is not a Setu-TS project member.`,
+      `No deno.json in ${escapeName(joinPath(memberRoot))} — this is not a Setu-TS project member.`,
     );
   }
-  let memberHandle: DenoJsonHandle;
-  try {
-    memberHandle = openDenoJson(memberManifestPath, memberSource);
-  } catch {
-    deps.error(`Cannot read ${memberManifestPath} as JSON; fix it and run this again.`);
+  if (memberRead.kind === 'refused') {
+    deps.error(memberRead.message);
     return EXIT_ERROR;
   }
+  const memberHandle = memberRead.handle;
+  const pinRefusal = frameworkPinRefusal(memberHandle);
+  if (pinRefusal !== undefined) return reportInapplicable(deps, pinRefusal);
+  const memberManifestPath = memberHandle.path;
   handles.push(memberHandle);
 
   const start = memberHandle.tasks['start'];
   if (start === undefined) {
     return reportInapplicable(
       deps,
-      `The member has no "start" task in ${memberManifestPath}; the devtool derives the` +
+      `The member has no "start" task in ${
+        escapeName(memberManifestPath)
+      }; the devtool derives the` +
         ` \`dev\` task from it, and there is nothing to derive from.`,
     );
   }
@@ -430,7 +524,7 @@ async function enableInWorkspace(
     return reportInapplicable(
       deps,
       `Cannot derive a "dev" task from the current "start" task:\n` +
-        `  ${start}\n` +
+        `  ${escapeName(start)}\n` +
         `The devtool requires a start task that runs main.ts directly, so the two tasks` +
         ` differ only in the entry module. Change the entry, then run this again.`,
     );
@@ -450,24 +544,24 @@ async function enableInWorkspace(
   // only place it can happen. Three outcomes: unmodified CLI output is
   // widened; already widened is a no-op; anything else is the developer's edit
   // and refuses with its current value.
-  const rootManifestPath = joinPath(dir, 'deno.json');
-  let rootSource: string;
-  try {
-    rootSource = new TextDecoder().decode(await deps.fs.readFile(rootManifestPath));
-  } catch {
+  const rootRead = await readWritableDenoManifest(deps.fs, dir);
+  if (rootRead.kind === 'missing') {
     return reportInapplicable(
       deps,
-      `No deno.json in ${dir}: a Deno workspace root declares one, and the root \`dev\`` +
+      `No deno.json in ${
+        escapeName(dir)
+      }: a Deno workspace root declares one, and the root \`dev\`` +
         ` task's grant must be widened in place for the devtool to run.`,
     );
   }
-  let rootHandle: DenoJsonHandle;
-  try {
-    rootHandle = openDenoJson(rootManifestPath, rootSource);
-  } catch {
-    deps.error(`Cannot read ${rootManifestPath} as JSON; fix it and run this again.`);
+  if (rootRead.kind === 'refused') {
+    deps.error(rootRead.message);
     return EXIT_ERROR;
   }
+  const rootHandle = rootRead.handle;
+  const rootPins = frameworkPinRefusal(rootHandle);
+  if (rootPins !== undefined) return reportInapplicable(deps, rootPins);
+  const rootManifestPath = rootHandle.path;
   handles.push(rootHandle);
   const expectedRunAll = workspaceProfile('deno').runAll;
   const currentRunAll = rootHandle.tasks['dev'];
@@ -480,9 +574,9 @@ async function enableInWorkspace(
   } else {
     return reportInapplicable(
       deps,
-      `Refusing to replace the existing "dev" task in ${rootManifestPath}:\n` +
-        `  current: ${currentRunAll ?? '(none)'}\n` +
-        `  would write: ${expectedRunAll}\n` +
+      `Refusing to replace the existing "dev" task in ${escapeName(rootManifestPath)}:\n` +
+        `  current: ${currentRunAll === undefined ? '(none)' : escapeName(currentRunAll)}\n` +
+        `  would write: ${escapeName(expectedRunAll)}\n` +
         `A task you wrote is yours to change; update it to match, or remove it, and run this again.`,
     );
   }
@@ -503,7 +597,18 @@ async function enableInWorkspace(
   const runnerRefusal = devtoolRunnerRefusal(existingRunner, runner.path);
   if (runnerRefusal !== undefined) return reportInapplicable(deps, runnerRefusal);
 
-  const devtoolPort = await resolveDevtoolPort(manifest, requestedPort, deps);
+  if (
+    member.devtoolPort !== undefined && requestedPort !== undefined &&
+    member.devtoolPort !== requestedPort
+  ) {
+    return reportInapplicable(
+      deps,
+      `Member ${
+        escapeName(member.name)
+      } already uses devtool port ${member.devtoolPort}; use ports --reallocate to move it.`,
+    );
+  }
+  const devtoolPort = member.devtoolPort ?? await resolveDevtoolPort(manifest, requestedPort, deps);
   if (typeof devtoolPort === 'string') return reportInapplicable(deps, devtoolPort);
 
   const entryPath = joinPath(dir, memberRoot, DEVTOOL_ENTRY_MODULE);
@@ -517,10 +622,12 @@ async function enableInWorkspace(
   } catch {
     existingEntry = undefined;
   }
-  if (existingEntry !== undefined && existingEntry !== entry) {
+  if (existingEntry !== undefined && !devEntryVariants(devtoolPort).includes(existingEntry)) {
     return reportInapplicable(
       deps,
-      `Refusing to overwrite ${joinPath(memberRoot, DEVTOOL_ENTRY_MODULE)}: it exists with` +
+      `Refusing to overwrite ${
+        escapeName(joinPath(memberRoot, DEVTOOL_ENTRY_MODULE))
+      }: it exists with` +
         ` different contents. The file is yours once written — review it, remove it, and` +
         ` run this again.`,
     );
@@ -528,17 +635,34 @@ async function enableInWorkspace(
 
   const nextManifest: WorkspaceManifest = {
     ...manifest,
+    devtoolBasePort: manifest.devtoolBasePort ?? requestedPort ?? devtoolRangeStart(manifest),
     members: manifest.members.map((entry_) =>
       entry_.name === member.name ? { ...entry_, devtoolPort } : entry_
     ),
   };
 
+  for (
+    const file of workspaceContainerFiles(
+      nextManifest,
+      transportSpec(manifest.transport),
+      workspaceProfile(manifest.runtime),
+    )
+  ) {
+    if (file.path !== DOCKERFILE && file.path !== DOCKERIGNORE) continue;
+    planned.push({
+      ...file,
+      path: joinPath(dir, file.path),
+      creating: false,
+    });
+  }
   planManifestWrites(planned, handles);
+  await planSourceWrites(deps, joinPath(dir, memberRoot), configPath, configSource, planned);
   if (existingRunner === undefined) {
     planned.push({ path: runnerPath, contents: runner.contents, creating: true });
   }
-  if (existingEntry === undefined) {
-    planned.push({ path: entryPath, contents: entry, creating: true });
+  // An accepted older rendering (the 0.8.0 entry) is rewritten to the current one.
+  if (existingEntry !== entry) {
+    planned.push({ path: entryPath, contents: entry, creating: existingEntry === undefined });
   }
   planned.push({
     path: joinPath(dir, WORKSPACE_MANIFEST),
@@ -546,30 +670,57 @@ async function enableInWorkspace(
     creating: false,
   });
 
+  for (let index = planned.length - 1; index >= 0; index--) {
+    const write = planned[index]!;
+    try {
+      const existing = new TextDecoder().decode(await deps.fs.readFile(write.path));
+      if (existing === write.contents) planned.splice(index, 1);
+    } catch {
+      planned[index] = { ...write, creating: true };
+    }
+  }
   if (args.flags['dry-run'] === true) {
     for (const write of planned) {
-      deps.log(`${write.creating ? 'would create' : 'would update'} ${write.path}`);
+      deps.log(`${write.creating ? 'would create' : 'would update'} ${escapeName(write.path)}`);
     }
     return EXIT_OK;
   }
 
+  if (planned.length === 0) {
+    deps.log(`The devtool is already enabled for ${escapeName(member.name)}; nothing to change.`);
+    return EXIT_OK;
+  }
+
   try {
-    await writeFiles(deps.fs, planned as readonly GeneratedFile[]);
+    await writeFiles(
+      deps.fs,
+      planned as readonly GeneratedFile[],
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
+    );
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(
-      `Failed to enable the devtool: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to enable the devtool: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
 
-  for (const write of planned) deps.log(`${write.creating ? 'created' : 'updated'} ${write.path}`);
+  for (const write of planned) {
+    deps.log(`${write.creating ? 'created' : 'updated'} ${escapeName(write.path)}`);
+  }
   deps.log('');
   deps.log(
-    `Enabled the devtool for ${member.name}: the connector listens on` +
+    `Enabled the devtool for ${escapeName(member.name)}: the connector listens on` +
       ` 127.0.0.1:${devtoolPort} while the member runs.`,
   );
   deps.log('Next, from the workspace root:');
-  deps.log(`  SETU_DEVTOOL_MEMBER=${member.name} deno task dev`);
+  deps.log(`  SETU_DEVTOOL_MEMBER=${escapeName(member.name)} deno task dev`);
   deps.log('The launcher supplies the session credentials through the environment.');
   return EXIT_OK;
 }
@@ -594,28 +745,45 @@ async function enableStandalone(
   if (memberName !== undefined) {
     deps.error(
       `\`${PROGRAM_NAME} devtool enable\` takes no member name outside a workspace:` +
-        ` ${dir} carries no ${WORKSPACE_MANIFEST}, so there is no member to name.`,
+        ` ${escapeName(dir)} carries no ${WORKSPACE_MANIFEST}, so there is no member to name.`,
     );
     return EXIT_USAGE;
   }
 
-  const manifestPath = joinPath(dir, 'deno.json');
-  let manifestSource: string;
-  try {
-    manifestSource = new TextDecoder().decode(await deps.fs.readFile(manifestPath));
-  } catch {
+  const manifestRead = await readWritableDenoManifest(deps.fs, dir);
+  if (manifestRead.kind === 'missing') {
+    // No Deno manifest: an npm project is the wrong runtime, while a directory
+    // with no manifest at all is not a project — the runtime detector would read
+    // that as Node and report the runtime, which names the wrong problem.
+    try {
+      if (await isPresent(deps.fs, joinPath(dir, 'package.json'))) {
+        // Never Deno without a Deno manifest, so this always refuses.
+        const runtime = await detectTargetRuntime(deps.fs, dir);
+        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime)!);
+      }
+    } catch (cause) {
+      return reportInapplicable(deps, escapeName(describeCause(cause)));
+    }
     return reportInapplicable(
       deps,
-      `No deno.json in ${dir} — this is not a Setu-TS project.`,
+      `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
     );
   }
-  let handle: DenoJsonHandle;
   try {
-    handle = openDenoJson(manifestPath, manifestSource);
-  } catch {
-    deps.error(`Cannot read ${manifestPath} as JSON; fix it and run this again.`);
+    const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir));
+    if (refusal !== undefined) return reportInapplicable(deps, refusal);
+  } catch (cause) {
+    return reportInapplicable(deps, escapeName(describeCause(cause)));
+  }
+
+  if (manifestRead.kind === 'refused') {
+    deps.error(manifestRead.message);
     return EXIT_ERROR;
   }
+  const handle = manifestRead.handle;
+  const pins = frameworkPinRefusal(handle);
+  if (pins !== undefined) return reportInapplicable(deps, pins);
+  const manifestPath = handle.path;
 
   const configPath = joinPath(dir, CONFIG_MODULE);
   let configSource: string;
@@ -624,20 +792,20 @@ async function enableStandalone(
   } catch {
     return reportInapplicable(
       deps,
-      `No ${CONFIG_MODULE} in ${dir} — this is not a Setu-TS project.`,
+      `No ${CONFIG_MODULE} in ${escapeName(dir)} — this is not a Setu-TS project.`,
     );
   }
   // Starter FIRST, for the reason spelled out at the workspace site above.
   const starter = starterConfigRefusal(configSource);
   if (starter !== undefined) return reportInapplicable(deps, starter);
-  const legacy = legacyFactoryRefusal(configSource);
+  const legacy = factoryRefusal(configSource);
   if (legacy !== undefined) return reportInapplicable(deps, legacy);
 
   const start = handle.tasks['start'];
   if (start === undefined) {
     return reportInapplicable(
       deps,
-      `This project has no "start" task in ${manifestPath}; the devtool derives the` +
+      `This project has no "start" task in ${escapeName(manifestPath)}; the devtool derives the` +
         ` \`dev\` task from it, and there is nothing to derive from.`,
     );
   }
@@ -646,7 +814,7 @@ async function enableStandalone(
     return reportInapplicable(
       deps,
       `Cannot derive a "dev" task from the current "start" task:\n` +
-        `  ${start}\n` +
+        `  ${escapeName(start)}\n` +
         `The devtool requires a start task that runs main.ts directly, so the two tasks` +
         ` differ only in the entry module. Change the entry, then run this again.`,
     );
@@ -660,16 +828,29 @@ async function enableStandalone(
   const importRefusal = mergeImport(handle, DEVTOOL_IMPORT);
   if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
 
-  const devtoolPort = requestedPort ?? DEFAULT_DEVTOOL_PORT;
   const entryPath = joinPath(dir, DEVTOOL_ENTRY_MODULE);
-  const entry = renderDevEntry({ devtoolPort });
   let existingEntry: string | undefined;
   try {
     existingEntry = new TextDecoder().decode(await deps.fs.readFile(entryPath));
   } catch {
     existingEntry = undefined;
   }
-  if (existingEntry !== undefined && existingEntry !== entry) {
+  const recordedPort = existingEntry === undefined ? undefined : devEntryPort(existingEntry);
+  const devtoolPort = requestedPort ?? recordedPort ??
+    (existingEntry === undefined ? await standaloneDevtoolPort(deps.portAvailable) : undefined);
+  if (devtoolPort === undefined) {
+    return reportInapplicable(
+      deps,
+      existingEntry === undefined
+        ? 'No bindable standalone devtool port remains between 4919 and 5019.'
+        : `Refusing to overwrite ${DEVTOOL_ENTRY_MODULE}: it exists with different contents.` +
+          ' The file is yours once written — review it, remove it, and run this again.',
+    );
+  }
+  const entry = renderDevEntry({ devtoolPort });
+  if (
+    existingEntry !== undefined && !devEntryVariants(devtoolPort, false).includes(existingEntry)
+  ) {
     return reportInapplicable(
       deps,
       `Refusing to overwrite ${DEVTOOL_ENTRY_MODULE}: it exists with different contents.` +
@@ -678,13 +859,15 @@ async function enableStandalone(
   }
 
   planManifestWrites(planned, [handle]);
-  if (existingEntry === undefined) {
-    planned.push({ path: entryPath, contents: entry, creating: true });
+  await planSourceWrites(deps, dir, configPath, configSource, planned);
+  // An accepted older rendering (the 0.8.0 entry) is rewritten to the current one.
+  if (existingEntry !== entry) {
+    planned.push({ path: entryPath, contents: entry, creating: existingEntry === undefined });
   }
 
   if (args.flags['dry-run'] === true) {
     for (const write of planned) {
-      deps.log(`${write.creating ? 'would create' : 'would update'} ${write.path}`);
+      deps.log(`${write.creating ? 'would create' : 'would update'} ${escapeName(write.path)}`);
     }
     return EXIT_OK;
   }
@@ -695,15 +878,28 @@ async function enableStandalone(
   }
 
   try {
-    await writeFiles(deps.fs, planned as readonly GeneratedFile[]);
+    await writeFiles(
+      deps.fs,
+      planned as readonly GeneratedFile[],
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
+    );
   } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
     deps.error(
-      `Failed to enable the devtool: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Failed to enable the devtool: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
+      }`,
     );
     return EXIT_ERROR;
   }
 
-  for (const write of planned) deps.log(`${write.creating ? 'created' : 'updated'} ${write.path}`);
+  for (const write of planned) {
+    deps.log(`${write.creating ? 'created' : 'updated'} ${escapeName(write.path)}`);
+  }
   deps.log('');
   deps.log(
     `Enabled the devtool: the connector listens on 127.0.0.1:${devtoolPort} while the project runs.`,
@@ -737,7 +933,9 @@ async function resolveDevtoolPort(
     );
     if (taken !== undefined) {
       return (
-        `Port ${requestedPort} is already used by the member "${taken.name}" in this workspace` +
+        `Port ${requestedPort} is already used by the member "${
+          escapeName(taken.name)
+        }" in this workspace` +
         `${taken.devtoolPort === requestedPort ? ' (its devtool port)' : ''}. Two listeners on` +
         ` one port cannot both bind, and the launcher would connect to whichever process won.`
       );
@@ -748,13 +946,17 @@ async function resolveDevtoolPort(
     return requestedPort;
   }
 
-  let candidate = allocatePort(manifest);
+  let candidate = allocateDevtoolPort(manifest);
   while (candidate !== undefined && !(await probe(candidate))) {
     // Same marker trick the application port uses: a member carrying the
     // occupied value as its port pushes the allocator past it.
-    candidate = allocatePort({
+    candidate = allocateDevtoolPort({
       ...manifest,
-      members: [...manifest.members, { name: '__occupied__', port: candidate }],
+      members: [...manifest.members, {
+        name: '__occupied__',
+        port: candidate,
+        devtoolPort: candidate,
+      }],
     });
   }
   if (candidate === undefined) {
@@ -762,4 +964,51 @@ async function resolveDevtoolPort(
       ` ${MAX_PORT} is taken.`;
   }
   return candidate;
+}
+
+/**
+ * Refuses mixed framework versions before any manifest merge.
+ *
+ * A pin passes only as the npm form this CLI writes —
+ * `npm:@setu-ts/<pkg>@^<version>`, optionally with a subpath. A project still
+ * pinned to `jsr:` predates the npm packages; it is refused with the upgrade
+ * guide named, never accepted because its version happens to match.
+ */
+function frameworkPinRefusal(handle: DenoJsonHandle): string | undefined {
+  const wrong = Object.entries(handle.imports).filter(([key, value]) =>
+    key.startsWith('@setu-ts/') &&
+    (typeof value !== 'string' ||
+      /^npm:@setu-ts\/[^@]+@(\^[^/]+)(?:\/.*)?$/.exec(value)?.[1] !== FRAMEWORK_RANGE)
+  );
+  if (wrong.length === 0) return undefined;
+  return `Framework pins in ${escapeName(handle.path)} disagree with this CLI:\n` +
+    wrong.map(([key, value]) =>
+      `  ${escapeName(key)}: ${escapeName(String(value))}; expected ${
+        escapeName(frameworkSpecifier(key.slice('@setu-ts/'.length), 'deno'))
+      }`
+    ).join('\n') +
+    `\nThe devtool entry imports types that exist only at ${VERSION}; upgrade the project first (see docs/upgrading.md), then run this again.`;
+}
+
+/**
+ * Whether a path exists. Only a missing path is absent; any other failure is
+ * thrown, so an unreadable manifest is reported rather than read as absence.
+ *
+ * @param fs - The filesystem to probe
+ * @param path - The absolute path
+ * @returns True when it exists
+ */
+async function isPresent(fs: IFileSystem, path: string): Promise<boolean> {
+  try {
+    await fs.stat(path);
+    return true;
+  } catch (cause) {
+    if (isMissingPath(cause)) return false;
+    throw cause;
+  }
+}
+
+/** A thrown value's message, or its string form. */
+function describeCause(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

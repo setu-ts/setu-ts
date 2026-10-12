@@ -12,6 +12,8 @@
  * @module
  */
 
+import type { IntegrationEventEnvelope } from './envelope.ts';
+
 /**
  * A named, versioned cross-service event contract.
  *
@@ -33,6 +35,19 @@ export interface IntegrationEventDefinition<T> {
    * consumer side only — never on publish.
    */
   readonly parse: (value: unknown) => T;
+  /**
+   * Opt-in ordering selector (M106 §3.7): returns the key that PLACES the
+   * event, or `undefined` for no key. Read only when the caller passes no
+   * `orderingKey`; a selector that throws, or returns a value §3.4 refuses,
+   * makes the publish reject.
+   *
+   * Declared in METHOD syntax deliberately: a property-style function member
+   * would make `IntegrationEventDefinition<T>` invariant in `T` under
+   * `strictFunctionTypes`, so an `IntegrationEventDefinition<OrderPlaced>` would
+   * no longer assign to the `IntegrationEventDefinition<unknown>` a consumer
+   * takes — a breaking change §4 forbids.
+   */
+  orderingKey?(envelope: IntegrationEventEnvelope<T>): string | undefined;
 }
 
 /**
@@ -71,8 +86,9 @@ export function defineIntegrationEvent<T>(options: {
   version: number;
   topic: string;
   parse: (value: unknown) => T;
+  orderingKey?: (envelope: IntegrationEventEnvelope<T>) => string | undefined;
 }): IntegrationEventDefinition<T> {
-  const { type, version, topic, parse } = options;
+  const { type, version, topic, parse, orderingKey } = options;
   if (typeof type !== 'string' || type.length === 0) {
     throw new TypeError(
       `defineIntegrationEvent: "type" must be a non-empty string; received ${String(type)}`,
@@ -93,6 +109,9 @@ export function defineIntegrationEvent<T>(options: {
   if (typeof parse !== 'function') {
     throw new TypeError('defineIntegrationEvent: "parse" must be a function');
   }
+  if (orderingKey !== undefined && typeof orderingKey !== 'function') {
+    throw new TypeError('defineIntegrationEvent: "orderingKey" must be a function when supplied');
+  }
   const suffix = `.v${version}`;
   if (!topic.endsWith(suffix)) {
     throw new TypeError(
@@ -100,5 +119,11 @@ export function defineIntegrationEvent<T>(options: {
         `(a version bump owns a distinct topic); received "${topic}"`,
     );
   }
-  return { type, version, topic, parse };
+  return {
+    type,
+    version,
+    topic,
+    parse,
+    ...(orderingKey !== undefined ? { orderingKey } : {}),
+  };
 }

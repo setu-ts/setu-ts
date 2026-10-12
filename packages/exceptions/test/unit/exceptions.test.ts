@@ -4,8 +4,7 @@
  * Asserts each factory returns an `HttpError` with the correct `statusCode`
  * and that `validationError` packs its errors into `details`.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   badRequest,

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as barrel from '../../src/index.ts';
 
 /** The runtime-visible surface §4 of the milestone plan commits to. */
@@ -45,7 +44,7 @@ describe('@setu-ts/cli barrel', () => {
   it('names Prompter and PromptChoice from the barrel', () => {
     const prompter: barrel.Prompter = {
       select: (_question: string, _choices: readonly barrel.PromptChoice[]) =>
-        Promise.resolve(undefined),
+        Promise.resolve({ kind: 'unavailable' }),
     };
     const choice: barrel.PromptChoice = { value: 'rest', label: 'REST set' };
     expect(prompter).toBeDefined();

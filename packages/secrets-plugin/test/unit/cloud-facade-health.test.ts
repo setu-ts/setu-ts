@@ -16,8 +16,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { AwsKmsProvider } from '../../src/providers/aws-kms.ts';
 import { GcpSecretManagerProvider } from '../../src/providers/gcp-secret-manager.ts';

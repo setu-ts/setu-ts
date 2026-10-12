@@ -18,6 +18,8 @@
  * @module
  * @since 0.7.0
  */
+import '../metadata/symbol-metadata.ts';
+
 import { methodDecorator } from '../metadata/context-bridge.ts';
 import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
 
@@ -65,7 +67,8 @@ const DEFAULT_REDIRECT_STATUS = 302;
  * class OrderController {
  *   @HttpCode(201)
  *   @Post('/')
- *   create(@Params(Body()) order: OrderInput): OrderView {
+ *   @Params(Body())
+ *   create(order: OrderInput): OrderView {
  *     return this.orders.create(order);
  *   }
  * }

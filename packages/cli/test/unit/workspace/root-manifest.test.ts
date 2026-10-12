@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   NODE_MODULES_AUTO,
   NODE_MODULES_DIR,
@@ -10,6 +9,27 @@ import {
 } from '../../../src/workspace/root-manifest.ts';
 
 describe('planRootNodeModulesDir', () => {
+  it('repairs an old root ignore even when nodeModulesDir is already auto', () => {
+    const plan = planRootNodeModulesDir('{"nodeModulesDir":"auto"}', 'web', 'coverage/');
+    expect(plan).toEqual({
+      kind: 'update',
+      file: {
+        path: '.gitignore',
+        contents: 'coverage/\nnode_modules/\n',
+        managed: true,
+      },
+    });
+    expect(planRootNodeModulesDir('{"nodeModulesDir":"auto"}', 'web', 'node_modules/\n').kind)
+      .toBe('unchanged');
+  });
+
+  it('plans the ignore append alongside the manifest merge', () => {
+    const plan = planRootNodeModulesDir('{}', 'web', 'coverage/\n');
+    expect(plan.kind).toBe('update');
+    if (plan.kind !== 'update') throw new Error('Expected an update');
+    expect(plan.extra?.[0]?.contents).toBe('coverage/\nnode_modules/\n');
+    expect(planRootNodeModulesDir('{}', 'web', 'node_modules/\n')).not.toHaveProperty('extra');
+  });
   it('adds the field, keeping everything else the root declared', () => {
     const plan = planRootNodeModulesDir(
       `${JSON.stringify({ workspace: ['./apps/*'], tasks: { dev: 'x' } })}\n`,

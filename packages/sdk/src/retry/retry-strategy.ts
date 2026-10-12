@@ -11,15 +11,85 @@
  * @internal
  */
 
-import type { IClientTiming } from '../http/contracts.ts';
-import type { RetryPolicy } from 'jsr:@setu-ts/common@^0.8.0';
+import type { ClientRetryPolicy, IClientTiming } from '../http/contracts.ts';
 
 import { HttpClientError } from '../errors.ts';
+
+// JavaScript runtimes clamp larger setTimeout delays, commonly to 1 ms.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Validate a retry policy and return a frozen shallow copy of it.
+ *
+ * The one owner of the retry bounds, run by the `HttpClient` constructor so a
+ * client built directly enforces what `createClient()` documents. Copying is
+ * load-bearing: the client keeps the copy rather than the caller's object, so
+ * raising `maxRetryAfterMs`, `delay` or `limit` after construction cannot move
+ * the validated cap or reach `timing.sleep` with an unchecked delay.
+ *
+ * @param policy - The caller-supplied retry policy
+ * @returns A frozen copy of the validated policy
+ * @throws {Error} When any bound is violated
+ * @internal
+ */
+export function validateRetryPolicy(policy: ClientRetryPolicy): Readonly<ClientRetryPolicy> {
+  if (!Number.isSafeInteger(policy.limit) || policy.limit < 1) {
+    throw new Error('retry.limit must be a positive safe integer');
+  }
+  if (!Number.isFinite(policy.delay) || policy.delay < 0) {
+    throw new Error('retry.delay must be a finite non-negative number');
+  }
+  if (policy.delay > MAX_TIMER_DELAY_MS) {
+    throw new Error('retry.delay exceeds the maximum timer delay');
+  }
+  const largestPolicyDelay = policy.delay * 2 ** (policy.limit - 1);
+  if (policy.backoff === 'exponential' && !Number.isFinite(largestPolicyDelay)) {
+    throw new Error('retry exponential backoff must remain finite');
+  }
+  if (policy.backoff === 'exponential' && largestPolicyDelay > MAX_TIMER_DELAY_MS) {
+    throw new Error('retry exponential backoff exceeds the maximum timer delay');
+  }
+  if (
+    policy.maxRetryAfterMs !== undefined &&
+    (!Number.isFinite(policy.maxRetryAfterMs) || policy.maxRetryAfterMs < 0)
+  ) {
+    throw new Error('retry.maxRetryAfterMs must be a finite non-negative number');
+  }
+  if (policy.maxRetryAfterMs !== undefined && policy.maxRetryAfterMs > MAX_TIMER_DELAY_MS) {
+    throw new Error('retry.maxRetryAfterMs exceeds the maximum timer delay');
+  }
+  return Object.freeze({ ...policy });
+}
 
 // Idempotent/safe methods that may be automatically retried.
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
 
-/** Retryable status codes: 408, 425, 429, and 500–599. */
+/**
+ * Errors raised AFTER a response arrived (a JSON parse failure, a response
+ * interceptor). The server executed, so a keyed request outside the safe set
+ * must not repeat it (M109b §3.9).
+ */
+const EXECUTED = new WeakSet<object>();
+
+/**
+ * Tags an error as raised after the server executed. Mutates nothing the
+ * caller can see: the tag lives in this module's `WeakSet`.
+ *
+ * @internal
+ * @param error - Whatever was thrown after a response arrived
+ * @returns The same error, tagged
+ */
+export function markExecuted<T>(error: T): T {
+  if (typeof error === 'object' && error !== null) EXECUTED.add(error);
+  return error;
+}
+
+/** True when an error was raised after a response arrived. */
+function isExecuted(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && EXECUTED.has(error);
+}
+
+/** Retryable status codes: 408, 425, 429, and 500–599 — plus `409` when keyed. */
 function isRetryableStatus(status: number): boolean {
   return (
     status === 408 ||
@@ -38,12 +108,12 @@ function isRetryableStatus(status: number): boolean {
  */
 function parseRetryAfterDelta(headers: Headers): number | null {
   const value = headers.get('Retry-After');
-  if (value === null || value.trim() === '') return null;
-  const n = Number(value);
-  // Gate on a non-negative integer: rejects fractional values and
-  // non-numeric parses. Empty strings are rejected above.
-  if (Number.isInteger(n) && n >= 0) return n * 1000;
-  return null;
+  if (value === null) return null;
+  const deltaSeconds = value.trim();
+  // RFC delta-seconds is one or more decimal digits. `Number()` alone also
+  // accepts JavaScript spellings such as `1e3`, `+3`, and `0x10`.
+  if (!/^[0-9]+$/.test(deltaSeconds)) return null;
+  return Number(deltaSeconds) * 1000;
 }
 
 /**
@@ -58,13 +128,19 @@ function parseRetryAfterDelta(headers: Headers): number | null {
  */
 export async function runWithRetry<T>(
   fn: () => Promise<T>,
-  policy: RetryPolicy,
+  policy: ClientRetryPolicy,
   method: string,
   timing: IClientTiming,
   signal?: AbortSignal,
+  keyed = false,
+  successfulResponseReceived?: () => boolean,
 ): Promise<T> {
   let lastError: unknown;
-  const canRetry = SAFE_METHODS.has(method.toUpperCase());
+  const safeMethod = SAFE_METHODS.has(method.toUpperCase());
+  // A keyed request may be repeated on ANY method (M109b §3.9).
+  const canRetry = keyed || safeMethod;
+  const maxRetryAfterMs = policy.maxRetryAfterMs ??
+    (policy.backoff === 'exponential' ? policy.delay * 2 ** (policy.limit - 1) : policy.delay);
 
   for (let attempt = 1; attempt <= policy.limit; attempt++) {
     try {
@@ -76,12 +152,19 @@ export async function runWithRetry<T>(
       // Never retry aborted requests.
       if (signal?.aborted) throw error;
 
+      // A keyed, non-safe method whose response already arrived is never
+      // repeated: the server executed (M109b §3.9).
+      if (keyed && !safeMethod && (successfulResponseReceived?.() || isExecuted(error))) {
+        throw error;
+      }
+
       let isRetryable = false;
       let retryAfter: number | null = null;
 
       if (error instanceof HttpClientError) {
-        // HTTP response error — classify on the real error type.
-        isRetryable = isRetryableStatus(error.status);
+        // HTTP response error — classify on the real error type. A keyed
+        // request also retries 109a's and tier C's `409` (M109b §3.9).
+        isRetryable = isRetryableStatus(error.status) || (keyed && error.status === 409);
         retryAfter = parseRetryAfterDelta(error.headers);
       } else {
         // Transport rejection (non-HttpClientError throw) — retryable on
@@ -94,6 +177,7 @@ export async function runWithRetry<T>(
       if (!isRetryable) throw error;
       if (!canRetry) throw error;
       if (attempt === policy.limit) throw error;
+      if (retryAfter !== null && retryAfter > maxRetryAfterMs) throw error;
 
       // Compute backoff delay: `delay * 2^(attempt - 1)`, matching
       // resilience-plugin's server-side schedule.

@@ -3,10 +3,11 @@
  * sync contract (gauges always equal `stats()`), the counter push sites, and
  * the deliberate split between admitted-then-failed and never-admitted.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
+import { WorkerBudget } from '../../src/pool/worker-budget.ts';
 import { TaskPool } from '../../src/pool/task-pool.ts';
+import { WorkerPoolService } from '../../src/services/worker-pool-service.ts';
 import { WorkerPoolCollector } from '../../src/metrics/worker-pool-collector.ts';
 import {
   REASON_LABEL,
@@ -37,9 +38,11 @@ function makeInstrumentedPool(
       size: overrides?.size ?? 2,
       maxQueue: overrides?.maxQueue ?? 1024,
       taskTimeoutMs: overrides?.taskTimeoutMs ?? 0,
+      startupTimeoutMs: 60_000,
     },
     host,
     runtime,
+    new WorkerBudget(Infinity),
     new WorkerPoolCollector(metrics, throwOnReport),
   );
   return { pool, host, timers, metrics };
@@ -54,6 +57,31 @@ function expectGaugesMatchStats(pool: TaskPool, metrics: RecordingMetrics): void
 }
 
 describe('WorkerPoolCollector — instrument creation', () => {
+  it('drops an evicted modules gauge when another module requests its idle slot', async () => {
+    const metrics = new RecordingMetrics();
+    const host = new FakeHost();
+    const service = new WorkerPoolService(
+      { host, maxWorkers: 1 },
+      createFakeRuntime(new FakeTimers()),
+      new WorkerPoolCollector(metrics, throwOnReport),
+    );
+    const first = service.run(SPEC, 1);
+    host.handles[0].emitReady();
+    host.handles[0].replyOk(1);
+    await first;
+    const second = service.run('b', 2).catch(() => undefined);
+    expect(metrics.require(WORKER_POOL_METRICS.WORKERS).valueFor(MODULE_LABELS)).toBe(0);
+    await Promise.resolve();
+    await service.shutdown();
+    await second;
+    await expect(service.run('new-module', 3)).rejects.toThrow('shut down');
+    expect(
+      metrics.require(WORKER_POOL_METRICS.REJECTED).valueFor({
+        task_module: 'new-module',
+        reason: 'pool_closed',
+      }),
+    ).toBe(1);
+  });
   it('should create all six instruments eagerly, before any task runs', () => {
     const metrics = new RecordingMetrics();
     new WorkerPoolCollector(metrics, throwOnReport);

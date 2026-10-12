@@ -17,6 +17,7 @@ import type {
   DecoratorHandler,
   FactoryProvider,
   HttpMethod,
+  IAuthorizationPolicyService,
   IAuthorizationService,
   IPlugin,
   IPluginContext,
@@ -31,9 +32,15 @@ import type {
   ValidationTarget,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, withResponseMetadata } from '@setu-ts/common';
+import type { IIdempotencyService } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
 import { registerIngresses } from './ingress-registration.ts';
+import {
+  appendPolicyMiddleware,
+  appendScopedRbacMiddleware,
+  registerPolicyClasses,
+} from './policy-registration.ts';
 import { validateResponseShaping } from '../decorators/response-status.ts';
 import type { ResponseShaping } from '../decorators/response-status.ts';
 
@@ -47,7 +54,7 @@ import type {
 import { discoverControllers } from '../discovery/controller-discovery.ts';
 import { findUnresolvableParameters, resolveParameters } from '../resolvers/parameter-resolver.ts';
 import { className, isHandlerResult, joinPaths } from '../internal.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Options for {@linkcode DecoratorPlugin}.
@@ -100,6 +107,17 @@ export interface DecoratorPluginOptions {
    * silenced: the pre-M89a behaviour.
    */
   readonly enforceRoles?: boolean;
+  /**
+   * `@Policy` classes to register with the authorization policy service
+   * AuthPlugin provides (M110a). Each is constructed like a controller — with
+   * constructor injection — and registered before any controller, so a
+   * route's `@RequirePolicy` can name it. Listing a class with no policy service
+   * registered, a class without `@Policy`, or one without an `@Ability()`
+   * method refuses `register()`.
+   *
+   * @since 0.9.0
+   */
+  readonly policies?: readonly Constructor[];
 }
 
 /** Plugin name — matches the package name without the scope. */
@@ -484,6 +502,39 @@ function requireViewEngine(
   return engine;
 }
 
+/**
+ * Appends the idempotency middleware LAST for a `@Idempotent` route (M109a
+ * §3.9), refusing a safe-method route and a missing provider at `register()`.
+ */
+function appendIdempotencyMiddleware(
+  target: Constructor,
+  route: RouteMetadata,
+  fullPath: string,
+  middleware: MiddlewareFunction[],
+  idempotency: IIdempotencyService | undefined,
+): void {
+  if (route.idempotent === undefined) {
+    return;
+  }
+  const method = route.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    throw new Error(
+      `${
+        routeLabel(target, route, fullPath)
+      } is decorated with @Idempotent, but ${method} is a safe ` +
+        'method; idempotency keys apply to unsafe methods only.',
+    );
+  }
+  if (idempotency === undefined) {
+    throw new Error(
+      `${routeLabel(target, route, fullPath)} is decorated with @Idempotent, but no ` +
+        'CAPABILITIES.IDEMPOTENCY provider is registered. Register IdempotencyPlugin from ' +
+        '@setu-ts/idempotency-plugin (or another provider of CAPABILITIES.IDEMPOTENCY).',
+    );
+  }
+  middleware.push(idempotency.middleware(route.idempotent));
+}
+
 /** Composes the post-authorization route middleware (class then method). */
 function composeMiddleware(
   ctrl: ControllerMetadata,
@@ -552,6 +603,7 @@ function buildRouteSchema(
   ctrl: ControllerMetadata,
   route: RouteMetadata,
   enforceRoles: boolean,
+  requiresPolicyPrincipal: boolean,
 ): RouteSchema | undefined {
   const schema = route.schema;
   const tags = [...ctrl.tags, ...(route.openapi?.tags ?? [])];
@@ -560,7 +612,10 @@ function buildRouteSchema(
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
   const restrictions = effectiveRestrictions(ctrl, route);
-  const isPublic = route.isPublic === true && (
+  // A `@RequirePolicy` whose ability requires a signed-in principal is enforcement too,
+  // independent of `enforceRoles` (M110a §3.10): its branded middleware derives
+  // the requirement, so the public marker would contradict it.
+  const isPublic = route.isPublic === true && !requiresPolicyPrincipal && (
     !enforceRoles || (restrictions.roles === undefined && restrictions.permissions === undefined)
   );
   if (
@@ -914,6 +969,8 @@ function registerController(
   enforceRoles: boolean,
   authorization: IAuthorizationService | undefined,
   viewEngine: IViewEngine | undefined,
+  idempotency: IIdempotencyService | undefined,
+  policies: IAuthorizationPolicyService | undefined,
 ): void {
   const ctrlMeta = metadataStore.getController(target);
   if (ctrlMeta === undefined) {
@@ -933,11 +990,39 @@ function registerController(
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
     }
+    // `@RequirePolicy` (M110a): after `@Roles`/`@Permissions`, before the
+    // interceptor/middleware/filter band and validation. Always enforced —
+    // `enforceRoles` governs only the role/permission metadata that shipped
+    // inert before M89a; `@RequirePolicy` has no inert history to preserve.
+    const requiresPolicyPrincipal = appendPolicyMiddleware(
+      metadataStore,
+      routeLabel(target, route, fullPath),
+      route.policies ?? [],
+      middleware,
+      policies,
+    );
+    // `@ScopedRoles`/`@ScopedPermissions` (M110b): the same band, after
+    // `@RequirePolicy`, and always enforced for the same reason.
+    const requiresScopedPrincipal = appendScopedRbacMiddleware(
+      routeLabel(target, route, fullPath),
+      ctrlMeta,
+      route,
+      middleware,
+      policies,
+    );
     middleware.push(...composeMiddleware(ctrlMeta, route));
     if (enforceSchemas) {
       appendValidationMiddleware(ctx, target, route, middleware, validation);
     }
-    const schema = buildRouteSchema(ctrlMeta, route, enforceRoles);
+    // Appended AFTER the validation band whether or not `enforceSchemas` is on,
+    // so a `@ValidateBody` route always runs idempotency last (M109a §3.9).
+    appendIdempotencyMiddleware(target, route, fullPath, middleware, idempotency);
+    const schema = buildRouteSchema(
+      ctrlMeta,
+      route,
+      enforceRoles,
+      requiresPolicyPrincipal || requiresScopedPrincipal,
+    );
     const routeDef: RouteDefinition = {
       handler,
       ...(middleware.length > 0 ? { middleware } : {}),
@@ -1002,17 +1087,25 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
   const ingress = dedup(opts.ingress ?? []);
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.METADATA_STORE],
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,
     // so the register-time resolution of all three capabilities sees it.
     optionalDependencies: ingress.length === 0
-      ? [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW]
+      ? [
+        CAPABILITIES.VALIDATION,
+        CAPABILITIES.AUTHORIZATION,
+        CAPABILITIES.AUTHORIZATION_POLICIES,
+        CAPABILITIES.VIEW,
+        CAPABILITIES.IDEMPOTENCY,
+      ]
       : [
         CAPABILITIES.VALIDATION,
         CAPABILITIES.AUTHORIZATION,
+        CAPABILITIES.AUTHORIZATION_POLICIES,
         CAPABILITIES.VIEW,
+        CAPABILITIES.IDEMPOTENCY,
         CAPABILITIES.QUEUE,
         CAPABILITIES.SCHEDULER,
         CAPABILITIES.EVENTS,
@@ -1043,6 +1136,16 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // exactly while none exists.
       const authorization = ctx.services.has(CAPABILITIES.AUTHORIZATION)
         ? ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION)
+        : undefined;
+      // Resolved once, beside VALIDATION and AUTHORIZATION (M109a §3.9).
+      const idempotency = ctx.services.has(CAPABILITIES.IDEMPOTENCY)
+        ? ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY)
+        : undefined;
+      // Authorization policies (M110a): resolved once, to register class-form
+      // policies and to validate every `@RequirePolicy` at register(). The appended
+      // middleware re-resolves per request, like the role middleware.
+      const policyService = ctx.services.has(CAPABILITIES.AUTHORIZATION_POLICIES)
+        ? ctx.services.get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES)
         : undefined;
       let discoveredControllers: Constructor[] = [];
       let discoveredServices: Constructor[] = [];
@@ -1094,6 +1197,12 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // they had deliberately replaced. In DI mode the provider lands in
       // `ctx.container` rather than the registry, so both are consulted.
       const viewEngine = resolveViewEngine(ctx);
+      // Policy classes AFTER the service loop (a policy may inject a service
+      // registered there) and BEFORE controllers (a route's `@RequirePolicy` names them).
+      registerPolicyClasses(metadataStore, dedup(opts.policies ?? []), policyService, (policy) => {
+        registerInContainer(ctx, policy, metadataStore.getService(policy));
+        return instantiate(policy, ctx);
+      });
       for (const ctrl of controllers) {
         registerController(
           ctx,
@@ -1103,6 +1212,8 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
           enforceRoles,
           authorization,
           viewEngine,
+          idempotency,
+          policyService,
         );
       }
       replayCustomDecorators(ctx);

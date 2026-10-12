@@ -1,8 +1,7 @@
 /**
  * The inject-or-lazy SAML library loader (M100f plan §3.1).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { adaptSamlModule, loadSaml, SAML_SPECIFIER } from '../../src/saml/loader.ts';
 import { SamlRuntimeLoadError } from '../../src/errors.ts';
@@ -46,6 +45,6 @@ describe('SAML loader', () => {
   });
 
   it('names the real specifier', () => {
-    expect(SAML_SPECIFIER).toBe('npm:@node-saml/node-saml@^5');
+    expect(SAML_SPECIFIER).toBe('@node-saml/node-saml');
   });
 });

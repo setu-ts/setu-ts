@@ -8,8 +8,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../../src/adapters/shared/fetch-mapping.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { FormBody, IRequest, ResponseSnapshot } from '@setu-ts/common';
 import { UnsupportedFormEncodingError } from '@setu-ts/common';
 

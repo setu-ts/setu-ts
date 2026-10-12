@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createDenoRuntimeServices } from '../../src/adapters/deno/deno-runtime.ts';
 import type { DenoHost } from '../../src/adapters/deno/deno-runtime.ts';
 

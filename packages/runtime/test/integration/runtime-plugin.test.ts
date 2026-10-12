@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration tests for RuntimePlugin — real HTTP round-trip through app.start.
  *
@@ -9,17 +10,13 @@
 
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '../../src/plugin/runtime-plugin.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Finds a free TCP port by binding one and releasing it.
  */
-function findFreePort(): number {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function findFreePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 /** Fetches after an asynchronously bound Node server starts listening. */
@@ -36,7 +33,7 @@ async function fetchWhenListening(url: string): Promise<Response> {
 
 describe('runtime-plugin integration', () => {
   it('real HTTP round-trip through app.start({ port })', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
     const seen: string[] = [];
 
     const app = createApplication({ plugins: [RuntimePlugin()] });
@@ -68,7 +65,7 @@ describe('runtime-plugin integration', () => {
   });
 
   it('serves POST /echo and 404 on real socket', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
     const app = createApplication({ plugins: [RuntimePlugin()] });
 
     app.router.post('/echo', async (ctx) => {
@@ -97,7 +94,7 @@ describe('runtime-plugin integration', () => {
   });
 
   it('app.fetch works through adapter', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
     const app = createApplication({ plugins: [RuntimePlugin()] });
 
     app.router.get('/health', (ctx) => {
@@ -124,7 +121,7 @@ describe('runtime-plugin integration', () => {
   });
 
   it('Node serves a terminal JSON response through @hono/node-server', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
     const app = createApplication({ plugins: [RuntimePlugin({ platform: 'node' })] });
 
     app.router.get('/json', (ctx) => ctx.response.status(201).json({ ok: true }));

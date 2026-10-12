@@ -13,8 +13,7 @@
  * Timeout object that coerces to its numeric id, so `Number()` happened to
  * round-trip. Any runtime whose handle does not coerce leaked outright.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -60,14 +59,15 @@ describe('RedisStreamsBroker timer-handle round trip', () => {
 
     await broker.connect();
     await broker.subscribe('timer.topic', () => Promise.resolve());
-    expect(started.length).toBe(1);
+    expect(started.length).toBe(2);
 
     await broker.disconnect();
 
     // Identity, not equality: an opaque handle must round-trip unchanged.
     // Before the fix this received NaN and the assertion failed.
-    expect(cleared.length).toBe(1);
+    expect(cleared.length).toBe(2);
     expect(cleared[0]).toBe(started[0]);
+    expect(cleared[1]).toBe(started[1]);
   });
 
   it('stops the poll loop on unsubscribe, so no command runs afterwards', async () => {
@@ -85,6 +85,7 @@ describe('RedisStreamsBroker timer-handle round trip', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     await subscription.unsubscribe();
     expect(cleared[0]).toBe(started[0]);
+    expect(cleared[1]).toBe(started[1]);
 
     const callsAfterUnsubscribe = client.calls.length;
     await new Promise((resolve) => setTimeout(resolve, 60));

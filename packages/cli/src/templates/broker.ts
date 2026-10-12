@@ -18,6 +18,7 @@ import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { EnvVariable } from './registry.ts';
 import { BROKER_COMPOSE_FILE, type ResolvedHost } from './project-files.ts';
 import { rewritePluginArgs } from './plugin-args.ts';
+import { withClientDependencies } from './client-dependencies.ts';
 
 /** The package whose wiring a broker arm rewrites. */
 const MESSAGING_PACKAGE = 'messaging-plugin';
@@ -46,11 +47,15 @@ export function withBrokerArgs(
   override?: string,
 ): ResolvedHost {
   if (spec.connection === undefined || spec.messagingArgs === undefined) return host;
-  return rewritePluginArgs(
-    host,
-    MESSAGING_PACKAGE,
-    spec.messagingArgs,
-    renderConnection(spec.connection, profile, override),
+  if (!host.plugins.some((wiring) => wiring.pkg === MESSAGING_PACKAGE)) return host;
+  return withClientDependencies(
+    rewritePluginArgs(
+      host,
+      MESSAGING_PACKAGE,
+      spec.messagingArgs,
+      renderConnection(spec.connection, profile, override),
+    ),
+    spec.messagingClients ?? [],
   );
 }
 
@@ -75,11 +80,15 @@ export function withQueueArgs(
   override?: string,
 ): ResolvedHost {
   if (spec.connection === undefined || spec.queueArgs === undefined) return host;
-  return rewritePluginArgs(
-    host,
-    QUEUE_PACKAGE,
-    spec.queueArgs,
-    renderConnection(spec.connection, profile, override),
+  if (!host.plugins.some((wiring) => wiring.pkg === QUEUE_PACKAGE)) return host;
+  return withClientDependencies(
+    rewritePluginArgs(
+      host,
+      QUEUE_PACKAGE,
+      spec.queueArgs,
+      renderConnection(spec.connection, profile, override),
+    ),
+    spec.queueClients ?? [],
   );
 }
 

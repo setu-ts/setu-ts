@@ -12,12 +12,14 @@
  *
  * @module
  */
+import { deadlineRangeError, resolveProbeTiming, withDeadline } from '@setu-ts/common';
 import type {
   HealthCheckResult,
   HealthIndicatorFn,
   ILogger,
   IRuntimeServices,
   IScheduler,
+  ProbeTiming,
   ScheduleOptions,
   SchedulerJobHandler,
   TimerHandle,
@@ -30,6 +32,7 @@ import type {
   RegistryEntry,
 } from '../interfaces/index.ts';
 import { cronNextMs } from '../cron/cron-parser.ts';
+import { DEFAULT_ACQUIRE_TIMEOUT_MS } from '../lock/distributed-lock.ts';
 import { JobRegistry } from '../jobs/job-registry.ts';
 import { run } from '../jobs/job-executor.ts';
 import type { FireObservation } from '../diagnostics/scheduler-observations.ts';
@@ -49,6 +52,22 @@ let writeSchedulerCollector: (
 ) => void;
 
 /**
+ * Construction options for {@linkcode SchedulerService}.
+ */
+export interface SchedulerServiceOptions {
+  /** Receives fire, lock and handler failures. */
+  logger?: ILogger | undefined;
+  /** Lock TTL in milliseconds. @default 30000 */
+  ttlMs?: number | undefined;
+  /**
+   * Bound on one lock acquire; `0` disables it (M101a V8-24).
+   *
+   * @default 5000
+   */
+  acquireTimeoutMs?: number | undefined;
+}
+
+/**
  * Scheduler service implementing IScheduler.
  *
  * Owns the job registry, timer arming, job executor, and distributed
@@ -61,6 +80,8 @@ export class SchedulerService implements IScheduler {
   #lock: IDistributedLock;
   #logger: ILogger | undefined;
   #ttlMs: number;
+  #acquireTimeoutMs: number;
+  #timing: ProbeTiming;
   #connected = false;
   #names: Set<string> = new Set();
 
@@ -81,13 +102,72 @@ export class SchedulerService implements IScheduler {
   constructor(
     runtime: IRuntimeServices,
     lock: IDistributedLock,
-    options?: { logger?: ILogger | undefined; ttlMs?: number | undefined },
+    options?: SchedulerServiceOptions,
   ) {
+    const acquireTimeoutMs = options?.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS;
+    const refusal = deadlineRangeError('acquireTimeoutMs', acquireTimeoutMs);
+    if (refusal !== null) {
+      throw refusal;
+    }
     this.#registry = new JobRegistry();
     this.#runtime = runtime;
     this.#lock = lock;
     this.#logger = options?.logger;
     this.#ttlMs = options?.ttlMs ?? 30000;
+    this.#acquireTimeoutMs = acquireTimeoutMs;
+    this.#timing = resolveProbeTiming(runtime);
+  }
+
+  /**
+   * One lock acquire under the acquire bound (M101a V8-24).
+   *
+   * `IDistributedLock.acquire` takes no cancellation signal, so the bound
+   * cannot STOP an acquire — it abandons it, and the rejection takes the
+   * caller's existing catch arm (logged, the fire skipped and counted
+   * `lock-failed`, the schedule re-armed). An abandoned acquire that later
+   * resolves to a token would hold a lock nobody releases — every later fire
+   * of the job contended until the TTL — so the bound attaches a continuation
+   * that releases a late token, best-effort, and ignores a late `null` or
+   * rejection. That continuation is the guarantee for every lock
+   * implementation, not only Redis.
+   *
+   * @param key - The lock key
+   * @param ttlMs - The lock TTL
+   * @param jobName - The job the acquire serves, for the late-release log
+   * @returns The acquire's own outcome, or a rejection when the bound fires
+   */
+  #acquire(key: string, ttlMs: number, jobName: string): Promise<string | null> {
+    if (this.#acquireTimeoutMs === 0) {
+      return this.#lock.acquire(key, ttlMs);
+    }
+    let pending: Promise<string | null> | undefined;
+    const timeoutMs = this.#acquireTimeoutMs;
+    return withDeadline(() => (pending = this.#lock.acquire(key, ttlMs)), {
+      timeoutMs,
+      timing: this.#timing,
+      onTimeout: () => {
+        pending?.then((late) => {
+          if (late !== null) {
+            void this.#releaseAbandoned(key, late, jobName);
+          }
+        }, () => {});
+        return new Error(`lock acquire did not settle within ${timeoutMs} ms`);
+      },
+    });
+  }
+
+  /**
+   * Releases a token an abandoned acquire returned after its bound fired.
+   * Best-effort: a failure is logged and the lock expires on its own TTL.
+   */
+  async #releaseAbandoned(key: string, token: string, jobName: string): Promise<void> {
+    try {
+      await this.#lock.release(key, token);
+    } catch (error) {
+      this.#logger?.error(`Job '${jobName}': could not release an abandoned lock`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -238,7 +318,7 @@ export class SchedulerService implements IScheduler {
       nextRunAtMs,
       timerHandle: null,
       generation: 0,
-      slotClaimed: false,
+      slotClaim: 'failed',
       slotToken: null,
       ...(options?.data !== undefined ? { data: options.data as unknown } : {}),
       ...(options?.retry !== undefined ? { retry: options.retry } : {}),
@@ -410,7 +490,7 @@ export class SchedulerService implements IScheduler {
    *
    * **Known limitation — the job is LOST if this replica leaves before it
    * fires.** Because the claim is decided here rather than at fire time, a
-   * replica that finds the slot held sets `slotClaimed = false` once and never
+   * replica that finds the slot held sets `slotClaim = 'contended'` once and never
    * re-attempts. If the claiming replica then dies — a crash, or a graceful
    * {@linkcode disconnect}, which clears timers WITHOUT releasing the slot —
    * between this registration and the fire, no replica runs the handler and
@@ -420,23 +500,23 @@ export class SchedulerService implements IScheduler {
   async #claimDelaySlot(entry: DelayRegistryEntry<unknown>): Promise<void> {
     const slotKey = this.#delaySlotKey(entry);
     try {
-      const token = await this.#lock.acquire(slotKey, this.#ttlMs + entry.delayMs);
+      const token = await this.#acquire(slotKey, this.#ttlMs + entry.delayMs, entry.name);
       if (token === null) {
         // Another replica registered this delay first; its fire runs the
         // handler. This replica keeps its armed timer (it must still leave
         // the registry cleanly) but skips the run.
-        entry.slotClaimed = false;
+        entry.slotClaim = 'contended';
         return;
       }
       entry.slotToken = token;
-      entry.slotClaimed = true;
+      entry.slotClaim = 'claimed';
     } catch (error) {
       // Lock backend unreachable — treat as not-claimed rather than risk a
       // duplicate run; the schedule is kept, the run is skipped.
       this.#logger?.error(`Job '${entry.name}': could not claim fire slot`, {
         error: error instanceof Error ? error.message : String(error),
       });
-      entry.slotClaimed = false;
+      entry.slotClaim = 'failed';
     }
   }
 
@@ -484,7 +564,7 @@ export class SchedulerService implements IScheduler {
     const collector = this.#collector;
     let token: string | null;
     try {
-      token = await this.#lock.acquire(lockKey, this.#ttlMs);
+      token = await this.#acquire(lockKey, this.#ttlMs, entry.name);
     } catch (error) {
       // Lock backend unreachable — skip this fire, keep the schedule.
       this.#logger?.error(`Job '${entry.name}': could not acquire lock`, {
@@ -593,19 +673,23 @@ export class SchedulerService implements IScheduler {
     // a fresh slot.
     let slotClaimed: boolean;
     if (entry.kind === 'delay') {
-      slotClaimed = entry.slotClaimed;
-      if (!slotClaimed) {
+      slotClaimed = entry.slotClaim === 'claimed';
+      if (entry.slotClaim === 'contended') {
         // Another replica registered this delay first and will run it.
         this.#logger?.debug(
           `Job '${entry.name}': fire slot claimed by another instance, skipping`,
         );
         this.#collector?.fireSettled(fireObs, 'contended', null, null);
+      } else if (entry.slotClaim === 'failed') {
+        // The claim at registration could not reach the lock backend (logged
+        // there). Count it as the every/cron arm counts the same failure.
+        this.#collector?.fireSettled(fireObs, 'lock-failed', null, null);
       }
     } else {
       const slotKey = `scheduler:job:${entry.name}:${String(entry.nextRunAtMs)}`;
       slotClaimed = true;
       try {
-        const slotToken = await this.#lock.acquire(slotKey, this.#ttlMs);
+        const slotToken = await this.#acquire(slotKey, this.#ttlMs, entry.name);
         if (slotToken === null) {
           // Another replica claimed this exact fire. Skip the run — but keep
           // the local re-arm logic below, or this replica would silently stop

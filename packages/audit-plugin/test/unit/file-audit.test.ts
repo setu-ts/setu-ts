@@ -1,8 +1,7 @@
 /**
  * Tests for FileAuditStorage.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { FileAuditStorage } from '../../src/storage/file-audit.ts';
 import type { IFileSystem } from '@setu-ts/common';
 

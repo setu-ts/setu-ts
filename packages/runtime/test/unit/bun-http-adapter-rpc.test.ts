@@ -1,6 +1,5 @@
 // deno-lint-ignore-file no-explicit-any, require-await
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { BunHttpAdapter, BunHttpServerHandle } from '../../src/adapters/bun/bun-http-adapter.ts';
 import type { BunServeHost } from '../../src/adapters/bun/bun-http-adapter.ts';
 

@@ -1,0 +1,57 @@
+{
+  "name": "@setu-ts/scheduler-plugin",
+  "version": "0.9.0",
+  "description": "Cron, interval, and delayed jobs with distributed locking",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/scheduler-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/scheduler-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "ioredis": "5.x"
+  },
+  "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@types/node": "^24",
+    "ioredis": "5.x",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

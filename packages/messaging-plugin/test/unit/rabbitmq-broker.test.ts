@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { Buffer } from 'node:buffer';
 import { RabbitMqBroker, validateClient } from '../../src/brokers/rabbitmq-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -54,6 +53,80 @@ describe('RabbitMqBroker', () => {
     );
     expect(decoded).toEqual(message);
 
+    await broker.disconnect();
+  });
+
+  it('refuses each field AMQP cannot encode before the channel is reached (M106 audit F1)', async () => {
+    const cases: { label: string; act: (b: RabbitMqBroker) => Promise<void> }[] = [
+      { label: 'routing key (the topic)', act: (b) => b.publish('t'.repeat(256), 1) },
+      { label: 'message id', act: (b) => b.publish('t', { messageId: 'm'.repeat(256) }) },
+      {
+        label: 'header name',
+        act: (b) => b.publishWithHeaders('t', 1, { ['h'.repeat(256)]: 'v' }),
+      },
+    ];
+    for (const { label, act } of cases) {
+      const fakeConnection = new FakeAmqpConnection();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+      });
+      await broker.connect();
+      await expect(act(broker)).rejects.toThrow(`the ${label} exceeds AMQP's 255 UTF-8 byte`);
+      const channel = await fakeConnection.createChannel();
+      expect({ label, publishes: channel.calls.filter((c) => c.method === 'publish').length })
+        .toEqual({ label, publishes: 0 });
+      await broker.disconnect();
+    }
+    // Exactly 255 bytes everywhere is accepted: the bound is the protocol's.
+    const fakeConnection = new FakeAmqpConnection();
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: fakeConnection,
+      exchangeName: 'e'.repeat(255),
+    });
+    await broker.connect();
+    await broker.publishWithHeaders('t'.repeat(255), { messageId: 'm'.repeat(255) }, {
+      ['h'.repeat(255)]: 'v',
+    });
+    const channel = await fakeConnection.createChannel();
+    expect(channel.calls.filter((c) => c.method === 'publish')).toHaveLength(1);
+    await broker.disconnect();
+  });
+
+  it('refuses an oversized exchangeName or defaultQueue at construction (M106 re-audit O1)', () => {
+    const make = (options: object) => () =>
+      new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: new FakeAmqpConnection(),
+        ...options,
+      });
+    expect(make({ exchangeName: 'e'.repeat(256) })).toThrow('exchangeName exceeds');
+    expect(make({ exchangeName: 'e'.repeat(255) })).not.toThrow();
+    // A private queue is `<defaultQueue>-<uuid>`, 37 bytes more.
+    expect(make({ defaultQueue: 'q'.repeat(219) })).toThrow('defaultQueue must leave room');
+    expect(make({ defaultQueue: 'q'.repeat(218) })).not.toThrow();
+  });
+
+  it('refuses an oversized topic or queue before any channel operation (M106 re-audit O1)', async () => {
+    const fakeConnection = new FakeAmqpConnection();
+    // Retry off: with it on, the helper-queue length check refuses the queue first.
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: fakeConnection,
+      consumerRetry: false,
+    });
+    await broker.connect();
+    const channel = await fakeConnection.createChannel();
+    const before = channel.calls.length;
+
+    await expect(broker.subscribe('t'.repeat(256), () => {})).rejects.toThrow(
+      "the topic exceeds AMQP's 255 UTF-8 byte limit",
+    );
+    await expect(broker.subscribe('t', () => {}, { queue: 'q'.repeat(256) })).rejects.toThrow(
+      "the queue name exceeds AMQP's 255 UTF-8 byte limit",
+    );
+    expect(channel.calls.length).toBe(before);
+
+    // At exactly 255 bytes both are accepted.
+    await broker.subscribe('t'.repeat(255), () => {}, { queue: 'q'.repeat(255) });
+    expect(channel.calls.some((c) => c.method === 'bindQueue')).toBe(true);
     await broker.disconnect();
   });
 
@@ -469,8 +542,8 @@ describe('RabbitMqBroker', () => {
     await broker.disconnect();
   });
 
-  // R8: failure-path - handler throws → nack(msg, false, false) called
-  it('subscribe calls nack(msg, false, false) when the handler throws', async () => {
+  // R8: failure-path - disabled retry policy → nack(msg, false, false)
+  it('consumerRetry false calls nack(msg, false, false) when the handler throws', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const fakeConnection = new FakeAmqpConnection({
@@ -482,7 +555,10 @@ describe('RabbitMqBroker', () => {
         },
       ],
     });
-    const broker = new RabbitMqBroker(runtime, serializer, { client: fakeConnection });
+    const broker = new RabbitMqBroker(runtime, serializer, {
+      client: fakeConnection,
+      consumerRetry: false,
+    });
 
     await broker.connect();
 

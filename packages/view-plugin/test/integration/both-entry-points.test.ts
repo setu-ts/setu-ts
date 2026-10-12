@@ -9,12 +9,11 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTestApp, inject } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { Controller, DecoratorPlugin, Get, Render } from '@setu-ts/decorator-plugin';
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 import type { IRequestContext } from '@setu-ts/common';
 
 import { renderView, ViewPlugin } from '../../src/index.ts';

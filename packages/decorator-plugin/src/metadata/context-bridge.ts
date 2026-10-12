@@ -39,6 +39,7 @@
 import type { Constructor } from '@setu-ts/common';
 
 import { metadataStore } from './metadata-store.ts';
+import { requireDecoratorMetadata } from './symbol-metadata.ts';
 import type { MetadataStore } from './metadata-store.ts';
 import { defer, takePendingFrom } from './pending.ts';
 
@@ -106,7 +107,7 @@ export function classDecorator(
 ): SetuClassDecorator {
   return (value, context): void => {
     const target = value as Constructor;
-    flushCarrier(target, context.metadata);
+    flushCarrier(target, requireDecoratorMetadata(context));
     write(metadataStore, target);
   };
 }
@@ -124,7 +125,7 @@ export function methodDecorator(
 ): SetuMethodDecorator {
   return (_value, context): void => {
     const handler = String(context.name);
-    defer(context.metadata, (store, target) => {
+    defer(requireDecoratorMetadata(context), (store, target) => {
       write(store, target, handler);
     });
   };
@@ -149,12 +150,12 @@ export function classOrMethodDecorator(
   return (value, context): void => {
     if (context.kind === 'class') {
       const target = value as Constructor;
-      flushCarrier(target, context.metadata);
+      flushCarrier(target, requireDecoratorMetadata(context));
       onClass(metadataStore, target);
       return;
     }
     const handler = String(context.name);
-    defer(context.metadata, (store, target) => {
+    defer(requireDecoratorMetadata(context), (store, target) => {
       onMethod(store, target, handler);
     });
   };

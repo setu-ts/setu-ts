@@ -1,6 +1,5 @@
 /** Public barrel contract tests for config-plugin. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IConfig } from '@setu-ts/common';
 
 import { defineConfigSection, getConfigSection } from '../../src/index.ts';
@@ -16,7 +15,7 @@ const configContractHasExactlyFourMembers: IsEqual<
 
 describe('config-plugin barrel exports', () => {
   it('exports typed configuration-section definitions and accessors', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const section: ConfigSection<{ readonly PORT: number }> = defineConfigSection({
       prefix: 'APP_',
       keys: ['PORT'],

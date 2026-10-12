@@ -9,6 +9,7 @@ async function readWorkflow(): Promise<string> {
 
 /** @returns The file's lowercase extension, without the dot. */
 function extensionOf(file: string): string {
+  if (file.endsWith('/LICENSE')) return 'license';
   return file.slice(file.lastIndexOf('.') + 1).toLowerCase();
 }
 
@@ -91,7 +92,22 @@ describe('dependency drift gate configuration', () => {
     // Every extension under those roots is either a source the resolution must
     // cover or a documented non-source. A new one lands in neither list and
     // fails here, which is a decision to take rather than a hole to acquire.
-    const nonSource = new Set(['json', 'md', 'txt', 'prisma', 'html', 'gitkeep']);
+    // `mjs`: the M111a boot fixture (`scripts/fixtures/node-boot/boot.mjs`) runs
+    // only under Node, after `check:node-build` has npm-installed the packed
+    // tarballs, and imports the tsc-compiled `./dist/controller.js` — no Deno
+    // gate resolves it, so the fresh-lock resolution must not either.
+    // M111c's generated LICENSE copies are tarball data, not source modules.
+    const nonSource = new Set([
+      'json',
+      'md',
+      'txt',
+      'prisma',
+      'html',
+      'gitkeep',
+      'sql',
+      'mjs',
+      'license',
+    ]);
     const sources = tracked.filter((file) => !nonSource.has(extensionOf(file)));
     expect(sources.length).toBeGreaterThan(2000);
 
@@ -110,7 +126,7 @@ describe('dependency drift gate configuration', () => {
     // Matched as an env KEY, not as a substring: the workflow's own comment
     // explains why the variable is inert and must not trip this pin.
     expect(text).not.toMatch(/^\s*DENO_FLAGS:/m);
-    for (const task of ['check', 'test']) {
+    for (const task of ['check', 'test:deno-lane', 'test:coverage']) {
       expect(text).toContain(
         `deno task ${task} --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen`,
       );

@@ -9,8 +9,7 @@
  * CAPABILITIES.GRPC.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import {
   createFakeConnectRuntime,

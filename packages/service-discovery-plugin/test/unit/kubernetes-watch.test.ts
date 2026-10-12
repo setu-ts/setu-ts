@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { watchKubernetesService } from '../../src/providers/kubernetes-watch.ts';
 import type { ServiceInstance, Unsubscribe } from '@setu-ts/common';

@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { HealthCheckResult, IPluginContext, IRealtimeBackplane } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { RealtimeBackplanePlugin } from '../../src/plugin/realtime-backplane-plugin.ts';

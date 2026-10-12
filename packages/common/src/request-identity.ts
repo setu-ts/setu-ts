@@ -1,6 +1,6 @@
 /**
- * Single-write guard for the two mutable identity fields on
- * {@linkcode IRequest} — `user` and `tenant`.
+ * Single-write guard for the three mutable request-scoped fields on
+ * {@linkcode IRequest} — `user`, `tenant` and `locale`.
  *
  * **This is not a security boundary.** Anything already running in the
  * process can re-import this module and call {@linkcode replacePrincipal},
@@ -30,6 +30,18 @@ const USER_SLOT = Symbol('setu.request.user');
 const USER_WRITTEN = Symbol('setu.request.userWritten');
 const TENANT_SLOT = Symbol('setu.request.tenant');
 const TENANT_WRITTEN = Symbol('setu.request.tenantWritten');
+const LOCALE_SLOT = Symbol('setu.request.locale');
+const LOCALE_WRITTEN = Symbol('setu.request.localeWritten');
+
+/** The fields this module guards. */
+type GuardedField = 'user' | 'tenant' | 'locale';
+
+/** The deliberate-replacement function a second-write error names, per field. */
+const REPLACERS: Readonly<Record<GuardedField, string>> = {
+  user: 'replacePrincipal',
+  tenant: 'replaceTenant',
+  locale: 'replaceLocale',
+};
 
 /** The symbol-keyed view of a sealed request, used only inside this module. */
 type IdentitySlots = Record<symbol, unknown>;
@@ -40,8 +52,8 @@ type IdentitySlots = Record<symbol, unknown>;
  * @param field - The field that was written twice
  * @returns The error to throw
  */
-function secondWriteError(field: 'user' | 'tenant'): Error {
-  const replacer = field === 'user' ? 'replacePrincipal' : 'replaceTenant';
+function secondWriteError(field: GuardedField): Error {
+  const replacer = REPLACERS[field];
   return new Error(
     `ctx.request.${field} has already been set for this request and accepts one write. ` +
       `Something is assigning it a second time — usually two middleware stages writing the ` +
@@ -85,16 +97,31 @@ const IDENTITY_DESCRIPTORS: PropertyDescriptorMap = {
       this[TENANT_SLOT] = value;
     },
   },
+  locale: {
+    enumerable: true,
+    configurable: true,
+    get(this: IdentitySlots): string | undefined {
+      return this[LOCALE_SLOT] as string | undefined;
+    },
+    set(this: IdentitySlots, value: string | undefined): void {
+      if (this[LOCALE_WRITTEN] === true) {
+        throw secondWriteError('locale');
+      }
+      this[LOCALE_WRITTEN] = true;
+      this[LOCALE_SLOT] = value;
+    },
+  },
 };
 
 /** Reports whether this module installed the accessor for an identity field. */
-function isSealed(request: IRequest, field: 'user' | 'tenant'): boolean {
+function isSealed(request: IRequest, field: GuardedField): boolean {
   const descriptor = Object.getOwnPropertyDescriptor(request, field);
   return descriptor?.get === IDENTITY_DESCRIPTORS[field]?.get;
 }
 
 /**
- * Installs the single-write guard over `request.user` and `request.tenant`.
+ * Installs the single-write guard over `request.user`, `request.tenant` and
+ * `request.locale`.
  *
  * Called once per request by the kernel's request-context factory — the one
  * funnel every request passes through whatever produced its
@@ -126,6 +153,7 @@ export function sealRequestIdentity(request: IRequest): void {
   }
   const seededUser = request.user;
   const seededTenant = request.tenant;
+  const seededLocale = request.locale;
   if (seededUser !== undefined) {
     slots[USER_SLOT] = seededUser;
     slots[USER_WRITTEN] = true;
@@ -133,6 +161,10 @@ export function sealRequestIdentity(request: IRequest): void {
   if (seededTenant !== undefined) {
     slots[TENANT_SLOT] = seededTenant;
     slots[TENANT_WRITTEN] = true;
+  }
+  if (seededLocale !== undefined) {
+    slots[LOCALE_SLOT] = seededLocale;
+    slots[LOCALE_WRITTEN] = true;
   }
   Object.defineProperties(request, IDENTITY_DESCRIPTORS);
 }
@@ -187,4 +219,34 @@ export function replaceTenant(request: IRequest, tenant: ITenant): void {
   }
   slots[TENANT_SLOT] = tenant;
   slots[TENANT_WRITTEN] = true;
+}
+
+/**
+ * Replaces `request.locale` deliberately, bypassing the single-write guard.
+ *
+ * The localization plugin's middleware calls it, for the reason
+ * {@linkcode replacePrincipal} documents. An application calls it to apply a
+ * preference the middleware could not see — a signed-in user's saved locale
+ * once authentication has run. A response cache keys on the locale present
+ * when it runs, so call this before the cache lookup for the override to be
+ * reflected there. Safe to call on a request that was never sealed.
+ *
+ * @param request - The request whose locale is being replaced
+ * @param locale - The BCP 47 tag to install — a supported locale, never raw
+ *   client text
+ * @example
+ * ```typescript
+ * // After authentication: apply the user's stored preference.
+ * replaceLocale(ctx.request, profile.locale);
+ * ```
+ * @since 0.9.0
+ */
+export function replaceLocale(request: IRequest, locale: string): void {
+  const slots = request as unknown as IdentitySlots;
+  if (!isSealed(request, 'locale')) {
+    request.locale = locale;
+    return;
+  }
+  slots[LOCALE_SLOT] = locale;
+  slots[LOCALE_WRITTEN] = true;
 }

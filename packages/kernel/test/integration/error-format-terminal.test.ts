@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { CAPABILITIES } from '@setu-ts/common';

@@ -28,10 +28,11 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import type { FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
-import { decodeCursor } from '@setu-ts/common';
+import { decodeCursor, DuplicateKeyError } from '@setu-ts/common';
+import { DatabaseService } from '../../src/services/database-service.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
 import { createLazyBigtableLoader } from '../../src/adapters/bigtable/bigtable-client.ts';
@@ -43,7 +44,7 @@ import {
 import type { BigtableEntityMapping } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 
 /** The emulator address; absent, every case below is ignored. */
-const endpoint = Deno.env.get('BIGTABLE_EMULATOR_ENDPOINT');
+const endpoint = process.env['BIGTABLE_EMULATOR_ENDPOINT'];
 const skipReal = endpoint === undefined;
 /** The project and instance the emulator serves implicitly (it has no admin API). */
 const projectId = 'setu-m82';
@@ -73,7 +74,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
  */
 // deno-lint-ignore no-explicit-any -- the native SDK is untyped at this boundary
 async function rawClient(): Promise<any> {
-  const { Bigtable } = await import('npm:@google-cloud/bigtable@^6');
+  const { Bigtable } = await import('@google-cloud/bigtable');
   // deno-lint-ignore no-explicit-any -- ditto
   return new (Bigtable as any)({ projectId, apiEndpoint: endpoint });
 }
@@ -124,7 +125,74 @@ async function connect(
 }
 
 describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
-  it('lazily imports the SDK and reads every CRUD write back', { ignore: skipReal }, async () => {
+  it('M105 conditional writes ignore retained historical matches and persist current matches', {
+    skip: skipReal,
+  }, async () => {
+    const tableId = await provision(`conditional_${suffix}`, ['cf']);
+    const adapter = await connect({ Row: { table: tableId } });
+    const raw = await rawClient();
+    try {
+      const source = adapter.createDataSource('Row');
+      await conditionalContract(
+        source,
+        'simple',
+        'missing',
+        { id: 'simple', tenant_id: 'a', name: 'old' },
+        { tenant_id: 'a' },
+        { name: 'new' },
+      );
+      const table = raw.instance(instanceId).table(tableId);
+      for (const operation of ['update', 'delete'] as const) {
+        await table.insert([{
+          key: operation,
+          data: {
+            cf: {
+              id: { value: `s:${operation}`, timestamp: new Date(1000) },
+              tenant_id: { value: 's:a', timestamp: new Date(1000) },
+              status: { value: 's:pending', timestamp: new Date(1000) },
+              name: { value: 's:secret', timestamp: new Date(1000) },
+            },
+          },
+        }]);
+        await table.insert([{
+          key: operation,
+          data: {
+            cf: {
+              tenant_id: { value: 's:b', timestamp: new Date(2000) },
+              status: { value: 's:sent', timestamp: new Date(2000) },
+            },
+          },
+        }]);
+        const [native] = await table.row(operation).get();
+        expect(native.data.cf.tenant_id).toHaveLength(2);
+        const before = await source.findById(operation);
+        const result = operation === 'update'
+          ? await source.updateWhere!(operation, { tenant_id: 'a', status: 'pending' }, {
+            name: 'historical-write',
+          })
+          : await source.deleteWhere!(operation, { tenant_id: 'a', status: 'pending' });
+        const readBack = await source.findById(operation);
+        expect({ result, readBack }).toEqual({
+          result: operation === 'update' ? null : false,
+          readBack: before,
+        });
+        expect(
+          operation === 'update'
+            ? await source.updateWhere!(operation, { tenant_id: 'b', status: 'sent' }, {
+              name: 'current-write',
+            })
+            : await source.deleteWhere!(operation, { tenant_id: 'b', status: 'sent' }),
+        ).toBeTruthy();
+        expect(await source.findById(operation)).toEqual(
+          operation === 'update' ? { ...before, name: 'current-write' } : null,
+        );
+      }
+    } finally {
+      await adapter.disconnect();
+      await raw.close();
+    }
+  });
+  it('lazily imports the SDK and reads every CRUD write back', { skip: skipReal }, async () => {
     const table = await provision(`crud_${suffix}`, ['cf']);
     const adapter = await connect({ User: { table } });
     try {
@@ -162,7 +230,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('addresses a row by a key COMPOSED from several fields', { ignore: skipReal }, async () => {
+  it('addresses a row by a key COMPOSED from several fields', { skip: skipReal }, async () => {
     const table = await provision(`composed_${suffix}`, ['cf']);
     const adapter = await connect({
       Order: { table, rowKey: { fields: ['tenantId', 'orderId'], prefix: 'o/' } },
@@ -192,7 +260,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('honours the EXCLUSIVE range boundary the SDK shorthand gets wrong', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`range_${suffix}`, ['cf']);
     const adapter = await connect({
@@ -256,7 +324,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('keeps a numeric key field a NUMBER by reading its cell, not the row key', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // The row key is bytes and records no type, so the key field's CELL is what
     // preserves it — which is why the projection always keeps the key
@@ -283,7 +351,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it("excludes the row that sits exactly on a prefix range's exclusive end", {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // The prefix range for `o/` ends at its successor, `o0` — and a row keyed
     // exactly `o0` is the one row an inclusive upper bound would wrongly
@@ -308,7 +376,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('matches a value by EXACT BYTES, so a regex metacharacter is data', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`bytes_${suffix}`, ['cf']);
     const adapter = await connect({ Code: { table } });
@@ -327,7 +395,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('answers a pushed-down predicate with the WHOLE row, not the matching cell', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`whole_${suffix}`, ['cf', 'meta']);
     const adapter = await connect({
@@ -352,7 +420,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('projects across column families while keeping the key field', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`project_${suffix}`, ['cf', 'meta']);
     const adapter = await connect({
@@ -373,7 +441,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('keeps a row carrying NONE of the projected columns', { ignore: skipReal }, async () => {
+  it('keeps a row carrying NONE of the projected columns', { skip: skipReal }, async () => {
     // A filter that removes every cell of a row removes the ROW — measured, the
     // service does not answer with an empty row — so a bare column projection
     // silently drops a row that has none of the projected columns. The
@@ -398,7 +466,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('refuses to overwrite on create and to fabricate on update', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`conditional_${suffix}`, ['cf']);
     const adapter = await connect({ User: { table } });
@@ -414,7 +482,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('walks a start-key cursor over deliberately TIED values', { ignore: skipReal }, async () => {
+  it('walks a start-key cursor over deliberately TIED values', { skip: skipReal }, async () => {
     const table = await provision(`page_${suffix}`, ['cf']);
     const adapter = await connect({ Row: { table } });
     try {
@@ -433,7 +501,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('reports a filtered page non-terminal even when it carries zero rows', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`sparse_${suffix}`, ['cf']);
     const adapter = await connect({ Row: { table, rowKey: { fields: ['id'] } } });
@@ -457,7 +525,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('walks a key set whose keys carry non-BMP characters, in the SERVICE order', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // Bigtable orders row keys as UTF-8 BYTES, and `'\u{1F600}y' < '\uFF21x'`
     // is true in JavaScript while false as UTF-8. A cursor filtered with `>`
@@ -486,7 +554,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('expands an `in` on the final key field into an explicit key read', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`inlist_${suffix}`, ['cf']);
     const adapter = await connect({ Item: { table, rowKey: { fields: ['tenant', 'id'] } } });
@@ -503,7 +571,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('commits delete-then-write as ONE atomic mutation list', { ignore: skipReal }, async () => {
+  it('commits delete-then-write as ONE atomic mutation list', { skip: skipReal }, async () => {
     const table = await provision(`tx_${suffix}`, ['cf']);
     const adapter = await connect({ User: { table } });
     try {
@@ -525,7 +593,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('rolls back without sending anything, and refuses a second row', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`txscope_${suffix}`, ['cf']);
     const adapter = await connect({ User: { table } });
@@ -550,7 +618,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('refuses a buffered update whose row is deleted before commit', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // The commit used to apply its mutations on BOTH CheckAndMutateRow
     // branches, so a row deleted after the pre-read was RECREATED through
@@ -573,7 +641,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('round-trips a non-finite number and refuses a relabelling write', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`shapes_${suffix}`, ['cf']);
     const adapter = await connect({ Row: { table, columns: { foo: 'cf:bar' } } });
@@ -593,7 +661,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('counts with and without a residual predicate', { ignore: skipReal }, async () => {
+  it('counts with and without a residual predicate', { skip: skipReal }, async () => {
     const table = await provision(`count_${suffix}`, ['cf']);
     const adapter = await connect({ Row: { table } });
     try {
@@ -610,7 +678,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('reads a row written by the RAW SDK, recovering key fields from the row key', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`interop_${suffix}`, ['cf']);
     // The interop shape: untagged values, and no key cell at all.
@@ -636,7 +704,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('refuses by name what Bigtable cannot serve', { ignore: skipReal }, async () => {
+  it('refuses by name what Bigtable cannot serve', { skip: skipReal }, async () => {
     const table = await provision(`refuse_${suffix}`, ['cf']);
     const adapter = await connect({ Row: { table } });
     try {
@@ -662,7 +730,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('names a missing table rather than failing with a bare error', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     // No connect-time probe exists precisely because this diagnostic already
     // quotes the full resource path — and an admin probe would refuse a
@@ -682,7 +750,7 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
   });
 
   it('agrees with the memory reference on every portable filter operator', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const table = await provision(`conform_${suffix}`, ['cf']);
     const adapter = await connect({ Row: { table } });
@@ -754,3 +822,29 @@ async function walkPages(
   }
   throw new Error('page walk did not terminate');
 }
+
+describe('BigtableAdapter against a real emulator — duplicate key', () => {
+  it('a create on an existing row is a DuplicateKeyError, directly and at commit', {
+    skip: skipReal,
+  }, async () => {
+    const table = await provision(`dupkey_${suffix}`, ['cf']);
+    const adapter = await connect({ User: { table } });
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'bigtable');
+    try {
+      const repo = service.getRepository('User');
+      await repo.create({ id: 'u1', name: 'ada' });
+
+      const direct = await repo.create({ id: 'u1', name: 'eve' }).catch((e: unknown) => e);
+      expect(direct).toBeInstanceOf(DuplicateKeyError);
+      expect((direct as DuplicateKeyError).entity).toBe('User');
+
+      const atCommit = await service.transaction(async (uow) => {
+        await uow.getRepository('User').create({ id: 'u1', name: 'bob' });
+      }).catch((e: unknown) => e);
+      expect(atCommit).toBeInstanceOf(DuplicateKeyError);
+      expect(await repo.findById('u1')).toMatchObject({ name: 'ada' });
+    } finally {
+      await service.close();
+    }
+  });
+});

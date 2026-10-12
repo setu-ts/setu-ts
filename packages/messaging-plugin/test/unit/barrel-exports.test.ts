@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as messaging from '../../src/index.ts';
 import type {
   IntegrationEventDefinition,
@@ -70,6 +69,15 @@ describe('barrel exports', () => {
     expect(typeof messaging.JetStreamUnavailableError).toBe('function');
     expect(messaging.JetStreamStreamError).toBeDefined();
     expect(typeof messaging.JetStreamStreamError).toBe('function');
+
+    // M101b: the three named real-broker errors, thrown by the Pub/Sub
+    // adapter's `open()`, `NatsBroker.subscribe` and `KafkaBroker.subscribe`.
+    expect(typeof messaging.PubSubSubscriptionBoundElsewhereError).toBe('function');
+    expect(typeof messaging.NatsConsumerNameCollisionError).toBe('function');
+    expect(typeof messaging.KafkaTopicUnavailableError).toBe('function');
+    // ...while the two naming helpers stay internal.
+    expect('toJetStreamConsumerName' in messaging).toBe(false);
+    expect('deriveDefaultSubscription' in messaging).toBe(false);
 
     // M93b: the four integration-event helpers and the rejection error class
     // thrown by `onIntegrationEvent`'s wrapper on the real delivery path.

@@ -1,7 +1,5 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /** Real Redis Streams trace-header round trip, guarded by `REDIS_URL`. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { MessageMetadata } from '@setu-ts/common';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -17,19 +15,13 @@ async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<voi
 }
 
 describe('REAL RedisStreamsBroker trace headers (guarded)', () => {
-  it('round-trips traceparent through XADD fields', async () => {
-    const url = Deno.env.get('REDIS_URL');
-    if (url === undefined) {
-      console.log('SKIP: REDIS_URL not set');
-      return;
-    }
+  it('round-trips traceparent through XADD fields', {
+    skip: process.env['REDIS_URL'] === undefined,
+  }, async () => {
+    const url = process.env['REDIS_URL'];
+    if (url === undefined) throw new Error('Backend guard failed');
 
-    try {
-      await import('npm:ioredis@5.x');
-    } catch {
-      console.log('SKIP: npm:ioredis@5.x not available');
-      return;
-    }
+    await import('ioredis');
 
     const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
       url,

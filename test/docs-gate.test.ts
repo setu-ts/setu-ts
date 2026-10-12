@@ -408,6 +408,7 @@ describe('documentation gate — required guides', () => {
       'README.md',
       'docs/getting-started.md',
       'docs/plugin-architecture.md',
+      'docs/how-it-fits-together.md',
       'docs/plugins.md',
       'docs/cli.md',
       'docs/programmatic-api.md',
@@ -418,6 +419,7 @@ describe('documentation gate — required guides', () => {
       'docs/migration-fastify.md',
       'docs/examples.md',
       'docs/runtime-deployment.md',
+      'docs/authorization.md',
     ];
 
     const findings = checkRequiredGuides(files);
@@ -1629,6 +1631,31 @@ describe('documentation gate — install-snippet versions', () => {
     expect(fenceExtension('typescript')).toBe('ts');
   });
 
+  it('reads the post-alpha 0.9.x line, and still reads 0.8.x as stale beside it', () => {
+    // Stale WITHIN 0.9 — the only case that discriminates. `^0.9.0` clean at
+    // 0.9.0 passes just as well when the gate reads no 0.9 at all. 0.9 is the
+    // first npm line, so the fixture is the npm install form.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'npm install @setu-ts/kernel@^0.9.0\n'),
+      '0.9.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.9.0');
+    expect(withinLine[0]?.message).toContain('0.9.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'npm install @setu-ts/kernel@^0.9.0\n'), '0.9.0'),
+    ).toEqual([]);
+
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.8.0\n'),
+      '0.9.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.8.0');
+    expect(outgoing[0]?.message).toContain('0.9.0');
+  });
+
   it('reads the post-alpha 0.8.x line, and still reads 0.7.x as stale beside it', () => {
     // Stale WITHIN 0.8 — the only case that discriminates. `^0.8.0` clean at
     // 0.8.0 passes just as well when the gate reads no 0.8 at all.
@@ -1944,6 +1971,21 @@ describe('documentation gate — bare version claims', () => {
 
   // The bare-claim checker reads its own copy of the alternation, so the 0.6
   // line is unproven here until asserted here.
+  it('reads the post-alpha 0.9.x line in a bare claim', () => {
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.9.0`\n'), '0.9.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.9.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.9.0`\n'), '0.9.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.8.0`\n'), '0.9.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.8.0');
+
+    const nineNoise = 'bound to 127.0.9.1 and 10.0.9.2, requires foo 10.9.1, mask 192.0.9.9\n';
+    expect(checkVersionClaims(doc('README.md', nineNoise), '0.9.0')).toEqual([]);
+  });
+
   it('reads the post-alpha 0.8.x line in a bare claim', () => {
     const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.8.0`\n'), '0.8.1');
     expect(withinLine).toHaveLength(1);
@@ -2271,5 +2313,88 @@ describe('docs/upgrading.md release attribution', () => {
 
     // Guards against the whole check passing because the parse found nothing.
     expect(checked).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('documentation gate — diagnostics field tables match their fences (M101h)', () => {
+  const DIAGNOSTIC_READMES: readonly string[] = [
+    'packages/auth-plugin/README.md',
+    'packages/events-plugin/README.md',
+  ];
+
+  /**
+   * Splits one `## Diagnostics` section into its table's field names and the
+   * text of its fenced example. A field row is any table row whose first cell
+   * is a lone inline-code identifier, which excludes the header and separator.
+   */
+  function diagnosticsSection(source: string): { fields: readonly string[]; fence: string } {
+    const lines = source.split('\n');
+    const start = lines.findIndex((line) => line.trim() === '## Diagnostics');
+    expect(start).toBeGreaterThanOrEqual(0);
+
+    let end = lines.length;
+    for (let index = start + 1; index < lines.length; index++) {
+      if (/^##\s/.test(lines[index] as string)) {
+        end = index;
+        break;
+      }
+    }
+
+    const fields: string[] = [];
+    const fenceLines: string[] = [];
+    let inFence = false;
+    for (const line of lines.slice(start + 1, end)) {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) {
+        fenceLines.push(line);
+        continue;
+      }
+      const cell = /^\|\s*`([A-Za-z][A-Za-z0-9]*)`\s*\|/.exec(line);
+      if (cell !== null) fields.push(cell[1] as string);
+    }
+    return { fields, fence: fenceLines.join('\n') };
+  }
+
+  /** Whether the fence sets `field` as an object key. */
+  function setsField(fence: string, field: string): boolean {
+    return new RegExp(`(^|[\\s{,])${field}\\s*:`, 'm').test(fence);
+  }
+
+  for (const readme of DIAGNOSTIC_READMES) {
+    it(`${readme} lists only fields its ## Diagnostics fence sets`, async () => {
+      const { fields, fence } = diagnosticsSection(await Deno.readTextFile(readme));
+      expect(fields.length).toBeGreaterThan(0);
+      for (const field of fields) {
+        expect(
+          setsField(fence, field),
+          `${readme} lists \`${field}\` in its ## Diagnostics table, but the section's fence ` +
+            `never sets it — the table has drifted from the real options interface`,
+        ).toBe(true);
+      }
+    });
+  }
+
+  it('flags a table field the fence omits (negative control)', () => {
+    const source = [
+      '## Diagnostics',
+      '',
+      '| Field     | Type     | Meaning |',
+      '| --------- | -------- | ------- |',
+      '| `enabled` | `true`   | opt-in  |',
+      '| `alias`   | `string` | label   |',
+      '',
+      '```typescript',
+      'EventsPlugin({ diagnostics: { enabled: true } });',
+      '```',
+      '',
+      '## Next',
+    ].join('\n');
+
+    const { fields, fence } = diagnosticsSection(source);
+    expect(fields).toEqual(['enabled', 'alias']);
+    expect(fields.filter((field) => !setsField(fence, field))).toEqual(['alias']);
   });
 });

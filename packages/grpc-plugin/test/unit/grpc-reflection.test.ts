@@ -7,8 +7,7 @@
  * serializes to an EMPTY message — the exact defect these tests pin.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   answerReflectionRequest,
   createReflectionService,

@@ -1,10 +1,18 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * `asUpgradeResponse` is the narrowing that turns a bare `TypeError` on
  * `undefined.accept()` into a message naming the binding and what to fix.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { asUpgradeResponse } from '../../../src/durable-objects/do-facades.ts';
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';

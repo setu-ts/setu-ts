@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { computeTotpCode, constantTimeEquals, totpCounter } from '../../src/mfa/totp-codes.ts';
 import { decodeBase32 } from '../../src/mfa/base32.ts';
 

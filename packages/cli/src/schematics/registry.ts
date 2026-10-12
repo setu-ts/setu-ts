@@ -11,6 +11,7 @@
 import type { TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { DerivedNames } from '../utils/names.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 
 import { generatePlugin } from './plugin.ts';
 import { generateController } from './controller.ts';
@@ -123,6 +124,8 @@ export interface SchematicMetadata {
   readonly factory: Schematic;
   /** The `@setu-ts` package that must be installed, when gated. */
   readonly requiresPlugin?: string;
+  /** Conditional gate, evaluated against the project's installed packages. */
+  readonly requiresPluginWhen?: (installed: ReadonlySet<string>) => string | undefined;
 }
 
 /**
@@ -151,7 +154,13 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
   ['command-handler', { factory: generateCommandHandler, requiresPlugin: 'cqrs-plugin' }],
   ['query-handler', { factory: generateQueryHandler, requiresPlugin: 'cqrs-plugin' }],
   ['event-handler', { factory: generateEventHandler, requiresPlugin: 'events-plugin' }],
-  ['job', { factory: generateJob }],
+  ['job', {
+    factory: generateJob,
+    requiresPluginWhen: (installed) =>
+      generatorMode(installed) === 'class-based' && !installed.has('queue-plugin')
+        ? 'queue-plugin'
+        : undefined,
+  }],
   ['migration', { factory: generateMigration, requiresPlugin: 'database-plugin' }],
   ['ws-route', { factory: generateWsRoute, requiresPlugin: 'websocket-plugin' }],
   ['sse', { factory: generateSse, requiresPlugin: 'sse-plugin' }],
@@ -181,8 +190,7 @@ export function getSchematic(name: string): SchematicMetadata | undefined {
 export function listSchematics(): readonly {
   readonly name: string;
   readonly requiresPlugin?: string;
+  readonly requiresPluginWhen?: (installed: ReadonlySet<string>) => string | undefined;
 }[] {
-  return [...REGISTRY].map(([name, meta]) =>
-    meta.requiresPlugin === undefined ? { name } : { name, requiresPlugin: meta.requiresPlugin }
-  );
+  return [...REGISTRY].map(([name, { factory: _factory, ...gates }]) => ({ name, ...gates }));
 }

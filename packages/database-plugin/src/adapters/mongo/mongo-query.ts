@@ -21,7 +21,7 @@ import { UnsupportedQueryFeatureError } from '../../errors.ts';
 /**
  * The native driver `find` options the query builder emits.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoFindOptions {
   /** Sort specification: field → direction. */
@@ -46,7 +46,7 @@ export interface MongoFindOptions {
  *
  * @param value - The literal search value
  * @returns The value with metacharacters escaped
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function escapeRegex(value: string): string {
   // `.*+?^${}()|[]\` — the metacharacters the native driver treats specially.
@@ -81,7 +81,7 @@ export function resolveMongoField(field: string | readonly string[]): string {
  *
  * @param comparison - The comparison to translate
  * @returns The operator document
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function translateComparison(
   comparison: FilterComparison,
@@ -125,7 +125,7 @@ export function translateComparison(
  *
  * @param expression - The expression to translate
  * @returns The match document
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function translateFilter(expression: FilterExpression): Record<string, unknown> {
   if (expression.type !== 'comparison') {
@@ -173,7 +173,7 @@ export function translateFilter(expression: FilterExpression): Record<string, un
  *
  * @param query - The fully-resolved normalized query
  * @returns The native `filter` and `find` options
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function translateQuery(query: NormalizedQuery): {
   filter: Record<string, unknown>;
@@ -213,7 +213,7 @@ export function translateQuery(query: NormalizedQuery): {
  * @param where - Equality conditions
  * @param filter - Optional portable expression
  * @returns The match document
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function translateCountFilter(
   where: Record<string, unknown>,

@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { NoopTelemetryService, TelemetryService } from '../../src/services/telemetry-service.ts';
 import type { ISpan, ITelemetryService, SpanOptions } from '@setu-ts/common';
 import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';

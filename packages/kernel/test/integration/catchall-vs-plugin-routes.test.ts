@@ -9,8 +9,7 @@
  * always in the router first, and before this milestone that alone decided the
  * match: a full-stack application answered the SSR 404 page on both endpoints.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '../../src/application/application.ts';

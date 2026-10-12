@@ -12,6 +12,8 @@
  * @module
  */
 
+import '../metadata/symbol-metadata.ts';
+
 import { normalizeMiddleware } from '../internal.ts';
 import { classOrMethodDecorator } from '../metadata/context-bridge.ts';
 import type { SetuClassOrMethodDecorator } from '../metadata/context-bridge.ts';

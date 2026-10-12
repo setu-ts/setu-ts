@@ -1,6 +1,5 @@
 // deno-lint-ignore-file require-await
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, none, ok, PLUGIN_PRIORITY, some } from '../../src/index.ts';
 import type {
   IScheduler,

@@ -12,6 +12,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -19,6 +20,7 @@ import { stringFlag, stringFlags } from '../args.ts';
 import {
   APP_VERB,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
@@ -40,9 +42,11 @@ import { readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
+  classifyFiles,
   findExisting,
   firstDuplicatePath,
   type GeneratedFile,
+  interruptedRunRetryHint,
   joinPath,
   writeFiles,
 } from '../utils/file-writer.ts';
@@ -60,7 +64,9 @@ import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
 import {
+  allocateDevtoolPort,
   allocatePort,
+  devtoolRangeStart,
   MAX_PORT,
   MEMBERS_DIR,
   MIN_PORT,
@@ -72,6 +78,8 @@ import {
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
 } from '../workspace/manifest.ts';
+import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 
 /**
  * Everything `runAppCommand` reaches the outside world through.
@@ -87,6 +95,8 @@ export interface AppDependencies {
   readonly error: (message: string) => void;
   /** Checks whether a candidate port is currently bindable. */
   readonly portAvailable?: PortProbe;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -143,13 +153,15 @@ function reportNoWorkspace(
   error: (message: string) => void,
 ): number {
   if (problem.kind === 'absent') {
-    error(`No ${WORKSPACE_MANIFEST} in ${dir}, so this is not a Setu workspace.`);
+    error(`No ${WORKSPACE_MANIFEST} in ${escapeName(dir)}, so this is not a Setu workspace.`);
     error(`Create one with \`${PROGRAM_NAME} new <name> --workspace\`, then run this inside it.`);
     return EXIT_ERROR;
   }
   if (problem.kind === 'unsupported-version') {
     error(
-      `${joinPath(dir, WORKSPACE_MANIFEST)} declares version ${problem.version}, ` +
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} declares version ${
+        escapeName(String(problem.version))
+      }, ` +
         `and this CLI understands version ${WORKSPACE_VERSION}.`,
     );
     error('Upgrade the CLI, or check the file into version control and roll it back.');
@@ -157,7 +169,9 @@ function reportNoWorkspace(
   }
   if (problem.kind === 'invalid-port') {
     error(
-      `${joinPath(dir, WORKSPACE_MANIFEST)} gives ${problem.field} the port ${problem.port}, ` +
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} gives ${
+        escapeName(problem.field)
+      } the port ${escapeName(String(problem.port))}, ` +
         `which no service can bind: it must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
     );
     error(
@@ -168,7 +182,9 @@ function reportNoWorkspace(
   }
   if (problem.kind === 'unknown-transport') {
     error(
-      `${joinPath(dir, WORKSPACE_MANIFEST)} names the transport "${problem.transport}", ` +
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the transport "${
+        escapeName(String(problem.transport))
+      }", ` +
         `which this CLI does not know. Expected one of: ${TRANSPORTS.join(', ')}.`,
     );
     error(
@@ -177,7 +193,7 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
-  error(`${joinPath(dir, WORKSPACE_MANIFEST)} is not a readable workspace manifest.`);
+  error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} is not a readable workspace manifest.`);
   error(`It must be JSON carrying \`version\`, \`basePort\`, and a \`members\` array.`);
   return EXIT_ERROR;
 }
@@ -203,6 +219,7 @@ function planMember(
   transport: TransportSpec,
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
+  rootGitignore: string,
   devtoolPort?: number,
 ): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
   readonly ok: false;
@@ -253,9 +270,9 @@ function planMember(
     // file lands in the unparseable-root branch and the member is refused with
     // advice that would change nothing if followed.
     if (profile.manifestKind === 'deno') {
-      const plan = planRootNodeModulesDir(rootManifest, name);
+      const plan = planRootNodeModulesDir(rootManifest, name, rootGitignore);
       if (plan.kind === 'refused') return { ok: false, message: plan.message };
-      if (plan.kind === 'update') extra.push(plan.file);
+      if (plan.kind === 'update') extra.push(plan.file, ...(plan.extra ?? []));
     }
   }
 
@@ -416,6 +433,11 @@ export async function runAppCommand(
 
   const read = await readWorkspaceManifest(deps.fs, deps.dir);
   if (!read.ok) return reportNoWorkspace(deps.dir, read.problem, deps.error);
+  const reconciliation = await reconcileMembers(deps.fs, deps.dir, read.manifest);
+  if (!reconciliation.ok) {
+    deps.error(describeReconcileFailure(reconciliation));
+    return EXIT_ERROR;
+  }
 
   // A member's runtime is the WORKSPACE's. The flag is accepted when it agrees
   // and refused when it does not, rather than silently scaffolding a member the
@@ -502,7 +524,7 @@ export async function runAppCommand(
     const devtoolHeld = taken.devtoolPort === requested.port && taken.port !== requested.port;
     deps.error(
       `Port ${requested.port} is already ${devtoolHeld ? 'the devtool port of' : 'bound by'} ` +
-        `the member "${taken.name}" in this workspace.`,
+        `the member "${escapeName(taken.name)}" in this workspace.`,
     );
     deps.error(
       `Two listeners on one port cannot both bind, and the launcher or a sibling would ` +
@@ -577,7 +599,7 @@ export async function runAppCommand(
         deps.error(
           `Port ${devtoolPortFlag.port} is already ` +
             `${devtoolHeld ? 'the devtool port of' : 'bound by'} the member ` +
-            `"${devtoolTaken.name}" in this workspace.`,
+            `"${escapeName(devtoolTaken.name)}" in this workspace.`,
         );
         deps.error(
           'Two listeners on one port cannot both bind, and the launcher would connect to ' +
@@ -596,18 +618,18 @@ export async function runAppCommand(
       }
       devtoolPort = devtoolPortFlag.port;
     } else {
-      let candidate = allocatePort({
+      let candidate = allocateDevtoolPort({
         ...read.manifest,
         members: [...read.manifest.members, { name, port }],
       });
       if (deps.portAvailable !== undefined) {
         while (candidate !== undefined && !(await deps.portAvailable(candidate))) {
-          candidate = allocatePort({
+          candidate = allocateDevtoolPort({
             ...read.manifest,
             members: [
               ...read.manifest.members,
               { name, port },
-              { name: '__occupied__', port: candidate },
+              { name: '__occupied__', port: candidate, devtoolPort: candidate },
             ],
           });
         }
@@ -630,6 +652,10 @@ export async function runAppCommand(
 
   const next: WorkspaceManifest = {
     ...read.manifest,
+    ...(devtoolPort === undefined ? {} : {
+      devtoolBasePort: read.manifest.devtoolBasePort ?? devtoolPortFlag.port ??
+        devtoolRangeStart(read.manifest),
+    }),
     members: [
       ...read.manifest.members,
       {
@@ -665,6 +691,15 @@ export async function runAppCommand(
     // Left empty: `planRootNodeModulesDir` refuses an unparseable root.
   }
 
+  let rootGitignore = '';
+  try {
+    rootGitignore = new TextDecoder().decode(
+      await deps.fs.readFile(joinPath(deps.dir, '.gitignore')),
+    );
+  } catch {
+    // An absent ignore file is created along with the frontend member.
+  }
+
   // Total: the manifest reader refuses a transport it does not know, so this
   // resolves without a "cannot happen" branch.
   const profile = workspaceProfile(next.runtime);
@@ -675,6 +710,7 @@ export async function runAppCommand(
     transportSpec(next.transport),
     profile,
     rootManifest,
+    rootGitignore,
     ...(devtoolPort === undefined ? [] as const : [devtoolPort] as const),
   );
   if (!plan.ok) {
@@ -687,7 +723,9 @@ export async function runAppCommand(
 
   const duplicate = firstDuplicatePath(plan.files);
   if (duplicate !== undefined) {
-    deps.error(`Refusing to plan ${duplicate} twice; it would be written and then overwritten.`);
+    deps.error(
+      `Refusing to plan ${escapeName(duplicate)} twice; it would be written and then overwritten.`,
+    );
     return EXIT_ERROR;
   }
 
@@ -697,25 +735,48 @@ export async function runAppCommand(
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${file.path}`);
+    for (const outcome of await classifyFiles(deps.fs, files)) {
+      deps.log(
+        outcome.outcome === 'unchanged'
+          ? `unchanged ${escapeName(outcome.path)}`
+          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${
+            escapeName(outcome.path)
+          }`,
+      );
+    }
     return EXIT_OK;
   }
 
   const existing = await findExisting(deps.fs, files);
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of existing) deps.error(`  ${path}`);
+    for (const path of existing) deps.error(`  ${escapeName(path)}`);
+    const retryHint = interruptedRunRetryHint(existing, joinPath(deps.dir, MEMBERS_DIR, name));
+    if (retryHint !== undefined) deps.error(retryHint);
     return EXIT_ERROR;
   }
 
   try {
-    await writeFiles(deps.fs, files);
+    const outcomes = await writeFiles(
+      deps.fs,
+      await formatForTarget(files, profile.runtime, deps.dir, deps.error),
+      deps.interrupt === undefined
+        ? { root: deps.dir }
+        : { root: deps.dir, signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
-    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    deps.error(
+      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
     return EXIT_ERROR;
   }
 
-  for (const file of files) deps.log(`created ${file.path}`);
   deps.log('');
   deps.log(`Added ${name} on port ${port}. Next:`);
   // From the profile, and from `runScript` rather than `manifestKind`: a Node

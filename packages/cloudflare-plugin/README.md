@@ -15,7 +15,8 @@ testable with a plain object.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/cloudflare-plugin
+npm install @setu-ts/cloudflare-plugin
+# Deno: deno add npm:@setu-ts/cloudflare-plugin
 ```
 
 ## Usage
@@ -433,6 +434,14 @@ job.
   shared store: a hit in one colo says nothing about another, and a `delete` does not evict
   globally. It reports under `X-Cache-Api`, so it composes with `cache-plugin`'s `cacheMiddleware`
   (which reports under `X-Cache` and reads a store every colo shares) rather than colliding with it.
+- **The default key carries the resolved tenant and locale.** The key is a URL string the platform
+  matches with no request headers, so `Vary` cannot separate entries here; `ctx.request.tenant` and
+  `ctx.request.locale` are appended to the URL text as `setu-cache-tenant` and `setu-cache-locale`
+  parameters instead. The middleware must run after the tenant and locale middleware (globally, at a
+  higher priority number than theirs — 40 and 45 by default, or whatever `middlewarePriority` and
+  `middleware.priority` are set to), and a request no key can keep apart from another — a fragment,
+  un-normalized URL text, an unencodable id, or a reserved parameter on a request that lacks the
+  value — is served uncached. A custom `key` must include both itself.
 - **The edge cache refuses some responses, and the middleware skips them rather than failing.**
   Non-GET, 206, `Vary: *`, and an uncleared `Set-Cookie` all make `caches.default.put` throw; those
   are checked first. `Cache-Control: private=Set-Cookie` is the platform's opt-in. Streaming
@@ -482,7 +491,9 @@ MIT
 | `D1Adapter`                               | class     |
 | `DistributedLockObjectCore`               | class     |
 | `DurableObjectBackplane`                  | class     |
+| `DurableObjectIdempotencyStore`           | class     |
 | `DurableObjectLock`                       | class     |
+| `IdempotencyObjectCore`                   | class     |
 | `KvCacheStore`                            | class     |
 | `KvSessionStore`                          | class     |
 | `R2Storage`                               | class     |
@@ -502,6 +513,7 @@ MIT
 | `DistributedLockObjectCoreOptions`        | interface |
 | `DurableObjectArm`                        | interface |
 | `DurableObjectBackplaneOptions`           | interface |
+| `DurableObjectIdempotencyStoreOptions`    | interface |
 | `DurableObjectLockOptions`                | interface |
 | `DurableObjectMessageEvent`               | interface |
 | `DurableObjectUpgradeResponse`            | interface |
@@ -511,11 +523,13 @@ MIT
 | `ICloudflareBindings`                     | interface |
 | `ID1Database`                             | interface |
 | `ID1PreparedStatement`                    | interface |
+| `IdempotencyObjectCoreOptions`            | interface |
 | `IDurableObjectClientSocket`              | interface |
 | `IDurableObjectNamespace`                 | interface |
 | `IDurableObjectState`                     | interface |
 | `IDurableObjectStorage`                   | interface |
 | `IDurableObjectWebSocket`                 | interface |
+| `IIdempotencyObjectState`                 | interface |
 | `IKvNamespace`                            | interface |
 | `IQueueMessage`                           | interface |
 | `IQueueMessageBatch`                      | interface |
@@ -558,3 +572,46 @@ MIT
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.
+
+## The Durable Object idempotency store (M109a)
+
+One Durable Object per idempotency store key — the tier-B store `@setu-ts/idempotency-plugin` can
+use on Workers. The application exports the DO class and hands the store to the plugin; the object
+owns the record, its lease and its alarm.
+
+```toml
+# wrangler.toml
+[[durable_objects.bindings]]
+name = "IDEMPOTENCY"
+class_name = "IdempotencyObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["IdempotencyObject"]
+```
+
+```typescript
+import { DurableObject } from 'cloudflare:workers';
+import { DurableObjectIdempotencyStore, IdempotencyObjectCore } from '@setu-ts/cloudflare-plugin';
+import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
+
+// The Durable Object side — the class the binding names.
+export class IdempotencyObject extends DurableObject {
+  #core = new IdempotencyObjectCore(this.ctx);
+  override fetch(request: Request): Promise<Response> {
+    return this.#core.fetch(request);
+  }
+  override alarm(): Promise<void> {
+    return this.#core.alarm();
+  }
+}
+
+// The Worker side — one store, its `namespace` isolating this application's records.
+const store = new DurableObjectIdempotencyStore(env.IDEMPOTENCY, { namespace: 'shop' });
+app.register(IdempotencyPlugin({ store: { type: 'custom', store } }));
+```
+
+The store takes `namespace` (required), `keyPrefix` (default `'idempotency:'`), `binding` (for error
+messages) and `timeoutMs` (default 5,000; `0` disables). It advertises `maxRecordBytes` of 120,000 —
+under the KV-backed Durable Object value limit — and has no `isHealthy`, because probing it would
+create and bill an object.

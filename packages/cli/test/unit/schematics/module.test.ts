@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { generateModule } from '../../../src/schematics/module.ts';
 import { gateOf, options } from './_shared.ts';
@@ -106,6 +105,22 @@ describe('generateModule', () => {
 
   describe('in a class-based project', () => {
     const files = generateModule(names, options(CLASS_PLUGINS));
+
+    // The module lists the service in `providers` and the test constructs it, so
+    // both need it as a VALUE: a type-only import is TS1361 and erases to an
+    // undefined reference. Only the controller, which injects by token, may
+    // import it as a type.
+    it('imports the service as a value wherever it is used as one', () => {
+      const valueImport = "import { UserProfileService } from './user-profile.service.ts';";
+      const typeImport = "import type { UserProfileService } from './user-profile.service.ts';";
+      for (const path of ['user-profile.module.ts', 'user-profile.service.test.ts']) {
+        const source = fileAt(files, `src/modules/user-profile/${path}`);
+        expect(source).toContain(valueImport);
+        expect(source).not.toContain(typeImport);
+      }
+      expect(fileAt(files, 'src/modules/user-profile/user-profile.controller.ts'))
+        .toContain(typeImport);
+    });
 
     it('emits a module declaration alongside its other files', () => {
       expect(files.map((f) => f.path)).toEqual([

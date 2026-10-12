@@ -2,7 +2,7 @@
 /**
  * Builds the body of a GitHub Release object from `CHANGELOG.md`.
  *
- * The release workflow creates the Release object after publishing to JSR (see
+ * The release workflow creates the Release object after publishing to npm (see
  * `.github/workflows/release.yml`). The extraction lives here rather than as
  * inlined workflow shell for the reason the Publish step already documents in
  * its own comment: a copy inside the workflow drifted from the task it
@@ -40,14 +40,14 @@ export function extractReleaseNotes(
 
 /**
  * Wraps the changelog section in the two things a Releases-tab reader needs and
- * the changelog does not carry: a PINNED install line (JSR never points
- * `latest` at a prerelease, so an unpinned instruction installs nothing), and a
+ * the changelog does not carry: a PINNED npm install line (an older Release
+ * must install its own version), and a
  * note that the earlier tags carry no Release object — without it a reader
  * lands on a near-empty Releases tab and takes the first entry for the first
  * release.
  */
 export function buildReleaseBody(notes: string, version: string): string {
-  const install = `deno add jsr:@setu-ts/kernel@${version} jsr:@setu-ts/runtime@${version}`;
+  const install = `npm install @setu-ts/kernel@${version} @setu-ts/runtime@${version}`;
   return [
     '```bash',
     install,

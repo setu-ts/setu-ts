@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { PathPattern } from '@setu-ts/common';
 import { DEFAULT_EXCLUDED_PATHS, HttpCollector } from '../../src/collectors/http-collector.ts';
 import { MetricsService } from '../../src/services/metrics-service.ts';

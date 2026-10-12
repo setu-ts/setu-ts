@@ -6,8 +6,7 @@
  * short-circuit behavior (next not re-invoked, downstream cannot overwrite),
  * and the Problem Details content-type.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { NextFunction } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 

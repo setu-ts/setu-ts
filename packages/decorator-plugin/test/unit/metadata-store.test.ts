@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { Constructor, MiddlewareFunction } from '@setu-ts/common';
 
 import { MetadataStore } from '../../src/metadata/metadata-store.ts';

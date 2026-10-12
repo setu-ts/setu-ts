@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IAmqpQueueChannel, IAmqpQueueConnection } from '../../../src/interfaces/index.ts';
 import { RabbitMqQueue } from '../../../src/adapters/rabbitmq-queue.ts';
 import { FakeRuntimeServices } from '../../fixtures/fake-runtime.ts';

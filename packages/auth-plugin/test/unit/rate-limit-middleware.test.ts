@@ -6,8 +6,7 @@
  * paths, custom message, injected store, and the default-memory-store path.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   defaultRateLimitKey,
   rateLimitMiddleware,

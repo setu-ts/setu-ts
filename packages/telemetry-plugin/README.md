@@ -50,6 +50,9 @@ await app.start({ port: 3000 });
 | `instrumentations`      | `InstrumentationsConfig`                                   | none       | Per-instrumentation auto-instrumentation; see below.                                                                                                                                                                                                  |
 | `contextPropagation`    | `boolean`                                                  | `true`     | Activate real spans for nested work.                                                                                                                                                                                                                  |
 | `contextManagerFactory` | `() => Promise<{ enable(): unknown; disable(): unknown }>` | —          | Injectable async-local context manager loader: a **factory** returning a promise, not a manager instance. Its return type is structural on purpose, so the factory can resolve to an OTel context manager without importing a type from this package. |
+| `redaction`             | `RedactionPolicy \| IRedactionService`                     | —          | Policy applied to retained query-parameter values when `queryParameters: 'redact'`.                                                                                                                                                                   |
+| `queryParameters`       | `'omit' \| 'redact'`                                       | `'omit'`   | How `http.url` query parameters are handled; see [Request URL handling](#request-url-handling). `'redact'` without a `redaction` policy warns and fails closed to omission.                                                                           |
+| `diagnostics`           | `TraceDiagnosticsOptions`                                  | —          | Opt-in minimized completed-span observations; see [Trace diagnostics (M98g)](#trace-diagnostics-m98g).                                                                                                                                                |
 
 ## Auto-instrumentation
 
@@ -72,6 +75,10 @@ logger plugin still boots, with nothing emitted.
 The request-span middleware reads and writes the W3C `traceparent` header, so traces join across
 services without extra configuration.
 
+For outbound calls made with `@setu-ts/sdk`, add its `createTraceContextInterceptor(telemetry)` to
+the client's request interceptors. It reads this plugin's active span and carries the same trace to
+the receiving service.
+
 Span **nesting** is a separate mechanism with its own preconditions. In real OTel mode the plugin
 registers an async-local context manager and `withSpan` runs its callback with the span active, so
 nested work — including messaging publishes — becomes a child span. That applies only when all three
@@ -89,6 +96,13 @@ Two outcomes count as active, and only one counts as failure:
   siblings rather than a tree.
 
 Pass an explicit `parentContext` where the relationship must hold regardless.
+
+Pass `root: true` (M107) to start a span with NO parent — ignoring both `parentContext` and the
+active span. Work that runs on behalf of something other than the surrounding request needs it: the
+messaging outbox relays a row that carries no valid stored `traceparent` under a root span, so a
+sweep dispatched from inside a request does not attribute that row to the request. The plugin
+carries the option to OpenTelemetry's own `SpanOptions.root`; an `ITelemetryService` implementation
+that ignores it starts the span under the active span.
 
 ## Request URL handling
 

@@ -158,6 +158,20 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     // serve assets through Workers Assets or R2 via `cloudflare-plugin`.
     runtimeCompat: NO_EDGE,
   },
+  'idempotency-plugin': {
+    description: 'A repeated request, queue job or broker message does its work once per key',
+    runtimeCompat: PORTABLE,
+  },
+  'localization-plugin': {
+    description:
+      'Localization: message catalogues, request locale resolution, a formatter shared with the browser',
+    // `browser: true` describes the `/format` subpath, which has no runtime
+    // dependency outside itself so a browser bundle can import it (M103 §3.13).
+    // JSR carries one flag per package; the root export is a server plugin
+    // (its only runtime import is the UNIVERSAL `common`) and is of no use in a
+    // browser, which the README says.
+    runtimeCompat: UNIVERSAL,
+  },
   'view-plugin': {
     description:
       'Server-rendered HTML: view engines for JSX and html-tag components, named by reference',
@@ -307,6 +321,10 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
   // ── Tooling ───────────────────────────────────────────────────────────────
   'cli': {
     description: 'setu — project scaffolding and plugin-aware code generation',
+    runtimeCompat: SERVER_ONLY,
+  },
+  'create': {
+    description: 'npm create @setu-ts — scaffolds a Setu-TS project with setu new',
     runtimeCompat: SERVER_ONLY,
   },
   'sdk': {

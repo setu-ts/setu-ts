@@ -1,3 +1,11 @@
+import {
+  denoBinary,
+  run as runProcess,
+  spawnProcess,
+  tempDir,
+} from '../../../../test/node-helpers.ts';
+import { fileURLToPath } from 'node:url';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The gate M63 exists for: a stock scaffold is installed, formatted, linted,
  * type-checked, BOOTED under its own declared permissions, and asked for the
@@ -22,19 +30,21 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
+import type { Prompter } from '../../src/prompt.ts';
 import {
   bootAndProbe,
   bootWithGeneratedPermissions,
+  unusedPort,
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
+import { startOverlay } from '../fixtures/node-project.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /** Templates that wire an HTTP surface and boot without an npm build. */
@@ -83,11 +93,11 @@ const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
 let root = '';
 
 beforeEach(async () => {
-  root = await Deno.makeTempDir({ prefix: 'setu-scaffold-runs-' });
+  root = await tempDir({ prefix: 'setu-scaffold-runs-' });
 });
 
 afterEach(async () => {
-  await Deno.remove(root, { recursive: true }).catch(() => {});
+  await nodeFs.rm(root, { recursive: true }).catch(() => {});
 });
 
 /**
@@ -172,13 +182,15 @@ function isTransientInstallFailure(output: string): boolean {
 async function runDenoOnce(
   project: string,
   args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
 ): Promise<{ code: number; output: string }> {
-  const child = new Deno.Command(Deno.execPath(), {
+  const child = spawnProcess(denoBinary(), {
     args: [...args],
     cwd: project,
+    env: { ...env },
     stdout: 'piped',
     stderr: 'piped',
-  }).spawn();
+  });
 
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -233,28 +245,62 @@ async function runDenoOnce(
 async function denoRunRetry(
   project: string,
   args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
 ): Promise<{ code: number; output: string }> {
-  let result = await runDenoOnce(project, args);
+  let result = await runDenoOnce(project, args, env);
   for (let attempt = 1; attempt < DENO_INSTALL_ATTEMPTS; attempt++) {
     if (result.code === 0 || !isTransientInstallFailure(result.output)) {
       return result;
     }
     await new Promise((resolve) => setTimeout(resolve, DENO_INSTALL_RETRY_DELAY_MS));
-    result = await runDenoOnce(project, args);
+    result = await runDenoOnce(project, args, env);
   }
   return result;
+}
+
+/**
+ * Runs Prettier's check over an npm-target project with the CLI's own Prettier,
+ * which reads the project's `.prettierrc.json` and `.prettierignore` — so the
+ * check needs no install.
+ *
+ * @param project - The project directory
+ * @returns Its exit code and combined output
+ */
+async function prettierCheck(project: string): Promise<{ code: number; output: string }> {
+  const bin = fileURLToPath(
+    new URL('../../node_modules/prettier/bin/prettier.cjs', import.meta.url),
+  );
+  const result = await runProcess(process.execPath, {
+    args: [bin, '--check', '.'],
+    cwd: project,
+    stdout: 'piped',
+    stderr: 'piped',
+  });
+  const decoder = new TextDecoder();
+  return {
+    code: result.code,
+    output: `${decoder.decode(result.stdout)}${decoder.decode(result.stderr)}`,
+  };
 }
 
 describe('a scaffolded project is formatted and lints clean', () => {
   for (const [label, args] of HOSTS) {
     it(`holds for ${label}`, async () => {
-      expect(await run(['new', 'shop', ...args])).toBe(0);
+      // Deno unless the host names its own target: this gate formats and lints
+      // with Deno, and the npm hosts get the same treatment on Node in
+      // `node-scaffold-e2e.test.ts`.
+      const workers = args.includes('cloudflare-workers');
+      const runtime = workers ? [] : ['--runtime', 'deno'];
+      expect(await run(['new', 'shop', ...runtime, ...args])).toBe(0);
       const project = `${root}/shop`;
 
-      // The generated project carries its own `fmt` config; this asserts the
-      // CLI's output already satisfies it, so a developer's first
-      // `deno fmt` does not rewrite files they did not write.
-      const formatted = await denoRun(project, ['fmt', '--check']);
+      // The generated project carries its own formatter config; this asserts
+      // the CLI's output already satisfies it, so a developer's first format
+      // run does not rewrite files they did not write. A Workers project is an
+      // npm target, formatted with Prettier — `deno fmt` is not its formatter.
+      const formatted = workers
+        ? await prettierCheck(project)
+        : await denoRun(project, ['fmt', '--check']);
       expect(formatted.code, formatted.output).toBe(0);
 
       const linted = await denoRun(project, ['lint']);
@@ -262,6 +308,17 @@ describe('a scaffolded project is formatted and lints clean', () => {
     });
   }
 });
+
+/**
+ * The paths a generated README's "What it serves" section lists, with each
+ * `:name` segment filled in, so they can be requested as written.
+ */
+async function advertisedPaths(project: string): Promise<string[]> {
+  const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
+  const section = readme.split('## What it serves')[1]?.split('\n## ')[0] ?? '';
+  return [...section.matchAll(/^- `([^`]+)`/gm)]
+    .map((match) => (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'));
+}
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
   // Membership is asserted, not just iterated. Removing a template from
@@ -275,33 +332,71 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
     expect([...BOOTABLE]).toEqual(['rest', 'microservice', 'class-based', 'full-stack']);
   });
 
+  it('boots a REST scaffold selected through the programmatic prompt seam', async () => {
+    const ask: Prompter = {
+      select(_question, choices) {
+        const selected = choices.find((choice) => choice.value === 'rest') ?? choices[0];
+        return Promise.resolve({ kind: 'answer', value: selected.value });
+      },
+    };
+    expect(
+      await runCli(['new', '--runtime', 'deno', 'shop'], {
+        fs,
+        cwd: root,
+        now: () => runtime.now(),
+        log: () => {},
+        error: () => {},
+        ask,
+      }),
+    ).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+
+    const result = await bootWithGeneratedPermissions(project, ['/health', '/greetings']);
+    expect(result.statuses['/health'], result.output).toBe(200);
+    expect(result.statuses['/greetings'], result.output).toBe(200);
+  });
+
   for (const template of BOOTABLE) {
     it(`holds for --template ${template}`, async () => {
-      expect(await run(['new', 'shop', '--template', template])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
-      // `full-stack` builds its React Router server before it can serve, and
-      // `start` depends on `build` — which is exactly what X5-3 added. Running
-      // the task here rather than letting `start` do it keeps the boot's own
-      // timeout measuring the boot.
-      if (template === 'full-stack') {
-        const built = await new Deno.Command(Deno.execPath(), {
-          args: ['task', 'build'],
-          cwd: project,
-          stdout: 'piped',
-          stderr: 'piped',
-        }).output();
-        expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
-      }
+      // No separate build first, even for `full-stack`: a fresh user runs
+      // `deno task test` on a project that has never been built, and the
+      // generated smoke test boots an app that loads the server build. The
+      // task must build it itself (V8-39) — pre-building here hid exactly that.
+      // The build it leaves behind is what the boot below serves. Retried like
+      // any install, since for `full-stack` this task now runs `deno install`.
+      const tested = await denoRunRetry(project, ['task', 'test']);
+      expect(tested.code, tested.output).toBe(0);
+      expect(tested.output).toContain('1 passed');
 
+      // Every path the README's "What it serves" section lists must answer,
+      // so the section cannot advertise a route the project does not serve.
+      const advertised = await advertisedPaths(project);
+      // Vacuity guard: every bootable template lists at least `/` and the six
+      // plugin endpoints, so fewer means the section or its parser broke.
+      expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(7);
       const paths = [
-        '/health',
-        '/ready',
-        '/metrics',
-        ...(template === 'rest' ? ['/greetings', '/greetings/Setu'] : []),
+        ...new Set([
+          '/health',
+          '/ready',
+          '/metrics',
+          ...(template === 'rest' ? ['/greetings', '/greetings/Setu'] : []),
+          ...advertised,
+        ]),
       ];
       const result = await bootWithGeneratedPermissions(project, paths);
+      for (const path of advertised) {
+        // `fetch` follows redirects, so a page behind sign-in lands on the
+        // sign-in form and answers 200 as well.
+        expect({ path, status: result.statuses[path] }, result.output).toEqual({
+          path,
+          status: 200,
+        });
+      }
 
       // The assertion D2 failed: without `--allow-sys` the self indicator's
       // `runtime.hostname()` throws and the probe answers 500.
@@ -322,6 +417,36 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
     });
   }
 
+  it('runs a smoke test on the template-less host', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'minimal'])).toBe(0);
+    const project = `${root}/minimal`;
+    await useWorkspacePackages(project);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    // The old annotation hides inject/unregister/hasPlugin. This control must
+    // fail at the actual testing-package boundary, not just a text assertion.
+    await nodeFs.writeFile(
+      configPath,
+      config.replace('): IKernelApplication {', '): IApplication {')
+        .replace(/type IKernelApplication,\s*/g, '')
+        .replace(
+          "import type { IPlugin } from '@setu-ts/common';",
+          "import type { IApplication, IPlugin } from '@setu-ts/common';",
+        ),
+    );
+    try {
+      const refused = await denoRun(project, ['check', 'test/app.test.ts']);
+      expect(refused.code, refused.output).not.toBe(0);
+      expect(refused.output).toContain('TS2739');
+      expect(refused.output).toContain('inject, unregister, hasPlugin');
+    } finally {
+      await nodeFs.writeFile(configPath, config);
+    }
+    const tested = await denoRun(project, ['task', 'test']);
+    expect(tested.code, tested.output).toBe(0);
+    expect(tested.output).toContain('1 passed');
+  });
+
   // The styled host gets its OWN boot case rather than a `HOSTS` entry: `HOSTS`
   // drives only `fmt --check` and `lint`, and the loop above iterates `BOOTABLE`
   // — a `HOSTS` entry alone would never boot. `BOOTABLE` stays the four template
@@ -336,7 +461,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
 
   for (const [label, args] of BOOTABLE_STYLED) {
     it(`boots with generated permissions for ${label}`, async () => {
-      expect(await run(['new', 'shop', ...args])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', ...args])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
@@ -363,7 +488,7 @@ describe('a scaffolded Workers project retries a failed boot and never leaks the
     // A config whose FIRST construction fails with an error carrying a path
     // marker — under the old memoisation both requests would replay this
     // failure and the message would leak into the response body.
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${project}/setu.config.ts`,
       `import type { IApplication } from '@setu-ts/common';\n` +
         `let calls = 0;\n` +
@@ -412,14 +537,14 @@ describe('a scaffolded Workers project retries a failed boot and never leaks the
 
 describe('a scaffolded project configures itself from a dotenv file', () => {
   it('emits an ignored dotenv file beside a tracked example', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
 
-    expect((await Deno.stat(`${project}/.env`)).isFile).toBe(true);
-    expect((await Deno.stat(`${project}/.env.example`)).isFile).toBe(true);
+    expect((await nodeFs.stat(`${project}/.env`)).isFile()).toBe(true);
+    expect((await nodeFs.stat(`${project}/.env.example`)).isFile()).toBe(true);
     // The example is the committed one, so the ignore rule must name only the
     // real file — an ignore of `.env*` would take the example with it.
-    const gitignore = await Deno.readTextFile(`${project}/.gitignore`);
+    const gitignore = await nodeFs.readFile(`${project}/.gitignore`, 'utf8');
     expect(gitignore).toContain('.env\n');
     expect(gitignore).not.toContain('.env.example');
   });
@@ -431,10 +556,10 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
     // at `ConfigPlugin.register` on the first `git clone`, in CI, and inside a
     // container built from the repository. Deleting the file here reproduces
     // exactly that state; `envFileOptional` is what makes it boot.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
-    await Deno.remove(`${project}/.env`);
+    await nodeFs.rm(`${project}/.env`);
 
     const result = await bootWithGeneratedPermissions(project, ['/health']);
 
@@ -445,11 +570,11 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
     // The other half: tolerating absence must not mean ignoring the file. This
     // asserts the configured path is genuinely loaded, so a fix that silently
     // stopped reading dotenv files would fail here rather than pass both ways.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
-    await Deno.writeTextFile(`${project}/.env`, 'SCAFFOLD_PROBE_VALUE=from-dotenv\n');
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(`${project}/.env`, 'SCAFFOLD_PROBE_VALUE=from-dotenv\n');
+    await nodeFs.writeFile(
       `${project}/src/controllers/index.ts`,
       `import { CAPABILITIES } from '@setu-ts/common';\n` +
         `import type { IConfig, IRouterApi } from '@setu-ts/common';\n\n` +
@@ -474,10 +599,10 @@ describe('a scaffolded project answers errors as RFC 9457 Problem Details', () =
     // `errorHandler({ format: 'rfc9457' })` in the emitted source: the format
     // argument reaching the middleware is the only thing that decides the wire
     // shape, and a string match cannot see whether it did.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${project}/src/controllers/index.ts`,
       `import { unauthorized } from '@setu-ts/exceptions';\n` +
         `import type { IRouterApi } from '@setu-ts/common';\n\n` +
@@ -511,10 +636,10 @@ describe('a scaffolded project answers errors as RFC 9457 Problem Details', () =
     // `errorFormat` argument, the validation failure would answer in the
     // default shape (`message`/`errors`, no `type`/`title`/`status`/`detail`)
     // and this assertion fails.
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${project}/src/controllers/index.ts`,
       `import { unauthorized } from '@setu-ts/exceptions';\n` +
         `import { validateQuery } from '@setu-ts/validation-plugin';\n` +
@@ -574,100 +699,69 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
    */
   async function setDependencyAge(project: string, value: number | null): Promise<void> {
     const path = `${project}/deno.json`;
-    const manifest = JSON.parse(await Deno.readTextFile(path)) as Record<string, unknown>;
+    const manifest = JSON.parse(await nodeFs.readFile(path, 'utf8')) as Record<string, unknown>;
     delete manifest['minimumDependencyAge'];
     delete manifest['//minimumDependencyAge'];
     if (value !== null) manifest['minimumDependencyAge'] = value;
-    await Deno.writeTextFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
-    await Deno.remove(`${project}/deno.lock`).catch(() => {});
-  }
-
-  /**
-   * Relaxes the scaffold's `@setu-ts/*` pins to the range floor.
-   *
-   * Both legs below are REAL registry installs — that is the point, since a
-   * workspace-repointed project never consults JSR and so can never exercise
-   * the age policy. But `setu new` pins a project to the CLI's OWN version,
-   * which during a release bump is not published yet, so the install fails on
-   * `Could not find version … that matches '^<next>'` before any age policy is
-   * consulted: the test would then block the very release that would publish
-   * the version it wants. `^0.1.0-alpha.1` resolves to a published release, so
-   * it does not deadlock, and it changes nothing either leg proves — the
-   * emitted value is asserted separately above, and every published version is
-   * younger than the ten-year threshold that makes the refusal leg
-   * deterministic.
-   *
-   * It no longer tracks the NEWEST published release, which it did while every
-   * version was a `0.1.0-alpha.N` prerelease: a caret range caps at the next
-   * minor, so from `v0.2.0` onward this deliberately installs the newest
-   * release of the alpha line. That is still a real registry install under a
-   * real age policy, which is all either leg needs. The self-maintaining
-   * alternative is a BARE specifier — unavailable before `v0.2.0`, because JSR
-   * never pointed `latest` at a prerelease, and available now.
-   *
-   * @param project - The project directory
-   */
-  async function relaxFrameworkPins(project: string): Promise<void> {
-    const path = `${project}/deno.json`;
-    const source = await Deno.readTextFile(path);
-    await Deno.writeTextFile(
-      path,
-      source.replaceAll(/(@setu-ts\/[a-z-]+)@\^[^"]+/g, '$1@^0.1.0-alpha.1'),
-    );
+    await nodeFs.writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
+    await nodeFs.rm(`${project}/deno.lock`).catch(() => {});
   }
 
   it('installs under a policy that would otherwise refuse every version', async () => {
     // D1 only bites while the pinned version is inside the age window, so the
     // obvious test is reproducible for one day per release and vacuous after.
-    // Raising the threshold instead makes EVERY published version "too new",
-    // which reproduces the same refusal deterministically and forever — the
-    // scaffold's own `minimumDependencyAge: 0` is then the only thing that can
-    // let the install through.
-    expect(await run(['new', 'shop'])).toBe(0);
+    // The overlay stamps the tree's own packs as published NOW, and the policy is
+    // raised to ten years, which makes every version "too new" — reproducing the
+    // refusal deterministically and forever. The scaffold's own
+    // `minimumDependencyAge: 0` is then the only thing that can let the install
+    // through. The pinned version is the tree's own, which the overlay always
+    // serves, so a release bump can never deadlock this test against the
+    // publish that would satisfy it.
+    expect(await run(['new', 'shop', '--runtime', 'deno'])).toBe(0);
     const project = `${root}/shop`;
 
     // What the scaffold actually emitted, asserted here rather than only in the
     // unit test: the two legs below prove the VALUE has the effect, and this
     // line is what ties that to the value the CLI writes. Without it the test
     // would still pass if `setu new` emitted no key at all.
-    const emitted = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
+    const emitted = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
       minimumDependencyAge?: unknown;
     };
     expect(emitted.minimumDependencyAge).toBe(0);
+    expect(await nodeFs.readFile(`${project}/deno.json`, 'utf8')).toContain(
+      'npm:@setu-ts/kernel@^',
+    );
 
-    // Read the emitted pins BEFORE relaxing them, so this leg still fails if
-    // `setu new` ever stops pinning the framework at all.
-    expect(await Deno.readTextFile(`${project}/deno.json`)).toContain('jsr:@setu-ts/kernel@^');
-    await relaxFrameworkPins(project);
+    const overlay = await startOverlay('now');
+    try {
+      const env = { NPM_CONFIG_REGISTRY: overlay.url };
+      // 10 years in minutes. Without this leg the second one proves nothing: an
+      // install that succeeds under a policy that was never going to refuse
+      // anything is not evidence that the emitted key does the work.
+      await setDependencyAge(project, 5_256_000);
+      // The refusal is deterministic, but reaching it requires registry I/O to
+      // resolve the versions first, so a transient blip under parallel load can
+      // fail the install with a network error instead of the age message. The
+      // retrying runner absorbs only that transient class.
+      const refused = await denoRunRetry(project, ['install'], env);
+      expect(refused.code, refused.output).toBe(1);
+      expect(refused.output).toContain('minimum dependency age');
 
-    // 10 years in minutes. Without this leg the second one proves nothing: an
-    // install that succeeds under a policy that was never going to refuse
-    // anything is not evidence that the emitted key does the work.
-    await setDependencyAge(project, 5_256_000);
-    // The refusal is deterministic, but reaching it requires registry I/O to
-    // resolve the versions first, so a transient blip under parallel load can
-    // fail the install with a network error instead of the age message. The
-    // retrying runner absorbs only that transient class and returns the
-    // deterministic refusal (or a success, which would expose a real defect)
-    // on its first attempt.
-    const refused = await denoRunRetry(project, ['install']);
-    expect(refused.code, refused.output).toBe(1);
-    expect(refused.output).toContain('minimum dependency age');
-
-    // What the CLI actually emits. This install is expected to SUCCEED, so it
-    // goes through the retrying runner: a transient registry blip under the
-    // full suite's parallel load must not fail the step, while a real refusal
-    // (which is deterministic) is still returned on its first attempt.
-    await setDependencyAge(project, 0);
-    const allowed = await denoRunRetry(project, ['install']);
-    expect(allowed.code, allowed.output).toBe(0);
-    expect(allowed.output).not.toContain('minimum dependency age');
+      // What the CLI actually emits. Expected to SUCCEED, through the retrying
+      // runner, while a real refusal is still returned on its first attempt.
+      await setDependencyAge(project, 0);
+      const allowed = await denoRunRetry(project, ['install'], env);
+      expect(allowed.code, allowed.output).toBe(0);
+      expect(allowed.output).not.toContain('minimum dependency age');
+    } finally {
+      await overlay.close();
+    }
   });
 });
 
 describe('a scaffolded full-stack project type-checks its own routes', () => {
   it('runs the generated check:app task over the app tree', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
 
     // Against THIS workspace, not the published packages the scaffold pins.
@@ -713,18 +807,18 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
   // first, and the scaffold shipped no route middleware at all. This drives both
   // through the generated project's own entry, under its own permissions.
   it('applies kernel middleware to every request and route middleware to its route', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
     // The kernel layer, exactly as a developer adds it.
     expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
     await useWorkspacePackages(project);
 
-    const built = await new Deno.Command(Deno.execPath(), {
+    const built = await runProcess(denoBinary(), {
       args: ['task', 'build'],
       cwd: project,
       stdout: 'piped',
       stderr: 'piped',
-    }).output();
+    });
     expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
 
     const { result, output } = await withGeneratedServer(project, async (origin) => {
@@ -777,5 +871,95 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
     expect(result.signedIn.status).toBe(200);
     expect(result.signedIn.body).toContain('Signed in as');
     expect(result.signedIn.body).toContain('ada@example.com');
+  });
+});
+
+describe('a scaffolded full-stack project serves route edits in development', () => {
+  // `deno task dev` runs Vite in-process. Before it existed, a route importing a
+  // `@setu-ts` package answered 500 under Vite's dev SSR runner, which cannot
+  // resolve a JSR import; and a package Vite loaded itself would have been a
+  // second copy whose context keys matched nothing. This boots the generated
+  // entry and edits a route while it runs.
+  it('renders through Vite, shares context keys, and serves an edit without a restart', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+    const installed = await denoRunRetry(project, ['install', '--allow-scripts']);
+    expect(installed.code, installed.output).toBe(0);
+
+    const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
+      tasks: Record<string, string>;
+    };
+    expect(manifest.tasks['dev']).toBe('deno task install && deno run -A dev.ts');
+    // `deno run` does not type-check, and the project's `check:app` does not
+    // reach the entry, so check it here.
+    const checked = await denoRunRetry(project, ['check', 'dev.ts']);
+    expect(checked.code, checked.output).toBe(0);
+
+    const port = await unusedPort();
+    const vitePort = await unusedPort();
+    // The task's own command after its install step, so the process killed
+    // below is the server itself rather than a task runner wrapping it.
+    const child = spawnProcess(denoBinary(), {
+      args: ['run', '-A', 'dev.ts'],
+      cwd: project,
+      env: { PORT: String(port), VITE_PORT: String(vitePort) },
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    const origin = `http://127.0.0.1:${port}`;
+    try {
+      let served = false;
+      for (let attempt = 0; attempt < 300 && !served; attempt++) {
+        try {
+          const response = await fetch(`${origin}/health`);
+          await response.body?.cancel();
+          served = response.ok;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      expect(served).toBe(true);
+
+      // The login loader reads the CSRF token populateLoadContext set under a
+      // contextKeyFor() key: a second module copy would leave it at its default.
+      const login = await fetch(`${origin}/login`);
+      const page = await login.text();
+      expect(login.status, page).toBe(200);
+      expect(page).toMatch(/name="_csrf"\s+value="[^"]+"/);
+
+      // A client module, through the application's port.
+      const module = /"(\/__vite\/app\/root\.tsx[^"]*)"/.exec(page)?.[1];
+      expect(module).toBeDefined();
+      const client = await fetch(`${origin}${module}`);
+      await client.body?.cancel();
+      expect(client.status).toBe(200);
+      expect(client.headers.get('content-type')).toContain('javascript');
+
+      const route = `${project}/app/routes/_auth/login.tsx`;
+      const source = await nodeFs.readFile(route, 'utf8');
+      expect(source).toContain('>Sign in<');
+      await nodeFs.writeFile(route, source.replace('>Sign in<', '>Sign in, edited<'));
+      let edited = '';
+      for (let attempt = 0; attempt < 50 && !edited.includes('Sign in, edited'); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        edited = await (await fetch(`${origin}/login`)).text();
+      }
+      expect(edited).toContain('Sign in, edited');
+
+      // SIGINT runs the entry's shutdown, which stops the app and Vite and exits 0.
+      child.kill('SIGINT');
+      const stopped = await child.status;
+      expect(stopped.code).toBe(0);
+    } finally {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Already exited; its output is still drained below.
+      }
+      await child.status;
+      await child.stdout!.cancel();
+      await child.stderr!.cancel();
+    }
   });
 });

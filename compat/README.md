@@ -1,8 +1,8 @@
 # Node / Bun compatibility suite
 
-Verifies that the published packages work on Node.js and Bun (AI_GUIDELINES §4.5, §6.4). CI runs it
-as the `Node compatibility` and `Bun compatibility` jobs; before that it was a pair of placeholder
-jobs blocked on the first JSR publish, which happened at `v0.1.0-alpha.1`. <!-- version:history -->
+Verifies the published npm packages on Node.js and Bun. The workflow probes the npm scope before
+installing: HTTP 404 reports an unpublished scope and skips; HTTP 200 runs the suite; other statuses
+fail. It installs all 52 `@setu-ts/*` packages at `latest` from the ordinary npm registry.
 
 ```bash
 cd compat
@@ -12,10 +12,8 @@ bun install && bun run test:bun
 
 ## What it tests, and why it cannot test the working tree
 
-Node and Bun cannot consume this repo's source. Cross-package specifiers are `jsr:@setu-ts/*` and
-optional heavy dependencies are `npm:*`; neither resolves outside Deno. JSR rewrites both at publish
-time, so **the published artifact is the unit under test** — installed from `https://npm.jsr.io` as
-`@jsr/setu-ts__*` via the scoped registry in `.npmrc`.
+The published `dist/` artifact is the unit under test. The source workspace and its import map could
+hide a missing dependency or an incorrect emitted specifier.
 
 Two consequences follow, and both are deliberate:
 
@@ -33,40 +31,36 @@ suite maintained against a published snapshot. So the deep checks run against `c
 `runtime`, and `logger-plugin`: enough to boot an application, resolve a capability, and serve a
 request.
 
-| Check                                  | What a failure would mean                                                |
-| -------------------------------------- | ------------------------------------------------------------------------ |
-| Every workspace package is declared    | A package ships covered on Deno and nowhere else                         |
-| Every declared package imports         | JSR's ESM output or a transitive dep does not resolve on this runtime    |
-| Entry points have the documented shape | The published surface drifted from what consumers are told to call       |
-| `detectRuntime()` matches host         | Runtime detection misroutes every runtime service                        |
-| Capability resolves from a token       | The token-to-service binding did not survive the npm rewrite             |
-| `inject()` serves a route              | Kernel pipeline and router are broken on this runtime                    |
-| Real socket serves a route             | `NodeHttpAdapter` / `BunHttpAdapter` is broken — neither runs under Deno |
-| `stop()` releases the port             | A redeploy on the same port would be refused                             |
-| `npm:` never reaches `import()`        | A published artifact ships `npm:` through a non-literal path (X7-3)      |
+| Check                                    | What a failure would mean                                                |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| Every workspace package is declared      | A package ships covered on Deno and nowhere else                         |
+| Every declared package imports           | ESM output or a transitive dep does not resolve on this runtime          |
+| Entry points have the documented shape   | The published surface drifted from what consumers are told to call       |
+| `detectRuntime()` matches host           | Runtime detection misroutes every runtime service                        |
+| Capability resolves from a token         | The token-to-service binding did not survive the build                   |
+| `inject()` serves a route                | Kernel pipeline and router are broken on this runtime                    |
+| Real socket serves a route               | `NodeHttpAdapter` / `BunHttpAdapter` is broken — neither runs under Deno |
+| `stop()` releases the port               | A redeploy on the same port would be refused                             |
+| `npm:` / `jsr:` never reaches `import()` | A published artifact ships `npm:` through a non-literal path (X7-3)      |
 
 The socket checks are the reason the job exists at all: the HTTP adapters are per-runtime
 implementations selected by detection, so the Deno-hosted suite never executes them.
 
 <!-- version:history -->
 
-The final check — `npm:` never reaches `import()` — audits the published `grpc-plugin` and
-`telemetry-plugin` artifacts for the X7-3 shape. JSR's npm-compatibility rewrite is static and
-reaches only a literal `import('npm:…')` argument, so it refuses two shapes: a literal `npm:` inside
-`import()`, and the indirection that evades it — a parameterized importer that forwards its
-parameter into `import()` (the known-broken `alpha.5` artifact carries the latter, not the former,
-which is why the first shape alone would have passed against the exact broken build). Comments are
-stripped before matching, because the fixed artifact's own JSDoc documents the indirection shape it
-must not contain. The check is version-guarded: while the installed packages are at or below
-`0.1.0-alpha.8` (the last release that shipped the defect) it reports `pend` rather than failing;
-once a newer version is installed the guard lifts and a surviving non-literal `npm:` path fails the
-suite.
+The final check audits every installed package's `dist/` for `npm:` or `jsr:` inside `import()`,
+including parameterized importers. Comments are stripped before matching. There is no version guard:
+npm never received the historical broken JSR builds.
 
 The first check derives its expectation from `../deno.json` rather than from this directory's own
 `package.json`, so adding a package to the workspace and forgetting it here **fails the compat job**
 instead of quietly shrinking coverage. The one legitimate exception is a package between its
 introduction and its first publish — it cannot be installed before it exists on the registry — which
 goes in `PENDING_FIRST_PUBLISH` in `compat.test.mjs` and comes out once it ships.
+
+The workflow probes `@setu-ts/common` first: HTTP 404 reports the npm scope as unpublished and skips
+install and suite steps; HTTP 200 runs them; every other status fails. All 52 dependencies are
+already declared, so the first npm publish arms the suite without an edit.
 
 ## Adding a check
 

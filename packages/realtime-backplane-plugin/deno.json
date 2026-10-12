@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/realtime-backplane-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
   "test": {
@@ -13,5 +13,9 @@
         "docker"
       ]
     }
+  },
+  "imports": {
+    "ioredis": "npm:ioredis@5.x",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

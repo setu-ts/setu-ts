@@ -19,9 +19,11 @@ import type {
   IRequestContext,
   ISessionService,
   PendingSignIn,
+  ScopedGrant,
   SignInOptions,
   SignInOutcome,
 } from '@setu-ts/common';
+import { readGrant } from '../scoped/model.ts';
 
 /** The reserved session key holding the signed-in record. */
 export const AUTH_SESSION_KEY = '__setu_auth_principal';
@@ -42,6 +44,42 @@ export const ID_TOKEN_SESSION_KEY = '__setu_auth_id_token';
  * {@linkcode AuthSessionService.promotePending}.
  */
 export const PENDING_MFA_SESSION_KEY = '__setu_auth_pending_mfa';
+
+/**
+ * The reserved session key holding the scoped RBAC grants resolved at sign-in
+ * (`scopedRbac.timing: 'sign-in'`, M110b). A PRIVATE session key rather than a
+ * claim, so a federated token carrying a claim of any name cannot forge them.
+ */
+export const SCOPED_GRANTS_SESSION_KEY = '__setu_auth_scoped_grants';
+
+/** The field of a pending record carrying grants resolved at the first factor. */
+const PENDING_GRANTS_FIELD = 'scopedGrants';
+
+/** What the session holds under {@linkcode SCOPED_GRANTS_SESSION_KEY}. */
+interface StoredGrants {
+  /** The principal the grants were resolved for. */
+  readonly principalId: string;
+  /** The grants. */
+  readonly grants: readonly ScopedGrant[];
+}
+
+/**
+ * Reads a grant list that survived a JSON round-trip, or `undefined` when the
+ * value is not one. Every grant is re-validated; an invalid one is dropped.
+ */
+function readGrantList(value: unknown): ScopedGrant[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const grants: ScopedGrant[] = [];
+  for (const raw of value as readonly unknown[]) {
+    const grant = readGrant(raw);
+    if (grant !== undefined) {
+      grants.push(grant);
+    }
+  }
+  return grants;
+}
 
 /**
  * How long a pending second-factor record may sit before it is refused, when
@@ -164,6 +202,14 @@ export interface AuthSessionServiceDeps {
      */
     readonly pendingTtlMs?: number;
   };
+  /**
+   * Scoped RBAC sign-in resolution (`scopedRbac.timing: 'sign-in'`). When
+   * present, `signIn` resolves the principal's grants BEFORE writing anything
+   * and stores them; a rejection rejects `signIn` and records nothing.
+   */
+  readonly scopedGrants?: {
+    readonly resolveAll: (principal: IPrincipal) => Promise<readonly ScopedGrant[]>;
+  };
 }
 
 /**
@@ -180,6 +226,7 @@ export class AuthSessionService implements IAuthSessionService {
   readonly #now: () => number;
   readonly #mfa: AuthSessionServiceDeps['mfa'];
   readonly #pendingTtlMs: number;
+  readonly #scopedGrants: AuthSessionServiceDeps['scopedGrants'];
 
   /**
    * Builds the plugin's sign-in owner.
@@ -192,6 +239,7 @@ export class AuthSessionService implements IAuthSessionService {
     this.#now = deps.now;
     this.#mfa = deps.mfa;
     this.#pendingTtlMs = deps.mfa?.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
+    this.#scopedGrants = deps.scopedGrants;
   }
 
   /**
@@ -216,6 +264,12 @@ export class AuthSessionService implements IAuthSessionService {
     const session = this.#sessionService.from(ctx);
     // `options` is required by the type, but a JavaScript caller may omit it.
     const methods = (options?.methods ?? []).filter((method) => AUTH_METHODS.includes(method));
+    // Scoped grants are resolved before ANY write, for both outcomes below, so
+    // a resolution failure records nothing and a second factor completed later
+    // (through the synchronous `promotePending`) still arrives with them.
+    const grants = this.#scopedGrants === undefined
+      ? undefined
+      : await this.#scopedGrants.resolveAll(principal);
 
     // Check the MFA policy: when it answers `true` and the methods hold no
     // second factor, hold the principal back in a pending record.
@@ -225,7 +279,13 @@ export class AuthSessionService implements IAuthSessionService {
         const required = await this.#mfa.required(principal, methods);
         if (required) {
           const pending: PendingSignIn = { principal, methods, at: this.#now() };
-          session.set(PENDING_MFA_SESSION_KEY, pending);
+          session.set(
+            PENDING_MFA_SESSION_KEY,
+            grants === undefined ? pending : { ...pending, [PENDING_GRANTS_FIELD]: grants },
+          );
+          if (grants !== undefined) {
+            session.delete(SCOPED_GRANTS_SESSION_KEY);
+          }
           // Clear any prior signed-in record: the principal is NOT signed in.
           session.delete(AUTH_SESSION_KEY);
           session.delete(RP_PROVIDER_SESSION_KEY);
@@ -238,6 +298,9 @@ export class AuthSessionService implements IAuthSessionService {
 
     const record: AuthSessionRecord = { principal, methods, at: this.#now() };
     session.set(AUTH_SESSION_KEY, record);
+    if (grants !== undefined) {
+      this.#storeGrants(session, principal.id, grants);
+    }
     // Provider-session facts belong to the sign-in that wrote them. A later
     // sign-in in the same session (a password login after a federated one)
     // must not inherit them, or logout would end a provider session this
@@ -329,7 +392,8 @@ export class AuthSessionService implements IAuthSessionService {
    */
   promotePending(ctx: IRequestContext, method: AuthMethod): 'signed-in' | 'no-pending' {
     const session = this.#sessionService.from(ctx);
-    const pending = parsePendingMfaRecord(session.get(PENDING_MFA_SESSION_KEY));
+    const raw = session.get(PENDING_MFA_SESSION_KEY);
+    const pending = parsePendingMfaRecord(raw);
     if (pending === null) {
       return 'no-pending';
     }
@@ -341,12 +405,67 @@ export class AuthSessionService implements IAuthSessionService {
     const methods = [...pending.methods, method];
     const record: AuthSessionRecord = { principal: pending.principal, methods, at: this.#now() };
     session.set(AUTH_SESSION_KEY, record);
+    // The grants resolved at the first factor ride the pending record; they are
+    // moved in the same synchronous write that records the principal.
+    if (this.#scopedGrants !== undefined) {
+      this.#storeGrants(
+        session,
+        pending.principal.id,
+        readGrantList((raw as Record<string, unknown>)[PENDING_GRANTS_FIELD]),
+      );
+    }
     session.delete(PENDING_MFA_SESSION_KEY);
     // The provider-session keys are KEPT: the pending `signIn` already cleared any
     // earlier sign-in's, so whatever is present now was written by the sign-in
     // being completed (a federated callback records them after `signIn`).
     session.regenerate();
     return 'signed-in';
+  }
+
+  /**
+   * Reads the scoped grants stored at sign-in for `principal`.
+   *
+   * Internal: the scoped RBAC evaluator's `'sign-in'` timing reads it; not part
+   * of `IAuthSessionService`. Grants stored for a different principal id are
+   * never returned. A request whose session middleware did not run has none.
+   *
+   * @param ctx - The request context whose session is read
+   * @param principal - The principal the check is about
+   * @returns The grants, or `null` when none are stored for this principal
+   */
+  storedGrants(ctx: IRequestContext, principal: IPrincipal): readonly ScopedGrant[] | null {
+    let raw: unknown;
+    try {
+      raw = this.#sessionService.from(ctx).get(SCOPED_GRANTS_SESSION_KEY);
+    } catch {
+      return null;
+    }
+    if (typeof raw !== 'object' || raw === null) {
+      return null;
+    }
+    const stored = raw as Partial<StoredGrants>;
+    if (stored.principalId !== principal.id) {
+      return null;
+    }
+    return readGrantList(stored.grants) ?? null;
+  }
+
+  /**
+   * Writes the stored grants, or clears them when the pending record carried
+   * none. Called only when sign-in timing is configured: without it this key
+   * is never touched, so the session operations are exactly as before M110b.
+   */
+  #storeGrants(
+    session: ReturnType<ISessionService['from']>,
+    principalId: string,
+    grants: readonly ScopedGrant[] | undefined,
+  ): void {
+    if (grants === undefined) {
+      session.delete(SCOPED_GRANTS_SESSION_KEY);
+      return;
+    }
+    const stored: StoredGrants = { principalId, grants };
+    session.set(SCOPED_GRANTS_SESSION_KEY, stored);
   }
 
   /**

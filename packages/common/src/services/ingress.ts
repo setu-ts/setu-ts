@@ -42,6 +42,14 @@ export type IngressKind = 'queue' | 'scheduler' | 'messaging' | 'websocket';
  * `IRequestContext`-taking members are unreachable from an ingress path,
  * which carries no request.
  *
+ * The optional `consumer` member added in M109a is a DISPATCH identity, not a
+ * capability and not a state bag: it names which subscriber a work item was
+ * dispatched to, so per-consumer state (an idempotency record) is keyed per
+ * subscriber rather than per topic. The "no `state`, no `services`" rule above
+ * stands unchanged — a behaviour still reaches a capability through its
+ * `RegistryFactory` arm, and a consumer value is read by the dispatch site,
+ * not resolved by the behaviour.
+ *
  * @typeParam TPayload - The native work item the ingress carries
  * @since 0.3.0
  */
@@ -88,6 +96,22 @@ export interface IngressContext<TPayload = unknown> {
    * read.
    */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Identity of the CONSUMER this work item was dispatched to, so per-consumer
+   * state (an idempotency record) does not collide when one topic has several
+   * subscribers.
+   *
+   * `'messaging'`: the subscription's `SubscribeOptions.queue` when given,
+   * otherwise `subscription:<instance>:<n>` — unique per subscription per
+   * process. `'queue'`: the job name. ABSENT on `'scheduler'` and
+   * `'websocket'`.
+   *
+   * A DISPATCH identity, not a capability and not a state bag — the envelope's
+   * "no `state`, no `services`" rule stands (see the interface JSDoc).
+   *
+   * @since 0.9.0
+   */
+  readonly consumer?: string;
 }
 
 /**

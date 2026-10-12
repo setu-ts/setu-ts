@@ -2,8 +2,7 @@
  * Unit tests for MemoryRefreshTokenStore.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
 import type { RefreshTokenRecord } from '../../src/stores/refresh-token-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

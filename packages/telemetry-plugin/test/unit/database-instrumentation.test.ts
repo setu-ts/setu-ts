@@ -4,8 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   createIORedisInstrumentation,
   loadIORedisInstrumentation,
@@ -60,7 +59,7 @@ describe('database-instrumentation', () => {
     const result = await loadIORedisInstrumentation(undefined, importFn);
     expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
+    expect(result.specifier).toBe('@opentelemetry/instrumentation-ioredis');
   });
 
   it('loadIORedisInstrumentation should reject when importFn rejects', async () => {

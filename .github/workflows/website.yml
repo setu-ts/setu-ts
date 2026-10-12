@@ -5,7 +5,7 @@ name: Website
 # ci.yml / release.yml / drift.yml is untouched and keeps its meaning.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - 'website/**'
       - 'docs/**'

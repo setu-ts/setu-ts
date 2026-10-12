@@ -7,8 +7,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { compileRealtimeDiagnosticsAlias } from '@setu-ts/common';
 import type { OutboundHttpDiagnosticsSnapshot } from '@setu-ts/common';
 
@@ -324,6 +323,10 @@ describe('compileOutboundAlias — agrees with the common realtime alias rule', 
     ['bad\nalias', false],
     ['bad\u0085alias', false],
     ['tab\talias', false],
+    ['bad\u202Ealias', false],
+    ['bad\u200Balias', false],
+    ['bad\u2028alias', false],
+    ['bad\u2029alias', false],
   ];
   for (const [alias, accepted] of table) {
     it(`${accepted ? 'accepts' : 'refuses'} ${JSON.stringify(alias).slice(0, 20)}`, () => {

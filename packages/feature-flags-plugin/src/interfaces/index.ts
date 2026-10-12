@@ -134,7 +134,7 @@ export interface DatabaseProviderOptions {
  * Configuration for the `'launchdarkly'` provider arm.
  *
  * Supply `sdkKey` for the normal path, or inject `client` (a prebuilt SDK
- * client) / `module` (the SDK module) to avoid the lazy `npm:` import — the
+ * client) / `module` (the SDK module) to avoid the lazy dynamic import — the
  * seam the provider's unit tests drive.
  *
  * @since 0.2.0

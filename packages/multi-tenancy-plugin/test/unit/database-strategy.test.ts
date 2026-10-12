@@ -1,8 +1,7 @@
 /**
  * DatabasePerTenant strategy tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { DatabasePerTenant } from '../../src/strategies/database-strategy.ts';
 
 describe('database strategy', () => {

@@ -7,6 +7,8 @@
  *
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import type {
   IIngressBehavior,
   IPipelineBehavior,

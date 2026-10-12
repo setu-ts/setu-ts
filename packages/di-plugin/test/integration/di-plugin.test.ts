@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IContainer } from '@setu-ts/common';
@@ -66,15 +65,24 @@ describe('DiPlugin integration', () => {
       expect(container.resolve('svc')).toBe(container.resolve('svc'));
     });
 
-    it('disables autoRegister by default', () => {
+    it('enables autoRegister by default', () => {
       const { ctx, services } = createFakeContext();
-      // Pre-register a fake logger on the service registry
-      ctx.services.register(CAPABILITIES.LOGGER, new FakeLogger());
+      const logger = new FakeLogger();
+      ctx.services.register(CAPABILITIES.LOGGER, logger);
 
       DiPlugin().register(ctx);
 
+      // The container falls back to the kernel registry with no option set.
+      expect(getContainer(services).resolve(CAPABILITIES.LOGGER)).toBe(logger);
+    });
+
+    it('confines resolution to the container when autoRegister is false', () => {
+      const { ctx, services } = createFakeContext();
+      ctx.services.register(CAPABILITIES.LOGGER, new FakeLogger());
+
+      DiPlugin({ autoRegister: false }).register(ctx);
+
       const container = getContainer(services);
-      // autoRegister is off, so resolving a service-registry-only token fails
       expect(() => container.resolve(CAPABILITIES.LOGGER)).toThrow(/No provider registered/);
     });
   });

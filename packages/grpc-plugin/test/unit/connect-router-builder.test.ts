@@ -5,8 +5,7 @@
  * service-name list.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { buildConnectRouter } from '../../src/transports/connect-router-builder.ts';
 import { GrpcDescriptorError } from '../../src/errors/grpc-errors.ts';
 import {

@@ -27,8 +27,10 @@ focused on the behaviour, documentation, or proposal at hand.
 2. Open a focused issue with a reproducible problem or agreed acceptance criteria.
 3. Wait for a maintainer to mark the issue as accepted for contribution before opening a code PR.
    Small documentation corrections may skip the discussion when their expected wording is clear.
-4. Fork the repository, create one branch for the agreed change, and open a PR against `main`. Do
-   not push to `main`, and do not request write access solely to contribute.
+4. Fork the repository, create one branch for the agreed change from `develop`, and open a PR
+   against `develop`. GitHub proposes `main`, the default branch, as the base — change it to
+   `develop`: `main` holds only the last release and accepts release PRs alone. Do not push to
+   either, and do not request write access solely to contribute.
 5. Keep the PR scoped to its linked issue. Include tests and documentation when the change requires
    them, and explain any intentional trade-off in the PR description.
 
@@ -38,8 +40,8 @@ Maintainers decide the public API, architecture, and release scope.
 ## Pull-request validation
 
 Setu-TS runs a substantial validation suite. Pull requests from forks deliberately do **not** start
-the repository's validation jobs, service containers, website build, or automatic CodeRabbit review.
-GitHub requires maintainer approval before any outside contributor's fork workflow can begin. If a
+the repository's validation jobs, service containers, website build, or a CodeRabbit review. GitHub
+requires maintainer approval before any outside contributor's fork workflow can begin. If a
 maintainer explicitly approves one, it receives only a small policy check that does not check out
 contributor code and prevents skipped checks from satisfying merge protection. This prevents
 untriaged, untrusted changes from consuming project resources or being merged as if they had been
@@ -50,14 +52,27 @@ where the full validation suite and an optional CodeRabbit review can run. Fork 
 the validated repository-branch PR is the one that can merge. Please do not ask maintainers to run
 those services before the change has been accepted for review.
 
-For work performed in a repository branch, the relevant checks are:
+For work performed in a repository branch, install Node 24, pnpm 12.11.2, and Deno on `PATH`, then
+run `pnpm install --frozen-lockfile`. Deno remains necessary for formatting, lint, type checks,
+repository scripts, Deno CLI subprocess proofs, and the retained runtime lane. The relevant checks
+are:
 
 ```bash
 deno task fmt:check
 deno task lint
 deno task check
 deno task test
+pnpm test
+pnpm test:coverage
+deno task test:deno-lane
+deno task test:coverage
 ```
+
+Package tests import from `vitest`; root tooling tests retain `@std/testing/bdd` and `@std/expect`
+until M111e. Node coverage is measured per member with a 90% per-file branch/function/line bar; a
+failed targeted run is authoritative. Select members with `pnpm test:coverage cli runtime` or
+`deno task test:coverage:pkg cli runtime`; use the member basename or its workspace path. Running
+without selections measures every member.
 
 Changes to a published package also require its documented coverage and publish checks. See
 [AI_GUIDELINES.md](AI_GUIDELINES.md) for the complete engineering requirements that apply once a

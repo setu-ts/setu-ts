@@ -45,10 +45,10 @@ import type { TransportSpec } from './transport.ts';
 export const DOCKER_DIR = 'docker';
 
 /** The generated Compose file's path, relative to the workspace root. */
-export const COMPOSE_FILE = `${DOCKER_DIR}/compose.yaml`;
+export const COMPOSE_FILE: string = `${DOCKER_DIR}/compose.yaml`;
 
 /** The generated Dockerfile's path, relative to the workspace root. */
-export const DOCKERFILE = `${DOCKER_DIR}/Dockerfile`;
+export const DOCKERFILE: string = `${DOCKER_DIR}/Dockerfile`;
 
 /**
  * The generated ignore file's path — at the workspace ROOT, not beside the
@@ -160,7 +160,21 @@ WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 # metadata on every file the cache layer created, so overlayfs copies the
 # ENTIRE module cache into a second layer — measured at 563 MB vs 362 MB with
 # the fold, paid on every push and every node pull.
-RUN deno cache main.ts && deno install && deno install --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+# Remove the development-only pin before resolving the production import map.
+# Deno 2.9 needs the full-map install pair to complete lazy broker npm edges;
+# an entrypoint-only frozen install can pass while the real broker later refuses.
+# The parser is pinned to an exact version and may read and write only the
+# member and root manifests, so this unlocked fetch cannot float or touch any
+# other file in the image.
+RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
+# The registry the install step resolves from. Unset by default, which is the
+# public npm registry; a gate building against a local registry passes it with
+# \`--build-arg\`. An ARG never reaches the running container's environment, but
+# its value IS recorded in the image history: pass a registry URL here, never a
+# credential — an authenticated registry belongs in a \`--secret\` mount.
+ARG NPM_CONFIG_REGISTRY=
+
+RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,
@@ -205,6 +219,7 @@ function dockerignore(): string {
     '.git',
     '.gitignore',
     'coverage',
+    `${MEMBERS_DIR}/*/main.dev.ts`,
     // The Dockerfile itself is passed with -f and read from the client, so
     // ignoring the directory costs nothing and keeps k8s/ and docker/ out of the
     // image.
@@ -257,11 +272,10 @@ ARG MEMBER
 
 WORKDIR /srv
 
-# The root manifest, the lockfile and the npm scope mapping first: they change far
-# less often than member source, so they earn their own cache layer. \`.npmrc\` is
-# not optional — the framework packages come from JSR through npm compatibility,
-# and without the scope mapping none of them resolve.
-COPY package.json ${profile.lockfile}* .npmrc ./
+# The root manifest and the lockfile first: they change far less often than member
+# source, so they earn their own cache layer. The framework packages install from
+# the npm registry under their own names, so no registry mapping is copied.
+COPY package.json ${profile.lockfile}* ./
 
 # The member's own manifest, before its source: an install needs it, and copying
 # the source first would invalidate the install layer on every code change.
@@ -274,7 +288,14 @@ COPY ${MEMBERS_DIR}/\${MEMBER}/package.json ./${MEMBERS_DIR}/\${MEMBER}/
 # directory is absent, while \`lib[s]\` matches nothing and copies nothing.
 COPY lib[s] ./${LIBS_DIR}/
 
-RUN ${profile.install}
+# The registry the install step resolves from. Unset by default, which is the
+# public npm registry; a gate building against a local registry passes it with
+# \`--build-arg\`. An ARG never reaches the running container's environment, but
+# its value IS recorded in the image history: pass a registry URL here, never a
+# credential — an authenticated registry belongs in a \`--secret\` mount.
+ARG NPM_CONFIG_REGISTRY=
+
+RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && ${profile.install}
 
 # Then the member itself.
 COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
@@ -385,12 +406,13 @@ ${envLines}${dependsBlock}
  *
  * @param manifest - The workspace as it will be after the current command
  * @param transport - The workspace's transport
+ * @param profile - The runtime profile; defaults to the one the manifest records
  * @returns The files to write, relative to the workspace root
  */
 export function workspaceContainerFiles(
   manifest: WorkspaceManifest,
   transport: TransportSpec,
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile(manifest.runtime),
 ): readonly GeneratedFile[] {
   const backing = transport.compose;
 

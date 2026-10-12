@@ -160,7 +160,11 @@ export function resolveParameter(
   }
   switch (param.type) {
     case 'header':
-      return param.name !== undefined ? ctx.request.headers.get(param.name) : undefined;
+      // `Headers.get` answers `null` for an absent header; the source is typed
+      // `string | undefined`, like a missing cookie or query parameter.
+      return param.name !== undefined
+        ? ctx.request.headers.get(param.name) ?? undefined
+        : undefined;
     case 'cookie': {
       const cookies = parseCookies(ctx.request.headers);
       return param.name !== undefined ? cookies[param.name] : cookies;

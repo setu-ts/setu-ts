@@ -1,8 +1,7 @@
 /**
  * MemoryTenantDataStore tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryTenantDataStore } from '../../src/stores/memory-tenant-store.ts';
 import { ColumnPerTenant } from '../../src/strategies/column-strategy.ts';
 import { DatabasePerTenant } from '../../src/strategies/database-strategy.ts';

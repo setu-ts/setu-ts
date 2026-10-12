@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * E2E tests for REAL GraphQL subscriptions.
  *
@@ -13,8 +14,7 @@
  * `npm:graphql@^16`, and read the events off the wire.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
@@ -178,9 +178,7 @@ describe('GraphQL real subscriptions (schema-first)', () => {
 
   it('streams a schema-first subscription over a real WebSocket', async () => {
     const app = buildApp([WebSocketPlugin()]);
-    const listener = Deno.listen({ port: 0 });
-    const port = (listener.addr as Deno.NetAddr).port;
-    listener.close();
+    const port = await nodeUnusedPort();
     await app.start({ port });
 
     try {

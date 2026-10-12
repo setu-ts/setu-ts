@@ -34,6 +34,11 @@ class UserCreated extends DomainEvent<{ userId: string }> {
   override readonly type = 'user.created';
 }
 
+async function welcome(userId: string): Promise<void> {
+  // Deliver the welcome message through your own transport.
+  await Promise.resolve(userId);
+}
+
 const bus = app.services.get<IEventBus>(CAPABILITIES.EVENTS);
 bus.subscribe<{ userId: string }>('user.created', async (event) => {
   await welcome(event.data.userId);
@@ -50,7 +55,7 @@ base class or publishing while its persistence policy is unresolved:
 
 ```typescript
 import { createDomainEvents, type IDomainEvent } from '@setu-ts/events-plugin';
-import type { IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES, type IEventBus, type IRuntimeServices } from '@setu-ts/common';
 
 class Order {
   readonly events = createDomainEvents();
@@ -59,6 +64,12 @@ class Order {
     // Check invariants and mutate order state first.
     this.events.record(event);
   }
+}
+
+async function dispatchAfterSave(bus: IEventBus, event: IDomainEvent<unknown>): Promise<void> {
+  // Runs after the aggregate is saved. A rejection leaves the event pending, so
+  // the loop below removes it only once it has been published.
+  await bus.publish(event);
 }
 
 function orderPlaced(
@@ -73,6 +84,7 @@ function orderPlaced(
   };
 }
 
+const bus = app.services.get<IEventBus>(CAPABILITIES.EVENTS);
 const order = new Order();
 order.place(orderPlaced(runtime, 'order-1'));
 
@@ -80,7 +92,7 @@ order.place(orderPlaced(runtime, 'order-1'));
 // persist the pending facts. Remove or clear only after its chosen policy succeeds.
 const pending = order.events.pending();
 for (const domainEvent of pending) {
-  await dispatchAfterSave(domainEvent);
+  await dispatchAfterSave(bus, domainEvent);
   order.events.remove(domainEvent);
 }
 ```
@@ -100,6 +112,37 @@ publication and durable outbox coordination remain application responsibilities.
 
 `errorHandler` defaults to logging through the optional `logger` capability when one is registered,
 otherwise a no-op. **A failing handler never makes `publish` reject** in either dispatch mode.
+
+## Diagnostics
+
+`EventsPlugin({ diagnostics })` opts into minimized event-dispatch observations for the local
+diagnostics connector's `GET /v1/event` (`@setu-ts/diagnostics-plugin`). It is an acknowledgement,
+not a toggle: the option is absent by default, and when supplied `enabled` must be the literal
+`true` — `enabled: false` is refused at construction.
+
+| Field     | Type                     | Meaning                                                                  |
+| --------- | ------------------------ | ------------------------------------------------------------------------ |
+| `enabled` | `true`                   | Explicit opt-in; must be the literal `true`.                             |
+| `alias`   | `string`                 | Display alias for this bus instance; never derived from the plugin name. |
+| `events`  | `Record<string, string>` | Exact event type → approved display alias. At most 64 entries.           |
+
+Only the exact event types listed in `events` are observed, each aggregated under its approved
+alias; a type outside the map is neither observed nor counted, and handler function names and
+identities are never captured. No payload, identifier or thrown value is admitted to the collector.
+`setu devtool enable` writes this option for you; this section is for the reader who configures it
+by hand. Enable only on an approved development dataset.
+
+```typescript
+import { EventsPlugin } from '@setu-ts/events-plugin';
+
+EventsPlugin({
+  diagnostics: {
+    enabled: true,
+    alias: 'orders',
+    events: { 'order.placed': 'OrderPlaced', 'order.cancelled': 'OrderCancelled' },
+  },
+});
+```
 
 ## Exports
 

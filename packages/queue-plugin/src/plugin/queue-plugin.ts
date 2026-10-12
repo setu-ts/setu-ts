@@ -36,9 +36,14 @@ import type {
 } from '../interfaces/index.ts';
 import type { QueueAdapter } from '../adapters/queue-adapter.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
-import { RedisQueue, validateClient as isRedisQueueClient } from '../adapters/redis-queue.ts';
+import {
+  RedisQueue,
+  resolveCommandTimeoutMs,
+  validateClient as isRedisQueueClient,
+} from '../adapters/redis-queue.ts';
 import {
   RabbitMqQueue,
+  resolvePublishTimeoutMs,
   validateClient as isAmqpQueueConnection,
 } from '../adapters/rabbitmq-queue.ts';
 import { SqsQueue } from '../adapters/sqs-queue.ts';
@@ -52,7 +57,7 @@ import {
   createDisabledQueueSource,
   QueueObservationCollector,
 } from '../diagnostics/queue-observation-collector.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Creates a queue plugin.
@@ -81,6 +86,18 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   // invalid option — including `enabled: false` from a caller the literal
   // type cannot reach — refuses before any application exists, with a fixed,
   // value-free message.
+  // M101a V8-5: refused here, not at `start()`, like every other bound.
+  if (adapterType === 'redis') resolveCommandTimeoutMs(options?.commandTimeoutMs);
+  if (adapterType === 'rabbitmq') {
+    resolvePublishTimeoutMs(options?.publishTimeoutMs);
+    if (
+      options?.persistentMessages !== undefined &&
+      typeof options.persistentMessages !== 'boolean'
+    ) {
+      throw new TypeError('queue-plugin: options.persistentMessages must be a boolean');
+    }
+  }
+
   const diagnosticsPolicy = options?.diagnostics === undefined
     ? null
     : compileQueueDiagnosticsPolicy(options.diagnostics);
@@ -145,7 +162,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
 
   return {
     name: pluginName,
-    version: denoJson.version,
+    version: VERSION,
     provides: [token],
     // B5: Declare optional logger dependency so kernel ordering resolves
     // LoggerPlugin first when installed, but remains optional. `METRICS` is
@@ -170,6 +187,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             ...(options?.deadLetterTtlMs === undefined
               ? {}
               : { deadLetterTtlMs: options.deadLetterTtlMs }),
+            ...(options?.commandTimeoutMs === undefined
+              ? {}
+              : { commandTimeoutMs: options.commandTimeoutMs }),
             // The built client's reconnect failures go to the logger (read at
             // call time) rather than ioredis's own console fallback.
             connectionErrorReporter: createConnectionErrorReporter({
@@ -185,6 +205,15 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             url: options?.url ?? 'amqp://localhost:5672',
             ...(client !== undefined && isAmqpQueueConnection(client) ? { client } : {}),
             ...(options?.prefix !== undefined ? { prefix: options.prefix } : {}),
+            ...(options?.persistentMessages !== undefined
+              ? { persistentMessages: options.persistentMessages }
+              : {}),
+            ...(options?.publishTimeoutMs !== undefined
+              ? { publishTimeoutMs: options.publishTimeoutMs }
+              : {}),
+            // Read at call time, not captured here (the M52b rule): a logger
+            // registered after this plugin still receives the warning.
+            reportWarning: (message: string) => ctx.logger?.warn(message),
           });
           break;
         }
@@ -225,9 +254,11 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
         : undefined;
       // M98f: a collector exists only when observation was opted in. Its
       // settlement evidence is the adapter's own property, known here because
-      // this plugin constructed the adapter: RabbitMQ's channel operations
-      // are unconfirmed and SQS absorbs a lapsed claim or a failed
-      // dead-letter send, so a completed call there is recorded `unknown`.
+      // this plugin constructed the adapter: a RabbitMQ job settles through an
+      // AMQP `ack`, which the broker never confirms (its publishes are
+      // confirmed since 0.9.0, its acks cannot be), and SQS absorbs a lapsed
+      // claim or a failed dead-letter send, so a completed call there is
+      // recorded `unknown`.
       const observation = diagnosticsPolicy === null ? null : new QueueObservationCollector(
         diagnosticsPolicy,
         runtime,

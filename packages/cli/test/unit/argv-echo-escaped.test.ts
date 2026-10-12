@@ -19,8 +19,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { createFakeApp } from '../fixtures/fake-app.ts';
 import { runCli } from '../../src/cli.ts';
@@ -48,7 +47,13 @@ async function run(
     readonly commands?: readonly string[];
   } = {},
 ): Promise<Run> {
-  const fs = createFakeFs(extra.files ?? {});
+  const fs = createFakeFs({
+    '/work/deno.json': '{}',
+    // Installed, so the plugin-command path reaches the loader rather than
+    // stopping at the `deno install` refusal.
+    '/work/node_modules/@setu-ts/kernel/package.json': '{}',
+    ...(extra.files ?? {}),
+  });
   const deps = {
     fs,
     cwd: '/work',
@@ -78,7 +83,9 @@ function expectNoForgery(text: string): void {
   }
 }
 
-const WORKSPACE: readonly string[] = ['new', 'acme', '--workspace'];
+// Deno, because the devtool refuses every other runtime before it reaches the
+// member name this table quotes.
+const WORKSPACE: readonly string[] = ['new', 'acme', '--workspace', '--runtime', 'deno'];
 
 describe('a flag value carrying a control character is refused before any command runs', () => {
   for (const flag of VALUE_FLAGS) {

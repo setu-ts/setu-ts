@@ -1,10 +1,114 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
-import { findExisting, writeFiles } from '../../src/utils/file-writer.ts';
+import { findExisting, withFileTransaction, writeFiles } from '../../src/utils/file-writer.ts';
+import { InterruptedError } from '../../src/utils/interruption.ts';
+
+describe('relocation interruption journal', () => {
+  it('forwards optional filesystem capabilities with their original receiver', async () => {
+    const backing = createFakeFs({ '/project/a.ts': 'original' });
+    const fs = {
+      ...backing,
+      realPath(path: string): Promise<string> {
+        return Promise.resolve(this.read(path) === 'original' ? '/canonical/a.ts' : path);
+      },
+      async readStream(path: string, options?: { readonly start?: number; readonly end?: number }) {
+        const data = await this.readFile(path);
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(data.slice(options?.start, (options?.end ?? data.length - 1) + 1));
+            controller.close();
+          },
+        });
+      },
+    };
+    await withFileTransaction(fs, async (journal) => {
+      expect(await journal.realPath!('/project/a.ts')).toBe('/canonical/a.ts');
+      expect(
+        await new Response(await journal.readStream!('/project/a.ts', { start: 1, end: 3 })).text(),
+      )
+        .toBe('rig');
+    });
+    // A filesystem offering neither optional capability: the journal must not
+    // invent one.
+    const bare: IFileSystem = { ...backing };
+    delete bare.realPath;
+    await withFileTransaction(bare, async (journal) => {
+      expect(journal.realPath).toBeUndefined();
+      expect(journal.readStream).toBeUndefined();
+      expect(await journal.readFile('/project/a.ts')).toEqual(new TextEncoder().encode('original'));
+    });
+  });
+
+  it('restores only mutated files and leaves an unrelated concurrent write intact', async () => {
+    const fs = createFakeFs({ '/project/a.ts': 'original' });
+    const controller = new AbortController();
+    await expect(withFileTransaction(fs, async (journal) => {
+      await journal.mkdir('/project/moved', { recursive: true });
+      await journal.writeFile('/project/moved/a.ts', await journal.readFile('/project/a.ts'));
+      await journal.rm('/project/a.ts');
+      await fs.writeFile('/project/unrelated.ts', new TextEncoder().encode('concurrent'));
+      controller.abort();
+    }, controller.signal)).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.read('/project/a.ts')).toBe('original');
+    expect(fs.read('/project/unrelated.ts')).toBe('concurrent');
+    expect(fs.has('/project/moved/a.ts')).toBe(false);
+  });
+
+  it('refuses recursive removal of an unrecorded file', async () => {
+    const fs = createFakeFs({ '/project/src/a.ts': 'keep' });
+    await expect(
+      withFileTransaction(fs, (journal) => journal.rm('/project/src', { recursive: true })),
+    )
+      .rejects.toThrow('Refusing to remove unrecorded file');
+    expect(fs.read('/project/src/a.ts')).toBe('keep');
+  });
+
+  it('reports paths whose recovery fails instead of claiming complete rollback', async () => {
+    const fs = createFakeFs();
+    const controller = new AbortController();
+    const broken: IFileSystem = {
+      ...fs,
+      rm: (path, options) =>
+        path.endsWith('a.ts') ? Promise.reject(new Error('cannot remove')) : fs.rm(path, options),
+    };
+    await expect(withFileTransaction(broken, async (journal) => {
+      await journal.mkdir('/project');
+      await journal.writeFile('/project/a.ts', new TextEncoder().encode('new'));
+      controller.abort();
+    }, controller.signal)).rejects.toThrow('rollback incomplete: /project/a.ts');
+  });
+});
 
 describe('writeFiles rollback', () => {
+  it('writes nothing when already interrupted', async () => {
+    const fs = createFakeFs();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      writeFiles(fs, [{ path: 'a.ts', contents: 'A' }], { root: '/', signal: controller.signal }),
+    ).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('rolls back when interruption arrives during the final write', async () => {
+    const fs = createFakeFs({ 'project/existing.ts': 'before' });
+    const controller = new AbortController();
+    const wrapped: IFileSystem = {
+      ...fs,
+      async writeFile(path, data) {
+        await fs.writeFile(path, data);
+        if (path.endsWith('last.ts')) controller.abort();
+      },
+    };
+    await expect(writeFiles(wrapped, [
+      { path: 'project/existing.ts', contents: 'after', managed: true },
+      { path: 'project/last.ts', contents: 'last' },
+    ], { root: '/', signal: controller.signal })).rejects.toBeInstanceOf(InterruptedError);
+    expect(fs.read('project/existing.ts')).toBe('before');
+    expect(fs.has('project/last.ts')).toBe(false);
+  });
+
   it('removes new files and nested directories after a partially written file rejects', async () => {
     const fs = createFakeFs();
     await fs.mkdir('project');
@@ -19,7 +123,7 @@ describe('writeFiles rollback', () => {
     await expect(writeFiles(failing, [
       { path: 'project/src/deep/a.ts', contents: 'AAA' },
       { path: 'project/src/deep/b.ts', contents: 'BBB' },
-    ])).rejects.toBe(failure);
+    ], { root: '/' })).rejects.toBe(failure);
     expect(fs.has('project/src/deep/a.ts')).toBe(false);
     expect(fs.has('project/src/deep/b.ts')).toBe(false);
     await expect(fs.stat('project/src/deep')).rejects.toThrow();
@@ -47,11 +151,11 @@ describe('writeFiles rollback', () => {
       { path: 'project/binary', contents: 'changed', managed: true },
       { path: 'project/barrel.ts', contents: 'new barrel', managed: true },
     ];
-    await expect(writeFiles(failing, files)).rejects.toThrow('write interrupted');
+    await expect(writeFiles(failing, files, { root: '/' })).rejects.toThrow('write interrupted');
     expect(await fs.readFile('project/binary')).toEqual(bytes);
     expect(fs.read('project/barrel.ts')).toBe('old barrel');
     expect(await findExisting(fs, files)).toEqual([]);
-    await writeFiles(failing, files);
+    await writeFiles(failing, files, { root: '/' });
     expect(fs.read('project/barrel.ts')).toBe('new barrel');
   });
 
@@ -60,20 +164,28 @@ describe('writeFiles rollback', () => {
     const files = [{ path: 'arrived', contents: 'new' }, { path: 'failure', contents: 'x' }];
     expect(await findExisting(fs, files)).toEqual([]);
     await fs.writeFile('arrived', new TextEncoder().encode('concurrent file'));
-    await expect(writeFiles({
-      ...fs,
-      writeFile: (path, data) =>
-        path === 'failure' ? Promise.reject(new Error('disk full')) : fs.writeFile(path, data),
-    }, files)).rejects.toThrow('disk full');
+    await expect(writeFiles(
+      {
+        ...fs,
+        writeFile: (path, data) =>
+          path === 'failure' ? Promise.reject(new Error('disk full')) : fs.writeFile(path, data),
+      },
+      files,
+      { root: '/' },
+    )).rejects.toThrow('disk full');
     expect(fs.read('arrived')).toBe('concurrent file');
   });
 
   it('does not overwrite an existing file it cannot snapshot', async () => {
     const fs = createFakeFs({ 'private': 'precious' });
-    await expect(writeFiles({
-      ...fs,
-      readFile: () => Promise.reject(new Error('permission denied')),
-    }, [{ path: 'private', contents: 'destroyed' }])).rejects.toThrow('permission denied');
+    await expect(writeFiles(
+      {
+        ...fs,
+        readFile: () => Promise.reject(new Error('permission denied')),
+      },
+      [{ path: 'private', contents: 'destroyed' }],
+      { root: '/' },
+    )).rejects.toThrow('permission denied');
     expect(fs.read('private')).toBe('precious');
     expect(fs.writes).toEqual([]);
   });
@@ -101,7 +213,7 @@ describe('writeFiles rollback', () => {
       { path: 'left', contents: 'b' },
       { path: 'managed', contents: 'c', managed: true },
       { path: 'fail', contents: 'd' },
-    ])).rejects.toThrow(
+    ], { root: '/' })).rejects.toThrow(
       /disk full[\s\S]*managed[\s\S]*restore denied[\s\S]*left[\s\S]*unlink denied/,
     );
     expect(fs.has('removed')).toBe(false);
@@ -121,7 +233,7 @@ describe('rollback boundaries', () => {
     }, [
       { path: 'existing/new/a', contents: 'a' },
       { path: 'existing/blocked/b', contents: 'b' },
-    ])).rejects.toThrow('mkdir denied');
+    ], { root: '/' })).rejects.toThrow('mkdir denied');
     expect((await fs.stat('existing')).isDirectory).toBe(true);
     await expect(fs.stat('existing/new')).rejects.toThrow();
     expect(fs.has('existing/new/a')).toBe(false);
@@ -133,7 +245,7 @@ describe('rollback boundaries', () => {
       writeFiles({ ...fs, stat: () => Promise.reject(new Error('stat denied')) }, [{
         path: 'private/a',
         contents: 'a',
-      }]),
+      }], { root: '/' }),
     ).rejects.toThrow('stat denied');
     expect(fs.mkdirs).toEqual([]);
     expect(fs.writes).toEqual([]);
@@ -142,16 +254,20 @@ describe('rollback boundaries', () => {
   it('preserves new content in a directory and reports its non-recursive cleanup failure', async () => {
     const fs = createFakeFs();
     const calls: string[] = [];
-    await expect(writeFiles({
-      ...fs,
-      writeFile: () => Promise.reject('original failure'),
-      rm(path, options) {
-        calls.push(path);
-        expect(options?.recursive).not.toBe(true);
-        if (path === 'new') return Promise.reject('not empty');
-        return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+    await expect(writeFiles(
+      {
+        ...fs,
+        writeFile: () => Promise.reject('original failure'),
+        rm(path, options) {
+          calls.push(path);
+          expect(options?.recursive).not.toBe(true);
+          if (path === 'new') return Promise.reject('not empty');
+          return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+        },
       },
-    }, [{ path: 'new/a', contents: 'a' }])).rejects.toThrow(
+      [{ path: 'new/a', contents: 'a' }],
+      { root: '/' },
+    )).rejects.toThrow(
       'original failure; rollback incomplete: new: not empty',
     );
     expect(calls).toEqual(['new/a', 'new']);
@@ -159,25 +275,33 @@ describe('rollback boundaries', () => {
 
   it('reports deletion failure for a new file and still removes the others', async () => {
     const fs = createFakeFs();
-    await expect(writeFiles({
-      ...fs,
-      writeFile: () => Promise.reject(new Error('write denied')),
-      rm: () => Promise.reject(new Error('rm denied')),
-    }, [{ path: 'new', contents: 'a' }])).rejects.toThrow('new: rm denied');
+    await expect(writeFiles(
+      {
+        ...fs,
+        writeFile: () => Promise.reject(new Error('write denied')),
+        rm: () => Promise.reject(new Error('rm denied')),
+      },
+      [{ path: 'new', contents: 'a' }],
+      { root: '/' },
+    )).rejects.toThrow('new: rm denied');
   });
 
   it('restores an overwritten path that disappeared before rollback', async () => {
     const fs = createFakeFs({ original: 'original' });
-    await expect(writeFiles({
-      ...fs,
-      async writeFile(path, bytes) {
-        if (path === 'fail') {
-          await fs.rm('original');
-          throw new Error('disk full');
-        }
-        await fs.writeFile(path, bytes);
+    await expect(writeFiles(
+      {
+        ...fs,
+        async writeFile(path, bytes) {
+          if (path === 'fail') {
+            await fs.rm('original');
+            throw new Error('disk full');
+          }
+          await fs.writeFile(path, bytes);
+        },
       },
-    }, [{ path: 'original', contents: 'change' }, { path: 'fail', contents: '' }]))
+      [{ path: 'original', contents: 'change' }, { path: 'fail', contents: '' }],
+      { root: '/' },
+    ))
       .rejects.toThrow('disk full');
     expect(fs.read('original')).toBe('original');
   });

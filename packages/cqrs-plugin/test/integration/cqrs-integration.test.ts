@@ -1,8 +1,7 @@
 /**
  * Integration tests for CqrsPlugin via kernel app.inject().
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CqrsPlugin } from '../../src/plugin/cqrs-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';

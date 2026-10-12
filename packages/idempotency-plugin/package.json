@@ -1,0 +1,70 @@
+{
+  "name": "@setu-ts/idempotency-plugin",
+  "version": "0.9.0",
+  "description": "A repeated request, queue job or broker message does its work once per key",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/idempotency-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/idempotency-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "ioredis": "5.x"
+  },
+  "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3",
+    "@setu-ts/cloudflare-plugin": "workspace:^",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/messaging-plugin": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/sdk": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@types/node": "^24",
+    "drizzle-orm": "0.45.2",
+    "ioredis": "5.x",
+    "mongodb": "^6.21.0",
+    "pg": "^8.0.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3",
+    "zod-v3": "npm:zod@^3.24.0"
+  }
+}

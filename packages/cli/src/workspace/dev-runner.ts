@@ -152,6 +152,8 @@ async function start(member: Member): Promise<void> {
   started.add(member.name);
   void child.status.then((status) => {
     if (!status.success) {
+      // A member that cannot boot breaks its dependents too. Keep the failure
+      // visible instead of hiding it behind a healthy sibling's /health.
       shutdown();
       Deno.exit(status.code);
     }
@@ -192,10 +194,16 @@ const children = [];
 
 const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+// Each member runs in a process group of its own (POSIX), and shutdown signals the GROUP:
+// the package manager runs \`start\` through a shell, and a shell that does not forward the
+// signal (dash, as on Ubuntu) would otherwise leave the server running, holding its port.
+const grouped = process.platform !== 'win32';
+
 const shutdown = () => {
   for (const child of children) {
     try {
-      child.kill('SIGTERM');
+      if (grouped) process.kill(-child.pid, 'SIGTERM');
+      else child.kill('SIGTERM');
     } catch {
       // Already gone: a child that exited on its own has nothing to signal.
     }
@@ -233,11 +241,13 @@ async function start(member) {
   const child = spawn('${executable}', ['run', 'start'], {
     cwd: \`apps/\${member.name}\`,
     stdio: 'inherit',
+    detached: grouped,
   });
   children.push(child);
   started.add(member.name);
   child.once('exit', (code) => {
     if (code !== 0) {
+      // A failed member breaks its dependents; keep that failure visible.
       shutdown();
       process.exitCode = code ?? 1;
     }

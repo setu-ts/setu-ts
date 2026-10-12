@@ -7,8 +7,7 @@
  * cookie budget.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MAX_RETURN_TO_BYTES, safeReturnTo } from '../../src/sign-in/return-to.ts';
 
 describe('safeReturnTo', () => {

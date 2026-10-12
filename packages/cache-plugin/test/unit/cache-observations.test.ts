@@ -1,3 +1,4 @@
+import { NODE_SOURCE_ARGS, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for the M98i cache operation counters: option validation, the
  * collector's counting, saturation, retention and failure latch, the
@@ -5,8 +6,7 @@
  * rejection identity, synchronous throws), and the plugin's source
  * registration and close ordering through a real kernel application.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type {
   CacheDiagnosticsSnapshot,
@@ -121,6 +121,7 @@ describe('compileCacheDiagnosticsAlias', () => {
       [{ enabled: true, alias: 'x'.repeat(65) }, CACHE_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ enabled: true, alias: 'a\u001bb' }, CACHE_DIAGNOSTICS_ERRORS.aliasControl],
       [{ enabled: true, alias: 'a\u0085b' }, CACHE_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ enabled: true, alias: 'a\u202eb' }, CACHE_DIAGNOSTICS_ERRORS.aliasControl],
       [{ enabled: true, alias: 'a', keys: ['secret'] }, CACHE_DIAGNOSTICS_ERRORS.extraKey],
     ];
     for (const [input, message] of cases) {
@@ -222,6 +223,30 @@ describe('observeCacheCall — outcome counters', () => {
     expect(record.count).toBe(3);
     expect(record.succeeded + record.failed).toBe(record.count);
     expect(record).toMatchObject({ succeeded: 2, failed: 1, hits: 2 });
+  });
+
+  // M101a V8-5: a bounded Redis command REJECTS rather than parking the call,
+  // and that rejection is the recorded failure — no new collector code. The
+  // reason is ioredis's own `commandTimeout` error text.
+  it('counts a command-timeout rejection as failed, never as a miss', async () => {
+    const clock = new Clock();
+    const timedOut = new Error('Command timed out');
+    const backend = {
+      ...scriptedBackend('resolve', null),
+      get: () => {
+        clock.now += 1000;
+        return Promise.reject(timedOut);
+      },
+    } as unknown as CacheStore;
+    const { service, collector } = observed(backend, clock);
+    await expect(service.get('k')).rejects.toBe(timedOut);
+    expect(recordOf(collector.snapshot(), 'get')).toMatchObject({
+      count: 1,
+      succeeded: 0,
+      failed: 1,
+      hits: 0,
+      misses: 0,
+    });
   });
 
   it('measures integer durations on the monotonic clock and clamps a negative delta', async () => {
@@ -329,25 +354,33 @@ describe('observeCacheCall — transparency', () => {
     // unhandled rejection with diagnostics on: observing settlement must
     // never mark the caller's promise as handled and swallow the error.
     const count = async (enabled: boolean): Promise<number> => {
-      const reason = new Error('fire-and-forget');
-      const { service } = enabled
-        ? observed(scriptedBackend('reject', reason))
-        : { service: new CacheService(scriptedBackend('reject', reason), '') };
-      let unhandled = 0;
-      const onUnhandled = (event: PromiseRejectionEvent): void => {
-        if (event.reason === reason) {
-          unhandled++;
-          event.preventDefault();
-        }
-      };
-      globalThis.addEventListener('unhandledrejection', onUnhandled);
-      try {
+      const output = await runProcess(process.execPath, {
+        args: [
+          ...NODE_SOURCE_ARGS,
+          '--input-type=module',
+          '-e',
+          `
+        import { CacheService, attachCacheCollector } from ${
+            JSON.stringify(new URL('../../src/services/cache-service.ts', import.meta.url).href)
+          };
+        import { CacheObservationCollector } from ${
+            JSON.stringify(
+              new URL('../../src/diagnostics/cache-observations.ts', import.meta.url).href,
+            )
+          };
+        const reason = new Error('fire-and-forget');
+        const service = new CacheService({ get: () => Promise.reject(reason) }, '');
+        if (${enabled}) attachCacheCollector(service, new CacheObservationCollector('primary', () => 1000));
+        let reports = 0;
+        process.on('unhandledRejection', (error) => { if (error === reason) reports++; });
         void service.get('k');
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      } finally {
-        globalThis.removeEventListener('unhandledrejection', onUnhandled);
-      }
-      return unhandled;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        console.log(reports);
+      `,
+        ],
+      });
+      expect(output.code).toBe(0);
+      return Number(new TextDecoder().decode(output.stdout).trim());
     };
     expect(await count(false)).toBe(1);
     expect(await count(true)).toBe(1);

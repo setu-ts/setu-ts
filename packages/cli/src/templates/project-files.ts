@@ -11,14 +11,9 @@
  * @module
  */
 
-import {
-  CONFIG_EXPORT,
-  CONFIG_MODULE,
-  PROGRAM_NAME,
-  type TargetRuntime,
-  VERSION,
-} from '../constants.ts';
+import { CONFIG_EXPORT, CONFIG_MODULE, PROGRAM_NAME, type TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
 import type {
   AppFactoryRenderContext,
   AppFactoryWiring,
@@ -27,6 +22,7 @@ import type {
   MiddlewareWiring,
   PackageImport,
   RuntimeSwap,
+  ServedRoute,
   TemplateHost,
   TemplateManifest,
   Wiring,
@@ -36,9 +32,13 @@ import type {
 import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
-
-/** Semver range the scaffolded project pins framework packages to. */
-const RANGE = `^${VERSION}`;
+import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
+import { frameworkSpecifier } from './framework-specifier.ts';
+import {
+  NPM_TOOLING_DEV_DEPENDENCIES,
+  NPM_TOOLING_SCRIPTS,
+  npmToolingFiles,
+} from './npm-tooling.ts';
 
 /**
  * The devtool composition parameter every generated factory accepts as its
@@ -106,6 +106,8 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
  * until a generated project fails to compile.
  */
 export interface ResolvedHost {
+  /** Connector port, read by the generated README. */
+  readonly devtoolPort?: number;
   readonly plugins: readonly Wiring[];
   /** Module exports the Workers entry declares beside `fetch`. */
   readonly workerExports: readonly WorkerExport[];
@@ -132,8 +134,20 @@ export interface ResolvedHost {
    * pins — what a transport-contributed file needs in order to compile.
    */
   readonly extraImports: Readonly<Record<string, string>>;
+  /**
+   * npm `dependencies` merged into a generated `package.json` beyond the
+   * framework pins — the client a selected broker, queue or RPC transport loads
+   * (see `client-dependencies.ts`).
+   */
+  readonly extraDependencies: Readonly<Record<string, string>>;
+  /** npm `scripts` merged into a generated `package.json` (a transport's `proto:gen`). */
+  readonly extraScripts: Readonly<Record<string, string>>;
+  /** npm `devDependencies` merged into a generated `package.json` (the proto toolchain). */
+  readonly extraDevDependencies: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
+  /** Routes the template's own source serves, for the README. */
+  readonly routes: readonly ServedRoute[];
   readonly manifest?: TemplateManifest | undefined;
 }
 
@@ -174,7 +188,11 @@ export function resolveHost(
     setupCalls: host.setupCalls ?? [],
     extraTasks: { ...host.extraTasks },
     extraImports: {},
+    extraDependencies: {},
+    extraScripts: {},
+    extraDevDependencies: {},
     appFactory: host.appFactory,
+    routes: host.routes ?? [],
     appFactoryContext: {
       ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
       ...host.appFactoryContext,
@@ -310,31 +328,57 @@ function configModule(
       : host.manifest?.envFilePath === undefined
       ? wiring.args ?? ''
       : renderConfigOptions(host.manifest.envFilePath);
-  // `common` is always imported for the return type, so a template naming more
+  const sourceInstalled = new Set(plugins.map((plugin) => plugin.pkg));
+  const sourceNames = {
+    project: 'app',
+    authorization: plugins.some((plugin) =>
+      plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? '')
+    ),
+    customBackplane: plugins.some((plugin) =>
+      plugin.pkg === 'realtime-backplane-plugin' && /transport:\s*'custom'/.test(plugin.args ?? '')
+    ),
+  };
+  const hasSources = host.devtoolPort !== undefined &&
+    plugins.some((plugin) =>
+      withSourceArgs(plugin.pkg, pluginArgs(plugin), sourceInstalled, sourceNames) !==
+        pluginArgs(plugin)
+    );
+  // `common` is always imported for IPlugin, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
   // second import of the same module.
   const extraCommonSymbols = packageImports
     .filter((p) => p.pkg === 'common')
     .flatMap((p) => p.symbols ?? []);
-  // With no extra symbols the statement is the type-only import every template
-  // emitted before this merge existed, so their output is unchanged.
+  // Merge template-specific common symbols into the one statement.
   const commonImport = extraCommonSymbols.length === 0
-    ? `import type { IApplication, IPlugin } from '@setu-ts/common';`
+    ? `import type { IPlugin } from '@setu-ts/common';`
     : renderImport(
-      [...extraCommonSymbols, 'type IApplication', 'type IPlugin'],
+      [...extraCommonSymbols, 'type IPlugin'],
       '@setu-ts/common',
     );
 
   const imports = [
+    ...(!hasSources ? [] : [
+      "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';",
+    ]),
     // A starter factory returns the application, so `createApplication` is not
     // imported on that path — but the factory's devtool parameter names
     // `KernelDiagnosticsOptions` on EVERY target, so every config module still
     // imports the kernel, as a type.
     ...(appFactory === undefined
-      ? [renderImport(['createApplication', 'type KernelDiagnosticsOptions'], '@setu-ts/kernel')]
+      ? [
+        renderImport([
+          'createApplication',
+          'type IKernelApplication',
+          'type KernelDiagnosticsOptions',
+        ], '@setu-ts/kernel'),
+      ]
       : [
         renderImport([appFactory.symbol], `@setu-ts/${appFactory.pkg}`),
-        renderImport(['type KernelDiagnosticsOptions'], '@setu-ts/kernel'),
+        renderImport(
+          ['type IKernelApplication', 'type KernelDiagnosticsOptions'],
+          '@setu-ts/kernel',
+        ),
       ]),
     commonImport,
     ...plugins.map((p) => renderImport([p.symbol], `@setu-ts/${p.pkg}`)),
@@ -374,6 +418,18 @@ function configModule(
     const factoryPluginLines = plugins.length === 0
       ? ''
       : `\n${plugins.map((p) => `  app.register(${p.symbol}(${pluginArgs(p)}));`).join('\n')}\n`;
+    const parameter = appFactory.parameter;
+    const parameterName = parameter === undefined
+      ? ''
+      : parameter.readOn.includes(runtime)
+      ? parameter.name
+      : `_${parameter.name}`;
+    const factoryParameterDoc = parameter === undefined
+      ? ''
+      : `\n * @param ${parameterName} - ${parameter.doc}`;
+    const factoryParameterLine = parameter === undefined
+      ? ''
+      : `\n  ${parameterName}?: ${parameter.type},`;
     return `${imports}
 
 /**
@@ -387,13 +443,13 @@ function configModule(
  * forwarded through unchanged.
  * @param _devtool - Accepted for one signature on every target. The starter
  * owns its construction, so a devtool composition cannot be honored here —
- * the CLI refuses the devtool opt-in on this template by name.
+ * the CLI refuses the devtool opt-in on this template by name.${factoryParameterDoc}
  * @returns The configured, unstarted application
  */
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
-  _${DEVTOOL_PARAMETER}
-): Promise<IApplication> {
+  _${DEVTOOL_PARAMETER}${factoryParameterLine}
+): Promise<IKernelApplication> {
   const app = await ${appFactory.symbol}(${
       appFactory.args?.({
         runtime,
@@ -413,7 +469,13 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
   const pluginList = [
     ...plugins
       .map((p) =>
-        `      ${p.symbol}(${onWorkers ? p.workersArgs ?? pluginArgs(p) : pluginArgs(p)}),`
+        `      ${p.symbol}(${
+          onWorkers
+            ? p.workersArgs ?? pluginArgs(p)
+            : host.devtoolPort === undefined
+            ? pluginArgs(p)
+            : withSourceArgs(p.pkg, pluginArgs(p), sourceInstalled, sourceNames)
+        }),`
       ),
     ...pluginSpreads.map((spread) => `      ${spread},`),
     // The devtool composition lands LAST: the kernel resolves plugins by
@@ -481,7 +543,12 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
  *${envDoc}
  * @returns The configured, unstarted application
  */
-export function ${CONFIG_EXPORT}(${factoryParam}): IApplication {
+export function ${CONFIG_EXPORT}(${factoryParam}): IKernelApplication {
+${
+    !hasSources
+      ? ''
+      : '  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;\n'
+  }\
   const app = createApplication({
     plugins: [
 ${pluginList}
@@ -723,32 +790,138 @@ function workersEntry(
   // `setu`, so it is the one place the specifier is safe.
   const waitUntilImport = wantsWaitUntil ? "import { waitUntil } from 'cloudflare:workers';\n" : '';
   const bootSignature =
-    'async function boot(env: Record<string, unknown>): Promise<IApplication> {';
+    'async function boot(env: Record<string, unknown>): Promise<IKernelApplication> {';
   const bootCall = `${CONFIG_EXPORT}(env${wantsWaitUntil ? ', waitUntil' : ''})`;
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
-  // The memoisation seam every entry shares. `??= boot(env)` cached the raw
-  // promise, so ONE failed boot — a mistyped binding, a broker briefly down at
-  // cold start — was permanent for the isolate's life; the catch clears the
-  // slot before rethrowing so the next request re-attempts. Synchronous on
-  // purpose: an `async` wrapper with no await fails the generated project's
-  // own `deno lint` (require-await).
-  const ensureBootedFn =
-    `function ensureBooted(env: Record<string, unknown>): Promise<IApplication> {
-  if (booted === undefined) {
-    booted = boot(env).catch((error: unknown) => {
-      booted = undefined;
-      throw error;
-    });
+  // The application cache every export shares. It answers three platform facts
+  // and one earlier defect:
+  // - A FAILED boot is never cached. `??= boot(env)` cached the raw promise, so
+  //   ONE failed boot — a mistyped binding, a broker briefly down at cold start
+  //   — was permanent for the isolate's life (M70l X9-8).
+  // - Bindings can change without a new isolate. Cloudflare may keep an
+  //   isolate running across a bindings-only deploy, so an application built
+  //   from one `env` would keep its bindings forever. Apps are keyed by the
+  //   `env` OBJECT: measured on workerd, `fetch` and `queue` receive the same
+  //   object on every request while bindings are unchanged, so the steady
+  //   state is one lookup.
+  // - Requests route to versions independently during a gradual deployment,
+  //   so one isolate may see two `env` objects alternately. Two apps are kept,
+  //   so alternation reuses both instead of rebuilding and stopping each in
+  //   turn. A third evicts the least recently used.
+  // - Stopping an app cuts off work still using it. The kernel drains
+  //   in-flight HTTP requests, but a queue batch is not one, so each app counts
+  //   the requests and batches holding it and is stopped only at zero.
+  // Retirement runs only once the app now being used has STARTED: a working
+  // app is never given up for one that may yet fail. An app no request has
+  // used for RETIRE_AFTER_USES requests is retired too, which reclaims the old
+  // version once a rollout completes. Uses are counted rather than timed
+  // because timers cannot be relied on between Worker invocations.
+  // `acquire` is synchronous on purpose: an `async` function with no await
+  // fails the generated project's own `deno lint` (require-await).
+  const cacheBlock =
+    `/** One application, built from one \`env\`, and the work currently using it. */
+interface BootedApp {
+  readonly app: Promise<IKernelApplication>;
+  started: boolean;
+  /** Requests and queue batches holding this app; it is stopped only at zero. */
+  active: number;
+  /** The value of \`uses\` when this app was last acquired. */
+  lastUse: number;
+  retired: boolean;
+}
+
+/**
+ * Two apps cover a gradual deployment, where requests for two versions of the
+ * Worker can alternate in one isolate.
+ */
+const MAX_APPS = 2;
+/** An app unused for this many requests belongs to a rollout that finished. */
+const RETIRE_AFTER_USES = 100;
+
+// Keyed by the \`env\` OBJECT, least recently used first. A bindings-only
+// deploy can keep this isolate running and hand later requests a new \`env\`;
+// while bindings are unchanged, every request receives the same object.
+const apps = new Map<Record<string, unknown>, BootedApp>();
+let uses = 0;
+
+/**
+ * Builds and starts the application for one \`env\`.
+ *
+ * Workers have no socket to bind, so start() takes no port: it registers the
+ * plugins and the platform drives the app through fetch().
+ */
+${bootSignature}
+  const app = await ${bootCall};
+  await app.start();
+  return app;
+}
+
+/**
+ * Returns the application for \`env\`, building it on first use. Every call
+ * must be paired with \`release\`, in a \`finally\`.
+ */
+function acquire(env: Record<string, unknown>): BootedApp {
+  let entry = apps.get(env);
+  if (entry === undefined) {
+    const created: BootedApp = {
+      app: boot(env),
+      started: false,
+      active: 0,
+      lastUse: 0,
+      retired: false,
+    };
+    created.app.then(
+      () => {
+        created.started = true;
+        retireStale(created);
+      },
+      () => {
+        // A failed boot is forgotten, so the next request retries it.
+        if (apps.get(env) === created) apps.delete(env);
+      },
+    );
+    entry = created;
+  } else {
+    apps.delete(env);
   }
-  return booted;
+  // Re-inserting keeps the Map ordered least recently used first.
+  apps.set(env, entry);
+  entry.active++;
+  entry.lastUse = ++uses;
+  if (entry.started) retireStale(entry);
+  return entry;
+}
+
+/** Ends one request's or batch's hold on its application. */
+function release(entry: BootedApp): void {
+  entry.active--;
+  if (entry.retired && entry.active === 0) stopQuietly(entry);
+}
+
+/** Retires apps beyond the cap, and apps no request has used for a while. */
+function retireStale(current: BootedApp): void {
+  for (const [env, entry] of apps) {
+    if (entry === current) continue;
+    if (apps.size > MAX_APPS || uses - entry.lastUse >= RETIRE_AFTER_USES) {
+      apps.delete(env);
+      entry.retired = true;
+      if (entry.active === 0) stopQuietly(entry);
+    }
+  }
+}
+
+/** Stops a retired app; its failure must not reach the apps still serving. */
+function stopQuietly(entry: BootedApp): void {
+  void entry.app.then((app) => app.stop()).catch(() => {});
 }`;
 
   // One import line per contributing package, and one export per contribution.
-  // Each reuses `booted`, never a second `boot(env)`: two applications would
-  // mean two brokers with two dispatch tables, and a subscription registered on
-  // one would be invisible to the other.
+  // Each acquires from the shared cache, never a private `boot(env)`: two
+  // LIVE applications for one `env` would mean two brokers with two dispatch
+  // tables, and a subscription registered on one would be invisible to the
+  // other.
   const exportImports = workerExports
     .map((entry) =>
       `import type { ${entry.payloadType} } from '@setu-ts/${entry.payloadPkg}';\n` +
@@ -761,59 +934,68 @@ function workersEntry(
     payload: ${entry.payloadType},
     env: Record<string, unknown>,
   ): Promise<void> {
-    const app = await ensureBooted(env);
-${renderRoutes(entry)}
+    const booted = acquire(env);
+    try {
+      const app = await booted.app;
+${indent(renderRoutes(entry), '  ')}
+    } finally {
+      release(booted);
+    }
   },`
     )
     .join('');
   const reExportBlock = entryReExports.length === 0 ? '' : `\n${entryReExports.join('\n')}\n`;
 
-  return `import type { IApplication } from '@setu-ts/common';
+  return `import type { IKernelApplication } from '@setu-ts/kernel';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
 ${waitUntilImport}${exportImports === '' ? '' : `${exportImports}\n`}
-let booted: Promise<IApplication> | undefined;
-
-/**
- * Builds and starts the application once, on the first request.
- *
- * Workers have no socket to bind, so start() takes no port: it registers the
- * plugins and the platform drives the app through fetch().
- */
-${bootSignature}
-  const app = await ${bootCall};
-  await app.start();
-  return app;
-}
-
-${ensureBootedFn}
+${cacheBlock}
 
 export default {
   ${fetchSignature}
-    let app: IApplication;
+    const booted = acquire(env);
     try {
-      app = await ensureBooted(env);
-    } catch (error) {
-      // A failed boot must not leak the stack to the client (M70l X9-8): the
-      // body is generic and the real error goes to the platform's logs. 503,
-      // because the instance genuinely has no application to serve with.
-      console.error('setu: application failed to start', error);
-      return new Response('Service Unavailable', { status: 503 });
-    }
-    try {
-      return await app.fetch(request);
-    } catch (error) {
-      // A REQUEST-time failure is a separate case, reported separately. Folding
-      // it into the boot catch above logged 'failed to start' for a fault that
-      // had nothing to do with startup, and answered 503 — which tells a load
-      // balancer to drain the instance — for what is a single bad request.
-      // app.fetch() does throw: the kernel rejects when no HTTP adapter is
-      // registered, and an adapter may reject on a malformed request.
-      console.error('setu: request failed', error);
-      return new Response('Internal Server Error', { status: 500 });
+      let app: IKernelApplication;
+      try {
+        app = await booted.app;
+      } catch (error) {
+        // A failed boot must not leak the stack to the client (M70l X9-8): the
+        // body is generic and the real error goes to the platform's logs. 503,
+        // because the instance genuinely has no application to serve with.
+        console.error('setu: application failed to start', error);
+        return new Response('Service Unavailable', { status: 503 });
+      }
+      try {
+        return await app.fetch(request);
+      } catch (error) {
+        // A REQUEST-time failure is a separate case, reported separately.
+        // Folding it into the boot catch above logged 'failed to start' for a
+        // fault that had nothing to do with startup, and answered 503 — which
+        // tells a load balancer to drain the instance — for what is a single
+        // bad request. app.fetch() does throw: the kernel rejects when no HTTP
+        // adapter is registered, and an adapter may reject on a malformed
+        // request.
+        console.error('setu: request failed', error);
+        return new Response('Internal Server Error', { status: 500 });
+      }
+    } finally {
+      release(booted);
     }
   },${exportBlock}
 };
 ${reExportBlock}`;
+}
+
+/**
+ * Prefixes every line of a rendered block. `renderRoutes` emits no blank lines,
+ * so no line is left unprefixed.
+ *
+ * @param block - The rendered lines
+ * @param prefix - What to prepend to each line
+ * @returns The re-indented block
+ */
+function indent(block: string, prefix: string): string {
+  return block.split('\n').map((line) => `${prefix}${line}`).join('\n');
 }
 
 /**
@@ -827,9 +1009,9 @@ ${reExportBlock}`;
  * @returns Bare package names, deduplicated
  */
 function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly string[] {
-  // Both are unconditional. `common`: the config module imports `IApplication`
-  // whichever way it builds the app. `kernel`: the factory's devtool parameter
-  // names `KernelDiagnosticsOptions` from `@setu-ts/kernel`, so every config
+  // Both are unconditional. `common`: the config module imports IPlugin.
+  // `kernel`: the factory returns IKernelApplication and its devtool parameter
+  // names KernelDiagnosticsOptions, so every config
   // module imports the package — as `createApplication` on the plugin-list
   // path, as a type on the starter path. Before that parameter existed the
   // starter path referenced nothing from the kernel and `kernel` was
@@ -844,6 +1026,7 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
   // no entry of its own.
   if (runtime !== 'cloudflare-workers') {
     packages.add('runtime');
+    packages.add('testing');
   }
   if (host.appFactory !== undefined) packages.add(host.appFactory.pkg);
   for (const entry of host.packageImports) packages.add(entry.pkg);
@@ -857,12 +1040,12 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
  * Builds the Deno `imports` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `jsr:` URL
+ * @returns Specifier → `npm:@setu-ts/…` specifier
  */
-function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
+function frameworkImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const imports: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
-    imports[`@setu-ts/${pkg}`] = `jsr:@setu-ts/${pkg}@${RANGE}`;
+    imports[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'deno');
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
@@ -870,18 +1053,46 @@ function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, 
 }
 
 /**
- * Builds the npm `dependencies` map for a generated project, using JSR's npm
- * compatibility names.
+ * Builds the npm `dependencies` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `npm:@jsr/…` range
+ * @returns Package name → caret range
  */
 function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
-    deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
+    if (DEV_FRAMEWORK_PACKAGES.has(pkg)) continue;
+    deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
   }
-  return { ...deps, ...host.manifest?.npmDependencies };
+  return { ...deps, ...host.extraDependencies, ...host.manifest?.npmDependencies };
+}
+
+/**
+ * Framework packages only the generated tests import. On an npm manifest they
+ * belong under `devDependencies`, where `setu add testing` also puts them, so a
+ * production install does not carry the test harness and a later `add` does not
+ * pin it in a second section. Deno's import map has no such split.
+ */
+const DEV_FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set(['testing']);
+
+/**
+ * The framework packages an npm manifest lists under `devDependencies`.
+ *
+ * @param host - The resolved template host
+ * @param runtime - The target runtime
+ * @returns Package name → caret range
+ */
+function npmDevFrameworkDependencies(
+  host: ResolvedHost,
+  runtime: TargetRuntime,
+): Record<string, string> {
+  const deps: Record<string, string> = {};
+  for (const pkg of frameworkPackages(host, runtime)) {
+    if (DEV_FRAMEWORK_PACKAGES.has(pkg)) {
+      deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
+    }
+  }
+  return deps;
 }
 
 /**
@@ -921,7 +1132,9 @@ function denoTasks(
   // generated test sat beside the generated service, unreachable from
   // `deno check main.ts setu.config.ts`, and both stayed broken through a full
   // green run of every gate a developer had.
-  const test = { test: 'deno test -A' };
+  const test = {
+    test: runtime === 'cloudflare-workers' ? 'deno test -A --permit-no-files' : 'deno test -A',
+  };
 
   if (manifest?.npmBuild === undefined) {
     return { start, ...test, ...host.extraTasks };
@@ -936,7 +1149,15 @@ function denoTasks(
     install: 'deno install --allow-scripts --min-dep-age 0',
     build: `deno task install && ${manifest.npmBuild.denoCommand}`,
     start: `deno task build && ${start}`,
-    ...test,
+    // The generated smoke test boots `createApp()`, which loads the server
+    // build, so a fresh project's first `deno task test` needs it as much as
+    // `start` does — without it the test fails on a missing build (V8-39).
+    test: `deno task build && ${test.test}`,
+    // The development entry runs Vite in-process and needs it installed, but
+    // not the production build: Vite serves the route modules itself.
+    ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
+      ? { dev: `deno task install && deno run -A ${manifest.npmBuild.devEntry.path}` }
+      : {}),
     ...host.extraTasks,
   };
 }
@@ -1076,10 +1297,49 @@ function denoPermissions(manifest?: TemplateManifest): string {
  * Workers project gets when its template needs an npm toolchain, so the two can
  * never disagree about how the emitted TypeScript is compiled.
  *
+ * Workers gets three more options, because it is the one target whose
+ * `tsconfig.json` a generated script type-checks (`npm run check` is
+ * `tsc --noEmit`). Without them that script failed on a pristine scaffold:
+ * every emitted import carries the `.ts` extension Deno requires, which `tsc`
+ * refuses (TS5097) unless `allowImportingTsExtensions` is set — and that option
+ * is itself refused unless `noEmit` is. And `@cloudflare/workers-types` is not
+ * an `@types/*` package, so `tsc` never loads it unless `types` names it: the
+ * devDependency was installed and read by nothing, leaving `cloudflare:workers`
+ * an unresolvable module (TS2307) and `KVNamespace` an undeclared name. `lib`
+ * drops the DOM, which describes a browser rather than workerd, and which the
+ * package's own documentation omits beside it. A template's own options still
+ * win, and its own `types` are KEPT beside the Workers ones rather than
+ * replacing them.
+ *
+ * @param runtime - The selected runtime target
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The merged compiler options
  */
-function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
+function tsconfigOptions(
+  runtime: TargetRuntime,
+  manifest?: TemplateManifest,
+): Record<string, unknown> {
+  const template = manifest?.tsconfigCompilerOptions;
+  const workers = runtime === 'cloudflare-workers'
+    ? {
+      // A template's own `lib` wins: a frontend build needs the DOM for the code
+      // it ships to a browser.
+      lib: template?.['lib'] ?? ['ES2022'],
+      types: [WORKERS_TYPES_PACKAGE, ...templateTypes(template)],
+    }
+    : {};
+  // Every npm-manifest target type-checks with its own `tsc` (M111d §3.7), and
+  // its imports end in `.ts` — which `tsc` accepts only alongside `noEmit`. A
+  // Deno project's `tsconfig.json` serves its frontend build alone.
+  const checked = runtime === 'deno' ? {} : { allowImportingTsExtensions: true, noEmit: true };
+  // TypeScript 6 includes no `@types/*` package unless `types` names it, so the
+  // runtime's own declarations are named — `process` and `node:test` on Node,
+  // `bun:test` on Bun. Workers names its own below.
+  const runtimeTypes = runtime === 'node'
+    ? { types: ['node', ...templateTypes(template)] }
+    : runtime === 'bun'
+    ? { types: ['bun', ...templateTypes(template)] }
+    : {};
   return {
     target: 'ES2022',
     module: 'ESNext',
@@ -1087,9 +1347,26 @@ function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
     strict: true,
     verbatimModuleSyntax: true,
     skipLibCheck: true,
-    ...manifest?.tsconfigCompilerOptions,
+    ...template,
+    ...checked,
+    ...runtimeTypes,
+    ...workers,
   };
 }
+
+/**
+ * The `types` a template's compiler options declare, as a list.
+ *
+ * @param options - The template's `tsconfig.json` compiler options
+ * @returns Its `types` entries, or an empty list when it declares none
+ */
+function templateTypes(options?: Readonly<Record<string, unknown>>): readonly unknown[] {
+  const types = options?.['types'];
+  return Array.isArray(types) ? types : [];
+}
+
+/** The ambient type package a Workers project's `tsconfig.json` names. */
+const WORKERS_TYPES_PACKAGE = '@cloudflare/workers-types';
 
 /**
  * The `compilerOptions` a generated `deno.json` carries.
@@ -1118,9 +1395,9 @@ function denoCompilerOptions(
 /**
  * The `scripts` a generated `package.json` carries.
  *
- * A template with a frontend build gets a `build` script alongside `start`,
- * because its `start` cannot work until the build has produced the server
- * bundle the SSR plugin loads.
+ * A template with a frontend build gets a `build` script, and its `start` and
+ * `test` run it first, because neither can work until the build has produced
+ * the server bundle the SSR plugin loads.
  *
  * @param runtime - The selected runtime target
  * @param manifest - The template's manifest contributions, when it declares them
@@ -1137,9 +1414,24 @@ function npmScripts(
   // test` for `bun:test`, and `node --test` under the same loader `start` uses,
   // since the generated test is TypeScript.
   const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
-  return manifest?.npmBuild === undefined
-    ? { start, test }
-    : { build: manifest.npmBuild.script, start, test };
+  // With a frontend build both scripts boot an app that loads the server
+  // bundle, so both build first, as the Deno `start` and `test` tasks do. A
+  // `start` without it is what the next-step hint and the README tell a new
+  // user to run, and it crashed with "Failed to load React Router server
+  // build" on a fresh Node or Bun project. The build runs FIRST, so `start`
+  // still begins with `bun` on Bun, which is how `detectTargetRuntime` tells a
+  // Bun project from a Node one.
+  const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
+  const devEntry = manifest?.npmBuild?.devEntry;
+  return manifest?.npmBuild === undefined ? { start, test } : {
+    build: manifest.npmBuild.script,
+    start: `${build} && ${start}`,
+    test: `${build} && ${test}`,
+    // No build first: Vite serves the route modules itself in development.
+    ...(devEntry === undefined ? {} : {
+      dev: runtime === 'bun' ? `bun run ${devEntry.path}` : `${NODE_RUNNER} ${devEntry.path}`,
+    }),
+  };
 }
 
 /**
@@ -1192,11 +1484,25 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   // and the README's own Durable Object snippet fails with TS2339/TS4112 under
   // the only checker present. `tsc` reads the `tsconfig.json` the scaffold
   // already emitted and nothing consumed.
+  //
+  // `wrangler` and its types are pinned as a SET (TypeScript comes from the
+  // shared npm tooling, `npm-tooling.ts`), because they are not independent: every
+  // `wrangler` release declares a peer range on `@cloudflare/workers-types`
+  // starting at its own bundled workerd date, and npm refuses an install whose
+  // ranges do not intersect. `wrangler` moved that peer from `^4` to `^5` inside
+  // its 4.x line (4.100.0 declares `^4.20260611.1`, 4.130.0 `^5.20260908.1`),
+  // so the `^4.0.0` this used to emit resolved to a release that refused the
+  // `^4.20250109.0` types pin beside it, and `npm install` — the first step the
+  // CLI prints — failed with ERESOLVE on every new Workers project. `^4` was
+  // never a promise about that peer, so `wrangler` is held to the tested minor:
+  // a patch release keeps the peer major (its floor still moves, which the `^5`
+  // range absorbs), while a minor that changes it is admitted only by bumping
+  // this pin. The guarded `npm install` in `workers-install-e2e.test.ts` is what
+  // fails first when an upstream release breaks the set.
   if (runtime === 'cloudflare-workers') {
     return {
-      wrangler: '^4.0.0',
-      typescript: '^5.7.0',
-      '@cloudflare/workers-types': '^4.20250109.0',
+      wrangler: '~4.148.0',
+      [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
     };
   }
   return {};
@@ -1211,7 +1517,7 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
  *   no `package.json`, so an npm toolchain would otherwise have nowhere to be
  *   declared. Only one template needs this.
  * - **Cloudflare Workers, always.** `wrangler` bundles with esbuild, which
- *   resolves neither `jsr:` specifiers nor a Deno import map, so every Workers
+ *   resolves no Deno import map, so every Workers
  *   project needs its framework packages in a `package.json` regardless of
  *   template.
  *
@@ -1236,7 +1542,7 @@ function standaloneNpmFiles(
   // through the import map instead) must not acquire a package.json — that
   // switches Deno to node_modules resolution.
   // Workers ALWAYS needs one: `wrangler` bundles `src/index.ts` with esbuild,
-  // which resolves neither `jsr:` specifiers nor a Deno import map, so a project
+  // which resolves no Deno import map, so a project
   // declaring its framework packages only in `deno.json` fails `wrangler dev`
   // with one `Could not resolve "@setu-ts/…"` per package — while the CLI's own
   // next-step hint already said `npm install && npx wrangler dev`. There was
@@ -1254,11 +1560,14 @@ function standaloneNpmFiles(
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
     ...runtimeDevDependencies(runtime),
+    ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
     ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
-    ...(onWorkers ? { check: 'tsc --noEmit', dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+    ...(onWorkers
+      ? { ...NPM_TOOLING_SCRIPTS, dev: 'wrangler dev', deploy: 'wrangler deploy' }
+      : {}),
   };
 
   return [
@@ -1284,13 +1593,78 @@ function standaloneNpmFiles(
         )
       }\n`,
     },
-    // JSR packages resolve from npm only when the @jsr scope is mapped.
-    ...(onWorkers ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }] : []),
     {
       path: 'tsconfig.json',
-      contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
+      contents: `${
+        JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
+      }\n`,
     },
+    ...(onWorkers ? npmToolingFiles(manifest?.npmBuild?.outputDir) : []),
   ];
+}
+
+/**
+ * The endpoint each first-party plugin registers at its default path.
+ *
+ * The CLI never passes these plugins a custom path, so the defaults are what a
+ * generated project serves. Order is the order the README lists them in.
+ */
+const PLUGIN_ROUTES: Readonly<Record<string, readonly ServedRoute[]>> = {
+  'health-plugin': [
+    { path: '/health', purpose: 'aggregated health of every registered indicator' },
+    { path: '/live', purpose: 'liveness probe' },
+    { path: '/ready', purpose: 'readiness probe' },
+  ],
+  'metrics-plugin': [{ path: '/metrics', purpose: 'Prometheus metrics' }],
+  'openapi-plugin': [
+    { path: '/docs', purpose: 'Swagger UI for the API' },
+    { path: '/openapi.json', purpose: 'the OpenAPI document' },
+  ],
+};
+
+/**
+ * Every route a generated project serves out of the box.
+ *
+ * A plugin-list host serves the hello-world route its config module registers;
+ * a factory-composed host declares its own `/` among its routes. Plugin
+ * endpoints come from the wirings, or from what the factory says it composes.
+ *
+ * @param host - The resolved template host
+ * @returns The routes, in README order
+ */
+export function servedRoutes(host: ResolvedHost): readonly ServedRoute[] {
+  const plugins = new Set([
+    ...packagesOf(host.plugins, host.middleware),
+    ...(host.appFactory?.composes ?? []),
+  ]);
+  return [
+    ...(host.appFactory === undefined
+      ? [{ path: '/', purpose: 'the hello-world route in `setu.config.ts`' }]
+      : []),
+    ...host.routes,
+    ...Object.entries(PLUGIN_ROUTES).flatMap(([pkg, routes]) => plugins.has(pkg) ? routes : []),
+  ];
+}
+
+/**
+ * The README section listing what a fresh project serves.
+ *
+ * The lead-in names the address rather than pointing at startup output, because
+ * only Deno's server prints one: a Node or Bun project starts silently.
+ *
+ * @param host - The resolved template host
+ * @param runtime - The selected runtime target
+ * @param port - Where the entry gets its port, for a workspace member
+ * @returns The section, starting and ending with a blank line
+ */
+function servedRoutesSection(host: ResolvedHost, runtime: TargetRuntime, port?: EntryPort): string {
+  const where = runtime === 'cloudflare-workers'
+    ? 'Under `npx wrangler dev`, at `http://localhost:8787`'
+    : port === undefined
+    ? 'At `http://localhost:3000` (set `PORT` to change it)'
+    : `On the port \`${port.from}\` exports`;
+  const lines = servedRoutes(host).map((route) => `- \`${route.path}\` — ${route.purpose}`);
+  return `\n## What it serves\n\n${where}:\n\n${lines.join('\n')}\n`;
 }
 
 /**
@@ -1344,8 +1718,18 @@ ${
       : 'npm start'
   }
 \`\`\`
-
-## Generate code
+${servedRoutesSection(host, runtime, port)}
+${
+    runtime !== 'cloudflare-workers' && manifest?.npmBuild?.devEntry !== undefined
+      ? `## Develop\n\n\`\`\`bash\n${
+        runtime === 'deno' ? 'deno task dev' : runtime === 'bun' ? 'bun run dev' : 'npm run dev'
+      }\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
+      : ''
+  }${
+    host.devtoolPort === undefined
+      ? ''
+      : `## Devtool\n\nRun \`deno task dev\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
+  }## Generate code
 
 \`\`\`bash
 ${PROGRAM_NAME} generate service billing
@@ -1353,12 +1737,10 @@ ${PROGRAM_NAME} generate --help
 \`\`\`
 ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
 
-  // Deno projects get neither `node_modules/` nor `.wrangler/`: this file is
-  // read by a human, and an ignore rule for a directory the target can never
-  // produce is noise that invites copying it into projects that would need it.
-  const gitignore = `${runtime === 'deno' ? '' : 'node_modules/\n'}coverage/\n${
-    runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''
-  }${
+  // A Deno frontend build creates node_modules too; other Deno projects do not.
+  const gitignore = `${
+    runtime !== 'deno' || host.manifest?.npmBuild !== undefined ? 'node_modules/\n' : ''
+  }coverage/\n${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
     // A frontend build's output is generated, so it is ignored like any other
     // build artifact — the generated file used to list only `coverage/` and the
     // env file, which left a minified bundle tracked (D2).
@@ -1370,6 +1752,52 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
     { path: 'README.md', contents: readme },
     { path: '.gitignore', contents: gitignore },
   ];
+
+  if (runtime === 'cloudflare-workers') {
+    files[0] = {
+      path: 'README.md',
+      contents:
+        `${readme}\n## Testing\n\nThe application needs the platform environment to boot. No smoke test is emitted here;\n\`deno task test\` permits an empty suite until you add platform-aware tests.\n`,
+    };
+  } else {
+    const hasAppFactory = host.appFactory !== undefined;
+    const path = hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin')
+      ? '/health'
+      : '/';
+    // A factory host composes a starter that serves SSR pages (full-stack
+    // today). `/health` stays 200 when `populateLoadContext` throws, so the
+    // smoke test also requests `/` — through `fetch`, because an SSR body
+    // streams and `inject()` refuses one, with the body consumed so the
+    // test's resource sanitizer does not report a leak.
+    const ssrProbe = hasAppFactory
+      ? `
+      // The SSR home page streams, which inject() refuses — request it
+      // through fetch, and consume the body so the resource sanitizer
+      // does not report a leak.
+      const page = await app.fetch(new Request('http://localhost/'));
+      ${renderEquals(runtime, 'page.status', '200')}
+      await page.text();`
+      : '';
+    files.push({
+      path: 'test/app.test.ts',
+      contents: `${testHarnessFor(runtime).imports}
+import { createTestApp } from '@setu-ts/testing';
+import { createApp } from '../setu.config.ts';
+
+describe('application composition', () => {
+  it('serves its smoke-test endpoint', async () => {
+    const app = await createTestApp({ app: await createApp() });
+    try {
+      const response = await app.inject({ method: 'GET', url: '${path}' });
+      ${renderEquals(runtime, 'response.statusCode', '200')}${ssrProbe}
+    } finally {
+      await app.stop();
+    }
+  });
+});
+`,
+    });
+  }
 
   if (runtime === 'deno' || runtime === 'cloudflare-workers') {
     // A workspace member is the only caller that passes a port, and a member's
@@ -1394,7 +1822,13 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
             // it; the renderer never did.
             //
             // Refused in a workspace member, where the root declares it instead.
-            ...(!isWorkspaceMember && manifest?.npmBuild !== undefined
+            //
+            // Every standalone Deno project carries it too (M111d §3.4): the
+            // `setu` CLI runs on Node and imports `setu.config.ts` through Node
+            // resolution, which cannot read this import map — `deno install`
+            // links `node_modules/@setu-ts/*` under this setting, and that link
+            // is what the import resolves through.
+            ...(!isWorkspaceMember && (runtime === 'deno' || manifest?.npmBuild !== undefined)
               ? { nodeModulesDir: 'auto' }
               : {}),
             // Declared by the template rather than fixed here: `deno check` reads
@@ -1402,7 +1836,7 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
             // JSX needs `jsx`, and decorated classes need nothing, because the
             // decorator surface is TC39 standard decorators.
             ...(compilerOptions === undefined ? {} : { compilerOptions }),
-            imports: jsrImports(host, runtime),
+            imports: frameworkImports(host, runtime),
           },
           null,
           2,
@@ -1425,7 +1859,11 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
             name: projectName,
             version: '0.1.0',
             type: 'module',
-            scripts: npmScripts(runtime, manifest),
+            scripts: {
+              ...npmScripts(runtime, manifest),
+              ...NPM_TOOLING_SCRIPTS,
+              ...host.extraScripts,
+            },
             dependencies: npmDependencies(host, runtime),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.
@@ -1437,7 +1875,10 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
             // Bun-with-no-template case and became unreachable, so it is gone
             // rather than left as a branch no input can take.
             devDependencies: {
+              ...npmDevFrameworkDependencies(host, runtime),
               ...runtimeDevDependencies(runtime),
+              ...NPM_TOOLING_DEV_DEPENDENCIES,
+              ...host.extraDevDependencies,
               ...manifest?.npmDevDependencies,
             },
           },
@@ -1446,18 +1887,32 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
         )
       }\n`,
     });
-    // JSR packages resolve from npm only when the @jsr scope is mapped.
-    files.push({ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' });
     files.push({
       path: 'tsconfig.json',
-      contents: `${JSON.stringify({ compilerOptions: tsconfigOptions(manifest) }, null, 2)}\n`,
+      contents: `${
+        JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
+      }\n`,
     });
+    for (const file of npmToolingFiles(manifest?.npmBuild?.outputDir)) files.push(file);
   }
 
   files.push({
     path: CONFIG_MODULE,
     contents: configModule(runtime, host),
   });
+  if (host.devtoolPort !== undefined) {
+    files.push(renderDevtoolSources(new Set(frameworkPackages(host, runtime)), {
+      project: projectName,
+      envKeys: manifest?.envVariables?.map((variable) => variable.name) ?? [],
+      authorization: host.plugins.some((plugin) =>
+        plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? '')
+      ),
+      customBackplane: host.plugins.some((plugin) =>
+        plugin.pkg === 'realtime-backplane-plugin' &&
+        /transport:\s*'custom'/.test(plugin.args ?? '')
+      ),
+    }));
+  }
 
   if (manifest?.envFilePath !== undefined) {
     files.push({
@@ -1548,6 +2003,13 @@ ${host.wranglerToml}`,
     });
   } else {
     files.push({ path: 'main.ts', contents: serveEntry(runtime, port) });
+  }
+
+  // Every server runtime, never Workers: the entry runs Vite in-process and
+  // binds sockets, which an isolate cannot.
+  const devEntry = host.manifest?.npmBuild?.devEntry;
+  if (runtime !== 'cloudflare-workers' && devEntry !== undefined) {
+    files.push({ path: devEntry.path, contents: devEntry.contents });
   }
 
   // Template source files last. Any path colliding with the fixed set above is

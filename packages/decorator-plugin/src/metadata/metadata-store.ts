@@ -15,12 +15,15 @@
 import type {
   Component,
   Constructor,
+  IdempotentRouteOptions,
   IIngressBehavior,
   IMetadataStore,
   IPipelineBehavior,
   MiddlewareFunction,
+  PolicyDefinition,
   ProcessOptions,
   ScheduleOptions,
+  ScopeSource,
   SubscribeOptions,
 } from '@setu-ts/common';
 
@@ -122,6 +125,10 @@ export interface ControllerMetadata {
   roles?: string[];
   /** Default permissions for all routes (overridden by method-level `@Permissions`). */
   permissions?: string[];
+  /** Default `@ScopedRoles` for all routes (overridden by the method's, M110b). */
+  scopedRoles?: ScopedRequirement;
+  /** Default `@ScopedPermissions` for all routes (overridden by the method's, M110b). */
+  scopedPermissions?: ScopedRequirement;
 }
 
 /**
@@ -273,6 +280,60 @@ export interface RouteMetadata {
   readonly redirect?: RedirectMetadata;
   /** Response headers declared by `@ResponseHeader(name, value)`. */
   readonly responseHeaders?: readonly ResponseHeaderMetadata[];
+  /** Idempotency options declared by `@Idempotent(options?)` (M109a). */
+  readonly idempotent?: IdempotentRouteOptions;
+  /** Policy requirements declared by `@RequirePolicy`, top to bottom (M110a). */
+  readonly policies?: readonly PolicyRequirement[];
+  /** Roles required in a scope, any of which suffices (`@ScopedRoles`, M110b). */
+  readonly scopedRoles?: ScopedRequirement;
+  /** Permissions required in a scope, all of them (`@ScopedPermissions`, M110b). */
+  readonly scopedPermissions?: ScopedRequirement;
+}
+
+/**
+ * One `@ScopedRoles` / `@ScopedPermissions` declaration (M110b): the catalogue
+ * names, and where the scope comes from (absent: the request tenant).
+ *
+ * Internal: not exported from the package barrel.
+ */
+export interface ScopedRequirement {
+  /** The role or permission names. */
+  readonly names: readonly string[];
+  /** The scope source; absent means `scopeFromTenant()`. */
+  readonly scope?: ScopeSource;
+}
+
+/**
+ * One `@RequirePolicy(policy, ability, target?)` requirement on a route (M110a).
+ *
+ * `policy` is a `@Policy` class or a `PolicyDefinition`; both are resolved to a
+ * policy NAME at `register()`. `target` is a value, or an extractor called per
+ * request.
+ *
+ * @since 0.9.0
+ */
+export interface PolicyRequirement {
+  /** The policy: a `@Policy` class or a definition. */
+  readonly policy: Constructor | PolicyDefinition;
+  /** The ability name. */
+  readonly ability: string;
+  /**
+   * The target value or extractor, when supplied. An omitted target and an
+   * explicit `undefined` evaluate identically.
+   */
+  readonly target?: unknown;
+}
+
+/**
+ * What `@Policy` and `@Ability` record about a policy class (M110a).
+ *
+ * @since 0.9.0
+ */
+export interface PolicyClassMetadata {
+  /** The policy name from `@Policy(name)`; absent when only `@Ability` ran. */
+  readonly name?: string;
+  /** Ability method names → whether each opted in to anonymous principals. */
+  readonly abilities: ReadonlyMap<string, boolean>;
 }
 
 /**
@@ -322,6 +383,18 @@ export interface MethodMeta {
    * `register()`, leaving no header able to overwrite another.
    */
   responseHeaders?: ResponseHeaderMetadata[];
+  /** Idempotency options declared by `@Idempotent(options?)` (mutable twin, M109a). */
+  idempotent?: IdempotentRouteOptions;
+  /**
+   * Policy requirements declared by `@RequirePolicy` (mutable twin, M110a). Decorators
+   * apply bottom-up, so each `@RequirePolicy` PREPENDS — the list reads top to bottom,
+   * which is the order the requirements are evaluated in.
+   */
+  policies?: PolicyRequirement[];
+  /** `@ScopedRoles` (mutable twin, M110b). */
+  scopedRoles?: ScopedRequirement;
+  /** `@ScopedPermissions` (mutable twin, M110b). */
+  scopedPermissions?: ScopedRequirement;
 }
 
 /**
@@ -381,6 +454,10 @@ export class MetadataStore implements IMetadataStore {
   private readonly _ctorOptional = new Map<Constructor, Set<number>>();
   private readonly _modules = new Map<Constructor, ModuleMetadata>();
   private readonly _ingress = new Map<Constructor, IngressMetadata[]>();
+  private readonly _policyClasses = new Map<
+    Constructor,
+    { name?: string; readonly abilities: Map<string, boolean> }
+  >();
 
   /** Controllers keyed by class. */
   get controllers(): Map<Constructor, Readonly<Record<string, unknown>>> {
@@ -441,6 +518,16 @@ export class MetadataStore implements IMetadataStore {
         ? { permissions: partial.permissions }
         : existing.permissions !== undefined
         ? { permissions: existing.permissions }
+        : {}),
+      ...(partial.scopedRoles !== undefined
+        ? { scopedRoles: partial.scopedRoles }
+        : existing.scopedRoles !== undefined
+        ? { scopedRoles: existing.scopedRoles }
+        : {}),
+      ...(partial.scopedPermissions !== undefined
+        ? { scopedPermissions: partial.scopedPermissions }
+        : existing.scopedPermissions !== undefined
+        ? { scopedPermissions: existing.scopedPermissions }
         : {}),
     };
     this._controllers.set(target, merged);
@@ -633,6 +720,51 @@ export class MetadataStore implements IMetadataStore {
   }
 
   /**
+   * Records a policy class's name (`@Policy`).
+   *
+   * @param target - The policy class
+   * @param name - The policy name
+   * @internal
+   */
+  setPolicyName(target: Constructor, name: string): void {
+    this.#policyClass(target).name = name;
+  }
+
+  /**
+   * Records one ability method of a policy class (`@Ability`).
+   *
+   * @param target - The policy class
+   * @param method - The ability method name
+   * @param anonymous - Whether it opted in to anonymous principals
+   * @internal
+   */
+  addPolicyAbility(target: Constructor, method: string, anonymous: boolean): void {
+    this.#policyClass(target).abilities.set(method, anonymous);
+  }
+
+  /**
+   * Returns what `@Policy`/`@Ability` recorded for a class.
+   *
+   * @param target - The class to inspect
+   * @returns The policy metadata, or `undefined` when neither decorator ran
+   * @internal
+   */
+  getPolicyClass(target: Constructor): PolicyClassMetadata | undefined {
+    this.#drain(target);
+    return this._policyClasses.get(target);
+  }
+
+  /** Returns the mutable policy-class record, creating it if absent. */
+  #policyClass(target: Constructor): { name?: string; readonly abilities: Map<string, boolean> } {
+    let entry = this._policyClasses.get(target);
+    if (entry === undefined) {
+      entry = { abilities: new Map() };
+      this._policyClasses.set(target, entry);
+    }
+    return entry;
+  }
+
+  /**
    * Returns the (mutable) method accumulator for a controller method,
    * creating it if absent.
    *
@@ -769,6 +901,7 @@ export class MetadataStore implements IMetadataStore {
     this._ctorOptional.clear();
     this._modules.clear();
     this._ingress.clear();
+    this._policyClasses.clear();
   }
 
   /**
@@ -792,8 +925,14 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.permissions !== undefined ? { permissions: [...meta.permissions] } : {}),
       ...(meta.view !== undefined ? { view: meta.view } : {}),
       ...(meta.httpCode !== undefined ? { httpCode: meta.httpCode } : {}),
+      ...(meta.idempotent !== undefined ? { idempotent: meta.idempotent } : {}),
       ...(meta.redirect !== undefined ? { redirect: meta.redirect } : {}),
       ...(meta.responseHeaders !== undefined ? { responseHeaders: [...meta.responseHeaders] } : {}),
+      ...(meta.policies !== undefined ? { policies: [...meta.policies] } : {}),
+      ...(meta.scopedRoles !== undefined ? { scopedRoles: meta.scopedRoles } : {}),
+      ...(meta.scopedPermissions !== undefined
+        ? { scopedPermissions: meta.scopedPermissions }
+        : {}),
     };
   }
 }

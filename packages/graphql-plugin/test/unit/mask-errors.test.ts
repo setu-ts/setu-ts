@@ -2,8 +2,7 @@
  * Tests for mask-errors.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { isExposable, maskErrors } from '../../src/security/mask-errors.ts';
 
 describe('mask-errors', () => {

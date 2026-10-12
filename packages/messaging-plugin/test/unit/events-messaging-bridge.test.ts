@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { EventsMessagingBridge } from '../../src/bridge/events-messaging-bridge.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPluginContext, IRuntimeServices } from '@setu-ts/common';

@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { pemToDer } from '../../src/providers/pem.ts';
 
 /** Wraps base64 in a PRIVATE KEY envelope. */

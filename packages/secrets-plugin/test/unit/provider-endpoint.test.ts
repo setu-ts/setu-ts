@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { adaptAwsModule, AwsKmsProvider, type AwsSdkModule } from '../../src/providers/aws-kms.ts';
 import {

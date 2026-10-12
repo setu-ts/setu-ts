@@ -14,7 +14,11 @@ import type { IClientTiming } from './contracts.ts';
  *
  * @internal
  */
-export function createRateLimiter(maxRequests: number, windowMs: number, timing: IClientTiming) {
+export function createRateLimiter(
+  maxRequests: number,
+  windowMs: number,
+  timing: IClientTiming,
+): { acquire: (signal?: AbortSignal) => Promise<void> } {
   const timestamps: number[] = [];
 
   const acquire = async (signal?: AbortSignal): Promise<void> => {

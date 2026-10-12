@@ -1,8 +1,7 @@
 /**
  * Unit tests for IEventHandler and subscribeHandler.
  */
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { InMemoryEventBus } from '../../src/bus/in-memory-event-bus.ts';
 import { defineDomainEvent } from '../../src/events/domain-event.ts';
 import type { IEventHandler } from '../../src/handlers/event-handler.ts';

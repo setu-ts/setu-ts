@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { NatsBroker, validateClient } from '../../src/brokers/nats-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -8,6 +7,7 @@ import type { FakeNatsOptions } from '../fixtures/fake-nats-client.ts';
 import {
   JetStreamStreamError,
   JetStreamUnavailableError,
+  NatsConsumerNameCollisionError,
   RequestTimeoutError,
 } from '../../src/errors.ts';
 
@@ -59,6 +59,62 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
+  // js.publish answers with a promise of the server's PubAck. Unawaited, a
+  // refused publish resolved as a success while the refusal escaped as an
+  // unhandled rejection — which terminates a Deno or Node process.
+  describe('awaits the JetStream acknowledgement', () => {
+    it('rejects, naming the subject and the remedy, when no stream captures it', async () => {
+      const fakeConnection = new FakeNatsConnection({ publishFailure: 'no-stream' });
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+      });
+      await broker.connect();
+      const error = await broker.publish('outside.the.stream', { a: 1 }).then(
+        () => undefined,
+        (e: unknown) => e as Error & { cause?: { code?: string } },
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error!.message).toContain('"outside.the.stream"');
+      expect(error!.message).toContain('NatsOptions.streamSubjects');
+      expect(error!.cause?.code).toBe('503');
+      await broker.disconnect();
+    });
+
+    it('rejects, naming the subject, when the server never acknowledges', async () => {
+      const fakeConnection = new FakeNatsConnection({ publishFailure: 'timeout' });
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+      });
+      await broker.connect();
+      const error = await broker.publishWithHeaders('orders', { id: 1 }, {}).then(
+        () => undefined,
+        (e: unknown) => e as Error & { cause?: { code?: string } },
+      );
+      expect(error!.message).toContain('"orders"');
+      expect(error!.message).not.toContain('streamSubjects');
+      expect(error!.cause?.code).toBe('TIMEOUT');
+      await broker.disconnect();
+    });
+
+    it('rejects through the header-carrying path too', async () => {
+      const fakeConnection = new FakeNatsConnection({ publishFailure: 'no-stream' });
+      const values = new Map<string, string>();
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: fakeConnection,
+        headersFactory: () => ({
+          set: (key, value) => values.set(key, value),
+          get: (key) => values.get(key),
+          keys: () => values.keys(),
+        }),
+      });
+      await broker.connect();
+      await expect(broker.publishWithHeaders('nowhere', { a: 1 }, { traceparent: '00-t' }))
+        .rejects.toThrow('"nowhere"');
+      expect(values.get('traceparent')).toBe('00-t');
+      await broker.disconnect();
+    });
+  });
+
   it('publishes supplied framework headers through the injected factory', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
@@ -98,6 +154,25 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
+  it('still applies a de-duplication id natively when no MsgHdrs factory exists', async () => {
+    // nats.js builds the `Nats-Msg-Id` header itself from the `msgID` option,
+    // so the server de-duplicates even though caller headers cannot ride.
+    const fakeConnection = new FakeNatsConnection();
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: fakeConnection,
+      logger: { error: () => {} },
+    });
+    await broker.connect();
+
+    await broker.publish('orders', { id: 1 }, { deduplicationId: 'order-1' });
+    await broker.publish('orders', { id: 2 });
+
+    const publishes = fakeConnection.jetstream().calls.filter((c) => c.method === 'publish');
+    expect(publishes[0]?.args[2]).toEqual({ msgID: 'order-1' });
+    expect(publishes[1]?.args[2]).toBeUndefined();
+    await broker.disconnect();
+  });
+
   it('stays silent when no headers were supplied, since nothing is lost', async () => {
     const errors: string[] = [];
     const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
@@ -132,6 +207,53 @@ describe('NatsBroker', () => {
     });
     expect(headers).toEqual({ traceparent: '00-parent' });
     await broker.disconnect();
+  });
+
+  it('keeps a delivered __proto__ header as an own key where the setter exists', async () => {
+    // Deno deletes `Object.prototype.__proto__`; Node and Bun keep it, and an
+    // assignment-built record silently drops the key there (M106 §10).
+    const previous = Object.getOwnPropertyDescriptor(Object.prototype, '__proto__');
+    Object.defineProperty(Object.prototype, '__proto__', {
+      configurable: true,
+      get(this: object): object | null {
+        return Object.getPrototypeOf(this);
+      },
+      set(this: object, value: unknown): void {
+        if (typeof value === 'object') Object.setPrototypeOf(this, value);
+      },
+    });
+    try {
+      // Vacuity guard: under the accessor, assigning a string to `__proto__`
+      // is a no-op (the setter ignores non-objects), so the key is dropped.
+      // `Reflect.set` performs that ordinary assignment, setter included.
+      const assigned: Record<string, string> = {};
+      Reflect.set(assigned, '__proto__', 'v');
+      expect(Object.keys(assigned)).toEqual([]);
+
+      const values = new Map([['__proto__', 'proto-value'], ['x-a', '1']]);
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: new FakeNatsConnection({
+          seededMessages: [{
+            subject: 'orders',
+            data: '{"id":"1"}',
+            seq: 1,
+            timestampNanos: 1735689600000000000,
+            headers: { keys: () => values.keys(), get: (key) => values.get(key) },
+          }],
+        }),
+      });
+      await broker.connect();
+      let headers: Readonly<Record<string, string>> | undefined;
+      await broker.subscribeWithHeaders('orders', (_message, metadata) => {
+        headers = metadata.headers;
+      });
+      await broker.disconnect();
+      expect(Object.keys(headers ?? {})).toEqual(['__proto__', 'x-a']);
+      expect(Object.getPrototypeOf(headers)).toBe(Object.prototype);
+    } finally {
+      if (previous) Object.defineProperty(Object.prototype, '__proto__', previous);
+      else delete (Object.prototype as { __proto__?: unknown }).__proto__;
+    }
   });
 
   it('subscribe creates durable consumer', async () => {
@@ -993,6 +1115,179 @@ describe('NatsBroker request-reply delegation', () => {
       caught = err;
     }
     expect(caught).toBeInstanceOf(RequestTimeoutError);
+    await broker.disconnect();
+  });
+});
+
+describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
+  type AddConfig = {
+    name: string;
+    durable_name: string;
+    filter_subject: string;
+    metadata: Record<string, string>;
+  };
+
+  async function connected(options: FakeNatsOptions = {}) {
+    const connection = new FakeNatsConnection(options);
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: connection,
+    });
+    await broker.connect();
+    const jsm = await connection.jetstreamManager();
+    const adds = () =>
+      jsm.calls.filter((c) => c.method === 'consumers.add').map((c) => c.args[1] as AddConfig);
+    return { broker, jsm, adds };
+  }
+
+  async function rejection(promise: Promise<unknown>): Promise<unknown> {
+    return await promise.then(() => null, (e: unknown) => e);
+  }
+
+  it('encodes a dotted queue into name AND durable_name, keeping the dotted subject', async () => {
+    const { broker, adds } = await connected();
+
+    await broker.subscribe('orders.created', () => {}, { queue: 'rr.inbox.abc' });
+
+    expect(adds()).toEqual([{
+      name: 'rr_2einbox_2eabc',
+      durable_name: 'rr_2einbox_2eabc',
+      filter_subject: 'orders.created',
+      ack_policy: 'explicit',
+      metadata: { 'setu.queue': 'rr.inbox.abc' },
+    }]);
+    await broker.disconnect();
+  });
+
+  it('subscribes the same queue twice without refusing it (idempotent create)', async () => {
+    const { broker, adds } = await connected();
+
+    await broker.subscribe('orders', () => {}, { queue: 'orders.eu' });
+    await broker.subscribe('orders', () => {}, { queue: 'orders.eu' });
+
+    expect(adds()).toHaveLength(2);
+    await broker.disconnect();
+  });
+
+  it('refuses a second queue that encodes to the same name, before any add', async () => {
+    const { broker, adds } = await connected();
+    await broker.subscribe('orders', () => {}, { queue: 'orders.eu' });
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders_2eeu' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    const named = err as NatsConsumerNameCollisionError;
+    expect(named.queue).toBe('orders_2eeu');
+    expect(named.existingQueue).toBe('orders.eu');
+    expect(named.consumerName).toBe('orders_2eeu');
+    expect(named.message).toContain('"orders_2eeu"');
+    expect(named.message).toContain('"orders.eu"');
+    expect(adds()).toHaveLength(1);
+    await broker.disconnect();
+  });
+
+  it('refuses a consumer another process created for a different queue', async () => {
+    const { broker, jsm, adds } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: {
+          name: 'orders_2eeu',
+          durable_name: 'orders_2eeu',
+          filter_subject: 'orders',
+          metadata: { 'setu.queue': 'orders.eu' },
+        },
+      }],
+    });
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders_2eeu' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    expect((err as NatsConsumerNameCollisionError).existingQueue).toBe('orders.eu');
+    expect(adds()).toHaveLength(1);
+    expect(jsm.calls.some((c) => c.method === 'consumers.info')).toBe(true);
+    await broker.disconnect();
+  });
+
+  it('refuses a queue reused across topics instead of attaching to the first topic', async () => {
+    const { broker } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: {
+          name: 'workers',
+          durable_name: 'workers',
+          filter_subject: 'orders',
+          metadata: { 'setu.queue': 'workers' },
+        },
+      }],
+    });
+
+    const err = await rejection(broker.subscribe('payments', () => {}, { queue: 'workers' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    await broker.disconnect();
+  });
+
+  it('attaches to a pre-M101b consumer whose durable name IS the raw queue', async () => {
+    const { broker, adds } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: { name: 'my-consumer', durable_name: 'my-consumer', filter_subject: 'orders' },
+      }],
+    });
+
+    await broker.subscribe('orders', () => {}, { queue: 'my-consumer' });
+
+    // The create differs only by the new metadata, so the server answers
+    // "already exists"; the legacy consumer is accepted, with no second add.
+    expect(adds()).toHaveLength(1);
+    await broker.disconnect();
+  });
+
+  it('refuses a pre-M101b consumer whose durable name is a DIFFERENT raw queue', async () => {
+    const { broker, jsm, adds } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: { name: 'orders_2eeu', durable_name: 'orders_2eeu', filter_subject: 'orders' },
+      }],
+    });
+
+    const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders.eu' }));
+
+    expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    expect((err as NatsConsumerNameCollisionError).existingQueue).toBe('orders_2eeu');
+    expect(adds()).toHaveLength(1);
+    expect(jsm.calls.filter((c) => c.method === 'consumers.info')).toHaveLength(1);
+    await broker.disconnect();
+  });
+
+  it('recognises "already exists" by message when no api_error code is attached', async () => {
+    const { broker, jsm } = await connected({
+      existingConsumers: [{
+        stream: 'MESSAGING',
+        config: {
+          name: 'q',
+          durable_name: 'q',
+          filter_subject: 'orders',
+          metadata: { 'setu.queue': 'other' },
+        },
+      }],
+    });
+    for (const message of ['consumer already exists', 'duplicate consumer']) {
+      jsm.consumers.add = () => Promise.reject(new Error(message));
+      const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'q' }));
+      expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
+    }
+    await broker.disconnect();
+  });
+
+  it('rethrows any other consumer-create failure unchanged', async () => {
+    const { broker, jsm } = await connected();
+    const failure = new Error('stream not found');
+    jsm.consumers.add = () => Promise.reject(failure);
+    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'q' }))).toBe(failure);
+
+    const thrown = 'a bare string rejection';
+    jsm.consumers.add = () => Promise.reject(thrown);
+    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'q' }))).toBe(thrown);
     await broker.disconnect();
   });
 });

@@ -4,8 +4,7 @@
  * Covers get<T>(key), get<T>(key, { default }), getOrThrow<T>(key),
  * has(key), and edge cases with undefined values.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { ConfigService } from '../../src/services/config-service.ts';
 

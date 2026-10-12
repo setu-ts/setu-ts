@@ -79,20 +79,23 @@ export class MailService implements IMailer {
 
   /**
    * Renders a named template and sends the result. The `subject` is taken
-   * verbatim from `message`; the template supplies the `html`/`text` bodies.
+   * verbatim from `message`; the template supplies the `html`/`text` bodies —
+   * `{{ variable }}` strings, or view components rendered through
+   * `CAPABILITIES.VIEW` with `data` as their props (M102).
    *
    * @param template - Template name
    * @param message - Envelope (recipients, subject, optional `from`/`cc`/`bcc`)
-   * @param data - Template variables
-   * @throws {Error} If the template is unknown, a variable is missing, no `from`
-   *   can be resolved, or the provider rejects the message
+   * @param data - Template variables, or the component's props
+   * @throws {Error} If the template is unknown, a string-template variable is
+   *   missing, a component throws while rendering, no `from` can be resolved,
+   *   or the provider rejects the message
    */
   async sendTemplate(
     template: string,
     message: Omit<MailMessage, 'html' | 'text'>,
     data: Readonly<Record<string, unknown>>,
   ): Promise<void> {
-    const rendered = this.#templates.render(template, data);
+    const rendered = await this.#templates.render(template, data);
     await this.#provider.send(this.#resolve({ ...message, ...rendered }));
   }
 

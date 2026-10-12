@@ -1,3 +1,5 @@
+import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * V5-3 — a generated handler must satisfy the project's own `deno fmt --check`
  * whatever its artifact is called.
@@ -17,8 +19,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { generateQueryHandler } from '../../src/schematics/query-handler.ts';
 import { generateCommandHandler } from '../../src/schematics/command-handler.ts';
@@ -92,30 +93,31 @@ const GENERATORS: ReadonlyArray<readonly [string, Generator]> = [
  * accepts them unchanged.
  */
 async function fmtAccepts(files: readonly GeneratedFile[]): Promise<{ ok: boolean; out: string }> {
-  const dir = await Deno.makeTempDir({ prefix: 'v5-3-' });
+  const dir = await tempDir({ prefix: 'v5-3-' });
   try {
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       `${dir}/deno.json`,
       `${JSON.stringify(rootManifestSettings(), null, 2)}\n`,
     );
     for (const file of files) {
       const path = `${dir}/${file.path}`;
-      await Deno.mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
-      await Deno.writeTextFile(path, file.contents);
+      await nodeFs.mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
+      await nodeFs.writeFile(path, file.contents);
     }
-    const cmd = new Deno.Command('deno', {
-      args: ['fmt', '--check'],
-      cwd: dir,
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const result = await cmd.output();
+    const cmd = () =>
+      runProcess('deno', {
+        args: ['fmt', '--check'],
+        cwd: dir,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+    const result = await cmd();
     return {
       ok: result.success,
       out: new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr),
     };
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    await nodeFs.rm(dir, { recursive: true });
   }
 }
 

@@ -1,8 +1,7 @@
 /**
  * Tests for JobRegistry.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { JobRegistry } from '../../src/jobs/job-registry.ts';
 import type { RegistryEntry } from '../../src/interfaces/index.ts';
 
@@ -189,7 +188,7 @@ describe('JobRegistry', () => {
       paused: false,
       nextRunAtMs: 10000,
       timerHandle: null,
-      slotClaimed: true,
+      slotClaim: 'claimed',
       slotToken: 'test-token',
     };
     registry.add(entry);

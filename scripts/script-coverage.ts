@@ -45,6 +45,10 @@ const THRESHOLD = 90;
  * gate then refuses a run that omits it.
  */
 export const SCRIPT_TARGETS: readonly string[] = [
+  'scripts/side-effects.ts',
+  'scripts/npm-release-gate.ts',
+  'scripts/npm-placeholders.ts',
+  'scripts/tar-read.ts',
   'scripts/check-docs.ts',
   'scripts/check-prose-assertions.ts',
   // The behaviour gate's pure core: fence selection, definition
@@ -78,6 +82,34 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // is a SILENT PASS — an export ships unannounced and the gate says it did
   // not — so the comparison itself carries the bar, with its I/O injected.
   'scripts/check-changelog-coverage.ts',
+  // The changelog PR-coverage check (verify-release check 9): merged PRs since
+  // the previous tag against the shipping section. `mergedPullRequests` is the
+  // git seam; `checkChangelogPrs`, `requiredToken` and `splitSections` carry
+  // the bar. Its failure mode is a SILENT PASS — a release ships without a
+  // PR's notes and the check says every PR is represented.
+  'scripts/changelog-prs.ts',
+  // The Node manifest generator (M111a §3.1): every member's package.json and
+  // tsconfig.json are its output, so a classification defect is a published
+  // manifest declaring the wrong dependencies. Its I/O seam takes a root, so
+  // the tests drive it against a throwaway workspace and it carries the bar
+  // whole.
+  'scripts/node-manifests.ts',
+  // The Node pack-and-boot gate's decidable core (M111a §3.10). Its runner
+  // (`check-node-build.ts`) spawns pnpm, npm, Node and Bun and is deliberately
+  // NOT a target — the M39 `check-deploy.ts` precedent. Its failure mode is a
+  // skip reported as a pass, which `decideOutcome` exists to refuse.
+  'scripts/node-build-gate.ts',
+  // The release bump. `main` is the filesystem seam; `planBump` and
+  // `rewriteReferences` are the decidable core, and a wrong edit here is a
+  // published package depending on the previous release.
+  'scripts/bump-version.ts',
+  // `release:verify` check 1's Node half (M111a §3.5): a package.json or
+  // src/version.ts that disagrees with the tag. Its failure mode is a SILENT
+  // PASS — an npm package whose manifest or runtime VERSION names the wrong release.
+  'scripts/version-sites.ts',
+  // Check 10's pure core: the bump kind against the section's BREAKING count.
+  // Its failure mode is a patch that breaks a caret pin's reader.
+  'scripts/release-shape.ts',
   // The suite partition's classifier. Its runner (`test-partition.ts`) is
   // deliberately NOT a target — it is the process seam the decidable logic was
   // extracted out of, and a test cannot drive it without spawning the whole
@@ -86,9 +118,9 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // goes red, and the cost surfaces later as an intermittent failure somewhere
   // else entirely.
   'scripts/test-partition-rules.ts',
-  // The publication hold's decision. `publish-packages.ts` runs it at the top
+  // The publication hold's decision. `npm-publish.ts` runs it at the top
   // level and is the process seam; this carries the bar. Its failure mode is a
-  // SILENT PUBLISH: a held package reaching JSR, where a version is immutable.
+  // SILENT PUBLISH: a held package reaching npm, where a version is immutable.
   'scripts/publication-hold.ts',
 ];
 

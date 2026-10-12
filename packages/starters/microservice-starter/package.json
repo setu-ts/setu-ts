@@ -1,0 +1,53 @@
+{
+  "name": "@setu-ts/microservice-starter",
+  "version": "0.9.0",
+  "description": "createMicroserviceApp — REST plus messaging, queues, resilience, and telemetry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/starters/microservice-starter"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/starters/microservice-starter",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/messaging-plugin": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/resilience-plugin": "workspace:^",
+    "@setu-ts/rest-starter": "workspace:^",
+    "@setu-ts/telemetry-plugin": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

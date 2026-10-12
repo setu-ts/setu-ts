@@ -1,10 +1,11 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Integration test - real kernel app: createApplication(AuditPlugin), resolve
  * IAuditLogger from CAPABILITIES.AUDIT, log() an entry, and assert the audit
  * service was registered correctly.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { AuditPlugin } from '../../src/index.ts';
@@ -139,7 +140,7 @@ describe('AuditPlugin integration (real kernel)', () => {
   it('resolves IAuditLogger with file storage backend', async () => {
     // Use a self-created temp directory so the test does not depend on any
     // pre-existing directory (a fixed relative path fails on a clean checkout).
-    const dir = await Deno.makeTempDir({ prefix: 'audit-plugin-test-' });
+    const dir = await tempDir({ prefix: 'audit-plugin-test-' });
     const filePath = `${dir}/audit.log`;
     const fileApp = createApplication({
       plugins: [
@@ -172,17 +173,17 @@ describe('AuditPlugin integration (real kernel)', () => {
       });
 
       // Read the file back to confirm both entries persisted.
-      const content = await Deno.readTextFile(filePath);
+      const content = await nodeFs.readFile(filePath, 'utf8');
       const lines = content.split('\n').filter((l) => l.trim().length > 0);
       expect(lines.length).toBe(2);
     } finally {
       await fileApp.stop();
-      await Deno.remove(dir, { recursive: true });
+      await nodeFs.rm(dir, { recursive: true });
     }
   });
 
   it('file backend creates a missing parent directory on the real filesystem', async () => {
-    const dir = await Deno.makeTempDir({ prefix: 'audit-plugin-mkdir-' });
+    const dir = await tempDir({ prefix: 'audit-plugin-mkdir-' });
     // A path whose parent directories do NOT exist yet.
     const nestedPath = `${dir}/nested/deeper/audit.log`;
     const app = createApplication({
@@ -199,18 +200,18 @@ describe('AuditPlugin integration (real kernel)', () => {
 
       // The previously-absent parent directories and the file now exist on the
       // real Deno filesystem — the write did not fail with ENOENT.
-      const fileStat = await Deno.stat(nestedPath);
-      expect(fileStat.isFile).toBe(true);
-      const dirStat = await Deno.stat(`${dir}/nested/deeper`);
-      expect(dirStat.isDirectory).toBe(true);
+      const fileStat = await nodeFs.stat(nestedPath);
+      expect(fileStat.isFile()).toBe(true);
+      const dirStat = await nodeFs.stat(`${dir}/nested/deeper`);
+      expect(dirStat.isDirectory()).toBe(true);
 
-      const content = await Deno.readTextFile(nestedPath);
+      const content = await nodeFs.readFile(nestedPath, 'utf8');
       const lines = content.split('\n').filter((l) => l.trim().length > 0);
       expect(lines.length).toBe(1);
       expect(JSON.parse(lines[0]).action).toBe('dir.create');
     } finally {
       await app.stop();
-      await Deno.remove(dir, { recursive: true });
+      await nodeFs.rm(dir, { recursive: true });
     }
   });
 });

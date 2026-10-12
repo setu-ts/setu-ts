@@ -9,9 +9,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createElement as h } from '@hono/hono/jsx';
+import { describe, expect, it } from 'vitest';
+import { createElement as h } from 'hono/jsx';
 
 import { normalizeRendered, renderComponent } from '../../src/render/normalize.ts';
 import type { Component } from '@setu-ts/common';

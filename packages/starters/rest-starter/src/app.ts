@@ -61,6 +61,8 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     ...(options.database ? [DatabasePlugin(options.database)] : []),
     ...(options.auth ? [AuthPlugin(options.auth)] : []),
     ...(options.session ? [SessionPlugin(options.session)] : []),
+    // DiPlugin's own `autoRegister: true` default is what lets an @Injectable
+    // class @Inject(CAPABILITIES.X); the options pass through unchanged.
     ...(options.di ? [DiPlugin(options.di)] : []),
     ...(options.graphql ? [GraphqlPlugin(options.graphql)] : []),
     ...(options.serviceDiscovery ? [ServiceDiscoveryPlugin(options.serviceDiscovery)] : []),

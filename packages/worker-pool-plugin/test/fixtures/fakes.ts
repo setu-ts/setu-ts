@@ -162,7 +162,7 @@ export class FakeHost implements IWorkerHost {
 
 /** Deterministic manual timers driven by `fire()`. */
 export class FakeTimers {
-  private readonly pending = new Map<number, () => void>();
+  private readonly pending = new Map<number, { readonly fn: () => void; readonly ms: number }>();
   private nextId = 1;
   /**
    * Every `setInterval` call made through the runtime this fixture backs.
@@ -172,9 +172,9 @@ export class FakeTimers {
    */
   readonly intervals: number[] = [];
 
-  setTimeout(fn: () => void, _ms: number): TimerHandle {
+  setTimeout(fn: () => void, ms: number): TimerHandle {
     const id = this.nextId++;
-    this.pending.set(id, fn);
+    this.pending.set(id, { fn, ms });
     return id;
   }
 
@@ -193,12 +193,23 @@ export class FakeTimers {
     return this.nextId++;
   }
 
-  /** Fires every armed timer. */
-  fire(): void {
-    const callbacks = [...this.pending.values()];
-    this.pending.clear();
-    for (const callback of callbacks) {
-      callback();
+  /**
+   * Fires every armed timer whose delay is at most `maxDelayMs`.
+   *
+   * The default stops below the 60 s startup deadline the pool tests configure
+   * (`startupTimeoutMs: 60_000`), so a test firing task timeouts does not also
+   * fail every still-starting worker — which is what a real clock would do,
+   * since task deadlines are shorter. Pass `Infinity` to fire everything.
+   *
+   * @param maxDelayMs - Largest delay to fire
+   */
+  fire(maxDelayMs = 30_000): void {
+    const due = [...this.pending].filter(([, timer]) => timer.ms <= maxDelayMs);
+    for (const [id] of due) {
+      this.pending.delete(id);
+    }
+    for (const [, timer] of due) {
+      timer.fn();
     }
   }
 }

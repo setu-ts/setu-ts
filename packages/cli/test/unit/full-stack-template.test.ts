@@ -1,3 +1,5 @@
+import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * Tests for the `full-stack` template definition and the files it emits.
  *
@@ -11,8 +13,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { TargetRuntime } from '../../src/constants.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
@@ -398,7 +399,93 @@ describe('full-stack template | manifest contributions', () => {
 
     expect(vite).toContain('environments');
     expect(vite).toContain('rollupOptions');
-    expect(vite).toContain('external: frameworkPackages');
+    expect(vite).toContain(
+      'external: (id) => isDeclared(frameworkPackages, id) || isDeclared(workspaceLibraries, id)',
+    );
+  });
+
+  it('reads declared library identities and documents the server-only boundary', () => {
+    const vite = contentsOf('vite.config.ts');
+    expect(vite).toContain("new URL('../../libs/', import.meta.url)");
+    expect(vite).toContain("for (const file of ['deno.json', 'deno.jsonc'])");
+    expect(vite).toContain('workspaceLibraries.push(manifest.name)');
+    expect(FULL_STACK_TEMPLATE.manifest?.readmeSection).toContain('Client modules cannot import');
+  });
+});
+
+describe('full-stack vite.config.ts | executed', () => {
+  // PR #415 review: a library named only in deno.jsonc, and an exported subpath
+  // of a declared package, must both stay external to the SSR build. Executes the
+  // emitted file against stub `vite` modules so the predicate is run, not read.
+  it('externalizes deno.jsonc libraries and exported subpaths, and nothing else', async () => {
+    const root = await tempDir({ prefix: 'setu-vite-config-' });
+    try {
+      const app = `${root}/apps/web`;
+      await nodeFs.mkdir(app, { recursive: true });
+      await nodeFs.writeFile(`${app}/vite.config.ts`, contentsOf('vite.config.ts'));
+      await nodeFs.writeFile(
+        `${app}/vite.ts`,
+        'export const defineConfig = (c: unknown) => c;\n',
+      );
+      await nodeFs.writeFile(`${app}/rr.ts`, 'export const reactRouter = () => ({});\n');
+      await nodeFs.writeFile(
+        `${app}/deno.json`,
+        JSON.stringify({ imports: { 'vite': './vite.ts', '@react-router/dev/vite': './rr.ts' } }),
+      );
+      const library = async (name: string, file: string, text: string) => {
+        await nodeFs.mkdir(`${root}/libs/${name}`, { recursive: true });
+        await nodeFs.writeFile(`${root}/libs/${name}/${file}`, text);
+      };
+      await library('plain', 'deno.json', '{ "name": "@custom/plain" }');
+      await library(
+        'commented',
+        'deno.jsonc',
+        '{\n  // a line comment, "quoted"\n  /* a block */ "name": "@custom/jsonc",\n' +
+          '  "url": "http://a/*b*/,]",\n  "exports": { ".": "./mod.ts", },\n}\n',
+      );
+      await library('both', 'deno.json', '{ "name": "@custom/json-wins" }');
+      await library('both', 'deno.jsonc', '{ "name": "@custom/jsonc-loses" }');
+      await library('broken', 'deno.jsonc', '{ "name": ');
+      const ids = [
+        '@setu-ts/common',
+        '@setu-ts/common/sub',
+        '@setu-ts/commonx',
+        '@custom/plain',
+        '@custom/plain/util',
+        '@custom/jsonc',
+        '@custom/jsonc/deep/path',
+        '@custom/json-wins',
+        '@custom/jsonc-loses',
+        '@custom/plainer',
+        'react',
+      ];
+      await nodeFs.writeFile(
+        `${app}/run.ts`,
+        "import config from './vite.config.ts';\n" +
+          'const external = (config as { environments: { ssr: { build: { rollupOptions: ' +
+          '{ external: (id: string) => boolean } } } } }).environments.ssr.build.rollupOptions' +
+          '.external;\n' +
+          `console.log(JSON.stringify(${JSON.stringify(ids)}.filter((id) => external(id))));\n`,
+      );
+      const result = await runProcess('deno', {
+        args: ['run', '--no-lock', '--allow-read', '--config', `${app}/deno.json`, `${app}/run.ts`],
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      const stderr = new TextDecoder().decode(result.stderr);
+      expect(result.code, stderr).toBe(0);
+      expect(JSON.parse(new TextDecoder().decode(result.stdout))).toEqual([
+        '@setu-ts/common',
+        '@setu-ts/common/sub',
+        '@custom/plain',
+        '@custom/plain/util',
+        '@custom/jsonc',
+        '@custom/jsonc/deep/path',
+        '@custom/json-wins',
+      ]);
+    } finally {
+      await nodeFs.rm(root, { recursive: true });
+    }
   });
 });
 
@@ -422,5 +509,24 @@ describe('full-stack app files | module-level shape', () => {
     // client bundle.
     expect(model).not.toContain('@setu-ts/');
     expect(model).not.toContain('.server.ts');
+  });
+});
+
+describe('full-stack gRPC csrf exclusion', () => {
+  // Audit round 5 (C-R5): the generated configuration must stay inside the language
+  // the CLI's own config reader classifies, so the exclusion is `new RegExp('…')`
+  // rather than a regex literal, and a base path that would need escaping is refused.
+  it('emits a RegExp constructor with no regex literal and no backslash', () => {
+    const args = FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath: '/grpc' });
+    expect(args).toContain("csrf: { exclude: [new RegExp('^/grpc(?:/|$)')] },");
+    expect(args).not.toContain('\\');
+    expect(args).not.toMatch(/\[\//);
+  });
+
+  it('refuses a base path that is not a single plain segment', () => {
+    for (const grpcBasePath of ['/a.b', '/a/b', 'grpc', '/']) {
+      expect(() => FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath }))
+        .toThrow('must be a single plain path segment');
+    }
   });
 });

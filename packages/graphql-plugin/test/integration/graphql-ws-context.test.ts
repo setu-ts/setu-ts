@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration test for X6-6 (M70i): the resolver context differs exactly as
  * documented between the HTTP and WebSocket transports.
@@ -11,8 +12,7 @@
  * the alternative (synthesizing a dead `requestContext` over WS).
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
@@ -40,12 +40,36 @@ function opened(socket: WebSocket): Promise<void> {
 }
 
 /** Resolves with the next inbound message. */
+const messageQueues = new WeakMap<
+  WebSocket,
+  { values: string[]; waiter?: (value: string) => void }
+>();
 function nextMessage(socket: WebSocket): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('timed out waiting for message')), 5000);
-    socket.onmessage = (event: MessageEvent) => {
+  let queue = messageQueues.get(socket);
+  if (!queue) {
+    queue = { values: [] };
+    const inbox = queue;
+    socket.addEventListener('message', (event) => {
+      const value = String(event.data);
+      if (inbox.waiter) {
+        const accept = inbox.waiter;
+        delete inbox.waiter;
+        accept(value);
+      } else inbox.values.push(value);
+    });
+    messageQueues.set(socket, queue);
+  }
+  const value = queue.values.shift();
+  if (value !== undefined) return Promise.resolve(value);
+  const inbox = queue;
+  return new Promise((accept, reject) => {
+    const timer = setTimeout(() => {
+      delete inbox.waiter;
+      reject(new Error('timed out waiting for message'));
+    }, 5000);
+    inbox.waiter = (message) => {
       clearTimeout(timer);
-      resolve(String(event.data));
+      accept(message);
     };
   });
 }
@@ -62,11 +86,8 @@ function closed(socket: WebSocket): Promise<void> {
 }
 
 /** Picks a free ephemeral port by binding and immediately releasing one. */
-function freePort(): number {
-  const listener = Deno.listen({ port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 const typeDefs = `
@@ -130,7 +151,7 @@ describe('GraphQL resolver context — HTTP vs WS (M70i X6-6)', () => {
         GraphqlPlugin({ typeDefs, resolvers, subscriptions: {} }),
       ],
     });
-    const port = freePort();
+    const port = await freePort();
     await app.start({ port });
 
     try {

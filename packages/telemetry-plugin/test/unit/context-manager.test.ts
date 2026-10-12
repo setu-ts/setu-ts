@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { registerContextManager } from '../../src/tracing/context-manager.ts';
 
 /** A context manager stand-in with the two members OTel's registration accepts. */
@@ -84,4 +83,15 @@ describe('registerContextManager', () => {
     expect(outcome.activated).toBe(false);
     expect(outcome.activated === false && outcome.reason).toContain('registration exploded');
   });
+});
+
+it('contains a host registration that throws a scalar reason', async () => {
+  expect(
+    await registerContextManager({
+      setGlobalContextManager: () => {
+        throw 'host-refusal';
+      },
+    }, () => Promise.resolve(fakeManager())),
+  )
+    .toEqual({ activated: false, reason: 'context manager registration failed: host-refusal' });
 });

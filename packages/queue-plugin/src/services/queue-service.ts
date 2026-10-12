@@ -218,6 +218,7 @@ export class QueueService implements IQueue {
   }
 
   process<T>(name: string, processor: JobProcessor<T>, options?: ProcessOptions): void {
+    this.#refuseUnusableName(name);
     const concurrency = options?.concurrency ?? 1;
 
     this.#processors.set(name, {
@@ -231,6 +232,7 @@ export class QueueService implements IQueue {
   }
 
   async addRecurring<T>(name: string, data: T, options: RecurringOptions): Promise<void> {
+    this.#refuseUnusableName(name);
     const id = this.#runtime.uuid();
     const now = this.#runtime.now();
 
@@ -389,6 +391,15 @@ export class QueueService implements IQueue {
     return { queues, backlog };
   }
 
+  /**
+   * Throws when the adapter can never use `name`, so the mistake surfaces at
+   * registration, not as a poll that fails every tick (M106 audit R4-1).
+   */
+  #refuseUnusableName(name: string): void {
+    const problem = this.#adapter.jobNameProblem?.(name) ?? null;
+    if (problem !== null) throw new RangeError(problem);
+  }
+
   #startWorkerLoop(): void {
     this.#workerHandle = this.#runtime.setInterval(() => {
       // The loop must survive a transient adapter failure, but the failure is
@@ -428,7 +439,15 @@ export class QueueService implements IQueue {
       reg.reserveInProgress = true;
 
       try {
-        const jobs = await this.#adapter.reserve<unknown>(name, limit, now);
+        let jobs: readonly StoredJob<unknown>[];
+        try {
+          jobs = await this.#adapter.reserve<unknown>(name, limit, now);
+        } catch (error) {
+          // One name's failure must not stop the names after it this tick
+          // (M106 audit R4-1); it is reported and retried on the next tick.
+          this.#report('queue reserve failed', error, { name });
+          continue;
+        }
 
         for (const storedJob of jobs) {
           // Increment in-flight counter
@@ -521,15 +540,22 @@ export class QueueService implements IQueue {
     const due = await this.#adapter.fetchRecurringDue(now);
 
     for (const rec of due) {
-      // Enqueue a concrete job
-      await this.#adapter.enqueue({
-        id: this.#runtime.uuid(),
-        name: rec.name,
-        data: rec.data,
-        attempts: 0,
-        maxAttempts: this.#defaultMaxAttempts,
-        availableAtMs: now,
-      });
+      // Enqueue a concrete job. A failure is reported and leaves this entry
+      // due, so it is retried next tick, without stopping the entries after
+      // it (M106 audit R4-1).
+      try {
+        await this.#adapter.enqueue({
+          id: this.#runtime.uuid(),
+          name: rec.name,
+          data: rec.data,
+          attempts: 0,
+          maxAttempts: this.#defaultMaxAttempts,
+          availableAtMs: now,
+        });
+      } catch (error) {
+        this.#report('queue recurring enqueue failed', error, { name: rec.name });
+        continue;
+      }
 
       // Advance the recurring schedule
       try {

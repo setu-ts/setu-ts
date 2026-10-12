@@ -124,3 +124,75 @@ export interface ITenantResolver {
    */
   resolve(request: IRequest): Promise<Option<ITenant>>;
 }
+
+/**
+ * Tenant-scoped data-store port.
+ *
+ * Implemented by the multi-tenancy plugin's shipped `MemoryTenantDataStore`
+ * (zero-dependency default), by `database-plugin`'s `DatabaseTenantDataStore`
+ * (the bridge over `IDatabaseService`, M101c V8-8), and by application-
+ * provided backends that consume real databases.
+ *
+ * Promoted from `@setu-ts/multi-tenancy-plugin` to `common` so a package that
+ * implements a store (`database-plugin`) can name the port without importing
+ * the plugin that declares its consumer (AI_GUIDELINES §2.2); the plugin
+ * re-exports the type so existing imports keep compiling.
+ *
+ * @since 0.9.0
+ */
+export interface ITenantDataStore {
+  /**
+   * Receives the resolved isolation strategy once, during `register()`.
+   * Optional so a store may ignore isolation metadata entirely.
+   */
+  useIsolation?(strategy: ITenantIsolationStrategy): void;
+
+  /** Retrieve all records of an entity for a tenant. */
+  findAll<E>(tenantId: string, entity: string): Promise<readonly E[]>;
+  /** Find a single record by its identifier. */
+  findById<E, Id>(tenantId: string, entity: string, id: Id): Promise<E | null>;
+  /** Find records matching a filter. */
+  find<E>(
+    tenantId: string,
+    entity: string,
+    filter: Readonly<Record<string, unknown>>,
+  ): Promise<readonly E[]>;
+  /** Create a new record; returns the stored entity including its id. */
+  create<E>(
+    tenantId: string,
+    entity: string,
+    data: Readonly<Record<string, unknown>>,
+  ): Promise<E>;
+  /** Update an existing record; returns `null` when the id is unknown. */
+  update<E, Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    data: Readonly<Record<string, unknown>>,
+  ): Promise<E | null>;
+  /** Delete a record. Returns `true` if a record was deleted. */
+  delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean>;
+  /** Gracefully close any connections. */
+  close?(): Promise<void>;
+}
+
+/**
+ * Pluggable database-isolation strategy.
+ *
+ * The plugin hands the resolved strategy to the data store via
+ * {@linkcode ITenantDataStore.useIsolation} so the store can derive its
+ * partition scope. Narrow on `kind` to reach an arm's method; a standalone
+ * kind alias is deliberately not exported, since
+ * `ITenantIsolationStrategy['kind']` already names it without a second
+ * symbol to keep in sync.
+ *
+ * Promoted from `@setu-ts/multi-tenancy-plugin` to `common` alongside
+ * {@linkcode ITenantDataStore} (M101c V8-8); the plugin re-exports the type
+ * so existing imports keep compiling.
+ *
+ * @since 0.9.0
+ */
+export type ITenantIsolationStrategy =
+  | { readonly kind: 'column'; getTenantColumn(): string }
+  | { readonly kind: 'schema'; resolveSchema(tenantId: string): string }
+  | { readonly kind: 'database'; resolveDatabase(tenantId: string): string };

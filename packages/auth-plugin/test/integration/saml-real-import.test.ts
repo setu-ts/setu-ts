@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { adaptSamlModule, importSamlModule, loadSaml } from '../../src/saml/loader.ts';
 import { buildLibraryConfig } from '../../src/saml/engine.ts';

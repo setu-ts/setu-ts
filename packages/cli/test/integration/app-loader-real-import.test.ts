@@ -1,17 +1,18 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
- * Drives the DEFAULT app loader — a real dynamic `import()` — so the production
- * path is exercised, not only the injected test seam.
+ * Drives the DEFAULT app loader — a real import through `tsx` — so the
+ * production path is exercised, not only the injected test seam.
  *
  * @module
  */
 
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { configModuleExists, loadApp } from '../../src/app-loader.ts';
 
-const fs: IFileSystem = createDenoRuntimeServices().fs!;
+const fs: IFileSystem = createNodeRuntimeServices().fs!;
 
 /** A config module that returns a minimal object satisfying the app shape. */
 const VALID = `export function createApp() {
@@ -49,17 +50,17 @@ describe('app loader — real import()', () => {
   let root: string;
 
   beforeAll(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-app-' });
-    await Deno.writeTextFile(`${root}/setu.config.ts`, VALID);
-    await Deno.mkdir(`${root}/variants`, { recursive: true });
-    await Deno.writeTextFile(`${root}/variants/async.ts`, ASYNC);
-    await Deno.writeTextFile(`${root}/variants/no-export.ts`, NO_EXPORT);
-    await Deno.writeTextFile(`${root}/variants/throws.ts`, THROWS);
-    await Deno.writeTextFile(`${root}/variants/wrong-shape.ts`, WRONG_SHAPE);
+    root = await tempDir({ prefix: 'setu-app-' });
+    await nodeFs.writeFile(`${root}/setu.config.ts`, VALID);
+    await nodeFs.mkdir(`${root}/variants`, { recursive: true });
+    await nodeFs.writeFile(`${root}/variants/async.ts`, ASYNC);
+    await nodeFs.writeFile(`${root}/variants/no-export.ts`, NO_EXPORT);
+    await nodeFs.writeFile(`${root}/variants/throws.ts`, THROWS);
+    await nodeFs.writeFile(`${root}/variants/wrong-shape.ts`, WRONG_SHAPE);
   });
 
   afterAll(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   it('detects the config module on a real filesystem', async () => {
@@ -96,5 +97,46 @@ describe('app loader — real import()', () => {
 
   it('throws for a module that does not exist on disk', async () => {
     await expect(loadApp(root, 'variants/absent.ts')).rejects.toThrow('Cannot load');
+  });
+
+  // M111d §3.3: Node's own type stripping rejects a decorator, so a class-based
+  // project's config only loads through tsx; and the project's tsconfig is the
+  // one nearest the module, so its path alias resolves however the CLI was
+  // invoked. A loader reading the repository's tsconfig would miss `~/`.
+  it('loads a decorated config that imports through its own tsconfig path alias', async () => {
+    const project = await tempDir({ prefix: 'setu-app-ts-' });
+    await nodeFs.mkdir(`${project}/src`, { recursive: true });
+    await nodeFs.writeFile(
+      `${project}/tsconfig.json`,
+      JSON.stringify({ compilerOptions: { paths: { '~/*': ['./src/*'] } } }),
+    );
+    await nodeFs.writeFile(
+      `${project}/src/marker.ts`,
+      `export function marked(_value: unknown, context: ClassDecoratorContext): void {
+  (context.metadata as Record<string, unknown>).marked = true;
+}
+`,
+    );
+    await nodeFs.writeFile(
+      `${project}/setu.config.ts`,
+      `import { marked } from '~/marker.ts';
+
+@marked
+class Holder {}
+
+export function createApp() {
+  const metadata = (Holder as unknown as Record<symbol, Record<string, unknown> | undefined>)[
+    Symbol.for('Symbol.metadata')
+  ];
+  return {
+    services: { getAll: () => [metadata?.marked === true ? 'decorated' : 'plain'] },
+    start: () => Promise.resolve(),
+    stop: () => Promise.resolve(),
+  };
+}
+`,
+    );
+    const app = await loadApp(project);
+    expect(app.services.getAll('anything')).toEqual(['decorated']);
   });
 });

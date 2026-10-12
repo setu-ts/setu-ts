@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { Controller } from '../../src/decorators/controller.ts';
 import { Post } from '../../src/decorators/http.ts';
@@ -68,5 +67,21 @@ describe('Validation decorators', () => {
     expect(schema?.body).toBe(bodySchema);
     expect(schema?.query).toBe(querySchema);
     expect(schema?.params).toBe(paramsSchema);
+  });
+});
+
+it('adds path validation to an existing body schema without replacing it', () => {
+  @Controller('/combined')
+  class C {
+    @Post('/:id')
+    @ValidateParams(paramsSchema)
+    @ValidateBody(bodySchema)
+    create() {
+      return null;
+    }
+  }
+  expect(metadataStore.getRoutesFor(C)[0]?.schema).toEqual({
+    body: bodySchema,
+    params: paramsSchema,
   });
 });

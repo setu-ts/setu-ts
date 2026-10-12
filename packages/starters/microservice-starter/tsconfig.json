@@ -1,0 +1,36 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../common"
+    },
+    {
+      "path": "../../exceptions"
+    },
+    {
+      "path": "../../kernel"
+    },
+    {
+      "path": "../../messaging-plugin"
+    },
+    {
+      "path": "../../queue-plugin"
+    },
+    {
+      "path": "../../resilience-plugin"
+    },
+    {
+      "path": "../rest-starter"
+    },
+    {
+      "path": "../../telemetry-plugin"
+    }
+  ]
+}

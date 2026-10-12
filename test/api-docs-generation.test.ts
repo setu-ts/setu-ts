@@ -451,6 +451,8 @@ error[private-type-ref]: public type references private type
       // precedent), and two pre-existing missing-description diagnostics were
       // paid down on files the milestone already touched. Lowered rather than
       // widened, which is the whole point of a ratchet.
+      // M109a added two packages' worth of surface and documented every new
+      // symbol, so the count is unchanged.
       expect(DOC_LINT_BASELINE).toBe(496);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
@@ -471,6 +473,16 @@ error[private-type-ref]: public type references private type
       for (const target of result.targets) {
         expect(target).toMatch(/^packages\//);
       }
+    });
+
+    it('includes the localization /format subpath target (M103)', async () => {
+      const fs = {
+        readTextFile: async (path: string) => await Deno.readTextFile(path),
+        readDir: (path: string) => Deno.readDir(path),
+        stat: (path: string) => Deno.stat(path),
+      };
+      const result = await collectApiEntrypoints(fs);
+      expect(result.targets).toContain('packages/localization-plugin/src/format/index.ts');
     });
 
     it('includes runtime worker subpath target', async () => {
@@ -541,17 +553,19 @@ error[private-type-ref]: public type references private type
       );
     });
 
-    it('has the expected authoritative count of 51 targets', async () => {
+    it('has the expected authoritative count of 55 targets', async () => {
       const fs = {
         readTextFile: async (path: string) => await Deno.readTextFile(path),
         readDir: (path: string) => Deno.readDir(path),
         stat: (path: string) => Deno.stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      // 49 published packages, runtime has 2 exports (./src/index.ts + ./worker),
-      // cli has 2 exports (./src/index.ts + ./main), rest have 1 each
-      // = 49 + 1 (extra runtime) + 1 (extra cli) = 51
-      expect(result.targets).toHaveLength(51);
+      // 52 published packages (M109a added idempotency-plugin, M111d added
+      // create), runtime has 2 exports (./src/index.ts + ./worker), cli has 2
+      // exports (./src/index.ts + ./main), localization-plugin has 2
+      // (./src/index.ts + ./format, M103), rest have 1 each
+      // = 52 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 55
+      expect(result.targets).toHaveLength(55);
     });
 
     it('maps each target to its correct package name', async () => {

@@ -1,8 +1,7 @@
 /**
  * `createPathMatcher` — the one path-exclusion matcher (M90a §3.1).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createPathMatcher } from '../../src/path-matcher.ts';
 import type { PathPattern } from '../../src/path-matcher.ts';
 

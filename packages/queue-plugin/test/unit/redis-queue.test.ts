@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { RedisQueue, validateClient } from '../../src/adapters/redis-queue.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
 

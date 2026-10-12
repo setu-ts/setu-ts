@@ -1,6 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { beforeEach } from '@std/testing/bdd';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type {
   IPlugin,

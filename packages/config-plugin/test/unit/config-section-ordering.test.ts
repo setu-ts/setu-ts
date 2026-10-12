@@ -1,13 +1,12 @@
 /** Tests for the whole-snapshot then section-validation ordering. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { defineConfigSection, getConfigSection, loadConfig } from '../../src/index.ts';
 import { createRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('typed configuration sections | validation ordering', () => {
   it('reads whole-snapshot coercions before parsing a section', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const sectionSchema = z.object({ PORT: z.number().int() });
     const application = defineConfigSection({
       prefix: 'APP_',

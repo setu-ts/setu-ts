@@ -3,8 +3,7 @@
  * compile step the plugin factory runs at construction. Every refusal is a
  * fixed, value-free `RangeError`; a supplied value is never echoed.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   COLLECTOR_ERRORS,
@@ -90,6 +89,7 @@ describe('compileHealthDiagnosticsPolicy', () => {
     // 22 × 3-byte characters = 66 UTF-8 bytes although only 22 code units.
     expect(compile({ indicators: { a: '€'.repeat(22) } })).toThrow(COLLECTOR_ERRORS.aliasBytes);
     expect(compile({ indicators: { a: 'bad\x01name' } })).toThrow(COLLECTOR_ERRORS.aliasControl);
+    expect(compile({ indicators: { a: 'bad\u202ename' } })).toThrow(COLLECTOR_ERRORS.aliasControl);
     expect(compile({ indicators: { a: 'bad\x9bname' } })).toThrow(COLLECTOR_ERRORS.aliasControl);
     expect(compile({ indicators: { a: 'same', b: 'same' } })).toThrow(
       COLLECTOR_ERRORS.duplicateAlias,

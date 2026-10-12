@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+import { describe, expect, it } from 'vitest';
 
 import { rootManifestSettings } from '../../src/templates/root-settings.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
@@ -60,7 +60,7 @@ describe('generated imports match the formatter the project ships with', () => {
     // enough to leave alone, so emitting them unsorted makes the formatter
     // rewrite a file the CLI just wrote.
     expect(commonImportOf()).toContain(
-      'CAPABILITIES, type IApplication, type ILogger, type IPlugin, type ISecretManager',
+      'CAPABILITIES, type ILogger, type IPlugin, type ISecretManager',
     );
   });
 
@@ -86,7 +86,7 @@ describe('generated imports match the formatter the project ships with', () => {
 describe('where the root settings are emitted', () => {
   it('puts them in a workspace root', () => {
     const manifest = manifestOf(
-      workspaceRootFiles('shop', 3000, transportSpec('http')),
+      workspaceRootFiles('shop', 3000, transportSpec('http'), workspaceProfile('deno')),
       'deno.json',
     );
 

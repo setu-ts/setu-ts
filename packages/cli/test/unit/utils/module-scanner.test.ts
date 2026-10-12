@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 
 import { MODULES_DIR, readModuleNames, scanModules } from '../../../src/utils/module-scanner.ts';
@@ -165,4 +164,15 @@ describe('readModuleNames', () => {
     // `--dir` must root the scan, or the scan and the write disagree.
     expect(seen).toEqual([`/somewhere/else/${MODULES_DIR}`]);
   });
+});
+
+it('sorts multiple skipped legacy modules independently of filesystem enumeration', async () => {
+  const result = await scanModules(
+    fsWith(['zeta', 'alpha'], {
+      'zeta/zeta.module.ts': MISSING,
+      'alpha/alpha.module.ts': MISSING,
+    }),
+    '/app',
+  );
+  expect(result.skipped.map((entry) => entry.name)).toEqual(['alpha', 'zeta']);
 });

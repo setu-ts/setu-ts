@@ -6,8 +6,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { EventsPlugin } from '../../src/plugin/events-plugin.ts';
 import type { IEventHandler } from '../../src/handlers/event-handler.ts';

@@ -5,8 +5,7 @@
  * and no data; the canary absence and allowed-metadata visibility are
  * asserted on the served snapshot.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createApplication } from '../../../kernel/src/index.ts';
 import { RuntimePlugin } from '../../../runtime/src/index.ts';

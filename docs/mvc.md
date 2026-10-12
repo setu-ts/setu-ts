@@ -26,12 +26,12 @@ await app.start({ port: 3000 });
 
 Both arm names describe the **authoring mode** — which import your components use — rather than a
 rendering strategy; one engine serves both, and the selected mode is reported by the `view` health
-indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with
-`@hono/hono/jsx`, escaped by the JSX runtime, zero client JavaScript.
-`ViewPlugin({ engine: 'hono-html' })` selects the `html` tagged-template arm, which needs no
-`jsxImportSource` and works in a plain `.ts` file. **Both arms require `@hono/hono` as a direct
-dependency** — `deno add jsr:@hono/hono` — because neither `@hono/hono/jsx/jsx-runtime` nor
-`@hono/hono/html` resolves through a transitive one; see the
+indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with `hono/jsx`,
+escaped by the JSX runtime, zero client JavaScript. `ViewPlugin({ engine: 'hono-html' })` selects
+the `html` tagged-template arm, which needs no `jsxImportSource` and works in a plain `.ts` file.
+**Declare `hono` as a direct dependency** — `npm install hono` — because the application's own
+compiler resolves `hono/jsx/jsx-runtime` and `hono/html`; the view plugin's own `hono` dependency
+resolves only under a hoisting installer (npm, Bun), not pnpm or Deno; see the
 [view-plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/view-plugin/README.md#installation).
 The `'custom'` arm registers an application-supplied `IViewEngine` verbatim.
 
@@ -167,9 +167,9 @@ export async function submit(ctx: IRequestContext) {
 
 A `@Render` handler returns its props bag — but it may also return a `HandlerResult` from
 `ctx.response`, which is what makes POST-redirect-GET expressible on a decorated route. The redirect
-short-circuits before the view runs, so no HTML body is produced. `HandlerResult` is branded, so
-widening the return union costs no type safety: a props bag of the wrong shape is still a compile
-error.
+short-circuits before the view runs, so no HTML body is produced; the rejected submission instead
+re-renders the form with a `422`. `HandlerResult` is branded, so widening the return union costs no
+type safety: a props bag of the wrong shape is still a compile error.
 
 ```tsx
 import { Controller, Ctx, Get, Params, Post, Render } from '@setu-ts/decorator-plugin';
@@ -180,7 +180,12 @@ interface TaskFormProps {
   readonly errors: Readonly<Record<string, string>>;
 }
 
-const TaskForm = (props: TaskFormProps) => <form>{props.values.title}</form>;
+const TaskForm = (props: TaskFormProps) => (
+  <form method='post' action='/tasks'>
+    <input name='title' value={props.values.title} />
+    {String(props.errors.title ?? '')}
+  </form>
+);
 
 @Controller('/tasks')
 class TasksController {
@@ -193,11 +198,14 @@ class TasksController {
   @Render(TaskForm)
   @Params(Ctx())
   @Post('/')
-  create(ctx: IRequestContext): TaskFormProps | HandlerResult {
-    const accepted = ctx.request.method === 'POST';
-    return accepted
-      ? ctx.response.redirect('/tasks', 303)
-      : { values: { title: '' }, errors: { title: 'Title must be at least 3 characters' } };
+  async create(ctx: IRequestContext): Promise<TaskFormProps | HandlerResult> {
+    const form = await ctx.request.formData?.();
+    const field = form?.get('title');
+    const title = typeof field === 'string' ? field.trim() : '';
+    if (title.length >= 3) return ctx.response.redirect('/tasks', 303);
+
+    ctx.response.status(422);
+    return { values: { title }, errors: { title: 'Title must be at least 3 characters' } };
   }
 }
 
@@ -220,7 +228,7 @@ clean — only the boundary is refused.
 A layout is an ordinary component that accepts `children`:
 
 ```tsx
-import type { Child } from '@hono/hono/jsx';
+import type { Child } from 'hono/jsx';
 
 function Layout(props: { readonly title: string; readonly children: Child }) {
   return (
@@ -272,7 +280,7 @@ shape a by-name engine adapts a compiled template to, and the plugin returns wha
 interpolations, and it is an **XSS hole** for a hand-written template literal:
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 
 // UNSAFE: `name` is interpolated raw. With name = '<script>alert(1)</script>'
 // this serves the script tag verbatim.
@@ -333,7 +341,7 @@ and a `SyntaxError` in the browser. The script never runs and nothing reports wh
 opens an `EventSource` or a `WebSocket` needs the opt-out:
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 import { raw } from '@setu-ts/view-plugin';
 
 const CLIENT = `const es = new EventSource('/events');

@@ -69,12 +69,12 @@ imagine is the one nobody drives. So:
 # Step 1 — Orient on the committed tree
 
 ```bash
-git branch --show-current      # the milestone's feat/… branch, never main
+git branch --show-current      # the milestone's feat/… branch, never develop or main
 git status --short             # MUST be empty — a dirty tree voids the audit
 git rev-parse HEAD             # the revision audited; the record names it
-git log --oneline main..HEAD   # the milestone's commits
-git diff --stat main...HEAD    # the audit scope: three dots diffs against the merge base, so
-                               # commits that reached main after the branch point are excluded
+git log --oneline develop..HEAD   # the milestone's commits
+git diff --stat develop...HEAD    # the audit scope: three dots diffs against the merge base, so
+                               # commits that reached develop after the branch point are excluded
 ```
 
 "Committed-tree" means the exact commit the PR will merge. An audit of an earlier commit covers that

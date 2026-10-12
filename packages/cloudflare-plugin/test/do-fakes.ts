@@ -276,7 +276,8 @@ export class FakeDurableObjectNamespace implements IDurableObjectNamespace {
     this.cores.set(name, core);
 
     const response = await core.fetch(request);
-    if (response.status !== 101 || pair === undefined || this.omitSocket) {
+    if (response.status === 101 && this.omitSocket) return { status: 101 } as Response;
+    if (response.status !== 101 || pair === undefined) {
       return response;
     }
 
@@ -314,7 +315,8 @@ export class FakeDurableObjectNamespace implements IDurableObjectNamespace {
     this.inboxCores.set(name, core);
 
     const response = await core.fetch(request);
-    if (response.status !== 101 || pair === undefined || this.omitSocket) {
+    if (response.status === 101 && this.omitSocket) return { status: 101 } as Response;
+    if (response.status !== 101 || pair === undefined) {
       return response;
     }
     return { status: 101, webSocket: pair.client } as unknown as Response;

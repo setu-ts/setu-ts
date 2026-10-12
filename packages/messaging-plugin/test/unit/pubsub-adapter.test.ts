@@ -1,14 +1,18 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { adaptPubSubModule } from '../../src/brokers/pubsub-broker.ts';
 import type { PubSubSdkModule } from '../../src/brokers/pubsub-broker.ts';
+import { PubSubSubscriptionBoundElsewhereError } from '../../src/errors.ts';
 
 describe('adaptPubSubModule', () => {
   function createFakeSdkModule(): PubSubSdkModule & {
     topics: Map<
       string,
       {
-        messages: Array<{ data: Uint8Array }>;
+        messages: Array<{
+          data: Uint8Array;
+          attributes?: Record<string, string>;
+          orderingKey?: string;
+        }>;
         subscriptions: Map<
           string,
           {
@@ -20,12 +24,20 @@ describe('adaptPubSubModule', () => {
       }
     >;
     subscriptions: Map<string, { topic: string; name: string; closed: boolean; deleted: boolean }>;
+    topicOptions: Map<string, { messageOrdering?: boolean | undefined }>;
+    subscriptionOptions: Map<string, { enableMessageOrdering?: boolean | undefined }>;
+    resumed: string[];
+    failNextPublish: boolean;
   } {
     const mod = {} as PubSubSdkModule & {
       topics: Map<
         string,
         {
-          messages: Array<{ data: Uint8Array }>;
+          messages: Array<{
+            data: Uint8Array;
+            attributes?: Record<string, string>;
+            orderingKey?: string;
+          }>;
           subscriptions: Map<
             string,
             {
@@ -42,25 +54,69 @@ describe('adaptPubSubModule', () => {
         string,
         { topic: string; name: string; closed: boolean; deleted: boolean }
       >;
+      topicOptions: Map<string, { messageOrdering?: boolean | undefined }>;
+      subscriptionOptions: Map<string, { enableMessageOrdering?: boolean | undefined }>;
+      resumed: string[];
+      failNextPublish: boolean;
     };
     mod.topics = new Map();
+    let fakeProjectId = '';
     mod.subscriptions = new Map();
+    mod.topicOptions = new Map();
+    mod.subscriptionOptions = new Map();
+    mod.resumed = [];
+    mod.failNextPublish = false;
 
     mod.PubSub = class {
-      constructor(_options: { projectId: string; credentials?: unknown }) {}
-      topic(name: string) {
+      constructor(options: { projectId: string; credentials?: unknown }) {
+        // The real SDK reports topics under the project it was built for.
+        fakeProjectId = options.projectId;
+      }
+      topic(name: string, options?: { messageOrdering?: boolean }) {
         if (!mod.topics.has(name)) {
           mod.topics.set(name, { messages: [], subscriptions: new Map() });
         }
+        mod.topicOptions.set(name, options ?? {});
         const topicData = mod.topics.get(name)!;
         return {
-          publishMessage(message: { data: Uint8Array }) {
+          publishMessage(message: {
+            data: Uint8Array;
+            attributes?: Record<string, string>;
+            orderingKey?: string;
+          }) {
+            if (mod.failNextPublish) {
+              mod.failNextPublish = false;
+              return Promise.reject(new Error('publish failed'));
+            }
             topicData.messages.push(message);
             return Promise.resolve('msg-id');
           },
-          createSubscription(subName: string) {
+          createSubscription(subName: string, options?: { enableMessageOrdering?: boolean }) {
+            mod.subscriptionOptions.set(subName, options ?? {});
+            // M101b: names are project-global, as on the real service — an
+            // existing subscription answers ALREADY_EXISTS whichever topic it
+            // is bound to. The pre-M101b fake accepted every create.
+            const known = mod.subscriptions.get(subName);
+            if (known !== undefined && known.topic !== '') {
+              return Promise.reject({ code: 6, message: 'ALREADY_EXISTS' });
+            }
             topicData.subscriptions.set(subName, { onMessage: null });
+            // Bind the entry a `subscription()` handle may already hold, so
+            // that handle's `getMetadata` reads the binding.
+            if (known !== undefined) {
+              known.topic = name;
+            } else {
+              mod.subscriptions.set(subName, {
+                topic: name,
+                name: subName,
+                closed: false,
+                deleted: false,
+              });
+            }
             return Promise.resolve([]);
+          },
+          resumePublishing(orderingKey: string) {
+            mod.resumed.push(orderingKey);
           },
         };
       }
@@ -94,6 +150,10 @@ describe('adaptPubSubModule', () => {
             entry.deleted = true;
             return Promise.resolve();
           },
+          getMetadata(): Promise<[{ topic?: string | null }]> {
+            // The service reports the fully-qualified topic name.
+            return Promise.resolve([{ topic: `projects/${fakeProjectId}/topics/${entry.topic}` }]);
+          },
         };
       }
       close() {
@@ -115,6 +175,212 @@ describe('adaptPubSubModule', () => {
     expect(topic).toBeDefined();
     expect(topic!.messages).toHaveLength(1);
     expect(topic!.messages[0].data).toEqual(bytes);
+  });
+
+  it('caches one Topic per name, created with messageOrdering: true (M106 §3.5)', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    const bytes = new TextEncoder().encode('a');
+    await transport.publish('order-topic', bytes, undefined, 'agg-1');
+    await transport.publish('order-topic', bytes, undefined, 'agg-1');
+
+    expect(sdk.topicOptions.get('order-topic')?.messageOrdering).toBe(true);
+    expect(sdk.topics.get('order-topic')!.messages.map((m) => m.orderingKey)).toEqual([
+      'agg-1',
+      'agg-1',
+    ]);
+  });
+
+  it('resumes the ordering key after a failed ordered publish, then rethrows (M106 §3.5)', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    sdk.failNextPublish = true;
+
+    await expect(
+      transport.publish('order-topic', new TextEncoder().encode('a'), undefined, 'agg-1'),
+    ).rejects.toThrow('publish failed');
+    expect(sdk.resumed).toEqual(['agg-1']);
+  });
+
+  it('rethrows the real error when the SDK omits the optional resumePublishing', async () => {
+    const sdk = createFakeSdkModule();
+    // A module double that does not model ordering: the topic handle has no
+    // `resumePublishing`. Calling it unguarded would replace the publish error
+    // with a TypeError.
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        const handle = super.topic(name, options);
+        return {
+          publishMessage: handle.publishMessage,
+          createSubscription: handle.createSubscription,
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    sdk.failNextPublish = true;
+
+    await expect(
+      transport.publish('order-topic', new TextEncoder().encode('a'), undefined, 'agg-1'),
+    ).rejects.toThrow('publish failed');
+    expect(sdk.resumed).toEqual([]);
+  });
+
+  it('bounds the Topic cache, evicting the least recently used idle handle (M106 audit L3)', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        return super.topic(name, options);
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    for (let i = 0; i <= 1024; i++) await transport.publish(`t-${i}`, bytes);
+    expect(created).toHaveLength(1025);
+
+    // The newest handle is kept; the oldest was evicted and is rebuilt.
+    await transport.publish('t-1024', bytes);
+    expect(created).toHaveLength(1025);
+    await transport.publish('t-0', bytes);
+    expect(created).toHaveLength(1026);
+  });
+
+  it('never evicts a handle with a publish in flight, so ordering cannot be overtaken', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    let release: () => void = () => {};
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        const handle = super.topic(name, options);
+        if (name !== 'busy') return handle;
+        let first = true;
+        return {
+          ...handle,
+          // Only the first publish is held, standing in for a slow network.
+          publishMessage: (message: { data: Uint8Array }) => {
+            if (!first) return handle.publishMessage(message);
+            first = false;
+            return new Promise<string>((resolve) => {
+              release = () => resolve('held');
+            });
+          },
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    const pending = transport.publish('busy', bytes, undefined, 'agg-1');
+    for (let i = 0; i < 1100; i++) await transport.publish(`t-${i}`, bytes);
+    release();
+    await pending;
+    // 'busy' was the oldest entry throughout but always in flight.
+    await transport.publish('busy', bytes, undefined, 'agg-1');
+    expect(created.filter((name) => name === 'busy')).toHaveLength(1);
+  });
+
+  it('over the bound with every other handle busy, evicts only the idle one (PR #427 review)', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    const releases: Array<() => void> = [];
+    let holding = true;
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        const handle = super.topic(name, options);
+        if (!name.startsWith('busy-')) return handle;
+        return {
+          ...handle,
+          // Held only while the test is holding: standing in for a slow network.
+          publishMessage: (message: { data: Uint8Array }) =>
+            holding
+              ? new Promise<string>((resolve) => releases.push(() => resolve('ok')))
+              : handle.publishMessage(message),
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    // 1100 handles in flight: more than the 1024 bound, none evictable.
+    const pending = Array.from({ length: 1100 }, (_, i) => transport.publish(`busy-${i}`, bytes));
+    await transport.publish('idle', bytes);
+    // The idle handle was the only evictable one, so the next use rebuilds it.
+    await transport.publish('idle', bytes);
+    expect(created.filter((name) => name === 'idle')).toHaveLength(2);
+
+    holding = false;
+    for (const release of releases) release();
+    await Promise.all(pending);
+    // Once they settle, the cache shrinks back to the bound; the newest stay.
+    await transport.publish('busy-1099', bytes);
+    expect(created.filter((name) => name === 'busy-1099')).toHaveLength(1);
+  });
+
+  it('never evicts a handle that went idle and is busy again', async () => {
+    const sdk = createFakeSdkModule();
+    const created: string[] = [];
+    let release: () => void = () => {};
+    let publishes = 0;
+    const Base = sdk.PubSub;
+    sdk.PubSub = class extends Base {
+      override topic(name: string, options?: { messageOrdering?: boolean }) {
+        created.push(name);
+        const handle = super.topic(name, options);
+        if (name !== 'reused') return handle;
+        return {
+          ...handle,
+          // The SECOND publish is held: the handle has been idle once first.
+          publishMessage: (message: { data: Uint8Array }) => {
+            publishes++;
+            if (publishes !== 2) return handle.publishMessage(message);
+            return new Promise<string>((resolve) => {
+              release = () => resolve('held');
+            });
+          },
+        };
+      }
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    const bytes = new TextEncoder().encode('a');
+
+    await transport.publish('reused', bytes, undefined, 'agg-1'); // settles: idle
+    const pending = transport.publish('reused', bytes, undefined, 'agg-1'); // busy again
+    for (let i = 0; i < 1100; i++) await transport.publish(`t-${i}`, bytes);
+    release();
+    await pending;
+    await transport.publish('reused', bytes, undefined, 'agg-1');
+    expect(created.filter((name) => name === 'reused')).toHaveLength(1);
+  });
+
+  it('does not resume a key when an UNORDERED publish fails (M106 §3.5)', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    sdk.failNextPublish = true;
+
+    await expect(transport.publish('plain-topic', new TextEncoder().encode('a'))).rejects.toThrow(
+      'publish failed',
+    );
+    expect(sdk.resumed).toEqual([]);
+  });
+
+  it('orders a created subscription only when enableMessageOrdering is set (M106 §3.5)', async () => {
+    const plain = createFakeSdkModule();
+    await adaptPubSubModule(plain, { projectId: 'demo' }).open('t', 'sub-plain', () => {});
+    expect(plain.subscriptionOptions.get('sub-plain')?.enableMessageOrdering).toBeUndefined();
+
+    const ordered = createFakeSdkModule();
+    await adaptPubSubModule(ordered, { projectId: 'demo', enableMessageOrdering: true })
+      .open('t', 'sub-ordered', () => {});
+    expect(ordered.subscriptionOptions.get('sub-ordered')?.enableMessageOrdering).toBe(true);
   });
 
   it('maps the SDK message id and publishTime onto the delivery (X28-4)', async () => {
@@ -406,5 +672,144 @@ describe('adaptPubSubModule', () => {
 
     const entry = sdk.subscriptions.get('sub-close');
     expect(entry!.closed).toBe(true);
+  });
+  describe('binding check on ALREADY_EXISTS (M101b, V8-2)', () => {
+    it('attaches to an existing subscription bound to the requested topic', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      await transport.createSubscription('orders', 'orders-sub');
+
+      // The second create answers ALREADY_EXISTS; the metadata names `orders`.
+      await expect(transport.open('orders', 'orders-sub', () => {})).resolves.toBeDefined();
+    });
+
+    it('accepts a fully-qualified requested topic', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      await transport.createSubscription('orders', 'orders-sub');
+
+      await expect(
+        transport.open('projects/demo/topics/orders', 'orders-sub', () => {}),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses an existing subscription bound to ANOTHER topic, naming all three', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      // Topic A owns the name, as `messaging-consumers` did before M101b.
+      await transport.createSubscription('orders', 'shared');
+
+      const err = await transport.open('payments', 'shared', () => {}).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
+      const named = err as PubSubSubscriptionBoundElsewhereError;
+      expect(named.subscription).toBe('shared');
+      expect(named.boundTopic).toBe('projects/demo/topics/orders');
+      expect(named.requestedTopic).toBe('payments');
+      expect(named.message).toContain('"shared"');
+      expect(named.message).toContain('"projects/demo/topics/orders"');
+      expect(named.message).toContain('"payments"');
+      expect(named.message).toContain('SubscribeOptions.queue');
+      expect(named.message).toContain('delete the existing subscription');
+    });
+
+    it('does not treat a topic whose name merely ends the same as a match', async () => {
+      const sdk = createFakeSdkModule();
+      const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+      await transport.createSubscription('eu-orders', 'shared');
+
+      // `/topics/orders` is not a suffix of `/topics/eu-orders` — the slash
+      // anchors the comparison to a whole topic ID.
+      await expect(transport.open('orders', 'shared', () => {})).rejects.toBeInstanceOf(
+        PubSubSubscriptionBoundElsewhereError,
+      );
+    });
+
+    it('refuses a subscription bound to a same-named topic in ANOTHER project', async () => {
+      // Pub/Sub allows cross-project subscriptions, so `/topics/orders` alone
+      // does not identify the topic: a short `orders` means THIS project's.
+      const mod = {
+        PubSub: class {
+          topic() {
+            return { createSubscription: () => Promise.reject({ code: 6 }) };
+          }
+          subscription() {
+            return {
+              on: () => {},
+              close: () => Promise.resolve(),
+              delete: () => Promise.resolve(),
+              getMetadata: () => Promise.resolve([{ topic: 'projects/other/topics/orders' }]),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as PubSubSdkModule;
+      const transport = adaptPubSubModule(mod, { projectId: 'demo' });
+
+      const err = await transport.open('orders', 'sub', () => {}).then(
+        () => null,
+        (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
+      );
+      expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
+      expect(err?.boundTopic).toBe('projects/other/topics/orders');
+    });
+
+    it('refuses when the service reports no topic, since the binding is unproven', async () => {
+      const mod = {
+        PubSub: class {
+          topic() {
+            return { createSubscription: () => Promise.reject({ code: 6 }) };
+          }
+          subscription() {
+            return {
+              on: () => {},
+              close: () => Promise.resolve(),
+              delete: () => Promise.resolve(),
+              getMetadata: () => Promise.resolve([{ topic: null }]),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as PubSubSdkModule;
+      const transport = adaptPubSubModule(mod, { projectId: 'demo' });
+
+      const err = await transport.open('orders', 'sub', () => {}).then(
+        () => null,
+        (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
+      );
+      expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
+      expect(err?.boundTopic).toBe('(unknown)');
+    });
+
+    it('propagates a failing metadata read rather than attaching blindly', async () => {
+      const failure = new Error('permission denied reading subscription');
+      const mod = {
+        PubSub: class {
+          topic() {
+            return { createSubscription: () => Promise.reject({ code: 6 }) };
+          }
+          subscription() {
+            return {
+              on: () => {},
+              close: () => Promise.resolve(),
+              delete: () => Promise.resolve(),
+              getMetadata: () => Promise.reject(failure),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as PubSubSdkModule;
+      const transport = adaptPubSubModule(mod, { projectId: 'demo' });
+
+      await expect(transport.open('orders', 'sub', () => {})).rejects.toBe(failure);
+    });
   });
 });

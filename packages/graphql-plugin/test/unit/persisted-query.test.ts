@@ -2,8 +2,7 @@
  * Tests for apq/persisted-query.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { extractPersistedQuery, persistedQueryHash } from '../../src/apq/persisted-query.ts';
 
 describe('extractPersistedQuery', () => {

@@ -69,13 +69,19 @@ export interface SamplingConfig {
  * @since 0.2.0
  */
 export interface TracerHost {
-  /** Starts a new span. */
+  /**
+   * Starts a new span.
+   *
+   * `root: true` starts a parentless span, ignoring both `parentContext` and
+   * the active span (OTel's own `SpanOptions.root`).
+   */
   startSpan(
     name: string,
     options?: {
       kind?: number;
       attributes?: Record<string, unknown>;
       parentContext?: TelemetryContext;
+      root?: boolean;
     },
   ): unknown;
   /** Runs work with the supplied span as the active OTel span, when supported. */
@@ -234,7 +240,7 @@ export interface TraceDiagnosticsOptions {
 export interface InstrumentationConfig {
   /**
    * An already-constructed OTel `Instrumentation` instance — the INJECT half of the
-   * inject-or-lazy seam. When set, the registry skips the lazy `npm:` import and uses
+   * inject-or-lazy seam. When set, the registry skips the lazy dynamic import and uses
    * this instance directly.
    */
   readonly instrumentation?: unknown;

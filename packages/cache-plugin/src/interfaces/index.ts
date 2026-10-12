@@ -25,6 +25,19 @@ export interface CacheStoreOptions {
   defaultTtl?: number;
   /** Maximum entry count for MemoryStore LRU eviction. */
   maxSize?: number;
+  /**
+   * Bound on one Redis command, in milliseconds (store `'redis'` only;
+   * ignored by `'memory'` and `'noop'`). Default `15000`; `0` disables it.
+   * A paused or partitioned server keeps its socket open, so without a bound
+   * a command waits forever; with it the command REJECTS, the cache call is
+   * counted `failed`, and the caller sees the error. Applied as ioredis
+   * `commandTimeout` to the client the store builds — never to an injected
+   * `client`, which keeps its own configuration. A value outside `0`–
+   * `2147483647` (including `NaN`) throws `RangeError` at construction.
+   *
+   * @since 0.9.0
+   */
+  commandTimeoutMs?: number;
 }
 
 /**

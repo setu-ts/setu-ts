@@ -2,7 +2,7 @@
  * Redis-backed rate limit store using ioredis (lazy-loaded or injected).
  *
  * Follows the cache-plugin RedisStore seam: prefer injected client, otherwise
- * lazy `await import('npm:ioredis@5.x')`.
+ * lazy `await import('ioredis')`.
  *
  * @module
  */
@@ -14,8 +14,8 @@ import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
 /**
  * Lazily load ioredis at runtime. Pin to 5.x for stability.
  */
-async function loadIoredis(): Promise<typeof import('npm:ioredis@5.x').Redis> {
-  const mod = await import('npm:ioredis@5.x');
+async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
+  const mod = await import('ioredis');
   return mod.Redis;
 }
 

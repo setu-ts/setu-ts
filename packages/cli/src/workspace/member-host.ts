@@ -17,6 +17,7 @@ import { withBrokerArgs, withQueueArgs } from '../templates/broker.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { TransportSpec } from './transport.ts';
+import { withClientDependencies } from '../templates/client-dependencies.ts';
 
 /** The package whose wiring the discovery overlay rewrites. */
 const DISCOVERY_PACKAGE = 'service-discovery-plugin';
@@ -40,7 +41,7 @@ export function withWorkspaceMember(
   host: ResolvedHost,
   transport: TransportSpec,
   member: string,
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
   endpoint?: string,
 ): ResolvedHost {
   return withTransport(withDiscoveryMap(host), transport, member, profile, endpoint);
@@ -116,6 +117,7 @@ function withTransport(
   // `QueueAdapterType` supports fewer backends — so a NATS or Kafka workspace
   // keeps the in-memory queue, which is the honest outcome rather than a
   // silently wrong adapter.
+  const onDeno = profile.manifestKind === 'deno';
   const next = withQueueArgs(
     withBrokerArgs(host, transport, profile, override),
     transport,
@@ -123,7 +125,9 @@ function withTransport(
     override,
   );
 
-  return {
+  // The transport's clients (the gRPC runtime) are optional peers of the plugin
+  // it appends, so the member declares them itself (`client-dependencies.ts`).
+  return withClientDependencies({
     ...next,
     ...(host.appFactory === undefined || transport.name !== 'grpc'
       ? {}
@@ -132,8 +136,17 @@ function withTransport(
     // registers one of them would collide — none does, and a unit test pins
     // that across the registry.
     plugins: [...next.plugins, ...transport.plugins],
-    files: [...next.files, ...(transport.memberFiles?.(member) ?? [])],
-    extraTasks: { ...next.extraTasks, ...transport.memberTasks },
-    extraImports: { ...next.extraImports, ...transport.memberImports },
-  };
+    files: [...next.files, ...(transport.memberFiles?.(member, onDeno) ?? [])],
+    // Each manifest kind gets only its own half: a Deno member's tasks and import
+    // map, an npm member's scripts and devDependencies.
+    ...(onDeno
+      ? {
+        extraTasks: { ...next.extraTasks, ...transport.memberTasks },
+        extraImports: { ...next.extraImports, ...transport.memberImports },
+      }
+      : {
+        extraScripts: { ...next.extraScripts, ...transport.memberScripts },
+        extraDevDependencies: { ...next.extraDevDependencies, ...transport.memberDevDependencies },
+      }),
+  }, transport.clients ?? []);
 }

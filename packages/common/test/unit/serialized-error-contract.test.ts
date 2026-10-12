@@ -1,6 +1,5 @@
 /** Type-level compatibility contract for the additive SerializedError members. @module */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { SerializedError } from '../../src/index.ts';
 
 describe('SerializedError compatibility contract', () => {

@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The consume half. Every message must be acked or retried **exactly once** —
  * acking a message the consumer could not route discards it silently, and
@@ -5,8 +14,7 @@
  * fire-and-forget message is dead-lettered.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   encodePublishEnvelope,

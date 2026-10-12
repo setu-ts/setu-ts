@@ -1,3 +1,5 @@
+import { denoBinary, run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The drift gate: scaffolds each template into a REAL temp directory, generates
  * over the §6.1 hostile name set, and runs `deno check` on the result.
@@ -21,15 +23,14 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 import { collectSources, denoCheck, useWorkspacePackages } from '../fixtures/generated-project.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /**
@@ -115,27 +116,27 @@ describe('template scaffolding — end to end', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-tpl-' });
+    root = await tempDir({ prefix: 'setu-tpl-' });
     out = [];
     err = [];
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   for (const template of listTemplates()) {
     it(`scaffolds a ${template.name} project whose files exist on disk`, async () => {
-      expect(await run(['new', 'svc', '--template', template.name])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'svc', '--template', template.name])).toBe(0);
       for (const name of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md']) {
-        expect((await Deno.stat(`${root}/svc/${name}`)).isFile).toBe(true);
+        expect((await nodeFs.stat(`${root}/svc/${name}`)).isFile()).toBe(true);
       }
     });
 
     it(`emits a ${template.name} config declaring every plugin in the manifest`, async () => {
-      await run(['new', 'svc', '--template', template.name]);
-      const config = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
-      const manifest = JSON.parse(await Deno.readTextFile(`${root}/svc/deno.json`));
+      await run(['new', '--runtime', 'deno', 'svc', '--template', template.name]);
+      const config = await nodeFs.readFile(`${root}/svc/setu.config.ts`, 'utf8');
+      const manifest = JSON.parse(await nodeFs.readFile(`${root}/svc/deno.json`, 'utf8'));
       for (const match of config.matchAll(/from '(@setu-ts\/[a-z-]+)'/g)) {
         expect(Object.keys(manifest.imports)).toContain(match[1]);
       }
@@ -148,10 +149,10 @@ describe('template scaffolding — end to end', () => {
     // could not resolve. E8 replaced the gate with a SHAPE: the functional form
     // imports `@setu-ts/common` alone, so the file compiles in a bare project
     // and the refusal is no longer needed.
-    await run(['new', 'bare']);
+    await run(['new', '--runtime', 'deno', 'bare']);
     expect(await run(['g', 'controller', 'user', '--dir', `${root}/bare`])).toBe(0);
 
-    const module = await Deno.readTextFile(`${root}/bare/src/controllers/user.controller.ts`);
+    const module = await nodeFs.readFile(`${root}/bare/src/controllers/user.controller.ts`, 'utf8');
     // The IMPORT is the property under test, not the word: the JSDoc names the
     // plugin deliberately, to tell the reader how to get the decorated form.
     expect(module).not.toContain("from '@setu-ts/decorator-plugin'");
@@ -159,14 +160,14 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('allows a controller in a class-based project', async () => {
-    await run(['new', 'svc', '--template', 'class-based']);
+    await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based']);
     expect(await run(['g', 'controller', 'user', '--dir', `${root}/svc`])).toBe(0);
   });
 
   describe('the hostile name set', () => {
     for (const { name, accepted } of HOSTILE_NAMES) {
       it(`${accepted ? 'generates' : 'refuses'} the name "${name}"`, async () => {
-        await run(['new', 'svc']);
+        await run(['new', '--runtime', 'deno', 'svc']);
         const project = `${root}/svc`;
         for (const schematic of UNGATED) {
           const code = await run(['g', schematic, name, '--dir', project]);
@@ -176,10 +177,10 @@ describe('template scaffolding — end to end', () => {
     }
 
     it('never writes a file for a refused name', async () => {
-      await run(['new', 'svc']);
+      await run(['new', '--runtime', 'deno', 'svc']);
       const project = `${root}/svc`;
       expect(await run(['g', 'service', '2fa', '--dir', project])).toBe(2);
-      await expect(Deno.stat(`${project}/src/services`)).rejects.toThrow();
+      await expect(nodeFs.stat(`${project}/src/services`)).rejects.toThrow();
     });
   });
 
@@ -190,7 +191,7 @@ describe('template scaffolding — end to end', () => {
   // that does not resolve, type-checks nowhere else in the suite. This is that
   // check.
   it('type-checks the scaffolded class-based project, including its emitted classes', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
     const project = `${root}/svc`;
 
     const sources = [
@@ -200,7 +201,7 @@ describe('template scaffolding — end to end', () => {
       `${project}/src/controllers/greeting.controller.ts`,
     ];
     for (const source of sources) {
-      expect((await Deno.stat(source)).isFile).toBe(true);
+      expect((await nodeFs.stat(source)).isFile()).toBe(true);
     }
 
     await useWorkspacePackages(project);
@@ -217,10 +218,10 @@ describe('template scaffolding — end to end', () => {
   // nowhere else — `args` is an opaque string literal as far as the CLI's own
   // `deno check` is concerned.
   it('type-checks the scaffolded microservice project, including the discovery args', async () => {
-    expect(await run(['new', 'msvc', '--template', 'microservice'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'msvc', '--template', 'microservice'])).toBe(0);
     const project = `${root}/msvc`;
 
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain(
       "ServiceDiscoveryPlugin({ provider: 'static', services: {} })",
     );
@@ -239,7 +240,7 @@ describe('template scaffolding — end to end', () => {
   // signature, or an alias the manifest never declares, type-checks nowhere
   // else in the suite.
   it('type-checks the scaffolded full-stack project, config and app tree', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
 
     // The .tsx files are deliberately excluded: they need React and the npm
@@ -256,7 +257,7 @@ describe('template scaffolding — end to end', () => {
       `${project}/app/features/products/products.server.ts`,
     ];
     for (const source of sources) {
-      expect((await Deno.stat(source)).isFile).toBe(true);
+      expect((await nodeFs.stat(source)).isFile()).toBe(true);
     }
 
     await useWorkspacePackages(project);
@@ -266,7 +267,7 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('refuses the retired independent DI switch', async () => {
-    expect(await run(['new', 'svc', '--template', 'rest', '--di'])).toBe(2);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'rest', '--di'])).toBe(2);
     expect(err.join('\n')).toContain('--style class-based');
   });
 
@@ -282,7 +283,7 @@ describe('template scaffolding — end to end', () => {
     ).toBe(0);
     const project = `${root}/edge`;
 
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     // The swap happened: the two socket-bound plugins are gone and the platform
     // plugin serves both capabilities in their place.
     expect(config).not.toContain('MessagingPlugin');
@@ -292,7 +293,7 @@ describe('template scaffolding — end to end', () => {
     expect(config).toContain("queue: { binding: 'JOBS' }");
 
     // The consumer half is a module export, which no plugin option can declare.
-    const entry = await Deno.readTextFile(`${project}/src/index.ts`);
+    const entry = await nodeFs.readFile(`${project}/src/index.ts`, 'utf8');
     expect(entry).toContain('async queue(');
     expect(entry).toContain("export { ReplyInboxObject } from './reply-inbox-object.ts';");
     // Cloudflare invokes ONE queue export for every consumed queue, so messaging
@@ -304,7 +305,7 @@ describe('template scaffolding — end to end', () => {
 
     // `max_batch_timeout = 0` is what makes request/reply usable at all; the
     // platform default of 5s alone exhausts the default reply budget.
-    const wrangler = await Deno.readTextFile(`${project}/wrangler.toml`);
+    const wrangler = await nodeFs.readFile(`${project}/wrangler.toml`, 'utf8');
     expect(wrangler).toContain('max_batch_timeout = 0');
     expect(wrangler).toContain('[[queues.producers]]');
     expect(wrangler).toContain('class_name = "ReplyInboxObject"');
@@ -330,14 +331,14 @@ describe('template scaffolding — end to end', () => {
     expect(await run(['new', 'b', '--template', 'microservice', '--runtime', 'node'])).toBe(0);
 
     for (const name of ['a', 'b']) {
-      const config = await Deno.readTextFile(`${root}/${name}/setu.config.ts`);
+      const config = await nodeFs.readFile(`${root}/${name}/setu.config.ts`, 'utf8');
       expect(config).toContain('MessagingPlugin()');
       expect(config).toContain('QueuePlugin()');
       expect(config).not.toContain('CloudflarePlugin');
     }
 
     // And no Workers-only artifact leaks onto them.
-    await expect(Deno.stat(`${root}/a/src/reply-inbox-object.ts`)).rejects.toThrow();
+    await expect(nodeFs.stat(`${root}/a/src/reply-inbox-object.ts`)).rejects.toThrow();
   });
 
   it('serves static assets everywhere but Cloudflare Workers', async () => {
@@ -349,8 +350,8 @@ describe('template scaffolding — end to end', () => {
       await run(['new', 'edge', '--template', 'full-stack', '--runtime', 'cloudflare-workers']),
     ).toBe(0);
 
-    const deno = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
-    const workers = await Deno.readTextFile(`${root}/edge/setu.config.ts`);
+    const deno = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
+    const workers = await nodeFs.readFile(`${root}/edge/setu.config.ts`, 'utf8');
 
     expect(deno).toContain("assetsDir: './build/client/assets'");
     expect(workers).not.toContain('assetsDir');
@@ -361,7 +362,7 @@ describe('template scaffolding — end to end', () => {
 
   it('emits the npm toolchain on a Deno target, which has no package.json of its own', async () => {
     expect(await run(['new', 'shop', '--template', 'full-stack', '--runtime', 'deno'])).toBe(0);
-    const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop/package.json`));
+    const manifest = JSON.parse(await nodeFs.readFile(`${root}/shop/package.json`, 'utf8'));
 
     // The frontend build runs on npm even when the server runs on Deno — the
     // one documented exception to the Deno-only toolchain.
@@ -374,22 +375,22 @@ describe('template scaffolding — end to end', () => {
 
   it('merges the npm toolchain into the fixed manifest on a Node target', async () => {
     expect(await run(['new', 'shop', '--template', 'full-stack', '--runtime', 'node'])).toBe(0);
-    const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop/package.json`));
+    const manifest = JSON.parse(await nodeFs.readFile(`${root}/shop/package.json`, 'utf8'));
 
     // One package.json carrying both: a second file would collide with the
     // fixed set and silently overwrite the framework dependencies.
     expect(manifest.dependencies['@setu-ts/full-stack-starter']).toBeDefined();
     expect(manifest.devDependencies['@react-router/dev']).toBeDefined();
 
-    const tsconfig = JSON.parse(await Deno.readTextFile(`${root}/shop/tsconfig.json`));
+    const tsconfig = JSON.parse(await nodeFs.readFile(`${root}/shop/tsconfig.json`, 'utf8'));
     expect(tsconfig.compilerOptions.paths['~/*']).toEqual(['./app/*']);
     // The fixed options survive the merge.
     expect(tsconfig.compilerOptions.strict).toBe(true);
   });
 
   it('grants the Deno start task the read permission SSR needs', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
-    const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop/deno.json`));
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+    const manifest = JSON.parse(await nodeFs.readFile(`${root}/shop/deno.json`, 'utf8'));
 
     // Without it the project scaffolds, starts, and fails on its first request:
     // the SSR plugin imports its own server build and reads client assets.
@@ -398,8 +399,8 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('emits no hello-world route, which would shadow the SSR index', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
-    const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+    const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
     // An exact '/' handler beats the catch-all the SSR plugin mounts, so the
     // app's own index route would never render.
@@ -408,8 +409,8 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('wires the class-based config with DI and the emitted classes', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
-    const config = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
+    const config = await nodeFs.readFile(`${root}/svc/setu.config.ts`, 'utf8');
 
     // The args string, rendered into the plugin call. The showcase classes come
     // first, then the standalone barrels, then the module barrel — so `setu g controller`
@@ -425,8 +426,8 @@ describe('template scaffolding — end to end', () => {
         '      }),',
     );
     // DiPlugin is what puts @Injectable classes on the container path. Since
-    // M70d (E3) it emits `autoRegister: true`, because the default disables the
-    // container's only route to the framework's own services.
+    // M70d (E3) it states `autoRegister: true`, the container's only route to the
+    // framework's own services.
     expect(config).toContain('DiPlugin({ autoRegister: true })');
     // The local imports that bring the args identifiers into scope.
     // E4: the showcase reaches the config through the seam barrels now, not by
@@ -445,8 +446,8 @@ describe('template scaffolding — end to end', () => {
   // raises TS2561 naming the key and its nearest match; without it, nothing.
   describe('the full-stack config resolver', () => {
     it('emits the annotation that restores excess-property checking', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
-      const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+      const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
       expect(config).toContain('(config): FullStackStarterOptions => ({');
       // A package import naming ONLY types renders in the `import type` form
@@ -458,15 +459,15 @@ describe('template scaffolding — end to end', () => {
     });
 
     it('makes a misspelled arm a COMPILE error in the generated project', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
       // The typo goes into the real generated file, in the real position, so
       // this measures the shipped resolver rather than a hand-built stand-in.
       const path = `${project}/setu.config.ts`;
-      const original = await Deno.readTextFile(path);
-      await Deno.writeTextFile(
+      const original = await nodeFs.readFile(path, 'utf8');
+      await nodeFs.writeFile(
         path,
         original.replace('    session: {', '    sessionn: { secret: 0 },\n    session: {'),
       );
@@ -476,7 +477,7 @@ describe('template scaffolding — end to end', () => {
       expect(stderr).toContain('sessionn');
 
       // Restored, so the mutation cannot leak into another assertion.
-      await Deno.writeTextFile(path, original);
+      await nodeFs.writeFile(path, original);
       const clean = await denoCheck(project, [path]);
       expect(clean.code, clean.stderr).toBe(0);
     });
@@ -488,7 +489,7 @@ describe('template scaffolding — end to end', () => {
   // checked by NEITHER of the project's own check paths. The route answered 404.
   describe('the full-stack seam host', () => {
     it('type-checks a generated artifact through the project OWN check task', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'route', 'widget', '--dir', project])).toBe(0);
       await useWorkspacePackages(project);
@@ -497,8 +498,8 @@ describe('template scaffolding — end to end', () => {
       // clean under `check:app` (which globbed `app/` only) AND under
       // `deno check main.ts setu.config.ts` (which never reached `src/`).
       const path = `${project}/src/controllers/widget.routes.ts`;
-      const original = await Deno.readTextFile(path);
-      await Deno.writeTextFile(
+      const original = await nodeFs.readFile(path, 'utf8');
+      await nodeFs.writeFile(
         path,
         original.replace(
           'export function registerWidgetRoutes',
@@ -506,28 +507,29 @@ describe('template scaffolding — end to end', () => {
         ),
       );
 
-      const checkTask = new Deno.Command(Deno.execPath(), {
+      const checkTask = () =>
+        runProcess(denoBinary(), {
+          args: ['task', 'check:app'],
+          cwd: project,
+          stdout: 'piped',
+          stderr: 'piped',
+        });
+      const broken = await checkTask();
+      expect(broken.code).not.toBe(0);
+
+      await nodeFs.writeFile(path, original);
+      const clean = await runProcess(denoBinary(), {
         args: ['task', 'check:app'],
         cwd: project,
         stdout: 'piped',
         stderr: 'piped',
       });
-      const broken = await checkTask.output();
-      expect(broken.code).not.toBe(0);
-
-      await Deno.writeTextFile(path, original);
-      const clean = await new Deno.Command(Deno.execPath(), {
-        args: ['task', 'check:app'],
-        cwd: project,
-        stdout: 'piped',
-        stderr: 'piped',
-      }).output();
       expect(clean.code, new TextDecoder().decode(clean.stderr)).toBe(0);
     });
 
     it('imports the seam barrels from the generated config', async () => {
-      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
-      const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+      const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
       expect(config).toContain("from './src/controllers/index.ts'");
       expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
@@ -538,9 +540,10 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('emits parameter-level @Inject in the class-based controller', async () => {
-    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
-    const controller = await Deno.readTextFile(
+    expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
+    const controller = await nodeFs.readFile(
       `${root}/svc/src/controllers/greeting.controller.ts`,
+      'utf8',
     );
     // The showcase is the parameter position, not the deprecated class-level list.
     expect(controller).toContain("@Inject('greeting-service')");
@@ -574,9 +577,12 @@ describe('template scaffolding — end to end', () => {
 
   for (const [group, schematics] of Object.entries(NON_COLLIDING_GROUPS)) {
     it(`type-checks a ${group} project generated over every accepted name`, async () => {
-      expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
       const project = `${root}/svc`;
 
+      if (schematics.includes('job')) {
+        expect(await run(['add', 'queue', '--dir', project])).toBe(0);
+      }
       for (const { name, accepted } of HOSTILE_NAMES) {
         if (!accepted) continue;
         for (const schematic of schematics) {
@@ -626,13 +632,13 @@ describe('setu generate module, end to end', () => {
     });
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-module-e2e-' });
+    root = await tempDir({ prefix: 'setu-module-e2e-' });
     out = [];
     err = [];
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   /**
@@ -643,9 +649,9 @@ describe('setu generate module, end to end', () => {
    */
   async function moduleSources(project: string): Promise<string[]> {
     const paths: string[] = [`${project}/src/modules/index.ts`];
-    for await (const entry of Deno.readDir(`${project}/src/modules`)) {
-      if (!entry.isDirectory) continue;
-      for await (const file of Deno.readDir(`${project}/src/modules/${entry.name}`)) {
+    for await (const entry of await nodeFs.opendir(`${project}/src/modules`)) {
+      if (!entry.isDirectory()) continue;
+      for await (const file of await nodeFs.opendir(`${project}/src/modules/${entry.name}`)) {
         // Test files included: the host templates declare the `@std` specifiers
         // the emitted test imports, so it must type-check like any other file.
         paths.push(`${project}/src/modules/${entry.name}/${file.name}`);
@@ -655,19 +661,19 @@ describe('setu generate module, end to end', () => {
   }
 
   it('type-checks a rest project carrying two generated modules', async () => {
-    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
     expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
     expect(await run(['g', 'module', 'order-item', '--dir', project])).toBe(0);
 
     // The barrel names both modules — the second generate did not drop the first.
-    const barrel = await Deno.readTextFile(`${project}/src/modules/index.ts`);
+    const barrel = await nodeFs.readFile(`${project}/src/modules/index.ts`, 'utf8');
     expect(barrel).toContain('UserModule');
     expect(barrel).toContain('OrderItemModule');
 
     // And the config consumes it, so both are registered with no hand edit.
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain("from './src/modules/index.ts'");
     expect(config).toContain('...MODULES');
 
@@ -686,12 +692,12 @@ describe('setu generate module, end to end', () => {
   // container's presence — so the emitted `@Inject` has to compile and resolve
   // on both paths, not just the one the showcase template takes.
   it('type-checks a class-based project carrying a generated module', async () => {
-    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
     expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
 
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     // The seam must not have displaced the template's own example classes.
     // E4: the showcase reaches the config through APP_CONTROLLERS rather than
     // by name, so the assertion is that BOTH registration paths are present —
@@ -713,7 +719,7 @@ describe('setu generate module, end to end', () => {
   });
 
   it('regenerates the barrel without refusing, and lists each module once', async () => {
-    await run(['new', 'shop', '--template', 'class-based']);
+    await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
     await run(['g', 'module', 'user', '--dir', project]);
 
@@ -721,7 +727,7 @@ describe('setu generate module, end to end', () => {
     // makes this exit 0 rather than refusing on an existing path.
     expect(await run(['g', 'module', 'billing', '--dir', project])).toBe(0);
 
-    const barrel = await Deno.readTextFile(`${project}/src/modules/index.ts`);
+    const barrel = await nodeFs.readFile(`${project}/src/modules/index.ts`, 'utf8');
     expect(barrel.match(/UserModule/g)?.length).toBe(2); // import + array entry
     expect(barrel.match(/from '\.\/user\/user\.module\.ts'/g)?.length).toBe(1);
   });
@@ -738,9 +744,9 @@ describe('setu generate module, end to end', () => {
   // see whether Deno actually resolves the specifier from the project.
   for (
     const [label, argv] of [
-      ['no template', ['new', 'bare']],
-      ['--template rest', ['new', 'bare', '--template', 'rest']],
-      ['--template full-stack', ['new', 'bare', '--template', 'full-stack']],
+      ['no template', ['new', '--runtime', 'deno', 'bare']],
+      ['--template rest', ['new', '--runtime', 'deno', 'bare', '--template', 'rest']],
+      ['--template full-stack', ['new', '--runtime', 'deno', 'bare', '--template', 'full-stack']],
     ] as const
   ) {
     it(`type-checks the module test it generates into a ${label} project`, async () => {
@@ -772,21 +778,22 @@ describe('setu generate module, end to end', () => {
     project: string,
     probe: string,
   ): Promise<Record<string, { status: number; body: string }>> {
-    await Deno.writeTextFile(`${project}/run-probe.ts`, probe);
-    const command = new Deno.Command(Deno.execPath(), {
-      args: [
-        'run',
-        '-A',
-        '--node-modules-dir=none',
-        '--config',
-        `${project}/deno.json`,
-        `${project}/run-probe.ts`,
-      ],
-      cwd: project,
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const { code, stdout, stderr } = await command.output();
+    await nodeFs.writeFile(`${project}/run-probe.ts`, probe);
+    const command = () =>
+      runProcess(denoBinary(), {
+        args: [
+          'run',
+          '-A',
+          '--node-modules-dir=none',
+          '--config',
+          `${project}/deno.json`,
+          `${project}/run-probe.ts`,
+        ],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+    const { code, stdout, stderr } = await command();
     const out = new TextDecoder().decode(stdout);
     if (code !== 0) {
       throw new Error(`probe exited ${code}\n${new TextDecoder().decode(stderr)}`);
@@ -840,7 +847,7 @@ await app.stop();
   // context positionally. Compiling is not working.
   for (const template of ['rest', 'class-based']) {
     it(`serves requests from generated modules on --template ${template}`, async () => {
-      expect(await run(['new', 'shop', '--template', template])).toBe(0);
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'orders', '--dir', project])).toBe(0);
       expect(await run(['g', 'module', 'order-item', '--dir', project])).toBe(0);
@@ -860,7 +867,7 @@ await app.stop();
   // one-line class of fix, so it ships here rather than on a separate branch
   // (a deliberate deviation from this milestone's plan, at the maintainer's call).
   it('serves requests from a generated standalone controller', async () => {
-    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
     expect(await run(['g', 'controller', 'widgets', '--dir', project])).toBe(0);
 
@@ -874,7 +881,7 @@ await app.stop();
   });
 
   it('still refuses to overwrite a module that already exists', async () => {
-    await run(['new', 'shop', '--template', 'class-based']);
+    await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
     await run(['g', 'module', 'user', '--dir', project]);
     err = [];

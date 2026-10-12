@@ -145,6 +145,7 @@ class MockRequest implements IRequest {
   readonly ip?: string;
   user?: IPrincipal;
   tenant?: ITenant;
+  locale?: string;
   readonly signal?: AbortSignal;
   /**
    * The body reduced ONCE to its wire form, so `json()`, `text()` and
@@ -172,6 +173,7 @@ class MockRequest implements IRequest {
     ip?: string;
     user?: IPrincipal;
     tenant?: ITenant;
+    locale?: string;
   }) {
     this.method = options.method as HttpMethod;
     this.url = options.url;
@@ -190,6 +192,9 @@ class MockRequest implements IRequest {
     }
     if (options.tenant !== undefined) {
       this.tenant = options.tenant;
+    }
+    if (options.locale !== undefined) {
+      this.locale = options.locale;
     }
   }
 
@@ -409,6 +414,7 @@ export function createTestContext(options?: TestContextOptions): IRequestContext
     ...(reqOptions.ip !== undefined ? { ip: reqOptions.ip } : {}),
     ...(reqOptions.user !== undefined ? { user: reqOptions.user } : {}),
     ...(reqOptions.tenant !== undefined ? { tenant: reqOptions.tenant } : {}),
+    ...(reqOptions.locale !== undefined ? { locale: reqOptions.locale } : {}),
   });
   sealRequestIdentity(mockRequest);
 

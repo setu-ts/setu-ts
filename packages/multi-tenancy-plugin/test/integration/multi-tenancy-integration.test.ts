@@ -2,8 +2,7 @@
  * End-to-end integration: plugin registration, middleware resolution,
  * memory store CRUD, and cross-tenant isolation.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryTenantDataStore } from '../../src/stores/memory-tenant-store.ts';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';

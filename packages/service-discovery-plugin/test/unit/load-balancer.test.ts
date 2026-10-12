@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { createLoadBalancer } from '../../src/balancer/load-balancer.ts';
 import { createFakeRuntime, instance } from '../fixtures/fakes.ts';

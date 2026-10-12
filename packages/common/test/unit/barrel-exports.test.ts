@@ -7,9 +7,17 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
+import type { WritePrecondition, WritePreconditionCheck } from '../../src/index.ts';
+
+describe('portable write precondition exports', () => {
+  it('exports the type and validator', () => {
+    const where: WritePrecondition = { status: 'pending', attempts: 1 };
+    const checked: WritePreconditionCheck<undefined> = common.checkWritePrecondition(where);
+    expect(checked).toEqual({ ok: true, where, data: undefined });
+  });
+});
 import type {
   HealthCheckResult,
   IHealthIndicator,
@@ -30,8 +38,22 @@ import type {
   IngressKind,
 } from '../../src/index.ts';
 import type { WebSocketGuardDecision, WebSocketUpgradeGuard } from '../../src/index.ts';
+import type { TraceparentSource } from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
+  it('exports the shared diagnostics alias predicate', () => {
+    expect(typeof common.hasForbiddenAliasCharacter).toBe('function');
+  });
+
+  it('exports TraceparentSource as a type', () => {
+    const source: TraceparentSource = {
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: '01',
+    };
+    expect(source.traceFlags).toBe('01');
+  });
+
   it('exports resolveRegistryEntry as a function', () => {
     expect(common.resolveRegistryEntry).toBeDefined();
     expect(typeof common.resolveRegistryEntry).toBe('function');
@@ -120,6 +142,29 @@ describe('@setu-ts/common barrel — M96 redaction', () => {
     expect(common.DATA_CLASSIFICATIONS.SECRET).toBe('secret');
     expect('createFieldMatcher' in common).toBe(false);
     expect('REDACTION' in common.CAPABILITIES).toBe(false);
+  });
+
+  it('exports FieldRedaction and accepts both policy field value forms (M101h)', () => {
+    // Compile-time: both arms assign to `RedactionPolicy.fields`, and the type
+    // resolves from the BARREL — dropping the re-export stops this compiling.
+    const stringValued: import('../../src/index.ts').RedactionPolicy = {
+      fields: { 'user.email': 'pii' },
+    };
+    const objectValued: import('../../src/index.ts').RedactionPolicy = {
+      fields: {
+        'user.email': { classification: 'pii', redactor: common.createMaskRedactor({ keep: 4 }) },
+        'user.name': { classification: 'pii' },
+      },
+    };
+    const fieldRedaction: import('../../src/index.ts').FieldRedaction = {
+      classification: 'secret',
+    };
+
+    expect(stringValued.fields['user.email']).toBe('pii');
+    expect(objectValued.fields['user.name']).toEqual({ classification: 'pii' });
+    expect(fieldRedaction.classification).toBe('secret');
+    // `FieldRedaction` is a type-only export, so it has no runtime presence.
+    expect('FieldRedaction' in common).toBe(false);
   });
 });
 
@@ -366,6 +411,37 @@ describe('@setu-ts/common barrel — M90f malformed body', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The portable duplicate-key error
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — duplicate key', () => {
+  it('exports DuplicateKeyError, branded 409 with a fixed detail and the driver error as cause', () => {
+    const driver = Object.assign(new Error('Key (email)=(ada@example.com) already exists.'), {
+      code: '23505',
+    });
+    const error = new common.DuplicateKeyError('diagnostic', { entity: 'User', cause: driver });
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('DuplicateKeyError');
+    expect(error.entity).toBe('User');
+    expect(error.cause).toBe(driver);
+    expect(common.httpStatusHintOf(error)).toEqual({
+      status: 409,
+      title: 'Conflict',
+      detail:
+        'A record with the same unique key already exists. The conflicting write was rejected.',
+    });
+    // The served detail never quotes the driver's text, which carries the value.
+    expect(common.httpStatusHintOf(error)?.detail).not.toContain('ada@example.com');
+  });
+
+  it('omits entity and cause when the producer supplies neither', () => {
+    const error = new common.DuplicateKeyError('diagnostic');
+    expect(error.entity).toBeUndefined();
+    expect('cause' in error).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M92 — the view rendering contract
 // ---------------------------------------------------------------------------
 
@@ -441,5 +517,324 @@ describe('@setu-ts/common barrel — M100c auth-session contract', () => {
   it('pins AuthMethod and SignInOutcome shapes (compile-time)', () => {
     expect(authMethodUnionPinned).toBe(true);
     expect(signInOutcomePinned).toBe(true);
+  });
+});
+
+describe('@setu-ts/common barrel — M101c identity composition', () => {
+  it('exports the session tenant-binding key and the pure compare helper', () => {
+    expect(common.SESSION_TENANT_BINDING_KEY).toBe('__setu_tenant');
+    expect(typeof common.tenantBindingMismatch).toBe('function');
+  });
+
+  it("exports SESSION_STATE_KEY byte-identical to the session plugin's", () => {
+    expect(common.SESSION_STATE_KEY).toBe('session-plugin:session');
+  });
+
+  it('exports SESSION_TENANT_BINDING_STATE_KEY following the state-key convention', () => {
+    expect(common.SESSION_TENANT_BINDING_STATE_KEY).toBe('session-plugin:tenant-binding');
+  });
+
+  it('tenantBindingMismatch is inert for an unbound session or a tenant-less request', () => {
+    // A minimal ISession double: the helper only calls `get`.
+    const session: common.ISession = {
+      id: 's1',
+      isNew: false,
+      get: <T = unknown>(key: string): T | undefined =>
+        (key === common.SESSION_TENANT_BINDING_KEY ? 'a' : undefined) as unknown as T | undefined,
+      set: () => {},
+      has: () => false,
+      delete: () => false,
+      clear: () => {},
+      regenerate: () => {},
+      destroy: () => {},
+      toJSON: () => ({}),
+    };
+    expect(common.tenantBindingMismatch(session, 'a')).toBe(false);
+    expect(common.tenantBindingMismatch(session, 'b')).toBe(true);
+    expect(common.tenantBindingMismatch(session, undefined)).toBe(false);
+  });
+
+  it('exports the promoted tenancy ports (declared against the barrel)', async () => {
+    // Compile-time: the two ports resolve from the barrel. A fixture assigned
+    // against them proves the re-export carries the full member set.
+    const strategy: common.ITenantIsolationStrategy = {
+      kind: 'column',
+      getTenantColumn: () => 'tenant_id',
+    };
+    const store: common.ITenantDataStore = {
+      useIsolation: (s: common.ITenantIsolationStrategy) => {
+        expect(s.kind).toBe(strategy.kind);
+      },
+      // deno-lint-ignore require-await
+      findAll: async () => [],
+      // deno-lint-ignore require-await
+      findById: async () => null,
+      // deno-lint-ignore require-await
+      find: async () => [],
+      // deno-lint-ignore require-await
+      create: async <E>(): Promise<E> => ({} as unknown as E),
+      // deno-lint-ignore require-await
+      update: async () => null,
+      // deno-lint-ignore require-await
+      delete: async () => false,
+    };
+    await expect(store.findAll('a', 'User')).resolves.toEqual([]);
+  });
+});
+
+describe('@setu-ts/common barrel — bounded backend call (M101a)', () => {
+  it('exports withDeadline and deadlineRangeError as functions', () => {
+    expect(typeof common.withDeadline).toBe('function');
+    expect(typeof common.deadlineRangeError).toBe('function');
+  });
+
+  it('exports the DeadlineOptions type (declared against the barrel)', async () => {
+    const options: common.DeadlineOptions = {
+      timeoutMs: 0,
+      onTimeout: () => new Error('never'),
+    };
+
+    await expect(common.withDeadline(() => Promise.resolve(7), options)).resolves.toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M103 — the localization contract
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M103 localization contract', () => {
+  it('exposes CAPABILITIES.LOCALIZATION, resolved through the localization plugin', () => {
+    expect(common.CAPABILITIES.LOCALIZATION).toBe('localization');
+  });
+
+  it('exports replaceLocale beside the other two replacers', () => {
+    expect(typeof common.replaceLocale).toBe('function');
+  });
+
+  it('exports the four localization types (declared against the barrel)', () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class).
+    const plural: common.PluralForms = { one: '{count} item', other: '{count} items' };
+    const message: common.LocalizationMessage = plural;
+    const catalogue: common.MessageCatalogue = { items: message, title: 'Cart' };
+    const localizer: common.ILocalizer = {
+      locale: 'en',
+      locales: ['en'],
+      t: (key) => String(catalogue[key]),
+      forLocale: () => localizer,
+    };
+    expect(localizer.t('title')).toBe('Cart');
+    expect(localizer.forLocale('en')).toBe(localizer);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M107 — the transactional outbox port and SpanOptions.root
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M107 outbox port', () => {
+  it('exposes CAPABILITIES.OUTBOX and OUTBOX_RECORD_KIND', () => {
+    expect(common.CAPABILITIES.OUTBOX).toBe('outbox');
+    expect(common.OUTBOX_RECORD_KIND).toBe('setu-outbox');
+  });
+
+  it('exports the outbox types (declared against the barrel)', async () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class): every
+    // declaration below names its type through the barrel namespace.
+    const status: common.OutboxStatus = 'pending';
+    const record: common.OutboxRecord = {
+      id: 'e1',
+      kind: common.OUTBOX_RECORD_KIND,
+      topic: 'orders.created.v1',
+      envelope: '{}',
+      options: '{"deduplicationId":"e1"}',
+      position: '000000000000001e1',
+      createdAt: 1,
+      status,
+      attempts: 0,
+      availableAt: 1,
+      claimVersion: 0,
+      leaseUntil: 0,
+    };
+    const key: common.OutboxKey = { orderingKey: 'order-1' };
+    const applied: common.OutboxTransition = { outcome: 'applied' };
+    const stats: common.OutboxStoreStats = { pending: 1, failed: 0, oldestPendingCreatedAt: 1 };
+    const written: Readonly<Record<string, unknown>>[] = [];
+    const scope: common.IOutboxWriteScope = {
+      getRepository: () => ({
+        create: (data) => {
+          written.push(data);
+          return Promise.resolve(data);
+        },
+      }),
+    };
+    const store: common.IOutboxStore = {
+      append: async (s, r) => {
+        await s.getRepository('Outbox').create({ ...r });
+      },
+      scanPending: () => Promise.resolve([record]),
+      failedKeys: () => Promise.resolve([key]),
+      claim: () => Promise.resolve(applied),
+      markInvalid: () => Promise.resolve(applied),
+      markSent: () => Promise.resolve(applied),
+      markFailure: () => Promise.resolve(applied),
+      release: () => Promise.resolve({ outcome: 'not-failed', status: 'sent' }),
+      stats: () => Promise.resolve(stats),
+      purge: () => Promise.resolve(0),
+      verify: () => Promise.resolve(),
+    };
+
+    await store.append(scope, record);
+    expect(written).toEqual([record]);
+    await expect(store.scanPending(undefined, 1)).resolves.toEqual([record]);
+    await expect(store.failedKeys(1)).resolves.toEqual([key]);
+    await expect(store.stats()).resolves.toEqual(stats);
+  });
+
+  it('exports SpanOptions with the optional root member', () => {
+    const options: common.SpanOptions = { kind: 'internal', root: true };
+    expect(options.root).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M109a — the idempotency port, service contract and option types
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M109a idempotency contract', () => {
+  it('exposes CAPABILITIES.IDEMPOTENCY, resolved by the idempotency plugin and the decorator plugin', () => {
+    expect(common.CAPABILITIES.IDEMPOTENCY).toBe('idempotency');
+  });
+
+  it('exports the idempotency port and option types (declared against the barrel)', () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class): dropping
+    // any re-export stops this file compiling. The `IngressContext.consumer`
+    // member is pinned in `ingress-contract.test.ts`.
+    const store: common.IIdempotencyStore = {
+      name: 'stub',
+      connect: () => Promise.resolve(),
+      claim: () => Promise.resolve({ outcome: 'claimed', takeover: false }),
+      complete: () => Promise.resolve('settled'),
+      release: () => Promise.resolve('lost'),
+    };
+    const route: common.IdempotentRouteOptions = { response: 'status' };
+    const ingress: common.IdempotentIngressOptions = { jobNames: ['email.send'] };
+    const claim: common.IdempotencyClaimRequest = {
+      key: 'a'.repeat(64),
+      scope: 'b'.repeat(64),
+      fingerprint: 'c'.repeat(64),
+      token: 't',
+      leaseMs: 1_000,
+      ttlMs: 2_000,
+    };
+
+    expect(store.name).toBe('stub');
+    expect(route.response).toBe('status');
+    expect(ingress.jobNames).toEqual(['email.send']);
+    expect(claim.leaseMs).toBeLessThanOrEqual(claim.ttlMs);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M108 — the consumer inbox port
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M108 inbox port', () => {
+  it('exposes CAPABILITIES.INBOX and INBOX_RECORD_KIND', () => {
+    expect(common.CAPABILITIES.INBOX).toBe('inbox');
+    expect(common.INBOX_RECORD_KIND).toBe('setu-inbox');
+  });
+
+  it('exports the inbox types (declared against the barrel)', () => {
+    // Type-only exports are asserted at COMPILE time (the M56 class).
+    const status: common.InboxStatus = 'parked';
+    const ids: common.InboxIds = { marker: 'm', attempts: 'm.attempts' };
+    const update: common.InboxFailureUpdate = {
+      consumer: 'c',
+      topic: 't.v1',
+      lastError: 'boom',
+      now: 1,
+    };
+    const stats: common.InboxStoreStats = { parked: 0 };
+    const record: common.InboxRecord = {
+      id: ids.marker,
+      kind: common.INBOX_RECORD_KIND,
+      consumer: update.consumer,
+      topic: update.topic,
+      status,
+      attempts: 1,
+      updatedAt: update.now,
+    };
+    const outcome: common.InboxReleaseOutcome = { outcome: 'applied', record };
+    const store: Pick<common.IInboxStore, 'stats'> = { stats: () => Promise.resolve(stats) };
+    expect(outcome.outcome).toBe('applied');
+    expect(typeof store.stats).toBe('function');
+  });
+});
+
+describe('@setu-ts/common barrel — authorization policies (M110a)', () => {
+  it('exports authorizationFailureInit beside respondWithAuthorizationFailure', () => {
+    expect(typeof common.authorizationFailureInit).toBe('function');
+    expect(typeof common.respondWithAuthorizationFailure).toBe('function');
+    expect(common.authorizationFailureInit('insufficient-privileges').status).toBe(403);
+  });
+
+  it('exports the policy contract types', () => {
+    // Compile-time: each type must be importable from the barrel.
+    const info: common.PolicyAbilityInfo = { anonymous: false };
+    const ability: common.PolicyAbility<never> = () => true;
+    const check: common.PolicyCheck<never> = () => true;
+    const anonymous: common.AnonymousPolicyCheck<never> = () => false;
+    const ref: common.PolicyRef<'read', never> = 'post';
+    const policy: common.PolicyDefinition = { name: 'post', abilities: { read: ability } };
+    const service: Pick<common.IAuthorizationPolicyService, 'describe'> = {
+      describe: () => info,
+    };
+    expect([typeof check, typeof anonymous, ref, policy.name]).toEqual([
+      'function',
+      'function',
+      'post',
+      'post',
+    ]);
+    expect(service.describe('post', 'read')).toEqual({ anonymous: false });
+  });
+});
+
+describe('scoped RBAC exports (M110b)', () => {
+  it('exports the reserved policy name, the encoders and the scope sources', () => {
+    expect(common.SCOPED_RBAC_POLICY).toBe('scoped-rbac');
+    expect(common.MAX_SCOPE_ID_LENGTH).toBe(256);
+    expect(common.scopedPermissionAbility('p')).toBe('perm:p');
+    expect(common.scopedRoleAbility('r')).toBe('role:r');
+    expect(common.isScopeType('tenant')).toBe(true);
+    expect(typeof common.scopeFromTenant).toBe('function');
+    expect(typeof common.scopeFromParam).toBe('function');
+  });
+
+  it('exports the model types', () => {
+    const scope: import('../../src/index.ts').ScopeRef = { type: 'tenant', id: 't' };
+    const grant: import('../../src/index.ts').ScopedGrant = { role: 'r', scope };
+    const query: import('../../src/index.ts').GrantQuery = { kind: 'chain', scopes: [scope] };
+    const target: import('../../src/index.ts').ScopedRbacTarget = { scope: null };
+    const source: import('../../src/index.ts').ScopeSource = scope;
+    const definition: import('../../src/index.ts').ScopedRoleDefinition = {
+      scope,
+      role: 'r',
+      permissions: [],
+    };
+    const grants: import('../../src/index.ts').IGrantSource = {
+      name: 'g',
+      grantsFor: () => Promise.resolve([grant]),
+    };
+    const roles: import('../../src/index.ts').IScopedRoleSource = {
+      name: 'r',
+      rolesFor: () => Promise.resolve([definition]),
+    };
+    expect([query.kind, target.scope, source, grants.name, roles.name]).toEqual([
+      'chain',
+      null,
+      scope,
+      'g',
+      'r',
+    ]);
   });
 });

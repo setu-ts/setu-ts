@@ -1,24 +1,22 @@
+import { readFileSync } from 'node:fs';
 /**
  * Unit tests for the Connect runtime loader: the pure `adaptConnectModule`
  * adapter and the per-specifier failure branches of `loadConnectModule`, driven
  * through the injected per-key importers so no network is required.
  *
  * The final test asserts each DEFAULT importer's source is a literal
- * `import('npm:…')`. That is the replacement for the old assertion that only
- * checked `String(defaultImporter)` contained `import(` — a stringified
- * non-literal `import(specifier)` also contains `import(`, so the old test
- * passed while the published artifact shipped `npm:` verbatim and could not
- * load on Node or Bun (X7-3). The literal-argument property is what survives
- * JSR's static npm-compatibility rewrite.
+ * `import('…')` of the bare package. That is the replacement for the old
+ * assertion that only checked `String(defaultImporter)` contained `import(` — a
+ * stringified non-literal `import(specifier)` also contains `import(`, so the
+ * old test passed while the published artifact lost the dependency (X7-3). The
+ * literal-argument property is what static analysis can see.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   adaptConnectModule,
   type ConnectImporters,
   type ConnectModuleLike,
-  DEFAULT_IMPORTERS,
   loadConnectModule,
 } from '../../src/transports/connect-loader.ts';
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
@@ -155,18 +153,18 @@ describe('adaptConnectModule', () => {
 describe('loadConnectModule', () => {
   /** The four specifiers in load order. */
   const SPECIFIERS = [
-    'npm:@connectrpc/connect@^2.1.2',
-    'npm:@connectrpc/connect@^2.1.2/protocol',
-    'npm:@bufbuild/protobuf@^2.7.0',
-    'npm:@bufbuild/protobuf@^2.7.0/wkt',
+    '@connectrpc/connect',
+    '@connectrpc/connect/protocol',
+    '@bufbuild/protobuf',
+    '@bufbuild/protobuf/wkt',
   ];
 
   /** The specifier each importer key loads, in load order. */
   const SPECIFIER_BY_KEY: Record<keyof ConnectImporters, string> = {
-    connect: 'npm:@connectrpc/connect@^2.1.2',
-    protocol: 'npm:@connectrpc/connect@^2.1.2/protocol',
-    protobuf: 'npm:@bufbuild/protobuf@^2.7.0',
-    wkt: 'npm:@bufbuild/protobuf@^2.7.0/wkt',
+    connect: '@connectrpc/connect',
+    protocol: '@connectrpc/connect/protocol',
+    protobuf: '@bufbuild/protobuf',
+    wkt: '@bufbuild/protobuf/wkt',
   };
 
   /** Per-key importers that resolve every key except the one named. */
@@ -240,10 +238,13 @@ describe('loadConnectModule', () => {
     // The old assertion only checked that the stringified default importer
     // contained `import(` — and `(specifier) => import(specifier)` does,
     // which is exactly the shape JSR's static rewrite cannot see, so the
-    // published artifact shipped `npm:` verbatim (X7-3). The property that
+    // published artifact lost the dependency (X7-3). The property that
     // survives publish is that the argument is a quoted literal.
     for (const key of Object.keys(SPECIFIER_BY_KEY) as Array<keyof ConnectImporters>) {
-      const source = String(DEFAULT_IMPORTERS[key]);
+      const source = readFileSync(
+        new URL('../../src/transports/connect-loader.ts', import.meta.url),
+        'utf8',
+      );
       expect(source).toContain(`import('${SPECIFIER_BY_KEY[key]}')`);
     }
   });

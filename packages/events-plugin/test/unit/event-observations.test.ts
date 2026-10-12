@@ -1,3 +1,4 @@
+import { NODE_SOURCE_ARGS, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for event dispatch observations (M98j): the bounded collector
  * behind `IEventDiagnosticsSource`, the WeakMap attachment on the bus, and
@@ -9,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IEventDiagnosticsSource, IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -96,6 +96,8 @@ describe('compileEventsDiagnosticsPolicy (M98j option validation)', () => {
     expect(() =>
       compileEventsDiagnosticsPolicy({ enabled: true, alias: 'a'.repeat(65), events: {} })
     ).toThrow(EVENT_COLLECTOR_ERRORS.aliasBytes);
+    expect(() => compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\u202e', events: {} }))
+      .toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
     expect(() => compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\n', events: {} }))
       .toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
     expect(() =>
@@ -574,23 +576,6 @@ describe('EventsPlugin diagnostics registration (M98j)', () => {
   });
 });
 
-/** Counts unhandled rejections while `run` executes, suppressing each. */
-async function countUnhandled(run: () => Promise<void>): Promise<number> {
-  let unhandled = 0;
-  const listener = (event: PromiseRejectionEvent) => {
-    unhandled++;
-    event.preventDefault();
-  };
-  globalThis.addEventListener('unhandledrejection', listener);
-  try {
-    await run();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  } finally {
-    globalThis.removeEventListener('unhandledrejection', listener);
-  }
-  return unhandled;
-}
-
 const EVENT = { type: 'user-created', id: 'e', occurredOn: new Date(0), data: 'SECRET' };
 
 describe('Observation never changes dispatch (M98j review fixes)', () => {
@@ -677,57 +662,48 @@ describe('Observation never changes dispatch (M98j review fixes)', () => {
   });
 
   it('an async errorHandler throw stays unhandled and rejects whenIdle, observed or not', async () => {
-    const outcome = async (observed: boolean) => {
-      const bus = new InMemoryEventBus({
-        async: true,
-        errorHandler: () => {
-          throw new Error('errorHandler threw');
-        },
+    const outcome = async (observed: boolean, waitIdle: boolean) => {
+      const output = await runProcess(process.execPath, {
+        args: [
+          ...NODE_SOURCE_ARGS,
+          '--input-type=module',
+          '-e',
+          `
+        import { InMemoryEventBus, attachEventObserver } from ${
+            JSON.stringify(new URL('../../src/bus/in-memory-event-bus.ts', import.meta.url).href)
+          };
+        import { EventObservationCollector, compileEventsDiagnosticsPolicy } from ${
+            JSON.stringify(
+              new URL('../../src/diagnostics/event-observations.ts', import.meta.url).href,
+            )
+          };
+        const bus = new InMemoryEventBus({ async: true, errorHandler: () => { throw new Error('errorHandler threw'); } });
+        const observer = new EventObservationCollector(compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus', events: { 'user-created': 'users' } }), { hrtime: () => 1000 });
+        if (${observed}) attachEventObserver(bus, observer);
+        bus.subscribe('user-created', () => { throw new Error('handler'); });
+        let unhandled = 0, idle = 'resolved';
+        process.on('unhandledRejection', () => { unhandled++; });
+        await bus.publish({ type: 'user-created', id: 'e', occurredOn: new Date(0), data: 'SECRET' });
+        if (${waitIdle}) await bus.whenIdle().catch(() => { idle = 'rejected'; });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        console.log(JSON.stringify({ unhandled, idle, snapshot: observer.snapshot() }));
+      `,
+        ],
       });
-      const observer = collector(new MutableClock());
-      if (observed) attachEventObserver(bus, observer);
-      bus.subscribe('user-created', () => {
-        throw new Error('handler');
-      });
-      let idle = 'resolved';
-      const unhandled = await countUnhandled(async () => {
-        await bus.publish(EVENT);
-        await bus.whenIdle().catch(() => (idle = 'rejected'));
-      });
-      return { unhandled, idle, observer };
+      expect(output.code).toBe(0);
+      return JSON.parse(new TextDecoder().decode(output.stdout));
     };
-    const plain = await outcome(false);
-    const observed = await outcome(true);
+    const plain = await outcome(false, true);
+    const observed = await outcome(true, true);
     expect(observed.idle).toBe(plain.idle);
     expect(observed.idle).toBe('rejected');
-    const unobservedOnly = await countUnhandled(async () => {
-      const bus = new InMemoryEventBus({
-        async: true,
-        errorHandler: () => {
-          throw new Error('x');
-        },
-      });
-      bus.subscribe('user-created', () => {
-        throw new Error('h');
-      });
-      await bus.publish(EVENT);
-    });
-    const observedOnly = await countUnhandled(async () => {
-      const bus = new InMemoryEventBus({
-        async: true,
-        errorHandler: () => {
-          throw new Error('x');
-        },
-      });
-      attachEventObserver(bus, collector(new MutableClock()));
-      bus.subscribe('user-created', () => {
-        throw new Error('h');
-      });
-      await bus.publish(EVENT);
-    });
-    expect(unobservedOnly).toBe(1);
-    expect(observedOnly).toBe(unobservedOnly);
-    const publish = observed.observer.snapshot().records.find((r) => r.operation === 'publish')!;
+    const unobservedOnly = await outcome(false, false);
+    const observedOnly = await outcome(true, false);
+    expect(unobservedOnly.unhandled).toBe(1);
+    expect(observedOnly.unhandled).toBe(unobservedOnly.unhandled);
+    const publish = observed.snapshot.records.find((r: { operation: string }) =>
+      r.operation === 'publish'
+    );
     expect(publish.failed).toBe(1);
   });
 

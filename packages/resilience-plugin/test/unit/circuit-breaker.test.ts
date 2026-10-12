@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { CircuitBreakerPolicy } from '@setu-ts/common';
 import { CircuitBreaker } from '../../src/patterns/circuit-breaker.ts';
 import { CircuitOpenError } from '../../src/errors.ts';

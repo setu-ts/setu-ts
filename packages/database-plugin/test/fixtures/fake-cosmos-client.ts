@@ -293,10 +293,14 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
         documents.set(key, patched);
         return Promise.resolve({ statusCode: 200, resource: { ...patched } });
       },
-      delete: (): Promise<CosmosItemResponse<Record<string, unknown>>> => {
+      delete: (requestOptions): Promise<CosmosItemResponse<Record<string, unknown>>> => {
         if (!documents.has(key)) {
           // Measured: unlike a read, a delete of a missing item THROWS.
           return Promise.reject(new FakeCosmosError(404, 'Resource Not Found.'));
+        }
+        const condition = requestOptions?.accessCondition;
+        if (condition !== undefined && condition.condition !== documents.get(key)?.['_etag']) {
+          return Promise.reject(new FakeCosmosError(412, 'E-tag mismatch detected'));
         }
         documents.delete(key);
         return Promise.resolve({ statusCode: 204 });

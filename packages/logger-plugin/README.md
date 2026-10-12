@@ -89,10 +89,19 @@ Loggers apply `redaction` after normalizing metadata and before the legacy `reda
 shared `RedactionPolicy` (or an `IRedactionService`) to use the same policy in other egress plugins:
 
 ```typescript
+import { DATA_CLASSIFICATIONS } from '@setu-ts/common';
+
 LoggerPlugin({
-  redaction: { fields: { 'user.email': 'private' } },
+  redaction: { fields: { 'user.email': DATA_CLASSIFICATIONS.PII } },
 });
 ```
+
+A `fields` value is either a classification — a `DATA_CLASSIFICATIONS` member (`'pii'`, `'phi'`,
+`'pci'`, `'secret'`) or an application-defined string the framework does not know, which reaches
+`redactors[<string>]` — or a `FieldRedaction` (`{ classification, redactor? }`) carrying a
+per-pattern redactor. See
+[the `common` Redaction section](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#redaction)
+for the full policy shape and the selection precedence.
 
 The legacy `redact` option remains supported and wins when it overlaps a policy. With no explicit
 `redact` list, common secret-shaped fields are redacted by default with case-insensitive matching;

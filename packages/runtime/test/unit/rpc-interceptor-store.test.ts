@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { RpcInterceptorStore } from '../../src/adapters/shared/rpc-interceptor-store.ts';
 
 function mockResponse(_request: Request): Promise<Response> {

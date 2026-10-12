@@ -1,6 +1,5 @@
 /** Tests for typed configuration-section cache boundaries. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IConfig } from '@setu-ts/common';
 
 import { defineConfigSection, getConfigSection, loadConfig } from '../../src/index.ts';
@@ -8,7 +7,7 @@ import { createRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('typed configuration sections | cache', () => {
   it('keeps cached values isolated by configuration snapshot', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL'],
@@ -29,7 +28,7 @@ describe('typed configuration sections | cache', () => {
   });
 
   it('rejects a read for a definition that was not validated at startup', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL'],
@@ -45,7 +44,7 @@ describe('typed configuration sections | cache', () => {
   });
 
   it('snapshots a definition so caller mutations cannot change its cached section', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const definition = {
       prefix: 'DATABASE_',
       keys: ['URL'],

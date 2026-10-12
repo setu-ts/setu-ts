@@ -6,6 +6,1377 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-12
+
+### Added
+
+- **The CLI is a Node program (M111d).** `setu` ships as an npm `bin`
+  (`npx @setu-ts/cli new my-app`) and the new `@setu-ts/create` package (exporting `createArgs`)
+  makes `npm create @setu-ts my-app` the same as `setu new`. Project TypeScript — `setu.config.ts`
+  for plugin commands, custom schematics — loads through `tsx`, a CLI dependency. An npm-target
+  scaffold (Node, Bun, Workers) carries its own tooling: `check` (`tsc`, TypeScript `~6.0.3`),
+  `lint` (ESLint with `typescript-eslint`) and `format` / `format:check` (Prettier); everything the
+  CLI writes into such a project is Prettier-formatted, so it passes its own `format:check` from the
+  first run. A selected broker, queue or gRPC transport now adds its client package (`ioredis`,
+  `amqplib`, `nats`, `kafkajs`, the cloud SDKs, Connect) to the project — package managers never
+  install an optional peer, so such a scaffold used to fail at its first boot. The generated
+  migration runner (`src/migrations/run.ts`, run with `npx tsx`, `bun run` or `deno run -A`) and
+  gRPC code generation (`proto:gen`) run on every target.
+
+- **npm publishing machinery (M111c).** All 51 manifests gain publish metadata, `src` and LICENSE in
+  their tarballs, and audited `sideEffects` declarations. The decorator metadata module is retained;
+  other members declare `false`. Publishing packs with pnpm, checks the packed manifest and registry
+  version, and publishes with npm; CI separates gates from the OIDC publish job. README-only
+  placeholders support the future one-time bootstrap. Nothing is published here. JSR's
+  dry-run/slow-type and `@module`-first checks are replaced by the TypeScript build, npm dry run,
+  and non-empty README check. Historical `@since` claims stay on JSR through 0.8.x; later claims
+  read npm tarball sources. Compatibility declares all 51 npm packages and arms on publish.
+
+- **Package tests on Node 24 (M111b).** Every member uses Vitest, source export resolution, TC39
+  decorator lowering, shared-resource isolation, and enforced per-file V8 coverage. Deno-only
+  runtime proofs retain a named lane; root tooling stays on Deno. The reproducible codemod, host
+  helpers, count parity report, and CI lane guards accompany the move.
+
+- **A Node build for every package (M111a).** Every workspace member builds with TypeScript `6.0.3`
+  (`tsc -b`) to `dist/`, with a generated `package.json` (ESM only, `engines.node >=22`, `exports`
+  per subpath, `workspace:^` internal dependencies) and `tsconfig.json`, under a pnpm workspace.
+  `scripts/node-manifests.ts` generates them — and each member's `deno.json` `imports`, from the
+  same range table — from the member's sources, and refuses drift (`--check`); every lazily imported
+  driver is an OPTIONAL `peerDependency`, and `@hono/node-server` is a regular dependency of
+  `@setu-ts/runtime` so a bare install can serve on Node. `deno task check:node-build` packs every
+  member, refuses a tarball still naming `workspace:`, installs `kernel`, `runtime` and
+  `decorator-plugin` with plain npm into an empty project, and serves a request and a `tsc`-compiled
+  decorated controller on Node 24, Node 22 and Bun; a new CI job runs it with `--require-all`.
+  Nothing is published to npm yet (111c). The Deno toolchain and every Deno gate are unchanged.
+- **`@setu-ts/decorator-plugin` installs `Symbol.metadata` on Node and Bun (M111a).** Neither
+  runtime defines it, and TypeScript's TC39 decorator emit creates decorator metadata only when it
+  exists, so a `tsc`-compiled decorated class crashed at definition with a bare `TypeError`.
+  Importing the package now installs `Symbol.for('Symbol.metadata')` when the symbol is absent
+  (never overwriting one — a no-op on Deno), and a decorator that still finds no carrier throws
+  `DecoratorMetadataUnavailableError` naming both remedies. It is the one module-level exception to
+  AI_GUIDELINES §11.5.
+
+- **Per-field redaction in a policy (`@setu-ts/common`, M101h).** `RedactionPolicy.fields` accepts a
+  `FieldRedaction` — `{ classification, redactor? }` — as well as a classification string, so one
+  classification can carry two treatments (mask the email, erase the name, both `pii`) without an
+  invented classification string. A new `FieldRedaction` export names the object arm, and
+  `createRedactionService` selects a redactor in this order: the field's own `redactor`, then
+  `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`. Every existing
+  string-valued policy behaves byte-identically. One reader-side change: code that READS
+  `policy.fields[path]` as a `DataClassification` now sees the union and must narrow with
+  `typeof value === 'string'`. A field's `redactor` and `classification` are read only as own
+  properties: an inherited `redactor` (a polluted `Object.prototype`, or an entry built with
+  `Object.create`) is ignored, and an entry without its own string `classification` is erased.
+
+- **Conditional repository writes (M105).** Optional `updateWhere` and `deleteWhere` on
+  `IRepository` and `IDataSource`, with shared `WritePrecondition` and `checkWritePrecondition`
+  validation (`WritePreconditionCheck`), native adapter conditions, bounded Cosmos version guards
+  and Bigtable newest-cell checks. `checkWritePrecondition` returns private copies of the predicate
+  and payload, and every implementation writes the copies, so the predicate the backend receives is
+  the one that was validated. Non-finite numbers and an own `__proto__` field (in the predicate or
+  the payload, which Node and Bun drop when MongoDB or Prisma rebuild the object) are refused.
+  `checkWritePrecondition`'s refusal reasons quote no caller field name or value, and Prisma's
+  validation message, which renders the whole query, is replaced with a fixed sentence; other
+  adapter and driver refusals may quote caller input, in server logs only, as for every repository
+  operation. Tenant, outbox and inbox bridges use conditional writes when supported and retain their
+  fallback for other sources.
+
+- **Scoped RBAC — a role held in a tenant, organisation, team or region (`@setu-ts/auth-plugin`,
+  `@setu-ts/decorator-plugin`, `@setu-ts/database-plugin`, `@setu-ts/common`, M110b).** The new
+  `AuthPluginOptions.scopedRbac` (requires `rbac`) defines one built-in policy, `scoped-rbac`, on
+  the M110a evaluator — no new capability token. `requireScopedRole` (any-of) and
+  `requireScopedPermission` (all-of) guard a route in the request's scope, taken from
+  `scopeFromTenant()` (the default), `scopeFromParam(param, type)`, a fixed `ScopeRef` or a
+  function; `@ScopedRoles` / `@ScopedPermissions` are the class form, validated at `register()`.
+  Grants come from `static`, `claims` and `custom` sources, unioned, and one failing source denies
+  the check; `inheritsFrom` walks parent and delegating scopes with cycle refusal and bounds (child
+  requests inherit parent grants); a route scope naming another tenant than the resolved request
+  tenant denies; `grantableIn` limits where a role counts; `customRoles` lets a scope define roles
+  bundling catalogue permissions; `timing` is `'request'` (default), a TTL cache, or `'sign-in'`
+  (stored under a private session key, never in claims, and carried through a pending second
+  factor); a `custom` source receives only the principal's id and `iss` claim, and a `claims` source
+  is mapped from the credential on every check and never memoised, cached or shared, because two
+  tokens for one principal can carry different claims. A scoped guard or decorator naming a
+  permission or role outside the catalogue fails at startup. `common` adds `ScopeRef`,
+  `ScopedGrant`, `GrantQuery`, `IGrantSource`, `IScopedRoleSource`, `ScopedRoleDefinition`,
+  `ScopedRbacTarget`, `ScopeSource`, `SCOPED_RBAC_POLICY`, `scopedPermissionAbility`,
+  `scopedRoleAbility`, `isScopeType`, `MAX_SCOPE_ID_LENGTH`, `scopeFromTenant` and `scopeFromParam`;
+  `database-plugin` adds `createDatabaseGrantSource` and `createDatabaseRoleSource` with
+  `DatabaseGrantSourceOptions`, `DatabaseRoleSourceOptions`, `GrantFields` and `RoleFields`
+  (verified against real PostgreSQL and MongoDB). `auth-plugin` exports the option types
+  `ScopedRbacOptions`, `GrantSourceConfig`, `StaticGrant`, `ClaimsGrantMapper`, `ScopedRoleLimit`,
+  `ScopedRbacTiming` and `ScopedGuardOptions`, and `GrantResolutionError` (a `503` hint, with a
+  `GrantResolutionReason`), which a sign-in-timing source failure rejects with. The name
+  `scoped-rbac` is reserved: `AuthPlugin({ policies })` refuses a policy of that name. Nothing
+  existing changes, so there is no upgrade step.
+
+- **Authorization policies — an asynchronous, target-aware check (`@setu-ts/auth-plugin`,
+  `@setu-ts/decorator-plugin`, `@setu-ts/common`, M110a).** Roles answer "does this principal hold
+  this role, anywhere"; a policy answers "may this principal do this, to this target". `common` adds
+  `CAPABILITIES.AUTHORIZATION_POLICIES` and the `IAuthorizationPolicyService` contract (`can`,
+  `authorize`, `describe`, `define`) with `PolicyDefinition`, `PolicyAbility`, `PolicyCheck`,
+  `AnonymousPolicyCheck`, `PolicyRef`, `PolicyAbilityInfo` and `PolicyTarget`, plus
+  `authorizationFailureInit`, now the one owner of the refusal status, title and detail that
+  `respondWithAuthorizationFailure` writes. `AuthPlugin` always registers the policy service and
+  gains a `policies` option; `auth-plugin` adds `definePolicy`, the `requirePolicy` route guard, and
+  the `AuthorizationDeniedError` (with `PolicyDenial`) and `UnknownPolicyError` rejections, and
+  re-exports `IAuthorizationPolicyService`. `decorator-plugin` adds the class form — `@Policy`,
+  `@Ability` (with `AbilityOptions`), `DecoratorPluginOptions.policies` — and `@RequirePolicy`,
+  typed by `PolicyClassAbility` and `PolicyClassTarget`. The evaluation rules are fixed: only a
+  literal `true` allows; a throwing check denies and is logged once, never with the target; an
+  anonymous request is refused `401` unless the ability opted in with `{ anonymous: true, check }`;
+  for a signed-in principal `before` runs first (`true` allows, `undefined` falls through, anything
+  else denies); a denied signed-in principal gets `403` with the same body `requireRole` writes, and
+  a thrown `authorize` denial gets that body too under `errorHandler`. A `requirePolicy` guard
+  naming an unregistered policy or ability fails `app.start()`, after which the policy registry is
+  sealed; `@RequirePolicy` is validated at `register()`, including against a same-named policy that
+  declares an ability differently. Both refuse an anonymous request to an ability that needs a
+  principal BEFORE running the target extractor, so an unauthenticated caller costs no lookup and
+  cannot probe which records exist — the guard reads that from the registered policy on every
+  request, so a route added after `start()` is covered too; an `undefined` principal is anonymous;
+  and an `UnknownPolicyError` truncates names over 128 characters. Both are branded for OpenAPI
+  `deriveSecurity`. New guide: `docs/authorization.md`. Not breaking: a new capability, new types
+  and new exports — no existing interface gains a member.
+
+- **Idempotency tier C — the work and its record committed together (`@setu-ts/idempotency-plugin`,
+  `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/sdk`, M109b).** A new
+  `IIdempotencyService.within(options, fn)` opens ONE database transaction, creates a claim row in
+  it FIRST, runs `fn` with that transaction's unit of work, creates a result row holding `fn`'s JSON
+  result and commits; a repeated key whose record is committed returns the stored result without
+  running `fn`, and a concurrent duplicate loses the race on the claim's primary key and its
+  business writes roll back with it — then it replays, or, where the backend reports a write
+  conflict before the winner committed, rejects with a retryable `409`. The plugin gains
+  `IdempotencyWithinError` (with `IdempotencyWithinErrorReason`), `IdempotencyVerifyTimeoutError`,
+  `TransactionalIdempotencyOptions` and `TransactionalIdempotencyPurgeOptions`; `common` gains the
+  port `ITransactionalIdempotencyStore` with `TransactionalIdempotencyClaim`,
+  `TransactionalIdempotencyRecord`, the `IDEMPOTENCY_RECORD_KIND` discriminator, and the
+  `IdempotentWithinOptions` / `IdempotentWithinResult` option and result types; `database-plugin`
+  gains `createDatabaseIdempotencyStore` (with `DatabaseIdempotencyStoreOptions`) and
+  `TransactionalStoreUnavailableError`; and `@setu-ts/sdk` gains `ClientOptions.idempotency`
+  (`ClientIdempotencyOptions`) and `ClientRequest.idempotencyKey`, so a keyed request keeps ONE key
+  across every retry attempt (a request that already carries the configured header uses it as the
+  key) and may retry any method and `409`, but keyed `POST`/`PATCH` requests are never retried after
+  a `2xx` response arrives, including a body-read failure or a throwing response interceptor; the
+  original thrown value reaches the caller unchanged. On both the first call and a replay, `within`
+  returns the JSON round trip of what `fn` returned: dates become ISO strings, `undefined` object
+  members are absent, and nested `toJSON()` output is respected. The service also exposes
+  `purgeTransactional()` for retention cleanup. On PostgreSQL (Prisma), a concurrent loser blocks on
+  the winner's claim insert, which the adapter's `transactionTimeout` does not interrupt, and then
+  replays; a loser whose own work exceeds that timeout answers `'store-failed'` (`503`), with no
+  timeout-to-`409` mapping.
+
+- **A "How It Fits Together" guide (`docs/how-it-fits-together.md`, PR #429).** One page answers the
+  questions a newcomer hits first: the order `start()` and `stop()` run in, why a capability lookup
+  misses and what each error message is telling you, whether a service lives in the service registry
+  or the DI container (and how `DiPlugin`'s `autoRegister` fallback links them), and whether a test
+  should use `overrideCapability`, `overrideProvider` or `without`. Every example compiles under the
+  guide fence gate.
+- **A Cloudflare Durable Object idempotency store (`@setu-ts/cloudflare-plugin`, M109a).** The
+  plugin gains `DurableObjectIdempotencyStore` (the Worker side, over a `durable_objects` binding
+  and a required `namespace`) and `IdempotencyObjectCore` (the Durable Object side, with
+  `IIdempotencyObjectState` and `IdempotencyObjectCoreOptions`), plus
+  `DurableObjectIdempotencyStoreOptions`. One object per store key, one alarm per record, and an
+  input gate that keeps each claim atomic.
+
+- **`@Idempotent()` makes a decorated route idempotent (`@setu-ts/decorator-plugin`, M109a).** The
+  decorator plugin gains `Idempotent`, which records a route's idempotency options and appends the
+  provider's middleware LAST — after guards, declarative authorization, the middleware band and the
+  validation band — so an invalid or unkeyed request never consumes a key. A safe-method route
+  (`GET`/`HEAD`/`OPTIONS`) or a missing `CAPABILITIES.IDEMPOTENCY` provider fails `register()`.
+
+- **Idempotency contracts in `@setu-ts/common` (M109a).** `CAPABILITIES.IDEMPOTENCY`
+  (`'idempotency'`) names the provider of the idempotency service. The package gains the store port
+  `IIdempotencyStore` and its `IdempotencyClaimRequest`, `IdempotencyClaimResult` and
+  `IdempotencySettleResult` types, the service contract `IIdempotencyService`, the route option type
+  `IdempotentRouteOptions` with `IdempotencyKeySource` and `IdempotencyFingerprintSource`, and the
+  ingress option types `IdempotentIngressOptions` with its shared half
+  `IdempotentIngressCommonOptions` and the `IngressIdempotencyKeySource` /
+  `IngressIdempotencyFingerprintSource` sources. `IngressContext` gains an OPTIONAL `consumer`
+  dispatch identity so per-consumer state (an idempotency record) is keyed per subscriber rather
+  than per topic. The mechanism itself ships in `@setu-ts/idempotency-plugin`.
+
+- **A repeat of a completed HTTP request, queue job or broker message is answered from its record or
+  skipped (`@setu-ts/idempotency-plugin`, M109a).** This is deduplication, not a single-execution
+  guarantee: a failure after a handler's external side effect but before `complete` lets a retry
+  repeat that effect, which only a derived key forwarded to a de-duplicating provider avoids. The
+  new package exposes `IdempotencyPlugin`, which registers an `IIdempotencyService` under
+  `CAPABILITIES.IDEMPOTENCY`; `idempotent()` for a route's `middleware` array and
+  `idempotentIngress()` for queue/broker behaviours; and `derivedIdempotencyKey()`, which a handler
+  forwards to a provider that de-duplicates. It ships an in-process store, a Redis store (atomic
+  Lua, an inject-or-lazy ioredis client, a connect-time `maxmemory-policy` warning and a required
+  `namespace`) and, from `@setu-ts/cloudflare-plugin`, a Cloudflare Durable Object store. A refusal
+  carries `IdempotencyRefusedError` with `IdempotencyRefusalReason`; a bad option carries
+  `IdempotencyConfigurationError`; `IdempotencyPluginOptions`, `IdempotencyStoreConfig`,
+  `IRedisIdempotencyClient`, `IDEMPOTENCY_KEY_HEADER` and `IDEMPOTENT_REPLAYED_HEADER` complete the
+  surface. The `idempotency` health indicator reports lifecycle truth then a bounded store probe.
+
+- **A full-stack project's `dev` task serves route edits without a restart, on Deno, Node and Bun
+  (`@setu-ts/cli`, `@setu-ts/react-router-plugin`, PR #426).** `setu new --template full-stack` now
+  emits a `dev.ts` entry and a `dev` task (`deno task dev`, `npm run dev`, `bun run dev`); a Workers
+  project gets neither, since the entry runs Vite in-process. On Deno, Vite's development SSR runner
+  could not load a route that imports a `@setu-ts` package: it resolves imports through
+  `node_modules`, so every page answered `500` with
+  `Cannot find module '@setu-ts/react-router-plugin'`, and a package it loaded itself would be a
+  second copy whose `contextKeyFor()` keys match nothing. The new `viteDevExternals()` resolves
+  those packages with the runtime's own resolver and keeps them external in the SSR environment; a
+  client import, which a browser could not load from that specifier, is left to Vite. On Node and
+  Bun the packages are in `node_modules`, which Vite externalises already, so the same `dev.ts` runs
+  unchanged there. The plugin is typed structurally (`ViteDevExternalsOptions`,
+  `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteHookContext`, `ViteResolvedEnvironments`), so
+  the package still imports no Vite. Verified on all three runtimes against the published packages,
+  and on Deno against the workspace sources too: `/login` renders with its CSRF token, client
+  modules load through the app port, an edited route is served on the next request, and SIGINT stops
+  the app and Vite with exit code 0. If either fails to stop, the failure is logged and the process
+  exits 1.
+
+- **`overrideProvider()` replaces a DI container provider in a test (`@setu-ts/testing`, PR #426).**
+  With `DiPlugin` registered, `DecoratorPlugin` puts each `@Injectable` class into the container,
+  where `overrideCapability()` cannot reach it, and the container refuses a second registration.
+  `overrideProvider('pricing-service', { useValue: fake })` registers the double before the real
+  class, so a decorated controller is constructed with it. A mistyped token, an application without
+  a container, or a provider registered too early fails `start()` instead of testing the real class.
+  A child scope from `createScope()` keeps the double even when it registers the token itself.
+
+- **Publish options (M106, PR #427).** `IMessageBroker.publish` takes an optional third argument,
+  typed `PublishOptions` — `orderingKey`, `deduplicationId` and `headers` — carried as `x-setu-*`
+  transport headers (`ORDERING_KEY_HEADER` / `DEDUPLICATION_ID_HEADER`) beside each broker's native
+  primitive (Kafka message `key`, Pub/Sub `orderingKey`, NATS `Nats-Msg-Id`, Service Bus and
+  RabbitMQ `messageId`), so the options are observable through `MessageMetadata.headers` on all
+  seven brokers and on `WorkersBroker` — the one exception is a `NatsBroker` with an injected
+  connection and no `headersFactory`, which drops caller headers and the ordering key (reported
+  once) while still applying the de-duplication id as nats.js's native `msgID`.
+  `enableMessageOrdering` creates the Pub/Sub broker's own subscriptions with ordering; it is
+  accepted only where the broker loads the SDK, and refused beside an injected `client`. The Pub/Sub
+  SDK facade's topic handle gains an optional `resumePublishing`, so a hand-built module double
+  still type-checks. `publishIntegrationEvent` takes `PublishOptions` as an optional sixth argument
+  and passes the envelope id as the default de-duplication id, and `defineIntegrationEvent` takes an
+  opt-in `orderingKey` selector, called only when the caller supplied no key. Invalid options are
+  refused by name, case-insensitively covering the header names a broker or its server acts on, and
+  a refusal never echoes the refused value. `common` gains the shared rule set — `publishIdProblem`
+  / `isValidPublishId` with `MAX_PUBLISH_ID_BYTES` for the ids, and `publishHeaderNameProblem` /
+  `publishHeaderValueProblem` with `MAX_PUBLISH_HEADERS`, `MAX_PUBLISH_HEADER_NAME_BYTES`,
+  `MAX_PUBLISH_HEADER_VALUE_BYTES`, `RESERVED_HEADER_NAMES` and `RESERVED_HEADER_PREFIXES` for the
+  headers, and `parsePublishOptions` (returning `ParsedPublishOptions`) — the one copy-once parse of
+  a whole options object — so the seven brokers, `WorkersBroker` and the envelope reader enforce one
+  copy of every rule. `WorkersBroker` carries the caller's `headers` on the envelope beside the two
+  ids. Header names are bounded at 255 bytes, the AMQP limit, so a name is accepted on every broker
+  or refused on all of them. The Pub/Sub adapter keeps at most 1024 idle `Topic` handles, evicting
+  the least recently used one with nothing in flight. The docs state the guarantee honestly:
+  `orderingKey` decides placement, not the order handlers finish in.
+
+- **Outbox relay fencing (M107b).** Versioned per-row leases and native conditional claims on every
+  supported backend; held-version status writes, including immediate deletion, and a pre-publish
+  time fence. Several relays preserve per-key first-publish order under the existing commit-order
+  and writer-clock conditions; pauses after the fence and late broker acceptance remain duplicate
+  windows. New `relay.claimLeaseMs` (30 000) and `maxClockSkewMs` (5 000); `sweepDeadlineMs` is now
+  30 000 with strict headroom over the claim/publish/status reserve. Unsupported conditional sources
+  fail startup. The unreleased M107 schema requires 64-bit `claimVersion` and `leaseUntil`; old SQL
+  DDL is refused and old JSON rows without the fields are poisoned as `invalid-row`.
+  `MAX_SAFE_INTEGER` is exhausted; max-minus-one can be claimed exactly. The store bridge reads
+  every integer `bigint` (Prisma Client's type for a `BigInt` column) as a number, so a
+  Prisma-mapped outbox is not poisoned row by row. `not-pending.sentBy` is removed, while the stored
+  diagnostic remains. Health uses `relay-overlap` for `fenced`, `claim-lost`, `duplicate`, and
+  `outbox_overlaps_total` uses `kind` instead of `origin`. A shared scheduler lock now saves
+  redundant scans; its TTL rule no longer bears on correctness. Retry clears the lease and
+  `lastError` and keeps the version; shutdown failures preserve the claim.
+
+- **Transactional outbox (M107, `@setu-ts/messaging-plugin`).** `MessagingPlugin({ outbox })` writes
+  an integration event as a row in the SAME database transaction as the business change —
+  `IOutbox.write(uow, definition, payload, input?)` through the caller's own unit of work, with the
+  envelope, its ordering key and its deduplication id fixed at write time through one implementation
+  shared with `publishIntegrationEvent` — and relays committed rows afterwards: at least once, per
+  ordering key in write order among committed rows, and never exactly once. The relay is a scheduled
+  job (`outbox-relay`) that reads the PENDING set in keyset-paged laps rather than a watermark (a
+  row that commits behind the relay is still published — measured on real PostgreSQL), blocks a key
+  behind a failed or backed-off row, bounds each sweep with one deadline, drains on shutdown before
+  any close hook, purges settled rows on its own interval (`outbox-purge`, `retainSentMs`),
+  re-parents each publish to the trace that wrote the row, and reports an `outbox` health indicator
+  and optional metrics. `IOutbox` (`write`, `dispatch`, `sweep`, `purge`, `release`) is registered
+  under `CAPABILITIES.OUTBOX`; the options are `OutboxOptions` (`OutboxCommonOptions` plus exactly
+  one of `store` and `stores`, with `OutboxStoreEntry`), `OutboxRelayOptions` and
+  `OutboxHealthOptions`; `write` takes `OutboxWriteInput` and `sweep` resolves `OutboxSweepResult`.
+  Refusals are `OutboxEnvelopeTooLargeError` (inside the transaction, so the business write rolls
+  back), `OutboxRelayUnscheduledError` (a scheduled relay with no `CAPABILITIES.SCHEDULER`),
+  `OutboxUnknownTenantError`, `OutboxRowStateError` (`release` of a row that is not `failed`),
+  `OutboxNotReadyError` and `OutboxStoreVerifyTimeoutError` (a store's startup `verify()` did not
+  settle within `relay.storeTimeoutMs`). On Cloudflare Workers the relay runs from a Cron Trigger
+  with `relay: { schedule: false }` and `background: waitUntil`. Driven against real PostgreSQL with
+  real RabbitMQ 4 and Redis Streams (including a process dying between a publish and its status
+  write), a MongoDB replica set, DynamoDB Local, the Bigtable emulator, the Cosmos emulator, and the
+  real OpenTelemetry SDK; the Workers composition is driven at unit level, not on real workerd.
+
+- **The outbox store port in `@setu-ts/common` (M107).** `IOutboxStore` — `append`, `scanPending`,
+  `failedKeys`, `claim`, `markInvalid`, `markSent`, `markFailure`, `release`, `stats`, `purge` and
+  `verify`, every method rejecting rather than throwing — with `IOutboxWriteScope` (the one-method
+  slice of a unit of work the write needs, satisfied by `database-plugin`'s `IUnitOfWork`), the row
+  shape `OutboxRecord` and `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, the
+  `'setu-outbox'` discriminator `OUTBOX_RECORD_KIND`, and the token `CAPABILITIES.OUTBOX`
+  (`'outbox'`, `outbox.<name>` for a named messaging instance). It is in `common` so a database
+  package can implement it without importing the messaging plugin.
+
+- **`createDatabaseOutboxStore` in `@setu-ts/database-plugin` (M107).** The shipped `IOutboxStore`
+  over `IDatabaseService`, as a `RegistryFactory` (`DatabaseOutboxStoreOptions`: `entity`, default
+  `'Outbox'`, and `database` for a named connection). Every row carries `kind: 'setu-outbox'` and
+  every read requires it, so an outbox sharing a table or Cosmos container with business documents
+  never touches them; transitions write only from the expected status. Its `verify()` refuses a
+  backend that cannot serve the relay with `OutboxStoreUnavailableError`, naming the reason:
+  Bigtable, a DynamoDB entity without the `{ partitionKey: 'status', sortKey: 'position' }` GSI, a
+  standalone MongoDB, or a missing or unreadable table. The DDL for PostgreSQL and SQLite/D1 is in
+  the messaging-plugin README.
+
+- **Consumer inbox (M108, `@setu-ts/messaging-plugin`).** `MessagingPlugin({ inbox })` plus
+  `onIntegrationEvent(definition, handler, { inbox: { consumer } })` applies an integration event's
+  database writes once per consumer: a marker keyed by `(consumer, topic, envelope id)` is created
+  in the SAME transaction as the handler's writes, and the handler receives that transaction's unit
+  of work as a fourth argument (`IntegrationEventInboxHandler`, its type inferred from the
+  annotation). A duplicate delivery is acknowledged without running the handler; a failed handler
+  leaves no marker, so the redelivery runs it again; after any rejection the marker is re-read to
+  tell a lost race from a real failure. The broker `queue` defaults to `inbox.` plus a
+  16-hex-character hash of the consumer and the topic. With the `inbox` option the call returns a
+  `RegistryFactory<SubscriptionDefinition>` resolved at `onInit` after the store is verified;
+  without it nothing changes. Optional `maxAttempts` counts failures outside the transaction and
+  parks a delivery at the limit (so a Kafka partition or a NATS consumer moves on); `IInbox` lists
+  parked deliveries and releases them (`retry` hands back the envelope to re-publish, `discard`
+  keeps them skipped). A scheduled purge (`inbox-purge`, `retainMs`) — which deletes parked markers
+  past the window too — and an `inbox` health indicator ship with it. Refusals:
+  `InboxNotConfiguredError`, `InboxConsumerConflictError` (two handlers sharing a consumer name on
+  one topic), `InboxNotReadyError`, `InboxPurgeUnscheduledError`, `InboxStoreVerifyTimeoutError`,
+  `InboxRowStateError`. The types are `InboxOptions` (with `InboxPurgeOptions` and
+  `InboxStoreEntry`), `IntegrationEventInboxOptions`, `IntegrationEventSubscribeOptions`,
+  `ParkedInboxEntry` and `InboxReleaseResult`. Driven against real PostgreSQL with real RabbitMQ 4
+  and Redis Streams (duplicates, a failure rolled back and redelivered, two consumer groups, and an
+  outbox row relayed twice handled once), a MongoDB replica set and the Bigtable emulator; D1 at
+  unit level over real SQLite.
+
+- **The inbox store port in `@setu-ts/common` (M108).** `IInboxStore` — `find`, `run`,
+  `recordFailure`, `park`, `parked`, `release`, `stats`, `purge` and `verify`, every method
+  rejecting rather than throwing — with `InboxRecord`, `InboxStatus`, `InboxIds`,
+  `InboxFailureUpdate`, `InboxReleaseOutcome`, `InboxStoreStats`, the `'setu-inbox'` discriminator
+  `INBOX_RECORD_KIND`, and the token `CAPABILITIES.INBOX` (`'inbox'`, `inbox.<name>` for a named
+  messaging instance).
+
+- **`createDatabaseInboxStore` in `@setu-ts/database-plugin` (M108).** The shipped `IInboxStore`
+  over `IDatabaseService`, as a `RegistryFactory` (`DatabaseInboxStoreOptions`: `entity`, default
+  `'Inbox'`, and `database`). Every row carries `kind: 'setu-inbox'` and every read requires it. Its
+  `verify()` refuses Cosmos DB and Bigtable by adapter arm or class, then runs a two-row
+  transactional probe that always rolls back, refusing a standalone MongoDB and a one-row-per-
+  transaction adapter with `InboxStoreUnavailableError`. The DDL for PostgreSQL and SQLite/D1 is in
+  the messaging-plugin README.
+
+- **`SpanOptions.root` in `@setu-ts/common` (M107).** An optional `root: true` starts a parentless
+  span, ignoring both `parentContext` and the active span; `@setu-ts/telemetry-plugin` carries it to
+  OpenTelemetry's own `SpanOptions.root`. The outbox relay uses it for a row with no valid stored
+  `traceparent`, so a sweep dispatched from inside a request no longer attributes that row to the
+  request. An `ITelemetryService` implementation that ignores it starts the span under the active
+  span.
+
+- **`DuplicateKeyError` in `@setu-ts/common` (#420).** A write that would duplicate a primary key or
+  a unique index, branded `409 Conflict`. It carries the targeted `entity` when known and the driver
+  error as `cause`, and it is not retryable. It lives in `common` so `@setu-ts/cloudflare-plugin`'s
+  D1 adapter, and any store that records "already processed" with a unique insert, can raise or
+  recognise it without importing `@setu-ts/database-plugin`.
+
+- **Scaffold testing (M101g, V8-12, V8-39).** Generated factories return `IKernelApplication`, or
+  its promise for starter compositions, so `createTestApp({ app: await createApp() })` type-checks.
+  `setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`. New
+  Deno, Node, and Bun scaffolds include a smoke test of the real application composition; Workers
+  requires its platform environment and permits an empty test suite. Devtool factory-upgrade
+  instructions name the kernel type and import. **Existing projects:** replace the factory's
+  `IApplication` return annotation with `IKernelApplication` from `@setu-ts/kernel` (see
+  `docs/upgrading.md`).
+
+- **Wired scaffolds (M101g).** Workspace full-stack SSR builds externalize library package
+  identities — declared in `deno.json` or `deno.jsonc`, with their exported subpaths; projects that
+  acquire npm dependencies ignore node_modules. Adding safe zero-configuration plugins wires both
+  generator styles, starter compositions name their option arm, and dependency additions preserve
+  the manifest's existing order.
+- **Development source policies and browser gate (M101g).** Opted-in scaffolds and devtool enable
+  generate names-only diagnostics approval maps, gated off in production; adding a plugin refreshes
+  an existing policy. A dedicated pinned Chromium gate exercises both the example and a fresh
+  scaffold, including missing-client and missing-asset controls. Full-stack configurations select
+  same-origin referrer policy for native form actions; existing projects can configure
+  `httpSecurity: { headers: { referrerPolicy: 'same-origin' } }`. CSRF checks stay enabled.
+
+- **Devtool lifecycle (M101f).** Enabling verifies both composition spreads and refuses mismatched
+  framework pins. Pin and edited-entry refusals escape project-controlled fields so embedded
+  newlines cannot forge additional CLI output lines. The entry detects dropped composition and stops
+  with a named error. Workspace connectors use a recorded `devtoolBasePort` range, and application
+  ports stay in their own sequence after a connector is allocated (skipping, never walking past, a
+  connector port); reallocation updates CLI-rendered development entries and refuses edited entries
+  before writes. Standalone defaults probe 4919–5019; the generated README reports the selected
+  port; subsequent enablement retains the existing entry port even when availability changes. New
+  entries are formatted; an unedited entry rendered by the 0.8.0 CLI is still recognized as
+  CLI-owned, so reallocation and re-enabling upgrade it instead of refusing it as edited. Production
+  images exclude `main.dev.ts` and remove the development connector pin before installing the
+  remaining import map, including JSONC and inherited-import layouts. Diagnostics aliases now refuse
+  Unicode format (Cf), line separator (U+2028) and paragraph separator (U+2029) characters through
+  `hasForbiddenAliasCharacter` in common, in addition to controls (Cc), and the twelve refusal
+  messages now read "contains a control, format or line-separator character"; replace bidi,
+  zero-width and separator aliases with printable names. Re-enabling an unchanged workspace member
+  now reports that nothing changed rather than "Enabled the devtool". **Launcher dependency:** the
+  `setu-ts-devtool` framework pin must be updated to the merge commit and its recipe catalog must
+  retain the previous entry renderings, because the probe changes the generated entry text. This
+  repository does not change that pin.
+
+- **CLI write safety (M101e).** Writing commands now cooperate with SIGINT and roll back partial
+  batches, interactive cancellation exits `130`, generation refuses non-project directories and
+  workspace roots, JSONC manifests are read safely, and `setu add` refuses runtime-incompatible
+  plugins. Interrupted adoption restores relocated project files as well as workspace writes; plugin
+  commands stop awaiting their handler and run application shutdown before returning `130`. Adoption
+  supports prototype-based filesystem adapters and retains exit `130` when nested recovery fails.
+  JSONC reads preserve comment token boundaries instead of accepting malformed literals.
+- **BREAKING: Programmatic CLI prompts (M101e).** `Prompter.select` now returns the discriminated
+  `PromptSelection` type instead of a string or `undefined`. Implementors must wrap answers as
+  `{ kind: 'answer', value }` and return `unavailable` or `cancelled` for the two no-answer cases.
+  This change ships in the `0.9.0` minor.
+- **Tenant data-store bridge (M101c, V8-8).** `@setu-ts/database-plugin` now ships the one
+  `ITenantDataStore` over a real backend: `createDatabaseTenantDataStore()` returns a
+  `RegistryFactory` the multi-tenancy plugin resolves in `onInit`, so `DatabasePlugin` may be
+  registered before or after the tenancy plugin. It returns a `DatabaseTenantDataStore` over
+  `service.getRepository(entity)`, supporting the `'column-per-tenant'` strategy only — the tenant
+  column is conjoined to every read (spread last, so a caller's filter cannot override it) and
+  stamped on every write, and stripped from every `update` payload so no write can move a row
+  between tenants. The column comes from the plugin's isolation strategy (`'tenant_id'` by default,
+  `database: new ColumnPerTenant('org_id')` for another), and `'schema'`/`'database'` throw
+  `TenantStoreStrategyUnsupportedError` because `IRepository` offers no schema or database switch.
+  Lookups by key go through the repository's own `findById`, so an entity whose primary key is not
+  `id` is addressed the way its adapter is configured, and the tenant column is checked on the row.
+  `MultiTenancyPluginOptions.dataStore` widens to
+  `ITenantDataStore | RegistryFactory<ITenantDataStore>`; a factory is resolved once at `onInit`,
+  validated, and handed the strategy, and the service's late-binding slot throws
+  `TenantDataStoreNotReadyError` for a repository call made before `onInit`. The port types
+  `ITenantDataStore` and `ITenantIsolationStrategy` move to `@setu-ts/common` (the multi-tenancy
+  plugin re-exports both), so the two plugins can type the bridge across the §2.2 boundary.
+
+- **Session tenant binding, two-sided (M101c, V8-7).** The binding compare now runs on whichever
+  side sees the tenant second: the session middleware keeps its load-time compare, and the tenant
+  middleware compares the session it finds in `ctx.state` right after it resolves a tenant. Both
+  sites share the pure `tenantBindingMismatch(session, tenantId)` in `@setu-ts/common`, which also
+  owns the keys the two packages must agree on byte-for-byte: `SESSION_STATE_KEY`,
+  `SESSION_TENANT_BINDING_KEY`, and `SESSION_TENANT_BINDING_STATE_KEY`, which the session middleware
+  sets to `true` when `tenantBinding` is on. The tenant side compares only then, so
+  `SessionPlugin({ tenantBinding: false })` disables both compare sites in every middleware order.
+
+- **CSRF path exclusion (M101c, V8-9).** `CsrfOptions.exclude` (http-security) lists paths — exact
+  string or `RegExp` — that skip the CSRF check entirely, checked before the method test so an
+  excluded path is never inspected; it matches the session plugin's existing
+  `CsrfFormOptions.exclude`. The documented SAML recipe becomes `exclude: ['/auth/<provider>/acs']`
+  on BOTH plugins, because an origin allowlist cannot admit an IdP that serves
+  `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS with `Origin: null`, and
+  `trustedOrigins: ['null']` would admit every opaque-origin `POST` on every route.
+
+- **Versioning policy from `0.9.0`, with two gates.** A patch is the normal release and breaking
+  changes are batched into an occasional minor (README "Versioning", ROADMAP "Versioning Policy From
+  `0.9.0`"). `release:verify` gains check 10 (`scripts/release-shape.ts`): it classifies the bump
+  from the previous tag and refuses a patch whose shipping changelog section carries a `BREAKING`
+  entry, and a minor whose section carries none unless `--allow-quiet-minor` is passed.
+  `deno task check:plan` requires every plan's "Exported surface" section to carry a
+  `**Breaking for implementors:**` statement — `none`, or the break and the minor that carries it.
+  No package source changed.
+- **Release tooling: `release:bump` and `release:verify` check 9.**
+  `deno task release:bump <version>` moves every site a version bump has to touch — discovered by
+  package name wherever a reference carries one, enumerated with its reason where it does not — and
+  re-sweeps the result with `check:versions`' own reader; `--dry-run` prints the plan.
+  `release:verify` gains check 9 (`scripts/changelog-prs.ts`): every pull request merged since the
+  previous tag is represented in the shipping changelog section, and no milestone PR's entry sits
+  under an already-published heading — the two manual release-cutting checks that each saved a
+  release. CI's publish-dry-run job checks out full history so the merge log is reachable, and the
+  release workflow calls the `release:verify` task rather than an inline copy. No package source
+  changed.
+- **Service-call agreement (M101d).** The SDK adds `createTraceContextInterceptor` and
+  `ClientRetryPolicy`; the full-stack starter adds `fullStackConfigOf` and
+  `FullStackConfigUnavailableError` for the exact composition snapshot; and `contextToTraceparent`
+  accepts the new `TraceparentSource` shared by both telemetry context shapes.
+- **`withDeadline`, `deadlineRangeError` and `DeadlineOptions` in `common` (M101a).** A bound on one
+  backend call whose expiry is a REJECTION with the caller's own error, never a swallowed timeout:
+  the call receives an `AbortSignal`, is raced against the deadline in case it ignores the signal,
+  and its own rejection is never masked. It is the request-path counterpart of `createCachedProbe`,
+  which never rejects. `deadlineRangeError` lets an option holder refuse a bad bound at
+  construction.
+- **New bound options (M101a).** `CachePlugin`'s Redis store and `QueuePlugin`'s `'redis'` adapter
+  take `commandTimeoutMs` (default `15000`, `0` disables), applied as the ioredis `commandTimeout`
+  on the client they build. `SchedulerPlugin`'s `DistributedLockOptions` take `acquireTimeoutMs`
+  (default `5000`, `0` waits) and `commandTimeoutMs` (default `acquireTimeoutMs`, or `15000` when
+  that is `0`). The `vault` secrets provider takes `requestTimeoutMs` (default `5000`). Each
+  `commandTimeoutMs` applies only to a Redis client the plugin builds, never an injected one;
+  `acquireTimeoutMs` bounds every acquire, an injected `lock` included, and `requestTimeoutMs`
+  bounds an injected `http` too. An out-of-range value — including `NaN`, which `Number(env.X)`
+  yields for an unset variable — throws `RangeError` at startup.
+- **`SecretProviderUnavailableError` (M101a).** Exported by `@setu-ts/secrets-plugin` and carrying a
+  `503` status hint, so an application running `errorHandler` answers an unreachable provider with a
+  retryable `503` instead of a masked `500`. The transport error is kept as `cause` and never
+  reaches the response body.
+- **Mail bodies rendered through the view engine (M102).** `MailPluginOptions.templates` gains a
+  component arm beside the released string arm: `{ view, text? }`, where `view` and `text` are
+  `Component`s (a JSX function, an `html` tagged template, or a plain `(props) => string`) rendered
+  through the `IViewEngine` registered under `CAPABILITIES.VIEW`, with `sendTemplate`'s `data`
+  passed verbatim as each component's props. `MailPlugin` declares `CAPABILITIES.VIEW` in
+  `optionalDependencies` and resolves the engine once at `register()`; a component template
+  configured with no provider fails at `register()` naming both remedies, never on the first send.
+  `MailTemplate` is now the union `MailStringTemplate | MailComponentTemplate` (both exported), and
+  the two arms cannot mix in one template (a compile error). Escaping is the rendering runtime's,
+  and the component arm performs no missing-key check — an absent key renders as `undefined`. The
+  committed `IMailer` contract is unchanged, so every holder calling `sendTemplate` gets the arm
+  with no code change.
+- **`@setu-ts/localization-plugin` (M103).** A new package: `LocalizationPlugin` registers an
+  `ILocalizer` under the new `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()`
+  (a malformed or `Intl`-unknown tag, a catalogue for an unlisted locale, a malformed message, and a
+  locale missing default keys are refused by name; `allowPartialCatalogues` downgrades the last to
+  one warning per locale), and resolves each request's locale at middleware priority 45 — query
+  parameter, cookie, `Accept-Language` (bounded parse, q-values, `de-AT` → `de`, `q=0` honoured
+  under `*`), a `tenantLocale` default, then the default — matching every candidate against the
+  supported set only. Every governed response carries `Vary: Accept-Language` (plus `Cookie` while
+  the cookie source is on, a stated CDN cost that `middleware.cookie: false` removes) and a
+  `Content-Language` written after the handler from the final locale. `localizerFor(ctx)` binds the
+  localizer to the request; `localeMiddleware` registers the resolution per route group;
+  `exposeCatalogues` serves `GET <basePath>/:locale` for browsers, `private, max-age=3600` by
+  default (a session refreshing its cookie must never reach a shared cache); `MissingMessageError`,
+  `MissingPluralCountError` and `UnsupportedLocaleError` are exported, with the option types
+  `LocalizationPluginOptions` (exactly one of `catalogues` and `source`, a compile error otherwise),
+  `LocaleMiddlewareOptions` and `IMessageSource` (catalogues loaded once at `register()`). The
+  formatter and locale negotiation ship as the import-free subpath
+  `@setu-ts/localization-plugin/format` (`format`, `negotiateLocale`, `parseAcceptLanguage`, and the
+  types `FormatValues`, `FormatOptions` and `AcceptLanguage`), whose runtime graph a test confines
+  to its own modules. It escapes nothing — escaping is the renderer's — and promises one
+  implementation, not identical output across runtimes: `Intl` data differs, so dates take an
+  explicit `timeZone`. Zero npm dependencies.
+- **Localization contracts in `common` (M103).** `CAPABILITIES.LOCALIZATION`, `ILocalizer`,
+  `LocalizationMessage`, `PluralForms` and `MessageCatalogue`, so a plugin formatting text for a
+  person resolves the localizer without importing the localization plugin.
+- **`IRequest.locale` and `replaceLocale` in `common` (M103).** The request's resolved BCP 47 tag is
+  a first-class optional field on the `tenant` precedent, sealed by the same one-implicit-write
+  guard (a second plain assignment throws naming `replaceLocale`), with
+  `replaceLocale(request,
+  tag)` as the deliberate escape — for example, to apply a signed-in
+  user's saved preference once authentication has run. Optional and source-compatible: no `IRequest`
+  implementor breaks. A reader running below priority 45 sees `undefined`, exactly as one below 40
+  sees no `tenant`.
+- **`@setu-ts/testing`'s `createTestContext` carries a seeded `request.locale` (M103)**, sealed as
+  the kernel seals a request, so a test seeding a locale gets it — and the same one-write guard.
+
+- **Three named real-broker errors in `@setu-ts/messaging-plugin` (M101b).**
+  `PubSubSubscriptionBoundElsewhereError`, `NatsConsumerNameCollisionError` and
+  `KafkaTopicUnavailableError`, each thrown by `subscribe()` (so a declared subscription rejects
+  `start()`) for a naming or startup rule the real broker imposes and a permissive fake accepted.
+- **`KafkaOptions.retry` / the `kafka` arm's `retry` (M101b).** Forwarded to `new Kafka({ retry })`
+  unless a `client` is injected, and read by `subscribe()` as its unknown-topic retry budget. Every
+  field is validated at construction, `factor` (kafkajs's jitter) included, held to [0, 1].
+
+### Changed
+
+- **The installation documentation teaches npm.** `0.9.0` is published to npm only, while the
+  README, `PUBLIC_API.md`, the getting-started, runtime-deployment, decorators and custom-plugins
+  guides and eighteen package READMEs still taught `jsr:` installs — pins that could never resolve
+  at `0.9.0`. Each install line is now `npm install @setu-ts/<pkg>` (`bun add`, or
+  `deno add npm:@setu-ts/<pkg>` on Deno), and the examples import `hono` rather than `@hono/hono`.
+  `PUBLIC_API.md`'s description of `setu add` pins, the Workers manifest and the workspace root no
+  longer mentions the `@jsr` scope or an `.npmrc`, which the CLI stopped writing in M111d. Earlier
+  releases stay on JSR.
+
+- **Breaking: `node` is the default generated target, and every target installs the framework from
+  npm (M111d).** `setu new` and `setu generate app` without `--runtime` now scaffold a Node project;
+  pass `--runtime deno` for the previous default. Generated manifests pin `@setu-ts/*` from npm
+  under their own names — `^0.9.0` in `package.json`, `npm:@setu-ts/…@^0.9.0` in a Deno import map —
+  with no `.npmrc` and no `@jsr/` aliases. A Deno project sets `nodeModulesDir: "auto"`, because the
+  CLI imports its config from Node: run `deno install` before `setu <plugin-command>`, which
+  otherwise refuses by name. A Deno project pinning the framework from JSR is refused the same way,
+  pointing at the upgrade guide; `setu adopt` rewrites pre-0.9 pins (`jsr:@setu-ts/…`,
+  `npm:@jsr/setu-ts__…`) onto npm and reports each. A directory with no manifest now reads as Node
+  rather than Deno wherever the CLI detects a target.
+- **Breaking for embedders: `@setu-ts/cli/main` (M111d).** `MainProcess.prompt` is asynchronous,
+  `(message, signal?) => Promise<string | null>`, so an interrupt ends a pending question instead of
+  waiting for Enter; `denoProcess` is removed and `nodeProcess` replaces it. Both executables set
+  `process.exitCode` rather than calling `process.exit`.
+- **Lazy-import error messages and reported specifiers name the bare package (M111a).** Source
+  imports `ioredis`, not `npm:ioredis@5.x`, so `GrpcRuntimeLoadError.specifier`, the telemetry
+  instrumentation loaders' reported `specifier`, `SAML_SPECIFIER` and the React Router load failure
+  now read `@connectrpc/connect`, `@opentelemetry/instrumentation-http`, `@node-saml/node-saml` and
+  `Failed to import 'react-router'`. Code matching the old `npm:…` strings must match the bare name.
+  The install guidance in those messages is unchanged and still names `deno add npm:…` for Deno.
+
+- **Worker pool sizing (M45c, #433).** `WorkerPoolPluginOptions.maxWorkers` now bounds the sum of
+  module pools, defaulting to the largest of available parallelism, defaultPoolSize and the sum of
+  explicit pool sizes. Multi-module applications share the cap fairly; pass `maxWorkers: Infinity`
+  to restore the previous unbounded sum. Health reports the budget.
+
+- **A generated full-stack `setu.config.ts` takes an `ssr` parameter, and its `vite.config.ts`
+  exports `frameworkPackages` and `workspaceLibraries` (`@setu-ts/cli`, PR #426).** `dev.ts` passes
+  the development SSR runtime as `createApp`'s third argument, which replaces `assetsDir`; omitted,
+  production behaviour is unchanged. Workers projects declare the parameter as `_ssr` and read none
+  of it. Existing projects are unaffected; to adopt the dev loop, copy those changes and `dev.ts`
+  from a fresh scaffold.
+
+- **BREAKING: `DiPlugin()` now defaults `autoRegister` to `true` (`@setu-ts/di-plugin`, PR #426).**
+  With the old `false` default, a bare `DiPlugin()` could not resolve any framework capability, so
+  `@Inject(CAPABILITIES.LOGGER)` or `CAPABILITIES.CACHE` failed at startup with "No provider
+  registered for DI token". The container now falls back to the kernel `ServiceRegistry` for a token
+  it does not hold; explicit container registrations still win. **Migration:** pass
+  `DiPlugin({ autoRegister: false })` to keep resolution confined to the container. A starter's
+  `di: {}` arm passes its options through, so `@Inject(CAPABILITIES.LOGGER)` — the pairing both
+  starter READMEs show — now resolves there too. `createContainer()` outside the plugin is
+  unchanged.
+
+- **BREAKING: RabbitMQ consumer retry defaults (#421).** Durable messaging consumer groups now retry
+  failures with five total attempts and tiered delays, create durable retry/dead queues (retry
+  queues are quorum queues with at-least-once dead-lettering, so an expiring copy is never dropped),
+  and bound unacked deliveries to prefetch 32 per consumer. Handlers must be idempotent. Configure
+  `consumerRetry: false` for the existing operator-DLX behavior; private queues and RPC reply
+  inboxes retain discard behavior. `ConsumerRetryOptions` names the shared RabbitMQ/Redis shape.
+  Retry topology reserves group suffixes `.dead` and `.retry.<digits>ms`; rename conflicting groups
+  or disable retries. Generated names must fit 255 UTF-8 bytes. Injected recovery channels require
+  confirms, `on`/`off` return listeners and `close()`; without them `subscribe()` on a retrying
+  group rejects. The RabbitMQ user needs configure permission on `Q.dead`/`Q.retry.<delay>ms`, read
+  on `Q.retry.<delay>ms`, and write on `amq.default`; otherwise the helper declarations fail with
+  `403`.
+
+- **BREAKING: Redis Streams messaging recovery (#419).** Failed messages now retry across restarts;
+  handlers must be idempotent. Redis ≥6.2 is required. Injected `IRedisStreamsClient` facades must
+  implement `xpending`, `xclaim`, `xinfo`, and `xgroup('DELCONSUMER', ...)`. Configure
+  `consumerRetry`, `reclaimIntervalMs`, `deadLetterMaxLen`, and `consumerIdleSweepMs`; see
+  `docs/upgrading.md`.
+
+- **Generated guards, class-based jobs and `setu add` on a Deno project (M101g, V8-32, V8-33,
+  V8-40).** These change what the CLI writes or refuses. `setu generate guard <name>` now emits
+  `requirePermission('<name>')` from `@setu-ts/auth-plugin` where it used to emit a stub that let
+  every authenticated caller through. The permission is evaluated by the authorization service
+  `AuthPlugin` registers only when given an `rbac` option, so without one every authenticated
+  request to a guarded route answers `501`. `setu add auth` therefore prints
+  `AuthPlugin({ jwt: { … }, rbac: { roles: {} } })`. Guards generated earlier are unchanged. In a
+  class-based project without `@setu-ts/queue-plugin`, `setu generate job` now refuses, naming
+  `setu add queue`, where it used to write an unwired function. On a Deno target `setu add` no
+  longer writes an `npm:@jsr/…` entry into `package.json`, which there holds only the frontend
+  build's own npm dependencies; a Node or Bun project is unchanged. `setu add` and
+  `setu devtool enable` now edit `setu.config.ts` only when they can read its meaning from the file
+  alone; otherwise they leave it untouched and print the registration line to add by hand. A
+  configuration that imports a starter or whose import map points a `@setu-ts/` name at another
+  package, a computed member access such as `x['k']`, an import from a package that is not a
+  framework package or a relative file, and template literals or escapes in code all get the printed
+  line instead of an edit. The managed `src/devtool/diagnostics.ts` declares every source key, so a
+  row it stops emitting still type-checks where `setu.config.ts` spreads it. Import maps are read
+  from the project's manifests, any `importMap` file and the workspace root. A backplane options
+  object that names no `transport` no longer receives the development policy, and a configuration
+  that binds its own `sources` gets the printed line rather than the CLI's declaration.
+
+- **RabbitMQ `publish()` and `queue.add()` now wait for the broker (#418).** They resolve only once
+  RabbitMQ has accepted the message, which costs one broker round trip per publish, and they can now
+  reject — when the broker refuses the message, the channel closes first, or `publishTimeoutMs`
+  expires — where they used to resolve unconditionally. See `docs/upgrading.md`.
+
+- **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
+  primary key is already stored now rejects
+  (`Entity '<name>' already has a row with this primary
+  key`), in and out of a transaction — a
+  commit re-checks its buffered creates against rows committed since and writes nothing on a
+  collision — where it used to store a second row that no `findById`, `update` or `delete` could
+  address. Every real backend already refuses this; a test that relied on inserting the same key
+  twice must use distinct keys or let the adapter generate them.
+
+- **The memory adapter's primary key is immutable (M101c).** An `update` whose payload changes a
+  primary-key value now rejects (`Entity '<name>': an update cannot change the primary key`), in and
+  out of a transaction; restating the same value is allowed. Rewriting a key onto another row's key
+  recreated the duplicate the entry above refuses. To change an identifier, delete and recreate the
+  row.
+
+- **The tenant data-store bridge's `find` accepts equality filters only (M101c).** A filter key
+  starting with `$` or a non-scalar value rejects with a `TypeError`, because MongoDB read them as
+  query operators (`$where` ran server-side JavaScript). An `update` whose written row turns out to
+  belong to another tenant — possible only if a key is reused across tenants between the ownership
+  check and the write — rejects instead of returning the row.
+
+- **A tenant-bound session is never re-bound (M101c, V8-7).** The session plugin now seals the
+  tenant only into a session that carries no binding yet. Previously a session whose tenant was
+  resolved after the session loaded could be re-sealed to a different tenant on commit, so a refused
+  request re-bound the session to the tenant it was refused under. A regenerated session still
+  adopts the current tenant, since `regenerate()` drops the binding.
+
+- **SAML ACS binding checked before the request is consumed (M101c, V8-25).** The binding compare
+  moves into the per-request request-cache adapter's `getAsync`, the first point at which the
+  library has parsed the response's `InResponseTo` and before any consumption. A refused peek sets a
+  per-request flag that makes `removeAsync` return without consuming — load-bearing, because
+  node-saml calls `removeAsync` on its failure path and on an unmatched `InResponseTo`, which is how
+  a foreign post consumed the victim's request. A refused peek now answers `state-invalid` (the code
+  the case already uses) instead of `assertion-invalid`.
+
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys a localized request on its locale (M103).** Its
+  key is a URL string, which the Cache API matches with no request headers, so `Vary` could never
+  separate locales there and one locale's page was served to everyone for the TTL. When
+  `ctx.request.locale` is set, the default key is the URL text as sent with a `setu-cache-locale`
+  parameter naming the locale concatenated after it (on the key only; a client-supplied copy and
+  every encoding variant stay distinct in the key, so a client can reach neither another locale's
+  entry nor an entry another URL is served from). Without a locale the key is unchanged, except in
+  the last case below. Four kinds of request are now served uncached, because no key can keep them
+  apart from another: a URL whose text is not in its parsed form (Deno, and Node for some targets,
+  hand the handler the request target as sent — `/a/./b`, a raw `"` in the query — while the Cache
+  API parses a key before matching, so such a request could fill its normalized sibling's entry), a
+  URL carrying a fragment (Deno, Node and Bun hand it to the handler, while the Cache API ignores it
+  when matching), a locale that is not well-formed UTF-16, and a request with no locale whose URL
+  already contains `setu-cache-locale=` (its key would equal a localized request's). Workers
+  normalizes the URL and strips the fragment, so the first two do not arise there. As for
+  `cache-plugin`, the middleware must run after the locale middleware, and a handler-time
+  `replaceLocale` is not reflected. A custom `key` is untouched and must include the locale itself.
+- **`cache-plugin` keys on the resolved locale (M103).** The cache key gains a length-prefixed
+  locale segment from `ctx.request.locale`, between the tenant and `vary` segments, so one locale's
+  cached body is never served to another. An application without the localization plugin has no
+  locale on its requests and keeps byte-identical keys. The segment is read when `cacheMiddleware`
+  runs, so it must run after the locale middleware: a GLOBAL `cacheMiddleware` needs a higher
+  priority number than that middleware's (45 by default, or the configured `middleware.priority`),
+  and where the locale middleware is applied per route, the cache must be on that route after it. A
+  `replaceLocale` override is reflected only when it runs before the lookup.
+- SDK-generated clients keep an error arm for every declared `3xx`, the auto-follow statuses (`301`,
+  `302`, `303`, `307`, and `308`) included, since Fetch returns one unfollowed when it carries no
+  `Location`. Operations that may follow a redirect return `unknown`. Retry policies now cap
+  honoured `Retry-After` delays (`retry.maxRetryAfterMs`, defaulting to the policy's largest
+  computed backoff) and surface the original response error immediately when the hint exceeds the
+  cap. Client construction rejects invalid/non-finite retry counts, delays, and derived exponential
+  backoffs so malformed configuration cannot disable that cap; delays above the portable JavaScript
+  timer maximum are also rejected so runtimes cannot clamp a long wait into an immediate retry. The
+  client keeps a frozen copy of the validated policy, so mutating the caller's `retry` object
+  afterwards no longer changes the cap.
+- **Every backend call M101a covers is now bounded by default, and an expired bound is a recorded
+  failure.** A paused or partitioned Redis keeps its socket open, so a cache, queue or
+  scheduler-lock command used to wait forever. It now rejects inside the bound: a cache call is
+  counted `failed` and the `cache` indicator reports `down`; `queue.add()` rejects and a poll
+  records the failure — though the server may still apply a timed-out command, so a rejected `add()`
+  can have enqueued the job and a retry can run it twice; a lock acquire that does not settle is a
+  skipped fire, logged, counted `lockFailed` and re-armed for the next slot, so a paused backend
+  skips fires instead of stopping the schedule. A token an abandoned acquire returns later is
+  released, and `RedisLock` releases the exact token of a timed-out `SET`, which can still apply
+  once Redis answers. Verified against a real paused Redis 7.
+- **`RedisQueue` transitions are atomic (M101a).** `enqueue`, `reserve`, `ack`, `requeue` and
+  dead-lettering each run as one Lua script when the client exposes `eval` — always true of the
+  client the adapter builds. They used to run as separate commands, so a command that timed out
+  locally but was applied by the server afterwards could leave a reserved job in neither the ready
+  nor the processing set, lost with its payload still stored. An injected client without `eval`
+  keeps the separate commands. A `reserve` the server applies after its local timeout still leaves
+  the job in the processing set, and nothing reclaims it, so it needs moving back by hand. Verified
+  against a live Redis 7.
+- **A Vault request that fails on the network or does not answer in `requestTimeoutMs` now rejects
+  with `SecretProviderUnavailableError` (`503`)** instead of a plain error served as a masked `500`.
+  The bound covers reading the response body too. `connect()` now refuses an address that is not an
+  absolute `http:`/`https:` URL, so a malformed address fails at startup rather than as a `503` on
+  every read. A Vault that answers with an HTTP error keeps its handling: `404` reads as `null`, any
+  other error status rejects with a plain `Error`.
+- **The Vault provider encodes secret names and caps response bodies (M101a security audit).** Each
+  `/`-separated segment of a name is percent-encoded, and a name with an empty, `.` or `..` segment
+  is refused before any request — `../../sys/health` used to reach another Vault endpoint with the
+  token attached. A name that relied on a literal `%`, `?` or `#` reaching Vault unencoded now reads
+  a different path. A name longer than 4096 characters once encoded is refused as an input error
+  instead of failing in the transport and reading as an outage (`503`). A read body over 1 MiB is
+  refused with a plain `Error`, and the memory a read holds stays within that 1 MiB however small
+  the chunks a dependency sends. Secret names quoted in `secrets-plugin` error messages have C0 and
+  C1 control characters, DEL, and U+2028/U+2029 escaped, so a name cannot start a new log line, and
+  quoted only up to its first 256 characters.
+- **The `database` indicator tells pool saturation from an outage (M101a).** When a Drizzle
+  registration's `poolStats` reports every connection busy with callers waiting, the probe queues no
+  `SELECT 1` and the indicator reports `up` with `reachable: 'unknown'`, so `/ready` does not pull
+  every saturated replica at once — but only while queries through the adapter keep completing (one
+  within the last 10 seconds). A full pool with no completed query is a hung database and reports
+  `degraded`. Once `getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native
+  instance, its queries bypass the adapter, so progress is unobservable and a saturated pool reads
+  `up`. A pool connection timeout now reports `degraded` rather than `down` — the probe used to
+  answer `false` for it, though the database never answered either way. Verified against a live
+  PostgreSQL 16 pool.
+- **A retained Service Bus outage is answered at once (M101a).** With a recorded network failure,
+  `reachability()` now returns `false` immediately and runs the management probe in the background,
+  where a `true` answer clears the outcome for the next read. It used to await that probe, whose
+  2-second bound tied the indicator's, so the indicator's bound fired first and a recorded outage
+  was reported `up`.
+- **Queue depth observations drop a row the latest cycle did not read (M101a)** instead of keeping
+  the previous count. The source's `failure` and `depthCoverage: 'partial'` say why; an unreadable
+  depth is never reported as a retained zero.
+- **BREAKING: `TemplateEngine.render` is asynchronous (M102).** The exported class's
+  `render(name, data)` now returns `Promise<RenderedTemplate>`, because `IViewEngine.render` may
+  answer a promise and both template arms share one lookup; every refusal (unknown template, missing
+  placeholder key) is now a rejection rather than a synchronous throw. `MailService` is unaffected
+  (it awaits). A direct caller of `TemplateEngine` adds an `await`; the constructor also gains an
+  optional second parameter, the view engine, which the plugin supplies. See `docs/upgrading.md`.
+- **BREAKING: the log and SendGrid mail providers refuse a send while not connected.** Both accepted
+  a send outside `connect()`..`disconnect()`, unlike the SMTP and SES providers: a send after
+  `app.stop()` reported success on the log provider and still POSTed a real email through SendGrid.
+  Both now reject with `'LogProvider is not connected'` / `'SendGridProvider is not
+  connected'`.
+  Through `MailPlugin` nothing changes before `stop()`, since the plugin connects the provider
+  during `register()`. A test constructing `LogProvider` directly must now call
+  `await provider.connect()` before sending.
+- **BREAKING: `MailTemplate` is a union type, no longer an interface (M102).** It is now
+  `MailStringTemplate | MailComponentTemplate`, so `interface X extends MailTemplate` fails with
+  `TS2312` and `class Y implements MailTemplate` with `TS2422`. Extend or implement
+  `MailStringTemplate` instead, which has the released `{ html?, text? }` shape. A value typed
+  `MailTemplate`, and every object literal assigned to one, compiles unchanged.
+
+- **BREAKING: a Pub/Sub subscription with no `queue` is named per topic (M101b, V8-2).** The default
+  is `<defaultQueue>.<topic ID>` (`messaging-consumers.<topic>`; a fully-qualified topic name
+  contributes only its ID, since `/` is illegal in a subscription ID) instead of one shared
+  `messaging-consumers`. Subscription names are project-global, so the shared default attached a
+  second topic to the first topic's subscription — its handler consumed the other topic's messages
+  with no log — and the RPC channel of one run to the previous run's. An existing subscription bound
+  to another topic is now refused with `PubSubSubscriptionBoundElsewhereError` rather than attached
+  to, and a name over 255 characters is refused at `subscribe()`. Migration: an existing
+  `messaging-consumers` subscription keeps its backlog with no consumer after upgrade; pass
+  `SubscribeOptions.queue: 'messaging-consumers'` on the ONE topic that owns it until it is drained,
+  then delete it.
+- **A Kafka subscription to a topic that does not exist yet retries, then is named (M101b, V8-26).**
+  A KRaft broker with auto-creation answers `UNKNOWN_TOPIC_OR_PARTITION` to the request that creates
+  the topic — measured on Kafka 4.0 — and kafkajs does not retry that, so such a subscription died
+  at boot with a raw `KafkaJSProtocolError` naming no topic. `subscribe()` now retries that one
+  error within `retry` (kafkajs's defaults, about 9 s) and the topic is found; a broker that does
+  not auto-create rejects after the budget with `KafkaTopicUnavailableError`. A consumer that failed
+  to join is disconnected rather than leaked, and a rejected `run()` (kafkajs's crash handler
+  rethrows a disconnect that fails) is reported through `KafkaOptions.logger` (its first reader)
+  instead of escaping as an unhandled rejection.
+- **A NATS consumer records its raw queue as `setu.queue` metadata (M101b).** Consumer metadata
+  needs NATS 2.10 or later; on an older server every `subscribe()` now rejects.
+
+### Fixed
+
+- **`release:bump` completes, and leaves history alone.** The task granted run access to `git` only,
+  so a real bump rewrote every file and then died with `NotCapable` before regenerating the member
+  manifests. It also rewrote the versions recorded in archived plans under `plans/archive/` and the
+  fixtures of a colocated `*.test.ts`; both are now left as written.
+
+- **`setu adopt` moves a project's `deno.jsonc` (M111d).** Adoption moved `deno.json` but left a
+  `deno.jsonc` at the repository root, beside the workspace's new `deno.json`, so the member had no
+  manifest and the project's own was ignored. It now moves with the member, and its pre-0.9 pins are
+  rewritten in place like a `deno.json`'s, comments kept.
+
+- **`setu generate custom <name>` refuses a path-like schematic name (M111d).** `../../x` or a
+  percent-escaped `%2e%2e` segment imported, and ran, a module outside `.setu-ts/schematics/`. A
+  name is now letters, digits, `-` and `_`, and anything else exits 2 naming the rule.
+
+- Consolidated SSE writes and cache coalescing settlement cleanup, preserving closed-connection and
+  owner-isolation behavior across runtimes.
+
+- Node filesystem removal now removes an empty directory without recursive deletion, so CLI rollback
+  can restore the original workspace while preserving nonempty directories.
+- Messaging transport headers preserve own `__proto__` fields and framework-header precedence
+  without invoking the object prototype setter.
+- **A streamed response without a content-type no longer reaches Node clients labelled as text
+  (M111b).** `@hono/node-server` writes `text/plain; charset=UTF-8` for any body that lacks a
+  `content-type`, so `ctx.response.stream(...)` with no type set arrived as text on Node while Deno,
+  Bun and Workers send none. The Node adapter now removes that default whenever the framework
+  response is a byte or stream body that sets no type, matching the Fetch standard, which implies a
+  type only for a string body. Explicit types (`send`, `text`, `json`, a set header) are unchanged.
+  A Node client that relied on the injected `text/plain` must now set the header itself. A body with
+  no type can now be MIME-sniffed by a browser, as it already could on the other runtimes: set a
+  type on any streamed body that may carry untrusted bytes, or send
+  `X-Content-Type-Options: nosniff`. `NodeServeHost.serve`'s `fetch` callback gains an optional
+  second `env` parameter (node-server's `{ outgoing }`); a host that never passes it is unaffected.
+
+- **MongoDB refuses an operator-shaped key (`@setu-ts/database-plugin`, M105).** Since M78 a key
+  value that was an object — `findById({ $ne: 'x' })`, or such a value inside a composite key —
+  reached the driver filter and was read as a query operator, addressing other documents. Every
+  keyed operation now rejects a key value that is not a string or number, before any driver call,
+  without quoting it.
+- **Cosmos DB and DynamoDB refuse a `__proto__` payload field (`@setu-ts/database-plugin`, M105).**
+  A JSON payload carrying an own `"__proto__"` key reached `create`/`update` unchecked. On Cosmos
+  (since M81) every row read back then carried that object as its prototype on Node and Bun
+  (`row.isAdmin === true`), because the read mapping assigned keys; on DynamoDB (since M80) the row
+  became permanently unreadable on every runtime, because the AWS SDK returns a `__proto__`
+  attribute with no value. Both adapters now refuse such a field on write without quoting it — at
+  any depth on DynamoDB, whose SDK drops nested ones too — and their read paths no longer let a
+  stored one (written by anything) inject a prototype or crash the read: Cosmos keeps it as an
+  ordinary field, and DynamoDB skips the valueless attribute the SDK delivers (one an injected
+  client delivers with a value stays an own property).
+- **Bigtable and DynamoDB field maps read own entries only (`@setu-ts/database-plugin`, M105).** A
+  field named after an inherited member (`constructor`, `toString`) resolved the inherited function
+  as a column address or date encoding; Bigtable then threw a `TypeError`. Both maps are now
+  null-prototype records, so such a field is an ordinary unmapped field.
+
+- **Worker lifecycle and example hardening (M45c, #433).** Expired pending tasks reclaim excess
+  starting slots; stale startup callbacks cannot reject unrelated work. Termination throws and
+  rejections are contained, and shutdown bounds its wait to one second per termination, including
+  retired workers. NaN legacy sizes no longer poison the default shared budget for valid modules.
+  The example binds loopback and uses scoped Deno permissions. The budget limits managed slots, not
+  physical worker exit when a host fails to terminate.
+
+- **Worker spawn failures (M45c, #433).** A synchronous `host.spawn` throw now rejects the oldest
+  queued task as a crash, clears its timeout and holds no budget, instead of leaving a ghost task
+  queued after its caller rejected. Remaining queued tasks continue scheduling after a failed spawn,
+  including from a budget hand-over. Hand-over continuations cannot leak the spawn error.
+
+- **Worker slots held by workers that never start (M45c, #433).** A spawned worker that does not
+  signal ready within the new `WorkerPoolPluginOptions.startupTimeoutMs` (default 10 000 ms, applied
+  even with `taskTimeoutMs: 0`, not disableable, and refused above 2 147 483 647 ms because a larger
+  timer delay overflows and fires at once) is terminated, its slot returns to the shared budget, and
+  the oldest waiting task for that module rejects with `WorkerTaskError`
+  (`remoteName: 'WorkerStartupTimeout'`). Before this, one call to a module that never became ready
+  held a shared slot until restart with task timeouts off, and under steady demand starved every
+  other module even with them on; a queued task expiring now also yields a starting worker to a
+  module with no worker. A worker whose listeners fail to attach is no longer charged a slot.
+  `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers`, because a task that
+  never settles keeps its slot. Every sizing and timeout option, including each own `pools` entry,
+  is read once into a validated snapshot that the pools use (an inherited `pools` entry is ignored;
+  a `null` entry means no overrides), a per-call `timeoutMs` is read once, refused values are
+  rendered bounded and escaped, a Symbol `maxWorkers` is refused with the documented `RangeError`,
+  and an `Infinity` legacy pool size no longer makes the derived default unbounded. **Breaking:**
+  `taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` must now be `0` or a
+  positive integer no greater than 2 147 483 647. `NaN` and negative values used to disable the
+  timeout silently and larger values timed every task out after about 1 ms; they now throw
+  `RangeError` at construction or reject that `run()`. Pass `0` for no timeout. The sizing
+  documentation now states that the bound counts slots, not threads: on Deno a timed-out CPU-bound
+  task keeps running, and can keep writing to a `SharedArrayBuffer`, after its promise rejects.
+
+- **Idle worker crashes are reported (M45c, #433).** A worker error that settles no task (an idle
+  worker crashing, or a startup crash with nothing queued) is now logged by the worker-pool plugin
+  as a warning naming the task module; before, it rejected nothing and was visible nowhere.
+
+- **Prometheus label values cannot split exposition lines (metrics-plugin, M45c, #433).** Control
+  characters the 0.0.4 text format cannot escape (carriage return, NUL, the rest of C0 and DEL) are
+  encoded in label values and HELP text as U+FFFD plus two hex digits (a lone UTF-16 surrogate as
+  U+FFFD, `u` and four hex digits), with a literal U+FFFD doubled, so distinct values never collapse
+  into one sample line. A worker-pool `task_module` label carrying a raw CR or NUL passed straight
+  through before.
+
+- **A Deno task module that throws at import no longer kills the host process (runtime, M45c,
+  #433).** The web-worker host now cancels the worker `error` event after reporting it to the pool.
+  Without that, Deno re-raised it in the parent as `Unhandled error in child worker` and the
+  application exited.
+
+- **Two JSDoc corrections (M107).** `ITelemetryService.withSpan` in `@setu-ts/common` named a
+  `parentSpan` option; the option is `parentContext`. `MongoAdapter.beginTransaction` in
+  `@setu-ts/database-plugin` said a standalone server fails there; measured against a standalone
+  `mongo:8`, the real driver's `startTransaction()` resolves and the refusal surfaces at the FIRST
+  operation inside the transaction as the driver's own `MongoServerError` (`code: 20`,
+  `IllegalOperation`), unwrapped — `MongoTransactionUnavailableError` therefore never fires on the
+  real driver (a behaviour fix left for a `fix/…` branch). The outbox's startup check detects that
+  code itself.
+
+- **A capability lookup that misses now names the actual cause (`@setu-ts/kernel`, PR #428).** The
+  error said "Register a plugin that provides it, or check the token spelling" for every miss, which
+  is wrong in the two commonest cases. Before `start()`, the plugin is listed but has not run, so
+  the error now says the application has not started and to resolve the service in a handler, in a
+  lifecycle hook, or after `await app.start()`. During a plugin's `register()`, a capability that a
+  later plugin provides now names that plugin and says to add the token to the consumer's
+  `dependencies` or `optionalDependencies`. Every other miss keeps the old advice, and the first
+  sentence of the message is unchanged.
+
+- **A full-stack application could not start on Cloudflare Workers (`@setu-ts/full-stack-starter`,
+  PR #426).** The starter always registered `SchedulerPlugin`, which refuses Workers at
+  `register()`, so `createFullStackApp()`, and every project from
+  `setu new --template full-stack --runtime cloudflare-workers`, threw `SchedulerUnavailableError`
+  before serving a request. The starter now leaves the scheduler out on Workers unless a `scheduler`
+  arm is passed; schedule there with `cloudflare-plugin`'s `WorkersCron`. Verified by booting the
+  composed set with the runtime forced to `cloudflare-workers` on Deno, not on workerd. The starter
+  README's Workers section, which said the starter does not run there, is corrected.
+
+- **A newly scaffolded full-stack project's smoke test now also requests `/` (`@setu-ts/cli`, PR
+  #426).** `populateLoadContext` runs only on an SSR request, so any DI misconfiguration left
+  `/health` at 200 while every page answered 500 and the generated `deno task test` passed over it.
+  The emitted `test/app.test.ts` now fetches `/` through `app.fetch` — an SSR body streams, which
+  `inject()` refuses — and asserts 200; other templates are unchanged.
+
+- **`export default { fetch: app.fetch }` answered every Workers request with 500
+  (`@setu-ts/kernel`, PR #426).** It is the Workers entry the `cloudflare-plugin` README,
+  `PUBLIC_API.md`, the `rest-starter` README and the Workers adapter's own `listen()` error all
+  name, and Cloudflare calls it as `exported.fetch(request, …)`, so `this` was the exported object
+  and `Application.fetch` threw `Cannot read private member #registry`. Measured on workerd. The
+  application now binds `fetch` at construction, so it works passed around as a bare function.
+
+- **A fresh full-stack project on Node or Bun crashed on its first `start` (`@setu-ts/cli`, PR
+  #426).** `setu new --template full-stack --runtime node` (or `bun`) prints
+  `npm install && npm start`, and the generated README says the same, but the `start` script ran
+  `tsx main.ts` (or `bun run main.ts`) without building first, so the React Router plugin failed
+  with "Failed to load React Router server build" because `build/server/index.js` did not exist.
+  `start` now runs the build first, as the Deno `start` task and the npm `test` script already did.
+  An existing project can prefix its own `start` with `npm run build &&` (or `bun run build &&`).
+
+- **A generated README now says what the project serves (`@setu-ts/cli`).** A new section lists each
+  route a fresh project answers, such as `/docs` (Swagger UI), `/openapi.json`, `/health` and
+  `/metrics`, with the address to reach them. The scaffold e2e requests every listed path on a
+  booted project, so the list cannot name a route that does not answer.
+
+- **The runtime deployment guide's setup commands did not run.** `npm install jsr:…`,
+  `npm add jsr:…` and `bun add jsr:…` all fail, and `wrangler init --type` takes no `--type`; the
+  guide now uses `npm install` / `bun add` against the npm packages (see Changed) and `setu new`. It
+  also showed a `package.json` `imports` block Node cannot use, a `node:20` Docker base below the
+  documented Node 22 floor, Workers startup that cached a failed start for the isolate's life,
+  `ctx.runtime` in request handlers (where `ctx` has no `runtime`), and a 120-second Workers
+  execution limit that does not exist: an HTTP Worker has no wall-clock limit, and its CPU time is
+  what is capped. Each startup retry constructs a fresh application, because the kernel refuses
+  restarting one after plugin registration has begun.
+
+- **The getting-started guide's CLI install command did not work.** It omitted `-g`, which Deno 2.9
+  requires for a global install, and `-n setu`, without which the binary is named `cli` and every
+  `setu …` command in the guide is not found. It now matches the other four documented sites, and a
+  test fails if any documented install command drifts from them.
+
+- **An absent header resolves to `undefined`, and a validated query can be typed
+  (`@setu-ts/decorator-plugin`, PR #426).** `@Params(Header('X-Name'))` declared its source as
+  `string | undefined` but passed `null` for an absent header, because `Headers.get` answers `null`.
+  It now passes `undefined`, like a missing cookie or query parameter. **Migration:** a handler that
+  tested `=== null` for a missing header must test `=== undefined`. The whole-query source is now
+  generic like `Body`, so `Query<z.infer<typeof schema>>()` declares the shape `@ValidateQuery`
+  wrote instead of a cast. `apps/static-site` takes its port as the first argument (default `8000`).
+
+- **A name over 255 bytes no longer jams a RabbitMQ channel (`@setu-ts/messaging-plugin`, M106, PR
+  #427).** AMQP limits the exchange, a queue, the routing key (the topic), the message id and each
+  header name to 255 bytes, and amqplib prepares a publish's confirm callback, or a channel
+  operation's reply slot, before it encodes. An oversized value was rejected, but it left the
+  channel wrong for the rest of its life: after a publish, each later awaited publish resolved only
+  when the one after it was confirmed; after a `subscribe()`, every later channel operation waited
+  forever, so publishes timed out and subscriptions never completed. A payload `messageId` or a
+  topic over 255 bytes reached this before 0.9.0. `RabbitMqBroker` now refuses each of these with a
+  `RangeError` naming the field before the channel is touched: the topic, queue, message id and
+  header names on `publish`/`subscribe`, and `exchangeName` (and a `defaultQueue` over 218 bytes,
+  which leaves no room for the private queue's uuid suffix) at construction.
+  `@setu-ts/queue-plugin`'s `RabbitMqQueue` had the same defect through its derived queue names,
+  `<prefix>.<name>.ready|.delay|.dead`: a job name that makes them exceed 255 bytes (240 with the
+  default prefix) is now refused before the channel is touched — at registration too, by `process()`
+  and `addRecurring()`, so a declared processor with such a name fails `start()` — and a `prefix`
+  over 247 bytes at construction. `QueueService` also isolates each name in its poll and recurring
+  loops: a reserve or recurring enqueue that fails for one name is reported and skipped, where it
+  used to abort the tick and starve every processor and recurring job registered after it.
+
+- **A new Cloudflare Workers project installs and type-checks again (`@setu-ts/cli`, #424).**
+  `setu new --runtime cloudflare-workers` emitted `wrangler: '^4.0.0'` beside
+  `@cloudflare/workers-types: '^4.20250109.0'`, and `wrangler` moved its `workers-types` peer from
+  `^4` to `^5` inside its own 4.x line — so `npm install`, the first step the CLI prints, failed
+  with ERESOLVE against `wrangler@4.148.0` for every new Workers project. The scaffold now pins
+  `wrangler: '~4.148.0'` and `@cloudflare/workers-types: '^5.20261006.1'`: a tilde range because a
+  floating `^4` was never a promise about that peer, while a patch release keeps it on `^5`. Its
+  `tsconfig.json` also gains `allowImportingTsExtensions`, `noEmit`, `lib: ['ES2022']` and
+  `types: ['@cloudflare/workers-types']`: without them the generated `npm run check` failed on a
+  pristine scaffold (TS5097, every emitted import carries `.ts`) and the types package was installed
+  and read by nothing, so `cloudflare:workers` and `KVNamespace` did not resolve. A template's own
+  `types` and `lib` are kept. Verified end to end: scaffold, `npm install`, `npm run check`,
+  `npx wrangler dev`, and `GET /` answers `200` on workerd. A new guarded e2e runs a dry-run
+  `npm install` of every Workers-capable template's generated manifest, so the next upstream peer
+  change fails the suite (including the weekly dependency-drift job) instead of reaching users; the
+  root suite grants `--allow-run=npm` for it. Existing projects can apply the same two pins and four
+  `tsconfig.json` options by hand.
+- **A scaffolded Worker kept its old bindings after a bindings-only deploy (`@setu-ts/cli`, #423).**
+  The `src/index.ts` that `setu new --runtime cloudflare-workers` generates memoized the application
+  built from the first request's `env` and reused it for every later request. Cloudflare may keep an
+  isolate running across a deploy that changes only bindings, so that application kept serving with
+  the previous bindings, variables and secrets. The entry now keeps one application per `env`
+  object. On workerd, `fetch` and `queue` handlers receive the same object while bindings are
+  unchanged, so the steady state is one lookup. Up to two applications are kept, so requests
+  alternating between two versions during a gradual deployment reuse both instead of rebuilding each
+  in turn; a third evicts the least recently used, and an application no request has used for 100
+  requests is retired. Retirement waits until the application now in use has started, so a broken
+  binding never costs the working application, and a retired application is stopped only once no
+  request or queue batch still holds it. Only newly scaffolded projects change; an existing project
+  can copy the new cache, from `interface BootedApp` through `stopQuietly`, and the
+  `acquire`/`release` calls in each export into its own `src/index.ts`.
+
+- **A refused NATS publish resolved as a success (`@setu-ts/messaging-plugin`, #425).** `NatsBroker`
+  never awaited JetStream's acknowledgement, so a publish to a subject no stream captures resolved
+  while the server's `503` escaped as an unhandled rejection, which terminates a Deno or Node
+  process by default; a successful publish was not confirmed either. `publish()` now resolves once
+  JetStream has stored the message and rejects with an error naming the subject (and, for `503`, the
+  `streamSubjects` remedy), keeping the client error as `cause`. An unresponsive server rejects
+  after the client's own 5 s timeout. A failed RPC reply now surfaces as a responder failure, so the
+  request is redelivered rather than its reply silently lost.
+
+- **A duplicate key answers `409 Conflict` instead of a masked `500` (`@setu-ts/database-plugin`,
+  `@setu-ts/cloudflare-plugin`, #420).** Every backend's unique violation reached `errorHandler` as
+  a plain `Error`: measured on the memory adapter, PostgreSQL through Drizzle, MongoDB and DynamoDB
+  Local, a duplicate primary key and a duplicate secondary unique key both answered `500`.
+  `DatabaseService` now classifies SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB
+  `11000`, Cosmos `409` and SQLite's `UNIQUE constraint failed` (the only signal D1 carries) as
+  `DuplicateKeyError`, and the memory, DynamoDB and Bigtable adapters raise it themselves. A
+  duplicate refused at `commit()` is mapped too, including a DynamoDB transaction cancelled by a
+  create's guard; any other commit rejection is still rethrown unchanged. The served `detail` is
+  fixed and never quotes the duplicated value.
+
+- **RabbitMQ discarded handler failures (`@setu-ts/messaging-plugin`, #421).** Durable groups now
+  confirm persistent retry/dead-letter copies before acknowledging the original, preserve message
+  properties and prototype-safe transport headers, drop the broker-interpreted `userId`, `CC` and
+  `BCC`, classify deterministic failures immediately, and replay retry/dead declarations plus
+  prefetch on reconnect. Retry delays, attempt budget, classifier, dead-letter cap and prefetch are
+  configurable and validated at construction. Mandatory replacement publishes now reject correlated
+  unroutable returns before acknowledging; reserved/oversized group names are refused before
+  declarations can close the shared channel. A failed disposition now closes its channel and starts
+  the reconnect-and-replay recovery, so unacked originals return to `Q` instead of filling
+  `prefetch` on a live channel until the consumer stalls. Dead-letter diagnostics normalize
+  application-supplied queue/topic names and bound the complete log line, preventing control
+  characters from forging log records while preserving the original routing names.
+
+- **Redis Streams stranded messages (`@setu-ts/messaging-plugin`, #419).** Failed entries are
+  reclaimed with tiered idle backoff through one delivery path, instead of staying in the pending
+  list forever. Terminal failures enter a bounded per-group dead-letter stream before
+  acknowledgement. Clean consumers are deleted only with no pending entries, and old foreign empty
+  consumers are swept. Real Redis tests cover restart recovery, competing replicas, dead-letter
+  fields, and clean stop.
+
+- **Generated WebSocket and SSE routes fail the project's own `deno fmt --check` (M101g).**
+  `setu generate ws-route` emitted a `broadcast` line wider than the generated project's formatter
+  allows for every name, and `setu generate sse` emitted a one-line registrar signature that
+  overflowed for longer names. Both now emit what `deno fmt` produces, and the every-family
+  formatting sweep generates these families too.
+- **`setu generate` no longer reports adopting a file into a barrel it does not write (#416).** On a
+  fresh `--template rest` project every `setu generate` printed "Adopted
+  src/services/greeting.service.ts into src/services/index.ts … Remove any manual registration of
+  it", although no `src/services/index.ts` was written and that barrel only re-exports, registering
+  nothing. Adoption is now reported only for a barrel the command writes, only for a barrel that
+  registers something, and only after the write succeeds; `--dry-run` previews it as "Would adopt".
+  A custom schematic's output never reports an adoption, since the CLI cannot vouch that its barrel
+  registers the file.
+
+- **CLI output cannot be forged by project-controlled text (M101f security audit).** A member name,
+  path, task value or parser message carrying a line feed, carriage return, U+2028/U+2029 or a bidi
+  control printed raw, so a hostile workspace could make `setu` print a line that read as the CLI's
+  own. Every such value in `devtool enable` (including the task value a refused merge would write
+  and the stale dev-runner refusal), `workspace ports --reallocate`, `generate` (including
+  `generate app`, `generate library` and the legacy `src/routes/` notice), `add`, the member
+  reconcile refusal, the duplicate-port refusals, the unreadable-runtime-marker error and the
+  interrupted-run retry hint is now escaped to `\uXXXX` and stays on one line. The file and failure
+  lines of `new`, every file, refusal and failure line of `adopt` (which now also refuses by name,
+  instead of crashing, when an adopted directory holds an entry it cannot stat, such as a committed
+  dangling symlink), the interrupted-rollback message, and the plugin-command missing-config refusal
+  and application-load errors are escaped the same way; an error raised by the project's own plugin
+  code is printed as written, since that code can already print anything. Messages keep their
+  intended line breaks, and legitimate output is unchanged.
+- **The CLI no longer follows symbolic links inside a project (M101f security audit).** A link is
+  committed content, so a cloned project could make `setu adopt` walk a linked directory and move —
+  deleting from where they lived — files outside the project, and could make `generate`,
+  `devtool enable` and `workspace ports --reallocate` overwrite or merge into a file outside it by
+  linking a barrel, `deno.json` or `main.dev.ts` there. Every CLI write, and every file `adopt`
+  moves, must now resolve to exactly its place under the project or workspace root; a path reached
+  through a link inside the project, or a dangling link, is refused by name with nothing written. A
+  path holding a backslash below the root is refused too (on POSIX it is an ordinary filename
+  character, so it names a different file on each platform), and a workspace member name must be one
+  path segment — no `/`, no `\\`, not `.` or `..` — or the manifest is refused as unreadable. A
+  project reached through a linked PARENT directory is unaffected. If you deliberately link a file
+  into a project (a shared `deno.json`, for example), replace the link with a copy before running a
+  writing command.
+- **Generated image pruning step pinned and scoped (M101f security audit).** The step that removes
+  the development-only diagnostics pin ran `deno eval` with every permission against a floating
+  `jsr:@std/jsonc@^1.0.2`, the one unlocked fetch in the image. It now runs `deno run` against
+  `jsr:@std/jsonc@1.0.3`, with read and write granted only to the member's and the root's
+  `deno.json`/`deno.jsonc`. Regenerate the managed Dockerfile with `setu generate app`,
+  `setu devtool enable` or `setu workspace ports --reallocate`.
+
+- **RabbitMQ messages and jobs survive a broker restart (#418).** Both RabbitMQ publishers —
+  `messaging-plugin`'s broker and `queue-plugin`'s adapter — declared durable queues and then
+  published every message TRANSIENT on a plain channel, so a RabbitMQ restart silently emptied every
+  queue of the messages and background jobs waiting in it, while `publish()`/`add()` had already
+  resolved. Measured against RabbitMQ 4.3.5: 5 messages and 5 jobs → 0 and 0 after a restart, the
+  queues surviving empty. Every publish is now persistent (`persistentMessages`, default `true`;
+  `false` restores the old wire behaviour exactly) and goes through a publisher-confirm channel, so
+  `publish()`/`add()` resolve only once RabbitMQ has accepted the message and reject when it refuses
+  it. Each publish also listens for its channel's `close` and rejects if the channel closes first:
+  amqplib 0.10.x's close-time drain can stop at a slot an out-of-order confirm already settled and
+  never call a later publish's callback, which with `publishTimeoutMs: 0` would leave the publish —
+  and a retry's ack of the reserved job — pending forever. A queue retry or dead-letter now
+  acknowledges the reserved job only after its replacement is accepted — previously it acknowledged
+  after an unconfirmed publish, so a broker failure between the two lost the job. The drive-mode
+  reconnect reopens a confirm channel too. `IAmqpConnection` and `IAmqpQueueConnection` gain an
+  optional `createConfirmChannel()`; an injected facade without it keeps a plain channel and logs
+  one warning. Proven by restarting a real broker in CI, with the transient control losing its
+  messages in the same restart.
+
+- **A paused RabbitMQ no longer hangs `publish()` or `add()` forever (#418).** Each publish made an
+  unbounded broker round trip (an exchange assert in `messaging-plugin`, queue declarations in
+  `queue-plugin`) that a paused broker — socket open, nothing answering — never completes. The new
+  `publishTimeoutMs` option (default `15000`, `0` unbounded, out-of-range values refused with
+  `RangeError` when the plugin is constructed) bounds every round trip of one publish, confirm
+  included; measured against a paused broker, both calls reject at the bound with a message naming
+  the option. A rejection is not proof the message was dropped.
+
+- **SAML binding cookie cleared only on consumption (M101c).** The ACS cleared the browser-binding
+  cookie on every outcome, so a cross-site `POST` of an empty or junk body to the CSRF-exempt ACS,
+  carrying the victim's `SameSite=None` cookie, burned the victim's in-flight login. It is now
+  cleared exactly when a pending request is consumed.
+
+- **`cloudflare-plugin`'s `cacheApiMiddleware` keys on the resolved tenant (#407).** The default key
+  carried the locale (M103) and not the tenant, so with multi-tenancy tenant A's cached page was
+  served to tenant B for the TTL — the exact gap the M103 audit recorded as pre-existing. When
+  `ctx.request.tenant` is set the key appends `setu-cache-tenant=<encoded id>` before the locale
+  parameter, under the same rules: the URL text is never re-serialized, a tenant-less request whose
+  URL already carries the parameter is served uncached (its key would equal a tenant's), as is an
+  unencodable id, and an application without the plugin keeps byte-identical keys. A global
+  registration must run after the tenant middleware (40). A custom `key` must include the tenant
+  itself.
+- **The documented Node.js floor is 22, not 18 (#406).** `docs/getting-started.md`,
+  `docs/runtime-deployment.md` and the runtime README claimed Node 18+; five packages use
+  `Promise.withResolvers`, which Node 22 was the first to ship, and `globalThis.crypto` alone
+  needs 19. CI verifies on Node 24. The `cacheApiMiddleware` JSDoc's list of skip reasons also names
+  the non-`GET` pass-through it had omitted since M52b.
+- **A Kafka `subscribe()` racing `disconnect()` no longer leaves a consumer running.** When
+  `disconnect()` landed while `subscribe()` was still connecting its consumer, or during a first
+  attempt that then succeeded, the subscription completed anyway — a consumer ran after shutdown,
+  holding the process open and consuming messages. It now rejects with
+  `KafkaBroker was disconnected while subscribing` and releases the consumer. The same held for a
+  consumer whose group JOIN was still in flight (about 3 s on a broker with Kafka's default
+  `group.initial.rebalance.delay.ms`): kafkajs's `stop()` is a no-op until the join completes, so
+  disconnecting closed the connections under it, which kafkajs treats as a retriable crash and
+  restarts — the consumer rejoined after `app.stop()`. Releasing a consumer now waits up to 10 s for
+  its join to settle and then disconnects it; a join still pending at 10 s is disconnected the
+  moment it settles, after `app.stop()` has returned, because disconnecting under it neither stops a
+  join that later succeeds nor returns before kafkajs's pending JoinGroup is answered. A record
+  delivered to a released consumer is left uncommitted for the group to redeliver. Found by the
+  M101b security audit; both predate M101b.
+
+- **A Kafka consumer stopped while kafkajs was restarting it no longer rejoins after `app.stop()`.**
+  After a broker restart or a connection reset, kafkajs restarts a crashed consumer behind its own
+  timer. A stop that landed once that restart had begun found nothing to stop — kafkajs's `stop()`
+  drops a runner that is still joining — so the restarted consumer joined the group after shutdown,
+  consumed and committed messages with the stopped application's handler, and held the process open
+  (measured on Kafka 4.0). The broker now declines kafkajs's restart and restarts the consumer
+  itself — after the crash's `retryTime`, else `KafkaOptions.retry.initialRetryTime`, else 300 ms,
+  as kafkajs reads them — so a stop cancels a pending restart and waits for one in progress. Found
+  by the M101b security audit; predates M101b.
+
+- **A Kafka application exits after `app.stop()`.** `KafkaBroker.disconnect()` and a subscription's
+  `unsubscribe()` called the kafkajs consumer's `stop()`, which halts fetching but leaves the
+  consumer's cluster connection open — so every Kafka application with a subscription hung after a
+  clean `app.stop()` until it was killed, and each RPC request's reply inbox leaked a connection
+  when it closed. Both now call `disconnect()`, which stops the consumer and closes its connection.
+  Found while verifying M101b; it predates M101b.
+
+- **A `MessagingPlugin` whose declared subscription rejects no longer leaks its broker (M101b).**
+  `register()` connected the broker, subscribed the declared entries, and only then registered the
+  close hook — so when a declared subscription rejected `start()`, the kernel's failed-start cleanup
+  had no hook to run, the connected broker was never closed, and the process could not exit
+  (measured against a real Kafka broker). M101b makes that rejection a documented outcome, so the
+  hook is now registered directly after `connect()`. A Kafka subscribe retry waiting out its backoff
+  is likewise cancelled by `disconnect()` instead of holding a timer for up to `maxRetryTime`.
+
+- **NATS request-reply works against a real server (M101b, V8-6).** The reply inbox subscribes with
+  the dotted queue `rr.inbox.<uuid>`, which was used verbatim as the JetStream consumer name, and
+  the nats client refuses `.` in one before anything reaches the server — so every `request()`
+  failed with `invalid durable name - durable name cannot contain '.'`, as did any dotted user
+  queue. A queue is now encoded (`.` → `_2e`, and likewise `*`, `>`, `/`, `\` and whitespace); a
+  queue with none of those characters is unchanged, so no existing consumer is renamed. A queue
+  whose encoding collides with another's, or that is reused across two topics, rejects with
+  `NatsConsumerNameCollisionError` instead of silently sharing one consumer's deliveries.
+
+- **62 `@since` tags named a release that does not ship their symbol.** The MongoDB, DynamoDB and
+  cursor-paging surfaces of `@setu-ts/database-plugin` (61 tags) carried `@since 0.1.0` while first
+  shipping in `0.2.0`, and the kernel router's `ROUTE_ENTRY` first shipped in `0.3.0`. Each is
+  corrected to the first published version whose file contains the symbol. They survived because the
+  `@since` gate skipped every `0.1.0` tag — that line shipped only as `0.1.0-alpha.*` — and now
+  checks such a tag against the line's last prerelease instead.
+
+- **The Cloudflare example cached a failed start for the isolate's whole life (`apps/cloudflare`, PR
+  #426).** `createWorkerHandler` memoised the start promise even when it rejected, so one transient
+  failure at cold start left that isolate answering errors to every later request. It now forgets a
+  failed start and retries on the next request, the rule the generated Workers entry has followed
+  since M70l. Concurrent requests still share one start, and none reaches `fetch` on an application
+  whose start failed.
+
+- **Constructor injection in a full-stack app was undocumented (`@setu-ts/full-stack-starter`,
+  `@setu-ts/rest-starter`, `@setu-ts/testing` docs, PR #426).** Nothing said how a React Router
+  loader reaches an injected service; the `full-stack-starter` README now shows resolving it from
+  `CAPABILITIES.DI_CONTAINER` in `populateLoadContext` and carrying it on a context key, and says
+  that a DI mistake starts cleanly and fails every server-rendered page. Both starter READMEs say
+  what the `di` arm turns on, and the testing README points a container-provided service at
+  `overrideProvider` rather than `overrideCapability`.
+
+- **The root README's quick examples did not run as written (README, PR #426).** The first example
+  registered `LoggerPlugin` without telling the reader to install it, so following the documented
+  install failed to resolve the import; it now says to add the package. The second read `JWT_SECRET`
+  before any plugin had registered; it now loads configuration with `loadConfig` and hands the same
+  snapshot to `ConfigPlugin({ instance })`. The feature table no longer claims event sourcing, which
+  the framework does not ship, and now lists Cosmos DB and Bigtable.
+
+- **The CLI guide described a CLI several milestones old (`docs/cli.md`, PR #426).** It said
+  `generate controller` and `generate module` need `decorator-plugin` (neither has since M70h),
+  listed fourteen schematics where there are sixteen (`ws-route` and `sse` were missing), quoted a
+  refusal message the CLI no longer prints, and left the M83 `@Module` file and `MODULES` barrel out
+  of the class-based module tree. It also miscounted the interactive questions, gave the wrong `bun`
+  start command, and showed the workspace discovery map without its `<MEMBER>_HOST` override. Each
+  corrected claim was checked against a project the CLI scaffolded.
+
+- **The NestJS migration guide mapped several NestJS features to hand-written code the framework
+  replaces (`docs/migration-nestjs.md`, PR #426).** Guards now map to `AuthPlugin` with
+  `requireAuth()`/`requireRole()`, in place of a hand-written global middleware that would also have
+  refused `/health`. Exception filters map to `errorHandler({ respond })`, WebSocket gateways to
+  `@Gateway`, and the testing module to `createTestApp({ app: createApp(), overrides })`. The guide
+  also says that a decorated `@Injectable` lives in the DI container, which `overrideCapability`
+  does not reach. The decorator example now passes `DiPlugin({ autoRegister: true })`, without which
+  injecting a framework capability fails at startup. The guide no longer says Setu-TS has no
+  `@Module`.
+
+- **The examples guide described applications that are not in `apps/` (`docs/examples.md`, PR
+  #426).** Its code blocks were written as illustrations rather than taken from the apps, and had
+  drifted. They showed routes the apps do not serve (`/items`, `/users`, `/my-route`), a health
+  endpoint `minimal` does not have, D1 and Cache API use the Cloudflare example does not make, and
+  WebSocket rooms in an SSE-only `realtime` example. They also named a `build` task where
+  `compiled-binary` has `compile`. The guide also did not say that `cqrs` and `microservices` print
+  a result and exit, or which port each app uses. Each deep dive now gives the commands it was
+  checked with against the running app, and links to that app's source.
+
+- **The Fastify migration guide's testing example threw at startup, and several sections described
+  behaviour the framework does not have (`docs/migration-fastify.md`, PR #426).** `createTestApp()`
+  with no plugins throws, because the kernel requires a runtime plugin. The example now passes
+  `RuntimePlugin()`, and the guide points at `app.inject()`, which works as Fastify's does. The
+  shutdown hooks' comments were reversed (`onStopping` runs while the application still serves;
+  `onShutdown` runs after the socket closes). The encapsulation section claimed capability tokens
+  scope a service, but every registered service is application-wide. Validation and error handling
+  now show `validateBody(...)` and `errorHandler()` in place of hand-written equivalents, and query
+  parameters come from `ctx.query`.
+
+- **The React Router development guide's loop failed for the CLI's full-stack skeleton on Deno
+  (`docs/react-router-dev.md`, PR #426).** Re-verified on Deno 2.9.6, Vite 8.3.1 and react-router
+  8.4.0: the build thunk, the `/__vite/` proxy and editing a route without a restart all still work.
+  A project from `setu new --template full-stack` imports `@setu-ts/react-router-plugin` in its
+  route modules, though, and Vite's development SSR runner cannot resolve that JSR import, so every
+  page answered `500`. The guide's loop now passes `viteDevExternals` (see Added), and points such a
+  project at its own `deno task dev`. It also pins Vite 8 as the CLI does, and says `isbot` is
+  needed only with React Router's default server entry.
+
+- **The telemetry fan-out guide's validation command failed as printed
+  (`docs/telemetry-collector-fanout.md`, PR #426).** The collector config reads five credentials
+  from the environment, and `otelcol-contrib validate` rejects it while they are empty, so the
+  command exited `1` on a clean checkout. The guide now sets placeholders in the command and says
+  validation contacts no vendor. It also says the config validates on 0.156.0 and on the 0.115.1
+  that the Compose stack pins. A scope note still sent readers to Milestone 39 for Compose. It now
+  links the `telemetry` profile that shipped there.
+
+- **The MVC guide's redirect example could never take its error branch (`docs/mvc.md`, PR #426).**
+  It decided acceptance with `ctx.request.method === 'POST'` on a `POST` route, so it always
+  redirected. It now validates the submitted title, re-renders the form with `422` when it is too
+  short, and redirects with `303` otherwise; both branches were driven through a running app. The
+  guide's other claims were checked the same way and hold.
+
+- **The custom-plugin guide's two test examples failed as printed (`docs/custom-plugins.md`, PR
+  #426).** The integration test registered its plugin after `createTestApp()` had started the
+  application, which throws; the unit test asserted a service its plugin never registered. Both now
+  pass when run, and every example was checked against the source or a running app. Step 1 used
+  `CAPABILITIES` without importing it, the service-registration block registered one token twice and
+  paired `override` with `multi` (which ignores it), the `subtle` example called it optional and
+  imported an HMAC key without a hash, and the sample README's outer fence closed early, so its
+  Usage and Options sections rendered as part of the guide.
+
+- **The programmatic API reference resolved capabilities before `start()`
+  (`docs/programmatic-api.md`, PR #426).** Both streaming examples and the `router.post` example
+  read a service at module scope, where the plugin providing it has not registered yet, so each
+  threw `No service registered`. They now resolve inside the handler, and the disconnect example no
+  longer closes a stream the client has already cancelled. The `middleware.add` section showed only
+  a plugin registration; it now adds a middleware. `register()` takes no options, `start()`'s
+  hostname defaults to the runtime's own, and the transcribed `IResponse` and `IRequestContext` gain
+  `html()` and `raw`.
+
+- **The plugin catalog described packages that have since changed (`docs/plugins.md`, PR #426).**
+  The kernel listed three exports it does not have (`createApplication` is its only value), the DI
+  token was `CAPABILITIES.CONTAINER` rather than `DI_CONTAINER`, the database entry listed neither
+  the MongoDB, DynamoDB, Cosmos DB nor Bigtable arms nor their drivers, telemetry omitted
+  `@opentelemetry/context-async-hooks`, audit claimed a Cloudflare KV store it does not ship,
+  multi-tenancy claimed physical schema and database isolation, LaunchDarkly was called Node-only,
+  and the CLI count was 14 schematics rather than 16. Every listed export and token is now checked
+  against its package's barrel and `CAPABILITIES`.
+
+- **The decorators guide's validation examples answered `500` on every request, and it said role
+  decorators are not enforced (`docs/decorators.md`, PR #426).** `@ValidateBody` and
+  `@ValidateQuery` were given plain `{ type, required }` objects, which are not schemas the
+  validation plugin can run, so every request to those routes failed. They now use Zod schemas.
+  `@Roles` and `@Permissions` have been enforced since M89a (`401`, `403`, or `501` with no
+  authorization service), while the guide described them as metadata only. The `DiPlugin()` examples
+  now pass `autoRegister: true`; without it, injecting `CAPABILITIES.CACHE` fails at startup. Also
+  corrected: the path `@Version` produces (`/v1/api/users`, not `/v1/users`), and the
+  `MetadataStore` example, which iterated a new, empty store instead of `metadataStore`.
+
+- **The plugin architecture guide's replacement and testing examples failed at startup
+  (`docs/plugin-architecture.md`, PR #426).** "Plugin Replacement" registered a custom logger beside
+  `LoggerPlugin`, which the kernel refuses because a capability has one provider. The testing
+  example registered a plugin after `createTestApp` had started the application, which throws. The
+  middleware priority table now lists every first-party middleware with its real priority; it had
+  omitted the error handler, locale resolution and request logging. The shutdown hook comments now
+  say when each hook runs relative to serving, and the guide no longer says routing and middleware
+  are plugins.
+
 ## [0.8.0] — 2026-10-03
 
 ### Added
@@ -4392,14 +5763,20 @@ Nothing here requires an application change unless it is named **Breaking** belo
   ```typescript
   // Before — compiled, then threw at app.start()
   DatabasePlugin({ type: 'prisma' });
-  DatabasePlugin({ type: 'drizzle', options: { drizzleTables: { User: users } } });
+  DatabasePlugin({
+    type: 'drizzle',
+    options: { drizzleTables: { User: users } },
+  });
 
   // After
   DatabasePlugin({ type: 'prisma', options: { prismaClient } });
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -4973,7 +6350,10 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { User: users },
     },
   });
@@ -5640,7 +7020,9 @@ migration.
 
   ```typescript
   app.register(OpenApiPlugin({
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
     security: [{ bearerAuth: [] }], // document-level default
   }));
 

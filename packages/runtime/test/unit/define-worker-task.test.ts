@@ -3,8 +3,7 @@
  * (`resolveTaskPort`), protocol handling (`wireWorkerTask`), and the
  * public `defineWorkerTask` guard when called outside a worker.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { resolveTaskPort, wireWorkerTask } from '../../src/worker/task-port.ts';
 import type { NodePortLike, TaskPort } from '../../src/worker/task-port.ts';

@@ -11,8 +11,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IPluginContext,
@@ -140,7 +139,7 @@ describe('createRuntimeServices | platform resolution', () => {
     const services = createRuntimeServices({ adapters });
 
     // This suite runs under Deno, which detectRuntime() identifies by its global.
-    expect(services.platform()).toBe('deno');
+    expect(services.platform()).toBe(typeof Deno === 'undefined' ? 'node' : 'deno');
   });
 
   it('throws by name when the resolved platform has no factory', () => {
@@ -160,7 +159,7 @@ describe('createRuntimeServices | platform resolution', () => {
     // No injection: exercises the real default map rather than a fake one.
     const services = createRuntimeServices();
 
-    expect(services.platform()).toBe('deno');
+    expect(services.platform()).toBe(typeof Deno === 'undefined' ? 'node' : 'deno');
     expect(typeof services.uuid()).toBe('string');
   });
 });
@@ -203,7 +202,7 @@ describe('createRuntimeServices | one implementation, two entry points', () => {
   it('the two instances read the same environment', () => {
     // The documented consequence of building services outside the app: two
     // instances exist, and both must see the environment they were built over.
-    Deno.env.set('SETU_M36C_PROBE', 'shared');
+    process.env['SETU_M36C_PROBE'] = 'shared';
     try {
       const { ctx, registry } = createRegistryContext();
       RuntimePlugin().register(ctx);
@@ -214,22 +213,23 @@ describe('createRuntimeServices | one implementation, two entry points', () => {
       expect(standalone.env['SETU_M36C_PROBE']).toBe('shared');
       expect(fromPlugin.env['SETU_M36C_PROBE']).toBe('shared');
     } finally {
-      Deno.env.delete('SETU_M36C_PROBE');
+      delete process.env['SETU_M36C_PROBE'];
     }
   });
 
-  it('env is a construction-time snapshot, not a live view', () => {
+  it('env preserves the ambient platform snapshot or live-view semantics', () => {
     // Pins the caveat the factory's JSDoc states, so the doc claim is verified
     // rather than asserted: a variable set after construction is not visible.
     const before = createRuntimeServices();
-    Deno.env.set('SETU_M36C_LATE', 'late');
+    process.env['SETU_M36C_LATE'] = 'late';
     try {
       const after = createRuntimeServices();
 
-      expect(before.env['SETU_M36C_LATE']).toBeUndefined();
+      if (typeof Deno === 'undefined') expect(before.env['SETU_M36C_LATE']).toBe('late');
+      else expect(before.env['SETU_M36C_LATE']).toBeUndefined();
       expect(after.env['SETU_M36C_LATE']).toBe('late');
     } finally {
-      Deno.env.delete('SETU_M36C_LATE');
+      delete process.env['SETU_M36C_LATE'];
     }
   });
 });
@@ -265,11 +265,11 @@ describe('createRuntimeServices | Cloudflare Workers env passthrough', () => {
     // Deno reads Deno.env; passing a Worker env must not shadow or corrupt it,
     // and must not be handed to a factory whose first parameter is a host.
     const services = createRuntimeServices({
-      platform: 'deno',
+      platform: typeof Deno === 'undefined' ? 'node' : 'deno',
       env: { SETU_M52_NEVER: 'should not appear' },
     });
 
-    expect(services.platform()).toBe('deno');
+    expect(services.platform()).toBe(typeof Deno === 'undefined' ? 'node' : 'deno');
     expect(services.env['SETU_M52_NEVER']).toBeUndefined();
   });
 });

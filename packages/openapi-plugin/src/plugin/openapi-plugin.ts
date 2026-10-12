@@ -5,7 +5,7 @@ import type { OpenApiGeneratorOptions } from '../generators/openapi-generator.ts
 import type { IOpenApiService } from '../interfaces/openapi-service.ts';
 import { OpenApiService } from '../services/openapi-service.ts';
 import { swaggerUiHtml } from '../ui/swagger-ui.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Options for the OpenAPI plugin.
@@ -102,7 +102,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
 
   return {
     name: 'openapi-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.OPENAPI],
     priority: PLUGIN_PRIORITY.OPENAPI,
 

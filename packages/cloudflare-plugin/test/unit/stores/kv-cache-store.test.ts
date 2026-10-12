@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * `KvCacheStore` against a fake KV that enforces the platform's real 60-second
  * `expirationTtl` floor, so the store's logical-expiry design is exercised
  * rather than assumed.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { CloudflareUnsupportedError, KvCacheStore } from '../../../src/index.ts';
 import { FakeClock, FakeKv } from '../../fakes.ts';

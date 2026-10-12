@@ -1,3 +1,5 @@
+import { connect } from '../../../../test/node-helpers.ts';
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * End-to-end proof of the M86 §7 verification bar: the X13 collaboration board
  * route — one WebSocket room with a guarded upgrade — is expressible with NONE
@@ -35,8 +37,8 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
+import NodeWebSocket from 'ws';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -82,7 +84,7 @@ interface BoardApp {
 // ---------------------------------------------------------------------------
 
 /** Resolves once the socket is open, or rejects on error/timeout. */
-function opened(socket: WebSocket): Promise<void> {
+function opened(socket: WebSocket | NodeWebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timed out waiting for open')), TIMEOUT_MS);
     socket.onopen = () => {
@@ -119,11 +121,8 @@ function closed(socket: WebSocket): Promise<void> {
 }
 
 /** Picks a free ephemeral port on 127.0.0.1 by binding and immediately releasing one. */
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function freePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 /**
@@ -132,7 +131,7 @@ function freePort(): number {
  * decided. The socket is closed before returning; no frames are exchanged.
  */
 async function rawUpgradeStatusLine(port: number, pathWithQuery: string): Promise<string> {
-  const conn = await Deno.connect({ hostname: '127.0.0.1', port });
+  const conn = await connect({ hostname: '127.0.0.1', port });
   try {
     const request = [
       `GET ${pathWithQuery} HTTP/1.1`,
@@ -220,7 +219,7 @@ function buildBoardApp(): BoardApp {
 describe('X13 declarative board route (e2e, real sockets)', () => {
   it('serves the guarded room from the routes option alone — no plugin wrapper, no duplicated path, no global middleware', async () => {
     const { app, plugins, guardRuns } = buildBoardApp();
-    const port = freePort();
+    const port = await freePort();
     await app.start({ port });
 
     // The service is read after start for the counts below; the route itself
@@ -288,7 +287,7 @@ describe('X13 declarative board route (e2e, real sockets)', () => {
 
   it('refuses an upgrade without the board token — 401 on the wire, handshake never completes', async () => {
     const { app, guardRuns } = buildBoardApp();
-    const port = freePort();
+    const port = await freePort();
     await app.start({ port });
     const sockets = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 
@@ -299,9 +298,10 @@ describe('X13 declarative board route (e2e, real sockets)', () => {
       expect(statusLine.startsWith('HTTP/1.1 401')).toBe(true);
       expect(sockets.connectionCount).toBe(0);
 
-      // A browser-grade client with a WRONG token fails the same way: no
-      // handshake, no connection.
-      const stray = new WebSocket(
+      // A client with a WRONG token fails the same way: no handshake, no
+      // connection. Node’s built-in client retries 401 handshakes; use the
+      // installed ws client to prove exactly one guard call per attempt.
+      const stray = new NodeWebSocket(
         `ws://127.0.0.1:${port}${BOARD_PATH}?room=${ROOM}&token=not-the-key`,
       );
       await expect(opened(stray)).rejects.toThrow();

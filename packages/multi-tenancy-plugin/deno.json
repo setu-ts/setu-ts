@@ -1,9 +1,12 @@
 {
   "name": "@setu-ts/multi-tenancy-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
   "test": {
     "include": ["test/**/*.test.ts"]
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

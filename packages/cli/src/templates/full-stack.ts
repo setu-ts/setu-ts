@@ -28,6 +28,7 @@ import {
   FULL_STACK_CHECK_TASK,
   FULL_STACK_DENO_COMPILER_OPTIONS,
   FULL_STACK_DENO_IMPORTS,
+  FULL_STACK_DEV_ENTRY,
   FULL_STACK_NPM_DEPENDENCIES,
   FULL_STACK_NPM_DEV_DEPENDENCIES,
   FULL_STACK_TSCONFIG_OPTIONS,
@@ -63,7 +64,9 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
-    : `\n      assetsDir: './build/client/assets',`;
+    // In development (`dev.ts`) Vite serves the client modules and there is no
+    // client build to read, so the development SSR runtime replaces assetsDir.
+    : `\n      ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),`;
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
@@ -78,9 +81,17 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const config = runtime === 'cloudflare-workers'
     ? ''
     : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
+  // `new RegExp('…')` rather than a regex literal: a generated configuration must
+  // stay inside the language the CLI's own config reader classifies (no regex
+  // literal, no backslash), or `setu add` and `setu devtool enable` would treat
+  // the CLI's own output as unfamiliar (audit round 5, C-R5). The base path is a
+  // fixed literal path segment, so it needs no escaping inside the pattern.
+  if (grpcBasePath !== undefined && !/^\/[A-Za-z0-9_-]+$/.test(grpcBasePath)) {
+    throw new Error(`gRPC base path ${grpcBasePath} must be a single plain path segment.`);
+  }
   const csrf = grpcBasePath === undefined
     ? '{}'
-    : `{ exclude: [/^${grpcBasePath.replaceAll('/', '\\/')}(?:\\/|$)/] }`;
+    : `{ exclude: [new RegExp('^${grpcBasePath}(?:/|$)')] }`;
 
   // The RETURN TYPE annotation is X5-2's whole fix, and it is load-bearing
   // rather than decorative. TypeScript does NOT apply excess-property checking
@@ -113,6 +124,8 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: ${csrf},
     },${discovery}
+    // Preserve Origin on native form posts; send no cross-origin referrer.
+    httpSecurity: { headers: { referrerPolicy: 'same-origin' } },
   }), { env${config} }`;
 }
 
@@ -162,7 +175,21 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     pkg: 'full-stack-starter',
     symbol: 'createFullStackAppFromConfig',
     args: fullStackArgs,
+    // The REST starter underneath registers these unconditionally; listed here
+    // because the factory hides them from the plugin list the README reads.
+    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin'],
+    parameter: {
+      name: 'ssr',
+      type: "Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
+      doc: 'The development SSR runtime `dev.ts` supplies; omitted in production.',
+      readOn: ['deno', 'node', 'bun'],
+    },
   },
+  routes: [
+    { path: '/', purpose: 'the home page, server-rendered by React Router' },
+    { path: '/products', purpose: 'a page behind sign-in; it redirects to `/login`' },
+    { path: '/login', purpose: 'the sign-in form' },
+  ],
   packageImports: [
     // The annotation that restores excess-property checking on the resolver
     // (X5-2). A type-only import, so it costs the generated project nothing at
@@ -174,7 +201,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { pkg: 'common', symbols: ['CAPABILITIES', 'type ILogger', 'type ISecretManager'] },
     // Imported by app/lib/context-keys.server.ts for contextKeyFor(), so the
     // manifest must carry it even though setu.config.ts names no symbol.
-    { pkg: 'react-router-plugin' },
+    { pkg: 'react-router-plugin', symbols: ['type ReactRouterPluginOptions'] },
   ],
   files: [
     ...FULL_STACK_APP_FILES,
@@ -207,6 +234,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
       // while `package.json` resolves the shim from `node_modules`.
       denoCommand: 'deno run -A npm:@react-router/dev build',
       outputDir: 'build',
+      devEntry: FULL_STACK_DEV_ENTRY,
     },
     npmDependencies: FULL_STACK_NPM_DEPENDENCIES,
     // The test packages are merged in because `setu generate module` is ungated

@@ -1,8 +1,7 @@
 /**
  * Tests for SchedulerService.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ILogger, ScheduledJob } from '@setu-ts/common';
 import { SchedulerService } from '../../src/services/scheduler-service.ts';
 import { MemoryLock } from '../../src/lock/memory-lock.ts';

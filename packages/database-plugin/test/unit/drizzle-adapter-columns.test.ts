@@ -14,14 +14,13 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
-import { pgTable, primaryKey, text } from 'npm:drizzle-orm@0.45.2/pg-core';
+import { describe, expect, it } from 'vitest';
+import { drizzle } from 'drizzle-orm/pg-proxy';
+import { pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
 import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
-import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
+import { drizzle as sqliteDrizzle } from 'drizzle-orm/sqlite-proxy';
 import { encodeCursor, keysetPredicate } from '@setu-ts/common';
 
 const tenants = pgTable('tenants', {

@@ -1,8 +1,7 @@
 /**
  * Query bus tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { QueryBus } from '../../src/bus/query-bus.ts';
 import type { CqrsQuery, IQueryHandler } from '@setu-ts/common';
 import { HandlerNotFoundError } from '../../src/errors/handler-not-found.ts';

@@ -12,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createStaticHandler } from '../../src/handler/static-handler.ts';
 import type { RouteHandler } from '@setu-ts/common';
 

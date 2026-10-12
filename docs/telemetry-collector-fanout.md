@@ -16,10 +16,10 @@ Reference config:
 [`docker/otel-collector/collector-config.yaml`](../docker/otel-collector/collector-config.yaml)
 (note: the path is relative to the repo root, not this file).
 
-> **Scope.** This page and that config are the telemetry fan-out reference only. Runnable
-> `docker-compose`, Kubernetes manifests, and Helm are owned by **Milestone 39 (Docker and
-> Kubernetes)**, which references this config rather than redefining it; the general documentation
-> site is owned by **Milestone 38 (Documentation)**, which links here.
+> **Scope.** This page and that config are the telemetry fan-out reference only. To run the
+> collector beside an application, use the `telemetry` profile of the Compose stack, which mounts
+> this same file: see
+> [Docker and Kubernetes — Local development with Compose](./deployment.md#local-development-with-compose).
 
 ## 1. App side — point the plugin at the collector
 
@@ -67,7 +67,12 @@ env or secret mechanism.
 ## 4. Validate the config
 
 The config is validated with the contrib collector — this fails on an unknown component, a malformed
-pipeline, or a missing required field:
+pipeline, or a missing required field.
+
+The five variables from section 3 must be set first, or validation fails on the empty values with
+`exporters::datadog: api.key is not set` and
+`exporters::otlphttp/newrelic: at least one endpoint must be specified`. Validation contacts no
+vendor, so placeholders are enough to check the file:
 
 ```bash
 otelcol-contrib validate --config docker/otel-collector/collector-config.yaml
@@ -76,9 +81,17 @@ otelcol-contrib validate --config docker/otel-collector/collector-config.yaml
 If the binary is not installed locally, validate via the image:
 
 ```bash
-docker run --rm -v "$PWD/docker/otel-collector:/cfg" \
+docker run --rm \
+  -e DD_API_KEY=placeholder -e DD_SITE=datadoghq.com \
+  -e NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net -e NEW_RELIC_LICENSE_KEY=placeholder \
+  -e 'APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://example.invalid/' \
+  -v "$PWD/docker/otel-collector:/cfg" \
   otel/opentelemetry-collector-contrib:latest validate --config /cfg/collector-config.yaml
 ```
+
+This passes on `otelcol-contrib` 0.156.0 and on 0.115.1, the version the Compose stack pins. A
+successful validation proves the file is well formed; it does not prove a vendor accepts your
+credentials.
 
 ## 5. Add or remove a backend
 

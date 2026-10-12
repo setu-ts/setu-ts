@@ -4,8 +4,7 @@
  * Covers construction, property assignment, cause chaining via ES2022
  * `Error.cause`, the `name` field, `instanceof`, and the `from()` factory.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { HttpError } from '../../src/errors/http-error.ts';
 

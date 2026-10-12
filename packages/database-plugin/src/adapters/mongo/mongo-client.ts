@@ -3,11 +3,11 @@
  * `IMongoClient` facade the adapter operates against, plus the inject-or-lazy
  * loader that supplies the real module on the lazy path.
  *
- * The adapter never imports `npm:mongodb` directly: it accepts a client
+ * The adapter never imports `mongodb` directly: it accepts a client
  * through {@linkcode MongoAdapterOptions.client} (preferred — the application
  * constructs and configures it) or loads it lazily at {@linkcode
  * MongoAdapter.connect} time. The loader performs a real, literal
- * `import('npm:mongodb@^6.21.0')`, so the seam is not a global-hook shim that only
+ * `import('mongodb')`, so the seam is not a global-hook shim that only
  * tests populate (the CLAUDE.md pitfall: a `globalThis.__x` loader throws in
  * production even when the package is installed).
  *
@@ -108,7 +108,7 @@ export type { MongoWriteOptions };
 /**
  * The native `mongodb` module shape the lazy loader adapts.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoSdkModule {
   /** The driver `MongoClient` constructor. */
@@ -119,9 +119,9 @@ export interface MongoSdkModule {
 
 /**
  * The client loader seam — either an injected client (no import) or a lazy
- * loader that performs the real `npm:mongodb@^6.21.0` import.
+ * loader that performs the real `mongodb` import.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoClientLoader {
   /**
@@ -143,7 +143,7 @@ export interface MongoClientLoader {
  * @param client - The constructed client
  * @param objectIdCtor - The driver `ObjectId` constructor
  * @returns A loader that hands the client back without importing anything
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function createInjectedClientLoader(
   client: IMongoClient,
@@ -160,18 +160,18 @@ export function createInjectedClientLoader(
 }
 
 /**
- * A lazy loader that constructs a client from the literal `npm:mongodb@^6.21.0`
+ * A lazy loader that constructs a client from the literal `mongodb`
  * specifier at {@linkcode MongoAdapter.connect} time.
  *
- * Performs a real `import('npm:mongodb@^6.21.0')`; the driver is resolved by the
+ * Performs a real `import('mongodb')`; the driver is resolved by the
  * runtime at call time and is not part of this package's dependency graph.
  *
  * @param url - The connection string
  * @returns A loader that performs the real import on first use
- * @since 0.1.0
+ * @since 0.2.0
  */
 export async function createLazyClientLoader(url: string): Promise<MongoClientLoader> {
-  const mod = await import('npm:mongodb@^6.21.0') as unknown as MongoSdkModule;
+  const mod = await import('mongodb') as unknown as MongoSdkModule;
   return {
     createClient: (): Promise<IMongoClient> => Promise.resolve(new mod.MongoClient(url)),
     objectIdCtor: mod.ObjectId,

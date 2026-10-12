@@ -60,6 +60,9 @@ export function createApp(): Promise<IKernelApplication> {
       secret: config.get<string>('SESSION_SECRET', { default: DEV_SESSION_SECRET }),
       csrf: {},
     },
+    // Native form posts need a same-origin Origin header for React Router's
+    // action check. Keep referrers private when navigating to another origin.
+    httpSecurity: { headers: { referrerPolicy: 'same-origin' } },
     database: { type: 'memory' },
   }));
 }

@@ -6,7 +6,12 @@
  *
  * @module
  */
-import type { EntityKey, IDatabaseAdapter, TransactionOptions } from '@setu-ts/common';
+import type {
+  EntityKey,
+  IDatabaseAdapter,
+  TransactionOptions,
+  WritePrecondition,
+} from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
 import type { SqlJsonDialect } from '../query/json-path.ts';
@@ -127,6 +132,31 @@ export interface IRepository<Entity, Id extends EntityKey = string> {
    * @since 0.1.0
    */
   delete(id: Id): Promise<boolean>;
+
+  /**
+   * Update only while the key and every equality precondition match.
+   * Optional permanently. BaseRepository rejects before I/O if the source lacks it.
+   *
+   * @param id - Primary key
+   * @param where - Non-empty string/number equality map on stored values
+   * @param data - Non-empty update payload
+   * @returns Updated entity, or `null` for a missing key or predicate mismatch
+   * @throws {UnsupportedQueryFeatureError} For an invalid predicate or unsupported source
+   * @since 0.9.0
+   */
+  updateWhere?(id: Id, where: WritePrecondition, data: Partial<Entity>): Promise<Entity | null>;
+
+  /**
+   * Delete only while the key and every equality precondition match.
+   * Optional permanently. BaseRepository rejects before I/O if the source lacks it.
+   *
+   * @param id - Primary key
+   * @param where - Non-empty string/number equality map on stored values
+   * @returns Whether the conditional delete applied
+   * @throws {UnsupportedQueryFeatureError} For an invalid predicate or unsupported source
+   * @since 0.9.0
+   */
+  deleteWhere?(id: Id, where: WritePrecondition): Promise<boolean>;
 
   /**
    * Check whether an entity with the given primary key exists.
@@ -797,7 +827,7 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
  * `connect()` throw — the same guarantee the `'custom'` arm gives
  * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * `client` is an already-constructed structural `IMongoClient`, and absent it
- * the adapter performs a literal `import('npm:mongodb@^6.21.0')` at connect time.
+ * the adapter performs a literal `import('mongodb')` at connect time.
  *
  * @example
  * ```typescript
@@ -808,7 +838,7 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
  *   options: { url: 'mongodb://localhost:27017/mydb' },
  * });
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoDatabaseOptions extends DatabaseConnectionOptions {
   /** Selects the Mongo arm. */
@@ -824,7 +854,7 @@ export interface MongoDatabaseOptions extends DatabaseConnectionOptions {
  * It is exported because the arms below reference it, so a caller building a
  * configuration incrementally can name the shared half.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
@@ -884,7 +914,7 @@ export interface MongoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'l
  * const lazy: MongoAdapterOptions = { url: 'mongodb://127.0.0.1:27017/app' };
  * const injected: MongoAdapterOptions = { client: myMongoClient, database: 'app' };
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type MongoAdapterOptions =
   | (MongoAdapterOptionsBase & {
@@ -902,7 +932,7 @@ export type MongoAdapterOptions =
     /**
      * An already-constructed `IMongoClient`.
      *
-     * When present, the lazy `import('npm:mongodb@^6.21.0')` never runs — the
+     * When present, the lazy `import('mongodb')` never runs — the
      * seam that keeps the branching unit-testable.
      */
     readonly client: IMongoClient;
@@ -917,7 +947,7 @@ export type MongoAdapterOptions =
  * It is exported because the arms below reference it, so a caller building a
  * configuration incrementally can name the shared half.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
@@ -973,7 +1003,7 @@ export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
  * const lazy: DynamoAdapterOptions = { region: 'us-east-1' };
  * const injected: DynamoAdapterOptions = { client: myDynamoClient };
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type DynamoAdapterOptions =
   | (DynamoAdapterOptionsBase & {
@@ -1002,7 +1032,7 @@ export type DynamoAdapterOptions =
     /**
      * An already-constructed {@linkcode IDynamoClient}.
      *
-     * When present, the lazy `import('npm:@aws-sdk/client-dynamodb@^3')`
+     * When present, the lazy `import('@aws-sdk/client-dynamodb')`
      * never runs — the seam that keeps the branching unit-testable — and the
      * client is never destroyed on `disconnect()`, because it belongs to the
      * application.
@@ -1029,7 +1059,7 @@ export type DynamoAdapterOptions =
  * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * `client` is an already-constructed structural {@linkcode IDynamoClient},
  * and absent it the adapter performs a literal
- * `import('npm:@aws-sdk/client-dynamodb@^3')` at connect time.
+ * `import('@aws-sdk/client-dynamodb')` at connect time.
  *
  * @example
  * ```typescript
@@ -1040,7 +1070,7 @@ export type DynamoAdapterOptions =
  *   options: { region: 'us-east-1' },
  * });
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface DynamoDatabaseOptions extends DatabaseConnectionOptions {
   /** Selects the DynamoDB arm. */
@@ -1154,7 +1184,7 @@ export type CosmosAdapterOptions =
     /**
      * An already-constructed `ICosmosClient`.
      *
-     * When present, the lazy `import('npm:@azure/cosmos@^4')` never runs — the
+     * When present, the lazy `import('@azure/cosmos')` never runs — the
      * seam that keeps the branching unit-testable.
      */
     readonly client: ICosmosClient;
@@ -1290,7 +1320,7 @@ export type BigtableAdapterOptions =
     /**
      * An already-constructed `IBigtableClient`.
      *
-     * When present, the lazy `import('npm:@google-cloud/bigtable@^6')` never
+     * When present, the lazy `import('@google-cloud/bigtable')` never
      * runs — the seam that keeps the branching unit-testable.
      */
     readonly client: IBigtableClient;

@@ -57,6 +57,69 @@ supplies its own reporter via `InMemoryBrokerOptions.onDispatchError`; absent on
 observed and dropped. One slow or throwing fan-out handler also no longer delays or aborts delivery
 to its siblings.
 
+## Publish options and trust
+
+`broker.publish(topic, message, options)` takes an optional third argument:
+
+| Option            | Bound                                                                            | Mapped to                                                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `orderingKey`     | non-empty string ≤ 128 UTF-8 bytes, no control characters, no edge whitespace    | Kafka message `key`, Pub/Sub `orderingKey`, and the `x-setu-ordering-key` header on every broker                            |
+| `deduplicationId` | same rule                                                                        | NATS `Nats-Msg-Id`, Service Bus `messageId`, RabbitMQ `messageId`, and the `x-setu-deduplication-id` header on every broker |
+| `headers`         | ≤ 32 entries; names 1–255 bytes of visible ASCII except `:`; values ≤ 1024 bytes | written beside the framework's own headers                                                                                  |
+
+Every option is carried as a transport header beside any native mapping, so it is observable through
+`MessageMetadata.headers` on every broker and never silently dropped. The constants
+`ORDERING_KEY_HEADER` and `DEDUPLICATION_ID_HEADER` (from `@setu-ts/common`) name the two headers.
+The `Cloudflare Workers` broker carries `orderingKey`, `deduplicationId` and the caller's `headers`
+as envelope fields, because a Cloudflare queue has no transport header channel; on delivery all of
+them are surfaced as the same transport headers. Invalid options are refused on publish; on
+delivery, an envelope entry failing the shared rules is dropped. A `NatsBroker` with an injected
+connection and no `headersFactory` drops caller headers and the ordering key (reported once through
+the logger) but still applies the de-duplication id as nats.js's native `msgID`.
+
+### What `orderingKey` promises
+
+`orderingKey` decides **placement** — the same key reaches the same partition, retry queue or
+ordered subscription where the broker has one — not the order handlers **finish** in. Measured
+2026-10-07 against real backends:
+
+| Broker          | On a handler failure                                                                                                                                                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition                                                                                                                                                              |
+| Pub/Sub         | Order kept by blocking, on an ordering subscription (`enableMessageOrdering`)                                                                                                                                                                                  |
+| Service Bus     | Order kept by blocking ONLY at `maxConcurrentCalls: 1` (the broker's default): the abandoned message is redelivered before the next is handled. At `maxConcurrentCalls: 2` the later message is handled first, so order is LOST. Measured both ways 2026-10-07 |
+| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits                                                                                                                                                                         |
+| Redis Streams   | Order lost on retry (reclaim)                                                                                                                                                                                                                                  |
+| NATS            | Order lost on retry                                                                                                                                                                                                                                            |
+| in-memory       | Dispatch already follows publish order                                                                                                                                                                                                                         |
+| `WorkersBroker` | Follows `dispatch` batch order                                                                                                                                                                                                                                 |
+
+A consumer that needs order compares the delivered envelope's version and drops or defers a stale
+message.
+
+### What a consumer may trust, and what a producer must not derive
+
+1. A delivered `x-setu-ordering-key` or `x-setu-deduplication-id` header is a **hint written by
+   whoever published the message** — validation runs on the publish side only — so a foreign or
+   compromised producer can send any value under these names. Use it to order or de-duplicate your
+   own work, **never to authorize anything**.
+2. A `deduplicationId` derived from request input lets the caller who chooses it suppress another
+   message with the same id for the broker's window (NATS's `duplicate_window`, 120 s by default;
+   Service Bus's configured detection window). Derive it from a producer-assigned id — the envelope
+   id `publishIntegrationEvent` uses by default is one.
+3. An `orderingKey` derived from request input lets a caller concentrate load on one Kafka partition
+   or one Pub/Sub ordering key (1 MB/s per key), and on a log-compacted Kafka topic it lets the
+   caller erase an earlier message that carries the same key. Derive it from an aggregate the
+   application owns.
+
+Invalid options are rejected with a `RangeError` **as a rejected promise**, naming the field and the
+rule and never echoing the refused value. A header name a broker or its server acts on
+(`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`, RabbitMQ's `x-death` /
+`x-delivery-count` / `x-acquired-count` / `x-delay` and the `x-first-death-*` / `x-last-death-*`
+forms) is refused on **every** broker, compared case-insensitively. A `goog` prefix is refused too,
+as a precaution: Pub/Sub's reservation of it is stated only by third-party documentation, and the
+emulator accepts `goog` attributes.
+
 ## Options
 
 `MessagingPluginOptions` is a union discriminated on `broker`. Two options are shared by every arm:
@@ -152,6 +215,158 @@ application logger — the first error of an outage at `warn`, identical repeats
 recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
 injected client gets no listener: it belongs to the caller.
 
+### RabbitMQ durability
+
+Consumer-group queues are declared durable, and every message is published **persistent** — a
+durable queue keeps only persistent messages across a broker restart. Before 0.9.0 messages were
+published transient, so a RabbitMQ restart emptied every group queue of the messages waiting in it.
+Publishes also go through a **confirm channel**: `publish()` resolves only once RabbitMQ has
+accepted the message, and rejects when it refuses it (or the channel closes first).
+
+Each `publish()` is bounded by `publishTimeoutMs` (default `15000`, `0` unbounded). The bound covers
+every broker round trip the publish makes, so a paused broker — which keeps its socket open and
+answers nothing — rejects the call instead of leaving it pending forever. A rejection is not proof
+the message was dropped: RabbitMQ may still accept it after the bound.
+
+```typescript
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+MessagingPlugin({
+  broker: 'rabbitmq',
+  url: 'amqp://localhost:5672',
+  // Both values are the defaults, shown for reference.
+  persistentMessages: true,
+  publishTimeoutMs: 15_000,
+});
+```
+
+`persistentMessages: false` restores the transient behaviour, for deliberately ephemeral traffic
+where losing in-flight messages on a restart is acceptable. An injected `client` without
+`createConfirmChannel()` keeps a plain channel — `publish()` then resolves before RabbitMQ has
+stored anything — and the broker logs one warning saying so; a real amqplib connection always has
+it.
+
+### RabbitMQ consumer recovery
+
+Since 0.9.0, durable consumer-group handlers **must be idempotent**: failures redeliver, and a crash
+after a confirmed copy but before the original ack can duplicate a message.
+
+| RabbitMQ option             | Default                         | Behavior                                                                                               |
+| --------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `consumerRetry.maxAttempts` | `5`                             | Total delivery budget, initial attempt included; positive safe integer                                 |
+| `consumerRetry.delaysMs`    | `[5000, 30000, 120000, 600000]` | Nonempty, nondecreasing positive integer milliseconds ≤2147483647; later attempts reuse the final tier |
+| `consumerRetry.isRetryable` | absent                          | False dead-letters immediately; a throwing classifier is logged and counts as retryable                |
+| `consumerRetry`             | enabled                         | `false` restores nack with requeue disabled, including any operator DLX policy                         |
+| `deadLetterMaxLength`       | `10000`                         | Positive safe integer; `x-max-length` on `Q.dead`                                                      |
+| `prefetch`                  | `32`                            | Integer 1–65535; maximum unacked deliveries per consumer, re-applied on reconnect                      |
+
+These numeric options throw `RangeError` at construction for invalid values, including `NaN`,
+fractions, empty delay arrays and decreasing tiers. `ConsumerRetryOptions` is shared with Redis
+Streams; each broker retains its own defaults and lease semantics.
+
+For group queue `Q`, each distinct delay `d` creates a durable quorum queue `Q.retry.<d>ms`, with
+queue-level `x-message-ttl: d` and default-exchange dead-letter routing back to `Q`. It uses
+at-least-once dead-lettering (`x-dead-letter-strategy: at-least-once`, `x-overflow: reject-publish`)
+because the original is acked once the copy is confirmed: classic at-most-once dead-lettering drops
+a copy that `Q` cannot take when it expires (measured on RabbitMQ 4: `Q` absent at expiry received
+nothing in 240 s; the quorum queue held the copy and delivered it about 180 s after `Q` reappeared).
+Changing delays creates new queues without a 406 redeclaration conflict; old retry queues drain into
+`Q`. No per-message expiration is copied. The default budget gives about 12.6 minutes of backoff
+before dead-lettering.
+
+With retries enabled, group names ending in `.dead` or `.retry.<digits>ms` are reserved for helper
+queues. Every generated queue name must fit 255 UTF-8 bytes. Declarative names are checked at plugin
+construction; imperative and factory subscriptions are checked before declaring anything. Rename
+conflicting groups, or set `consumerRetry: false` to keep their existing names. Before enabling
+retries, migrate any existing queues occupying `Q.dead` or `Q.retry.<delay>ms` in the same vhost.
+
+Deserialize failures and `IntegrationEventRejectedError` go straight to `Q.dead`. Other failures run
+the application classifier, then retry below the total attempt budget or dead-letter when exhausted.
+Retry copies preserve body bytes, messageId, timestamp and transport headers (including
+traceparent), adding `x-setu-attempt` (absent means initial attempt 1). Copies omit `expiration`,
+`userId` and the `CC`/`BCC` headers: RabbitMQ refuses another user's `user_id` by closing the
+channel, and CC/BCC would deliver the copy to the queues they name. Malformed attempt headers
+dead-letter immediately. Dead letters add `x-setu-attempts`, `x-setu-topic` and `x-setu-error`,
+rendered via `describeError` and bounded to 1 KiB UTF-8. Error descriptions and payloads may contain
+sensitive data: grant queue and diagnostic-log access only to readers trusted with that data, and
+apply retention policy. Dead-letter log lines normalize control and format characters in queue,
+topic and error text, and cap the complete diagnostic at 8192 Unicode code points with a visible
+truncation marker. Routing names and retained topic headers preserve their original values. When the
+dead queue exceeds its cap, RabbitMQ drops its oldest ready messages. Drain and delete `Q.dead`
+before changing `deadLetterMaxLength`; RabbitMQ rejects different `x-max-length` arguments with 406.
+
+The copy is always persistent, even if original publishes use `persistentMessages: false`. It uses
+the same confirmed publish path and timeout as normal publishes, and the original is acked only
+after that publish succeeds. Copies use mandatory publishing: an unroutable `basic.return` rejects
+the disposition even if RabbitMQ sends a positive confirm. The framework-owned
+`x-setu-disposition-id` header is replaced for each copy and correlates concurrent returns without
+changing the original message ID. Return listeners are removed on confirm, return, close or timeout.
+A failed disposition leaves the original unacked and logs the failure, then the broker closes that
+channel (returning the original to `Q`) and runs its reconnect-and-replay recovery, which
+re-declares the retry and dead queues before consuming again; otherwise the unacked originals would
+fill `prefetch` on a live channel and stall the consumer. The RabbitMQ user needs configure
+permission on `Q.dead` and `Q.retry.<delay>ms`, read permission on `Q.retry.<delay>ms`, and write
+permission on the default exchange, `amq.default`, which carries every retry and dead-letter copy
+(measured on RabbitMQ 4: without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first
+helper declaration, and a copy published without `amq.default` write closes the channel). Recovery
+requires confirm channels with channel `on`/`off` return listeners and `close()`; `subscribe()`
+refuses a retrying consumer group on an injected facade missing any of them, before declaring
+anything, and names `consumerRetry: false` as the alternative. Normal publishes retain their
+documented unconfirmed-publish limitation. Use `consumerRetry: false` for legacy nack behavior.
+
+Private exclusive fan-out queues and RPC reply inboxes keep nack with requeue disabled. Measured:
+TTL dead-lettering reaches an exclusive queue while its connection lives, but discards the copy once
+the connection is gone. Durable retries therefore apply only to consumer groups. Messages unacked
+behind a slow handler stay leased until channel closure; elapsed time alone does not cause
+redelivery. A large prefetch allows more messages to wait in that consumer's memory and can increase
+their latency and reduce fairness across replicas. Handlers may run concurrently up to prefetch.
+
+Local RabbitMQ 4 measurement (2,000 persistent messages, 2 ms async handler): prefetch 1/8/32/128
+took 6554/813/209/65 ms. Default 32 bounds local backlog while reaching about 9,570 messages/s in
+this probe; these numbers describe this machine, not a throughput guarantee.
+
+### Redis Streams recovery
+
+Redis **6.2 or newer** is required (`XPENDING IDLE`). Handlers must be idempotent: failed messages
+now retry, including after an application restart. New and reclaimed entries use the same payload,
+headers, metadata, and acknowledgement path. Reclaim uses `XPENDING IDLE` and atomic `XCLAIM`; it
+reads at most ten pending entries per pass, rotating the cursor so later entries cannot starve.
+
+| Redis option                | Default                          | Behavior                                                                       |
+| --------------------------- | -------------------------------- | ------------------------------------------------------------------------------ |
+| `consumerRetry.maxAttempts` | `5`                              | Total delivery budget, including the initial attempt.                          |
+| `consumerRetry.delaysMs`    | `[30000, 60000, 300000, 600000]` | Delay indexed by deliveries minus one, clamped to the final tier.              |
+| `consumerRetry.isRetryable` | all handler failures retry       | `false` dead-letters immediately; a throwing classifier is logged and retries. |
+| `reclaimIntervalMs`         | `5000`                           | One reclaim pass per subscription per interval.                                |
+| `deadLetterMaxLen`          | `10000`                          | Approximate `MAXLEN ~` retention on each dead-letter stream.                   |
+| `consumerIdleSweepMs`       | `3600000`                        | Sweep inactive foreign consumers only with pending count zero.                 |
+
+Counts must be positive safe integers. Millisecond values must be positive integers no greater than
+`2147483647`; delays must be nonempty and nondecreasing. Invalid values, including `NaN`, throw
+`RangeError` at broker construction. There is no `consumerRetry: false` arm.
+
+The first delay is also the lease for in-flight handlers: set it above the longest handler runtime,
+or another replica may reclaim a slow handler's work and run it concurrently. Effective retry
+latency is the tier plus up to one reclaim interval when the pass keeps pace with the backlog;
+rotating through a larger backlog adds passes. Reclaimed entries may arrive after newer entries; use
+`aggregateVersion` when the application needs ordered effects.
+
+Deserialize failures, missing payloads, and `IntegrationEventRejectedError` go directly to
+`<topic>.dead.<group>`. Exhausted deliveries go there too. The stream carries the original fields
+plus `x-setu-source-id` and `x-setu-deliveries`, written with `XADD MAXLEN ~` **before** source
+`XACK`. A crash between those commands can duplicate a dead-letter entry; a failed write preserves
+the source pending entry. Approximate trimming can exceed the configured length by Redis allocation
+blocks. Dead-letter streams retain message data; apply suitable Redis ACLs and retention.
+
+Each pass adds a pending query, up to ten claims, and a consumer-info query; cleanup adds deletion
+commands as needed. Clean unsubscribe/disconnect deletes its own consumer only when pending count is
+zero. Pending consumers survive shutdown for another replica to reclaim. Redis 6.2 uses consumer
+`idle` for the sweep; Redis 7.2+ uses `inactive` (falling back to `idle` for consumers that have
+never delivered).
+
+Injected `IRedisStreamsClient` facades must supply `xpending`, `xclaim`, and `xinfo` as well as the
+existing methods, and support `xgroup('DELCONSUMER', ...)`.
+
 ### NATS prerequisites
 
 The nats broker **requires a JetStream-enabled server** — start it with the `-js` flag (or set
@@ -180,6 +395,52 @@ MessagingPlugin({
 
 An existing stream is never touched, with or without `streamSubjects`.
 
+**`publish()` resolves once JetStream has stored the message.** It waits for the server's
+acknowledgement, so a publish to a subject no stream captures rejects with an error naming the
+subject (the server answers `503`), and an unresponsive server rejects after the client's own 5 s
+timeout. Before 0.9.0 the acknowledgement was not awaited: such a publish resolved as a success and
+the refusal surfaced as an unhandled rejection, which terminates a Deno or Node process by default.
+
+**Request-reply needs its subjects in the stream too.** A responder consumes the derived
+`rr.req.<topic>` subject and the requester's reply inbox is `rr.inbox.<uuid>`, so an RPC-capable
+stream must cover both — for example
+`streamSubjects: ['orders.>', 'rr.req.orders.>', 'rr.inbox.>']`. NATS refuses two streams whose
+subjects overlap, so only **one** stream per account can own `rr.inbox.>`: applications that use RPC
+on one server must share that stream.
+
+**Queue names become consumer names.** A `SubscribeOptions.queue` is the JetStream durable consumer
+name, and the nats client refuses `.`, `*`, `>`, `/`, `\`, space, tab, CR and LF in one before
+anything reaches the server — which is why the reply inbox's dotted `rr.inbox.<uuid>` queue made
+every `request()` fail. Each refused character is now escaped as `_` plus two hex digits
+(`orders.eu` → `orders_2eeu`), so the name stays readable in `nats consumer ls`; a queue with none
+of them is used unchanged, so no existing consumer is renamed. The consumer records its raw queue as
+`setu.queue` metadata, which needs **NATS 2.10 or later**.
+
+The escape is not injective: the legal queue `orders_2eeu` encodes like `orders.eu`. Rather than let
+two independent queues split one consumer's deliveries, `subscribe()` rejects with
+`NatsConsumerNameCollisionError` naming both queues — in one process, and across processes by
+reading the existing consumer's recorded queue. The same error refuses a queue reused across two
+topics, which used to attach silently to the first topic's consumer. A consumer created before this
+release carries no `setu.queue`; it is accepted when its durable name equals the requested queue and
+its filter matches the topic.
+
+### Pub/Sub subscriptions
+
+When `queue` is not supplied, each subscription is derived per topic — `<defaultQueue>.<topic ID>`
+(default prefix `messaging-consumers`; a fully-qualified `projects/<p>/topics/<id>` name contributes
+only its ID, because `/` is illegal in a subscription ID) — because a Pub/Sub subscription name is
+**project-global**: the old single shared default attached a second topic to the first topic's
+subscription, so one topic's handler consumed the other's messages with no log, and the RPC channel
+of one run attached to the previous run's. A caller-supplied `queue` is used verbatim, so competing
+consumers of one topic keep sharing a subscription.
+
+The broker creates a subscription when it is absent. When it already exists, the broker reads which
+topic it is bound to and refuses one bound elsewhere with `PubSubSubscriptionBoundElsewhereError`
+naming the subscription, its topic and the requested topic — pass a distinct `queue`, or delete the
+subscription. Pub/Sub reserves no character in a name, so unlike Kafka's colon the `.` separator is
+not recoverable by splitting. A derived or supplied name over 255 characters is refused at
+`subscribe()`. Topics must already exist; the broker creates none.
+
 ### Kafka consumer groups
 
 When `queue` is not supplied, each subscription's consumer group is derived per topic —
@@ -194,11 +455,43 @@ may not contain `:` (the broker refuses one at creation), while a group id may, 
 produce `orders-eu-created`, putting two differently-subscribed consumers into one group and
 restoring the empty-assignment failure this derivation exists to prevent.
 
+### Kafka topics
+
+The broker creates no topic. On a broker with `auto.create.topics.enable` (Kafka's default), the
+metadata request that creates a topic answers `UNKNOWN_TOPIC_OR_PARTITION` — measured on Kafka 4.0
+in KRaft mode — and kafkajs does not retry that answer, so a subscription to a topic that did not
+exist yet used to die at boot with a raw `KafkaJSProtocolError` naming no topic. `subscribe()` now
+retries that one error with exponential backoff within `retry` (kafkajs's defaults: 5 retries from
+300 ms, about 9 s in all), and the next attempt finds the new topic. When the topic is still unknown
+after the budget — a broker that does not auto-create — it rejects with `KafkaTopicUnavailableError`
+naming the topic and the consumer group; `retry: { retries: 0 }` names it at once. Pre-create the
+topic, or enable auto-creation.
+
+`retry` is also forwarded to `new Kafka({ retry })` for kafkajs's own retries, unless a `client` is
+injected. A consumer's `run()` can reject — kafkajs's crash handler rethrows a disconnect that fails
+— and the broker reports that through the logger instead of letting it become an unhandled
+rejection.
+
+A consumer that crashes with an error kafkajs would retry is restarted by the broker, after the
+crash's own `retryTime`, else `retry.initialRetryTime`, else 300 ms — read the way kafkajs's own
+restart reads them, so `initialRetryTime: 0` waits 300 ms rather than restarting at once. The
+`retry` read is `KafkaOptions.retry`, not an injected client's own. The broker declines kafkajs's
+restart in favour of its own so that stopping can always reach the restarted consumer.
+
+Stopping releases every consumer: `disconnect()` and `unsubscribe()` cancel a scheduled restart,
+wait up to 10 s for an in-flight group join to settle, then disconnect the consumer. A join still
+pending at 10 s is not disconnected under — that neither stops a join that later succeeds nor
+returns before kafkajs's pending JoinGroup is answered — so the release returns and the consumer is
+disconnected the moment its join settles or fails. Until then the process stays alive, and a record
+delivered in that window is left uncommitted for the group to redeliver. On a broker with Kafka's
+default `group.initial.rebalance.delay.ms` (3 s), stopping an application moments after it started
+takes a few seconds.
+
 ## Request-reply
 
 `request()` / `respond()` carry correlation inside a message envelope over each broker's ordinary
-`publish`/`subscribe` — **not** transport headers, which the in-memory and Redis brokers do not
-populate.
+`publish`/`subscribe`. Correlation is carried in the message envelope independently of transport
+headers.
 
 RPC rides a channel derived from the topic, so it never collides with plain pub/sub: a
 `subscribe('orders', …)` consumer never sees a request envelope, and a `publish('orders', …)` is
@@ -291,6 +584,14 @@ what the producer put in. The string is the honest type. `correlationId`, `causa
 JSON serialization maps `NaN`/`Infinity` to `null` — a non-finite one would arrive as `null`. Each
 is checked on both sides: refused at the producer, and refused as a `malformed` rejection at the
 consumer.
+
+**Publish options.** `publishIntegrationEvent` takes the same `PublishOptions` as `broker.publish`
+as an optional sixth argument (after the causal metadata), with two defaults of its own:
+`deduplicationId` defaults to the envelope `id`, so re-publishing the same envelope is de-duplicated
+where the broker supports it; and `orderingKey` comes from the caller, else from an optional
+`orderingKey: (envelope) => string | undefined` selector on the definition, else none. The selector
+runs only when the caller supplied no key; if it throws or returns a value the rules refuse, the
+publish rejects.
 
 One definition serves both directions — the producer reads its `type`/`version`/`topic`, the
 consumer the same three plus `parse`:
@@ -488,16 +789,17 @@ each engine's own local time — measured, `2026-01-01T00:00:00` becomes `2025-1
 a `+05:30` host — so one event would mean a different instant on every consumer.
 
 The rejection follows the broker's OWN failure path, and that path differs per arm — it is not a
-retry guarantee. RabbitMQ nacks with requeue DISABLED, so a refused message is dead-lettered when a
-DLX is configured and discarded otherwise, and logs the failure. NATS naks, which redelivers while
-the stream retains the message, and (since PR #287) also logs it. The in-memory broker reports
-through `onDispatchError` and drops. Because a rejection here is deterministic — the same envelope
-fails the same way on every delivery — redelivery cannot resolve it, so a dead-letter queue rather
-than a retry is where a refused event is inspected. The error's `message` carries the whole
-diagnostic (reason, topic, expected against observed), because the in-memory default composition
-logs exactly `error.message` through the application's logger; the structured fields serve an
-`instanceof` branch on a path that surfaces the error object, such as a dead-letter consumer or a
-bespoke sink on the [`'custom'` broker arm](#options).
+retry guarantee. RabbitMQ durable groups now send deterministic rejections directly to `Q.dead` and
+log the failure; private queues, reply inboxes and `consumerRetry: false` retain nack with requeue
+disabled (operator DLX if configured, otherwise discard). NATS naks, which redelivers while the
+stream retains the message, and (since PR #287) also logs it. The in-memory broker reports through
+`onDispatchError` and drops. Because a rejection here is deterministic — the same envelope fails the
+same way on every delivery — redelivery cannot resolve it, so a dead-letter queue rather than a
+retry is where a refused event is inspected. The error's `message` carries the whole diagnostic
+(reason, topic, expected against observed), because the in-memory default composition logs exactly
+`error.message` through the application's logger; the structured fields serve an `instanceof` branch
+on a path that surfaces the error object, such as a dead-letter consumer or a bespoke sink on the
+[`'custom'` broker arm](#options).
 
 ### Behaviour ordering
 
@@ -507,6 +809,18 @@ payload. That ordering is deliberate: a behaviour that short-circuits (a tenant 
 check) must be able to refuse a message without the framework parsing it first, and a behaviour
 reading `envelope.correlationId` off the raw object is doing something useful. A behaviour therefore
 cannot depend on `payload` being the parsed `T`.
+
+**The dispatch consumer identity.** Every behaviour also sees `IngressContext.consumer` — the
+identity of the subscription the message was dispatched to. A subscription created with a `queue`
+carries that queue name; a queue-less subscription gets a per-process `subscription:<prefix>:<n>`.
+It is always present for a broker-delivered message, so a behaviour may key per-consumer state on it
+— the
+[`idempotentIngress()`](https://github.com/setu-ts/setu-ts/tree/main/packages/idempotency-plugin)
+behaviour uses it so two subscribers on one topic each run once. On a topic you make idempotent,
+pass `queue` to `subscribe` (together with your broker's competing-consumer configuration) so a
+redelivery reaches the SAME consumer identity; a queue-less subscription's identity is per process,
+so on a broker whose queue-less default is a shared group a redelivery to another replica is not
+de-duplicated.
 
 ### Mapping a local domain event to an integration event
 
@@ -573,6 +887,776 @@ events.clear(); // after the application's own confirmed dispatch policy
 Publishing this way says nothing about any consumer finishing: as [Publish timing](#publish-timing)
 documents, a transport accepting a publish resolves on dispatch hand-off, not on handler completion.
 
+## Transactional outbox
+
+A service that changes its own data and announces the change must do both or neither. The outbox
+writes an integration event as a ROW in the same database transaction as the business change,
+through your own unit of work, and a relay publishes the persisted rows afterwards. If the
+transaction rolls back, no row exists and nothing is ever published; if it commits, the event is
+published even when the process dies before the relay runs.
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import {
+  createDatabaseOutboxStore,
+  DatabasePlugin,
+  type IDatabaseService,
+} from '@setu-ts/database-plugin';
+import { defineIntegrationEvent, type IOutbox, MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.placed',
+  version: 1,
+  topic: 'orders.placed.v1',
+  parse: (value) => value as { orderId: string },
+  // Rows of one ordering key are relayed in write order (see "The promise").
+  orderingKey: (envelope) => envelope.data.orderId,
+});
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SchedulerPlugin(), // runs the relay every `relay.intervalMs`
+    DatabasePlugin({ type: 'memory' }),
+    MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }),
+  ],
+});
+await app.start();
+
+const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+
+await db.transaction(async (uow) => {
+  await uow.getRepository('Order').create({ id: 'o-1', total: 42 });
+  // The SAME unit of work: the row commits or rolls back with the order.
+  await outbox.write(uow, orderPlaced, { orderId: 'o-1' }, {
+    metadata: { aggregateId: 'o-1', aggregateVersion: 1 },
+  });
+});
+// Optional: request a sweep now instead of waiting for the next interval.
+outbox.dispatch();
+```
+
+`MessagingPlugin({ outbox })` registers an `IOutbox` under `CAPABILITIES.OUTBOX` (`outbox.<name>`
+for a named instance) and an `outbox` health indicator. At `onInit` it resolves the store, runs its
+`verify()` (a backend that cannot serve an outbox fails `start()` by name), and schedules the relay
+(`outbox-relay`) and the retention purge (`outbox-purge`) on `CAPABILITIES.SCHEDULER`. With the
+default `relay.schedule: true` and no scheduler registered, `start()` rejects
+`OutboxRelayUnscheduledError`.
+
+| Member                                      | What it does                                                                                                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `write(scope, definition, payload, input?)` | Builds the envelope (id, ordering key and deduplication id fixed NOW) and appends the row through `scope`. Resolves the envelope id; every refusal is a rejection |
+| `dispatch()`                                | Requests a sweep without waiting: coalesced (one running, one follow-up), never throws, a no-op once closing                                                      |
+| `sweep()`                                   | Runs or joins a sweep and resolves its `OutboxSweepResult`                                                                                                        |
+| `purge()`                                   | Deletes settled rows older than `retainSentMs`                                                                                                                    |
+| `release(id, action, { tenantId? })`        | Returns a `failed` row to `pending` (`'retry'`) or settles it unpublished (`'discard'`)                                                                           |
+
+`write` uses ONE implementation of the publish precedence with `publishIntegrationEvent`: the
+caller's `orderingKey` beats the definition's selector, and `deduplicationId` defaults to the
+envelope id, so every re-send of a row carries the same deduplication id. An envelope larger than
+`maxEnvelopeBytes` (default 262 144 UTF-8 bytes) is refused with `OutboxEnvelopeTooLargeError`
+INSIDE the transaction, so the business write rolls back with it rather than committing a row that
+could never be sent. A `write` before `onInit` completes rejects `OutboxNotReadyError`.
+
+### The promise
+
+At-least-once delivery of every committed row. At most one relay holds a row's claim at a time,
+provided the relays' wall clocks agree within `relay.maxClockSkewMs`. A relay starts publishing only
+while its claim leaves room for the publish, status write and clock skew. Any number of relays keep
+per-key order among FIRST publishes, provided rows of one key commit in write order and the writers'
+clocks agree. Delivery order is what the broker gives it (see
+[What `orderingKey` promises](#what-orderingkey-promises)); consumers compare `aggregateVersion`.
+
+Never exactly once: a repeat carries the same envelope and deduplication id, which a consumer inbox
+absorbs. Two windows remain: a relay can pause AFTER the fence check and resume after its lease; and
+a publish the broker accepts after it was abandoned can arrive late. Those repeats can arrive out of
+order. A relay paused past its claim BEFORE the fence check publishes nothing.
+
+The ordering limit is measured, not theoretical. On real PostgreSQL 16, transaction A wrote its row
+and stayed open while B wrote and committed; the relay published B; then A committed. The relay
+published A on its next tick — a watermark relay (`id > lastSeen` or `createdAt > lastSeen`) would
+never have published A at all, which is why the relay reads the PENDING set rather than a watermark
+— but B, written second, was published first, because it committed first. A relay can order only the
+rows it can see. Clock skew is the cross-replica version of the same limit: a row's position is
+taken from its writer's clock, clamped per process, so two writers whose clocks disagree interleave
+by clock rather than by real time.
+
+| Crash or fault                                       | Outcome                                                                                                    |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| before commit                                        | nothing written, nothing published                                                                         |
+| after commit, before any sweep                       | the next sweep publishes it                                                                                |
+| the process stops mid-batch                          | marked rows stay sent; an unmarked row is republished after its claim expires; the rest follow in order    |
+| after publish, before the status write               | republished after claim expiry, up to `claimLeaseMs + maxClockSkewMs`, with the same envelope id           |
+| the status write rejects after a successful publish  | key blocked and sweep ended; republished after claim expiry                                                |
+| the failure write rejects                            | no attempt recorded; retried after claim expiry                                                            |
+| a publish times out and the broker accepts it late   | failure recorded and retried after backoff; two copies with one deduplication id                           |
+| the application stops mid-sweep                      | drain awaits the sweep; a publish failure while closing writes no attempt and keeps the claim until expiry |
+| a relay pauses past its claim before the fence check | fenced; publishes nothing                                                                                  |
+| during purge                                         | deleted rows stay deleted; the rest are purged at the next interval                                        |
+
+The mid-batch and after-publish rows are driven against real PostgreSQL with real RabbitMQ 4 and
+real Redis Streams in `test/integration/outbox-real.test.ts`.
+
+### Backends
+
+Use `createDatabaseOutboxStore()` from `@setu-ts/database-plugin` (any `IOutboxStore` works — see
+[A custom store](#a-custom-store)). Its `verify()` refuses a backend that cannot serve the relay at
+startup with `OutboxStoreUnavailableError`, naming the reason:
+
+| Backend  | Requirement                                                                                                         | Driven in this repository against            |
+| -------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| memory   | none — single process only                                                                                          | the unit suite                               |
+| Drizzle  | the outbox table exists and is registered in `drizzleTables`                                                        | real PostgreSQL 16                           |
+| Prisma   | the table exists and the model is in the generated client                                                           | not driven (unverified)                      |
+| D1       | the table exists                                                                                                    | real SQLite (`D1Adapter` over `node:sqlite`) |
+| MongoDB  | a replica set; a standalone server is refused (`'mongodb-replica-set'`)                                             | real MongoDB 8 replica set, and a standalone |
+| DynamoDB | a GSI `{ partitionKey: 'status', sortKey: 'position' }` with projection `ALL`; refused without (`'dynamodb-index'`) | DynamoDB Local                               |
+| Cosmos   | the outbox entity maps to the business container, and its partition-key path is a column the row carries            | the local Cosmos emulator (not in CI)        |
+| Bigtable | refused (`'bigtable'`): no secondary index — use a change-data-capture relay                                        | the Bigtable emulator                        |
+
+On DynamoDB the relay's `position > after` page runs as a KEY condition on that GSI
+(`status = :pending AND position > :after`, with `kind` as a filter), recorded against DynamoDB
+Local, so paging never rescans. A transaction there is one `TransactWriteItems`, at most 100 writes
+INCLUDING outbox rows.
+
+**The discriminator.** Every row carries `kind: 'setu-outbox'`; every read, count, transition and
+purge requires it, and a lookup by id treats a row of another `kind` as missing. An outbox sharing a
+table, collection or container with business documents — Cosmos queries a container as a whole —
+never reads, counts, transitions or deletes a business document that happens to carry
+`status: 'pending'` or `'sent'`. Driven on the Cosmos emulator with business documents carrying
+both.
+
+### Provisioning
+
+No portable migration exists (`DatabaseService.migrate()` always rejects), so create the table
+yourself. PostgreSQL (the exact file the real suite applies):
+
+```sql
+CREATE TABLE setu_outbox (
+  id            text    PRIMARY KEY,
+  kind          text    NOT NULL,
+  topic         text    NOT NULL,
+  envelope      text    NOT NULL,
+  options       text    NOT NULL,
+  ordering_key  text,
+  tenant_id     text,
+  traceparent   text,
+  position      text    NOT NULL,
+  created_at    bigint  NOT NULL,
+  status        text    NOT NULL,
+  attempts      integer NOT NULL,
+  available_at  bigint  NOT NULL,
+  claim_version bigint  NOT NULL,
+  lease_until   bigint  NOT NULL,
+  last_error    text,
+  settled_at    bigint,
+  sent_by       text
+);
+CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
+CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settled_at);
+```
+
+SQLite and Cloudflare D1, where `D1Adapter` uses the field names as column names (the file the D1
+test applies):
+
+```sql
+CREATE TABLE setu_outbox (
+  id          TEXT    PRIMARY KEY,
+  kind        TEXT    NOT NULL,
+  topic       TEXT    NOT NULL,
+  envelope    TEXT    NOT NULL,
+  options     TEXT    NOT NULL,
+  orderingKey TEXT,
+  tenantId    TEXT,
+  traceparent TEXT,
+  position    TEXT    NOT NULL,
+  createdAt   INTEGER NOT NULL,
+  status      TEXT    NOT NULL,
+  attempts    INTEGER NOT NULL,
+  availableAt INTEGER NOT NULL,
+  claimVersion INTEGER NOT NULL,
+  leaseUntil  INTEGER NOT NULL,
+  lastError   TEXT,
+  settledAt   INTEGER,
+  sentBy      TEXT
+);
+CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
+CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settledAt);
+```
+
+MySQL takes the PostgreSQL columns with `VARCHAR(64)` for `id`, `kind`, `status` and `position` (an
+index needs a bounded key) and `TEXT` elsewhere; this repository has no MySQL backend, so that form
+is unverified. Keep `position` in a binary or `C` collation-equivalent ordering: it is fixed width
+with no separators, so a collation that ignores punctuation cannot reorder it.
+
+The mappings for the other adapters:
+
+```typescript
+import { bigint, integer, pgTable, text } from 'npm:drizzle-orm@^0.45.2/pg-core';
+import { CosmosAdapter, DynamoAdapter, MongoAdapter } from '@setu-ts/database-plugin';
+
+// Drizzle: register this table as `drizzleTables: { Outbox: outbox }`.
+export const outbox = pgTable('setu_outbox', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(),
+  topic: text('topic').notNull(),
+  envelope: text('envelope').notNull(),
+  options: text('options').notNull(),
+  orderingKey: text('ordering_key'),
+  tenantId: text('tenant_id'),
+  traceparent: text('traceparent'),
+  position: text('position').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull(),
+  availableAt: bigint('available_at', { mode: 'number' }).notNull(),
+  claimVersion: bigint('claim_version', { mode: 'number' }).notNull(),
+  leaseUntil: bigint('lease_until', { mode: 'number' }).notNull(),
+  lastError: text('last_error'),
+  settledAt: bigint('settled_at', { mode: 'number' }),
+  sentBy: text('sent_by'),
+});
+
+// MongoDB (a replica set): the envelope id is the `_id`, stored as a string.
+export const mongo = new MongoAdapter({
+  url: 'mongodb://127.0.0.1:27017/?replicaSet=rs0',
+  database: 'shop',
+  collections: { Outbox: { collection: 'outbox', idType: 'raw' } },
+});
+
+// DynamoDB: a table keyed by `id`, and the GSI the relay pages through.
+export const dynamo = new DynamoAdapter({
+  region: 'eu-west-1',
+  entities: {
+    Outbox: {
+      table: 'outbox',
+      partitionKey: 'id',
+      indexes: { 'by-status-position': { partitionKey: 'status', sortKey: 'position' } },
+    },
+  },
+});
+
+// Cosmos: the outbox shares the business CONTAINER and partition-key path, so
+// one batch carries the business write and the row. Write with `tenantId`.
+export const cosmos = new CosmosAdapter({
+  endpoint: 'https://shop.documents.azure.com:443/',
+  key: '…',
+  database: 'shop',
+  containers: {
+    Order: { container: 'orders', partitionKey: 'tenantId' },
+    Outbox: { container: 'orders', partitionKey: 'tenantId' },
+  },
+});
+```
+
+MongoDB indexes, for the relay and the purge:
+
+```js
+db.outbox.createIndex({ kind: 1, status: 1, position: 1 });
+db.outbox.createIndex({ kind: 1, status: 1, settledAt: 1 });
+```
+
+The DynamoDB table needs `id` as its hash key and the GSI `by-status-position` (hash `status`, range
+`position`, both `S`) with `"Projection": { "ProjectionType": "ALL" }` — a narrower projection is
+not detected by `verify()`. A Prisma model maps the PostgreSQL columns with `@map`
+(`orderingKey String? @map("ordering_key")`, `createdAt BigInt @map("created_at")`, …) and
+`@@map("setu_outbox")`. Prisma Client returns a `BigInt` column as a JS `bigint`; the bridge
+converts every integer column it reads to a number. A value too large for a safe integer stays too
+large after conversion, so the relay still refuses it as `invalid-row` in `claimVersion` and
+`leaseUntil`. The Prisma path is not driven in this repository.
+
+### The relay
+
+The relay walks the pending set in LAPS, keyset-paged on `position`, examining rows one at a time. A
+failed row, a row in retry backoff, a row held by another relay, or a row whose status write failed
+BLOCKS its ordering key for the rest of the lap, so a later row of the same key is never published
+first; an unkeyed row is never blocked. Two budgets per sweep keep a stuck key from starving others:
+`scanLimit` (rows examined, default 1000) and `publishLimit` (publishes, default 100); the lap
+carries across sweeps, so the scan moves past a blocked key's rows and reaches an unblocked key
+behind them.
+
+A publish failure is retried with backoff (`baseBackoffMs` doubled per attempt up to
+`maxBackoffMs`); after `maxAttempts` (default 10) the row becomes `failed`. A row that cannot be
+decoded — its envelope is not JSON, too large or carries another id; its options are longer than any
+the outbox writes, fail validation or disagree with its `orderingKey` column; or its topic is empty,
+over 255 bytes or carries a control character — is `failed` at once with `lastError: 'invalid-row'`.
+Invalid claim fields also become `failed`: a stored version must be an integer in
+`[0, Number.MAX_SAFE_INTEGER - 1]`, and a lease must be a nonnegative safe integer no farther than
+`now + 3 660 000` ms. This global horizon accepts other replicas' longer leases during a rollout.
+`MAX_SAFE_INTEGER` is exhausted and never incremented; `MAX_SAFE_INTEGER - 1` is claimed normally.
+`markInvalid` preserves attempts, clears the lease and writes `invalid-row`. Either kind of failed
+row blocks its key until an operator calls `release`.
+
+**`release` carries no built-in authorization.** It is an operator capability: gate the route that
+calls it. `'retry'` returns the row to `pending` with zero attempts and `leaseUntil: 0`, keeping
+`claimVersion`; `'discard'` settles it without publishing (and the purge deletes it later). A
+release takes effect at the relay's next lap.
+
+**One deadline per sweep.** `relay.sweepDeadlineMs` (default 30 000), on the monotonic clock, bounds
+the whole sweep and purge. Each publish and store call has its own bound (default 5 000 each). A row
+starts only while `publishTimeoutMs + 2 × storeTimeoutMs` fits: the claim, publish and status write
+reserve 15 000 ms by default, leaving the first 15 000 ms for row starts. Construction requires
+`publishTimeoutMs + 2 × storeTimeoutMs < sweepDeadlineMs`; equality is refused naming all three
+options.
+
+**Several relays may sweep one store.** Each row is claimed through an atomic compare-and-set on
+`claimVersion`, incrementing it once and recording `leaseUntil`. Another relay waits until
+`now ≥ leaseUntil + maxClockSkewMs`; every status write, including immediate deletion, requires the
+held version. `relay.claimLeaseMs` defaults to 30 000 (integer 1–3 600 000) and must cover
+`publishTimeoutMs + 2 × storeTimeoutMs + maxClockSkewMs`. `relay.maxClockSkewMs` defaults to 5 000
+(integer 0–60 000); zero assumes perfectly agreeing clocks and is unsafe across hosts.
+
+A shared scheduler lock saves redundant scans: without it each replica scans every interval.
+`dispatch()` runs outside the lock. The former `sweepDeadlineMs ≤ distributedLock.ttlMs − 10 000`
+rule no longer bears on correctness. Claims use the same protocol on every supported backend; the
+bridge refuses sources without native conditional writes.
+
+The overlap kinds are `fenced` (the pre-publish check refused an expired claim), `claim-lost` (a
+status write found another version) and `duplicate` (`markSent` found the row already sent). Any
+kind, including a dispatch sweep, degrades health with `relay-overlap` inside the configured window.
+Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0` disables
+only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator diagnostic, and
+is absent from transition outcomes.
+
+On DynamoDB a stale GSI page cannot cause a publish: the claim's conditional write checks the latest
+base item. This follows AWS's documented model and is exercised against DynamoDB Local, not the
+service.
+
+On shutdown the relay drains in an `onShutdown` hook, before any `onClose` hook closes the broker or
+the database: the jobs are removed, `dispatch()` becomes a no-op, and the in-flight sweep finishes
+within its deadline. A failure caused by the application stopping is never counted against
+`maxAttempts`.
+
+### Tenancy
+
+**Column isolation:** one `store`; `write(…, { tenantId })` records the tenant in the row, blocking
+keys include it (one tenant's poisoned row never blocks another tenant's key of the same value), and
+the relay sweeps every tenant together. **Database per tenant:** `stores: { [tenantId]: entry }`
+(typically `createDatabaseOutboxStore({ database: '<name>' })`); `write` and `release` select the
+store by `tenantId` and reject `OutboxUnknownTenantError` for an absent or unknown one. `store` and
+`stores` together are a compile error.
+
+**The store must read the database your unit of work writes to — a caller obligation the outbox
+cannot check**, because a unit of work carries no database identity. A per-tenant store for ANOTHER
+tenant, or a `createDatabaseOutboxStore({ database })` naming a different connection than the
+transaction's, puts the row in the transaction's database where the selected store's relay never
+looks: it is relayed under the wrong tenant if that database has its own relay, and never if it does
+not. The tenant is never a published header: an event that needs its tenant carries it in the
+payload.
+
+### Retention
+
+`purge()` runs on its own interval, `purgeIntervalMs` (default 60 000), never per sweep, and deletes
+`sent` and `discarded` rows whose `settledAt` is older than `retainSentMs` (default 7 days), at most
+`purgeBatch` (default 100) per status per run. Settled rows hold event payloads, which may be
+personal data — set `retainSentMs` to what your retention policy allows. `retainSentMs: 0` deletes a
+row at mark-sent (and disables only `duplicate` detection). `failed` rows are never purged: they
+block their key until released. On DynamoDB the purge is a `status`-partition query with `settledAt`
+as a filter, which READS (and bills for) every settled item it passes over; `purgeIntervalMs` bounds
+how often.
+
+### Trust
+
+**Protect the outbox table like the broker credentials.** The relay publishes whatever a row says:
+its topic, envelope and options. Rows are re-validated on every read — size, id, options, ordering
+key and topic format — and a row failing any check is `invalid-row`, never published; but a VALID
+row edited to name another topic is published there. Anyone with write access to the table can
+therefore publish under this service's broker identity, which is a stronger capability than the
+broker's own trust boundary assumes.
+
+A failed row's `lastError` column holds the broker's error message, with control characters removed
+and cut to 1 024 characters. A broker may quote part of the message it refused in that text, so the
+column can carry payload data: it is covered by the same protection as the rest of the table.
+
+**Startup is bounded.** Each store's `verify()` runs under `relay.storeTimeoutMs` (default 5 000). A
+database that accepts the connection and never answers fails `start()` with
+`OutboxStoreVerifyTimeoutError` instead of waiting on the driver's own timeout, which `pg` does not
+set by default.
+
+### Health and metrics
+
+The `outbox` indicator reads the store's counts through a cached, bounded probe (5 s TTL, 2 s
+bound): `down` when the store does not answer, otherwise `degraded` with `data.reasons` from a fixed
+vocabulary, else `up`. `data` carries counts, ages in ms and the last local sweep's counts — never a
+tenant id, ordering key, topic or error text.
+
+| Reason                | Source                                                                                       | Scope                    |
+| --------------------- | -------------------------------------------------------------------------------------------- | ------------------------ |
+| `oldest-pending-age`  | the oldest pending row is older than `health.degradedAfterMs` (default 60 s)                 | cluster-wide (the store) |
+| `failed-rows`         | the failed count is above zero                                                               | cluster-wide             |
+| `failed-scan-cap`     | the failed count reaches `relay.maxFailedScan`, so a lap's blocked set is incomplete         | cluster-wide             |
+| `blocked-key-cap`     | this instance's current or last completed lap overflowed its 10 000-key blocked set          | this instance            |
+| `store-write-failing` | this instance's last sweep ended on a rejected store call                                    | this instance            |
+| `relay-overlap`       | this instance observed `fenced`, `claim-lost` or `duplicate` inside `health.overlapWindowMs` | this instance            |
+
+A replica that never wins the scheduler's slot never sweeps, so it reports none of the per-instance
+reasons. With `CAPABILITIES.METRICS` registered the outbox adds counters `outbox_published_total`,
+`outbox_publish_failures_total`, `outbox_poisoned_total` (labelled `topic`, capped at 100 distinct
+values then `other`) and `outbox_overlaps_total` (`kind`: `fenced`, `claim-lost`, `duplicate`), and
+gauges `outbox_pending_rows` and `outbox_oldest_pending_seconds`, each labelled `outbox` with the
+instance's token. **The two gauges are written only when the health indicator reads the store** —
+they are as fresh as the last `/health` poll, and stale if nothing polls it.
+
+### Trace continuity
+
+`write` stores the active `traceparent`; the relay publishes each row inside an
+`outbox relay <topic>` span whose parent is that stored context, so request → relay → publish →
+receive is one trace even though the sweep runs later, from a clean context. A row with no valid
+`traceparent` — written outside a span, or edited — gets a ROOT relay span (`SpanOptions.root`),
+never the span of whatever request happened to dispatch the sweep. Both are driven against the real
+OpenTelemetry SDK in `test/integration/outbox-trace-real.test.ts`. The relay span is active only
+when a context manager is registered (`TelemetryPlugin`'s `contextPropagation`, on by default);
+without one the producer span is a root. A custom broker without the framework-header channel —
+`WorkersBroker` today — drops the producer's `traceparent`, so the consumer cannot continue the
+trace.
+
+### Cloudflare Workers
+
+Workers has no scheduler (`SchedulerPlugin` refuses to start there): set
+`relay: { schedule: false }`, hand `waitUntil` to `background` so a `dispatch()`ed sweep survives
+the response, and drive the relay and the purge from Cron Triggers. The outbox table is a D1 table
+through `D1Adapter`:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import {
+  createScheduledHandler,
+  D1Adapter,
+  type ID1Database,
+  type IScheduledController,
+  WorkersCron,
+} from '@setu-ts/cloudflare-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IOutbox } from '@setu-ts/messaging-plugin';
+
+// From `cloudflare:workers` in a real Worker.
+declare const env: { readonly DB: ID1Database };
+declare function waitUntil(promise: Promise<unknown>): void;
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    DatabasePlugin({
+      type: 'custom',
+      adapter: new D1Adapter(env.DB, { tables: { Outbox: { table: 'setu_outbox' } } }),
+    }),
+    MessagingPlugin({
+      outbox: {
+        store: createDatabaseOutboxStore(),
+        relay: { schedule: false },
+        background: waitUntil,
+      },
+    }),
+  ],
+});
+await app.start();
+const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+
+const cron = new WorkersCron()
+  .on('* * * * *', async () => {
+    await outbox.sweep();
+  })
+  .on('0 * * * *', async () => {
+    await outbox.purge();
+  });
+
+export function scheduled(controller: IScheduledController): Promise<void> {
+  return createScheduledHandler(cron)(controller);
+}
+```
+
+Cron Triggers fire at most once a minute, so call `outbox.dispatch()` after each transaction for
+latency and keep the cron for reliability. This composition is driven at unit level (the shipped
+`D1Adapter` over real SQLite, `WorkersCron` and `createScheduledHandler`) in
+`test/integration/outbox-workers.test.ts`; it has NOT been driven on real workerd.
+
+### A custom store
+
+Any `IOutboxStore` from `@setu-ts/common` can back the outbox — an instance or a `RegistryFactory`.
+It must keep the bridge's contract: `append` writes inside the caller's scope; `scanPending` returns
+`pending` rows of its own kind in `position` order, strictly after the cursor, without filtering on
+`availableAt`; every transition atomically requires the discriminator and expected status; `claim`
+also compares the read version and increments it, while `markSent`/`markFailure` require the held
+version and answer `claim-lost` on a version miss; `markInvalid` uses a status-only guard and
+preserves attempts; `purge` deletes only settled rows older than the cutoff; `verify` rejects when
+the backend cannot serve the relay; and every method rejects rather than throwing synchronously.
+
+## Consumer inbox
+
+At-least-once delivery means duplicates by design: an outbox relay that crashes after publishing
+sends the row again, and every broker redelivers after a lost acknowledgement. The inbox records
+each event a consumer applied, keyed by `(consumer, topic, envelope id)`, in the SAME database
+transaction as the handler's own writes. A duplicate delivery is acknowledged without running the
+handler; a handler that fails leaves no record, so the redelivery runs it again.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import {
+  createDatabaseInboxStore,
+  DatabasePlugin,
+  type IUnitOfWork,
+} from '@setu-ts/database-plugin';
+import {
+  defineIntegrationEvent,
+  MessagingPlugin,
+  onIntegrationEvent,
+} from '@setu-ts/messaging-plugin';
+
+const personHired = defineIntegrationEvent<{ personId: string }>({
+  type: 'people.hired',
+  version: 1,
+  topic: 'people.hired.v1',
+  parse: (value) => value as { personId: string },
+});
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SchedulerPlugin(), // runs the retention purge
+    DatabasePlugin({ type: 'memory' }),
+    MessagingPlugin({
+      inbox: { store: createDatabaseInboxStore() },
+      subscriptions: [
+        onIntegrationEvent(
+          personHired,
+          // The fourth argument is the inbox transaction's unit of work: write
+          // through it, and the writes commit with the inbox marker or not at all.
+          async (payload, _envelope, _metadata, uow: IUnitOfWork) => {
+            await uow.getRepository('PayrollRecord').create({ id: payload.personId });
+          },
+          { inbox: { consumer: 'payroll' } },
+        ),
+      ],
+    }),
+  ],
+});
+await app.start();
+```
+
+With `inbox`, `onIntegrationEvent` returns a `RegistryFactory` rather than a
+`SubscriptionDefinition` — still a valid `subscriptions` entry, resolved at `onInit` after the store
+is verified. A plain subscription without `inbox` is unchanged. To subscribe imperatively, call the
+factory with a registry at or after `onInit`:
+`const d = onIntegrationEvent(def, handler, { inbox })(ctx.services); await broker.subscribe(d.topic, d.handler, d.options);`.
+
+`MessagingPlugin({ inbox })` registers an `IInbox` under `CAPABILITIES.INBOX` (`inbox.<name>` for a
+named instance; an inbox subscription names it with `inbox.instance`) and an `inbox` health
+indicator. At `onInit` it resolves the store, runs its `verify()` (an unusable backend fails
+`start()` by name), and schedules the retention purge (`inbox-purge`) on `CAPABILITIES.SCHEDULER`;
+with no scheduler registered `start()` rejects `InboxPurgeUnscheduledError`, unless
+`purge: { schedule: false }` (then call `inbox.purge()` yourself — from a Cron Trigger on Workers).
+
+### The consumer name
+
+`inbox.consumer` is part of the key — with the topic and the envelope id — so it must be the SAME on
+every replica and every deployment of the consumer: a name that changes makes every redelivered
+event look new. The topic in the key keeps one consumer's topics apart, so an event on one topic
+never suppresses an event with the same id on another. Unless you set `queue`, the broker `queue` is
+`inbox.` plus 16 hex characters of a 64-bit FNV-1a hash of the consumer and the topic (one queue per
+pair, legal on every broker; set `queue` for a readable name). The hash guards against accidental
+collisions only, so build neither name from untrusted input. Service Bus creates no subscriptions:
+set `queue` explicitly there and create that subscription. A named queue matters because on RabbitMQ
+a queue-less subscriber gets a private queue whose failed messages are discarded, which would leave
+the inbox nothing to de-duplicate, and a queue shared by two topics hands each handler the other
+topic's messages. Two inbox subscriptions with the same consumer name on one topic in one
+application are refused with `InboxConsumerConflictError`, because each would skip the other's
+events. Across processes this cannot be detected: give each consumer its own name.
+
+### The promise
+
+For one consumer name, the handler's writes through the supplied unit of work are committed at most
+once per topic and envelope id while the marker is retained; a delivery after the marker is purged
+is processed again. Nothing is promised about effects outside that unit of work, about two processes
+using one consumer name with different handlers, or about a database other than the store's. The
+inbox is not authentication: anyone who can publish to the topic can still publish a new event.
+
+How it decides: it reads the marker first and acknowledges if one exists; otherwise it opens ONE
+transaction, creates the marker FIRST, runs the handler, and commits. A concurrent duplicate loses
+that race on the marker's primary key — PostgreSQL blocks the second insert until the first
+transaction ends, a MongoDB replica set rejects the loser with a write conflict, and the deferred
+backends (memory, D1, DynamoDB) refuse it at commit — and its business writes roll back with it.
+After ANY rejection the inbox reads the marker again: present means another delivery handled the
+event, so it acknowledges; absent means the handler failed (a duplicate key in your OWN writes
+included), and the failure is reported. Both race shapes are driven against real PostgreSQL and a
+real MongoDB replica set in `test/integration/inbox-backends-real.test.ts`.
+
+### Effects outside the database
+
+Sending an email or calling a provider cannot join the transaction, and the inbox runs nothing after
+the commit — so an effect performed inside the handler is AT LEAST ONCE: if the commit is refused or
+the process dies, the effect has already happened and the redelivery runs it again. Choose per
+effect:
+
+| Choice                     | How                                                                                                                                                                                                        | Guarantee                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Perform it in the handler  | anywhere in the handler (the default shape)                                                                                                                                                                | at least once                                           |
+| Forward a derived key      | pass `JSON.stringify([consumer, topic, envelope.id])` (or a hash of it) as the provider's idempotency key — all three, unambiguously joined, or another topic's event reusing the id is de-duplicated away | once, where the provider de-duplicates                  |
+| Claim it before the effect | in the handler, COMMIT your own claim row for the effect in a SEPARATE transaction (not the inbox's unit of work), and skip the effect when the claim already exists                                       | at most once — a crash after the claim loses the effect |
+
+On the backends that defer writes to commit (memory, D1, DynamoDB) the handler runs BEFORE a
+concurrent duplicate can be refused, so its outside effects run for both; and DynamoDB's reads are
+eventually consistent, so a sequential duplicate inside the consistency window can do the same.
+
+### Failures and parking
+
+Without `maxAttempts` (the default) a handler failure is rethrown and the broker's own budget
+applies:
+
+| Broker        | On a handler failure                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------- |
+| RabbitMQ      | retried and then dead-lettered by `consumerRetry` (a durable named queue — the inbox's default) |
+| Redis Streams | retried and then dead-lettered by `consumerRetry`                                               |
+| Service Bus   | the platform's max delivery count and dead-letter queue                                         |
+| Pub/Sub       | the subscription's dead-letter policy                                                           |
+| NATS          | redelivered without limit — set `maxAttempts`                                                   |
+| Kafka         | the partition blocks on the message — set `maxAttempts`                                         |
+| in-memory     | reported and dropped                                                                            |
+
+With `maxAttempts`, each failure is counted on a separate row OUTSIDE the rolled-back transaction,
+and at the limit the delivery is PARKED and acknowledged: its marker becomes `parked` with the
+envelope (up to `maxParkedEnvelopeBytes`), so the partition moves on and every redelivery is
+skipped. A parse rejection parks at once — redelivery cannot fix it. The count is a lower bound (two
+concurrent failures can record one increment), so parking comes one attempt late, never early. On
+RabbitMQ and Redis Streams `consumerRetry` (default 5 attempts) also applies, and whichever budget
+runs out first wins: set `maxAttempts` at or below `consumerRetry.maxAttempts`, or set
+`consumerRetry: false`, or the broker dead-letters the delivery before it is ever parked. On a
+backend that defers writes, a concurrent delivery's park can commit while a sibling's successful
+transaction is still open; the sibling then rolls back and acknowledges, and the event ends parked —
+recoverable through `release('retry')`.
+
+```typescript
+import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';
+import type { IInbox } from '@setu-ts/messaging-plugin';
+
+const inbox = app.services.get<IInbox>(CAPABILITIES.INBOX);
+const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+for (const parked of await inbox.parked()) {
+  // `retry` deletes the parked marker and hands back the stored envelope.
+  const { topic, envelope } = await inbox.release(parked.rowId, 'retry');
+  // Re-publish WITHOUT a deduplicationId: NATS and Service Bus would drop it
+  // inside their de-duplication window.
+  if (envelope !== undefined) await broker.publish(topic, envelope);
+}
+```
+
+`release(rowId, 'discard')` keeps the marker as `discarded` with its envelope cleared, so
+redeliveries stay skipped. The inbox never re-runs a handler itself — that would bypass the
+messaging behaviour chain. A re-publish reaches every consumer group of the topic: groups using an
+inbox skip it, groups without one process it again. `parked()` never returns an envelope, and the
+health indicator carries a count only. Parked rows are purged by `retainMs` like every other row,
+envelope included, so a parked row does not outlive the window: release or discard a parked delivery
+within that window (the `inbox` health indicator reports `degraded` while any row is parked), and
+`discard` clears one sooner. These are operator capabilities — gate any route that calls them.
+
+### Backends
+
+Use `createDatabaseInboxStore()` from `@setu-ts/database-plugin` (any `IInboxStore` works — see
+[A custom inbox store](#a-custom-inbox-store)). Its `verify()` refuses a backend that cannot serve
+the inbox at startup with `InboxStoreUnavailableError`:
+
+| Backend  | Requirement                                                                                                                                | Driven in this repository against            |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| memory   | none — single process only                                                                                                                 | the unit and integration suites              |
+| Drizzle  | the inbox table exists and is registered in `drizzleTables`                                                                                | real PostgreSQL 16                           |
+| Prisma   | the table exists and the model is in the generated client                                                                                  | not driven (unverified)                      |
+| D1       | the table exists                                                                                                                           | real SQLite (`D1Adapter` over `node:sqlite`) |
+| MongoDB  | a replica set (`'mongodb-standalone'` otherwise); create the collections first — two transactions that each create one implicitly conflict | real MongoDB 8 replica set                   |
+| DynamoDB | the purge and the health count `Scan` without a GSI `{ partitionKey: 'status', sortKey: 'updatedAt' }`; add it for a large table           | not driven (unverified)                      |
+| Cosmos   | refused (`'cosmos-unsupported'`): a transaction is one partition, and the inbox row cannot share the business partition                    | the adapter class, unit level                |
+| Bigtable | refused (`'bigtable-unsupported'`): one row per transaction                                                                                | the Bigtable emulator                        |
+
+Every row carries `kind: 'setu-inbox'`, and every read, count, release and purge requires it, so an
+inbox sharing a table or collection with business documents never touches them. Row ids are a
+SHA-256 of `(consumer, topic, envelope id)` — 64 hex characters, or 73 for the failure-count row —
+whatever id a producer sent; the raw envelope id is stored only when it is a valid publish id (at
+most 128 UTF-8 bytes, no control or format characters). Protect the inbox table like the broker
+credentials: anyone who can write to it can mark an event handled.
+
+PostgreSQL (the exact file the real suite applies):
+
+```sql
+CREATE TABLE setu_inbox (
+  id          text    PRIMARY KEY,
+  kind        text    NOT NULL,
+  consumer    text    NOT NULL,
+  topic       text    NOT NULL,
+  envelope_id text,
+  status      text    NOT NULL,
+  attempts    integer NOT NULL,
+  updated_at  bigint  NOT NULL,
+  last_error  text,
+  envelope    text
+);
+CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
+```
+
+SQLite and Cloudflare D1, where `D1Adapter` uses the field names as column names:
+
+```sql
+CREATE TABLE setu_inbox (
+  id          TEXT    PRIMARY KEY,
+  kind        TEXT    NOT NULL,
+  consumer    TEXT    NOT NULL,
+  topic       TEXT    NOT NULL,
+  envelopeId  TEXT,
+  status      TEXT    NOT NULL,
+  attempts    INTEGER NOT NULL,
+  updatedAt   INTEGER NOT NULL,
+  lastError   TEXT,
+  envelope    TEXT
+);
+CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updatedAt);
+```
+
+### Retention
+
+`retainMs` (default 7 days, at least 60 000) is how long a processed marker is kept. A redelivery
+older than that is processed again, so it must exceed the broker's redelivery window plus the
+outbox's re-send window (a crashed relay re-sends within its next sweep; an operator's
+`release('retry')` of a failed outbox row re-sends a row no consumer has seen). The purge deletes
+rows of every status older than the window — `processed`, `discarded` and `parked` markers and
+failure-count rows — but each run deletes at most `purge.batch` rows per status (default 100 a
+minute), so the table stays within the window only while inflow per status stays below that rate —
+raise `purge.batch` or shorten `purge.intervalMs` above it.
+
+### Options
+
+| Option                   | Default  | Meaning                                                        |
+| ------------------------ | -------- | -------------------------------------------------------------- |
+| `store`                  | required | an `IInboxStore`, or a `RegistryFactory` producing one         |
+| `maxAttempts`            | absent   | park after this many handler failures (1–1000)                 |
+| `retainMs`               | 7 days   | how long a processed marker is kept (≥ 60 000)                 |
+| `storeTimeoutMs`         | 5000     | bound on every store call except the handler's own transaction |
+| `maxParkedEnvelopeBytes` | 262 144  | largest envelope stored on a parked marker; `0` stores none    |
+| `purge.schedule`         | `true`   | schedule the purge on `CAPABILITIES.SCHEDULER`                 |
+| `purge.intervalMs`       | 60 000   | milliseconds between purge runs                                |
+| `purge.batch`            | 100      | rows deleted per status per run                                |
+
+Every numeric option must be a finite integer in its range; a violation is refused when
+`MessagingPlugin(...)` is called. The handler's transaction is NOT bounded: an abandoned transaction
+cannot be cancelled from outside, so the database's own statement and transaction timeouts govern
+it.
+
+### A custom inbox store
+
+Any `IInboxStore` from `@setu-ts/common` can back the inbox. It must keep the bridge's contract:
+`run` creates the marker FIRST inside one transaction and rolls it back with the work on any
+rejection; a second marker with the same id is refused; `find` returns `undefined` for a row of
+another `kind`; `recordFailure` writes outside any transaction; `park` answers `'exists'` when a
+marker is already present; `parked` never returns the envelope; `release` writes only from `parked`;
+`purge` never deletes a parked marker; `verify` rejects when the backend cannot serve the inbox; and
+every method rejects rather than throwing synchronously.
+
 ## Bridging in-process events
 
 `EventsMessagingBridge` forwards selected events from
@@ -615,99 +1699,136 @@ records the outcome of every real publish — the **data plane** — as evidence
 consults it FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs`
 (default `5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected
 topic or a quota error is an application-level fact, never an outage) resolves `false` until a
-successful publish or positive management probe contradicts it. The plane distinction is the
-substance: the management round trip proves the **management** plane is reachable — evidence about
-the data plane, never proof of it — and that gap is what let a stopped namespace report `up` while
-every publish threw. Two further changes, and the first has **two layers** because the health
-indicator is not the only caller. The indicator wraps every arm's `reachability()` in its own
-`createCachedProbe` (5-second TTL, 2-second bound), which is the universal outer bound: a probe that
-cannot answer — a **hung** broker, the condition a stopped one never produces — settles
-`reachable: 'unknown'` instead of holding `/health` open. `RabbitMqBroker` and `ServiceBusBroker`
-additionally build their own cached, bounded probes, which is what `isHealthy()` reads; that inner
-layer is what protects a **direct** caller, such as `realtime-backplane-plugin`'s `'messaging'`
-transport, which resolves the broker itself and never passes through this indicator. Second, the
-RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the connection-fault
-flag read that a hung broker never trips. Residual exposure, stated rather than implied: a
-deployment whose Service Bus management plane is unreachable and that publishes nothing keeps
-reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who needs
-the signal can publish synthetically.
+successful publish or positive management probe contradicts it. **Since M101a** that retained
+failure is answered at once: the management probe runs in the background, and only a `true` answer
+clears the outcome, for the NEXT read — before, `reachability()` awaited the probe, whose own 2 s
+bound tied the indicator's, so the indicator's bound fired first and a recorded outage was reported
+`up`. A failure inside a window the indicator has already cached as `up` is reported at the first
+poll after that 5 s cache expires. The plane distinction is the substance: the management round trip
+proves the **management** plane is reachable — evidence about the data plane, never proof of it —
+and that gap is what let a stopped namespace report `up` while every publish threw. Two further
+changes, and the first has **two layers** because the health indicator is not the only caller. The
+indicator wraps every arm's `reachability()` in its own `createCachedProbe` (5-second TTL, 2-second
+bound), which is the universal outer bound: a probe that cannot answer — a **hung** broker, the
+condition a stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health`
+open. `RabbitMqBroker` and `ServiceBusBroker` additionally build their own cached, bounded probes,
+which is what `isHealthy()` reads; that inner layer is what protects a **direct** caller, such as
+`realtime-backplane-plugin`'s `'messaging'` transport, which resolves the broker itself and never
+passes through this indicator. Second, the RabbitMQ probe is a real round trip (a throwaway channel
+open/close), replacing the connection-fault flag read that a hung broker never trips. Residual
+exposure, stated rather than implied: a deployment whose Service Bus management plane is unreachable
+and that publishes nothing keeps reporting `reachable: 'unknown'` with status `up` until its first
+publish — an operator who needs the signal can publish synthetically.
 
 ## Exports
 
-| Export                            | Kind      |
-| --------------------------------- | --------- |
-| `adaptPubSubModule`               | function  |
-| `adaptServiceBusModule`           | function  |
-| `causedBy`                        | function  |
-| `defineIntegrationEvent`          | function  |
-| `EventsMessagingBridge`           | function  |
-| `loadPubSubModule`                | function  |
-| `loadServiceBusModule`            | function  |
-| `MessagingPlugin`                 | function  |
-| `onIntegrationEvent`              | function  |
-| `publishIntegrationEvent`         | function  |
-| `ChainGateTimeoutError`           | class     |
-| `CloudBrokerUnavailableError`     | class     |
-| `GcpPubSubBroker`                 | class     |
-| `InMemoryBroker`                  | class     |
-| `IntegrationEventRejectedError`   | class     |
-| `JetStreamStreamError`            | class     |
-| `JetStreamUnavailableError`       | class     |
-| `JsonSerializer`                  | class     |
-| `KafkaBroker`                     | class     |
-| `MessagingNotSupportedError`      | class     |
-| `NatsBroker`                      | class     |
-| `RabbitMqBroker`                  | class     |
-| `RedisStreamsBroker`              | class     |
-| `RemoteHandlerError`              | class     |
-| `ReplyInboxUnavailableError`      | class     |
-| `RequestTimeoutError`             | class     |
-| `ServiceBusBroker`                | class     |
-| `CustomMessagingOptions`          | interface |
-| `EventsMessagingBridgeOptions`    | interface |
-| `IMessageBroker`                  | interface |
-| `INatsHeaders`                    | interface |
-| `InMemoryBrokerOptions`           | interface |
-| `IntegrationEventDefinition`      | interface |
-| `IntegrationEventEnvelope`        | interface |
-| `IntegrationEventMetadata`        | interface |
-| `IPubSubSubscription`             | interface |
-| `IPubSubTransport`                | interface |
-| `ISerializer`                     | interface |
-| `IServiceBusProcessErrorArgs`     | interface |
-| `IServiceBusReceiver`             | interface |
-| `IServiceBusSubscribeOptions`     | interface |
-| `IServiceBusSubscription`         | interface |
-| `IServiceBusTransport`            | interface |
-| `ISubscription`                   | interface |
-| `KafkaMessagingOptions`           | interface |
-| `KafkaOptions`                    | interface |
-| `MemoryMessagingOptions`          | interface |
-| `MessageMetadata`                 | interface |
-| `MessagingCommonOptions`          | interface |
-| `NatsMessagingOptions`            | interface |
-| `NatsOptions`                     | interface |
-| `PubSubOptions`                   | interface |
-| `PubSubSdkModule`                 | interface |
-| `RabbitMqMessagingOptions`        | interface |
-| `RabbitMqOptions`                 | interface |
-| `RedisStreamsMessagingOptions`    | interface |
-| `RedisStreamsOptions`             | interface |
-| `RequestOptions`                  | interface |
-| `ServiceBusOptions`               | interface |
-| `ServiceBusRetryOptions`          | interface |
-| `ServiceBusSdkModule`             | interface |
-| `SubscribeOptions`                | interface |
-| `SubscriptionDefinition`          | interface |
-| `IntegrationEventHandler`         | type      |
-| `IntegrationEventRejectionReason` | type      |
-| `MessageHandler`                  | type      |
-| `MessagingBrokerType`             | type      |
-| `MessagingPluginOptions`          | type      |
-| `PubSubMessagingOptions`          | type      |
-| `RequestHandler`                  | type      |
-| `ServiceBusMessagingOptions`      | type      |
-| `SubscriptionEntry`               | type      |
+| Export                                  | Kind      |
+| --------------------------------------- | --------- |
+| `adaptPubSubModule`                     | function  |
+| `adaptServiceBusModule`                 | function  |
+| `causedBy`                              | function  |
+| `defineIntegrationEvent`                | function  |
+| `EventsMessagingBridge`                 | function  |
+| `loadPubSubModule`                      | function  |
+| `loadServiceBusModule`                  | function  |
+| `MessagingPlugin`                       | function  |
+| `onIntegrationEvent`                    | function  |
+| `publishIntegrationEvent`               | function  |
+| `ChainGateTimeoutError`                 | class     |
+| `CloudBrokerUnavailableError`           | class     |
+| `GcpPubSubBroker`                       | class     |
+| `InboxConsumerConflictError`            | class     |
+| `InboxNotConfiguredError`               | class     |
+| `InboxNotReadyError`                    | class     |
+| `InboxPurgeUnscheduledError`            | class     |
+| `InboxRowStateError`                    | class     |
+| `InboxStoreVerifyTimeoutError`          | class     |
+| `InMemoryBroker`                        | class     |
+| `IntegrationEventRejectedError`         | class     |
+| `JetStreamStreamError`                  | class     |
+| `JetStreamUnavailableError`             | class     |
+| `JsonSerializer`                        | class     |
+| `KafkaBroker`                           | class     |
+| `KafkaTopicUnavailableError`            | class     |
+| `MessagingNotSupportedError`            | class     |
+| `NatsBroker`                            | class     |
+| `NatsConsumerNameCollisionError`        | class     |
+| `OutboxEnvelopeTooLargeError`           | class     |
+| `OutboxNotReadyError`                   | class     |
+| `OutboxRelayUnscheduledError`           | class     |
+| `OutboxRowStateError`                   | class     |
+| `OutboxStoreVerifyTimeoutError`         | class     |
+| `OutboxUnknownTenantError`              | class     |
+| `PubSubSubscriptionBoundElsewhereError` | class     |
+| `RabbitMqBroker`                        | class     |
+| `RedisStreamsBroker`                    | class     |
+| `RemoteHandlerError`                    | class     |
+| `ReplyInboxUnavailableError`            | class     |
+| `RequestTimeoutError`                   | class     |
+| `ServiceBusBroker`                      | class     |
+| `ConsumerRetryOptions`                  | interface |
+| `CustomMessagingOptions`                | interface |
+| `EventsMessagingBridgeOptions`          | interface |
+| `IInbox`                                | interface |
+| `IMessageBroker`                        | interface |
+| `INatsHeaders`                          | interface |
+| `InboxOptions`                          | interface |
+| `InboxPurgeOptions`                     | interface |
+| `InboxReleaseResult`                    | interface |
+| `InMemoryBrokerOptions`                 | interface |
+| `IntegrationEventDefinition`            | interface |
+| `IntegrationEventEnvelope`              | interface |
+| `IntegrationEventInboxOptions`          | interface |
+| `IntegrationEventMetadata`              | interface |
+| `IOutbox`                               | interface |
+| `IPubSubSubscription`                   | interface |
+| `IPubSubTransport`                      | interface |
+| `ISerializer`                           | interface |
+| `IServiceBusProcessErrorArgs`           | interface |
+| `IServiceBusReceiver`                   | interface |
+| `IServiceBusSubscribeOptions`           | interface |
+| `IServiceBusSubscription`               | interface |
+| `IServiceBusTransport`                  | interface |
+| `ISubscription`                         | interface |
+| `KafkaMessagingOptions`                 | interface |
+| `KafkaOptions`                          | interface |
+| `MemoryMessagingOptions`                | interface |
+| `MessageMetadata`                       | interface |
+| `MessagingCommonOptions`                | interface |
+| `NatsMessagingOptions`                  | interface |
+| `NatsOptions`                           | interface |
+| `OutboxCommonOptions`                   | interface |
+| `OutboxHealthOptions`                   | interface |
+| `OutboxRelayOptions`                    | interface |
+| `OutboxSweepResult`                     | interface |
+| `OutboxWriteInput`                      | interface |
+| `ParkedInboxEntry`                      | interface |
+| `PubSubOptions`                         | interface |
+| `PubSubSdkModule`                       | interface |
+| `RabbitMqMessagingOptions`              | interface |
+| `RabbitMqOptions`                       | interface |
+| `RedisStreamsMessagingOptions`          | interface |
+| `RedisStreamsOptions`                   | interface |
+| `RequestOptions`                        | interface |
+| `ServiceBusOptions`                     | interface |
+| `ServiceBusRetryOptions`                | interface |
+| `ServiceBusSdkModule`                   | interface |
+| `SubscribeOptions`                      | interface |
+| `SubscriptionDefinition`                | interface |
+| `InboxStoreEntry`                       | type      |
+| `IntegrationEventHandler`               | type      |
+| `IntegrationEventInboxHandler`          | type      |
+| `IntegrationEventRejectionReason`       | type      |
+| `IntegrationEventSubscribeOptions`      | type      |
+| `MessageHandler`                        | type      |
+| `MessagingBrokerType`                   | type      |
+| `MessagingPluginOptions`                | type      |
+| `OutboxOptions`                         | type      |
+| `OutboxStoreEntry`                      | type      |
+| `PubSubMessagingOptions`                | type      |
+| `RequestHandler`                        | type      |
+| `ServiceBusMessagingOptions`            | type      |
+| `SubscriptionEntry`                     | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

@@ -66,7 +66,10 @@ export {
   IntegrationEventRejectedError,
   JetStreamStreamError,
   JetStreamUnavailableError,
+  KafkaTopicUnavailableError,
   MessagingNotSupportedError,
+  NatsConsumerNameCollisionError,
+  PubSubSubscriptionBoundElsewhereError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
@@ -80,10 +83,54 @@ export type { IntegrationEventEnvelope } from './integration/envelope.ts';
 export { causedBy, publishIntegrationEvent } from './integration/publish.ts';
 export type { IntegrationEventMetadata } from './integration/publish.ts';
 export { onIntegrationEvent } from './integration/subscribe.ts';
-export type { IntegrationEventHandler } from './integration/subscribe.ts';
+export type {
+  IntegrationEventHandler,
+  IntegrationEventInboxHandler,
+  IntegrationEventInboxOptions,
+  IntegrationEventSubscribeOptions,
+} from './integration/subscribe.ts';
+
+// Transactional outbox (M107)
+export {
+  OutboxEnvelopeTooLargeError,
+  OutboxNotReadyError,
+  OutboxRelayUnscheduledError,
+  OutboxRowStateError,
+  OutboxStoreVerifyTimeoutError,
+  OutboxUnknownTenantError,
+} from './outbox/errors.ts';
+export type {
+  IOutbox,
+  OutboxCommonOptions,
+  OutboxHealthOptions,
+  OutboxOptions,
+  OutboxRelayOptions,
+  OutboxStoreEntry,
+  OutboxSweepResult,
+  OutboxWriteInput,
+} from './interfaces/index.ts';
+
+// Consumer inbox (M108)
+export {
+  InboxConsumerConflictError,
+  InboxNotConfiguredError,
+  InboxNotReadyError,
+  InboxPurgeUnscheduledError,
+  InboxRowStateError,
+  InboxStoreVerifyTimeoutError,
+} from './inbox/errors.ts';
+export type {
+  IInbox,
+  InboxOptions,
+  InboxPurgeOptions,
+  InboxReleaseResult,
+  InboxStoreEntry,
+  ParkedInboxEntry,
+} from './interfaces/index.ts';
 
 // Option types
 export type {
+  ConsumerRetryOptions,
   CustomMessagingOptions,
   EventsMessagingBridgeOptions,
   INatsHeaders,

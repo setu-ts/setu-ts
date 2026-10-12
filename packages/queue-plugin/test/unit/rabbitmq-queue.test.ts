@@ -2,8 +2,7 @@
  * Unit tests for RabbitMqQueue adapter.
  */
 
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { RabbitMqQueue, validateClient } from '../../src/adapters/rabbitmq-queue.ts';
 import { createFakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
 import type { FakeAmqpQueueChannel } from '../fixtures/fake-amqplib-client.ts';
@@ -66,6 +65,48 @@ describe('RabbitMqQueue', () => {
       await queue.connect();
       await queue.connect(); // Second call should not error
       expect(queue.isReady()).toBe(true);
+    });
+  });
+
+  describe('AMQP short-string limits (M106 audit O4)', () => {
+    // `he.queue.` + name + `.ready` (or `.delay`): 15 bytes of overhead.
+    const job = (name: string) => ({
+      id: '1',
+      name,
+      data: {},
+      attempts: 0,
+      maxAttempts: 1,
+      availableAtMs: 0,
+    });
+
+    it('refuses a prefix that leaves no room for a job name, at construction', () => {
+      const runtime = new FakeRuntimeServices();
+      // `<prefix>.x.ready` must fit 255 bytes: a 247-byte prefix does, 248 does not.
+      expect(() => new RabbitMqQueue(runtime, { prefix: 'p'.repeat(248) })).toThrow(
+        'prefix leaves no room',
+      );
+      expect(() => new RabbitMqQueue(runtime, { prefix: 'p'.repeat(247) })).not.toThrow();
+    });
+
+    it('refuses an oversized job name before any channel operation', async () => {
+      const runtime = new FakeRuntimeServices();
+      const fakeClient = createFakeAmqpConnection();
+      const queue = new RabbitMqQueue(runtime, { client: fakeClient });
+      await queue.connect();
+      const channel = await fakeClient.createChannel();
+      const before = channel.calls.length;
+
+      const longName = 'n'.repeat(241); // 256-byte queue names
+      await expect(queue.enqueue(job(longName))).rejects.toThrow(
+        "its queue names exceed AMQP's 255 UTF-8 byte limit",
+      );
+      await expect(queue.reserve(longName, 1, 0)).rejects.toThrow('its queue names exceed');
+      expect(channel.calls.length).toBe(before);
+
+      // A 240-byte name makes exactly 255-byte queue names and is accepted.
+      await queue.enqueue(job('n'.repeat(240)));
+      expect(channel.calls.some((c) => c.method === 'assertQueue')).toBe(true);
+      await queue.disconnect();
     });
   });
 

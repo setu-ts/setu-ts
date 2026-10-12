@@ -281,3 +281,128 @@ export class JetStreamStreamError extends Error {
     this.stream = stream;
   }
 }
+
+/**
+ * Thrown when a GCP Pub/Sub subscription the broker would attach to already
+ * exists but is bound to a DIFFERENT topic (M101b, V8-2).
+ *
+ * Pub/Sub subscription names are project-global. Before this check the broker
+ * swallowed `ALREADY_EXISTS` and attached to whatever topic the existing
+ * subscription was bound to, so a second topic's handler silently consumed the
+ * first topic's messages. The broker now reads the existing subscription's
+ * topic and refuses a mismatch.
+ *
+ * Remedies: pass a distinct `SubscribeOptions.queue` for this topic, or delete
+ * the existing subscription.
+ *
+ * @since 0.9.0
+ */
+export class PubSubSubscriptionBoundElsewhereError extends Error {
+  /** The subscription name that already exists. */
+  readonly subscription: string;
+  /** The topic the existing subscription is bound to, as the service reports it. */
+  readonly boundTopic: string;
+  /** The topic this subscribe call asked for. */
+  readonly requestedTopic: string;
+
+  /**
+   * Creates the error reported for a subscription bound to another topic.
+   *
+   * @param subscription - The existing subscription name
+   * @param boundTopic - The topic the service reports it is bound to
+   *   (`'(unknown)'` when the service reported none)
+   * @param requestedTopic - The topic the caller subscribed to
+   */
+  constructor(subscription: string, boundTopic: string, requestedTopic: string) {
+    super(
+      `Pub/Sub subscription ${JSON.stringify(subscription)} already exists and is bound to ` +
+        `topic ${JSON.stringify(boundTopic)}, not the requested topic ` +
+        `${JSON.stringify(requestedTopic)}. Pass a distinct SubscribeOptions.queue for this ` +
+        'topic, or delete the existing subscription.',
+    );
+    this.name = 'PubSubSubscriptionBoundElsewhereError';
+    this.subscription = subscription;
+    this.boundTopic = boundTopic;
+    this.requestedTopic = requestedTopic;
+  }
+}
+
+/**
+ * Thrown by `NatsBroker.subscribe` when two DIFFERENT
+ * `SubscribeOptions.queue` values map to one JetStream consumer name, or when
+ * the consumer already on the server under that name was created for another
+ * queue or another topic (M101b, V8-6).
+ *
+ * JetStream refuses `.`, `*`, `>`, `/`, `\` and whitespace in a consumer
+ * name, so the broker escapes each as `_` plus two hex digits (`orders.eu` →
+ * `orders_2eeu`). A queue that literally spells such an escape collides with
+ * the dotted queue it encodes from; attaching both would make two independent
+ * queues split one consumer's deliveries, so the second is refused.
+ *
+ * @since 0.9.0
+ */
+export class NatsConsumerNameCollisionError extends Error {
+  /** The queue this subscribe call asked for. */
+  readonly queue: string;
+  /** The queue (or, for a consumer from before 0.9.0, the durable name) already holding the name. */
+  readonly existingQueue: string;
+  /** The JetStream consumer name both map to. */
+  readonly consumerName: string;
+
+  /**
+   * Creates the error reported for a consumer-name collision.
+   *
+   * @param queue - The requested queue
+   * @param existingQueue - The queue already holding the consumer name
+   * @param consumerName - The encoded JetStream consumer name
+   */
+  constructor(queue: string, existingQueue: string, consumerName: string) {
+    super(
+      `NATS queue ${JSON.stringify(queue)} maps to JetStream consumer ` +
+        `${JSON.stringify(consumerName)}, which already belongs to ${
+          JSON.stringify(existingQueue)
+        } (a different queue or topic). Choose a queue name that does not collide.`,
+    );
+    this.name = 'NatsConsumerNameCollisionError';
+    this.queue = queue;
+    this.existingQueue = existingQueue;
+    this.consumerName = consumerName;
+  }
+}
+
+/**
+ * Thrown by `KafkaBroker.subscribe` when the broker still reports the topic
+ * does not exist (`UNKNOWN_TOPIC_OR_PARTITION`) after the subscribe retry
+ * budget (`KafkaOptions.retry`) is spent (M101b, V8-26). The platform error is
+ * carried as {@linkcode cause}.
+ *
+ * Remedies: pre-create the topic, or enable `auto.create.topics.enable` on the
+ * broker.
+ *
+ * @since 0.9.0
+ */
+export class KafkaTopicUnavailableError extends Error {
+  /** The topic that could not be subscribed. */
+  readonly topic: string;
+  /** The consumer group the subscription used. */
+  readonly groupId: string;
+
+  /**
+   * Creates the error reported for a topic that could not be subscribed.
+   *
+   * @param topic - The topic
+   * @param groupId - The consumer group
+   * @param cause - The platform error
+   */
+  constructor(topic: string, groupId: string, cause: unknown) {
+    super(
+      `Kafka topic ${JSON.stringify(topic)} could not be subscribed by consumer group ` +
+        `${JSON.stringify(groupId)}: the broker reports it does not exist. Pre-create the ` +
+        'topic, or enable auto.create.topics.enable on the broker.',
+      { cause },
+    );
+    this.name = 'KafkaTopicUnavailableError';
+    this.topic = topic;
+    this.groupId = groupId;
+  }
+}

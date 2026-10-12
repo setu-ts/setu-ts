@@ -1,8 +1,7 @@
 /**
  * PathResolver tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { assertSome } from '../fixtures/option.ts';
 import { extractPathTenant, PathResolver } from '../../src/resolvers/path-resolver.ts';
 import { createFakeRequest } from '../fixtures/fake-request.ts';

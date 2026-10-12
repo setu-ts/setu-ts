@@ -1,0 +1,78 @@
+{
+  "name": "@setu-ts/queue-plugin",
+  "version": "0.9.0",
+  "description": "Background jobs over memory, Redis, or RabbitMQ, with retries and cron scheduling",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/queue-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/queue-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-sns": "^3",
+    "@aws-sdk/client-sqs": "^3",
+    "amqplib": "0.10.x",
+    "ioredis": "5.x"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-sns": {
+      "optional": true
+    },
+    "@aws-sdk/client-sqs": {
+      "optional": true
+    },
+    "amqplib": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-sns": "^3",
+    "@aws-sdk/client-sqs": "^3",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-base": "^2.9.0",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@types/amqplib": "^0.10.8",
+    "@types/node": "^24",
+    "amqplib": "0.10.x",
+    "ioredis": "5.x",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryProvider } from '../../src/providers/memory-provider.ts';
 import type { FlagDefinition } from '../../src/interfaces/index.ts';
 

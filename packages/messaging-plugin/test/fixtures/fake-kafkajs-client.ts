@@ -29,6 +29,31 @@ export interface FakeKafkaOptions {
   }>;
   /** Whether stop() should reject. */
   rejectStop?: boolean;
+  /**
+   * Topics the broker does not know (M101b). `subscribe` rejects for these
+   * with the shape real kafkajs 2.2.4 produces against a broker that does not
+   * auto-create — measured: the BARE `KafkaJSProtocolError`, unwrapped,
+   * because kafkajs's metadata retrier `bail`s every error but
+   * `LEADER_NOT_AVAILABLE`.
+   */
+  unknownTopics?: readonly string[];
+  /**
+   * When set, `run()` rejects with this value — a consumer crash kafkajs
+   * declined to restart (M101b).
+   */
+  runRejection?: unknown;
+}
+
+/** Builds the protocol error real kafkajs raises for an unknown topic. */
+export function unknownTopicError(): Error & { type: string; retriable: boolean } {
+  const err = new Error(
+    'This server does not host this topic-partition',
+  ) as Error & { type: string; retriable: boolean; code: number };
+  err.name = 'KafkaJSProtocolError';
+  err.type = 'UNKNOWN_TOPIC_OR_PARTITION';
+  err.retriable = true;
+  err.code = 3;
+  return err;
 }
 
 /**
@@ -102,6 +127,8 @@ export class FakeKafkaConsumer {
   #calls: Array<{ method: string; args: unknown[] }>;
   #committedOffsets: string[];
   #rejectStop: boolean;
+  #unknownTopics: readonly string[];
+  #runRejection: { value: unknown } | null;
   #seededMessages: Array<{
     topic: string;
     value: string;
@@ -122,7 +149,11 @@ export class FakeKafkaConsumer {
       timestamp: string;
       headers: Record<string, KafkaHeaderValue>;
     }>,
+    unknownTopics: readonly string[] = [],
+    runRejection: { value: unknown } | null = null,
   ) {
+    this.#unknownTopics = unknownTopics;
+    this.#runRejection = runRejection;
     this.#subscribedTopics = [];
     this.#runOptions = null;
     this.#running = false;
@@ -182,6 +213,9 @@ export class FakeKafkaConsumer {
 
   subscribe(options: { topic: string; fromBeginning?: boolean }): Promise<void> {
     this.#record('subscribe', [options]);
+    if (this.#unknownTopics.includes(options.topic)) {
+      return Promise.reject(unknownTopicError());
+    }
     this.#subscribedTopics.push(options.topic);
     return Promise.resolve();
   }
@@ -194,6 +228,9 @@ export class FakeKafkaConsumer {
     },
   ): Promise<void> {
     this.#record('run', [options]);
+    if (this.#runRejection !== null) {
+      return Promise.reject(this.#runRejection.value);
+    }
     this.#runOptions = options;
     this.#running = true;
     // Auto-deliver seeded messages to the handler, tracking commit-on-resolve.
@@ -220,9 +257,16 @@ export class FakeKafkaConsumer {
     return Promise.resolve();
   }
 
+  /**
+   * Mirrors real kafkajs: `disconnect()` runs `stop()` first and rethrows its
+   * failure, so a consumer whose stop rejects also fails to disconnect.
+   */
   disconnect(): Promise<void> {
     this.#record('disconnect', []);
     this.#running = false;
+    if (this.#rejectStop) {
+      return Promise.reject(new Error('Stop rejected'));
+    }
     return Promise.resolve();
   }
 
@@ -414,6 +458,8 @@ export class FakeKafkaFactory {
         options.groupId,
         this.#options.rejectStop,
         this.#options.seededMessages,
+        this.#options.unknownTopics,
+        'runRejection' in this.#options ? { value: this.#options.runRejection } : null,
       );
       this.#consumers.set(options.groupId, consumer);
     }

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
@@ -22,7 +21,7 @@ interface Harness {
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}): Harness {
-  const fs = createFakeFs(seed);
+  const fs = createFakeFs({ '/app/deno.json': '{}', ...seed });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -42,7 +41,61 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
   };
 }
 
+function bareHarness(seed: Readonly<Record<string, string>> = {}): Harness {
+  const fs = createFakeFs(seed);
+  const out = createRecorder();
+  const err = createRecorder();
+  return {
+    fs,
+    out,
+    err,
+    run: (argv, load) =>
+      runGenerateCommand(parseArgs(argv), {
+        fs,
+        cwd: '/app',
+        now: () => 0,
+        log: out.sink,
+        error: err.sink,
+        ...(load === undefined ? {} : { load }),
+      }),
+  };
+}
+
 describe('runGenerateCommand', () => {
+  it('refuses a class-based job without queue before writing and marks help unavailable', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
+    expect(await h.run(['job', 'nightly'])).toBe(1);
+    expect(h.err.text()).toContain('setu add queue');
+    expect(h.fs.writes).toEqual([]);
+    expect(await h.run(['--help'])).toBe(0);
+    expect(h.out.text()).toContain('job  (unavailable — run `setu add queue`)');
+  });
+
+  it('emits decorated ingress once the class-based project has queue', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin', 'queue-plugin') });
+    expect(await h.run(['job', 'nightly'])).toBe(0);
+    expect(h.fs.writes.some((path) => path.includes('/ingress/'))).toBe(true);
+  });
+  it('writes nothing when a JSONC comment splits a manifest token', async () => {
+    const h = bareHarness({ '/app/deno.jsonc': '{"compilerOptions":{"strict":tru/*note*/e}}' });
+    expect(await h.run(['service', 'billing'])).toBe(1);
+    expect(h.err.text()).toContain('Cannot read /app/deno.jsonc:');
+    expect(h.fs.writes).toEqual([]);
+  });
+  it('refuses to write outside a project', async () => {
+    const h = bareHarness({ '/app/notes.txt': 'mine' });
+    expect(await h.run(['service', 'billing'])).toBe(1);
+    expect(h.err.text()).toContain('holds no deno.json, deno.jsonc or package.json');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a workspace root and points at a member', async () => {
+    const h = bareHarness({ '/app/setu.workspace.json': '{}' });
+    expect(await h.run(['service', 'billing'])).toBe(2);
+    expect(h.err.text()).toContain('--dir apps/<member>');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('generates an ungated schematic and reads the write back', async () => {
     const h = harness();
     expect(await h.run(['service', 'user-profile'])).toBe(0);
@@ -56,7 +109,7 @@ describe('runGenerateCommand', () => {
   });
 
   it('roots generated paths at --dir', async () => {
-    const h = harness();
+    const h = harness({ '/elsewhere/deno.json': '{}' });
     expect(await h.run(['service', 'billing', '--dir', '/elsewhere'])).toBe(0);
     expect(h.fs.writes).toEqual([
       '/elsewhere/src/services/billing.service.ts',
@@ -67,7 +120,7 @@ describe('runGenerateCommand', () => {
   it('creates the parent directory before writing', async () => {
     const h = harness();
     await h.run(['service', 'billing']);
-    expect(h.fs.mkdirs).toEqual(['/app', '/app/src', '/app/src/services']);
+    expect(h.fs.mkdirs).toEqual(['/app/src', '/app/src/services']);
   });
 
   describe('--dry-run', () => {
@@ -436,14 +489,14 @@ describe('runGenerateCommand', () => {
         seenUrl = url;
         return Promise.resolve({ schematic: () => [{ path: 'x.txt', contents: 'x' }] });
       };
-      const h = harness();
+      const h = harness({ '/app/proj/deno.json': '{}' });
       expect(await h.run(['custom', 'probe', 'thing', '--dir', 'proj'], load)).toBe(0);
       expect(seenUrl).toBe('file:///app/proj/.setu-ts/schematics/probe.ts');
     });
   });
 
   it('returns 1 and reports the cause when the write fails', async () => {
-    const fs = createFakeFs();
+    const fs = createFakeFs({ '/app/deno.json': '{}' });
     const err = createRecorder();
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
       fs: { ...fs, writeFile: () => Promise.reject(new Error('read-only fs')) },
@@ -454,6 +507,27 @@ describe('runGenerateCommand', () => {
     });
     expect(code).toBe(1);
     expect(err.text()).toContain('Failed to write: read-only fs');
+  });
+
+  it('refuses with exit 1 and writes nothing when a runtime marker is unreadable', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}', '/app/bun.lock': '' });
+    const err = createRecorder();
+    const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
+      fs: {
+        ...fs,
+        readFile: (path: string) =>
+          path === '/app/bun.lock'
+            ? Promise.reject(new Error('EIO: i/o error'))
+            : fs.readFile(path),
+      },
+      cwd: '/app',
+      now: () => 0,
+      log: () => {},
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('Cannot read /app/bun.lock: EIO');
+    expect(fs.writes).toEqual([]);
   });
 
   describe('--runtime validation', () => {
@@ -549,7 +623,7 @@ describe('runGenerateCommand', () => {
   });
 
   it('reports a non-Error write failure', async () => {
-    const fs = createFakeFs();
+    const fs = createFakeFs({ '/app/deno.json': '{}' });
     const err = createRecorder();
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
       fs: { ...fs, writeFile: () => Promise.reject('EROFS') },
@@ -722,5 +796,63 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     expect(code).toBe(0);
     expect(h.fs.read('/app/src/controllers/index.ts')).toContain('registerAdminRoutes');
     expect(h.err.lines.join('\n')).toContain('Adopted src/controllers/admin.routes.ts');
+  });
+
+  it('reports no adoption into a barrel this command does not write', async () => {
+    // `g plugin` writes only the plugins barrel. The admin module is a controllers
+    // candidate, so that barrel is not rewritten and nothing was adopted — saying
+    // otherwise names a barrel that does not change, on every unrelated generate.
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST('kernel'),
+      '/app/setu.config.ts': 'export function createApp() {}\n',
+      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    });
+
+    expect(await h.run(['plugin', 'audit'])).toBe(0);
+    expect(h.fs.has('/app/src/controllers/index.ts')).toBe(false);
+    expect(h.err.lines.join('\n')).not.toContain('Adopted');
+  });
+
+  it('reports no adoption when a custom schematic writes the barrel path', async () => {
+    // PR #416 review: a custom schematic may write `src/controllers/index.ts` with
+    // contents that register nothing, so a matching path cannot imply adoption.
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST('kernel'),
+      '/app/setu.config.ts': 'export function createApp() {}\n',
+      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    });
+    const load = () =>
+      Promise.resolve({
+        schematic: (): readonly GeneratedFile[] => [
+          { path: 'src/controllers/index.ts', contents: 'export {};\n', managed: true },
+        ],
+      });
+
+    expect(await h.run(['custom', 'barrel', 'thing'], load)).toBe(0);
+    expect(h.fs.read('/app/src/controllers/index.ts')).toBe('export {};\n');
+    expect(h.err.lines.join('\n')).not.toContain('Adopted');
+  });
+
+  it('adopts nothing when the generate is refused or only a dry run', async () => {
+    const seed = {
+      '/app/deno.json': DENO_MANIFEST('kernel'),
+      '/app/setu.config.ts': 'export function createApp() {}\n',
+      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    };
+    // Refused: the planned route module already exists, so nothing is written.
+    const refused = harness({
+      ...seed,
+      '/app/src/controllers/report.routes.ts': 'export function registerReportRoutes(): void {}\n',
+    });
+    expect(await refused.run(['route', 'report'])).toBe(1);
+    expect(refused.err.lines.join('\n')).not.toContain('Adopted');
+
+    const dry = harness(seed);
+    expect(await dry.run(['route', 'report', '--dry-run'])).toBe(0);
+    expect(dry.err.lines.join('\n')).not.toContain('Adopted ');
+    expect(dry.err.lines.join('\n')).toContain(
+      'Would adopt src/controllers/admin.routes.ts into src/controllers/index.ts',
+    );
+    expect(dry.fs.has('/app/src/controllers/index.ts')).toBe(false);
   });
 });

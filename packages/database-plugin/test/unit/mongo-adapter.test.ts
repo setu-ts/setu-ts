@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { serializeError } from '@setu-ts/common';
 import { MongoAdapter, parseDatabaseFromUrl } from '../../src/adapters/mongo/mongo-adapter.ts';
 import type { MongoAdapterOptions } from '../../src/interfaces/index.ts';
@@ -335,4 +334,48 @@ describe('MongoAdapter — concurrent connect()', () => {
     await adapter.connect();
     expect(adapter.isReady()).toBe(true);
   });
+});
+
+it('pings the resolved database and reports outages and disconnect as unhealthy', async () => {
+  const client = new FakeMongoClient();
+  const database = client.db('health');
+  let fail = false;
+  let calls = 0;
+  Object.assign(database, {
+    command(query: unknown) {
+      expect(this).toBe(database);
+      expect(query).toEqual({ ping: 1 });
+      calls++;
+      return fail ? Promise.reject(new Error('offline')) : Promise.resolve({ ok: 1 });
+    },
+  });
+  const adapter = new MongoAdapter({ client, database: 'health' });
+  await adapter.connect();
+  expect(await adapter.isHealthy!()).toBe(true);
+  fail = true;
+  expect(await adapter.isHealthy!()).toBe(false);
+  await adapter.disconnect();
+  expect(await adapter.isHealthy!()).toBe(false);
+  expect(calls).toBe(2);
+});
+
+it('allows a minimal connected facade whose database lookup refuses a health probe', async () => {
+  const client = new FakeMongoClient();
+  client.db = () => {
+    throw new Error('no database facade');
+  };
+  const adapter = new MongoAdapter({ client, database: 'health' });
+  await adapter.connect();
+  expect(adapter.isReady()).toBe(true);
+  expect(adapter.isHealthy).toBeUndefined();
+  await adapter.disconnect();
+});
+
+it('retains a scalar transaction refusal as the cause', async () => {
+  const session = new FakeSession();
+  session.startTransaction = () => Promise.reject('standalone');
+  const adapter = new MongoAdapter({ client: new FakeSessionClient(session), database: 'db' });
+  await adapter.connect();
+  await expect(adapter.beginTransaction()).rejects.toMatchObject({ cause: 'standalone' });
+  await adapter.disconnect();
 });

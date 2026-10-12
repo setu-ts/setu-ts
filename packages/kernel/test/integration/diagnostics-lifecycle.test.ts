@@ -1,6 +1,7 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
+import { CAPABILITIES } from '@setu-ts/common';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createApplication } from '../../src/application/application.ts';
 import { runtimePlugin } from '../fixtures/runtime-plugin.ts';
 
@@ -240,4 +241,48 @@ describe('diagnostics lifecycle integration', () => {
     await expect(app.start()).rejects.toThrow();
     expect(app.diagnostics!.snapshot().state).toBe('failed');
   });
+});
+
+it('preserves a registration failure after initializing the diagnostics runtime', async () => {
+  const error = new Error('register refused');
+  const app = createApplication({
+    diagnostics: {},
+    plugins: [runtimePlugin(), {
+      name: 'refuses-register',
+      version: '1.0.0',
+      register() {
+        throw error;
+      },
+    }],
+  });
+  await expect(app.start()).rejects.toBe(error);
+  expect(app.diagnostics!.snapshot().failureCode).toBe('startup-failed');
+});
+
+it('observes successful and refused HTTP listen operations without changing their outcome', async () => {
+  for (const fail of [false, true]) {
+    const fake = createFakeRuntime();
+    const error = new Error('listen refused');
+    if (fail) fake.adapter.listen = () => Promise.reject(error);
+    const app = createApplication({
+      diagnostics: {},
+      plugins: [{
+        name: 'server',
+        version: '1.0.0',
+        provides: [CAPABILITIES.RUNTIME, CAPABILITIES.HTTP_ADAPTER],
+        register(ctx) {
+          ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
+          ctx.services.register(CAPABILITIES.HTTP_ADAPTER, fake.adapter);
+        },
+      }],
+    });
+    if (fail) {
+      await expect(app.start({ port: 3333 })).rejects.toBe(error);
+      expect(app.diagnostics!.snapshot().failureCode).toBe('startup-failed');
+    } else {
+      await app.start({ port: 3333 });
+      expect(app.diagnostics!.snapshot().state).toBe('running');
+      await app.stop();
+    }
+  }
 });

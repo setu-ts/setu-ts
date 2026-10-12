@@ -76,7 +76,7 @@ with third-party clients, which is the part that cannot move in-repo.
 ## Relationship to the gates
 
 The app is not a workspace member, so `deno task check`, `deno task test`, `test:coverage`,
-`publish:check`, and `release:verify` do not see it. `deno fmt` and `deno lint` do, and it is kept
-clean under both. The trade-off is deliberate and worth stating plainly: **the interop suite is not
-run by CI**, so a framework change can break it without turning anything red. Run
+`release:publish --dry-run`, and `release:verify` do not see it. `deno fmt` and `deno lint` do, and
+it is kept clean under both. The trade-off is deliberate and worth stating plainly: **the interop
+suite is not run by CI**, so a framework change can break it without turning anything red. Run
 `deno task interop` by hand when changing the GraphQL transports.

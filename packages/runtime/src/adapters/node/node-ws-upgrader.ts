@@ -1,7 +1,7 @@
 /**
  * Node WebSocket upgrade — completes an RFC 6455 handshake on the raw
  * `upgrade` event of the `node:http` server that `@hono/node-server`'s
- * `serve()` returns, using `npm:ws`.
+ * `serve()` returns, using `ws`.
  *
  * **Why not `@hono/node-ws`, and why not node-server's built-in `websocket`
  * option.** Both drive the handshake through Hono's request context: the former
@@ -166,7 +166,7 @@ export function adaptWsModule(module: unknown): WsModuleLike {
 export async function loadWsModule(): Promise<WsModuleLike> {
   let module: unknown;
   try {
-    module = await import('npm:ws@^8.18.0');
+    module = await import('ws');
   } catch (cause) {
     throw new Error(
       'WebSocket support on Node requires the "ws" package. Install it with ' +

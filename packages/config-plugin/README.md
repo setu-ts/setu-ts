@@ -6,7 +6,8 @@ structurally compatible schema validation.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/config-plugin
+npm install @setu-ts/config-plugin
+# Deno: deno add npm:@setu-ts/config-plugin
 ```
 
 ## Quick Start
@@ -142,7 +143,7 @@ the whole flat snapshot, while the former receives only its declared, prefix-str
 
 ## Configuration Provenance
 
-`diagnostics` is the explicit opt-in (0.8.0) to value-free provenance for the approved keys only:
+`diagnostics` is the explicit opt-in to value-free provenance for the approved keys only:
 
 ```typescript
 app.register(ConfigPlugin({

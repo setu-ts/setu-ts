@@ -10,6 +10,445 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## 0.9.0
+
+### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`
+
+From 0.9.0 the packages are published to npm under their own names (`@setu-ts/kernel`, …), and the
+CLI is a Node program. What an existing project changes depends on its target:
+
+<!-- version:history -->
+
+- **Node, Bun or Workers project.** Replace each `npm:@jsr/setu-ts__<pkg>@^0.8.0` dependency with
+  `^0.9.0` under the key it already has (`"@setu-ts/kernel": "^0.9.0"`), delete the
+  `@jsr:registry=…` line from `.npmrc` (or the file, if that was its only line), and reinstall.
+- **Deno project.** Replace each `jsr:@setu-ts/<pkg>@^0.8.0` import with
+  `npm:@setu-ts/<pkg>@^0.9.0`, add `"nodeModulesDir": "auto"` to `deno.json`, and run
+  `deno install`. The CLI now imports `setu.config.ts` from Node to find plugin commands, so it
+  reads the project's `node_modules`; until `deno install` has created it, `setu <command>` refuses
+  and says so.
+- **A project you are adopting into a workspace.** `setu adopt` rewrites both pre-0.9 forms onto npm
+  as it moves the project, and reports each pin it changed.
+
+Scaffolding without `--runtime` now produces a Node project; pass `--runtime deno` where a script
+relied on the old default. Install the CLI from npm: `npx @setu-ts/cli …`, `npm create @setu-ts`, or
+`npm install --global @setu-ts/cli`.
+
+Code that embeds the CLI through `@setu-ts/cli/main`: `MainProcess.prompt` now returns
+`Promise<string | null>` and takes the run's interrupt signal as a second argument, and
+`denoProcess` is replaced by `nodeProcess`.
+
+### `RedactionPolicy.fields` values may now be a `FieldRedaction`
+
+No action is required for a policy that supplies classification strings — every existing policy
+behaves identically. Only code that READS a policy's `fields` values back as a `DataClassification`
+is affected: the member is now `DataClassification | FieldRedaction`, so narrow with
+`typeof value === 'string'` before using the value as a classification. No released framework code
+path reads a policy back, so this is a note rather than a required migration.
+
+### Set `maxWorkers` to size worker pools across task modules
+
+WorkerPoolPlugin now caps the sum of worker slots across modules. The default is the largest of
+available parallelism, defaultPoolSize and the sum of explicitly configured pool sizes. Applications
+with several modules using fallback sizes share that budget; tasks may wait or cause idle workers to
+retire. Set `maxWorkers` for your container's memory budget, or pass `maxWorkers: Infinity` to
+restore the previous unbounded sum. Invalid explicit bounds throw `RangeError` at construction. Task
+timeouts include time waiting for budget. `/health` now reports `budget: { maxWorkers, workers }`
+(`null` for the unbounded limit).
+
+A worker that does not signal ready within `startupTimeoutMs` (default 10 s, applied even with
+`taskTimeoutMs: 0`) is terminated, its slot returns to the budget, and the oldest waiting task for
+that module rejects with `WorkerTaskError` (`remoteName: 'WorkerStartupTimeout'`). When a queued
+task expires while another module has work and no worker, the expiring module yields a starting
+worker to it, so a module that never becomes ready cannot starve the others under steady demand.
+Callbacks from removed slots are ignored. Termination throws/rejections are contained; shutdown
+waits at most 1,000 ms per termination, including already-retired slots. This bounds waiting, not
+physical thread exit: a failing host can leave a worker alive. Module metadata remains retained for
+the service lifetime. `NaN` or `Infinity` legacy default/pool sizes contribute zero to the derived
+budget; their per-pool behavior remains unchanged, while independently valid configured modules
+remain usable.
+
+With `taskTimeoutMs: 0` (or a per-call `run()` option of `timeoutMs: 0`) under a finite
+`maxWorkers`, a task that never settles holds its slot until restart and can starve other modules;
+keep a task timeout on modules that share the budget, or pass `maxWorkers: Infinity`. `register()`
+logs a warning when the plugin-wide or a per-pool `taskTimeoutMs` is `0`; a per-call `timeoutMs: 0`
+is not visible at registration and gets no warning. On Deno a timed-out CPU-bound task keeps running
+after its slot is released, and may keep writing to a `SharedArrayBuffer` after its promise
+rejected: do not reuse such a buffer.
+
+`taskTimeoutMs` (plugin-wide and per pool) and the per-call `timeoutMs` are now validated: each must
+be `0` or a positive integer no greater than 2147483647. `NaN` (what `Number()` returns for an unset
+environment variable), negative, fractional and larger values used to be accepted and either
+disabled the timeout or fired it after about 1 ms; they now throw `RangeError` at construction, or
+reject that `run()` call. Parse configuration explicitly and pass `0` if you mean "no timeout".
+
+The worker-pool example starts on 127.0.0.1 with scoped Deno permissions. Remote health exposure
+requires an explicit application deployment decision.
+
+### Pass `autoRegister: false` to keep a container closed
+
+`DiPlugin()` now defaults `autoRegister` to `true`, so a token the container does not hold resolves
+from the kernel's service registry. Nothing changes for a project that already passed
+`autoRegister: true`. A project that relied on the old default to refuse framework capabilities
+passes `DiPlugin({ autoRegister: false })`.
+
+### Handle `409` for a duplicate key, where it used to be `500`
+
+A write that duplicates a primary key or a unique index now rejects with `DuplicateKeyError` from
+`@setu-ts/common` and answers `409 Conflict`. Before, every backend answered a masked `500`. Nothing
+in your code has to change for the new status to be correct, but a test or a client matching `500`
+for a duplicate stops matching. `instanceof DuplicateKeyError` replaces matching driver codes or
+message text. Do not retry it: unlike `SerializationConflictError`, the same write fails the same
+way.
+
+### Make RabbitMQ handlers idempotent and configure `consumerRetry`
+
+Durable consumer groups now retry handler failures with five total attempts and delays
+`[5000, 30000, 120000, 600000]` ms. Make handlers idempotent: retries and a crash between confirmed
+copy and original ack can repeat side effects. Deserialize and integration-event rejections
+dead-letter immediately; `consumerRetry.isRetryable` can return false for other deterministic
+failures. Set `consumerRetry: false` to retain the existing operator DLX policy.
+
+Allow the application to declare durable `Q.retry.<delay>ms` quorum queues and `Q.dead`. Extend
+vhost permissions before upgrading: the RabbitMQ user needs configure permission on `Q.dead` and
+`Q.retry.<delay>ms`, read permission on `Q.retry.<delay>ms`, and write permission on the default
+exchange, `amq.default`, which carries every retry and dead-letter copy (measured on RabbitMQ 4:
+without them `subscribe()` fails with `403 ACCESS_REFUSED` on the first helper declaration, and a
+copy published without `amq.default` write closes the channel). Changing delays is safe; changing
+`deadLetterMaxLength` (default 10000) requires draining and deleting `Q.dead` before restart,
+because RabbitMQ rejects changed queue arguments. Inspect `x-setu-attempts`, `x-setu-topic` and the
+bounded `x-setu-error` in dead letters, and apply access/retention policy for their data. Default
+prefetch is now 32 per consumer; configure `prefetch` for handler concurrency and latency. Injected
+channels should implement `prefetch`. Private exclusive queues and RPC reply inboxes retain discard
+behavior. A failed copy leaves the original unacked; the broker then closes that channel, which
+returns it to `Q`, and reconnects, re-declaring the retry and dead queues before consuming again.
+
+`ConsumerRetryOptions` now names the shared RabbitMQ/Redis retry object type; Redis behavior and its
+existing option shape are unchanged.
+
+Group names ending in `.dead` or `.retry.<digits>ms` are reserved when retries are enabled, and
+generated helper names must fit 255 UTF-8 bytes. Rename conflicting groups, or set
+`consumerRetry: false` to retain existing names. Migrate queues already occupying helper names in
+the same vhost before enabling retries. Invalid names fail before declaration, so they cannot close
+the shared consumer channel with a 406. Injected recovery channels must support publisher confirms,
+`on`/`off` return listeners and `close()`; otherwise `subscribe()` on a retrying group now rejects,
+so supply `createConfirmChannel()` or set `consumerRetry: false`. Mandatory retry/dead publishes
+reject unroutable returns and leave the original unacked; `x-setu-disposition-id` is framework-owned
+and replaced on each copy.
+
+### Update `IRedisStreamsClient` facades and Redis consumer handlers
+
+Injected messaging Redis facades must implement the required `xpending`, `xclaim`, and `xinfo`
+methods using ioredis 5 RESP2 reply shapes, and accept `xgroup('DELCONSUMER', ...)`. A facade
+missing a method now fails connection. Redis 6.2 or newer is required for `XPENDING IDLE`; its
+trimmed-entry `XCLAIM` reply contains a null slot, which the facade must preserve.
+
+Failed messages now redeliver, including pending entries from before an app restart. Make handlers
+idempotent. Set `consumerRetry.delaysMs[0]` above the longest handler runtime to prevent another
+replica claiming a slow handler's entry. Defaults are five total attempts, delays
+`[30000, 60000, 300000, 600000]`, and a 5000 ms reclaim interval. `consumerRetry.isRetryable` can
+return `false` for immediate dead-lettering; deserialize and integration-event rejections
+dead-letter immediately regardless. There is no `consumerRetry: false` option.
+
+Inspect failed messages in `<topic>.dead.<group>`; each carries its original fields,
+`x-setu-source-id`, and `x-setu-deliveries`. Configure `deadLetterMaxLen` (default 10000,
+approximate trimming) and suitable Redis access/retention policy for payload data.
+`consumerIdleSweepMs` defaults to one hour. Clean consumers are removed on stop; consumers with
+pending entries remain until their work is recovered.
+
+### Set `referrerPolicy` for native full-stack forms (M101g)
+
+Existing full-stack starter compositions should configure
+`httpSecurity: { headers: { referrerPolicy: 'same-origin' } }` in `setu.config.ts`. The default
+`no-referrer` policy can make Chromium send `Origin: null` on a native form post, which React Router
+refuses. The full-stack scaffold now sets `same-origin`: cross-origin referrers remain suppressed,
+and session CSRF and React Router origin checks remain enabled.
+
+### Enable development policies with `setu devtool enable` (M101g)
+
+Run `setu devtool enable` on an eligible Deno project to generate the CLI-managed
+`src/devtool/diagnostics.ts` policy and wire recognized plugin calls. Manual configurations receive
+guidance. Source options activate only when `createApp` receives its devtool argument. The module
+contains approved names, never environment values, and is refreshed by `setu add`; keep
+application-specific policies in application-owned configuration. Empty approval maps approve no
+observations.
+
+### Return `IKernelApplication` from scaffold factories (M101g, V8-12)
+
+In `setu.config.ts`, replace `createApp`'s `IApplication` return annotation with
+`IKernelApplication`, imported as a type from `@setu-ts/kernel`. For an async starter factory, use
+`Promise<IKernelApplication>`. Remove the old common type import if nothing else reads it. The value
+already has this type; the old annotation hid `inject`, `unregister`, and `hasPlugin` from
+`createTestApp({ app: await createApp() })`. Workers' `boot` and `ensureBooted` helpers follow the
+same type change in new scaffolds.
+
+`setu add testing` now accepts `@setu-ts/testing`, putting it in Deno's import map or npm's
+`devDependencies`. New socket-target scaffolds include `test/app.test.ts`; an existing project can
+add the same composition-root smoke test using its runtime's test harness.
+
+### Replace links inside a project before running a writing `setu` command
+
+`setu` now refuses to write through, or `adopt` to move, a path reached through a symbolic link
+inside the project or workspace, and refuses a dangling link, with nothing written. If you link a
+file into a project on purpose (a shared `deno.json`, for example), replace the link with a copy
+before running `generate`, `add`, `devtool enable`, `workspace ports --reallocate` or `adopt`. A
+project reached through a linked parent directory needs no change.
+
+### Refresh `main.dev.ts` and production images (M101f)
+
+<!-- version:history -->
+
+Upgrade every `@setu-ts/*` pin together before `setu devtool enable`; mixed versions are refused.
+Apply the complete factory edit in the CLI README: the second parameter AND both usage spreads. The
+development entry now stops when composition is discarded. Restore an edited entry before
+`ports --reallocate`; only CLI-rendered entries are rewritten, and an unedited 0.8.0 entry counts as
+one — the next reallocation or `devtool enable` upgrades it. Workspace manifests record
+`devtoolBasePort` on first allocation, defaulting to `basePort + 1000` (capped at 65535). Standalone
+defaults probe 4919–5019; read the reported port or pass `--devtool-port`.
+
+Regenerate managed deployment files with `generate app`, `devtool enable`, or `ports --reallocate`
+and rebuild production images to exclude the development entry and connector cache. Replace aliases
+containing Unicode format characters (bidi controls, zero-width format characters) or the line and
+paragraph separators U+2028/U+2029 with printable ones; these now fail at construction and wire
+validation. Code matching the old "contains a control character" refusal text should match "contains
+a control, format or line-separator character".
+
+The devtool extension release must re-pin the framework to this milestone merge commit and retain
+previous recipe renderings in its catalog. Until that cross-repository update, an older launcher may
+refuse newly generated entries with `PREPARATION_FAILED`.
+
+### Update programmatic CLI `Prompter` implementations
+
+`Prompter.select` now returns `PromptSelection`. Replace a string result with
+`{ kind: 'answer', value }`, inability to prompt with `{ kind: 'unavailable' }`, and user
+cancellation with `{ kind: 'cancelled' }`. Cancellation stops scaffolding and exits `130`. This is a
+breaking change for programmatic `Prompter` implementors and ships in `0.9.0`.
+
+The four M101a entries (`acquireTimeoutMs`, `SecretProviderUnavailableError`, the `database` and
+`queue` health data, `commandTimeoutMs`) do not fail to compile; each is a default that now applies
+to a running application. The three M102 mail entries can. The three M101b messaging entries do not
+fail to compile; each changes what a running broker names or refuses. The two M101c entries do not
+fail to compile: one changes a documented recipe that otherwise refuses an IdP posting
+`Origin: null`, the other makes the memory adapter refuse writes it used to accept. The RabbitMQ
+durability entry does not fail to compile; it makes `publish()` and `add()` wait for the broker.
+
+### Handle a rejecting RabbitMQ publish (`publishTimeoutMs`)
+
+With `broker: 'rabbitmq'` (`messaging-plugin`) or `adapter: 'rabbitmq'` (`queue-plugin`),
+`publish()` and `queue.add()` now resolve only once RabbitMQ has accepted the message, and reject
+when it refuses it, when the channel closes first, or when `publishTimeoutMs` (default `15000`)
+expires. Before, they resolved before RabbitMQ had stored anything and never rejected — which is
+also why a broker restart could lose messages without any caller noticing. Code that published
+without handling a rejection should now handle it. A rejection is not proof the message was dropped:
+retrying can deliver it twice, so a retried message needs an idempotent consumer.
+
+Messages are also published persistent now, so they survive a broker restart. To keep the old
+transient publishes for deliberately ephemeral traffic, pass `persistentMessages: false`. An
+injected AMQP connection without `createConfirmChannel()` still works, unconfirmed, and logs one
+warning; a real amqplib connection always has the method.
+
+### Give memory-adapter rows distinct keys, and do not change a key by `update` (M101c)
+
+The memory adapter now refuses a `create` whose caller-supplied primary key is already stored, and
+an `update` whose payload changes a primary-key value — every real backend already refuses both. A
+test that inserted the same key twice, or renamed a row's id through `update`, now rejects: give
+each row its own key (or let the adapter generate one), and delete and recreate a row to change its
+id.
+
+### Change the SAML CSRF recipe to use `CsrfOptions.exclude` instead of trusting the IdP origin (M101c)
+
+If you run a SAML provider behind both CSRF defences, the documented recipe now exempts the ACS path
+on **both** plugins rather than trusting the IdP's origin on `http-security-plugin`:
+
+```diff
+  SessionPlugin({
+    secret: '…',
+    csrf: { exclude: ['/auth/corp/acs'] },
+  });
+- HttpSecurityPlugin({ csrf: { trustedOrigins: ['https://sts.example.com'] } });
++ HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
+```
+
+Why the change: an IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) makes the browser
+post the ACS with `Origin: null`. The old recipe's `trustedOrigins` admits only a REAL origin, so
+under `Origin: null` the ACS answers `403` and sign-in is broken. The one allowlist answer —
+`trustedOrigins: ['null']` — is worse than the exemption, because it admits every opaque-origin
+`POST` on every route. `exclude` is path-scoped: it exempts the ACS, whose signed assertion,
+single-use request and binding cookie are the defences the CSRF check would otherwise add. Nothing
+to do if you do not run both CSRF defences in front of a SAML ACS, or if your IdP sends a real
+origin and you keep `trustedOrigins` for it.
+
+### Regenerate clients whose OpenAPI document declares `3xx` responses
+
+Generated SDK clients keep an error arm for every declared `3xx`, including the statuses `fetch`
+follows automatically (`301`, `302`, `303`, `307`, and `308`), since an unfollowed one — no
+`Location` — still throws `HttpClientError`. Regenerate affected clients; any operation declaring an
+auto-follow redirect or the OpenAPI `3XX` range now returns `unknown`, representing the follow
+target body the document does not name. This also applies when the operation declares a `2xx`
+response alongside the redirect.
+
+### Keep `acquireTimeoutMs` below each scheduled job's interval
+
+Every distributed-lock acquire is now bounded by `distributedLock.acquireTimeoutMs`, default `5000`.
+An acquire still unsettled at the bound skips that fire. If a job runs more often than every five
+seconds, set `acquireTimeoutMs` below its interval. If you set `commandTimeoutMs`, it must not
+exceed a non-zero `acquireTimeoutMs`, or `SchedulerPlugin(...)` throws `RangeError`. `0` restores
+the old unbounded wait, which leaves the schedule parked while the lock backend is unreachable.
+
+### Catch `SecretProviderUnavailableError` where you handled a Vault error
+
+A Vault request that fails on the network or times out (default `requestTimeoutMs: 5000`) now
+rejects with `SecretProviderUnavailableError`, answered `503` through `errorHandler`, instead of a
+plain `Error` answered as a masked `500`. Catch it by identity if you handled the old error, and
+raise `requestTimeoutMs` if a slow Vault legitimately takes longer.
+
+### Review alerts keyed on the `database` and `queue` health data
+
+A Drizzle pool connection timeout now reports `degraded` instead of `down`, and, with `poolStats`
+supplied, a saturated pool reports `up` with `reachable: 'unknown'` while its queries keep
+completing through the adapter (a full pool with no completed query in 10 seconds reports
+`degraded`; queries run on your own Drizzle instance are not counted, while once the typed
+`getDrizzleDatabase`/`getDrizzleTransaction` seam is used progress is unobservable and saturation
+reads `up`). An alert that paged on `down` for pool exhaustion should watch `degraded` or
+`data.capacity` instead. Separately, a queue depth row the latest diagnostics cycle could not read
+is now absent rather than repeating the previous count; a dashboard should read `depthCoverage`
+instead of assuming every name has a row.
+
+### Raise `commandTimeoutMs` for a slow Redis network
+
+Cache and queue Redis commands are now bounded at `15000` ms through `commandTimeoutMs`. An injected
+client is unaffected. Set `commandTimeoutMs` higher, or `0` to disable, if a command legitimately
+takes longer.
+
+### Await `TemplateEngine.render` if you call the mail template engine directly
+
+`@setu-ts/mail-plugin`'s exported `TemplateEngine.render(name, data)` now returns a
+`Promise<RenderedTemplate>` (M102), so a direct caller adds an `await`; unknown-template and
+missing-placeholder refusals arrive as rejections rather than synchronous throws. Nothing to do if
+you only ever reached templates through `IMailer.sendTemplate`, which already returned a promise.
+The constructor's new second parameter (a view engine) is optional and only needed for the new
+component-template arm, which `MailPlugin` supplies for you.
+
+### Extend `MailStringTemplate`, not `MailTemplate`
+
+`MailTemplate` is now the union `MailStringTemplate | MailComponentTemplate` (M102). TypeScript
+refuses to extend or implement a union, so `interface X extends MailTemplate` (`TS2312`) and
+`class Y implements MailTemplate` (`TS2422`) stop compiling. Name `MailStringTemplate` instead — it
+carries the released `{ html?, text? }` shape. Anything that only holds or assigns a `MailTemplate`
+value needs no change.
+
+### Connect a `LogProvider` before sending through it directly
+
+`@setu-ts/mail-plugin`'s `LogProvider` and `SendGridProvider` now reject a send while not connected,
+matching the SMTP and SES providers. Through `MailPlugin` nothing changes, because the plugin
+connects the provider during `register()`. A test that constructs `new LogProvider()` and sends on
+it without connecting must add `await provider.connect()` first.
+
+### Drain the old shared `messaging-consumers` Pub/Sub subscription
+
+A Pub/Sub subscription with no `queue` is now named per topic, `messaging-consumers.<topic>`
+(M101b). On upgrade every topic gets a new subscription, and an existing `messaging-consumers`
+subscription keeps any backlog with no consumer. Pass
+`SubscribeOptions.queue: 'messaging-consumers'` on the ONE topic that owns it until its backlog is
+drained, then delete it. A subscription whose name is already bound to another topic now rejects
+`subscribe()` with `PubSubSubscriptionBoundElsewhereError` instead of being attached to.
+
+### Run NATS 2.10 or later for `setu.queue` consumer metadata
+
+A NATS consumer now records its raw queue as `setu.queue` metadata (M101b), which the server accepts
+from 2.10. On an older server every `subscribe()` rejects. If you use request-reply, the JetStream
+stream must also cover `rr.req.<topic>` and `rr.inbox.>`.
+
+### Pre-create Kafka topics, or expect `KafkaTopicUnavailableError`
+
+A subscription to an unknown Kafka topic now retries for about 9 s (`retry`), then rejects with
+`KafkaTopicUnavailableError` (M101b) — so on a broker without `auto.create.topics.enable`, `start()`
+for a declared subscription to a missing topic fails after that budget rather than at once. Create
+the topic first, or set `retry: { retries: 0 }` to fail immediately.
+
+### Run Node.js 22 or later (`engines.node >=22`)
+
+The documented floor was Node 18; five packages use `Promise.withResolvers`, which Node 22 was the
+first to ship. Upgrade runtimes and production images to Node 22 or newer before installing `0.9.0`
+(CI verifies on Node 24).
+
+### Test a missing header against `undefined`, not `null`
+
+`@Params(Header('X-Name'))` now passes `undefined` for an absent header, like a missing cookie or
+query parameter. A handler testing `=== null` must test `=== undefined`.
+
+### Match bare package names in lazy-import errors and `GrpcRuntimeLoadError`
+
+Lazy-import failures now name the bare package (`ioredis`, `@connectrpc/connect`,
+`@node-saml/node-saml`) instead of an `npm:…` specifier, including `GrpcRuntimeLoadError.specifier`
+and the telemetry loaders' reported `specifier`. Code matching the old strings must match the bare
+name.
+
+### Handle a rejecting `NatsBroker` publish
+
+`NatsBroker.publish()` now resolves only once JetStream has stored the message, and rejects with an
+error naming the subject when no stream captures it. A publish that used to resolve silently now
+rejects: await it, handle the rejection, and make sure a stream captures every subject you publish
+to.
+
+### Keep `RabbitMqBroker` names within 255 bytes
+
+An exchange, queue, topic, message id or header name over 255 bytes is now refused (a processor at
+registration, a publish before it is sent) instead of jamming the channel. Shorten any that exceed
+the limit, counting the suffixes the queue adapter appends to a job name.
+
+### Set a `content-type` on streamed responses that clients read as text
+
+On Node, a `ctx.response.stream(...)` body with no `content-type` no longer arrives labelled
+`text/plain; charset=UTF-8`, matching Deno, Bun and Workers. Set the content type explicitly where a
+client relied on that default, and send `X-Content-Type-Options: nosniff` for untrusted bytes.
+
+### Order a global `cacheMiddleware` after the locale and tenant middleware
+
+`cache-plugin` and `cloudflare-plugin`'s `cacheApiMiddleware` now key on the resolved locale and
+tenant, read when the cache middleware runs. A GLOBAL cache middleware must therefore run after the
+locale (and tenancy) middleware — give it a higher priority number — and a per-request locale
+override must happen before the lookup. Existing cached entries simply miss once.
+
+### Rename Vault secrets that relied on a literal `%`, `?` or `#`
+
+Each `/`-separated segment of a Vault secret name is now percent-encoded, and a name with an empty,
+`.` or `..` segment is refused. A name that relied on a literal `%`, `?` or `#` reaching Vault
+unencoded now reads a different path; rename those secrets. `connect()` also refuses an address that
+is not an absolute `http:`/`https:` URL.
+
+### Set `retry.maxRetryAfterMs` if a server's `Retry-After` may exceed the default cap
+
+Generated and hand-built SDK clients now cap how long an honoured `Retry-After` may make them wait,
+and surface the original error at once when the hint exceeds the cap. Raise `retry.maxRetryAfterMs`
+where longer server-directed waits are acceptable. Client construction also refuses non-finite or
+invalid retry counts and delays.
+
+### Import `hono`, not `@hono/hono`, in views and templates
+
+`@setu-ts/view-plugin` now depends on the npm package `hono`; `@hono/hono` is the JSR name and does
+not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hono/html` and
+`hono/jsx`, set `jsxImportSource` to `hono/jsx`, and install `hono` as a direct dependency
+(`npm install hono`, or `deno add npm:hono` on Deno), since your own compiler resolves those paths.
+
+### Repair projects scaffolded by an earlier `setu new`
+
+Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
+copy the fix from a fresh scaffold:
+
+- **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
+  `setu new --runtime
+  cloudflare-workers` project does (the old pair fails `npm install` with
+  `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
+  new entry carries, so a bindings-only deploy is picked up.
+- **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
+  without it the first `start` fails with "Failed to load React Router server build".
+- **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which
+  answers `501` unless `AuthPlugin` is registered with an `rbac` option. A guard generated earlier
+  is unchanged.
+
+<!-- version:history -->
+
 ## 0.8.0
 
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at
@@ -200,7 +639,9 @@ unchanged — so any value reaching it is written to the page verbatim. With a u
 emit `&lt;script&gt;`.
 
 Nothing in the plugin changed and no version is affected — the engine always behaved this way. What
-changed is the documentation. If you copied that shape, switch to either escaping form:
+changed is the documentation. If you copied that shape, switch to either escaping form. The
+`@hono/hono` import below is the JSR name earlier releases used; on npm write `hono/html` instead
+(see "Import `hono`, not `@hono/hono`" under 0.9.0):
 
 ```tsx
 // JSX — what `ViewPlugin()` selects with no options.

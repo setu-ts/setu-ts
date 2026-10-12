@@ -443,6 +443,11 @@ import { currentUserContext, sessionContext } from '~/lib/context-keys.server.ts
  *
  * The \`.server.ts\` suffix is safe here: React Router strips the \`middleware\`
  * export — and the imports only it uses — from the browser bundle.
+ *
+ * A refusal from this layer is rendered by React Router's route error boundary,
+ * not by the kernel error responder. Throw \`redirect()\` for anonymous document
+ * requests or \`data(..., { status: 403 })\` for a forbidden page; API callers
+ * that require Problem Details should call a kernel API route.
  */
 export const requireUser: MiddlewareFunction<Response> = ({ context }, next) => {
   const email = context.get(sessionContext)?.get<string>('userEmail');
@@ -780,4 +785,10 @@ Use kernel middleware for cross-cutting concerns such as headers, auditing and r
 route middleware for page-level rules: \`app/middleware/require-user.server.ts\` redirects a visitor
 who is not signed in to \`/login\`, and puts the signed-in user on the context for the loader.
 \`/products\` attaches it; export it from a layout module to guard every route in that group.
+
+## Workspace libraries
+
+Import workspace libraries from \`.server.ts\` modules and \`setu.config.ts\`. The SSR build leaves
+their declared package names external so the server runtime resolves them through the workspace.
+Client modules cannot import a Deno workspace library: the browser bundle has no Deno workspace.
 `;

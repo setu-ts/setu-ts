@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -397,7 +396,7 @@ describe('MessagingPlugin', () => {
     expect(memoryResult.data).toEqual({ broker: 'memory', reachable: true });
   });
 
-  it.ignore('redis-streams uses custom URL', async () => {
+  it.skip('redis-streams uses custom URL', async () => {
     // Skip this test as it requires ioredis npm package which needs env access
   });
 
@@ -793,6 +792,26 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
+  });
+
+  it('threads retry through to the kafka broker (M101b)', async () => {
+    // Observable as the subscribe-attempt count against an unknown topic: the
+    // configured `retries: 1` gives two attempts, where the default gives six.
+    const fakeClient = new FakeKafkaFactory({ unknownTopics: ['orders'] });
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'kafka',
+      client: fakeClient as unknown as IKafkaFactory,
+      retry: { retries: 1, initialRetryTime: 1 },
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+    await expect(broker.subscribe('orders', () => {})).rejects.toThrow('Kafka topic "orders"');
+    const attempts = fakeClient.consumer({ groupId: 'messaging-consumers:orders' }).calls
+      .filter((c) => c.method === 'subscribe').length;
+    expect(attempts).toBe(2);
   });
 
   it('threads replyTopic through to the kafka broker rather than storing it', async () => {

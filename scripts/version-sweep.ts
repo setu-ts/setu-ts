@@ -15,7 +15,7 @@
  *
  * The gap was measured, not assumed. Reverting one `packages/sdk/src`
  * specifier to the previous release leaves `deno check`, the full suite,
- * `publish:check` and `release:verify` **all green** — the range still
+ * `release:publish --dry-run` and `release:verify` **all green** — the range still
  * resolves, because the previous version is really on JSR. The published
  * package then depends on the release before the one being cut, which is the
  * exact failure `docs/releasing.md` warns about in prose and nothing enforced.

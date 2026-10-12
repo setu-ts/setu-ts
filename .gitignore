@@ -17,6 +17,16 @@ docs/api/
 # npm compatibility artifacts (compat test suites)
 node_modules/
 
+# The Node build output (M111a): every member's `tsc -b` writes dist/, and the
+# incremental build state sits beside it. Generated, never committed. The root
+# pnpm-lock.yaml is COMMITTED (the pack gate runs `pnpm install
+# --frozen-lockfile` against it); only per-package lockfiles, which pnpm
+# workspaces never write, would be generated here.
+dist/
+*.tsbuildinfo
+packages/*/pnpm-lock.yaml
+packages/starters/*/pnpm-lock.yaml
+
 # Environment files
 .env
 .env.*
@@ -50,6 +60,9 @@ test/fixtures/snippets/deno.lock
 # added later (e.g. .claude/settings.json), un-ignore it with a negation.
 .claude/
 
+# Local agent state (same treatment as .claude/).
+.agents/
+
 # Compat suite installs the latest PUBLISHED packages on purpose; a committed
 # lockfile would pin them and defeat the check.
 compat/package-lock.json
@@ -74,3 +87,7 @@ website/.lighthouseci/
 # VSCode workspace settings. Kept local: the MCP-discovery entry an IDE writes
 # here is a per-developer editor preference, not a project setting.
 .vscode/
+
+# Per-member Vitest reports (M111b)
+coverage-node/
+coverage-deno-lane/

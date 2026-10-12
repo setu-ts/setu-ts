@@ -1,6 +1,5 @@
 // deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { securityHeadersMiddleware } from '../../src/middleware/security-headers-middleware.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';

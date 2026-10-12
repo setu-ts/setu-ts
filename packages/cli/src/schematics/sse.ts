@@ -42,9 +42,10 @@ function renderFunctionalController(names: DerivedNames): string {
 import type { IRouterApi, IServiceRegistry, ISseService } from '@setu-ts/common';
 
 /** Registers the ${names.kebab} SSE endpoint. */
-export function ${
-    routeRegistrarSymbol(names)
-  }(router: IRouterApi, services?: IServiceRegistry): void {
+export function ${routeRegistrarSymbol(names)}(
+  router: IRouterApi,
+  services?: IServiceRegistry,
+): void {
   if (services === undefined) {
     throw new Error('registerGeneratedRoutes must provide the service registry.');
   }

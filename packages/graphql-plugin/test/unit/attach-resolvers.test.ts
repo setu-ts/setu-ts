@@ -2,8 +2,7 @@
  * Tests for attach-resolvers.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { attachResolvers } from '../../src/schema/attach-resolvers.ts';
 import { GraphqlSchemaError } from '../../src/errors/graphql-errors.ts';
 import type { GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';

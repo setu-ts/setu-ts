@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import type { FakeFs, Recorder } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
@@ -31,7 +30,12 @@ interface IHarnessOptions {
 }
 
 function harness(options: IHarnessOptions = {}): IHarness {
-  const fs = createFakeFs(options.seed ?? {});
+  const fs = createFakeFs({
+    '/work/deno.json': '{}',
+    // Installed, so a plugin command reaches its loader (see app-loader.ts).
+    '/work/node_modules/@setu-ts/kernel/package.json': '{}',
+    ...(options.seed ?? {}),
+  });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -61,6 +65,7 @@ const WORKSPACE_SEED = {
     members: [{ name: 'orders', port: 3000 }],
   }),
   '/work/deno.json': '{"workspace": ["./apps/*"]}',
+  '/work/apps/orders/.setu-member': '',
 };
 
 describe('extra-positional refusal', () => {
@@ -226,7 +231,7 @@ describe('valid arities still succeed', () => {
   it('new takes its one name', async () => {
     const h = harness();
     expect(await h.run(['new', 'app']), h.err.text()).toBe(0);
-    expect(h.fs.has('/work/app/deno.json')).toBe(true);
+    expect(h.fs.has('/work/app/package.json')).toBe(true);
   });
 
   it('generate takes the schematic word and one name', async () => {

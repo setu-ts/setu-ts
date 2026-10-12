@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../../src/args.ts';
 import { resolveNewChoices } from '../../src/commands/new-interactive.ts';
 import type { PromptChoice, Prompter } from '../../src/prompt.ts';
@@ -12,9 +11,14 @@ function scripted(answers: readonly (string | undefined)[]) {
   const questions: string[] = [];
   const queue = [...answers];
   const prompter: Prompter = {
-    select(question: string, _choices: readonly PromptChoice[]): Promise<string | undefined> {
+    select(question: string, _choices: readonly PromptChoice[]) {
       questions.push(question);
-      return Promise.resolve(queue.shift());
+      const answer = queue.shift();
+      return Promise.resolve(
+        answer === undefined
+          ? { kind: 'unavailable' as const }
+          : { kind: 'answer' as const, value: answer },
+      );
     },
   };
   return { prompter, questions };
@@ -22,8 +26,9 @@ function scripted(answers: readonly (string | undefined)[]) {
 
 async function resolve(argv: readonly string[], answers: readonly (string | undefined)[]) {
   const { prompter, questions } = scripted(answers);
-  const args = await resolveNewChoices(parseArgs(argv), prompter, () => {});
-  return { args, questions };
+  const result = await resolveNewChoices(parseArgs(argv), prompter, () => {});
+  if (result.kind === 'cancelled') throw new Error('unexpected cancellation');
+  return { args: result.args, questions };
 }
 
 /**
@@ -36,9 +41,14 @@ async function offered(argv: readonly string[], answers: readonly (string | unde
   const menus = new Map<string, readonly string[]>();
   const queue = [...answers];
   const prompter: Prompter = {
-    select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined> {
+    select(question: string, choices: readonly PromptChoice[]) {
       menus.set(question, choices.map((choice) => choice.value));
-      return Promise.resolve(queue.shift());
+      const answer = queue.shift();
+      return Promise.resolve(
+        answer === undefined
+          ? { kind: 'unavailable' as const }
+          : { kind: 'answer' as const, value: answer },
+      );
     },
   };
   await resolveNewChoices(parseArgs(argv), prompter, () => {});
@@ -48,7 +58,7 @@ async function offered(argv: readonly string[], answers: readonly (string | unde
 describe('resolveNewChoices', () => {
   it('returns the input unchanged when no prompter is supplied', async () => {
     const args = parseArgs(['svc']);
-    expect(await resolveNewChoices(args, undefined, () => {})).toBe(args);
+    expect(await resolveNewChoices(args, undefined, () => {})).toEqual({ kind: 'resolved', args });
   });
 
   it('asks runtime, template, style, broker and queue for a bare standalone scaffold', async () => {
@@ -77,12 +87,12 @@ describe('resolveNewChoices', () => {
   // it held for broker and queue and not for the very first question.
   it('never offers a runtime a workspace cannot be hosted on', async () => {
     const menus = await offered(['acme', '--workspace'], ['deno', 'http']);
-    expect(menus.get('Runtime?')).toEqual(['deno', 'node', 'bun']);
+    expect(menus.get('Runtime?')).toEqual(['node', 'deno', 'bun']);
   });
 
   it('still offers every runtime to a standalone project', async () => {
     const menus = await offered(['svc'], ['deno', 'minimal']);
-    expect(menus.get('Runtime?')).toEqual(['deno', 'node', 'bun', 'cloudflare-workers']);
+    expect(menus.get('Runtime?')).toEqual(['node', 'deno', 'bun', 'cloudflare-workers']);
   });
 
   it('asks runtime and transport only for a workspace', async () => {
@@ -221,10 +231,11 @@ describe('resolveNewChoices', () => {
     const prompter: Prompter = {
       select(question, choices) {
         seen[question] = choices;
-        return Promise.resolve('minimal');
+        return Promise.resolve({ kind: 'answer', value: 'minimal' });
       },
     };
-    const args = await resolveNewChoices(parseArgs(['svc']), prompter, () => {});
+    const result = await resolveNewChoices(parseArgs(['svc']), prompter, () => {});
+    if (result.kind === 'cancelled') throw new Error('unexpected cancellation');
     // The class-based alias is omitted: two names for one project with nothing
     // telling them apart is what the alias annotation exists to prevent.
     expect(seen['Template?']?.map((choice) => choice.value)).toEqual([
@@ -233,6 +244,48 @@ describe('resolveNewChoices', () => {
       'microservice',
       'full-stack',
     ]);
-    expect(args.flags['template']).toBeUndefined();
+    expect(result.args.flags['template']).toBeUndefined();
+  });
+
+  it('stops asking immediately when a question is cancelled', async () => {
+    const questions: string[] = [];
+    const result = await resolveNewChoices(parseArgs(['svc']), {
+      select(question) {
+        questions.push(question);
+        return Promise.resolve(
+          question === 'Template?' ? { kind: 'cancelled' } : { kind: 'answer', value: 'deno' },
+        );
+      },
+    }, () => {});
+    expect(result).toEqual({ kind: 'cancelled' });
+    expect(questions).toEqual(['Runtime?', 'Template?']);
   });
 });
+
+for (
+  const question of [
+    'Runtime?',
+    'Code style?',
+    'Message broker?',
+    'Job queue?',
+    'How should the workspace members reach each other?',
+  ]
+) {
+  it(`stops at a cancelled ${question} prompt`, async () => {
+    const asked: string[] = [];
+    const argv = question.includes('workspace') ? ['svc', '--workspace'] : ['svc'];
+    const result = await resolveNewChoices(parseArgs(argv), {
+      select(current, choices) {
+        asked.push(current);
+        return Promise.resolve(
+          current === question ? { kind: 'cancelled' as const } : {
+            kind: 'answer' as const,
+            value: current === 'Template?' ? 'microservice' : choices[0]!.value,
+          },
+        );
+      },
+    }, () => {});
+    expect(result).toEqual({ kind: 'cancelled' });
+    expect(asked.at(-1)).toBe(question);
+  });
+}

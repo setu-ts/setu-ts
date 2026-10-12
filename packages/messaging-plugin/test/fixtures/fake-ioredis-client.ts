@@ -1,290 +1,255 @@
 import type { IRedisStreamsClient } from '../../src/interfaces/index.ts';
 
-/**
- * Options for configuring the fake Redis Streams client.
- */
+/** Redis RESP2 semantics measured by .tmp/probe-redis.ts on Redis 7.4. */
 export interface FakeRedisOptions {
-  /** Whether to simulate BUSYGROUP on XGROUP CREATE. */
   simulateBusyGroup?: boolean;
-  /** Whether to reject on XADD. */
   rejectXadd?: boolean;
-  /** Whether to reject on XREADGROUP. */
   rejectXreadgroup?: boolean;
-  /**
-   * Pre-seeded messages for XREADGROUP. `fields` carries any stream fields
-   * beside `payload` — the channel the broker uses for transport headers.
-   */
+  /** Clock shared with the deterministic runtime. */
+  now?: () => number;
+  /** Redis 6.2 returns a null slot for a successfully claimed trimmed entry. */
+  trimmedClaimReply?: 'null';
   seededMessages?: Array<
     { id: string; payload: string; fields?: Readonly<Record<string, string>> }
   >;
 }
+interface Pending {
+  id: string;
+  owner: string;
+  deliveredAt: number;
+  deliveries: number;
+}
+interface Group {
+  delivered: Set<string>;
+  pending: Map<string, Pending>;
+  consumers: Map<string, { seenAt: number; activeAt: number }>;
+}
 
-/**
- * Fake ioredis client for testing RedisStreamsBroker.
- *
- * Records all method calls and simulates Redis Streams behavior.
- */
+/** Stateful fake: per-group PEL, atomic idle claims, and destructive DELCONSUMER. */
 export class FakeRedisStreamsClient implements IRedisStreamsClient {
   #options: FakeRedisOptions;
-  // Entries retain EVERY field, not just `payload`: a real Redis stream
-  // stores an arbitrary field/value list, and the broker carries transport
-  // headers in the fields beside `payload`. A fake that kept only the
-  // payload would silently drop them and make a header round-trip test
-  // pass (or fail) for reasons unrelated to the code under test.
-  #streams: Map<string, Array<{ id: string; payload: string; fields: string[] }>>;
-  #groups: Map<string, Set<string>>; // stream -> consumer groups
-  #pending: Map<string, Map<string, { groupId: string; messageId: string }>>; // stream -> groupId -> messageId -> pending
-  // Entries already handed to a group, tracked SEPARATELY from the PEL.
-  // In real Redis, `XREADGROUP ... STREAMS key >` returns only entries never
-  // delivered to that group, and `XACK` removes an entry from the PEL without
-  // making it eligible for `>` again. Conflating the two (deleting the pending
-  // entry on ack, and treating "not pending" as "deliverable") redelivers every
-  // successfully-acked message on the next poll — the opposite of the real
-  // server, and invisible until the fake could deliver at all.
-  #deliveredToGroup: Map<string, Set<string>>; // stream -> `${group}:${id}`
-  #calls: Array<{ method: string; args: unknown[] }>;
+  #streams = new Map<string, Array<[string, string[]]>>();
+  #groups = new Map<string, Map<string, Group>>();
+  #calls: Array<{ method: string; args: unknown[] }> = [];
+  #sequence = 0;
   #quitCalled = false;
   #connectCalled = false;
-
   constructor(options: FakeRedisOptions = {}) {
     this.#options = options;
-    this.#streams = new Map();
-    this.#groups = new Map();
-    this.#pending = new Map();
-    this.#deliveredToGroup = new Map();
-    this.#calls = [];
   }
-
-  /**
-   * Records a method call for inspection.
-   */
+  #now(): number {
+    return this.#options.now?.() ?? Date.now();
+  }
   #record(method: string, args: unknown[]): void {
     this.#calls.push({ method, args: [...args] });
   }
-
-  /**
-   * All recorded method calls.
-   */
   get calls(): Array<{ method: string; args: unknown[] }> {
     return [...this.#calls];
   }
-
-  /**
-   * Whether quit() has been called.
-   */
   get quitCalled(): boolean {
     return this.#quitCalled;
   }
-
-  /**
-   * Whether connect() has been called.
-   */
   get connectCalled(): boolean {
     return this.#connectCalled;
   }
-
-  /**
-   * Clear all recorded calls and state.
-   */
   reset(): void {
     this.#calls = [];
     this.#quitCalled = false;
     this.#connectCalled = false;
   }
-
-  /**
-   * Reset stream data.
-   */
   resetStreams(): void {
     this.#streams.clear();
-    this.#deliveredToGroup.clear();
     this.#groups.clear();
-    this.#pending.clear();
   }
-
+  #group(topic: string, group: string): Group {
+    const state = this.#groups.get(topic)?.get(group);
+    if (!state) throw new Error('NOGROUP');
+    return state;
+  }
+  #touch(group: Group, consumer: string, active: boolean): void {
+    const previous = group.consumers.get(consumer);
+    group.consumers.set(consumer, {
+      seenAt: this.#now(),
+      activeAt: active ? this.#now() : previous?.activeAt ?? -1,
+    });
+  }
   // deno-lint-ignore require-await
   async xadd(
     name: string,
     id: string,
-    data: string | Array<string>,
+    data: string | string[],
     ...args: string[]
   ): Promise<string> {
     this.#record('xadd', [name, id, data, ...args]);
-
-    if (this.#options.rejectXadd) {
-      throw new Error('XADD failed');
-    }
-
-    if (!this.#streams.has(name)) {
-      this.#streams.set(name, []);
-    }
-    const stream = this.#streams.get(name)!;
-
-    // Parse payload from data - could be string or array
-    let payload: string;
-    if (typeof data === 'string') {
-      payload = data;
-    } else {
-      // Array format: ['field1', 'value1', 'field2', 'value2', ...]
-      const payloadIdx = data.indexOf('payload');
-      payload = payloadIdx >= 0 && payloadIdx + 1 < data.length ? data[payloadIdx + 1] : '';
-    }
-
-    // Preserve the complete field/value list exactly as a server would.
-    const fields = typeof data === 'string' ? [data, ...args] : [...data, ...args];
-    const entryId = id === '*' ? `0-${stream.length}` : id;
-    stream.push({ id: entryId, payload, fields });
-
+    if (this.#options.rejectXadd) throw new Error('XADD failed');
+    const parts = [id, ...(typeof data === 'string' ? [data] : data), ...args];
+    const star = parts.indexOf('*');
+    const limited = id === 'MAXLEN';
+    const actualId = limited ? parts[star] : id;
+    const fields = parts.slice(limited ? star + 1 : 1);
+    const entryId = actualId === '*' ? `0-${this.#sequence++}` : actualId;
+    const stream = this.#streams.get(name) ?? [];
+    stream.push([entryId, fields]);
+    // A deterministic exact trim is within the approximate retention contract.
+    if (limited) stream.splice(0, Math.max(0, stream.length - Number(parts[2])));
+    this.#streams.set(name, stream);
     return entryId;
   }
-
   // deno-lint-ignore require-await
   async xgroup(
-    command: 'CREATE' | 'DELETE' | 'SETID',
+    command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
     ...args: string[]
-  ): Promise<string | 'OK'> {
+  ): Promise<string | number> {
     this.#record('xgroup', [command, ...args]);
-
+    const [topic, group, consumer] = args;
     if (command === 'CREATE') {
-      const stream = args[0];
-      const group = args[1];
-
-      if (!this.#groups.has(stream)) {
-        this.#groups.set(stream, new Set());
-      }
-      const groups = this.#groups.get(stream)!;
-
-      if (groups.has(group)) {
-        if (this.#options.simulateBusyGroup) {
-          const err = new Error('BUSYGROUP Consumer Group name already exists') as Error & {
-            code?: string;
-          };
-          err.code = 'BUSYGROUP';
-          throw err;
+      const groups = this.#groups.get(topic) ?? new Map<string, Group>();
+      if (groups.has(group)) throw new Error('BUSYGROUP Consumer Group name already exists');
+      const delivered = new Set<string>();
+      if (args[2] === '$') { for (const [id] of this.#streams.get(topic) ?? []) delivered.add(id); }
+      groups.set(group, { delivered, pending: new Map(), consumers: new Map() });
+      this.#groups.set(topic, groups);
+      this.#streams.set(topic, this.#streams.get(topic) ?? []);
+      return 'OK';
+    }
+    if (command === 'DELCONSUMER') {
+      const state = this.#group(topic, group);
+      let dropped = 0;
+      for (const [id, p] of state.pending) {
+        if (p.owner === consumer) {
+          state.pending.delete(id);
+          dropped++;
         }
-        return 'OK';
       }
-
-      groups.add(group);
-
-      // Initialize pending map for this group
-      if (!this.#pending.has(stream)) {
-        this.#pending.set(stream, new Map());
-      }
-
-      return 'OK';
+      state.consumers.delete(consumer);
+      return dropped;
     }
-
-    if (command === 'DELETE') {
-      const stream = args[0];
-      const group = args[1];
-
-      if (this.#groups.has(stream)) {
-        this.#groups.get(stream)!.delete(group);
-      }
-      return 'OK';
-    }
-
-    if (command === 'SETID') {
-      return 'OK';
-    }
-
+    if (command === 'DELETE') this.#groups.get(topic)?.delete(group);
     return 'OK';
   }
-
   // deno-lint-ignore require-await
   async xreadgroup(...args: string[]): Promise<unknown[][] | null> {
     this.#record('xreadgroup', args);
-
-    if (this.#options.rejectXreadgroup) {
-      throw new Error('XREADGROUP failed');
+    if (this.#options.rejectXreadgroup) throw new Error('XREADGROUP failed');
+    const gi = args.indexOf('GROUP');
+    if (gi < 0) return null;
+    const [group, owner] = args.slice(gi + 1);
+    const topic = args[args.indexOf('STREAMS') + 1];
+    const state = this.#group(topic, group);
+    const stream = this.#streams.get(topic)!;
+    for (const msg of this.#options.seededMessages ?? []) {
+      stream.push([msg.id, ['payload', msg.payload, ...Object.entries(msg.fields ?? {}).flat()]]);
     }
-
-    // Parse arguments: GROUP group consumer COUNT N BLOCK M STREAMS stream id
-    const groupIdx = args.indexOf('GROUP');
-    if (groupIdx === -1) {
-      return null;
+    this.#options.seededMessages = [];
+    const ci = args.indexOf('COUNT');
+    const count = ci < 0 ? Infinity : Number(args[ci + 1]);
+    const entries = stream.filter(([id]) => !state.delivered.has(id)).slice(0, count);
+    this.#touch(state, owner, entries.length > 0);
+    for (const [id] of entries) {
+      state.delivered.add(id);
+      state.pending.set(id, { id, owner, deliveredAt: this.#now(), deliveries: 1 });
     }
-
-    const group = args[groupIdx + 1];
-    const streamIdx = args.indexOf('STREAMS');
-    const stream = args[streamIdx + 1];
-
-    // Return seeded messages first (for testing)
-    if (this.#options.seededMessages && this.#options.seededMessages.length > 0) {
-      const entries: unknown[][] = [];
-      for (const msg of this.#options.seededMessages) {
-        const extra = Object.entries(msg.fields ?? {}).flatMap(([k, v]) => [k, v]);
-        entries.push([msg.id, ['payload', msg.payload, ...extra]]);
-      }
-      // Clear seeded messages after returning them once
-      this.#options.seededMessages = [];
-      return [[stream, entries]];
-    }
-
-    if (!this.#streams.has(stream)) {
-      return null;
-    }
-
-    const streamData = this.#streams.get(stream)!;
-
-    // '>' semantics: entries never delivered to this group.
-    const entries: unknown[][] = [];
-    let delivered = this.#deliveredToGroup.get(stream);
-    if (!delivered) {
-      delivered = new Set();
-      this.#deliveredToGroup.set(stream, delivered);
-    }
-    if (!this.#pending.has(stream)) {
-      this.#pending.set(stream, new Map());
-    }
-    const streamPending = this.#pending.get(stream)!;
-
-    for (const entry of streamData) {
-      const key = `${group}:${entry.id}`;
-      if (delivered.has(key)) continue;
-      entries.push([entry.id, entry.fields]);
-      delivered.add(key);
-      // Delivered entries enter the PEL until acked.
-      streamPending.set(key, { groupId: group, messageId: entry.id });
-    }
-
-    // Real XREADGROUP nests entries one level deeper, per stream:
-    // [[streamName, [[id, [field, value, ...]], ...]], ...]. Returning the bare
-    // entry list made every delivery unparseable by the broker, so its whole
-    // subscribe path — deserialize, metadata, handler, ack — never ran, while
-    // the two tests that looked like they covered it asserted only that
-    // `xreadgroup` had been called.
-    return entries.length > 0 ? [[stream, entries]] : null;
+    return entries.length ? [[topic, entries]] : null;
   }
-
   // deno-lint-ignore require-await
-  async xack(name: string, group: string, ...ids: string[]): Promise<number> {
-    this.#record('xack', [name, group, ...ids]);
-
-    if (!this.#pending.has(name)) {
-      this.#pending.set(name, new Map());
-    }
-    const streamPending = this.#pending.get(name)!;
-
-    let acked = 0;
-    for (const id of ids) {
-      const key = `${group}:${id}`;
-      // XACK removes the entry from the PEL. It does NOT make the entry
-      // eligible for a later `>` read — that is what `#deliveredToGroup`
-      // records, and it is deliberately left untouched here.
-      if (streamPending.delete(key)) acked++;
-    }
-
-    return acked;
+  async xpending(...args: string[]): Promise<Array<[string, string, number, number]>> {
+    this.#record('xpending', args);
+    const [topic, group] = args;
+    const filtered = args[2] === 'IDLE';
+    const threshold = filtered ? Number(args[3]) : 0;
+    const [start, end, count, owner] = args.slice(filtered ? 4 : 2);
+    const numericId = (id: string): bigint => {
+      const [a, b] = id.split('-');
+      return BigInt(a) * 1000000n + BigInt(b);
+    };
+    return [...this.#group(topic, group).pending.values()]
+      .sort((a, b) => numericId(a.id) < numericId(b.id) ? -1 : 1)
+      .filter((p) =>
+        this.#now() - p.deliveredAt >= threshold &&
+        (owner === undefined || p.owner === owner) &&
+        (start === '-' || (start.startsWith('(')
+          ? numericId(p.id) > numericId(start.slice(1))
+          : numericId(p.id) >= numericId(start))) &&
+        (end === '+' || numericId(p.id) <= numericId(end))
+      )
+      .slice(0, Number(count))
+      .map((p) => [p.id, p.owner, this.#now() - p.deliveredAt, p.deliveries]);
   }
-
+  // deno-lint-ignore require-await
+  async xclaim(...args: string[]): Promise<Array<[string, string[]] | null>> {
+    this.#record('xclaim', args);
+    const [topic, group, owner, minIdle, ...ids] = args;
+    const state = this.#group(topic, group);
+    this.#touch(state, owner, false);
+    const entries: Array<[string, string[]] | null> = [];
+    for (const id of ids) {
+      const pending = state.pending.get(id);
+      if (!pending || this.#now() - pending.deliveredAt < Number(minIdle)) continue;
+      const entry = this.#streams.get(topic)?.find(([entryId]) => entryId === id);
+      if (!entry) {
+        if (this.#options.trimmedClaimReply === 'null') {
+          pending.owner = owner;
+          pending.deliveredAt = this.#now();
+          pending.deliveries++;
+          entries.push(null);
+        } else state.pending.delete(id);
+        continue;
+      }
+      pending.owner = owner;
+      pending.deliveredAt = this.#now();
+      pending.deliveries++;
+      entries.push(entry);
+      this.#touch(state, owner, true);
+    }
+    return entries;
+  }
+  // deno-lint-ignore require-await
+  async xinfo(...args: string[]): Promise<unknown[][]> {
+    this.#record('xinfo', args);
+    const [, topic, group] = args;
+    const state = this.#group(topic, group);
+    return [...state.consumers].map(([name, times]) => [
+      'name',
+      name,
+      'pending',
+      [...state.pending.values()].filter((p) => p.owner === name).length,
+      'idle',
+      this.#now() - times.seenAt,
+      'inactive',
+      times.activeAt < 0 ? -1 : this.#now() - times.activeAt,
+    ]);
+  }
+  // deno-lint-ignore require-await
+  async call(command: string, ...args: string[]): Promise<unknown> {
+    this.#record('call', [command, ...args]);
+    if (command !== 'EVAL') throw new Error('Unsupported command');
+    const [, , topic, group, self, threshold] = args;
+    const state = this.#group(topic, group);
+    let removed = 0;
+    // No await between snapshot and mutation, matching Redis script atomicity.
+    for (const [name, times] of state.consumers) {
+      const pending = [...state.pending.values()].filter((p) => p.owner === name).length;
+      const inactive = this.#now() - (times.activeAt < 0 ? times.seenAt : times.activeAt);
+      if (name !== self && pending === 0 && inactive > Number(threshold)) {
+        state.consumers.delete(name);
+        this.#record('xgroup', ['DELCONSUMER', topic, group, name]);
+        removed++;
+      }
+    }
+    return removed;
+  }
+  // deno-lint-ignore require-await
+  async xack(topic: string, group: string, ...ids: string[]): Promise<number> {
+    this.#record('xack', [topic, group, ...ids]);
+    let count = 0;
+    for (const id of ids) if (this.#group(topic, group).pending.delete(id)) count++;
+    return count;
+  }
   // deno-lint-ignore require-await
   async quit(): Promise<void> {
     this.#record('quit', []);
     this.#quitCalled = true;
   }
-
   // deno-lint-ignore require-await
   async connect(): Promise<void> {
     this.#record('connect', []);

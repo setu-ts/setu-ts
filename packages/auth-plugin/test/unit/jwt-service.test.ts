@@ -2,8 +2,7 @@
  * Tests for JwtService.
  */
 
-import { beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { JwtService } from '../../src/services/jwt-service.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 

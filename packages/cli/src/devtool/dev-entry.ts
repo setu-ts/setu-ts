@@ -3,8 +3,9 @@
  *
  * The production entry never imports this module and nothing in the production
  * graph imports the diagnostics plugin: the devtool composition exists only
- * here, which makes exclusion a property of the build rather than of a runtime
- * branch (the M98b README's development-only-composition guidance, emitted).
+ * here. The production image excludes each member's main.dev.ts through .dockerignore
+ * and removes the development-only import pin before installing the remaining
+ * import map and checking main.ts through --entrypoint, keeping the connector out of its cache.
  *
  * The entry READS its credentials; it never generates, writes or prints a pair.
  * The two variable names are approved CLI surface (AI_GUIDELINES §10.2): a
@@ -15,6 +16,8 @@
  * @module
  */
 
+import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery-module.ts';
+import { isUsablePort } from '../workspace/manifest.ts';
 import type { EntryPort } from '../templates/project-files.ts';
 import { DEVTOOL_ENTRY_MODULE, shutdownBlock } from '../templates/project-files.ts';
 
@@ -60,6 +63,15 @@ export interface DevEntryInput {
  * @returns The file contents
  */
 export function renderDevEntry(input: DevEntryInput): string {
+  return renderEntry(input, true);
+}
+
+/**
+ * Renders the entry with or without the composition probe. Without it, the output is
+ * byte-identical to the 0.8.0 CLI's rendering, which predates the probe; that shape is
+ * still a CLI-owned file, so reallocation and re-enabling may rewrite it.
+ */
+function renderEntry(input: DevEntryInput, probe: boolean): string {
   const portImport = input.port === undefined
     ? ''
     : `import { ${input.port.symbol} } from '${input.port.from}';\n`;
@@ -76,7 +88,7 @@ export function renderDevEntry(input: DevEntryInput): string {
 import { createApp } from './setu.config.ts';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { ILogger } from '@setu-ts/common';
+import type { ${probe ? 'ILogger, IPlugin' : 'ILogger'} } from '@setu-ts/common';
 import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 ${portImport}
 const runtime = createRuntimeServices();
@@ -117,14 +129,57 @@ const diagnostics = DiagnosticsPlugin({
   maxSessionLifetimeMs: 28_800_000,
 });
 
-const app = await createApp(undefined, {
-  plugins: [diagnostics],
+${probe ? PROBE_DECLARATION : ''}const app = await createApp(undefined, {
+  plugins: [diagnostics${probe ? ', devtoolProbe' : ''}],
   diagnostics: {},
 });
 
 await app.start({ port: ${appPort} });
-${shutdownBlock('deno')}`;
+${probe ? PROBE_CHECK : ''}${shutdownBlock('deno')}`;
 }
+
+/** Records the probe plugin's registration, so a dropped composition is observable. */
+const PROBE_DECLARATION = `let devtoolRegistered = false;
+const devtoolProbe: IPlugin = {
+  name: 'setu-devtool-probe',
+  version: '0.0.0',
+  register() {
+    devtoolRegistered = true;
+  },
+};
+
+`;
+
+/** Stops the entry when the factory discarded the composition. */
+const PROBE_CHECK = `if (!devtoolRegistered || app.diagnostics === undefined) {
+  console.error(
+    'setu devtool: setu.config.ts did not pass the devtool composition to createApplication — ' +
+      'the connector is not running. Re-run \`setu devtool enable\`, which names the two lines to add.',
+  );
+  await app.stop();
+  Deno.exit(1);
+}
+`;
 
 /** The module path of the generated development entry, relative to a project root. */
 export { DEVTOOL_ENTRY_MODULE };
+
+/**
+ * Every rendering of a CLI-owned entry at this port: the current one, and the 0.8.0
+ * rendering that predates the composition probe — the shape every workspace created
+ * before this release carries. No released CLI has produced any other.
+ */
+export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
+  const input: DevEntryInput = {
+    devtoolPort,
+    ...(member ? { port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER } } : {}),
+  };
+  return [renderEntry(input, true), renderEntry(input, false)];
+}
+
+/** Reads the port only from a complete, unedited CLI-owned entry. */
+export function devEntryPort(source: string, member = false): number | undefined {
+  const match = /\n {2}port: ([0-9]+), \/\/ IPv4 loopback only;/.exec(source);
+  const port = Number(match?.[1]);
+  return isUsablePort(port) && devEntryVariants(port, member).includes(source) ? port : undefined;
+}

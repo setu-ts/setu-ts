@@ -57,6 +57,7 @@ export class ServiceRegistry implements IServiceRegistry {
   #sealed = false;
   #observer: ((kind: 'override' | 'unregister', token: CapabilityToken) => void) | undefined;
   #diagnosticsSink: RegistryDiagnosticsSink | undefined;
+  #missExplanation: ((token: CapabilityToken) => string | undefined) | undefined;
 
   constructor(parent?: ServiceRegistry) {
     this.#parent = parent;
@@ -81,6 +82,19 @@ export class ServiceRegistry implements IServiceRegistry {
    */
   setDiagnosticsSink(sink: RegistryDiagnosticsSink | undefined): void {
     this.#diagnosticsSink = sink;
+  }
+
+  /**
+   * Installs the explanation {@linkcode ServiceRegistry.get} gives for a token
+   * it cannot find. The application knows what the registry cannot: whether
+   * its plugins have registered yet, and which plugin provides a token. When
+   * the function returns a string, it replaces the generic advice in the
+   * error; `undefined` keeps that advice.
+   *
+   * @param explain - Explains a missing token, or answers `undefined`
+   */
+  setMissExplanation(explain: (token: CapabilityToken) => string | undefined): void {
+    this.#missExplanation = explain;
   }
 
   /**
@@ -173,10 +187,9 @@ export class ServiceRegistry implements IServiceRegistry {
   get<T extends object>(token: CapabilityToken): T {
     const registration = this.#lookup(token);
     if (registration === undefined) {
-      throw new Error(
-        `No service registered for capability '${token}'. ` +
-          `Register a plugin that provides it, or check the token spelling against CAPABILITIES.`,
-      );
+      const advice = this.#missExplanation?.(token) ??
+        'Register a plugin that provides it, or check the token spelling against CAPABILITIES.';
+      throw new Error(`No service registered for capability '${token}'. ${advice}`);
     }
     return resolveRegistration(registration) as T;
   }

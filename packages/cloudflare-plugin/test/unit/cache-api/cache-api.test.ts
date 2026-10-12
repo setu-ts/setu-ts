@@ -1,11 +1,19 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * `caches.default` is the one platform global this package reads, so the
  * resolver is where that read is pinned down. Deno has a `caches` with no
  * `default` at all, which is exactly the case an inline read would break on.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { resolveCacheApi } from '../../../src/cache-api/cache-api.ts';
 import { FakeCacheApi } from '../../fakes.ts';

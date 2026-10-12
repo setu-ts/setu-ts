@@ -4,8 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { InstrumentationKind } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import {
@@ -61,7 +60,7 @@ describe('buildInstrumentationRegistry', () => {
   /**
    * Loaders that never touch npm. The registry takes `loaders` precisely so the
    * lazy path is hermetic; without injecting them these tests call the REAL
-   * `import('npm:@opentelemetry/instrumentation-*')`, which makes the unit
+   * `import('@opentelemetry/instrumentation-*')`, which makes the unit
    * suite depend on whether those packages happen to be cached and leaves the
    * outcome unassertable in either direction.
    *

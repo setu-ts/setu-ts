@@ -1,19 +1,20 @@
 {
   "name": "@setu-ts/database-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "exclude": ["test/fixtures/prisma-client-generated"],
-  "imports": {
-    "@prisma/client": "npm:@prisma/client@^7.10.0",
-    "mongodb": "npm:mongodb@^6.21.0"
-  },
+  "exclude": [
+    "test/fixtures/prisma-client-generated"
+  ],
   "test": {
     "permissions": {
       "read": true,
       "import": true,
       "env": true,
-      "sys": ["hostname", "osRelease"],
+      "sys": [
+        "hostname",
+        "osRelease"
+      ],
       "net": [
         "127.0.0.1:27017",
         "localhost:27017",
@@ -24,5 +25,24 @@
         "127.0.0.1:1"
       ]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-dynamodb": "npm:@aws-sdk/client-dynamodb@^3",
+    "@azure/cosmos": "npm:@azure/cosmos@^4",
+    "@google-cloud/bigtable": "npm:@google-cloud/bigtable@^6",
+    "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7.10.0",
+    "@prisma/client": "npm:@prisma/client@^7.10.0",
+    "drizzle-orm": "npm:drizzle-orm@0.45.2",
+    "drizzle-orm/better-sqlite3": "npm:drizzle-orm@0.45.2/better-sqlite3",
+    "drizzle-orm/mysql-core": "npm:drizzle-orm@0.45.2/mysql-core",
+    "drizzle-orm/mysql-proxy": "npm:drizzle-orm@0.45.2/mysql-proxy",
+    "drizzle-orm/node-postgres": "npm:drizzle-orm@0.45.2/node-postgres",
+    "drizzle-orm/pg-core": "npm:drizzle-orm@0.45.2/pg-core",
+    "drizzle-orm/pg-proxy": "npm:drizzle-orm@0.45.2/pg-proxy",
+    "drizzle-orm/sqlite-core": "npm:drizzle-orm@0.45.2/sqlite-core",
+    "drizzle-orm/sqlite-proxy": "npm:drizzle-orm@0.45.2/sqlite-proxy",
+    "mongodb": "npm:mongodb@^6.21.0",
+    "pg": "npm:pg@^8.0.0",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

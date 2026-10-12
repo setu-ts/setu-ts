@@ -1,10 +1,10 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
+import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
 interface Harness {
@@ -84,9 +84,15 @@ describe('the Workers target is deployable as documented', () => {
     }
   });
 
-  it('maps the @jsr scope, without which those packages do not install', async () => {
+  // From 0.9 the framework is published to npm under its own names, so no
+  // registry mapping is needed and none is written.
+  it('installs the framework from npm with no registry mapping', async () => {
     const h = await workers('rest');
-    expect(h.fs.read('/work/app/.npmrc')).toContain('@jsr:registry=https://npm.jsr.io');
+    expect(h.fs.has('/work/app/.npmrc')).toBe(false);
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      dependencies?: Record<string, string>;
+    };
+    expect(manifest.dependencies?.['@setu-ts/kernel']).toMatch(/^\^/);
   });
 
   it('pins wrangler rather than leaving npx to fetch whatever is latest', async () => {
@@ -127,6 +133,40 @@ describe('the Workers target is deployable as documented', () => {
     expect(manifest.devDependencies?.['wrangler']).toBeDefined();
     expect(manifest.devDependencies?.['vite']).toBeDefined();
     expect(manifest.dependencies?.['@setu-ts/common']).toBeDefined();
+  });
+});
+
+describe('a template with a frontend build, on an npm target', () => {
+  // The next-step hint and the README both tell a new user to run `start`.
+  // Without a build first it crashed on a fresh project with "Failed to load
+  // React Router server build", because the server bundle did not exist yet.
+  for (
+    const [runtime, build, entry] of [
+      ['node', 'npm run build', 'tsx main.ts'],
+      ['bun', 'bun run build', 'bun run main.ts'],
+    ] as const
+  ) {
+    it(`builds before start on ${runtime}, as it already does before test`, async () => {
+      const h = harness();
+      expect(await h.run(['app', '--runtime', runtime, '--template', 'full-stack'])).toBe(0);
+      const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+        scripts: Record<string, string>;
+      };
+      expect(manifest.scripts['start']).toBe(`${build} && ${entry}`);
+      expect(manifest.scripts['test']?.startsWith(`${build} && `)).toBe(true);
+      // The start script is the runtime marker other commands read, so the
+      // build prefix must not change which runtime the project reads as.
+      expect(await detectTargetRuntime(h.fs, '/work/app')).toBe(runtime);
+    });
+  }
+
+  it('leaves start alone for a template with no frontend build', async () => {
+    const h = harness();
+    expect(await h.run(['app', '--runtime', 'node', '--template', 'rest'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      scripts: Record<string, string>;
+    };
+    expect(manifest.scripts['start']).toBe('tsx main.ts');
   });
 });
 
@@ -198,12 +238,22 @@ describe('the Node target can run decorated source', () => {
 });
 
 describe('runNewCommand', () => {
-  it('creates a deno project under the working directory by default', async () => {
+  it('creates a node project under the working directory by default', async () => {
     const h = harness();
     expect(await h.run(['my-app'])).toBe(0);
-    for (const file of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md', '.gitignore']) {
+    for (
+      const file of [
+        'package.json',
+        'tsconfig.json',
+        'main.ts',
+        'setu.config.ts',
+        'README.md',
+        '.gitignore',
+      ]
+    ) {
       expect(h.fs.has(`/work/my-app/${file}`)).toBe(true);
     }
+    expect(h.fs.has('/work/my-app/deno.json')).toBe(false);
   });
 
   // A template's README section is appended to the generic README, and only its own.
@@ -233,7 +283,7 @@ describe('runNewCommand', () => {
       ).toContain(
         'export function createApp(\n  _env?: Readonly<Record<string, unknown>>,\n' +
           '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
-          '): IApplication {',
+          '): IKernelApplication {',
       );
     });
 
@@ -276,7 +326,7 @@ describe('runNewCommand', () => {
       // devtool parameter's type names `KernelDiagnosticsOptions` (M98c), so
       // the config still imports the package, as a type.
       expect(config).not.toContain('createApplication');
-      expect(config).toContain('import type { KernelDiagnosticsOptions } from');
+      expect(config).toContain('import type { IKernelApplication, KernelDiagnosticsOptions } from');
     });
 
     it('exports an async factory, which the loader already awaits', async () => {
@@ -285,30 +335,30 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(config).toContain('export async function createApp(');
-      expect(config).toContain('): Promise<IApplication> {');
+      expect(config).toContain('): Promise<IKernelApplication> {');
       // Still must not start the server: command discovery imports this module.
       expect(config).not.toContain('.start(');
     });
 
     it('pins the starter and the kernel the devtool parameter names', async () => {
       const h = harness();
-      await h.run(['shop', '--template', 'full-stack']);
+      await h.run(['shop', '--template', 'full-stack', '--runtime', 'deno']);
       const manifest = JSON.parse(h.fs.read('/work/shop/deno.json'));
 
       expect(manifest.imports['@setu-ts/full-stack-starter']).toContain(
-        'jsr:@setu-ts/full-stack-starter@',
+        'npm:@setu-ts/full-stack-starter@',
       );
       // The factory's devtool parameter names `KernelDiagnosticsOptions`
       // (M98c), so the config imports the kernel even on the starter path —
       // as a type, never calling `createApplication`.
-      expect(manifest.imports['@setu-ts/kernel']).toMatch(/^jsr:@setu-ts\/kernel@\^/);
-      // Still needed: the config module imports the IApplication type.
+      expect(manifest.imports['@setu-ts/kernel']).toMatch(/^npm:@setu-ts\/kernel@\^/);
+      // Still needed: the config module imports IPlugin from common.
       expect(manifest.imports['@setu-ts/common']).toBeDefined();
     });
 
     it('declares every package the generated config imports', async () => {
       const h = harness();
-      await h.run(['shop', '--template', 'full-stack']);
+      await h.run(['shop', '--template', 'full-stack', '--runtime', 'deno']);
       const config = h.fs.read('/work/shop/setu.config.ts');
       const manifest = JSON.parse(h.fs.read('/work/shop/deno.json'));
 
@@ -340,7 +390,7 @@ describe('runNewCommand', () => {
       // On Workers the environment is per-request, so a factory that resolves
       // configuration before any plugin is constructed can only see it if the
       // entry hands it over. Without this the app composes from an empty
-      // config and fails on every request, since `booted` memoises the boot.
+      // config and fails on every request, since the app is cached per env.
       const h = harness();
       expect(
         await h.run(['shop', '--template', 'full-stack', '--runtime', 'cloudflare-workers']),
@@ -350,7 +400,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
-      expect(entry).toContain('await ensureBooted(env)');
+      expect(entry).toContain('const booted = acquire(env);');
       expect(entry).toContain('createApp(env)');
       expect(config).toContain('env?: Readonly<Record<string, unknown>>');
       expect(config).toContain('{ env }');
@@ -398,7 +448,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/api/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
-      expect(entry).toContain('await ensureBooted(env);');
+      expect(entry).toContain('const booted = acquire(env);');
       expect(entry).toContain('createApp(env)');
       // The devtool parameter is the second one on every target (M98c), so
       // the env parameter keeps its default and the signature wraps.
@@ -622,7 +672,7 @@ describe('runNewCommand', () => {
 
     it('declares a manifest import for every package the config references', async () => {
       const h = harness();
-      await h.run(['app', '--template', 'rest']);
+      await h.run(['app', '--template', 'rest', '--runtime', 'deno']);
       const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
       const config = h.fs.read('/work/app/setu.config.ts');
       for (const specifier of Object.keys(manifest.imports)) {
@@ -698,19 +748,19 @@ describe('runNewCommand', () => {
   it('roots the project at an absolute --dir', async () => {
     const h = harness();
     expect(await h.run(['my-app', '--dir', '/tmp/sandbox'])).toBe(0);
-    expect(h.fs.has('/tmp/sandbox/my-app/deno.json')).toBe(true);
+    expect(h.fs.has('/tmp/sandbox/my-app/package.json')).toBe(true);
   });
 
   it('anchors a relative --dir to the working directory', async () => {
     const h = harness();
     expect(await h.run(['my-app', '--dir', 'sandbox'])).toBe(0);
-    expect(h.fs.has('/work/sandbox/my-app/deno.json')).toBe(true);
+    expect(h.fs.has('/work/sandbox/my-app/package.json')).toBe(true);
   });
 
   it('normalises the project name to kebab-case', async () => {
     const h = harness();
     expect(await h.run(['MyApp'])).toBe(0);
-    expect(h.fs.has('/work/my-app/deno.json')).toBe(true);
+    expect(h.fs.has('/work/my-app/package.json')).toBe(true);
   });
 
   describe('--runtime deno', () => {
@@ -719,7 +769,7 @@ describe('runNewCommand', () => {
       await h.run(['app', '--runtime', 'deno']);
       const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
       expect(manifest.imports['@setu-ts/kernel']).toMatch(
-        /^jsr:@setu-ts\/kernel@\^/,
+        /^npm:@setu-ts\/kernel@\^/,
       );
       expect(manifest.tasks.start).toContain('main.ts');
     });
@@ -791,18 +841,17 @@ describe('runNewCommand', () => {
     });
 
     describe(`--runtime ${runtime}`, () => {
-      it('emits a package.json with npm-compatible JSR specifiers', async () => {
+      it('emits a package.json pinning the npm framework packages', async () => {
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
         const manifest = JSON.parse(h.fs.read('/work/app/package.json'));
-        expect(manifest.dependencies['@setu-ts/kernel'])
-          .toMatch(/^npm:@jsr\/setu-ts__kernel@\^/);
+        expect(manifest.dependencies['@setu-ts/kernel']).toMatch(/^\^\d/);
       });
 
-      it('emits the .npmrc that makes the @jsr scope resolvable', async () => {
+      it('emits no .npmrc, since the framework installs from npm', async () => {
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
-        expect(h.fs.read('/work/app/.npmrc')).toContain('@jsr:registry=https://npm.jsr.io');
+        expect(h.fs.has('/work/app/.npmrc')).toBe(false);
       });
 
       it('emits a tsconfig that needs no decorator option', async () => {
@@ -829,8 +878,7 @@ describe('runNewCommand', () => {
         await h.run(['app', '--runtime', runtime, '--template', 'rest']);
         const manifest = JSON.parse(h.fs.read('/work/app/package.json'));
         for (const pkg of ['kernel', 'common', 'runtime', 'openapi-plugin', 'exceptions']) {
-          expect(manifest.dependencies[`@setu-ts/${pkg}`])
-            .toMatch(new RegExp(`^npm:@jsr/setu-ts__${pkg}@\\^`));
+          expect(manifest.dependencies[`@setu-ts/${pkg}`]).toMatch(/^\^\d/);
         }
       });
     });
@@ -893,7 +941,10 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/app/src/index.ts');
-      expect(entry).toContain('await ensureBooted(env);');
+      // Boot starts inside acquire(), which attaches its rejection handler
+      // in the same expression, so a failed boot is never unhandled.
+      expect(entry).toContain('const booted = acquire(env);');
+      expect(entry).toContain('created.app.then(');
       expect(entry).not.toContain('??=');
     });
 
@@ -915,7 +966,7 @@ describe('runNewCommand', () => {
     it('reports each path it would create', async () => {
       const h = harness();
       await h.run(['app', '--dry-run']);
-      expect(h.out.text()).toContain('would create /work/app/deno.json');
+      expect(h.out.text()).toContain('would create /work/app/package.json');
     });
   });
 
@@ -997,7 +1048,7 @@ describe('runNewCommand', () => {
       it(`scaffolds the digit-leading project name ${JSON.stringify(name)}`, async () => {
         const h = harness();
         expect(await h.run([name])).toBe(0);
-        expect(h.fs.writes.some((path) => path.endsWith(`/${name}/deno.json`))).toBe(true);
+        expect(h.fs.writes.some((path) => path.endsWith(`/${name}/package.json`))).toBe(true);
       });
     }
 
@@ -1088,10 +1139,11 @@ describe('runNewCommand', () => {
     const h = harness();
     await h.run(['my-app']);
     expect(h.out.text()).toContain('cd my-app');
-    expect(h.out.text()).toContain('deno task start');
+    expect(h.out.text()).toContain('npm install && npm start');
   });
 
   const nextSteps: readonly (readonly [string, string])[] = [
+    ['deno', 'deno task start'],
     ['node', 'npm install && npm start'],
     ['bun', 'bun install && bun run start'],
     ['cloudflare-workers', 'npm install && npx wrangler dev'],
@@ -1110,7 +1162,7 @@ describe('--workspace', () => {
   it('creates a monorepo root rather than a project', async () => {
     const h = harness();
     expect(await h.run(['acme', '--workspace'])).toBe(0);
-    for (const file of ['deno.json', 'setu.workspace.json', 'README.md', '.gitignore']) {
+    for (const file of ['package.json', 'setu.workspace.json', 'README.md', '.gitignore']) {
       expect(h.fs.has(`/work/acme/${file}`)).toBe(true);
     }
     // A root registers no plugins and starts no server.
@@ -1121,10 +1173,10 @@ describe('--workspace', () => {
   it('declares members by glob, so adding one rewrites nothing', async () => {
     const h = harness();
     await h.run(['acme', '--workspace']);
-    const manifest = JSON.parse(h.fs.read('/work/acme/deno.json')) as { workspace?: string[] };
+    const manifest = JSON.parse(h.fs.read('/work/acme/package.json')) as { workspaces?: string[] };
     // Services under apps/, libraries under libs/ — both declared at creation, so
     // neither kind of addition rewrites this file.
-    expect(manifest.workspace).toEqual(['./apps/*', './libs/*']);
+    expect(manifest.workspaces).toEqual(['apps/*', 'libs/*']);
   });
 
   it('records the default base port', async () => {
@@ -1392,9 +1444,9 @@ describe('the interactive seam on setu new', () => {
         return calls;
       },
       prompter: {
-        select(): Promise<string | undefined> {
+        select() {
           calls++;
-          return Promise.resolve(undefined);
+          return Promise.resolve({ kind: 'unavailable' as const });
         },
       },
     };
@@ -1443,8 +1495,12 @@ describe('the interactive seam on setu new', () => {
 
   it('honors prompted answers by rewriting the flag record', async () => {
     const scripted = {
-      select(question: string): Promise<string | undefined> {
-        return Promise.resolve(question.startsWith('Template?') ? 'microservice' : undefined);
+      select(question: string) {
+        return Promise.resolve(
+          question.startsWith('Template?')
+            ? { kind: 'answer' as const, value: 'microservice' }
+            : { kind: 'unavailable' as const },
+        );
       },
     };
     const fs = createFakeFs();
@@ -1471,7 +1527,7 @@ describe('the interactive seam on setu new', () => {
       cwd: '/work',
       log: () => {},
       error: () => {},
-      ask: createTerminalPrompter(() => true, () => '', () => {}),
+      ask: createTerminalPrompter(() => true, () => Promise.resolve(''), () => {}),
     });
     expect(code).toBe(0);
     const yes = harness();
@@ -1479,5 +1535,20 @@ describe('the interactive seam on setu new', () => {
     const pathsOf = (fs: FakeFs) =>
       fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => a < b ? -1 : 1);
     expect(pathsOf(enter)).toEqual(pathsOf(yes.fs));
+  });
+
+  it('cancels with exit 130 before writing', async () => {
+    const fs = createFakeFs();
+    const errors: string[] = [];
+    const code = await runNewCommand(parseArgs(['svc']), {
+      fs,
+      cwd: '/work',
+      log: () => {},
+      error: (message) => errors.push(message),
+      ask: { select: () => Promise.resolve({ kind: 'cancelled' }) },
+    });
+    expect(code).toBe(130);
+    expect(fs.writes).toEqual([]);
+    expect(errors).toEqual(['Cancelled; nothing was written.']);
   });
 });

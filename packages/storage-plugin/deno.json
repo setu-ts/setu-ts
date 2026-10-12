@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/storage-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
   "test": {
@@ -21,5 +21,12 @@
         "osRelease"
       ]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3",
+    "@aws-sdk/s3-request-presigner": "npm:@aws-sdk/s3-request-presigner@^3",
+    "@azure/storage-blob": "npm:@azure/storage-blob@^12",
+    "@google-cloud/storage": "npm:@google-cloud/storage@^7",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

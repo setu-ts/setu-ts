@@ -11,8 +11,7 @@
  * Every case below is asserted in BOTH registration orders, because "the right
  * route wins" is only meaningful if it does not depend on who registered first.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { Router } from '../../src/router/router.ts';
 import type { RouteHandler } from '@setu-ts/common';

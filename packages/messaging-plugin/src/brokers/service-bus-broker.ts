@@ -19,6 +19,7 @@ import {
   type ISubscription,
   type MessageHandler,
   type MessageMetadata,
+  type PublishOptions,
   type RequestHandler,
   type RequestOptions,
   type SubscribeOptions,
@@ -28,6 +29,7 @@ import type { ServiceBusRetryOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
@@ -48,7 +50,7 @@ const PROBE_TIMEOUT_MS = 2000;
 
 /**
  * Structural type matching the real SDK's ProcessErrorArgs callback argument
- * (npm:@azure/service-bus@^7).
+ * (@azure/service-bus).
  */
 export interface IServiceBusProcessErrorArgs {
   /** The underlying error. */
@@ -65,7 +67,7 @@ export interface IServiceBusProcessErrorArgs {
 
 /**
  * Structural receive-options matching the real SDK's SubscribeOptions
- * (npm:@azure/service-bus@^7). The property is autoCompleteMessages, not autoComplete.
+ * (@azure/service-bus). The property is autoCompleteMessages, not autoComplete.
  */
 export interface IServiceBusSubscribeOptions {
   autoCompleteMessages?: boolean;
@@ -106,7 +108,9 @@ export interface ServiceBusSdkModule {
     options?: { retryOptions?: Omit<ServiceBusRetryOptions, 'mode'> & { mode?: number } },
   ) => {
     createSender(queueOrTopicName: string): {
-      sendMessages(messages: { body: unknown }): Promise<void>;
+      sendMessages(
+        messages: { body: unknown; applicationProperties?: unknown; messageId?: string },
+      ): Promise<void>;
       close(): Promise<void>;
     };
     createReceiver(queueName: string, options?: unknown): IServiceBusReceiver;
@@ -135,11 +139,17 @@ export interface ServiceBusSdkModule {
  * Domain port for Azure Service Bus operations.
  */
 export interface IServiceBusTransport {
-  /** Send a body to a topic. */
+  /**
+   * Send a body to a topic.
+   *
+   * @param messageId - Native Service Bus message id (M106 §3.3): a repeated id
+   *   is de-duplicated only on an entity configured with duplicate detection
+   */
   send(
     topic: string,
     body: string,
     applicationProperties?: Readonly<Record<string, string>>,
+    messageId?: string,
   ): Promise<void>;
   /**
    * Open a receiver on a topic subscription.
@@ -401,7 +411,7 @@ async function closeReceiver(entry: OpenReceiver): Promise<void> {
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadServiceBusModule(): Promise<ServiceBusSdkModule> {
-  const mod = await import('npm:@azure/service-bus@^7');
+  const mod = await import('@azure/service-bus');
   return mod as unknown as ServiceBusSdkModule;
 }
 
@@ -464,13 +474,18 @@ export function adaptServiceBusModule(
       topic: string,
       body: string,
       applicationProperties?: Readonly<Record<string, string>>,
+      messageId?: string,
     ): Promise<void> => {
       let sender = senders.get(topic);
       if (!sender) {
         sender = client.createSender(topic);
         senders.set(topic, sender);
       }
-      const message = applicationProperties ? { body, applicationProperties } : { body };
+      const message = {
+        body,
+        ...(applicationProperties !== undefined ? { applicationProperties } : {}),
+        ...(messageId !== undefined ? { messageId } : {}),
+      };
       await sender.sendMessages(message);
     },
     open: async (
@@ -746,7 +761,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     assertNotCloudflareWorkers(
       this.#runtime,
       'Azure Service Bus',
-      'npm:@azure/service-bus@^7',
+      '@azure/service-bus',
     );
 
     if (this.#injectedClient !== undefined) {
@@ -808,7 +823,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
 
   /**
    * Tri-state backend reachability (M70c, bounded in M90b; evidence-first
-   * in M95b).
+   * in M95b; a negative outcome answers at once in M101a).
    *
    * The evidence is consulted FIRST: a data-plane outcome —
    * the success or network-layer failure of a real publish, recorded in
@@ -816,14 +831,23 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * trips — answers directly, because the thing reported on should be the
    * plane the application actually uses. Positive evidence expires after
    * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs}; negative evidence is
-   * retained until contradicted. With no authoritative evidence the
-   * management probe answers exactly as it did before M95b: the probe
-   * delegates to the transport's `isHealthy?()` — the real adapter reads
-   * the namespace through the administration client — through the broker's
-   * own cached probe (5 s TTL, 2 s bound), so repeated health polls cost
-   * at most one round trip per TTL and a hung transport cannot hold a
-   * caller past the bound. `true`/`false` from the evidence or the probe,
-   * `undefined` when neither has an answer (a minimal fake, an idle
+   * retained until contradicted.
+   *
+   * A retained negative outcome returns `false` WITHOUT waiting for the
+   * management probe (V8-1): the probe is started in the background, and only
+   * when it settles `true` does it clear the outcome — so the NEXT read, not
+   * this one, answers through the probe again. Awaiting it here was a race the
+   * caller lost: the `messaging` indicator bounds this call with the same 2 s
+   * the probe is bounded with, so a probe that could not reach the namespace
+   * timed the indicator out first and the indicator reported `up`.
+   *
+   * With no authoritative evidence the management probe answers exactly as it
+   * did before M95b: the probe delegates to the transport's `isHealthy?()` —
+   * the real adapter reads the namespace through the administration client —
+   * through the broker's own cached probe (5 s TTL, 2 s bound), so repeated
+   * health polls cost at most one round trip per TTL and a hung transport
+   * cannot hold a caller past the bound. `true`/`false` from the evidence or
+   * the probe, `undefined` when neither has an answer (a minimal fake, an idle
    * broker) — the indicator then reports `reachable: 'unknown'`.
    *
    * @returns `true`/`false`/`undefined` as described
@@ -834,18 +858,33 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     if (evidence === true) {
       return evidence;
     }
-    if (this.#probe === null) {
+    const probe = this.#probe;
+    if (probe === null) {
       return evidence;
     }
-    const managementReachability = await this.#probe();
     if (evidence === false) {
-      if (managementReachability === true) {
-        this.#evidence = null;
-        return true;
-      }
+      this.#clearNegativeOutcomeInBackground(probe);
       return false;
     }
-    return managementReachability;
+    return await probe();
+  }
+
+  /**
+   * Starts the management probe without awaiting it, clearing the retained
+   * negative outcome only if the probe answers `true`.
+   *
+   * The probe is the cached, coalesced one, so repeated reads during an
+   * outage share one in-flight probe rather than stacking them, and it never
+   * rejects. The clear is skipped when the probe is no longer current: a
+   * `disconnect()` drops it, and every newly recorded failure rebuilds it —
+   * so a late `true` can never erase a failure recorded after it started.
+   */
+  #clearNegativeOutcomeInBackground(probe: () => Promise<boolean | undefined>): void {
+    void probe().then((reachable) => {
+      if (reachable === true && this.#probe === probe) {
+        this.#evidence = null;
+      }
+    });
   }
 
   /** Creates one bounded, cached management-plane probe from the current transport. */
@@ -921,8 +960,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     return reachable !== false;
   }
 
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -930,13 +969,16 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#transport) {
       throw new Error('ServiceBusBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     try {
-      await this.#transport.send(topic, serialized, headers);
+      await this.#transport.send(topic, serialized, wireHeaders, validated.deduplicationId);
     } catch (error) {
       // M95b: narrowed by ORIGIN — the guard and the serializer above threw
       // before the transport was reached and say nothing about the network;

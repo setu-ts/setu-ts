@@ -1,8 +1,7 @@
 /**
  * Unit tests for aggregate-local domain event recording.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IDomainEvent, IDomainEvents } from '@setu-ts/events-plugin';
 import { createDomainEvents } from '@setu-ts/events-plugin';
 

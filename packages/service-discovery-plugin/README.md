@@ -10,7 +10,8 @@ the HTTP providers run on web-standard `fetch` and the DNS provider on the optio
 ## Install
 
 ```bash
-deno add jsr:@setu-ts/service-discovery-plugin
+npm install @setu-ts/service-discovery-plugin
+# Deno: deno add npm:@setu-ts/service-discovery-plugin
 ```
 
 ## Quick start

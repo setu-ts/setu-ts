@@ -1,18 +1,19 @@
 /**
  * @module full-stack-starter barrel export tests
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as fullStackStarter from '../../src/index.ts';
 
 describe('full-stack-starter / barrel exports', () => {
-  it('exports exactly the three factories', () => {
+  it('exports exactly the documented runtime surface', () => {
     const exportedNames = Object.keys(fullStackStarter);
     expect(new Set(exportedNames)).toEqual(
       new Set([
         'createFullStackApp',
         'buildFullStackPlugins',
         'createFullStackAppFromConfig',
+        'fullStackConfigOf',
+        'FullStackConfigUnavailableError',
       ]),
     );
   });

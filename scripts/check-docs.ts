@@ -675,6 +675,7 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
 const REQUIRED_GUIDES = [
   'docs/getting-started.md',
   'docs/plugin-architecture.md',
+  'docs/how-it-fits-together.md',
   'docs/plugins.md',
   'docs/cli.md',
   'docs/programmatic-api.md',
@@ -685,6 +686,7 @@ const REQUIRED_GUIDES = [
   'docs/migration-fastify.md',
   'docs/examples.md',
   'docs/runtime-deployment.md',
+  'docs/authorization.md',
 ];
 
 /** The canonical absolute URL of the committed public-API ledger. */
@@ -1772,6 +1774,7 @@ export const POST_ALPHA_MINOR_LINES: readonly string[] = [
   '0.6',
   '0.7',
   '0.8',
+  '0.9',
 ];
 
 /**

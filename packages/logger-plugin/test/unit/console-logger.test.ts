@@ -1,6 +1,5 @@
 // deno-lint-ignore-file no-console
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { ILogger } from '@setu-ts/common';
 

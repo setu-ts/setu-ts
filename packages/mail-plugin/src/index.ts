@@ -2,7 +2,8 @@
  * @module
  *
  * Email plugin with log, SMTP (`nodemailer`), AWS SES (v2), and SendGrid
- * providers plus a zero-dependency `{{ variable }}` template engine.
+ * providers plus a template engine rendering `{{ variable }}` strings or view
+ * components through `CAPABILITIES.VIEW`.
  *
  * Exports the plugin factory, service, provider implementations, structural
  * client facades, the template engine, and option types.
@@ -25,7 +26,10 @@ export type { MailServiceOptions } from './services/mail-service.ts';
 
 // ── Template engine ─────────────────────────────────────────────────────────
 
-/** TemplateEngine — renders named `{{ variable }}` bodies. */
+/**
+ * TemplateEngine — renders named bodies: `{{ variable }}` strings, or view
+ * components through `CAPABILITIES.VIEW` (M102). `render` is asynchronous.
+ */
 export { escapeHtml, TemplateEngine } from './templates/template-engine.ts';
 
 /** A rendered template body. */
@@ -82,8 +86,12 @@ export type { MailProviderType } from './interfaces/index.ts';
 /** Provider-specific options. */
 export type { MailProviderOptions } from './interfaces/index.ts';
 
-/** A named body template. */
-export type { MailTemplate } from './interfaces/index.ts';
+/** A named body template, and its two arms (M102). */
+export type {
+  MailComponentTemplate,
+  MailStringTemplate,
+  MailTemplate,
+} from './interfaces/index.ts';
 
 /** An outgoing mail with a resolved sender (what providers receive). */
 export type { OutgoingMail } from './interfaces/index.ts';

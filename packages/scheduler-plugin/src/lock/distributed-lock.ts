@@ -8,7 +8,12 @@
  * @module
  */
 import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
-import type { IDistributedLock, SchedulerPluginOptions } from '../interfaces/index.ts';
+import type {
+  DistributedLockOptions,
+  IDistributedLock,
+  SchedulerPluginOptions,
+} from '../interfaces/index.ts';
+import { checkLockTimeout, DEFAULT_REDIS_COMMAND_TIMEOUT_MS, RedisLock } from './redis-lock.ts';
 
 // Re-export the interface as the public-facing name
 export type { IDistributedLock } from '../interfaces/index.ts';
@@ -22,6 +27,48 @@ export type { IDistributedLock } from '../interfaces/index.ts';
 export interface ILifecyclableLock extends IDistributedLock {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
+}
+
+/** The default bound on one lock acquire (M101a V8-24). */
+export const DEFAULT_ACQUIRE_TIMEOUT_MS = 5000;
+
+/** The resolved lock bounds (M101a V8-24). */
+export interface LockTimeouts {
+  /** Bound on one acquire call; `0` disables it. */
+  readonly acquireTimeoutMs: number;
+  /** ioredis `commandTimeout` for a BUILT Redis lock client; `0` omits it. */
+  readonly commandTimeoutMs: number;
+}
+
+/**
+ * Resolves and validates the two lock bounds.
+ *
+ * `commandTimeoutMs` defaults to the resolved `acquireTimeoutMs` (to the
+ * 15 s ioredis default only when the acquire bound is disabled), and is
+ * refused when it would outlast a non-zero acquire bound.
+ *
+ * @param options - The `distributedLock` options, if any
+ * @returns The resolved bounds
+ * @throws {RangeError} If either value is out of range, or `commandTimeoutMs`
+ *   exceeds a non-zero `acquireTimeoutMs`
+ */
+export function resolveLockTimeouts(options: DistributedLockOptions | undefined): LockTimeouts {
+  const acquireTimeoutMs = checkLockTimeout(
+    'distributedLock.acquireTimeoutMs',
+    options?.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS,
+  );
+  const commandTimeoutMs = checkLockTimeout(
+    'distributedLock.commandTimeoutMs',
+    options?.commandTimeoutMs ??
+      (acquireTimeoutMs === 0 ? DEFAULT_REDIS_COMMAND_TIMEOUT_MS : acquireTimeoutMs),
+  );
+  if (acquireTimeoutMs !== 0 && commandTimeoutMs > acquireTimeoutMs) {
+    throw new RangeError(
+      `scheduler-plugin: distributedLock.commandTimeoutMs (${commandTimeoutMs}) must not ` +
+        `exceed distributedLock.acquireTimeoutMs (${acquireTimeoutMs})`,
+    );
+  }
+  return { acquireTimeoutMs, commandTimeoutMs };
 }
 
 /**
@@ -51,9 +98,9 @@ export async function resolveLock(
 
   // Redis lock when explicitly selected
   if (distOpts?.enabled && distOpts.storage === 'redis') {
-    const { RedisLock } = await import('./redis-lock.ts');
     return new RedisLock({
       url: distOpts.url ?? 'redis://localhost:6379',
+      commandTimeoutMs: resolveLockTimeouts(distOpts).commandTimeoutMs,
       ...(distOpts.client !== undefined
         ? { client: distOpts.client as import('../interfaces/index.ts').IRedisLockClient }
         : {}),

@@ -31,6 +31,14 @@ export {
 } from './handler/server-build.ts';
 export { bridgeRequestToRR } from './handler/request-bridge.ts';
 export { contextKeyFor, servicesContext, userContext } from './handler/context-keys.ts';
+export { viteDevExternals } from './dev/vite-dev-externals.ts';
+export type {
+  ViteDevExternalId,
+  ViteDevExternalsOptions,
+  ViteDevExternalsPlugin,
+  ViteHookContext,
+  ViteResolvedEnvironments,
+} from './dev/vite-dev-externals.ts';
 export type {
   PopulateLoadContext,
   ReactRouterPluginOptions,

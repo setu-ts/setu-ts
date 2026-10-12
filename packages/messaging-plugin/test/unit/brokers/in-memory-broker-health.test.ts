@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { InMemoryBroker } from '../../../src/brokers/in-memory-broker.ts';
 import { JsonSerializer } from '../../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../../fixtures/fake-runtime.ts';

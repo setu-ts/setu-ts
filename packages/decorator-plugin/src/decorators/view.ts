@@ -17,6 +17,8 @@
  * @module
  * @since 0.6.0
  */
+import '../metadata/symbol-metadata.ts';
+
 import type { Component, HandlerResult } from '@setu-ts/common';
 
 import { methodDecorator } from '../metadata/context-bridge.ts';

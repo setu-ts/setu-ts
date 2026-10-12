@@ -4,11 +4,11 @@
  *
  * @module
  */
-import type { IMessageBroker, IRuntimeServices } from '@setu-ts/common';
+import type { IMessageBroker, IRuntimeServices, PublishOptions } from '@setu-ts/common';
 
 import type { IntegrationEventDefinition } from './definition.ts';
 import type { IntegrationEventEnvelope } from './envelope.ts';
-import { createEnvelope } from './envelope.ts';
+import { prepareIntegrationPublish } from './prepare.ts';
 
 /**
  * Optional causal metadata for {@linkcode publishIntegrationEvent}.
@@ -51,6 +51,10 @@ export interface IntegrationEventMetadata {
  * @param definition - The contract being published
  * @param payload - The event payload, carried verbatim
  * @param metadata - Optional causal metadata
+ * @param options - Optional publish options (M106 §3.7); `orderingKey` beats
+ *   the definition's selector, and `deduplicationId` defaults to the envelope id
+ * @throws {RangeError} As a rejected promise when the options (or the value the
+ *   definition's selector returns) fail §3.4 validation
  * @throws Whatever `broker.publish` rejects with, unchanged
  * @example
  * ```typescript
@@ -66,8 +70,22 @@ export async function publishIntegrationEvent<T>(
   definition: IntegrationEventDefinition<T>,
   payload: T,
   metadata?: IntegrationEventMetadata,
+  options?: PublishOptions,
 ): Promise<void> {
-  await broker.publish(definition.topic, createEnvelope(runtime, definition, payload, metadata));
+  // Envelope and effective options come from the ONE implementation the
+  // outbox `write` shares (M107 §3.5): caller options validated once, then
+  // the caller's key > the definition's selector > none (the selector is not
+  // called when the caller supplied a key), and the caller's
+  // `deduplicationId` or else the envelope id.
+  const { envelope, options: effective } = await prepareIntegrationPublish(
+    runtime,
+    definition,
+    payload,
+    metadata,
+    options,
+  );
+
+  await broker.publish(definition.topic, envelope, effective);
 }
 
 /**

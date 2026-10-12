@@ -2,8 +2,7 @@
  * Tests for apq/apq-resolver.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { ApqResolver } from '../../src/apq/apq-resolver.ts';
 import { persistedQueryHash } from '../../src/apq/persisted-query.ts';
 import type { ICacheStore } from '@setu-ts/common';

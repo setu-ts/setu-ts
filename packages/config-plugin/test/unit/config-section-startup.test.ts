@@ -1,6 +1,5 @@
 /** Tests for typed configuration-section startup validation. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IConfig } from '@setu-ts/common';
 
 import { defineConfigSection, getConfigSection, loadConfig } from '../../src/index.ts';
@@ -8,7 +7,7 @@ import { createRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('typed configuration sections | startup validation', () => {
   it('rejects an invalid section without disclosing the rejected value or cause', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const application = defineConfigSection({
       prefix: 'APP_',
       keys: ['MODE'],
@@ -27,7 +26,7 @@ describe('typed configuration sections | startup validation', () => {
   });
 
   it('validates a supplied IConfig instance through declared named reads', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['PORT'],
@@ -45,7 +44,7 @@ describe('typed configuration sections | startup validation', () => {
   });
 
   it('does not reparse a section after startup', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     let parses = 0;
     const application = defineConfigSection({
       prefix: 'APP_',
@@ -66,7 +65,7 @@ describe('typed configuration sections | startup validation', () => {
   });
 
   it('clears an injected snapshot cache when a later validation fails', async () => {
-    const { z } = await import('npm:zod@^3.24.0');
+    const { z } = await import('zod-v3');
     const application = defineConfigSection({
       prefix: 'APP_',
       keys: ['MODE'],

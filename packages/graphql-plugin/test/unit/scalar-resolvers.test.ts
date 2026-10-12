@@ -2,8 +2,7 @@
  * Tests for schema/attach-resolvers.ts scalar branch
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { attachResolvers } from '../../src/schema/attach-resolvers.ts';
 import type { GraphqlRuntime } from '../../src/interfaces/graphql-runtime.ts';
 

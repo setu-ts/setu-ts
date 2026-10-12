@@ -2,8 +2,7 @@
  * Tests for barrel exports — ensures all expected symbols are exported.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import * as graphqlPlugin from '../../src/index.ts';
 
 describe('barrel exports', () => {

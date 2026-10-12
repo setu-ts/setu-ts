@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The direct D1 data source, driven against a REAL SQLite engine.
  *
@@ -6,8 +15,7 @@
  * no-op implementation passes its own tests when they only assert the no-op.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { NormalizedQuery } from '@setu-ts/common';
 import { encodeCursor } from '@setu-ts/common';
 

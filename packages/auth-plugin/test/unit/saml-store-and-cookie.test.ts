@@ -2,8 +2,7 @@
  * The memory SAML request store and the browser-binding cookie (M100f plan
  * §3.4–§3.5).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { MemorySamlRequestStore } from '../../src/stores/saml-request-store.ts';
 import type { SamlPendingRequest } from '../../src/stores/saml-request-store.ts';

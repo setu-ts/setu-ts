@@ -5,8 +5,7 @@
  * losers produce no handler records), and the plugin's multi-provider
  * source registration and close ordering through a real kernel application.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IIngressBehavior, IScheduler, ISchedulerDiagnosticsSource } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -102,6 +101,7 @@ describe('compileSchedulerDiagnostics', () => {
       [{ ...base, jobs: { a: 7 } }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsValue],
       [{ ...base, jobs: { a: '' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ ...base, jobs: { a: 'a\u0085b' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ ...base, jobs: { a: 'a\u202eb' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasControl],
       [{ ...base, jobs: { a: 'same', b: 'same' } }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsDuplicate],
     ];
     for (const [input, message] of cases) {
@@ -943,12 +943,25 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       ],
     });
     await app.start();
+    // A caught behaviour settles in one run; without one the executor retries
+    // up to the limit of 3. Wait for that many runs (and, when observed, that
+    // many settled attempts) rather than a fixed window, which a loaded runner
+    // can outlast, then a short quiet period to catch any extra run.
+    const expectedRuns = catchingBehaviour ? 1 : 3;
+    const source = app.services.getAll<ISchedulerDiagnosticsSource>(
+      CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+    )[0]!;
+    const settled = () =>
+      counts.handlerRuns >= expectedRuns &&
+      (!observed ||
+        (recordOf(source.snapshot(), 'hostile-alias', 'attempt')?.count ?? 0) >= expectedRuns);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-      )[0]!.snapshot();
-      return { counts, attempt: recordOf(snapshot, 'hostile-alias', 'attempt') };
+      const deadline = performance.now() + 5000;
+      while (!settled() && performance.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { counts, attempt: recordOf(source.snapshot(), 'hostile-alias', 'attempt') };
     } finally {
       await app.stop();
     }

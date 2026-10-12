@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The whole path, end to end: two kernel applications, each with its own
  * `CloudflarePlugin` durableObject arm over ONE shared Durable Object namespace,
@@ -12,8 +21,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';

@@ -9,8 +9,7 @@
  * promotion would not have achieved anything.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 
 import { BigtableAdapter, DrizzleAdapter, MemoryAdapter, PrismaAdapter } from '../../src/index.ts';

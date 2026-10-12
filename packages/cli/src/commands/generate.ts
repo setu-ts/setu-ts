@@ -4,12 +4,14 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import {
   APP_VERB,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
@@ -29,7 +31,8 @@ import {
   overlongComponent,
 } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
-import { detectTargetRuntime } from '../utils/runtime-detector.ts';
+import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
+import { detectProject } from '../utils/project-detector.ts';
 import {
   findExisting,
   type GeneratedFile,
@@ -44,9 +47,14 @@ import {
   type Schematic,
   type SchematicOptions,
 } from '../schematics/registry.ts';
-import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
+import {
+  CUSTOM_SCHEMATIC_DIR,
+  isCustomSchematicName,
+  loadCustomSchematic,
+  type ModuleLoader,
+} from '../schematics/custom.ts';
 import { scanModules } from '../utils/module-scanner.ts';
-import { scanArtifacts } from '../utils/artifact-scanner.ts';
+import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
@@ -56,6 +64,7 @@ import {
   readConfigModule,
   readLegacyHttpFiles,
 } from '../utils/legacy-layout.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -75,6 +84,8 @@ export interface GenerateDependencies {
   readonly load?: ModuleLoader;
   /** Checks whether a workspace port can bind before an app is assigned one. */
   readonly portAvailable?: PortProbe;
+  /** Cooperative interruption signal checked at write boundaries. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -90,7 +101,8 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log(`Usage: ${PROGRAM_NAME} generate <schematic> <name> [options]`);
   log('');
   log('Schematics:');
-  for (const { name, requiresPlugin } of listSchematics()) {
+  for (const { name, requiresPlugin: fixed, requiresPluginWhen } of listSchematics()) {
+    const requiresPlugin = fixed ?? requiresPluginWhen?.(installed);
     if (requiresPlugin === undefined) {
       log(`  ${name}`);
     } else if (installed.has(requiresPlugin)) {
@@ -144,6 +156,7 @@ export async function runGenerateCommand(
       log: deps.log,
       error: deps.error,
       ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+      ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
     });
   }
 
@@ -156,13 +169,13 @@ export async function runGenerateCommand(
       dir,
       log: deps.log,
       error: deps.error,
+      ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
     });
   }
 
-  const installed = await detectPlugins(deps.fs, dir);
-
   // `--help` is never an error, with or without a schematic named.
   if (args.flags['help'] === true || args.flags['h'] === true) {
+    const installed = await detectPlugins(deps.fs, dir);
     printSchematics(installed, deps.log);
     return EXIT_OK;
   }
@@ -196,65 +209,46 @@ export async function runGenerateCommand(
     // contradicted the guidance it carried. Everything that genuinely fails —
     // an invalid `--runtime` (refused above), a missing name, an unknown
     // schematic, over-arity — still exits 2.
-    printSchematics(installed, deps.log);
+    printSchematics(await detectPlugins(deps.fs, dir), deps.log);
     return EXIT_OK;
   }
-  // Detected from the project rather than defaulted, because the project already
-  // knows: `setu new svc --runtime bun` records the choice once and nobody
-  // repeats it on every `generate`. An explicit flag still wins, so a custom
-  // schematic can be driven for another target deliberately.
-  const runtime: TargetRuntime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
 
-  let schematic: Schematic;
+  let schematic: Schematic | undefined;
   let name: string | undefined;
+  let customName: string | undefined;
+  let requiredPlugin: string | undefined;
 
   if (schematicName === CUSTOM_SCHEMATIC) {
-    const customName = args.positionals[1];
+    customName = args.positionals[1];
     name = args.positionals[2];
     if (customName === undefined || name === undefined) {
       deps.error(`Usage: ${PROGRAM_NAME} generate custom <schematic-name> <name>`);
       return EXIT_USAGE;
     }
-    try {
-      schematic = await loadCustomSchematic(dir, customName, deps.load);
-    } catch (cause) {
-      deps.error(cause instanceof Error ? cause.message : String(cause));
-      return EXIT_ERROR;
+    if (!isCustomSchematicName(customName)) {
+      deps.error(
+        `Invalid custom schematic name "${
+          escapeName(customName)
+        }": use letters, digits, "-" and "_" — it names a file in ${CUSTOM_SCHEMATIC_DIR}/`,
+      );
+      return EXIT_USAGE;
     }
   } else {
     const metadata = getSchematic(schematicName);
     if (metadata === undefined) {
       deps.error(`Unknown schematic: ${escapeName(schematicName)}`);
-      printSchematics(installed, deps.log);
+      printSchematics(await detectPlugins(deps.fs, dir), deps.log);
       return EXIT_USAGE;
     }
 
     name = args.positionals[1];
     if (name === undefined) {
-      deps.error(`Usage: ${PROGRAM_NAME} generate ${schematicName} <name>`);
+      deps.error(`Usage: ${PROGRAM_NAME} generate ${escapeName(schematicName)} <name>`);
       return EXIT_USAGE;
     }
 
-    if (metadata.requiresPlugin !== undefined && !installed.has(metadata.requiresPlugin)) {
-      deps.error(
-        `The "${schematicName}" schematic requires @setu-ts/${metadata.requiresPlugin}, ` +
-          `which is not installed in ${dir}.`,
-      );
-      deps.error(
-        `Run \`${PROGRAM_NAME} add ${metadata.requiresPlugin.replace(/-plugin$/, '')}\`, ` +
-          `then this command again.`,
-      );
-      // M61 added a third line here naming a decorator-free alternative, because
-      // `controller` and `module` were gated and refusing them with only
-      // "install the decorator plugin" read as though decorators were required
-      // to serve HTTP. Both are ungated now — `module` since M65, `controller`
-      // in this milestone — so no gated schematic has an alternative to name and
-      // the mechanism went with the last producer (M59's precedent: an
-      // unreachable branch is deleted, not left for coverage to excuse).
-      return EXIT_ERROR;
-    }
-
     schematic = metadata.factory;
+    requiredPlugin = metadata.requiresPlugin;
   }
 
   const names = deriveNames(name);
@@ -269,6 +263,72 @@ export async function runGenerateCommand(
     return EXIT_USAGE;
   }
 
+  const project = await detectProject(deps.fs, dir);
+  if (project.kind === 'none') {
+    deps.error(
+      `${
+        escapeName(dir)
+      } holds no deno.json, deno.jsonc or package.json — run this inside a project, or pass --dir.`,
+    );
+    return EXIT_ERROR;
+  }
+  if (project.kind === 'workspace-root') {
+    deps.error(
+      `${escapeName(dir)} is a workspace root (${
+        escapeName(project.marker)
+      }); generate inside a member instead.`,
+    );
+    deps.error(`  Pass --dir apps/<member>.`);
+    return EXIT_USAGE;
+  }
+  if (project.kind === 'unreadable') {
+    deps.error(`Cannot read ${escapeName(project.path)}: ${escapeName(project.reason)}`);
+    return EXIT_ERROR;
+  }
+
+  const installed = await detectPlugins(deps.fs, dir);
+  requiredPlugin ??= getSchematic(schematicName)?.requiresPluginWhen?.(installed);
+
+  // Resolve project-owned code and plugin gates only after the target has been
+  // established as a readable project. Otherwise a missing plugin or custom
+  // module can mask the more fundamental wrong-directory refusal.
+  if (customName !== undefined) {
+    try {
+      schematic = await loadCustomSchematic(dir, customName, deps.load);
+    } catch (cause) {
+      deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
+      return EXIT_ERROR;
+    }
+  } else if (requiredPlugin !== undefined && !installed.has(requiredPlugin)) {
+    deps.error(
+      `The "${schematicName}" schematic requires @setu-ts/${requiredPlugin}, ` +
+        `which is not installed in ${escapeName(dir)}.`,
+    );
+    deps.error(
+      `Run \`${PROGRAM_NAME} add ${
+        requiredPlugin.replace(/-plugin$/, '')
+      }\`, then this command again.`,
+    );
+    return EXIT_ERROR;
+  }
+
+  if (schematic === undefined) {
+    deps.error(`Could not resolve schematic: ${escapeName(schematicName)}`);
+    return EXIT_ERROR;
+  }
+  // Detected from the project rather than defaulted, because the project already
+  // knows: `setu new svc --runtime bun` records the choice once and nobody
+  // repeats it on every `generate`. An explicit flag still wins, so a custom
+  // schematic can be driven for another target deliberately.
+  let runtime: TargetRuntime;
+  try {
+    runtime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
+  } catch (cause) {
+    if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
+    deps.error(cause.message);
+    return EXIT_ERROR;
+  }
+
   // Read unconditionally, like `detectPlugins` above: the `module` schematic
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
@@ -277,11 +337,15 @@ export async function runGenerateCommand(
   const legacyModules = moduleScan.skipped.map((skip) => skip.name);
   for (const skip of moduleScan.skipped) {
     deps.error(
-      `Skipped ${skip.path}: it is missing ${skip.missing}, so it cannot be listed in ` +
+      `Skipped ${escapeName(skip.path)}: it is missing ${
+        escapeName(String(skip.missing))
+      }, so it cannot be listed in ` +
         'the MODULES activation barrel used by migrated configs.',
     );
     deps.error(
-      `  Add ${skip.missing} with @Module(...) or delete and regenerate the module.`,
+      `  Add ${
+        escapeName(String(skip.missing))
+      } with @Module(...) or delete and regenerate the module.`,
     );
   }
   // Same reasoning as `modules`: the migration runner lists every migration in
@@ -299,7 +363,9 @@ export async function runGenerateCommand(
   // compile, or one that quietly omits their work.
   for (const skip of scan.skipped) {
     deps.error(
-      `Skipped ${skip.path}: it does not export ${skip.missing.join(', ')}, ` +
+      `Skipped ${escapeName(skip.path)}: it does not export ${
+        escapeName(skip.missing.join(', '))
+      }, ` +
         `so it cannot be listed in the generated barrel and nothing registers it.`,
     );
     // "Regenerate it" was the advice, and it could not be followed: the artifact
@@ -322,26 +388,18 @@ export async function runGenerateCommand(
     );
   }
 
-  // X4-4/F2: the barrel just claimed a file the CLI did not write. Reported once —
-  // the next scan sees it in the barrel and stays quiet — because the alternative,
-  // requiring a provenance marker in the artifact, would un-wire every artifact in
-  // every project generated before this release.
-  for (const claim of scan.adopted) {
-    deps.error(
-      `Adopted ${claim.path} into ${claim.barrel}: it matches this family's naming ` +
-        `convention, so it is now registered by the generated barrel.`,
-    );
-    deps.error(`  Remove any manual registration of it, or rename the file.`);
-  }
-
   // The half that breaks the boot: adopted AND already registered by hand is a
   // duplicate `METHOD path`, which the kernel has refused since M68. The developer's
   // own wiring wins and the barrel steps aside, rather than the command reporting
   // success and leaving the application unable to start.
   for (const wired of scan.manual) {
     deps.error(
-      `Skipped ${wired.path}: ${wired.symbol} is already registered by hand in ` +
-        `${wired.wiredIn}, so listing it in the generated barrel would register it twice.`,
+      `Skipped ${escapeName(wired.path)}: ${
+        escapeName(wired.symbol)
+      } is already registered by hand in ` +
+        `${
+          escapeName(wired.wiredIn)
+        }, so listing it in the generated barrel would register it twice.`,
     );
     deps.error(
       `  Remove the manual registration to let the barrel own it, or leave it as it is.`,
@@ -377,11 +435,13 @@ export async function runGenerateCommand(
   );
   if (conflict !== undefined) {
     deps.error(
-      `Cannot generate ${schematicName} "${names.kebab}": ${conflict.resource} is already ` +
-        `claimed by ${conflict.claimedBy}.`,
+      `Cannot generate ${escapeName(schematicName)} "${names.kebab}": ${
+        escapeName(conflict.resource)
+      } is already ` +
+        `claimed by ${escapeName(conflict.claimedBy)}.`,
     );
-    deps.error(`If both existed, ${conflict.consequence}.`);
-    deps.error(`Choose a different name, or ${conflict.remedy}.`);
+    deps.error(`If both existed, ${escapeName(conflict.consequence)}.`);
+    deps.error(`Choose a different name, or ${escapeName(conflict.remedy)}.`);
     return EXIT_ERROR;
   }
 
@@ -400,8 +460,8 @@ export async function runGenerateCommand(
     generated = schematic(names, options);
   } catch (cause) {
     deps.error(
-      `Schematic "${schematicName}" failed: ${
-        cause instanceof Error ? cause.message : String(cause)
+      `Schematic "${escapeName(schematicName)}" failed: ${
+        escapeName(cause instanceof Error ? cause.message : String(cause))
       }`,
     );
     return EXIT_ERROR;
@@ -419,7 +479,7 @@ export async function runGenerateCommand(
   }));
 
   if (files.length === 0) {
-    deps.error(`Schematic "${schematicName}" produced no files.`);
+    deps.error(`Schematic "${escapeName(schematicName)}" produced no files.`);
     return EXIT_ERROR;
   }
 
@@ -438,25 +498,74 @@ export async function runGenerateCommand(
     return EXIT_USAGE;
   }
 
+  // X4-4/F2: adoption happens only when a barrel this command WRITES claims a file
+  // the CLI did not write. A claim into any other barrel is not an adoption — that
+  // barrel does not change — so the scan's candidates are filtered by the plan. A
+  // custom schematic is excluded outright: a matching path says nothing about what
+  // it wrote there, so the CLI cannot vouch that its barrel registers the file.
+  const planned = new Set(generated.map((file) => file.path));
+  const adoptions = customName === undefined
+    ? scan.adopted.filter((claim) => planned.has(claim.barrel))
+    : [];
+
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${file.path}`);
+    for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
+    reportAdoptions(adoptions, 'Would adopt', deps.error);
     return EXIT_OK;
   }
 
   const existing = await findExisting(deps.fs, files);
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of existing) deps.error(`  ${path}`);
+    for (const path of existing) deps.error(`  ${escapeName(path)}`);
     return EXIT_ERROR;
   }
 
   try {
-    await writeFiles(deps.fs, files);
+    const formatted = await formatForTarget(files, runtime, dir, deps.error);
+    const outcomes = await writeFiles(
+      deps.fs,
+      formatted,
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+    // After the write, so a refused or failed run never reports a claim it did not
+    // make. Reported once — the next scan finds the file in the barrel — because the
+    // alternative, a provenance marker in the artifact, would un-wire every artifact
+    // in every project generated before this release.
+    reportAdoptions(adoptions, 'Adopted', deps.error);
   } catch (cause) {
-    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    deps.error(
+      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
     return EXIT_ERROR;
   }
 
-  for (const file of files) deps.log(`created ${file.path}`);
   return EXIT_OK;
+}
+
+/**
+ * Reports each file a generated barrel claimed that the CLI did not write.
+ *
+ * @param adoptions - The claims into barrels this command writes
+ * @param verb - `Adopted`, or `Would adopt` for a dry run
+ * @param error - The command's error channel
+ */
+function reportAdoptions(
+  adoptions: readonly AdoptedArtifact[],
+  verb: 'Adopted' | 'Would adopt',
+  error: (message: string) => void,
+): void {
+  for (const claim of adoptions) {
+    error(
+      `${verb} ${escapeName(claim.path)} into ${escapeName(claim.barrel)}: it matches this ` +
+        `family's naming convention, so the generated barrel registers it.`,
+    );
+    error(`  Remove any manual registration of it, or rename the file.`);
+  }
 }

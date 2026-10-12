@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { Child } from '@hono/hono/jsx';
+import type { Child } from 'hono/jsx';
 
 /**
  * A layout is an ordinary component taking `children` — no plugin-level

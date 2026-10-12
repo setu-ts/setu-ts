@@ -11,8 +11,7 @@
  * environment without the optional dependency installed.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { loadWsModule } from '../../src/adapters/node/node-ws-upgrader.ts';
 
 /** Probes once whether the optional dependency is resolvable. */
@@ -26,20 +25,16 @@ const wsAvailable = await (async (): Promise<boolean> => {
 })();
 
 describe('loadWsModule (real npm:ws)', () => {
-  it({
-    name: 'resolves the real ws module and satisfies WsModuleLike',
-    ignore: !wsAvailable,
-    fn: async () => {
-      const module = await loadWsModule();
+  it('resolves the real ws module and satisfies WsModuleLike', { skip: !wsAvailable }, async () => {
+    const module = await loadWsModule();
 
-      expect(typeof module.WebSocketServer).toBe('function');
-    },
+    expect(typeof module.WebSocketServer).toBe('function');
   });
 
-  it({
-    name: 'constructs a real noServer WebSocketServer with a protocol selector',
-    ignore: !wsAvailable,
-    fn: async () => {
+  it(
+    'constructs a real noServer WebSocketServer with a protocol selector',
+    { skip: !wsAvailable },
+    async () => {
       const { WebSocketServer } = await loadWsModule();
 
       // The exact shape the Node adapter builds — proving the real constructor
@@ -55,5 +50,5 @@ describe('loadWsModule (real npm:ws)', () => {
         server.close();
       }
     },
-  });
+  );
 });

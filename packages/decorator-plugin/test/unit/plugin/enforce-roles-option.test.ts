@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IAuthorizationService,
@@ -185,7 +184,9 @@ describe('enforceRoles option (§3.4, §3.5)', () => {
     expect(plugin.optionalDependencies).toEqual([
       CAPABILITIES.VALIDATION,
       CAPABILITIES.AUTHORIZATION,
+      CAPABILITIES.AUTHORIZATION_POLICIES,
       CAPABILITIES.VIEW,
+      CAPABILITIES.IDEMPOTENCY,
       CAPABILITIES.QUEUE,
       CAPABILITIES.SCHEDULER,
       CAPABILITIES.EVENTS,

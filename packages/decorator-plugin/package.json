@@ -1,0 +1,66 @@
+{
+  "name": "@setu-ts/decorator-plugin",
+  "version": "0.9.0",
+  "description": "Optional NestJS-style decorators and reflection, without reflect-metadata",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/decorator-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/decorator-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": [
+    "./dist/metadata/symbol-metadata.js"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/cqrs-plugin": "workspace:^",
+    "@setu-ts/di-plugin": "workspace:^",
+    "@setu-ts/events-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/messaging-plugin": "workspace:^",
+    "@setu-ts/multi-tenancy-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/view-plugin": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3",
+    "zod-v3": "npm:zod@^3.24.0"
+  }
+}

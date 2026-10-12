@@ -1,38 +1,38 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import * as nodeFs from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
+import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
+import { createServer } from 'node:net';
+import { emitInterrupt, type MainProcess, nodeProcess, runMain } from '../../src/main.ts';
 
-/**
- * The recurrence gate §3.12 of the M72 plan commits to: nothing under
- * `packages/cli/src` may prompt, read stdin, or terminate the process, because
- * `runCli` returns an exit code and every gate drives it in-process.
- *
- * An ALLOWLIST, not a bare grep, for two reasons. A bare grep false-positives
- * on EMITTED source — `src/workspace/dev-runner.ts` carries `Deno.exit` inside
- * the runner source the CLI writes into a generated workspace, which this
- * process never executes. And a bare grep cannot see its own allowlist grow:
- * the membership assertion below is the M37c `ALLOW_SKIP` lesson, so adding a
- * third entry is a visible edit to THIS file, never a silent exemption.
- */
-const PATTERNS = [/prompt\(/, /confirm\(/, /Deno\.stdin/, /Deno\.exit/] as const;
-
-/** The only files allowed to carry one, and why each earns its place. */
-const ALLOWLIST = [
-  'src/main.ts', // The process boundary: Deno.stdin.isTerminal(), the single exit.
-  'src/workspace/dev-runner.ts', // Emitted runner source; its matches are written, never run here.
-  'src/devtool/dev-entry.ts', // Emitted dev-entry source; the refusal it writes is the project's exit, not this process's.
+// Host process reads and exits: Deno's (generated Deno source is emitted by the
+// allowlisted modules as text) and Node's. Only the boundary may touch them.
+const PATTERNS = [
+  /prompt\(/,
+  /confirm\(/,
+  /Deno\.stdin/,
+  /Deno\.exit/,
+  /process\.exit\(/,
+  /process\.stdin/,
+  /node:readline/,
 ] as const;
 
-/** The package's own src directory, resolved independently of the CWD. */
+const ALLOWLIST = [
+  'src/bin.ts',
+  'src/main.ts',
+  'src/terminal-line.ts',
+  'src/workspace/dev-runner.ts',
+  'src/devtool/dev-entry.ts',
+] as const;
+
 const SRC_DIR = new URL('../../src', import.meta.url).pathname.replace(/\/$/, '');
 
 describe('the process boundary of packages/cli/src', () => {
   it('carries no prompt, stdin or exit reference outside the allowlist', async () => {
     const offenders: string[] = [];
     for await (const entry of walk(SRC_DIR)) {
-      // Paths are package-relative (`src/main.ts`), matching the allowlist.
       const relative = `src/${entry.slice(SRC_DIR.length + 1)}`;
       if ((ALLOWLIST as readonly string[]).includes(relative)) continue;
-      const source = stripComments(await Deno.readTextFile(entry));
+      const source = stripComments(await nodeFs.readFile(entry, 'utf8'));
       for (const pattern of PATTERNS) {
         if (pattern.test(source)) offenders.push(`${relative}: ${pattern}`);
       }
@@ -41,25 +41,160 @@ describe('the process boundary of packages/cli/src', () => {
   });
 
   it('holds the allowlist to exactly its named entries', () => {
-    // Another entry is a visible edit to THIS constant, reviewed as such.
     expect([...ALLOWLIST].sort()).toEqual([
+      'src/bin.ts',
       'src/devtool/dev-entry.ts',
       'src/main.ts',
+      'src/terminal-line.ts',
       'src/workspace/dev-runner.ts',
     ]);
   });
+
+  it('registers SIGINT through runtime services, not Deno directly', async () => {
+    const source = await nodeFs.readFile(new URL('../../src/main.ts', import.meta.url), 'utf8');
+    expect(source).toContain("runtime.onSignal?.('SIGINT'");
+    expect(source).not.toContain('Deno.addSignalListener');
+  });
+
+  it('returns 130 without writes when SIGINT is already delivered at startup', async () => {
+    const fs = createFakeFs();
+    const err = createRecorder();
+    let registered: string | undefined;
+    const process: MainProcess = {
+      args: ['new', 'app'],
+      cwd: () => '/work',
+      isTerminal: () => true,
+      prompt: () => Promise.resolve(''),
+      log: () => {},
+      error: err.sink,
+      portAvailable: () => Promise.resolve(true),
+    };
+    expect(
+      await runMain({
+        fs,
+        now: () => 0,
+        onSignal: (signal, handler) => {
+          registered = signal;
+          handler();
+        },
+      }, process),
+    ).toBe(130);
+    expect(registered).toBe('SIGINT');
+    expect(fs.writes).toEqual([]);
+    expect(err.text()).toContain('Cancelled; nothing was written.');
+  });
+
+  it('reports missing filesystem access and runs non-terminal informational commands', async () => {
+    const errors = createRecorder();
+    const output = createRecorder();
+    const process: MainProcess = {
+      args: ['--version'],
+      cwd: () => '/work',
+      isTerminal: () => false,
+      prompt: () => Promise.resolve(null),
+      log: output.sink,
+      error: errors.sink,
+      portAvailable: () => Promise.resolve(true),
+    };
+    expect(await runMain({ now: () => 0 }, process)).toBe(1);
+    expect(errors.text()).toContain('requires filesystem access');
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, process)).toBe(0);
+    expect(output.lines).not.toEqual([]);
+  });
+
+  it('builds a Node adapter whose port probe reports bind success and refusal', async () => {
+    const originalLog = console.log;
+    const originalError = console.error;
+    const messages: string[] = [];
+    console.log = (message) => messages.push(String(message));
+    console.error = (message) => messages.push(String(message));
+    const held = createServer();
+    await new Promise<void>((resolve) => held.listen({ host: '127.0.0.1', port: 0 }, resolve));
+    try {
+      const host = nodeProcess(() => {});
+      expect(host.args).toEqual(process.argv.slice(2));
+      expect(host.cwd()).toBe(process.cwd());
+      expect(typeof host.isTerminal()).toBe('boolean');
+      host.log('out');
+      host.error('err');
+      expect(messages).toEqual(['out', 'err']);
+      const address = held.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      expect(await host.portAvailable(port)).toBe(false);
+      expect(await host.portAvailable(0)).toBe(true);
+      expect(await host.portAvailable(-1)).toBe(false);
+    } finally {
+      console.log = originalLog;
+      console.error = originalError;
+      await new Promise<void>((resolve) => held.close(() => resolve()));
+    }
+  });
+
+  it("routes the Node host's prompt through its reader, and releases it on dispose", async () => {
+    const host = nodeProcess(() => {});
+    const interrupted = new AbortController();
+    interrupted.abort();
+    // An already-interrupted run never asks: no reader is opened on stdin.
+    expect(await host.prompt('Template? ', interrupted.signal)).toBeNull();
+    host.dispose?.();
+    // Disposed: every later question answers "no answer" rather than reading.
+    expect(await host.prompt('Again? ')).toBeNull();
+  });
+
+  it('disposes the host after the run, so an open terminal reader cannot keep it alive', async () => {
+    let disposed = 0;
+    const host: MainProcess = {
+      args: ['--version'],
+      cwd: () => '/work',
+      isTerminal: () => false,
+      prompt: () => Promise.resolve(null),
+      log: () => {},
+      error: () => {},
+      portAvailable: () => Promise.resolve(true),
+      dispose: () => {
+        disposed++;
+      },
+    };
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, host)).toBe(0);
+    expect(disposed).toBe(1);
+  });
+
+  it('delivers a Ctrl+C at a question as the SIGINT event, never as a real signal', () => {
+    // process.kill would terminate the process outright on Windows, and on any
+    // platform where no handler is registered; the event only runs handlers.
+    const originalKill = process.kill;
+    let killed = false;
+    process.kill = (() => {
+      killed = true;
+      return true;
+    }) as typeof process.kill;
+    let handled = 0;
+    const handler = (): void => {
+      handled++;
+    };
+    process.on('SIGINT', handler);
+    try {
+      emitInterrupt();
+    } finally {
+      process.off('SIGINT', handler);
+      process.kill = originalKill;
+    }
+    expect(handled).toBe(1);
+    expect(killed).toBe(false);
+  });
+
+  it('never ends the process itself; the executable sets the exit code', async () => {
+    const bin = await nodeFs.readFile(new URL('../../src/bin.ts', import.meta.url), 'utf8');
+    expect(bin.startsWith('#!/usr/bin/env node\n')).toBe(true);
+    expect(stripComments(bin)).toContain('process.exitCode = await runMain(');
+    expect(stripComments(bin)).not.toContain('process.exit(');
+  });
 });
 
-/**
- * Lists every `.ts` file under a directory, recursively.
- *
- * @param dir - Directory to walk
- * @returns Absolute paths of the `.ts` files found
- */
 async function* walk(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of await nodeFs.opendir(dir)) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       yield* walk(path);
     } else if (entry.name.endsWith('.ts')) {
       yield path;
@@ -67,16 +202,6 @@ async function* walk(dir: string): AsyncGenerator<string> {
   }
 }
 
-/**
- * Removes comments from TypeScript source, leaving strings intact.
- *
- * The sweep targets CODE, not prose: JSDoc legitimately names these APIs when
- * explaining that the CLI does NOT use them. String literals are tracked so a
- * `'http://…'` inside one is not mistaken for a comment opener.
- *
- * @param source - The file contents
- * @returns The source without comments
- */
 function stripComments(source: string): string {
   let out = '';
   let quote: string | undefined;

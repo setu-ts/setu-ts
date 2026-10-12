@@ -3,13 +3,13 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   buildTracerHost,
   loadOtelTracerProvider,
   type OtelResourcesModule,
   type OtelSdkModule,
+  setOtelApi,
 } from '../../src/tracing/tracer.ts';
 import type { TracerHost } from '../../src/interfaces/index.ts';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
@@ -294,6 +294,48 @@ describe('buildTracerHost (via fake modules)', () => {
       },
     };
   }
+
+  it('validates direct OTLP construction and tolerates absent parent and activation context', async () => {
+    expect(() =>
+      buildTracerHost({
+        sdkMod: createFakeSdkModule(),
+        resourcesMod: createFakeResourcesModule(),
+        pluginOptions: { exporter: 'otlp' },
+      })
+    ).toThrow('endpoint');
+    const host = await buildTracerHost({
+      sdkMod: createFakeSdkModule(),
+      resourcesMod: createFakeResourcesModule(),
+      pluginOptions: { exporter: 'console', serviceVersion: '' },
+      consoleExporterCtor: class {} as never,
+      contextActivation: true,
+    });
+    const api = await import('@opentelemetry/api');
+    try {
+      setOtelApi(null);
+      expect(
+        host.startSpan('no-api', {
+          parentContext: { _opaque: TELEMETRY_CONTEXT_OPAQUE, traceId: '1', spanId: '2' },
+        }),
+      ).toBeDefined();
+      expect(host.startSpan('no-id', { parentContext: { _opaque: TELEMETRY_CONTEXT_OPAQUE } }))
+        .toBeDefined();
+      expect(await host.activate!({}, () => Promise.resolve('result'))).toBe('result');
+      setOtelApi(api as unknown as Parameters<typeof setOtelApi>[0]);
+      expect(
+        host.startSpan('default-flags', {
+          parentContext: {
+            _opaque: TELEMETRY_CONTEXT_OPAQUE,
+            traceId: '0af7651916cd43dd8448eb211c80319c',
+            spanId: 'b7ad6b7169203331',
+          },
+        }),
+      ).toBeDefined();
+    } finally {
+      setOtelApi(null);
+      await host.shutdown();
+    }
+  });
 
   it('should throw when exporter is neither otlp nor console', async () => {
     try {
@@ -1251,4 +1293,14 @@ describe('buildTracerHost — M98g diagnostic processor composition', () => {
     });
     expect(capturedRatio).toEqual([0.5]);
   });
+});
+
+it('loads the installed OTLP exporter without activation and closes it without exporting', async () => {
+  const host = await loadOtelTracerProvider({
+    exporter: 'otlp',
+    endpoint: 'http://127.0.0.1:4318/v1/traces',
+    contextPropagation: false,
+  });
+  expect(host.otelProvider).toBeDefined();
+  await host.shutdown();
 });

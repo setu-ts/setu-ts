@@ -77,7 +77,7 @@ export function eventWithinByteCap(
 }
 
 /** The capture-time bound for one string field of an event. */
-export const MAX_EVENT_FIELD_LENGTH = MAX_FIELD_LENGTH;
+export const MAX_EVENT_FIELD_LENGTH: number = MAX_FIELD_LENGTH;
 
 /**
  * The exact UTF-8 byte length of the event's compact JSON encoding — used by

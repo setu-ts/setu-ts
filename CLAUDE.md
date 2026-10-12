@@ -1,34 +1,45 @@
 # Setu-TS — Session Instructions
 
-Plugin-first enterprise backend framework. **Deno-first toolchain** (Deno 2 workspaces), published
-to **JSR** under `@setu-ts`, consumable from Node/Bun via JSR npm compatibility.
+Plugin-first enterprise backend framework, published to **JSR** under `@setu-ts` and consumable from
+Node/Bun via JSR npm compatibility. Package tests run on Node 24 with pnpm and Vitest. Deno 2
+workspaces retain repository scripts, root tests, and the named native-adapter test lane until
+M111e.
 
-The backend toolchain is Deno-only. The **sole exception** is an application's _frontend build_ —
-the React Router SSR plugin (M44) is built with Vite on the Node/npm toolchain, outside the Deno
-workspace. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and
-never appears in any JSR-published package's dependency graph (see AI_GUIDELINES §12.2).
+The React Router SSR plugin (M44) uses Vite on the Node/npm toolchain for application frontend
+builds. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and never
+appears in any JSR-published package's dependency graph (see AI_GUIDELINES §12.2).
 
 ## Starting a new milestone — READ THESE FIRST (mandatory)
 
-**Step 0 — be on the milestone's feature branch before you touch anything.** `main` is protected;
-never work on it and never commit to it directly (AI_GUIDELINES §15.3). A milestone gets exactly ONE
-feature branch — `feat/[milestone]-[description]` (e.g. `feat/m4-logger-plugin`) — and ALL work for
-that milestone lives on it: the initial implementation AND every follow-up fix, review change, or
-bug repair, right up until the branch is merged. Your FIRST action is:
+**Step 0 — be on the milestone's feature branch, in its own worktree, before you touch anything.**
+`develop` and `main` are both protected; never work on either and never commit to either directly
+(AI_GUIDELINES §15.3). `develop` is the integration branch every PR targets except release and
+hotfix PRs; `main` holds only the last release, is the repository's default branch (so
+`gh pr create` needs `--base develop`), and changes only through a release or hotfix PR (see
+"Branches" under Key conventions). A milestone gets exactly ONE feature branch —
+`feat/[milestone]-[description]` (e.g. `feat/m4-logger-plugin`) — and ALL work for that milestone
+lives on it: the initial implementation AND every follow-up fix, review change, or bug repair, right
+up until the branch is merged. Every new task — milestone or not — starts in a NEW git worktree at
+`.claude/worktrees/<name>`, never in the main checkout, which stays on `develop` (AI_GUIDELINES
+§15.4). Your FIRST action is:
 
 ```bash
-git branch --show-current            # what am I on?
-# If it already prints the milestone's feat/… branch (work in progress) → continue on it.
-# If it prints "main":
-git switch feat/[milestone]-[description]     # resume the existing branch if it exists, else:
-git switch -c feat/[milestone]-[description]  # create it (only when starting the milestone fresh)
+git worktree list                    # does the branch already have a worktree?
+# If it does (work in progress) → cd into it and continue there.
+# If the branch exists but has no worktree:
+git worktree add .claude/worktrees/[milestone]-[description] feat/[milestone]-[description]
+# If it does not exist yet, start it fresh in a new worktree:
+git fetch origin && git worktree add -b feat/[milestone]-[description] \
+  .claude/worktrees/[milestone]-[description] origin/develop
+cd .claude/worktrees/[milestone]-[description] && git branch --show-current
 ```
 
 Do NOT open a new `fix/…` branch for defects in a milestone that is not yet merged — those fixes
 belong on the milestone's own `feat/…` branch (a `fix/…` branch is only for a defect in
-already-merged code on `main`). If `git branch --show-current` prints `main` at any point during a
-milestone, stop and switch to the feature branch before doing anything else. The branch merges to
-`main` via a single PR once the milestone is complete.
+already-merged code on `develop`). If `git branch --show-current` prints `develop` or `main` at any
+point during a milestone, stop and switch to the feature branch before doing anything else. The
+branch merges to `develop` via a single PR once the milestone is complete; it reaches `main` only
+with the next release.
 
 Do NOT write, edit, or scaffold any code until you have read, in this order:
 
@@ -2686,6 +2697,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   labels. Writing the coverage test for the reporter surfaced a fixture bug the type checker caught:
   `{ ...base }` on a class copies fields and DROPS every prototype method. All `src` files at 100%
   branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR #170)
+- **Milestone 45c** (`packages/worker-pool-plugin` — service-wide worker pool sizing) — complete (PR
+  #433). `maxWorkers` bounds the sum of lazy module pools, with reserved asynchronous hand-over,
+  idle eviction and priority for modules without a slot. Both construction paths validate the bound;
+  health reports it. Synchronous spawn failures settle their oldest task without a ghost queue entry
+  and continue scheduling the remaining queue, and shutdown refuses new work before closing the
+  budget. Security follow-up reclaims excess startup slots, contains termination failures with a
+  one-second cleanup deadline, ignores stale callbacks and isolates NaN legacy sizing contributions.
+  The example now binds loopback with scoped permissions. A second independent audit failed the
+  branch on five findings; the fix adds `startupTimeoutMs` (a never-ready worker no longer holds a
+  shared slot, even with task timeouts off), yields a starting worker to a starved module, charges a
+  slot only after listeners attach, documents that the bound counts slots rather than threads on
+  Deno, and stops a Deno task module that throws at import from killing the host process
+  (pre-existing, folded in at the maintainer's direction). The `apps/worker-pool` smoke proves
+  event-loop progress, fairness under one slot, shared-buffer writes and health data. All ten
+  negative controls failed and were reverted; full tests and coverage passed, with every measured
+  plugin source file above 90% on branch, function and line. Sizing and migration docs ship with the
+  archived plan at `plans/archive/milestone-45c-worker-pool-sizing.md`.
+
 - **Milestone 70c** (`messaging-plugin` + `realtime-backplane-plugin` + `storage-plugin` +
   `mail-plugin` + `queue-plugin` + `service-discovery-plugin` + `grpc-plugin` — health signals that
   describe lifecycle, not reachability). Six packages answered `up` with their backends stopped and
@@ -5568,13 +5597,601 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   branch. Verified beyond the gates: the client on Node, Bun and Deno against a Deno server, process
   freeze/resume, and a live 364 s machine suspend showing the cap counts awake time — complete (PR
   #392).
+- **Milestone 101d** (`packages/sdk` + `packages/telemetry-plugin` +
+  `packages/react-router-plugin` + `packages/starters/full-stack-starter`): aligned both sides of
+  five first-party call contracts. The SDK propagates an active trace and caps `Retry-After`;
+  generated clients no longer claim observable `3xx` error arms; React Router refusal ownership is
+  explicit; and post-factory code can read the exact full-stack configuration snapshot — complete
+  (PR #403).
 - **Release `v0.8.0`** — on `release/v0.8.0`, 2026-10-03 (PR #394). **49 packages**; first publish
   of `diagnostics-plugin`, so `release:create-packages` and `release:link-repos` run before the tag.
   Scope was M98a–M98o, M99a–M99e and M100a–M100f. The sdk manifest's pinned mapping value
   (`jsr:@setu-ts/common@<version>`) is a bump site a `^`-only sweep misses (see
   `docs/releasing.md`), and an in-place edit to the published `[0.7.0]` CHANGELOG section (the M99c
   Blob default) was reverted to its tag text, since 0.7.0 did not have that behaviour.
-- **Next milestone** — none open; see ROADMAP.md.
+- **Milestone 101a** (`common` + `messaging-plugin` + `database-plugin` + `secrets-plugin` +
+  `cache-plugin` + `queue-plugin` + `scheduler-plugin` — health that reports healthy, and calls that
+  hang, when a dependency fails): one rule, built on the new `withDeadline` in `common`, applied
+  across seven packages — every backend call is bounded, and an expired bound is a recorded failure.
+  V8-1 (the regression): a retained Service Bus outage answers `false` at once, with the management
+  probe only clearing it in the background. V8-3: a saturated Drizzle pool (seen through
+  `poolStats`) is `up` with `reachable: 'unknown'` only while queries complete through the adapter
+  (a hung database reads `degraded`), and a pool timeout is `degraded` rather than `down`. V8-4:
+  Vault requests are bounded by `requestTimeoutMs` and an outage rejects with the new
+  `SecretProviderUnavailableError` (`503`). V8-5: cache and queue Redis commands carry
+  `commandTimeoutMs`. V8-23: an unread queue depth row is absent, never a retained zero. V8-24: a
+  hung lock acquire is bounded by `acquireTimeoutMs`, counted `lockFailed`, re-armed, and a late
+  token released. Every bound refuses an out-of-range value (including `NaN`) at startup. Proven
+  against a real paused Redis 7 (CI, pinned by `test/apps-gate.test.ts`), PostgreSQL 16, Vault and
+  the Service Bus emulator. An unplanned security audit, requested by the maintainer, ran four
+  fresh-context rounds: round 1 found no design review (now plan §11, recorded after the fact) and
+  pre-existing Vault defects — an unencoded secret name reached any Vault endpoint with the token,
+  and bodies were unbounded — both fixed; round 2 found 16-byte chunks pinning 64 KiB buffers (a
+  read peaked at 2.4 GiB under the 1 MiB cap, now 131 MiB); rounds 2–3 found unbounded and partly
+  escaped names in messages. Round 4 passed on `0caf9f9` — complete (PR #401).
+- **Milestone 102** (`packages/mail-plugin` — mail bodies rendered through the view engine. M29's
+  `TemplateEngine` is 94 lines of `{{ variable }}` substitution, the right size for a welcome mail
+  and the wrong size for an invoice or a digest, which every application built by concatenating
+  strings — exactly what M92 removed from HTTP responses. `MailPluginOptions.templates` gains a
+  **component arm** beside the string arm (`{ view, text? }`, both `Component`s), rendered through
+  the `IViewEngine` under `CAPABILITIES.VIEW` with `sendTemplate`'s `data` passed verbatim as props,
+  so the committed `IMailer` contract is unchanged. **The bridge lives in `mail-plugin`, as an
+  optional capability** — a typed free function in `view-plugin` was rejected as the three lines an
+  application already writes, with no reader but its own test (maintainer decision). `MailPlugin`
+  declares `CAPABILITIES.VIEW` in `optionalDependencies` and resolves the engine ONCE at
+  `register()`; a component template with no provider fails at startup naming both remedies (the M92
+  `@Render` precedent), performed inside the `TemplateEngine` constructor so it is testable without
+  a plugin context. The two arms carry `never`-typed cross-arm members, so a template mixing `view`
+  and `html` is a compile error rather than a precedence rule (pinned by self-validating
+  `@ts-expect-error` rows). **One breaking change**: `TemplateEngine.render` is now asynchronous,
+  because `IViewEngine.render` may answer a promise and both arms share one lookup — CHANGELOG'd
+  with migration text and a `docs/upgrading.md` entry. Two asymmetries with the string arm are
+  stated in three doc sites and pinned by tests rather than implied away: escaping is the rendering
+  runtime's (an `html` template escapes, a hand-written literal does not), and there is NO
+  missing-key check (an absent key renders as `undefined`). Only the registry is consulted — a
+  container-supplied engine lands during `DecoratorPlugin`'s own `register()`, after this one.
+  Verified through a real kernel app with the real `ViewPlugin` under the non-default `hono-html`
+  arm, `MailPlugin` listed BEFORE `ViewPlugin` so the edge rather than array order is what orders
+  them; `ViewRenderError` and `UnresolvedSuspenseError` propagate unwrapped with the provider never
+  reached. Four negative controls each observed failing and reverted. All changed `src` files at
+  100% branch/function/line. **Two pre-existing defects the verification surfaced are fixed here at
+  the maintainer's direction** (the M58 `g controller` / M59 `detectRuntime` precedent): the log and
+  SendGrid providers accepted a send while disconnected — after `app.stop()` the log provider
+  reported success and SendGrid still POSTed a real email, while SMTP and SES refused — and the
+  `@since` gate skipped every `@since 0.1.0` tag, because that line shipped only as `0.1.0-alpha.*`,
+  reporting them as "ahead of the registry". The gate now checks such a tag against the line's last
+  prerelease, which took it from 946 verified tags to 1,728 and surfaced 62 wrong ones — the
+  MongoDB, DynamoDB and cursor-paging surfaces of `database-plugin` tagged `0.1.0` while shipping in
+  `0.2.0` — each corrected to the first published version that contains the symbol, derived from the
+  registry rather than guessed) — complete (PR #400)
+- **Milestone 101b** (`packages/messaging-plugin` — message transports that fail against the real
+  broker): three arms that passed every fake-backed test and failed on first contact with the real
+  server. **V8-2:** a Pub/Sub subscription with no `queue` is named per topic,
+  `<defaultQueue>.<topic ID>` (breaking), and an existing subscription bound to another topic — read
+  through a new `getMetadata` facade member — is refused with
+  `PubSubSubscriptionBoundElsewhereError` rather than attached to. **V8-6:** a NATS queue is encoded
+  into a legal JetStream consumer name (`.` → `_2e`, the nine characters the client refuses held as
+  data; a legal queue is unchanged), the raw queue is recorded as `setu.queue` consumer metadata
+  (NATS 2.10+), and an encoding collision or a queue reused across topics rejects with
+  `NatsConsumerNameCollisionError` — in process, and across processes on the server's
+  `10148 consumer already exists`, which the old `'consumer name already exists'`/`'duplicate'`
+  match never saw. **V8-26:** **the plan's premise was falsified by measurement** — kafkajs retries
+  only `LEADER_NOT_AVAILABLE`, and a KRaft broker WITH auto-creation answers
+  `UNKNOWN_TOPIC_OR_PARTITION` to the request that creates the topic, so `subscribe()` now retries
+  that one error within a validated, forwarded `KafkaOptions.retry` (kafkajs's defaults), then
+  throws `KafkaTopicUnavailableError`; a `run()` rejection reaches the logger. Real suites drive two
+  topics and RPC in one app on real NATS, Kafka 4.0.0 and the Pub/Sub emulator (run twice on one
+  instance, striking the doc's restart advice that masked V8-2); every negative control reproduced
+  the run's own signature. **Verification then found three defects the gates passed.** The headline
+  one made the milestone's own named errors hang the process: `register()` connected the broker and
+  subscribed the declared entries BEFORE registering its close hook, so a declared subscription
+  rejecting `start()` — now the documented outcome — left the connected broker open and the process
+  never exited (measured on real Kafka); the hook now follows `connect()`. A fully-qualified Pub/Sub
+  topic derived a default name containing `/`, which the emulator refused with `INVALID_ARGUMENT`
+  (the topic ID is used now), and a Kafka retry wait held its timer through `disconnect()`. A
+  pre-existing leak, folded in at the maintainer's direction (the M58 precedent): `KafkaBroker`
+  `stop()`ped consumers on `disconnect()` and `unsubscribe()` but never `disconnect()`ed them, so
+  every Kafka app hung after `app.stop()` on `develop` too, and every RPC reply-inbox close leaked a
+  connection; both now `disconnect()` . The independent security audit (round 1, on `0d3da3da`)
+  failed on a missing design security review — now recorded as plan §10 after the fact (the M101a
+  precedent) — and a doc claim that every `retry` field was validated while `factor` was forwarded
+  unchecked (now held to [0, 1]); its pre-existing observation that a `disconnect()` racing
+  `subscribe()`'s connect or first attempt left a consumer running was folded in and fixed. Round 2
+  (on `1b6c741d`) found the same class one window later (F3): a consumer whose group JOIN was in
+  flight survived `app.stop()`, because kafkajs's `stop()` is a no-op mid-join and closing the
+  connections under the join is a retriable crash it RESTARTS — so release now waits for the join
+  (bounded 10 s) and a released consumer refuses the restart; on a real broker each half was shown
+  load-bearing on its own (without the wait a stale member lingers; without either the process
+  hangs). Round 3 (on `3a8dbccf`) found both claims one window short: a stop after kafkajs's own
+  restart timer fired still left the restarted consumer joining — kafkajs's `stop()` drops a runner
+  that is not yet running, so nothing could stop it, and it consumed after `app.stop()` (N2) — and
+  the 10 s bound covered only the wait, not the disconnect under a pending JoinGroup (N1: 45 s, 64
+  s). The broker now owns crash restarts (`restartOnFailure` always declines and schedules its own),
+  and a join outlasting the bound is disconnected the moment it settles rather than under it:
+  measured on Kafka 4.0, `app.stop()` 10.0 s in both N1 cases and every N2 window, 0 delivered, exit
+  0. Round 4 (on `ab9598e6`) found that fix taking `initialRetryTime: 0` literally where kafkajs
+  reads `|| 300` — 1393 restarts in a 20 s outage, now 64, fixed on `d015a9b4`; the maintainer
+  waived a fifth round — complete (PR #404).
+- **Milestone 103** (`packages/localization-plugin` (new), `packages/common`,
+  `packages/cache-plugin`, `packages/cloudflare-plugin`, `packages/testing`, and one `packages/cli`
+  claim-table line — localization): `LocalizationPlugin` registers an `ILocalizer` under the new
+  `CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()` (unknown or malformed tags,
+  unlisted locales, malformed messages, and locales missing default keys refused by name;
+  `allowPartialCatalogues` downgrades the last to one warning per locale), and resolves each
+  request's locale at priority 45 — query, cookie, a bounded `Accept-Language` parse with `q=0`
+  honoured under `*`, a `tenantLocale` default, then the default — matching every candidate against
+  the supported set only. The resolved tag is a first-class `IRequest.locale` on the `tenant`
+  precedent, sealed by the same one-write guard with `replaceLocale` as the deliberate escape; it
+  costs about 170 ns per request (measured against `develop`, inside the plan's 1 µs threshold).
+  `Vary: Accept-Language` (plus `Cookie` while the cookie source is on, a stated CDN cost) is
+  written before the handler and `Content-Language` after it, from the final locale. `cache-plugin`
+  keys on the locale by default; the plan's review found the ordering condition that governs it — a
+  global `cacheMiddleware` must run after the locale middleware and an override must precede the
+  lookup — and both limitations are pinned by tests rather than claimed. The formatter and
+  negotiation ship as the import-free subpath `/format`, whose runtime graph a `deno info --json`
+  walk confines to its own modules, with a planted `common` value import as a permanent negative
+  control; it promises one implementation, not identical output (`Intl` data and time zones differ,
+  so dates take an explicit `timeZone`). PR review of the plan caught four defects before any code:
+  `*` ignoring `q=0`, `Vary` missing `Cookie`, a cross-runtime parity claim no test could make, and
+  a date cache keyed by locale alone. Implementation found `@setu-ts/testing` dropping a seeded
+  locale. The fresh-context security audit then found the Cloudflare Cache API serving one locale's
+  page to everyone (a URL-string key is matched with no request headers, so `Vary` could not help —
+  its default key now carries the locale), the catalogue route marking a session `Set-Cookie`
+  response `public` (default now `private`), an overstated no-echo claim, blanket test permissions,
+  and base paths that registered dead or root routes; all fixed. The re-audit found the Cloudflare
+  fix had itself introduced web cache poisoning — `searchParams.set` stripped a client's copy of the
+  key parameter from the key while the handler still saw it — so the parameter is kept in the key
+  instead; two Low findings were fixed with it. A third round found that the key still re-serialized
+  the query, so encoding variants shared an entry (it now concatenates onto the URL text as sent),
+  and that the documented ordering condition hard-coded priority 45 where the real rule is "after
+  the locale middleware". A fourth round found that Deno and Node deliver a client's URL fragment,
+  so a fragment-carrying request is now served uncached, as is a locale that is not well-formed
+  UTF-16 (which made `encodeURIComponent` throw); a fifth found the same shape for URL text Deno
+  delivers un-normalized, so a URL that is not its own serialization is served uncached as well; a
+  sixth found that a locale-less request carrying the reserved parameter keyed like a localized one,
+  and it is served uncached too. All `src` files at 100% branch/function/line; twenty negative
+  controls observed failing — complete (PR #405)
+- **Milestone 101e** (`packages/cli` — write safety): generation refuses non-project directories and
+  workspace roots; interactive cancellation exits `130`; JSONC inspection, runtime-aware add,
+  workspace member reconciliation, and honest write outcomes share command-layer checks. SIGINT
+  rolls back write batches and adoption's relocations, while plugin commands run application
+  shutdown. Real-filesystem interruption regressions cover adoption's copy, deletion, root write,
+  and entry rewrite; a subprocess SIGINT test pins both rollback and unhandled termination —
+  complete (PR #412).
+- **Milestone 101c** (`packages/session-plugin` + `packages/common` +
+  `packages/multi-tenancy-plugin` + `packages/database-plugin` + `packages/http-security-plugin` +
+  `packages/auth-plugin` — tenancy and identity features that do not compose; V8-7, V8-8, V8-9,
+  V8-25): a session's tenant binding compares on whichever side sees the tenant second — the session
+  middleware's load-time compare and a new tenant-side compare share one pure
+  `tenantBindingMismatch`, the session plugin publishes `SESSION_TENANT_BINDING_STATE_KEY` so
+  `tenantBinding: false` disables both, and a bound session is never re-bound (V8-7).
+  `ITenantDataStore` moves to `common` and a `DatabaseTenantDataStore` bridge
+  (`createDatabaseTenantDataStore()`, resolved at `onInit`) makes the tenant repository read and
+  write the application's real database; key lookups go through the repository's own `findById`, so
+  a primary key not named `id` works (V8-8). `csrfMiddleware` gains `exclude` and the SAML recipe
+  stops trusting `Origin: null` (V8-9); the SAML ACS checks the binding before consuming the pending
+  request (V8-25). Verification found the bridge hardcoding `id` (a silent not-found on a real
+  MongoDB `primaryKey: 'user_id'`) and a dead `tenantColumn` factory option; code review found
+  `tenantBinding: false` ignored at the tenant-side compare. The security audit (plan §11, recorded
+  after implementation) ran four fresh-context rounds: round 1 found a cross-tenant overwrite
+  through duplicate memory-adapter keys (High), a cross-site POST burning a victim's SAML login, and
+  `$`-operators reaching MongoDB through `find`; round 2 found the commit path still admitting
+  duplicates; round 3 found an `update` able to rewrite a key onto another row's key (High) and a
+  transaction committing a duplicate through delete-then-recreate. The memory adapter now refuses
+  duplicate and changed primary keys in and out of transactions. Round 4 passed on `c011db69` —
+  complete (PR #411).
+- **Milestone 101f** (`packages/cli` + `packages/common` + diagnostics sources — devtool lifecycle):
+  enabling verifies composition and aligned pins; development entries detect discarded composition;
+  connector ports use a recorded range, and reallocation updates CLI-rendered entries before
+  rewriting the manifest. Production images exclude the development entry and connector cache, while
+  completing lazy broker lockfile edges. All diagnostics aliases refuse Cc and Cf characters through
+  the shared common predicate (SDK keeps its type-only import policy) — complete (PR #414).
+- **Milestone 101g** (`packages/cli` + the full-stack template — wired scaffolds) — in progress.
+  First implementation slice: generated factories return `IKernelApplication`; socket targets emit
+  composition-root smoke tests; `setu add testing` supports Deno imports and npm dev dependencies;
+  devtool upgrade instructions preserve the kernel type. Remaining wiring and browser deliverables
+  are implemented. Verification and code review are done (2026-10-06); they fixed a fresh full-stack
+  `deno task test` that still failed (V8-39), a guard registration that answered `501`, unformatted
+  `ws-route`/`sse` output and a production `@setu-ts/testing` pin. The security design review is in
+  plan §10. The independent committed-tree audit ran seven fresh-context rounds, all on how
+  `setu add` and `setu devtool enable` read a hand-edited `setu.config.ts`: each round found a
+  configuration the text classifier accepted and misread (a duplicate plugin insert, a wrong
+  backplane policy, silenced registration guidance), quadratic scanners, or — rounds 6 and 7 — a CLI
+  command sequence whose own output broke or silently changed the project. The fix narrowed what the
+  CLI classifies to a language it can decide from one file (ASCII code, static framework or relative
+  imports, no reflection identifiers or computed member access, no starter imports, no retargeted
+  import maps); everything else gets the printed registration line instead of an edit. Round 7
+  failed on four Low findings, fixed afterwards on this branch and NOT re-audited, at the
+  maintainer's limit of seven rounds — complete (PR #415).
+- **Milestone 101i** (`packages/cli` + `packages/kernel` + `packages/di-plugin` +
+  `packages/decorator-plugin` + `packages/testing` + `packages/react-router-plugin` + the starters +
+  docs — first-run repairs; no ROADMAP entry, by the maintainer's direction): every command the
+  newcomer path tells a reader to run now runs. `app.fetch` is bound, so
+  `export default { fetch: app.fetch }` serves on Workers; a full-stack npm project builds before it
+  starts; `DiPlugin` defaults `autoRegister: true` (breaking); `@setu-ts/testing` gains
+  `overrideProvider`; an absent header resolves to `undefined` and `Query<T>()` is generic; the
+  full-stack `dev` entry serves route edits on Deno, Node and Bun through `viteDevExternals`; and
+  the full-stack starter leaves `SchedulerPlugin` out on Workers, where every full-stack application
+  failed to start. Every newcomer guide was cold-read and its examples run or checked against source
+  — complete (PR #426).
+- **Milestone 106** (`packages/common` + `packages/messaging-plugin` + `packages/cloudflare-plugin`
+  - `packages/queue-plugin` — publish options): `IMessageBroker.publish` takes an optional
+    `PublishOptions` (`orderingKey`, `deduplicationId`, `headers`), mapped to each broker's native
+    primitive (Kafka key, Pub/Sub `orderingKey`, NATS `Nats-Msg-Id`, Service Bus and RabbitMQ
+    `messageId`) and always carried as `x-setu-*` headers, on all seven brokers and `WorkersBroker`.
+    One `parsePublishOptions` in `common` reads the caller's object once into a frozen copy and
+    refuses, by name and without echoing the value, reserved header names (case-insensitive), bad
+    ids, and anything over the portable bounds; `publishIntegrationEvent` defaults the
+    de-duplication id to the envelope id and takes an opt-in ordering selector. Verification found
+    the Workers broker dropping a `__proto__` header on every runtime but Deno, and the record rules
+    duplicated with drift; the code review found eleven more, including `enableMessageOrdering`
+    silently ignored beside an injected Pub/Sub client. The security audit ran five fresh-context
+    rounds. Round 1 found a High: a 256-byte header name passed validation, and amqplib queues a
+    confirm callback before encoding, so one such publish misattributed every later confirm on the
+    channel; the name bound is now 255 everywhere and `RabbitMqBroker` refuses unencodable fields
+    first. The re-audit found the same class, pre-existing, in `subscribe()` and in queue-plugin's
+    `RabbitMqQueue` (both jammed their channel until restart) — folded in at the maintainer's
+    direction — and then that the queue refusal starved every later processor, now refused at
+    registration with per-name isolation in both loops. Round 5 passed with nothing open — complete
+    (PR #427).
+- **Milestone 107** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` +
+  `packages/telemetry-plugin` — transactional outbox): `MessagingPlugin({ outbox })` registers an
+  `IOutbox` under the new `CAPABILITIES.OUTBOX`; `write(scope, definition, payload)` appends an
+  integration event inside the caller's own database transaction through the `IOutboxStore` port in
+  `common`, which `database-plugin`'s `createDatabaseOutboxStore` bridge implements over the
+  repository surface (every row carries the `'setu-outbox'` discriminator, so a shared table or
+  collection is safe; Bigtable, a DynamoDB table without its index and a standalone MongoDB are
+  refused at startup by name). A scheduled relay sweeps the PENDING set in keyset-paged laps with a
+  persisted cursor rather than a watermark, publishes at least once with M106's ordering key and
+  de-duplication id, blocks a key behind a failed or backed-off row, poisons unreadable rows, and
+  re-parents each publish to the trace that wrote the row via the new `SpanOptions.root`. Purge runs
+  on its own interval, shutdown drains in `onShutdown`, and an `outbox` health indicator plus
+  metrics report it. Proven on real PostgreSQL → RabbitMQ and → Redis Streams, a Mongo replica set,
+  DynamoDB Local and the real OpenTelemetry SDK. The full suite found the dependency drift gate
+  refusing the new `.sql` fixtures. The security audit ran four fresh-context rounds: round 1 found
+  F1 (Medium) — a lap overflowing its 10 000-key blocked set ended in the same sweep, which cleared
+  the flag before health read it, so an attacker with table write access stalled every keyed row
+  while `/health` read `up`; the holder now keeps the last completed lap's overflow until a clean
+  lap. Round 2 passed on `30e55237`. Two of the auditor's observations were then fixed at the
+  maintainer's direction: each store's startup `verify()` is bounded by `relay.storeTimeoutMs` and
+  fails `start()` with `OutboxStoreVerifyTimeoutError` (Drizzle's `connect()` does no I/O, so on
+  `pg`, whose driver sets no connect timeout, `verify()` is the first database call and `start()`
+  hung for ever), and stored `options` longer than any the outbox writes — a bound derived from the
+  M106 limits — are refused before the parse. Round 3 found L1 (Low): the test for that order fed an
+  unparseable string, so it passed with the check moved after the parse; it now spies on
+  `JSON.parse`. Round 4 passed on `f31148bf`. Not verified: workerd, Prisma, MySQL DDL, a non-`C`
+  PostgreSQL collation — complete (PR #431).
+- **Milestone 109a** (`packages/idempotency-plugin` (new) + `packages/common` +
+  `packages/decorator-plugin` + `packages/cloudflare-plugin` + `packages/messaging-plugin` +
+  `packages/queue-plugin` + one `packages/cli` claim-table line — idempotency core):
+  `IdempotencyPlugin` registers an `IIdempotencyService` under the new `CAPABILITIES.IDEMPOTENCY`
+  over one claim/complete/release state machine with fencing tokens, a SHA-256 key and fingerprint
+  derived from canonical JSON, and three stores — memory (per-scope and global caps), Redis (three
+  Lua scripts on the server clock, required `namespace`, a `maxmemory-policy` warning) and a
+  Cloudflare Durable Object (input gate plus alarm). Entry points: the `idempotent()` HTTP
+  middleware, `@Idempotent()` appended after guards, authorization and validation, and an ingress
+  behaviour with a required `topics`/`jobNames` allow-list, keyed per `IngressContext.consumer`
+  (new, optional; populated by messaging and queue dispatch). A replay re-serves status, body and
+  allow-listed headers, never `Set-Cookie`, and answers `422` for a different body under one key and
+  `409` while in progress. Implemented by zoo code; verification (a 64-check probe through real
+  kernel apps and real Redis) found the planned regression tests, a missing ioredis error listener
+  and an unthrottled per-scope sweep missing. The security audit ran five fresh-context rounds,
+  fixed in turn: a per-path warning set that grew without bound (High, now capped per route), a
+  whole-store scan per refused claim (Medium, now a per-scope index), a throwing logger or an
+  unconvertible thrown value changing an outcome (`safeLog`, `describeThrown`), and three doc
+  claims. Round 6 was waived at the maintainer's direction, so the last fix (`f9e42b07`) is not
+  re-audited — complete (PR #434).
+- **Milestone 108** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` +
+  one `packages/cli` claim-table line — consumer inbox): `MessagingPlugin({ inbox })` plus
+  `onIntegrationEvent(definition, handler, { inbox: { consumer } })` applies an integration event's
+  database writes once per consumer. A marker keyed by a SHA-256 of `(consumer, topic, envelope id)`
+  is created FIRST in the same transaction as the handler's writes, and the handler receives that
+  transaction's unit of work as a fourth argument (`IntegrationEventInboxHandler`, its type inferred
+  from the annotation); with `inbox` the call returns a `RegistryFactory` resolved at `onInit` after
+  the store is verified, and every existing call keeps its type (the inbox overload is declared
+  first and the legacy options take `inbox?: never`). A duplicate is acknowledged after a pre-read;
+  after ANY rejection the marker is re-read — a commit-time `DuplicateKeyError` carries no entity
+  and a concurrent loser on a MongoDB replica set is a write conflict (measured), so the error alone
+  cannot say "already handled". The broker `queue` defaults to `inbox.` plus a 16-hex-character hash
+  of the consumer and topic, because a queue-less RabbitMQ subscriber discards failures and a queue
+  shared by two topics splits them. Opt-in `maxAttempts` counts failures outside the transaction and
+  parks at the limit (NATS and Kafka have no delivery budget); `IInbox` lists and releases parked
+  deliveries without ever re-running a handler. `common` gains `IInboxStore` and
+  `CAPABILITIES.INBOX`; `database-plugin` ships `createDatabaseInboxStore`, whose `verify()` refuses
+  Cosmos DB and Bigtable by adapter arm or class and runs a two-row transactional probe that always
+  rolls back. Plan verification (one round) found one blocker and six majors, all folded in before
+  implementation. Driven against real PostgreSQL with RabbitMQ 4 and Redis Streams (duplicates, a
+  failure rolled back and redelivered, two consumer groups, an outbox row relayed twice handled
+  once), a MongoDB replica set and the Bigtable emulator; D1 at unit level. The committed-tree
+  security audit ran three fresh-context rounds. Round 1 failed on three Medium findings (a store
+  write's warn log quoting Drizzle's bound parameters, envelope included; a key without the topic,
+  so one topic's event id could suppress another's; one consumer on two topics sharing a RabbitMQ
+  queue, measured dead-lettering half of each) and two Low (a stored status quoted into an error,
+  parked rows never purged). All five were fixed: the key is `(consumer, topic, envelope id)`, logs
+  carry the error class only, the default queue is `inbox.` plus a hash of the pair, and purge
+  covers parked rows. Round 2 found five Low, chiefly that a dotted-join queue name collided and
+  broke a qualified Pub/Sub topic; round 3 found two Low documentation findings, fixed in docs
+  afterwards and NOT re-audited, at the maintainer's direction — complete (PR #436).
+- **Milestone 109b** (`packages/idempotency-plugin` + `packages/common` +
+  `packages/database-plugin` + `packages/sdk` — idempotency tier C and the SDK key):
+  `service.within(options, fn)` runs `fn` and its idempotency record in ONE database transaction — a
+  claim row `id` created first, then a result row `${id}.r` (two creates, never an update or a
+  delete, because DynamoDB and D1 have no read-your-own-writes). A committed record replays the JSON
+  round trip of what `fn` returned, the same value on the first call and on a replay; a concurrent
+  duplicate loses on the claim's key and replays, or answers a retryable `conflict` (`409`) where
+  the backend refuses before the winner commits. `fn`'s own errors are rethrown unchanged; store
+  errors become a value-free `store-failed` (`503`) logged by class only.
+  `createDatabaseIdempotencyStore` refuses Cosmos DB, Bigtable and a standalone MongoDB at
+  `start()`, through a backend probe now shared with the M107 outbox and M108 inbox stores. The SDK
+  gains `ClientRequest.idempotencyKey` and `ClientOptions.idempotency`: one key across every retry,
+  retries on any method and on `409`, and never after a `2xx`. Implemented by a local agent and then
+  Codex, with measurement overturning two plan claims: DynamoDB's concurrent loser replays rather
+  than conflicting, and a Prisma loser blocks on the winner's claim insert — its
+  `transactionTimeout` does not interrupt the wait — then replays, rather than conflicting (driven
+  by hand against a real Prisma 7.10 client). Verification found a first call returning a `Date`
+  while its replay returned a string, a keyed `POST` retried after a `2xx` whose body could not be
+  read, and a purge that deleted a record's two rows separately — an interruption left the key
+  answering `conflict` for ever. The committed-tree security audit ran three fresh-context rounds:
+  round 1 failed on four Low findings (an ambiguous `${tenantId}:${principalId}` scope recipe, now
+  `JSON.stringify([tenantId, principalId])`; missing SDK CORS and server-dedupe notes; overlapping
+  purges outliving `stop()`; a wrong JSDoc); round 2 on two Low (a purge deleting a key re-created
+  after another replica purged it; a hung purge stalling retention silently); round 3 on one Low,
+  the narrower purge race plan §3.10 accepts — documented afterwards and NOT re-audited. The
+  standalone-MongoDB refusal was also run once against a throwaway local `mongo:8`. Not verified: a
+  browser — complete (PR #438).
+- **Milestone 105** (`packages/common` + `packages/database-plugin` + `packages/cloudflare-plugin` —
+  conditional writes on `IRepository`): optional `updateWhere(id, where, data)` /
+  `deleteWhere(id, where)` on `IDataSource` and `IRepository`, optional permanently (a maintainer-
+  approved departure from the versioning policy), answering `null`/`false` for a missing key or a
+  failed predicate. The predicate is a scalar equality map CONJOINED with the key on every backend,
+  never spread into it (Prisma `AND`, Mongo `$and`, Drizzle `and()`, D1 `WHERE … AND`, DynamoDB
+  `ConditionExpression`, a Bigtable nested condition capped to each column's NEWEST cell, a Cosmos
+  read then `_etag` IfMatch write bounded to 3 rounds). `checkWritePrecondition` in `common` returns
+  private copies that every implementation validates and writes, and refuses `$`/dotted/empty names,
+  an own `__proto__`, non-finite numbers and an empty payload. Deferred-write transaction sources
+  omit the members and `BaseRepository` refuses with `'conditional-write'` (501) before any I/O. The
+  tenant bridge, outbox transitions and inbox failure count switch over through one internal
+  fallback helper, closing the M101c check-then-write races; relay fencing moves to M107b.
+  Implemented by Codex, whose two stops corrected the plan (a Bigtable condition matching a retained
+  historical version, measured on the emulator) and a hand-off env block. Verification found a
+  tenant `update` with nothing left after stripping rejecting where the reference store returns the
+  row, and a PUBLIC_API rejection-class claim false for D1. The committed-tree security audit ran
+  five fresh-context rounds: round 1 failed on one Low (the tenant fallback race undocumented in the
+  README) and recorded observations folded in at the maintainer's direction — a Proxy changing a
+  predicate after validation (on Mongo it wrote through `$where`), a pre-existing (M78) Mongo key
+  filter reading an object key as an operator, Prisma validation messages rendering the whole query,
+  inherited-member field-map lookups in Bigtable and DynamoDB, and non-finite numbers; round 2 found
+  `__proto__` predicate fields dropped by Mongo and Prisma on Node/Bun (now refused) and two quoted
+  keys; rounds 3–4 found the docs still over-claiming which refusals carry no caller input, so they
+  now guarantee only the validator's reasons and the replaced Prisma message; round 5 passed on
+  `d36e7c3d`. Folded in afterwards at the maintainer's direction, NOT re-audited: Cosmos (since M81)
+  and DynamoDB (since M80) now refuse an own `__proto__` payload field, after measurement showed
+  Cosmos rows inheriting it as a prototype on Node and Bun and the AWS SDK returning a DynamoDB
+  `__proto__` attribute with no value (rows became unreadable), and the Mongo session test runs on a
+  replica set only — complete (PR #439).
+- **Milestone 110a** (`packages/common` + `packages/auth-plugin` + `packages/decorator-plugin` —
+  authorization policies): an async, target-aware check under the new
+  `CAPABILITIES.AUTHORIZATION_POLICIES`, always provided by `AuthPlugin`.
+  `IAuthorizationPolicyService` (`can`/`authorize`/`describe`/`define`) evaluates `definePolicy`
+  definitions: only a literal `true` allows, a throwing check denies and is logged once without the
+  target or principal, an anonymous principal is refused `401` unless the ability opts in with
+  `{ anonymous: true, check }`, and `before` runs for signed-in principals only. Two entry points
+  share one evaluator: the `requirePolicy(policy, ability, target?)` route guard, refused at
+  `start()` by a scan of every route's guards before the registry seals, and the class form
+  `@Policy`/`@Ability` plus `@RequirePolicy`, validated at `register()`. The decorator was first
+  named `@Can` and renamed at the maintainer's direction to match the `requireXxx` guards. A thrown
+  `AuthorizationDeniedError` answers the guard's exact body under `errorHandler`, through
+  `authorizationFailureInit` in `common`, the one owner of those bodies. The design security review
+  is plan §10. The committed-tree audit ran four fresh-context rounds. Round 1 found five defects;
+  the worst (Medium) ran the target extractor before the anonymous refusal, a lookup per
+  unauthenticated request and a 401-vs-404 existence oracle. Round 2 found a guard deciding that
+  refusal from its own policy object, which only the startup scan checks; it now reads the
+  registered policy per request. Round 3 found the OpenAPI brand documented as following the
+  registered policy, which it does not, so the docs are scoped. Round 4 passed on `e6d71601` —
+  complete (PR #440).
+- **Milestone 107b** (`packages/messaging-plugin` + `packages/common` + `packages/database-plugin` —
+  outbox relay fencing and multi-relay sweeping): every row a relay publishes is a row it holds a
+  claim on — a per-row lease taken by an M105 conditional write on a `claimVersion` that only
+  increases, checked again before the publish
+  (`now + publishTimeoutMs + storeTimeoutMs +
+  maxClockSkewMs ≤ leaseUntil`) and required by every
+  status write, so a relay paused past its lease publishes nothing and any number of relays drain
+  one outbox without double-sending, keeping per-key first-publish order by blocking a key behind a
+  row claimed elsewhere. One mechanism on every supported backend: the ROADMAP's `SKIP LOCKED` and
+  lock-epoch arms were not buildable through the portable surface, and the "deferred-write" backends
+  defer only inside a transaction the relay never opens. A store without native conditional writes,
+  and an SQL table from the M107 schema, are refused at startup; the read-then-write fallback is
+  deleted. Two windows remain and are stated: a pause after the fence check, and a publish the
+  broker accepts after it was abandoned. Implemented by Codex, whose three stops each corrected the
+  plan: a PostgreSQL `integer` version column refused the claim past `2147483647` (now 64-bit
+  everywhere, valid to `MAX_SAFE_INTEGER − 1`); a per-row reserve equal to the 15 000 ms default
+  deadline ended every default sweep before its first read — 200 rows left pending on all four
+  backends while the manual-clock tests passed (the default is now 30 000 and the relation strict,
+  which also closes the same equality M107 accepted); and the suite's environment restarted RabbitMQ
+  and Redis through existing outage suites. The extra write per row roughly doubled a 1 000-row
+  PostgreSQL sweep (1.16 s → 2.33 s). Verified on real PostgreSQL, a MongoDB replica set, DynamoDB
+  Local and D1's engine: a relay frozen past its lease published nothing while a second took over
+  once, and four relays drained every row once in per-key order. The committed-tree security audit
+  ran two fresh-context rounds: round 1 failed on a Medium — the documented Prisma mapping returns
+  `BigInt` columns as JS `bigint`, so the relay's safe-integer claim check poisoned every row (a
+  regression from M107) — fixed by converting integer columns in the store bridge; round 2 confirmed
+  it closed on real PostgreSQL with Drizzle `bigint` columns and found a Low (an unsafe `bigint`
+  `createdAt` left as a `bigint` made the health indicator throw), fixed afterwards by converting
+  every `bigint` and NOT re-audited, the maintainer proceeding to the PR — complete (PR #441).
+- **Milestone 110b** (`packages/common` + `packages/auth-plugin` + `packages/decorator-plugin` +
+  `packages/database-plugin` — scoped RBAC): a role granted IN a scope (tenant, organisation, team,
+  region). `scopedRbac` (requires `rbac`) makes AuthPlugin define ONE built-in policy,
+  `scoped-rbac`, on the M110a evaluator — catalogue permissions as `perm:` abilities, roles as
+  `role:` abilities, the scope as target — so no capability token is added and a guard or decorator
+  naming a name outside the catalogue fails at startup through M110a's scan, which now reads a
+  multi-ability brand. `requireScopedRole` (any-of) / `requireScopedPermission` (all-of) and
+  `@ScopedRoles` / `@ScopedPermissions` take a `ScopeSource` (`scopeFromTenant()` default,
+  `scopeFromParam`); grant sources (`static`, `claims`, `custom`, `createDatabaseGrantSource`) are
+  unioned and one failing source denies; `inheritsFrom` is one resolver for parents and delegation,
+  walked with cycle refusal and bounds (child requests inherit parent grants); a route scope naming
+  another tenant than the resolved request tenant denies; `grantableIn` limits where a role counts;
+  per-scope custom roles bundle catalogue permissions and resolve against the grant's own scope;
+  timing is `'request'`, a TTL cache, or `'sign-in'` under a private session key carried through a
+  pending second factor. Negative controls found two tests that could not fail — the custom-role
+  collision test never put both scopes' definitions in the index, and the `hasOwn` test used
+  `Object.prototype` names, which carry no permissions — both strengthened. The JSDoc lint ratchet
+  caught `GrantResolutionError.reason` typed by an internal type; it is now the exported
+  `GrantResolutionReason`. Verified through real kernel apps for scenarios A–E, against real
+  PostgreSQL and MongoDB for the database sources, and by a 17-check behavioural probe including
+  revocation on the next request. The committed-tree security audit ran three fresh-context rounds.
+  Round 1 found a Medium: grants from a `claims` source were memoised, coalesced and cached by
+  principal id and issuer, so a narrow token for one user passed in a scope only that user's broad
+  token granted; a `claims` source is now mapped per credential and never shared. It also found a
+  non-string principal id reaching a Prisma filter as an operator, a guide example that skipped
+  tenant consistency, an id reaching a log as an error name, and silent truncation at `limit`. Round
+  2 found the same sharing through a `custom` source reading claims — a custom source now receives
+  only the id and `iss` — and a `null` id compared as `IS NULL`. Round 3 passed on `6fe0a973`; its
+  observation that `iss` was read twice was fixed afterwards and NOT re-audited, at the maintainer's
+  direction — complete (PR #444).
+- **Milestone 101h** (`packages/common` + the READMEs of `common`, `storage-plugin`,
+  `multi-tenancy-plugin`, `telemetry-plugin`, `logger-plugin`, `auth-plugin` and `events-plugin`,
+  `PUBLIC_API.md`, CHANGELOG and the upgrade guide — documentation, plus the one additive redaction
+  change): `RedactionPolicy.fields` accepts a `FieldRedaction` (`{ classification, redactor? }`)
+  beside a classification string, and `createRedactionService` selects a redactor in the documented
+  order — the matched field's own `redactor`, then `redactors[classification]`, then
+  `defaultRedactor`, then `eraseRedactor` — so one classification can carry two treatments without
+  an invented classification string, and a string-valued policy is byte-identical in behaviour
+  (V8-30). The documentation half: the `RedactionPolicy` shape and the `DATA_CLASSIFICATIONS` table
+  now live in the common README and `PUBLIC_API.md`; the logger example classifies with
+  `DATA_CLASSIFICATIONS.PII` instead of the unknown `'private'`; the storage `rootDir`, five
+  multi-tenancy resolver rows and three telemetry rows are documented; `IPrincipal` has a shape
+  table; the auth rate-limit key cell matches the source's four-step order and is asserted
+  executable by an `assert:js` table; the authentication capability is named `CAPABILITIES.AUTH`
+  everywhere; and auth and events gain `## Diagnostics` sections whose field tables are tied to
+  compiling fences by a new docs-gate case, with the events README moved into the gated fence table
+  and its two non-compiling fences fixed (V8-42/43/44). Verified through real kernel apps (logger,
+  audit read-back, telemetry span). The design security review was recorded after implementation;
+  the fresh-context audit failed round 1 on a Medium — `redactor` was read through the prototype
+  chain, so a polluted `Object.prototype.redactor` disabled redaction everywhere, including the
+  logger's default secret list — fixed by own-property reads, plus a Low review gap
+  (`idempotency-plugin` unlisted). The fixes were NOT re-audited, at the maintainer's direction —
+  complete (PR #445).
+- **Milestone 111a** (every member + `scripts/` + CI — a Node build for every package): each member
+  gains a generated `package.json` (ESM, `dist/` exports, `files`, `engines`, `workspace:^` internal
+  deps) and `tsconfig.json`, built by one `tsc -b` over a solution config from a shared
+  `tsconfig.base.json` (`module: nodenext`, `rewriteRelativeImportExtensions`,
+  `isolatedDeclarations`). `scripts/node-manifests.ts` generates all of it — plus each member's
+  `deno.json` import map, because Deno reads a member's `package.json` only for programs rooted
+  inside the workspace — from one committed range table, and `--check` refuses drift. Every lazy
+  `npm:` import became a bare specifier listed as an OPTIONAL peer, and the M70e audit now also
+  refuses any `npm:`/`jsr:` specifier in `src`. Each member that reads its own version ships a
+  `src/version.ts` constant, a third bump site `release:bump` and `release:verify` both cover.
+  Importing `decorator-plugin` installs `Symbol.metadata` write-if-absent (Node 24 and Bun 1.4 lack
+  it; a maintainer-approved §11.5 exception), and a missing carrier fails with a named
+  `DecoratorMetadataUnavailableError`. `check:node-build` packs every member, refuses a tarball
+  still naming `workspace:`, installs the kernel/runtime/decorator closure with a plain
+  `npm install`, and boots a decorated controller on Node 24, Node 22 and Bun; CI runs it with
+  `--require-all`. Zoo code's implementation pass looped and was taken over; measuring then rebuilt
+  the lockfile from `develop`'s with zero resolutions moved (a full re-resolve had moved 30, Prisma
+  backwards). Verified by driving the packed tarballs on Node 24 and Bun against real Redis — a
+  decorated write read back and the cache keys found in Redis — with the carrier removed as a
+  negative control. Verification found the drift gate refusing the committed boot fixture and four
+  gaps, all closed: an untested `release:verify` version-site check (extracted to
+  `scripts/version-sites.ts`), the undocumented `Symbol.metadata` install, a missing
+  `serverBuildPath` note, and the tracking flip — complete (PR #446)
+- **Milestone 111b** (every member + `scripts/` + CI — the test suite on Node under Vitest): the
+  package suites run under Vitest 5 on Node 24, with `perFile` 90% branch/function/line thresholds,
+  so a file under the bar is now a failing exit code rather than a table a human reads. A committed
+  codemod (`scripts/codemods/std-to-vitest.ts`, with a `--check` gate refusing unawaited async
+  assertions) converted 1,561 files; 165 that used `Deno.*` were converted by hand. Vitest 5's OXC
+  leaves TC39 decorators unlowered, so an `enforce: 'pre'` plugin lowers them with esbuild first —
+  disabling it fails decorator-plugin with a `SyntaxError`. Deno-only runtime proofs keep a named
+  `test:deno-lane` over the same files. A swap report compares every file's Deno and Node leaf
+  counts (Deno 19,201 → Node 19,375; gains are 58 added proofs and 7 suites Deno had skipped whole),
+  and was shown to fail on a deliberately lost file. The converted suite exposed five real defects,
+  each fixed with maintainer approval: Node `rm` could not remove an empty directory without
+  `recursive`; transport headers lost an own `__proto__` key on Node; a dead guard in the cache
+  coalescer; SSE writes after close; and `@hono/node-server` labelling an untyped streamed body
+  `text/plain` where Deno, Bun and Workers send no type. Verification found a skipped real-import
+  test, a streaming test that had dropped its content-type assertion, and five always-true
+  `canImportNpm()` stubs. The committed-tree security audit (one fresh-context round) failed on two
+  Low findings — `deno.lock` pinning `source-map-js@1.2.1`, which failed CI's audit job, and the
+  untyped-body change leaving such bodies MIME-sniffable undocumented — both fixed afterwards and
+  NOT re-audited, at the maintainer's direction. Not run locally: Keycloak, Postgres-backed Drizzle
+  and Prisma, Pub/Sub, Service Bus, Cosmos, LocalStack, Vault — complete (PR #447)
+- **Milestone 111c** (every member + `scripts/` + CI — npm publishing machinery, proven by dry runs;
+  the `v0.9.0` cut follows M111d): each generated manifest gains publish metadata (`description`,
+  `repository`, `homepage`, `bugs`, `publishConfig.access: public`) and an audited `sideEffects`
+  (`false` everywhere except `decorator-plugin`, which retains `symbol-metadata.js`), and every
+  tarball ships `dist/`, `src/` (the source maps point at it), README and a generated LICENSE copy.
+  `release:publish` packs each member with `pnpm pack`, checks the packed manifest, looks the
+  version up on npm even in a dry run (the `v0.1.0-alpha.2` trap), and publishes the tarball with
+  `npm publish`, scripts disabled throughout. `release.yml` is split into gates, publish and
+  release; only the publish job holds `id-token: write`, runs in environment `npm`, and reads no npm
+  token. `release:verify`, the `@since` gate (npm tarball sources for versions after 0.8.x), CI's
+  dry run, compat and the release-notes install line move to npm; `publish:check` is retired.
+  Implemented by Codex, whose three stops each corrected the plan: `npm trust` needs npm 11.15.0; a
+  trusted publisher expires unless a publish through it succeeds within 2 days, so the bootstrap
+  became README-only placeholders published locally, then trust, then 0.9.0 as the first OIDC
+  publish (no npm access token; `npm login` sessions are logged out per step); and three M98 static
+  blocks are module-local seams, not side effects. A fourth measurement showed the bundle cannot
+  distinguish the retention list from `false`, because every decorator imports `symbol-metadata.ts`
+  as a value, so the bundle's negative control now removes the install from a scratch tarball.
+  Verification (31 behavioural checks against real packing, the real registry and a real third-party
+  tarball) found three historical `CLAUDE.md` entries rewritten and the M51 lesson deleted, both
+  restored. The `events-plugin` wall-clock ordering flake was folded in at the maintainer's
+  direction. The fresh-context security audit of `c8f1f86d` failed on four findings the plan's
+  design review missed: a manual `workflow_dispatch` could make a real OIDC publish from any branch
+  (Medium), the publish job ran actions referenced by movable tags (Medium), the `@since` gate
+  gunzipped registry tarballs unbounded (Low), and the runbook's "no npm token" was false for
+  `npm login` sessions (Low). All four are fixed, each with a test that fails without it: publish
+  and release run only on a pushed `v*` tag, every action is pinned to a commit SHA, decompression
+  is capped at 64 MiB, and the runbook restricts environment `npm` to `v*` tags and logs out after
+  every login. NOT re-audited, at the maintainer's direction — complete (PR #448)
+- **Milestone 111d** (`packages/cli` + new `packages/create` + `scripts/` + docs — the CLI goes
+  Node-first): `setu` is a Node `bin` (`runMain` + `nodeProcess` behind `@setu-ts/cli/main`, one
+  readline reader, `process.exitCode` never `process.exit`), `@setu-ts/create` makes
+  `npm create @setu-ts` the same as `setu new`, and project TypeScript loads through `tsx` (a CLI
+  dependency). Node is the default target and every target pins the framework from npm (`^V` in
+  `package.json`, `npm:@setu-ts/x@^V` in a Deno import map, no `.npmrc`); a Deno project sets
+  `nodeModulesDir: "auto"` and plugin commands refuse until `deno install` has run. An npm-target
+  scaffold carries `tsc` (`~6.0.3`, `types` named), ESLint and Prettier, and everything the CLI
+  writes is Prettier-formatted through config resolved per file (maintainer decision); a selected
+  broker, queue or gRPC transport declares its client package, since a package manager never
+  installs an optional peer. **Two breaking changes**: the default `--runtime`, and
+  `MainProcess.prompt` becoming asynchronous for embedders (maintainer-approved, with the two
+  `bin.ts` files as an approved AI_GUIDELINES §11.5 exception). Nothing is on npm until the cut, so
+  a local registry overlay (`scripts/registry-overlay.ts`) serves the tree's own packs at canonical
+  tarball routes and proxies the rest; every Node e2e and `check:deploy --generated` install through
+  it. **Measurement corrected the plan three times**: `deno fmt` and Prettier disagree on 3–13 files
+  per template, so no renderer change satisfies both; the `lock.jsr` hardening was deleted after
+  three cold installs wrote byte-identical npm lockfile sections; and the deploy gate's devtool
+  probe was grepping file CONTENTS, which an npm tarball's README defeats, so it now matches package
+  paths behind a positive control. **The third Codex review found a test that proved nothing**: the
+  source-redirect hook rewrote the scaffolded project's own `@setu-ts/*` imports to workspace
+  source, so `plugin-commands-e2e` never exercised the packed tarballs. The hook now leaves an
+  installed project to Node, and a control that poisons the installed kernel fails under the old
+  hook and passes under the new one. Endpoint assertions now check content rather than status,
+  cleanup kills the process tree, and `setu adopt` rewrites a commented `deno.json` in place instead
+  of skipping it. The full gate run also caught type errors in CLI test files that Vitest never
+  type-checks, and a stale `docs/cli.md` still teaching the JSR install. **The fresh-context
+  security audit failed round 1** on a High (the `tsconfig.json` lookup walked above the project, so
+  a `paths` entry planted in a shared parent chose which file an `@setu-ts/*` import ran, even over
+  installed packages — every Deno scaffold has no `tsconfig.json` of its own), a Medium (Prettier
+  executed a planted `prettier.config.mjs` the same way) and three Lows; round 2 confirmed all five
+  closed with negative controls and found three more Lows, one a regression from a round-1 fix.
+  Those were fixed and NOT re-audited, at the maintainer's direction. `setu adopt` also now moves a
+  project's `deno.jsonc` (pre-existing, folded in at the maintainer's direction) — complete (PR
+  #450)
+- **Release `v0.9.0`** — on `release/v0.9.0`, cut 2026-10-12 (PR #451). The first npm release: **52
+  packages** under `@setu-ts`, three of them (`localization-plugin`, `idempotency-plugin`, `create`)
+  published for the first time; `v0.8.0` and earlier stay on JSR. Publishing needs the one-time npm
+  bootstrap first (placeholders, trust, then the tag inside the two-day window — see
+  `docs/releasing.md`). **The cut pulled the install half of M111f forward** at the maintainer's
+  direction: the docs still taught `jsr:` installs, which the bump moved to `^0.9.0`, a version that
+  never exists on JSR. Every user-facing install line now uses npm, examples import `hono` rather
+  than `@hono/hono`, and PUBLIC_API's JSR-era descriptions of `setu add`, the Workers manifest and
+  the workspace root (`@jsr` aliases, `.npmrc`) are corrected. `release:bump` itself failed on first
+  real use: its task could run `git` only, so it rewrote 186 files and died with `NotCapable` before
+  regenerating manifests, and it rewrote history in archived plans and a colocated test fixture. Two
+  tests pinned `0.8.0` as a literal, which the bump correctly leaves alone, and failed.
+- **Next milestone** — publish `v0.9.0` (placeholders, trust, OIDC tag), then M104, the `v0.9.0`
+  client-brief run; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -5809,10 +6426,15 @@ deno task check
 deno task test
 ```
 
-All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`). During the
-edit loop, `deno task test:coverage:pkg <members…>` measures only the packages you name and enforces
-the same per-file bar in seconds — but a targeted FAIL is not authoritative (another package's tests
-may cover those lines), and a targeted run is never the coverage evidence a milestone hands back.
+These Deno checks cover formatting, lint, types, and the root tooling suite. Package changes also
+require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for the
+retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured source
+file must reach 90% branch/function/line; Node, Deno-lane, and root-script gates enforce their bars
+with nonzero exits. Read the per-file tables as evidence.
+
+For the edit loop, `pnpm test:coverage <members…>` measures those members and the Node tooling
+target. Each member owns its source coverage, so a targeted failure is authoritative. A milestone
+hands back the complete Node, Deno-lane, and root coverage reports.
 
 **A milestone that changes what `packages/cli` GENERATES ALSO boots a scaffolded project — the gates
 above type-check generated output and stop there.** M63 repaired four defects that every one of the
@@ -5830,30 +6452,30 @@ for is unobservable under a blanket grant.
 see a publish-blocking defect.**
 
 ```bash
-deno task publish:check              # deno publish --dry-run, on a COMMITTED tree
-deno task release:verify <version>   # version agreement, specifier resolvability, workspace
-                                     # coverage, no stub in the list, @module-first
+deno task release:publish --dry-run  # pack, packed-manifest rules, npm lookup and publish dry run
+deno task release:verify <version>  # versions, source workspace ranges, metadata, release contracts
 ```
 
 M51 shipped three separate defects that every one of the four gates and the per-file coverage bar
-passed over, each of which would have stopped the package reaching JSR:
+passed over, each of which would have stopped the package being published. Each still has a gate:
 
-- **A slow type.** `createDepthLimitRule` was exported from the barrel with an inferred return type.
-  JSR rejects that because it blocks automatic `.d.ts` generation — and the CI comment is explicit
-  that the generated `.d.ts` is what the Node and Bun compat jobs consume, so the dry run gates
-  both. Every exported function needs a written-out return type; `deno check` does not care.
+- **A slow type.** `createDepthLimitRule` was exported from the barrel with an inferred return type,
+  which blocks `.d.ts` generation. `isolatedDeclarations` in the `tsc -b` build now refuses it;
+  every exported function needs a written-out return type.
 - **A package in neither release list.** `packages/graphql-plugin` was a workspace member absent
   from both `PUBLISHED_PACKAGES` and `UNPUBLISHED_PACKAGES`, so it would simply never have
   published. Only `release:verify` looks for this.
-- **A README suppressed on jsr.io.** `src/index.ts` opened its module JSDoc with the description
-  instead of `@module`, which makes JSR render that blurb as the whole package page instead of the
-  README. The README still ships in the tarball, so nothing else can see the loss — `release:verify`
-  check 5 exists precisely for it.
+- **A README suppressed on jsr.io.** A description-first module JSDoc replaced the README on the JSR
+  page. npm always renders `README.md`, so M111c retired that check (`release:verify` check 5) in
+  favour of "the README exists and is non-empty"; it still applies to versions on JSR.
 
-`publish:check` refuses a dirty tree (`--allow-dirty` is deliberately not passed), so run it AFTER
-committing — a "failure" that turns out to be uncommitted changes is not a result. Note also that a
-green `--dry-run` does NOT prove a real publish works: it skips the already-published check, which
-is what needs `--allow-net` (see the `alpha.2` entry above).
+Run both on a committed tree. M111c replaces the JSR publish dry run: `tsc -b` with
+`isolatedDeclarations` covers its slow-type rule; non-empty README validation replaces JSR's
+`@module`-first rendering rule. The publisher checks the exact tarball it hands to npm, including
+internal dependency ranges, repository metadata, public access, and shipped sources and licence. Its
+dry run also performs the packument lookup: the old dry run skipped it, which hid the missing
+network permission that stopped `v0.1.0-alpha.2`. A green dry run still cannot prove OIDC or live
+provenance; that proof belongs to the first npm cut after M111d.
 
 **A milestone whose plan names a committed-tree security audit — or whose diff crosses a trust
 boundary — is ALSO security-audited before it merges**, following
@@ -5874,10 +6496,9 @@ because nothing defined what one was.
   `// deno-lint-ignore-file no-console` with a reason).
 - Unused variables fail lint — delete them; do not underscore-prefix.
 - Run `deno fmt` before `deno task fmt:check`; it also reformats markdown — never hand-wrap tables.
-- `scripts/coverage.ts` tolerates empty coverage only while packages are stubs. It does NOT enforce
-  the per-file 90% bar: `deno task test:coverage` has exited 0 with a `src` file at 80% branch. A
-  green coverage run is NOT proof — read the per-file table yourself and enforce the bar (see the
-  Self-review checklist and "Before reporting a task done").
+- Coverage is per file, across branch, function, and line. The Node runner uses Vitest V8
+  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses
+  `scripts/script-coverage.ts`. Inspect all three tables before claiming completion.
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
 - `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). NOTE: `deno lint`'s `no-eval`
@@ -5900,11 +6521,10 @@ because nothing defined what one was.
 
 ## Self-review checklist (bugs that slipped through before — check every time)
 
-- **Per-file coverage, not aggregate — and the gate won't enforce it for you**: the 90% bar applies
-  to every file under `src/` on branch, function, AND line. Read the ANSI-stripped per-file table
-  from `deno task test:coverage` yourself; its exit code is NOT the check (it exits 0 with a file
-  under the bar). Any file below 90% on any of the three means the task is NOT done — write more
-  tests until it clears. Test fixtures belong under `test/` and are excluded from measurement.
+- **Per-file coverage, not aggregate**: every source file must reach 90% on branch, function, AND
+  line. Read the ANSI-stripped Node, Deno-lane, and root-script tables. Any file below 90% means the
+  task is unfinished. Package fixtures under `test/` are excluded from measurement; the Node host
+  helper and runner tooling have their own measured target.
 - **A coverage drop means write more tests, not ship it.** After every change, compare each file you
   touched to its previous branch/function/line numbers. A regression (even one still "passing" the
   silent gate) means you removed, bypassed, or added an untested path — restore it to ≥90% before
@@ -6023,10 +6643,10 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
   NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
   points, confirm one test drives BOTH under a non-default configuration.
-- **Run the two publish gates on the committed tree.** `deno task publish:check` and
+- **Run the two publish gates on the committed tree.** `deno task release:publish --dry-run` and
   `deno task release:verify <version>` — see the Verification section for the three M51 defects that
   every other gate passed over. A milestone whose package cannot publish is not done, and CI's
-  `JSR publish dry-run` job will say so on the PR after you have handed it back.
+  `npm publish dry-run` job will say so on the PR after you have handed it back.
 - **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table, the
   grep result, and the exit status of both publish gates. "Done" without that evidence is not done.
 - **Flip the milestone's status IN the milestone PR, before it merges.** A completed milestone is
@@ -6035,7 +6655,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   milestone" at the following one). These edits belong on the milestone's own `feat/…` branch and
   ship in the SAME PR as the code — a merged PR that left the tracking table at `⬜` is a defect. If
   you catch a merged milestone whose status was never flipped, correct it on a `fix/…` branch (it is
-  a defect in already-merged `main`), never by editing `main` directly.
+  a defect in already-merged `develop`), never by editing `develop` or `main` directly.
 - **Clean up plan/scratch files before you commit — a milestone commits exactly ONE plan.** The only
   `plans/` file a milestone PR may add or keep is its single canonical plan,
   `plans/milestone-<N>-<desc>.md`. Every transient artifact — continuation prompts, `fix-round-*`
@@ -6059,18 +6679,39 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `plans/archive/` on completion in the milestone's own PR — archived, never deleted; removal is the
   maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
   plan-cleanup rule in "Before reporting a task done").
-- Tests: `@std/testing/bdd` (`describe`/`it`) + `@std/expect` (`expect`), in
-  `test/{unit,integration,e2e}/` per package. **Write every test with `describe`/`it` from
-  `@std/testing/bdd` from the very first line — NEVER start with `Deno.test(...)` and convert it
-  later.** `Deno.test` is banned in this repo; a test file's first test-framework import must be
-  `import { describe, it } from '@std/testing/bdd';` and assertions use `expect` from `@std/expect`.
-  Do not scaffold in one style and rewrite to another — that wastes the whole edit.
+- Package tests use `describe`, `it`, hooks, and `expect` from `vitest` in
+  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` uses `@std/testing/bdd` and
+  `@std/expect` until M111e. Deno-only package proofs use the same Vitest-shaped files through the
+  Deno-lane import-map shim. Write in the runner style appropriate to that location from the first
+  line; `Deno.test` remains banned.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).
+- **Two long-lived branches; PRs target `develop` except release and hotfix PRs, which target
+  `main`.** `develop` is where milestones, fixes and docs integrate. `main` is the repository's
+  DEFAULT branch, so a `gh pr create` without `--base` targets it — always pass `--base develop` (or
+  `--base main` for a release or hotfix PR). `main` means "the last release": it moves only when a
+  release PR merges, and each merge to `main` redeploys the public website (Cloudflare Workers
+  Builds watches `main`). Both are protected by rulesets ("protect develop", "protect main"), which
+  name each branch explicitly — never point one at `~DEFAULT_BRANCH`, since that silently moves
+  protection when the default changes. The release flow is `docs/releasing.md`'s: cut
+  `release/vX.Y.Z` from `develop`, PR it into `main` with a MERGE COMMIT (the `main` ruleset refuses
+  squash and rebase, because either rewrites the history `develop` must share), tag that merge
+  commit, then open a back-merge PR `main` → `develop`, also as a merge commit, so the release's
+  version-bump commits reach `develop`. A defect in a PUBLISHED release that cannot wait for the
+  next one goes on `hotfix/[issue]-[description]` cut from `main`, PRs into `main`, ships as a patch
+  release, and back-merges the same way.
+- **Every new task starts in a new worktree** —
+  `git worktree add -b <branch>
+  .claude/worktrees/<name> origin/develop` (`origin/main` for a
+  hotfix), then work only inside it. The main checkout stays on `develop` and is never edited; a
+  resumed task continues in the worktree that already holds its branch (`git worktree list`).
+  `.claude/` is gitignored and invisible to `deno fmt`/`deno lint`; never put a worktree in `/tmp`
+  or beside the repository. Remove it with `git worktree remove` once its PR merges. AI_GUIDELINES
+  §15.4 is canonical.
 - Branches: one `feat/[milestone]-[description]` per milestone — all of that milestone's work and
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in
-  already-merged `main`; `docs/[description]` is for a documentation-only change that is not a
+  already-merged `develop`; `docs/[description]` is for a documentation-only change that is not a
   milestone's implementation work — opening a new ROADMAP milestone, correcting a committed doc,
   amending these conventions. Use `docs/…` rather than `feat/…` for those: a `feat/[milestone]-…`
   branch asserts that the milestone is being BUILT on it, so `feat/37c-…` carrying only a ROADMAP
@@ -6082,7 +6723,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `feat/…` branch — the status flip, the PUBLIC_API correction, and the plan archival are part of
   the milestone, not separate work. Commits: conventional format (`feat(scope): subject`); **no
   commit message may exceed 100 words** in total (AI_GUIDELINES §15.1) — the plan, the PR body, and
-  the code comments are where the long reasoning goes; no direct commits to `main`.
+  the code comments are where the long reasoning goes; no direct commits to `develop` or `main`.
 - **Pushing and opening the PR are yours to do — but only when asked.** Remote credentials ARE
   available (`gh auth status` reports a logged-in account; SSH for git operations), so `git push`
   and `gh pr create` work. This bullet previously said the opposite — that no credentials existed
@@ -6090,27 +6731,25 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   opened this way. Do not push or open a PR unprompted, though: finish the milestone, report the
   evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
   time.
-- **A new PR carries the `maintainer-review` label** — `gh pr create --label maintainer-review`, or
-  `gh pr edit <pr> --add-label maintainer-review` for one already open. `.coderabbit.yaml` sets
-  `auto_review.enabled: true` with `labels: [maintainer-review]`, and a positive `labels` list
-  RESTRICTS automatic review to PRs carrying one of them, so an unlabelled PR is never reviewed.
-  **The failure is silent**: the same file sets `review_status: false`, so there is no "review
-  skipped" notice and an unlabelled PR looks exactly like one whose review has not arrived. Check
-  the label landed rather than trusting the flag. The label buys the FIRST review only —
-  `auto_incremental_review: false` sits beside it, so a re-review after pushing fixes still needs
-  `@coderabbitai review`. The file read `enabled: false` from 2026-09-16 to 2026-09-22, and labelled
-  PRs went unreviewed in that window (#344, #353) — but that is an observation, not a rule about
-  `enabled`: CodeRabbit's contract is that a positive label opts a PR in even while automatic review
-  is disabled, so the old form should have worked. **The cause was never established**, and
-  `enabled: true` is the form that does not depend on that path rather than a diagnosed fix. If a
-  labelled PR still is not reviewed, ask by hand and record it — do not flip the flag again on a
-  guess. Suspending automatic review deliberately means `enabled: false` AND removing the positive
-  `labels` entry, since a positive label would otherwise keep opting PRs in. The repo file also
-  overrides the CodeRabbit dashboard (YAML > repo UI > org UI), so the web toggle changes nothing
-  while the file sets the same key. The maintainer's gate on EXTERNAL contributions is untouched,
-  and does not depend on this rule being obeyed: applying a label needs the Triage role or above on
-  this repository, so from a fork `--label` fails with a 403 and nothing is applied — that is the
-  gate working, not something to retry around. AI_GUIDELINES §16.7 is canonical.
+- **A new non-`docs/…` PR requests its CodeRabbit review with a comment, once its head is final** —
+  `gh pr comment <pr> --body '@coderabbitai review'`, posted AFTER the PR-number commit below has
+  been pushed, never before it. CodeRabbit aborts a review whose head commit moves while it runs
+  ("⚠️ Action not completed — Head commit changed.") and does not retry, which is how
+  setu-ts/setu-ts#440 lost its first review; if a push lands mid-review, trigger it again.
+  `.coderabbit.yaml` sets `auto_review.enabled: false` with no `labels` or `description_keyword`, so
+  CodeRabbit never reviews on its own. Applies to `feat/…`, `fix/…`, `hotfix/…`, `release/…` and
+  `chore/…` PRs; **`docs/…` PRs are excluded** (the review is for code) and so is a `main` →
+  `develop` back-merge (already-reviewed commits). Automatic review was dropped when `main` became
+  the default branch: it covers the default branch plus `base_branches`, so it would have to be
+  re-scoped to `develop` and would then fire on `docs/…` PRs too — nothing in CodeRabbit's config
+  excludes by HEAD branch. **The failure is silent**: `review_status: false` suppresses the "review
+  skipped" notice, so a PR nobody asked to review looks exactly like one whose review has not
+  arrived — check the comment was posted. A re-review after pushing fixes is another
+  `@coderabbitai review`. Also attach the `maintainer-review` label to every such PR
+  (`gh pr edit <pr> --add-label maintainer-review`) — the maintainer keeps it as the marker of a PR
+  awaiting their review, though it no longer triggers CodeRabbit; the comment does. The repo file
+  overrides the CodeRabbit dashboard, so the web toggle changes nothing. Fork PRs are proposals and
+  are not reviewed (CONTRIBUTING.md). AI_GUIDELINES §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with
@@ -6124,7 +6763,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   (Claude, ChatGPT/Codex, Roo).
 - **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
   which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
-  pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again.
-  That second commit lands on the same branch before merge, so the merged history never carries "PR
-  pending". Same for the ROADMAP row and the plan archival — all of it ships in the milestone's own
-  PR (see "Before reporting a task done").
+  pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again →
+  only then post `@coderabbitai review` (see above). That second commit lands on the same branch
+  before merge, so the merged history never carries "PR pending". Same for the ROADMAP row and the
+  plan archival — all of it ships in the milestone's own PR (see "Before reporting a task done").

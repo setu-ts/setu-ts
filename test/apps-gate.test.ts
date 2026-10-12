@@ -1,5 +1,5 @@
-import { expect } from '@std/expect';
 import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
 import {
   classifySmokeExitCode,
   malformedAppDirMessage,
@@ -20,6 +20,35 @@ async function readJson<T>(path: string): Promise<T> {
 }
 
 describe('application gate configuration', () => {
+  it('supplies the M109b within-real backend guards in every suite workflow', async () => {
+    for (const path of ['ci', 'drift', 'release']) {
+      const workflow = await Deno.readTextFile(`.github/workflows/${path}.yml`);
+      expect(workflow).toContain('DYNAMODB_ENDPOINT_URL: http://127.0.0.1:8000');
+      expect(workflow).toContain(
+        'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      );
+      expect(workflow).toContain(
+        'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
+      );
+      expect(workflow).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
+      expect(workflow).toContain('BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086');
+    }
+  });
+
+  it('fails CI when the example gate changes tracked application files', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const start = workflow.indexOf('\n  deno:');
+    const end = workflow.indexOf('\n  publish-dry-run:');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const denoJob = workflow.slice(start, end);
+    // Same step, immediately after the gate: an assertion elsewhere or a
+    // failure-tolerant shell command would let lockfile drift pass again.
+    expect(denoJob).toMatch(
+      /- name: Example applications\n {8}run: \|\n {10}deno task check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
+    );
+  });
+
   it('keeps applications outside the published workspace', async () => {
     const root = await readJson<RootConfig>('deno.json');
     expect(root.workspace.some((entry) => entry.includes('apps'))).toBe(false);
@@ -266,8 +295,8 @@ describe('real-backend CI wiring', () => {
       ]
     ) {
       const suite = await Deno.readTextFile(file);
-      expect(suite).toContain("Deno.env.get('KEYCLOAK_URL')");
-      expect(suite).toContain('ignore: BASE === undefined');
+      expect(suite).toContain("process.env['KEYCLOAK_URL']");
+      expect(suite).toContain('skip: BASE === undefined');
     }
     // The realm the sign-in suite logs into: a standard-flow client and a user.
     const realm = await readJson<{
@@ -382,7 +411,13 @@ describe('real-backend CI wiring', () => {
   it('grants each Redis package the net permission its guarded test needs', async () => {
     // auth-plugin and scheduler-plugin joined with the connection-error suites
     // (their Redis stores/locks build ioredis clients too).
-    const redisPackages = ['cache-plugin', 'messaging-plugin', 'auth-plugin', 'scheduler-plugin'];
+    const redisPackages = [
+      'cache-plugin',
+      'messaging-plugin',
+      'auth-plugin',
+      'scheduler-plugin',
+      'idempotency-plugin',
+    ];
     for (const pkg of redisPackages) {
       const config = await readJson<{
         readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
@@ -415,6 +450,26 @@ describe('real-backend CI wiring', () => {
           'localhost:4222',
           '127.0.0.1:9092',
           'localhost:9092',
+          // M107 §6: the outbox real-backend suites — PostgreSQL (5433, the
+          // port database-plugin already grants), the standalone MongoDB the
+          // refusal test drives, the replica set, DynamoDB Local, the Bigtable
+          // emulator and the local-only Cosmos emulator. IP literals only.
+          '127.0.0.1:5433',
+          '127.0.0.1:27017',
+          '127.0.0.1:27018',
+          '127.0.0.1:8000',
+          '127.0.0.1:8086',
+          '127.0.0.1:8082',
+        ]);
+      } else if (pkg === 'idempotency-plugin') {
+        expect(config.test?.permissions?.net).toEqual([
+          '127.0.0.1:6379',
+          'localhost:6379',
+          '127.0.0.1:5433',
+          '127.0.0.1:27017',
+          '127.0.0.1:27018',
+          '127.0.0.1:8000',
+          '127.0.0.1:8086',
         ]);
       } else if (pkg === 'auth-plugin') {
         // M100b §6: plus the real-provider Keycloak suite, endpoint-scoped.
@@ -484,7 +539,7 @@ describe('real-backend CI wiring', () => {
       // carrying either is an invalid workflow — and the text pins above would
       // still pass. Assert their absence too.
       expect(text).not.toMatch(/^\s+command:/m);
-      expect(text).not.toMatch(/^\s+environment:/m);
+      expect(text).not.toMatch(/^ {8}environment:/m);
       expect(text).toContain('-p 127.0.0.1:9000:9000');
       expect(text).toContain('S3_ENDPOINT_URL: http://localhost:9000');
       // Mailpit (mail SMTP outage suite)
@@ -494,9 +549,222 @@ describe('real-backend CI wiring', () => {
     }
   });
 
+  it('pins the RabbitMQ durability restart suites, their guard, and their grants', async () => {
+    // Each suite restarts the CI RabbitMQ service to prove persistent
+    // messages/jobs survive it, with a transient control losing its own in the
+    // same restart. They guard with `skip:` on RABBITMQ_URL, so a deleted
+    // file, a dropped guard, a lost restart, or a lost `docker`/AMQP grant
+    // would turn the only proof of durability into a silent skip.
+    const suites = [
+      ['messaging-plugin', 'REAL RabbitMQ message durability'],
+      ['queue-plugin', 'REAL RabbitMQ job durability'],
+    ] as const;
+    for (const [pkg, title] of suites) {
+      const source = await Deno.readTextFile(
+        `packages/${pkg}/test/integration/durability-real.test.ts`,
+      );
+      expect(source).toContain(title);
+      expect(source).toContain("process.env['RABBITMQ_URL']");
+      expect(source).toContain('skip: rabbitUrl === undefined');
+      expect(source).toContain("docker(['restart', containerId])");
+      // The control is what makes the restart discriminate.
+      expect(source).toContain('.toEqual([5, 0])');
+      const config = await readJson<{
+        readonly test?: {
+          readonly permissions?: {
+            readonly net?: readonly string[];
+            readonly run?: readonly string[];
+          };
+        };
+      }>(`packages/${pkg}/deno.json`);
+      expect(config.test?.permissions?.run).toEqual(['docker']);
+      expect(config.test?.permissions?.net).toContain('127.0.0.1:5672');
+    }
+  });
+
+  it('pins real RabbitMQ consumer retries, tiers, restart, and guard', async () => {
+    const source = await Deno.readTextFile(
+      'packages/messaging-plugin/test/integration/consumer-retry-real.test.ts',
+    );
+    expect(source).toContain('REAL RabbitMQ consumer retry');
+    expect(source).toContain("process.env['RABBITMQ_URL']");
+    expect(source).toContain('skip: rabbitUrl === undefined');
+    for (
+      const scenario of [
+        'second tier',
+        'always-failing handler',
+        'changing delays',
+        'prefetch bounds',
+        'survives a broker restart',
+        'recovers the original',
+        'declares retry queues as quorum queues',
+        'refuses reserved group names',
+        'normalizes dead-letter logs',
+        'a CC header never routes',
+      ]
+    ) expect(source).toContain(scenario);
+    expect(source).toContain("docker(['restart', containerId])");
+    expect(source).toContain('toBeGreaterThanOrEqual(200)');
+    expect(source).toContain('toBeGreaterThanOrEqual(800)');
+    const config = await readJson<{ test: { permissions: { net: string[]; run: string[] } } }>(
+      'packages/messaging-plugin/deno.json',
+    );
+    expect(config.test.permissions.net).toContain('127.0.0.1:5672');
+    expect(config.test.permissions.run).toEqual(['docker']);
+  });
+
+  it('pins real Redis Streams redelivery, its ignore guard, CI broker, and endpoint grants', async () => {
+    const source = await Deno.readTextFile(
+      'packages/messaging-plugin/test/integration/redis-redelivery-real.test.ts',
+    );
+    expect(source).toContain('REAL Redis Streams redelivery');
+    expect(source).toContain("process.env['REDIS_URL']");
+    expect(source).toContain('skip: redisUrl === undefined');
+    for (
+      const scenario of [
+        'm1 is redelivered after restart',
+        'two replicas reclaim',
+        'always-failing handler',
+        'clean stop leaves no dead consumer',
+      ]
+    ) {
+      expect(source).toContain(scenario);
+    }
+    const config = await readJson<{ test: { permissions: { net: readonly string[] } } }>(
+      'packages/messaging-plugin/deno.json',
+    );
+    expect(config.test.permissions.net).toContain('127.0.0.1:6379');
+    expect(config.test.permissions.net.every((host) => host.includes(':'))).toBe(true);
+    for (
+      const path of [
+        '.github/workflows/ci.yml',
+        '.github/workflows/drift.yml',
+        '.github/workflows/release.yml',
+      ]
+    ) {
+      const workflow = await Deno.readTextFile(path);
+      expect(workflow).toContain('image: redis:7');
+      expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
+    }
+  });
+
+  it('pins the M101a paused-Redis bound suites, their guard, and their grants', async () => {
+    // Each suite `docker pause`s the CI Redis service to prove a command is
+    // bounded. They guard with `skip:` on REDIS_URL, so a deleted file, a
+    // dropped guard, or a lost `docker`/Redis grant would turn the proof into a
+    // silent skip or a permission failure while the rest of CI stays green.
+    const suites = [
+      ['cache-plugin', 'REAL Redis cache outage (M101a V8-5)'],
+      ['queue-plugin', 'REAL paused Redis bounds queue.add (M101a V8-5)'],
+      ['scheduler-plugin', 'REAL Redis scheduler lock outage (M101a V8-24)'],
+    ] as const;
+    for (const [pkg, title] of suites) {
+      const source = await Deno.readTextFile(
+        `packages/${pkg}/test/integration/outage-real.test.ts`,
+      );
+      expect(source).toContain(title);
+      expect(source).toContain("process.env['REDIS_URL']");
+      expect(source).toContain('skip: redisUrl === undefined');
+      expect(source).toContain("'pause'");
+      const config = await readJson<{
+        readonly test?: {
+          readonly permissions?: {
+            readonly net?: readonly string[];
+            readonly run?: readonly string[];
+          };
+        };
+      }>(`packages/${pkg}/deno.json`);
+      expect(config.test?.permissions?.run).toEqual(['docker']);
+      expect(config.test?.permissions?.net).toContain('127.0.0.1:6379');
+    }
+  });
+
+  it('keeps the M101a Vault and database-plugin live-Postgres cells local-only (§3.8, M107 C8)', async () => {
+    // CI runs no Vault, and does not set the BARE `POSTGRES_URL` the
+    // database-plugin live-Postgres cells guard on (they need a generated
+    // Prisma client). Asserting that here — rather than leaving it implicit —
+    // keeps a later reader from mistaking the skipped cells for an oversight,
+    // and pins the `skip:` guards so an unset variable is reported IGNORED,
+    // never passed by an early return.
+    //
+    // M107 C8: CI now runs PostgreSQL for the OUTBOX suites, on the distinct
+    // `OUTBOX_POSTGRES_URL`. The pin was a substring match, which that name
+    // also fails; the lookbehind refuses the bare name and admits the
+    // prefixed one.
+    for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+      const text = await Deno.readTextFile(workflow);
+      expect(text).not.toContain('VAULT_ADDR');
+      expect(text).not.toMatch(/(?<![A-Z_])POSTGRES_URL/);
+    }
+    const vault = await Deno.readTextFile(
+      'packages/secrets-plugin/test/integration/vault-outage-real.test.ts',
+    );
+    expect(vault).toContain('local-only');
+    expect(vault).toContain("process.env['VAULT_ADDR']");
+    expect(vault).toContain('skip: skip');
+    // The header carries the command that runs it, since no doc does.
+    expect(vault).toContain('docker run');
+    const postgres = await Deno.readTextFile(
+      'packages/database-plugin/test/integration/real-drizzle-adapter.test.ts',
+    );
+    expect(postgres).toContain("process.env['POSTGRES_URL']");
+    expect(postgres).toContain('skip: skipLivePg');
+  });
+
+  it('starts PostgreSQL and a MongoDB replica set for the outbox suites in all three workflows (M107 §6)', async () => {
+    // The outbox real-backend suites guard on OUTBOX_POSTGRES_URL and
+    // MONGODB_RS_URI via `skip:`. A dropped service or variable would turn
+    // the proof into a permanent skip while CI stays green, so the service,
+    // its health check, the port mappings, the step and both variables are
+    // pinned in every workflow that runs the suite.
+    for (
+      const workflow of [
+        '.github/workflows/ci.yml',
+        '.github/workflows/drift.yml',
+        '.github/workflows/release.yml',
+      ]
+    ) {
+      const text = await Deno.readTextFile(workflow);
+      expect(text).toContain(
+        'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      );
+      expect(text).toContain(
+        'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
+      );
+      expect(text).toMatch(/\n {6}postgres:\n {8}image: postgres:16\n/);
+      expect(text).toContain('POSTGRES_PASSWORD: postgres');
+      expect(text).toContain('- 127.0.0.1:5433:5432');
+      expect(text).toContain('--health-cmd "pg_isready -U postgres"');
+      expect(text).toContain('docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8');
+      expect(text).toContain('--replSet rs0 --port 27018 --bind_ip_all');
+      expect(text).toContain(
+        "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27018' }] })",
+      );
+      expect(text).toContain('db.hello().isWritablePrimary');
+      // The standalone service is untouched: the outbox's refusal of a
+      // standalone server is itself under test on MONGODB_URI.
+      expect(text).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
+    }
+    const config = await readJson<{
+      readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+    }>('packages/messaging-plugin/deno.json');
+    for (
+      const endpoint of [
+        '127.0.0.1:5433',
+        '127.0.0.1:27017',
+        '127.0.0.1:27018',
+        '127.0.0.1:8000',
+        '127.0.0.1:8086',
+        '127.0.0.1:8082',
+      ]
+    ) {
+      expect(config.test?.permissions?.net).toContain(endpoint);
+    }
+  });
+
   it('starts the NATS and Kafka backends and declares their endpoints and grants (M90d §3.5)', async () => {
     // The M90d real-backend suites (nats-real / kafka-real) guard on NATS_URL
-    // / KAFKA_BROKERS via `ignore:` — a skipped suite is visible, but a DROPPED
+    // / KAFKA_BROKERS via `skip:` — a skipped suite is visible, but a DROPPED
     // service still turns the proof into a permanent skip while CI stays
     // green. These pins keep both backends, their port mappings, their env
     // vars and their manifest grants from drifting.
@@ -642,5 +910,142 @@ describe('malformedAppDirMessage', () => {
   it('returns null for an unknown error type', () => {
     const msg = malformedAppDirMessage('baz', new RangeError('out of range'));
     expect(msg).toBeNull();
+  });
+});
+
+describe('M111c npm workflow boundaries', () => {
+  it('confines publish identity to the npm environment job with scripts disabled', async () => {
+    const text = await Deno.readTextFile('.github/workflows/release.yml');
+    const jobs = '\n' + text.split('\njobs:\n')[1];
+    expect(text.split('\njobs:\n')[0]).not.toContain('id-token: write');
+    expect([...jobs.matchAll(/^ {2}([a-z]+):$/gm)].map((m) => m[1])).toEqual([
+      'gates',
+      'publish',
+      'release',
+    ]);
+    const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
+    expect(text.match(/id-token: write/g)).toHaveLength(1);
+    for (
+      const fragment of [
+        'needs: gates',
+        'environment: npm',
+        'contents: read',
+        'id-token: write',
+        'persist-credentials: false',
+        'registry-url: https://registry.npmjs.org',
+        'pnpm install --frozen-lockfile --ignore-scripts',
+        'deno task release:publish',
+      ]
+    ) expect(publish).toContain(fragment);
+    expect(publish).not.toContain('secrets.');
+    expect(text).not.toContain('NODE_AUTH_TOKEN');
+    expect(publish).not.toMatch(/run:.*test/);
+    expect(jobs.split('\n  gates:')[1].split('\n  publish:')[0]).not.toContain('id-token');
+    expect(jobs.split('\n  release:')[1]).not.toContain('id-token');
+  });
+  it('publishes only from a pushed v* tag; a manual run rehearses without an identity', async () => {
+    // Security audit F1: a manual dispatch with a false dry-run input once made a real
+    // OIDC publish from any branch, skipping the tag-only release checks.
+    const text = await Deno.readTextFile('.github/workflows/release.yml');
+    const jobs = '\n' + text.split('\njobs:\n')[1];
+    const gates = jobs.split('\n  gates:')[1].split('\n  publish:')[0];
+    const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
+    const release = jobs.split('\n  release:')[1];
+    const tagOnly = "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')";
+    expect(publish).toContain(tagOnly);
+    expect(release).toContain(tagOnly);
+    expect(text).not.toMatch(/dry_run|inputs\./);
+    expect(publish).not.toContain('--dry-run');
+    expect(gates).toMatch(
+      /if: github\.event_name == 'workflow_dispatch'\n\s+run: deno task release:publish --dry-run/,
+    );
+  });
+  it('pins every action in the release workflow to a full commit SHA', () => {
+    // Security audit F2: the publish job can mint an npm OIDC token, so an action
+    // that moved under a tag (or a branch, as setup-deno@v2 is) could publish.
+    const text = Deno.readTextFileSync('.github/workflows/release.yml');
+    const uses = [...text.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];
+    expect(uses.length).toBeGreaterThanOrEqual(10);
+    for (const [, ref, comment] of uses) {
+      expect(ref).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+      expect(comment).toMatch(/# v\d+\.\d+\.\d+/);
+    }
+  });
+  it('arms each compatibility suite only on a successful npm scope probe', async () => {
+    const text = await Deno.readTextFile('.github/workflows/compat.yml');
+    for (const job of ['node-compat', 'bun-compat']) {
+      const block = text.split(`\n  ${job}:`)[1].split(/\n {2}[a-z]+-compat:/)[0];
+      for (
+        const fragment of [
+          'id: scope',
+          '--retry 3',
+          'registry.npmjs.org/@setu-ts%2fcommon',
+          "404) echo 'published=false'",
+          "200) echo 'published=true'",
+          'exit 1',
+          "if: steps.scope.outputs.published == 'true'",
+        ]
+      ) expect(block).toContain(fragment);
+      expect(block.match(/if: steps.scope.outputs.published/g)).toHaveLength(2);
+    }
+  });
+});
+
+describe('M111b workflow lanes', () => {
+  for (const workflow of ['ci', 'release', 'drift']) {
+    it(`${workflow} gates all four test lanes in the test job`, async () => {
+      const source = await Deno.readTextFile(`.github/workflows/${workflow}.yml`);
+      const job = workflow === 'ci'
+        ? 'deno'
+        : workflow === 'release'
+        ? 'gates'
+        : 'fresh-resolution';
+      const testJob = source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
+      expect(testJob).toBeDefined();
+      const commands = [
+        'node scripts/codemods/std-to-vitest.ts --check',
+        'pnpm test:coverage',
+        'deno task test:deno-lane',
+        'deno task test:coverage',
+      ];
+      let previous = -1;
+      for (const command of commands) {
+        const index = testJob!.indexOf(command);
+        expect(index).toBeGreaterThan(previous);
+        previous = index;
+      }
+      // release.yml pins actions to commit SHAs (security audit F2); the others use the tag.
+      expect(source).toMatch(/pnpm\/action-setup@(?:v4\b|[0-9a-f]{40} # v4\.)/);
+      // The drift job resolves every declared range fresh, so its package
+      // suites see this week's versions; the PR and release jobs test the
+      // committed lock.
+      if (workflow === 'drift') {
+        expect(source).toContain('rm pnpm-lock.yaml');
+        expect(source).toContain('pnpm install --no-frozen-lockfile');
+        expect(source).not.toContain('pnpm install --frozen-lockfile');
+      } else {
+        expect(source).toContain('pnpm install --frozen-lockfile');
+      }
+    });
+  }
+});
+
+describe('M111c declared artifact coverage', () => {
+  it('declares the complete npm package set and retires the JSR task', async () => {
+    const workspace = JSON.parse(await Deno.readTextFile('package.json'));
+    const compat = JSON.parse(await Deno.readTextFile('compat/package.json'));
+    const expected = await Promise.all(
+      workspace.workspaces.map(async (dir: string) =>
+        JSON.parse(await Deno.readTextFile(`${dir}/package.json`)).name
+      ),
+    );
+    expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
+    expect(expected).toHaveLength(52);
+    expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
+    const deno = JSON.parse(await Deno.readTextFile('deno.json'));
+    expect(deno.tasks['publish:check']).toBeUndefined();
+    expect(deno.tasks['release:publish']).toContain('scripts/npm-publish.ts');
+    expect(deno.tasks['release:placeholders']).toContain('scripts/write-npm-placeholders.ts');
+    await expect(Deno.stat('compat/.npmrc')).rejects.toThrow();
   });
 });

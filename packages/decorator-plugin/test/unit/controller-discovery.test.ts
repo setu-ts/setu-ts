@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { IFileSystem, IRuntimeServices } from '@setu-ts/common';
 
 import {
@@ -46,31 +45,13 @@ function fakeControllerImporter(): { importer: ModuleImporter; count: () => numb
 // branching logic around it is still exercised by the injectable-importer
 // tests below). Probed synchronously via the permission API to avoid a
 // circular top-level `await import(import.meta.url)`.
-function probeImportPermission(): boolean {
-  const g = globalThis as {
-    Deno?: { permissions?: { querySync?: (p: unknown) => { state: string } } };
-  };
-  const deno = g.Deno;
-  if (deno?.permissions?.querySync === undefined) {
-    return false;
-  }
-  try {
-    return deno.permissions.querySync({ name: 'import' }).state === 'granted';
-  } catch {
-    return false;
-  }
-}
-const realImportAvailable = probeImportPermission();
 
 describe('discoverControllers', () => {
   beforeEach(() => {
     metadataStore.clear();
   });
 
-  it({
-    name: 'discovers a real decorated controller via the default import() path',
-    ignore: !realImportAvailable,
-  }, async () => {
+  it('discovers a real decorated controller via the default import() path', async () => {
     const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
       /\/$/,
       '',
@@ -150,6 +131,21 @@ describe('discoverControllers', () => {
       importer,
     );
     expect(count()).toBe(1);
+  });
+
+  it('hands the importer only absolute file: URLs (M111a §3.9)', async () => {
+    // tsc wraps this computed import() in __rewriteRelativeImportExtension,
+    // which rewrites only a "./" or "../" specifier ending in .ts. An absolute
+    // file: URL is outside that shape, so the helper passes it through.
+    const fs = createFakeFileSystem({ '/d/a.ts': '', '/d/nested/b.ts': '' });
+    const seen: string[] = [];
+    const importer: ModuleImporter = (spec) => {
+      seen.push(spec);
+      return Promise.resolve();
+    };
+    await discoverControllers({ path: '/d' }, createFakeRuntime({ fs }), metadataStore, importer);
+    expect(seen).toHaveLength(2);
+    for (const spec of seen) expect(spec.startsWith('file:///')).toBe(true);
   });
 
   it('records an import error and continues with remaining files', async () => {
@@ -245,11 +241,6 @@ describe('discoverControllers', () => {
   });
 
   it('uses the default importer when not provided (calls global import)', async () => {
-    // Guard: only run if import permission is available
-    const perm = Deno.permissions.querySync({ name: 'import' });
-    if (perm.state !== 'granted') {
-      return;
-    }
     // Fake fs that returns a real file so the default importer actually runs
     const fs: IFileSystem = {
       readdir: () => Promise.resolve(['user-controller.ts']),
@@ -281,5 +272,52 @@ describe('discoverControllers', () => {
       importer,
     );
     expect(result.services).toHaveLength(1);
+  });
+});
+
+describe('discovery failure isolation', () => {
+  beforeEach(() => metadataStore.clear());
+  it('does not attribute existing metadata to a newly imported module', async () => {
+    class ExistingController {}
+    class ExistingService {}
+    class NewController {}
+    class NewService {}
+    metadataStore.mergeController(ExistingController, { path: '/existing' });
+    metadataStore.mergeService(ExistingService, { token: 'existing' });
+    const result = await discoverControllers(
+      { path: '/d' },
+      createFakeRuntime({ fs: createFakeFileSystem({ '/d/a.ts': '' }) }),
+      metadataStore,
+      () => {
+        metadataStore.mergeController(NewController, { path: '/new' });
+        metadataStore.mergeService(NewService, { token: 'new' });
+        return Promise.resolve();
+      },
+    );
+    expect(result.controllers).toEqual([NewController]);
+    expect(result.services).toEqual([NewService]);
+  });
+  it('reports scalar filesystem and importer failures', async () => {
+    const fs = { ...createFakeFileSystem(), readdir: () => Promise.reject('filesystem refused') };
+    const failedWalk = await discoverControllers(
+      { path: '/d' },
+      createFakeRuntime({ fs }),
+      metadataStore,
+    );
+    expect(failedWalk.errors[0]!.error).toContain('filesystem refused');
+    const failedImport = await discoverControllers(
+      { path: '/d' },
+      createFakeRuntime({ fs: createFakeFileSystem({ '/d/a.ts': '' }) }),
+      metadataStore,
+      () => Promise.reject('import refused'),
+    );
+    expect(failedImport.errors[0]!.error).toContain('import refused');
+  });
+  it('ignores special filesystem entries', async () => {
+    const fs = {
+      ...createFakeFileSystem({ '/d/socket.ts': '' }),
+      stat: () => Promise.resolve({ isDirectory: false, isFile: false, size: 0 }),
+    };
+    expect(await walkDirectory('/d', fs, ['.ts'], [])).toEqual([]);
   });
 });

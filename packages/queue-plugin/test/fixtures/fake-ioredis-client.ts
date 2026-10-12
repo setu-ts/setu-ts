@@ -8,6 +8,13 @@
  */
 
 import type { IRedisQueueClient } from '../../src/interfaces/index.ts';
+import {
+  ACK_SCRIPT,
+  DEAD_LETTER_SCRIPT,
+  ENQUEUE_SCRIPT,
+  REQUEUE_SCRIPT,
+  RESERVE_SCRIPT,
+} from '../../src/adapters/redis-queue-scripts.ts';
 
 /**
  * Options for the fake Redis client.
@@ -295,5 +302,69 @@ export class FakeRedisClient implements IRedisQueueClient {
     }
 
     return this.#zsets.has(key) || this.#hashes.has(key) ? 1 : 0;
+  }
+}
+
+/**
+ * A {@link FakeRedisClient} that also exposes `eval`, so `RedisQueue` takes its
+ * atomic-script path. Each known script is reproduced with the fake's own
+ * commands in the order the Lua runs them; an unknown script rejects, as Redis
+ * would for a script it cannot run. The real scripts are executed against a
+ * live Redis by `redis-atomic-transitions-real.test.ts`.
+ */
+export class FakeEvalRedisClient extends FakeRedisClient {
+  /** Every `eval` call, as `[script, numKeys, ...keysAndArgs]`. */
+  readonly evals: Array<readonly unknown[]> = [];
+
+  async eval(
+    script: string,
+    numKeys: number,
+    ...keysAndArgs: (string | number)[]
+  ): Promise<unknown> {
+    this.evals.push([script, numKeys, ...keysAndArgs]);
+    const keys = keysAndArgs.slice(0, numKeys).map(String);
+    const args = keysAndArgs.slice(numKeys).map(String);
+    switch (script) {
+      case ENQUEUE_SCRIPT:
+        await this.hset(keys[0], args[0], args[1]);
+        await this.zadd(keys[1], Number(args[2]), args[0]);
+        return 1;
+      case RESERVE_SCRIPT: {
+        const ids = await this.zrangebyscore(keys[0], '-inf', args[0], 'LIMIT', 0, Number(args[1]));
+        const out: string[] = [];
+        for (const id of ids) {
+          await this.zrem(keys[0], id);
+          await this.zadd(keys[1], Number(args[0]), id);
+          const raw = await this.hget(keys[2], id);
+          if (raw !== null) {
+            out.push(raw);
+          }
+        }
+        return out;
+      }
+      case ACK_SCRIPT:
+        await this.zrem(keys[0], args[0]);
+        await this.hdel(keys[1], args[0]);
+        return 1;
+      case REQUEUE_SCRIPT:
+        await this.hset(keys[0], args[0], args[1]);
+        await this.zrem(keys[1], args[0]);
+        await this.zadd(keys[2], Number(args[2]), args[0]);
+        return 1;
+      case DEAD_LETTER_SCRIPT: {
+        await this.zrem(keys[0], args[0]);
+        if (args[2] === '1') {
+          const raw = await this.hget(keys[2], args[0]);
+          if (raw !== null) {
+            await this.hset(keys[3], args[0], raw);
+            await this.hdel(keys[2], args[0]);
+          }
+        }
+        await this.zadd(keys[1], Number(args[1]), args[0]);
+        return 1;
+      }
+      default:
+        throw new Error('ERR unknown script');
+    }
   }
 }

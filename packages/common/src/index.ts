@@ -27,7 +27,10 @@ export type {
   ErrorResponseInit,
   IErrorResponder,
 } from './errors/error-responder.ts';
-export { respondWithAuthorizationFailure } from './errors/authorization-responder.ts';
+export {
+  authorizationFailureInit,
+  respondWithAuthorizationFailure,
+} from './errors/authorization-responder.ts';
 export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
 export { causeMessage, serializeError } from './errors/serialize-error.ts';
@@ -35,6 +38,8 @@ export type { SerializedError } from './errors/serialize-error.ts';
 // Malformed request body (M90f, X37-1) — the one 400-branded parse failure
 // every `IRequest.json()` producer rejects with
 export { MalformedRequestBodyError } from './errors/malformed-body.ts';
+// Duplicate key — the 409 every database backend's unique-violation maps onto
+export { DuplicateKeyError } from './errors/duplicate-key.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with
 export { HTTP_STATUS_HINT, httpStatusHintOf, withHttpStatusHint } from './errors/status-hint.ts';
@@ -43,6 +48,9 @@ export type { HttpStatusHint } from './errors/status-hint.ts';
 // Health probe
 export { createCachedProbe, resolveProbeTiming } from './health/probe.ts';
 export type { CachedProbeOptions, ProbeTiming } from './health/probe.ts';
+// Bounded backend call (M101a) — a deadline whose expiry is a recorded failure
+export { deadlineRangeError, withDeadline } from './health/deadline.ts';
+export type { DeadlineOptions } from './health/deadline.ts';
 // Connection-error reporting — routes a built client's 'error' events to the
 // logger, de-duplicated, instead of the driver's own console fallback
 export {
@@ -88,8 +96,17 @@ export type {
 } from './registry.ts';
 
 // Request identity and cross-package state keys
-export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
-export { CLIENT_IP_STATE_KEY } from './state-keys.ts';
+export {
+  replaceLocale,
+  replacePrincipal,
+  replaceTenant,
+  sealRequestIdentity,
+} from './request-identity.ts';
+export {
+  CLIENT_IP_STATE_KEY,
+  SESSION_STATE_KEY,
+  SESSION_TENANT_BINDING_STATE_KEY,
+} from './state-keys.ts';
 
 // Path-exclusion matcher (M90a) — the one matcher four middlewares share
 export { createPathMatcher } from './path-matcher.ts';
@@ -103,6 +120,7 @@ export {
   TRACEPARENT_HEADER,
   TRACESTATE_HEADER,
 } from './trace-context.ts';
+export type { TraceparentSource } from './trace-context.ts';
 
 // HTTP abstractions
 export type {
@@ -240,6 +258,34 @@ export type {
   RoleDefinition,
 } from './services/auth.ts';
 export type {
+  AnonymousPolicyCheck,
+  IAuthorizationPolicyService,
+  PolicyAbility,
+  PolicyAbilityInfo,
+  PolicyCheck,
+  PolicyDefinition,
+  PolicyRef,
+  PolicyTarget,
+} from './services/authorization-policies.ts';
+export {
+  isScopeType,
+  MAX_SCOPE_ID_LENGTH,
+  SCOPED_RBAC_POLICY,
+  scopedPermissionAbility,
+  scopedRoleAbility,
+} from './services/scoped-authorization.ts';
+export type {
+  GrantQuery,
+  IGrantSource,
+  IScopedRoleSource,
+  ScopedGrant,
+  ScopedRbacTarget,
+  ScopedRoleDefinition,
+  ScopeRef,
+} from './services/scoped-authorization.ts';
+export { scopeFromParam, scopeFromTenant } from './services/scope-sources.ts';
+export type { ScopeSource } from './services/scope-sources.ts';
+export type {
   AuthMethod,
   IAuthSessionService,
   PendingSignIn,
@@ -250,7 +296,7 @@ export { DATA_CLASSIFICATIONS, DEFAULT_SECRET_FIELD_PATTERNS } from './redaction
 export type { DataClassification } from './redaction/classification.ts';
 export { createMaskRedactor, eraseRedactor } from './redaction/redactors.ts';
 export type { MaskOptions, RedactionContext, Redactor } from './redaction/redactors.ts';
-export type { RedactionPolicy } from './redaction/policy.ts';
+export type { FieldRedaction, RedactionPolicy } from './redaction/policy.ts';
 export { createRedactionService } from './redaction/redaction-service.ts';
 export type { IRedactionService } from './redaction/redaction-service.ts';
 export type {
@@ -278,11 +324,28 @@ export type { CursorPayload, CursorValue } from './services/cursor.ts';
 export { mintNextCursor, resolveKeysetSort, sortFingerprint } from './services/cursor.ts';
 export type { ICacheStore } from './services/cache.ts';
 export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './services/events.ts';
+export {
+  DEDUPLICATION_ID_HEADER,
+  isValidPublishId,
+  MAX_PUBLISH_HEADER_NAME_BYTES,
+  MAX_PUBLISH_HEADER_VALUE_BYTES,
+  MAX_PUBLISH_HEADERS,
+  MAX_PUBLISH_ID_BYTES,
+  ORDERING_KEY_HEADER,
+  parsePublishOptions,
+  publishHeaderNameProblem,
+  publishHeaderValueProblem,
+  publishIdProblem,
+  RESERVED_HEADER_NAMES,
+  RESERVED_HEADER_PREFIXES,
+} from './services/messaging.ts';
 export type {
   IMessageBroker,
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  ParsedPublishOptions,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -316,9 +379,31 @@ export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
 export type {
   IMultiTenancyService,
   ITenant,
+  ITenantDataStore,
+  ITenantIsolationStrategy,
   ITenantRepository,
   ITenantResolver,
 } from './services/tenancy.ts';
+export { INBOX_RECORD_KIND } from './services/inbox.ts';
+export type {
+  IInboxStore,
+  InboxFailureUpdate,
+  InboxIds,
+  InboxRecord,
+  InboxReleaseOutcome,
+  InboxStatus,
+  InboxStoreStats,
+} from './services/inbox.ts';
+export { OUTBOX_RECORD_KIND } from './services/outbox.ts';
+export type {
+  IOutboxStore,
+  IOutboxWriteScope,
+  OutboxKey,
+  OutboxRecord,
+  OutboxStatus,
+  OutboxStoreStats,
+  OutboxTransition,
+} from './services/outbox.ts';
 export type {
   CqrsCommand,
   CqrsQuery,
@@ -340,6 +425,30 @@ export type {
   IngressContext,
   IngressKind,
 } from './services/ingress.ts';
+// Idempotency port, service contract and option types (M109a). The mechanism
+// lives in `@setu-ts/idempotency-plugin`; only the contracts are shared so the
+// store adapters (memory, Redis, Durable Object) and the decorator plugin can
+// consume them without importing one another (AI_GUIDELINES §2.2).
+export { IDEMPOTENCY_RECORD_KIND } from './services/idempotency.ts';
+export type {
+  IdempotencyClaimRequest,
+  IdempotencyClaimResult,
+  IdempotencyFingerprintSource,
+  IdempotencyKeySource,
+  IdempotencySettleResult,
+  IdempotentIngressCommonOptions,
+  IdempotentIngressOptions,
+  IdempotentRouteOptions,
+  IdempotentWithinOptions,
+  IdempotentWithinResult,
+  IIdempotencyService,
+  IIdempotencyStore,
+  IngressIdempotencyFingerprintSource,
+  IngressIdempotencyKeySource,
+  ITransactionalIdempotencyStore,
+  TransactionalIdempotencyClaim,
+  TransactionalIdempotencyRecord,
+} from './services/idempotency.ts';
 export type {
   IScheduler,
   RetryOptions,
@@ -533,7 +642,16 @@ export type { ISsrService } from './services/ssr.ts';
 // View rendering contracts
 export type { Component, IViewEngine } from './services/view.ts';
 
+// Localization contracts
+export type {
+  ILocalizer,
+  LocalizationMessage,
+  MessageCatalogue,
+  PluralForms,
+} from './services/localization.ts';
+
 // Session contracts
+export { SESSION_TENANT_BINDING_KEY, tenantBindingMismatch } from './services/session.ts';
 export type {
   ISession,
   ISessionService,
@@ -570,3 +688,8 @@ export {
   isWorkerTaskReply,
   isWorkerTaskRequest,
 } from './services/worker-pool.ts';
+
+export { hasForbiddenAliasCharacter } from './diagnostics/alias.ts';
+
+export type { WritePrecondition, WritePreconditionCheck } from './services/write-precondition.ts';
+export { checkWritePrecondition } from './services/write-precondition.ts';

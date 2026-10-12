@@ -19,13 +19,21 @@ import {
   CONFIG_EXPORT,
   CONFIG_MODULE,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   PROGRAM_NAME,
 } from '../constants.ts';
 import { resolveDir } from '../utils/file-writer.ts';
+import { awaitInterruptibly, InterruptedError, throwIfInterrupted } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
-import { type AppLoader, configModuleExists, configModulePath, loadApp } from '../app-loader.ts';
+import {
+  type AppLoader,
+  configModuleExists,
+  configModulePath,
+  denoInstallRefusal,
+  loadApp,
+} from '../app-loader.ts';
 
 /**
  * The registration shape the kernel stores under `CAPABILITIES.CLI_COMMAND`.
@@ -52,8 +60,10 @@ export interface PluginCommandDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
-  /** Loads the config module; defaults to a real dynamic `import()`. */
+  /** Loads the config module; defaults to a real import through `tsx`. */
   readonly loadApp?: AppLoader;
+  /** Interrupts dispatch and runs application teardown before returning 130. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -77,9 +87,14 @@ async function withPluginCommands(
   config: string | undefined,
   use: (commands: readonly RegisteredCommand[]) => Promise<number> | number,
 ): Promise<number> {
+  throwIfInterrupted(deps.interrupt);
+  const refusal = await denoInstallRefusal(deps.fs, dir);
+  if (refusal !== undefined) throw new Error(refusal);
   const app = await loadApp(dir, config, deps.loadApp);
   try {
+    throwIfInterrupted(deps.interrupt);
     await app.start();
+    throwIfInterrupted(deps.interrupt);
     const commands = app.services.getAll<RegisteredCommand>(CAPABILITIES.CLI_COMMAND);
 
     // Detected here rather than in each caller: both refuse identically, and
@@ -163,7 +178,7 @@ function reportMissingConfig(
   config: string | undefined,
   error: (message: string) => void,
 ): void {
-  error(`No ${CONFIG_MODULE} found at ${configModulePath(dir, config)}.`);
+  error(`No ${CONFIG_MODULE} found at ${escapeName(configModulePath(dir, config))}.`);
   error(
     `Plugin commands are read from your application, which \`${PROGRAM_NAME}\` loads through a ` +
       `${CONFIG_MODULE} exporting \`${CONFIG_EXPORT}()\`. Scaffold one with \`${PROGRAM_NAME} new\`, ` +
@@ -208,6 +223,13 @@ export async function runCommandsListing(
       return EXIT_OK;
     });
   } catch (cause) {
+    if (cause instanceof InterruptedError) {
+      deps.error('Interrupted; plugin command stopped.');
+      return EXIT_INTERRUPTED;
+    }
+    // Printed as written: CLI-built messages escape their own interpolations (and
+    // keep their intended line breaks); anything else comes from the project's
+    // own plugin code, which can already print whatever it likes.
     deps.error(cause instanceof Error ? cause.message : String(cause));
     return EXIT_ERROR;
   }
@@ -267,10 +289,17 @@ export async function dispatchPluginCommand(
         return EXIT_USAGE;
       }
 
-      await match.handler(args.positionals);
+      await awaitInterruptibly(() => match.handler(args.positionals), deps.interrupt);
       return EXIT_OK;
     });
   } catch (cause) {
+    if (cause instanceof InterruptedError) {
+      deps.error('Interrupted; plugin command stopped.');
+      return EXIT_INTERRUPTED;
+    }
+    // Printed as written: CLI-built messages escape their own interpolations (and
+    // keep their intended line breaks); anything else comes from the project's
+    // own plugin code, which can already print whatever it likes.
     deps.error(cause instanceof Error ? cause.message : String(cause));
     return EXIT_ERROR;
   }

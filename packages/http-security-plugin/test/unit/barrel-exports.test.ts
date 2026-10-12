@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 // Import the barrel to verify all expected exports are present
 import * as httpSecurity from '../../src/index.ts';

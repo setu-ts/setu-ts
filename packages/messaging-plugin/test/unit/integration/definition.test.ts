@@ -9,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { defineIntegrationEvent } from '../../../src/integration/definition.ts';
 // Declared against the BARREL: dropping the type from `src/index.ts` must
@@ -44,6 +43,31 @@ describe('defineIntegrationEvent', () => {
     expect(definition.version).toBe(2);
     expect(definition.topic).toBe('orders.placed.v2');
     expect(definition.parse).toBe(parseOrderPlaced);
+  });
+
+  it('exposes an orderingKey selector unchanged when supplied (M106 §3.7)', () => {
+    const selector = (envelope: { aggregateId?: string }): string | undefined =>
+      envelope.aggregateId;
+    const definition: IntegrationEventDefinition<OrderPlaced> = defineIntegrationEvent({
+      ...VALID,
+      orderingKey: selector,
+    });
+    expect(definition.orderingKey).toBe(selector);
+  });
+
+  it('omits orderingKey entirely when no selector is supplied', () => {
+    const definition: IntegrationEventDefinition<OrderPlaced> = defineIntegrationEvent(VALID);
+    expect('orderingKey' in definition).toBe(false);
+  });
+
+  it('refuses a non-function orderingKey, naming the field (M106 §3.7)', () => {
+    const withBadKey = () =>
+      defineIntegrationEvent<OrderPlaced>({
+        ...VALID,
+        orderingKey: 'aggregateId' as unknown as () => string,
+      });
+    expect(withBadKey).toThrow(TypeError);
+    expect(withBadKey).toThrow(/"orderingKey"/);
   });
 
   it('refuses an empty type, naming the field', () => {

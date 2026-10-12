@@ -1,14 +1,18 @@
 {
   "name": "@setu-ts/logger-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0"
-  },
   "test": {
     "permissions": {
       "net": true
     }
+  },
+  "imports": {
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+    "pino": "npm:pino@10.x",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

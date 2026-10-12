@@ -4,8 +4,7 @@
  * pipeline, so the adapter seam is no longer used.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {

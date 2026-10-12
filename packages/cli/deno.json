@@ -1,14 +1,10 @@
 {
   "name": "@setu-ts/cli",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./main": "./src/main.ts"
-  },
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.8.0"
   },
   "lint": {
     "rules": {
@@ -30,8 +26,14 @@
         "127.0.0.1"
       ],
       "run": [
-        "deno"
+        "deno",
+        "npm"
       ]
     }
+  },
+  "imports": {
+    "prettier": "npm:prettier@^3.9.10",
+    "tsx/esm/api": "npm:tsx@^4.23.0/esm/api",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

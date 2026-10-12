@@ -1,8 +1,7 @@
 /**
  * X34-1 / X29-3 — the queue trace channel, at the decorator level.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   AddJobOptions,
   IJob,

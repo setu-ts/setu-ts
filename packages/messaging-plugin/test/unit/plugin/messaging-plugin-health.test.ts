@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HealthCheckResult, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import { MessagingPlugin } from '../../../src/plugin/messaging-plugin.ts';
@@ -160,6 +159,9 @@ describe('MessagingPlugin health indicator four arms (M70c)', () => {
       xadd: () => Promise.resolve('0-1'),
       xgroup: () => Promise.resolve('OK'),
       xreadgroup: () => Promise.resolve(null),
+      xpending: () => Promise.resolve([]),
+      xclaim: () => Promise.resolve([]),
+      xinfo: () => Promise.resolve([]),
       xack: () => Promise.resolve(0),
       quit: async () => {},
       connect: async () => {},
@@ -185,6 +187,9 @@ describe('MessagingPlugin health indicator four arms (M70c)', () => {
       xadd: () => Promise.resolve('0-1'),
       xgroup: () => Promise.resolve('OK'),
       xreadgroup: () => Promise.resolve(null),
+      xpending: () => Promise.resolve([]),
+      xclaim: () => Promise.resolve([]),
+      xinfo: () => Promise.resolve([]),
       xack: () => Promise.resolve(0),
       quit: async () => {},
       connect: async () => {},

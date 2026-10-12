@@ -12,6 +12,11 @@ building production-ready applications with our plugin-first, runtime-independen
 
 ## Core Concepts
 
+- [How It Fits Together](./how-it-fits-together.md)
+  - When plugins register and when a lookup misses
+  - Service registry versus DI container
+  - Which test helper replaces which service
+
 - [Plugin Architecture](./plugin-architecture.md)
   - Understanding the plugin contract
   - Capability tokens and service registration
@@ -29,6 +34,17 @@ building production-ready applications with our plugin-first, runtime-independen
   - Controller and route decorators
   - Dependency injection
   - Custom decorators
+
+- [Authorization](./authorization.md)
+  - Roles versus policies, and where attribute rules go
+  - Route guards, `@RequirePolicy`, and checks inside a handler
+  - The fixed evaluation rules
+
+- [Localization](./localization.md)
+  - Choosing how users pick a language
+  - Catalogues and plural forms
+  - Server views, React Router and browser clients
+  - Caching localized responses
 
 ## Tooling
 

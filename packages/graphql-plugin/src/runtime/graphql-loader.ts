@@ -34,7 +34,7 @@ export function adaptGraphqlModule(module: GraphqlModuleLike): GraphqlRuntime {
  * Default importer function that performs the actual import.
  */
 const defaultImporter = async (): Promise<GraphqlModuleLike> => {
-  const mod = await import('npm:graphql@^16');
+  const mod = await import('graphql');
   return {
     parse: mod.parse as unknown as GraphqlModuleLike['parse'],
     validate: mod.validate as unknown as GraphqlModuleLike['validate'],
@@ -60,7 +60,7 @@ const defaultImporter = async (): Promise<GraphqlModuleLike> => {
  * @throws {GraphqlRuntimeLoadError} If loading fails
  */
 export async function loadGraphqlModule(
-  importer = defaultImporter,
+  importer: () => Promise<GraphqlModuleLike> = defaultImporter,
 ): Promise<GraphqlRuntime> {
   try {
     const module = await importer();
@@ -69,6 +69,6 @@ export async function loadGraphqlModule(
     if (error instanceof GraphqlRuntimeLoadError) {
       throw error;
     }
-    throw new GraphqlRuntimeLoadError('npm:graphql@^16', error);
+    throw new GraphqlRuntimeLoadError('graphql', error);
   }
 }

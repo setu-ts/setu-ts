@@ -5,18 +5,25 @@ framework.
 
 ## Installation
 
+`setu` is a Node program (Node 22 or later), published to npm with a `bin`. Run it without an
+install, install it globally, or start through `npm create`:
+
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
+npx @setu-ts/cli new my-app
+npm install --global @setu-ts/cli          # then: setu new my-app
+npm create @setu-ts my-app                 # the same as setu new my-app
 ```
 
-The `-n setu` is required, not decorative: Deno derives the binary name from the package, which for
-a package called `cli` would install a binary named `cli`. All help text shows `setu`.
+It loads a project's TypeScript — `setu.config.ts` for plugin commands, a custom schematic — through
+`tsx`, resolving the project's own imports from its `node_modules`. A Deno project sets
+`nodeModulesDir: "auto"` so `deno install` creates that directory; run it once before
+`setu <plugin-command>`.
 
 ## Scaffolding a project
 
 ```bash
-setu new my-app                                  # Deno, minimal (runtime plugin only)
-setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers — see below
+setu new my-app                                  # Node, minimal (runtime plugin only)
+setu new my-app --runtime deno                   # node (default) | deno | bun | cloudflare-workers — see below
 setu new my-app --template rest                  # rest | microservice | class-based | full-stack
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template rest --env-file config/.env.local
@@ -32,6 +39,13 @@ steps.
 Every project gets a `setu.config.ts` exporting `createApp()` — the one place its plugin list lives.
 `main.ts` imports it to start the server, and `setu` imports it to find plugin commands, so the two
 cannot disagree. The factory does **not** start the application.
+
+The factory returns `IKernelApplication` (or `Promise<IKernelApplication>` for a starter), so it
+works directly with `createTestApp({ app: await createApp() })`. Every Deno, Node, and Bun scaffold
+includes `test/app.test.ts`, which starts this composition without a socket, checks `/health` (`/`
+on the minimal host), and stops it. Workers needs the platform environment and emits no smoke test;
+its `test` task permits an empty suite. For an existing project, `setu add testing` pins the testing
+package in Deno's import map or npm's `devDependencies`.
 
 On Deno, Node, and Bun, config-backed templates emit a gitignored `.env` and tracked `.env.example`,
 and load the selected path through `ConfigPlugin({ envFilePath })`. Use `--env-file <path>` to
@@ -88,11 +102,14 @@ The frontend build runs on npm even when the server runs on Deno. Deno and Worke
 standalone `package.json` for Vite and React Router; Node and Bun get those dev dependencies merged
 into the manifest they already have.
 
-| Runtime              | Emits                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| `deno`               | `deno.json` (JSR imports, `start` task), `main.ts` binding a port via `app.start()`       |
-| `node` / `bun`       | `package.json` (npm-compat JSR deps), `.npmrc` mapping `@jsr`, `tsconfig.json`, `main.ts` |
-| `cloudflare-workers` | `deno.json`, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen`              |
+| Runtime              | Emits                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| `node` (default)     | `package.json` (`@setu-ts/*` from npm), `tsconfig.json`, ESLint and Prettier config, `main.ts` |
+| `bun`                | the same npm manifests as `node`, run with `bun`                                               |
+| `deno`               | `deno.json` (`npm:@setu-ts/*` imports, `nodeModulesDir: "auto"`, `start` task), `main.ts`      |
+| `cloudflare-workers` | `deno.json`, `package.json`, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen`   |
+
+No target emits an `.npmrc` or a JSR registry mapping: every target takes the framework from npm.
 
 Every target also gets a `README.md` and a `.gitignore`.
 
@@ -103,23 +120,23 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                                                                                         | Requires           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                  |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin` |
-| `service`          | `src/services/<name>.service.ts`                                                                              | —                  |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                  |
-| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`       |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin` |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                  |
-| `job`              | `src/jobs/<name>.job.ts`                                                                                      | —                  |
-| `guard`            | `src/guards/<name>.guard.ts`                                                                                  | `auth-plugin`      |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`    |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`   |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`      |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`      |
-| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`    |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`  |
+| Schematic          | Emits                                                                                                         | Requires                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                                      |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin`                     |
+| `service`          | `src/services/<name>.service.ts`                                                                              | —                                      |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                                      |
+| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`                           |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin`                     |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                                      |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: ingress processor                                                      | `queue-plugin` in class-based projects |
+| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                               | `auth-plugin`                          |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`                        |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`                       |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`                          |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`                          |
+| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`                        |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`                      |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.
@@ -137,7 +154,7 @@ install, and `setu generate --help` lists only what is available here.
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                                                                                                                                                                                                                                                                                                                                                        |
 | `--dir <path>`        | Operate on this directory instead of the working directory.                                                                                                                                                                                                                                                                                                                                                                 |
-| `--runtime <target>`  | On `new`, the entry shape and manifest (default `deno`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                    |
+| `--runtime <target>`  | On `new`, the entry shape and manifest (default `node`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                    |
 | `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                |
 | `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                        |
 | `--broker <name>`     | `new` only: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers, starter-composed templates, and templates registering no messaging. |
@@ -159,13 +176,17 @@ receives positionals only, so no plugin command can read any other flag.
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
 error (unknown command or schematic, missing argument, unknown `--runtime`, an option the command
 does not recognize, or a name that cannot form an identifier — empty after normalization, or
-digit-leading such as `2fa`).
+digit-leading such as `2fa`), and `130` interrupted or cancelled with built-in writes rolled back or
+plugin application shutdown attempted. Incomplete recovery is reported; plugin handlers' external
+side effects are not rolled back.
 
 A relative `--dir` is resolved against the working directory.
 
 ## Devtool development
 
-`setu new --devtool` and `setu devtool enable <member>` opt a project into the
+The devtool is Deno-only — the diagnostics listener refuses every other runtime before it binds — so
+these commands need a Deno project (`--runtime deno`). `setu new --devtool` and
+`setu devtool enable <member>` opt a project into the
 [local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md):
 they emit a `main.dev.ts` development entry the production graph never imports, add `dev` and
 `check` tasks, and — for a workspace member — record a `devtoolPort` in `setu.workspace.json`,
@@ -173,8 +194,8 @@ allocated so it never collides with any member's application port
 (`setu workspace ports --reallocate` moves both together).
 
 ```bash
-setu new my-app --devtool              # standalone; connector on 127.0.0.1:4919 by default
-setu new acme --workspace && cd acme
+setu new my-app --runtime deno --devtool   # standalone; connector probes from 4919; override with --devtool-port <n>
+setu new acme --workspace --runtime deno && cd acme
 setu generate app orders --devtool     # member; the devtool port is allocated
 setu devtool enable billing            # a member that already exists
 setu devtool enable                    # a standalone project that already exists
@@ -199,7 +220,34 @@ the development entry resolves through, so the project's own `check` task passes
 without any edit. The refusals name their fix: a non-Deno runtime (the connector's listener refuses
 every non-Deno bind), a starter-composed template (kernel diagnostics must be enabled at
 construction), and a factory scaffolded before the devtool existed, which needs its signature
-widened before the command proceeds.
+widened AND its composition passed to createApplication before the command proceeds.
+
+```typescript
+import type { IPlugin } from '@setu-ts/common';
+import type { IKernelApplication, KernelDiagnosticsOptions } from '@setu-ts/kernel';
+
+export function createApp(
+  _env?: Readonly<Record<string, unknown>>,
+  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+): IKernelApplication {
+  return createApplication({
+    plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
+    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
+  });
+}
+```
+
+Keep the existing plugins in the array. The entry checks plugin registration and kernel diagnostics
+after startup, stops the application and exits 1 if the factory discarded the composition. All
+framework pins must match this CLI version before enabling; upgrade them together first. Workspace
+connectors allocate from `devtoolBasePort` (recorded on first enable, default `basePort + 1000`,
+capped at 65535). Standalone defaults probe 4919 through 5019 on first enablement; later enablement
+retains the entry's recorded port, including while the connector runs. `--devtool-port` chooses
+explicitly. `ports --reallocate` updates an untouched CLI entry along with the manifest; an edited
+entry refuses the whole operation before writing. Production images exclude the entry and remove the
+development connector pin before installing the remaining import map. See the
+[deployment recipe](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#the-image-is-the-members-only-dependency-source-at-runtime)
+for the complete build sequence and JSONC support.
 
 ## Generated modules
 
@@ -305,20 +353,21 @@ is what makes `--dry-run` exact.
 
 ```typescript
 import { runCli } from '@setu-ts/cli';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const code = await runCli(['generate', 'service', 'billing'], {
   fs: runtime.fs!,
-  cwd: Deno.cwd(),
+  cwd: process.cwd(),
   now: () => runtime.now(),
   log: console.log,
   error: console.error,
 });
 ```
 
-`runCli` returns an exit code and never calls `Deno.exit`. The dependency bundle has no default on
-purpose: `src/main.ts` owns the process boundary, so every other path stays testable.
+`runCli` returns an exit code and never exits the process. The dependency bundle has no default on
+purpose: `src/main.ts` (`runMain` with `nodeProcess`) owns the process boundary, so every other path
+stays testable.
 
 ## Interactive scaffolding
 
@@ -333,8 +382,8 @@ project, and `--dry-run` stays exact.
 
 Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an
 OPTIONAL `ask` member no programmatic caller passes; the installed executable supplies it only when
-stdin is a terminal; and Deno's own prompt returns `null` on a non-terminal. All three fail closed
-to the documented defaults. `--yes` is the explicit escape hatch.
+stdin is a terminal; and the reader answers `null` once input ends. All three fail closed to the
+documented defaults. `--yes` is the explicit escape hatch.
 
 ## Not yet supported
 
@@ -366,6 +415,7 @@ MIT
 | `SchematicOptions` | interface |
 | `AppLoader`        | type      |
 | `ModuleLoader`     | type      |
+| `PromptSelection`  | type      |
 | `Schematic`        | type      |
 | `TemplateName`     | type      |
 
@@ -381,3 +431,17 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cli-setu-tscli).
+
+## Development source policies and registration guidance
+
+Opted-in Deno scaffolds and `setu devtool enable` write the CLI-managed `src/devtool/diagnostics.ts`
+approval module. `setu add` refreshes an existing module, using artifact names and env-example keys
+rather than values. Source options activate only when the factory receives its devtool argument;
+production keeps disabled defaults. Unknown source shapes receive manual guidance, including the
+`DEVTOOL_SOURCES` import and the `sources` declaration those lines read. The module is regenerated,
+so preserve application-specific policy outside that file.
+
+Adding one of the twelve safe zero-configuration providers wires its emitted plugin-list anchor in
+either style. Starter compositions instead name their option arm; configure that arm to avoid a
+duplicate registration. Manifest updates preserve existing key order. Deno frontend projects update
+imports without adding unused framework dependencies to their frontend package.json.

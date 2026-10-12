@@ -1,5 +1,5 @@
 /**
- * Actual-fence compiler for every copyable Setu-TS block across all ten guides.
+ * Actual-fence compiler for every copyable Setu-TS block across every curated guide.
  *
  * This test delegates classification and compilation to the shared fence engine
  * at test/fixtures/snippets/fence-engine.ts, which provides:
@@ -47,9 +47,12 @@ interface FenceCounts {
 
 const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   'docs/getting-started.md': {
-    total: 22,
-    ts: 12,
-    compile: 12,
+    // 22/12 until the cold-read pass: three byte-identical per-runtime
+    // `app.start()` blocks collapsed into one, and a "Stopping Cleanly" fence
+    // showing the portable signal handler was added.
+    total: 20,
+    ts: 10,
+    compile: 10,
     external: 0,
     pseudocode: 0,
     skipped: 10,
@@ -63,9 +66,11 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/custom-plugins.md': {
-    total: 23,
-    ts: 20,
-    compile: 20,
+    // 23/20 until the cold-read pass: the sample README's outer fence closed
+    // early, so its inner Usage block was counted as a top-level guide fence.
+    total: 22,
+    ts: 19,
+    compile: 19,
     external: 0,
     pseudocode: 0,
     skipped: 3,
@@ -89,13 +94,28 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
-  'docs/examples.md': {
-    total: 14,
-    ts: 11,
-    compile: 11,
+  'docs/how-it-fits-together.md': {
+    // Startup order, the registry-versus-container split and the test
+    // overrides, each with a compiling example.
+    total: 4,
+    ts: 4,
+    compile: 4,
     external: 0,
     pseudocode: 0,
-    skipped: 3,
+    skipped: 0,
+  },
+  'docs/examples.md': {
+    // Rewritten after the examples cold read: the per-app "Key code" blocks
+    // described apps that no longer existed (routes, plugins, ports), so each
+    // deep dive now gives the shell commands it was checked with and links to
+    // the app's source. One compiled block remains: the factory/smoke shape
+    // every example shares, taken from apps/minimal.
+    total: 18,
+    ts: 1,
+    compile: 1,
+    external: 0,
+    pseudocode: 0,
+    skipped: 17,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -166,12 +186,25 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 2,
   },
   'docs/runtime-deployment.md': {
-    total: 30,
-    ts: 13,
-    compile: 13,
+    // 30/13 until the cold-read pass: the Workers execution-limits best
+    // practice is prose now, because its code block computed a timeout from a
+    // wrong 120 s limit.
+    total: 29,
+    ts: 12,
+    compile: 12,
     external: 0,
     pseudocode: 0,
     skipped: 17,
+  },
+  'docs/authorization.md': {
+    // M110a: the policy guide — four fences, every one compiling. M110b: the
+    // Scoped Roles section adds four more, all compiling.
+    total: 8,
+    ts: 8,
+    compile: 8,
+    external: 0,
+    pseudocode: 0,
+    skipped: 0,
   },
 };
 
@@ -190,15 +223,25 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 272 in M95d: docs/mvc.md's URL-scheme demonstration and its Error pages
   // worked example (+2, both compiling). 274 in M99e: migration-nestjs.md's
   // Scaffolding and Microservices sections add two bash fences (+2, skipped).
-  total: 274,
-  ts: 226,
-  compile: 193,
+  // 272 after the getting-started cold read: three identical per-runtime
+  // blocks collapse to one and a "Stopping Cleanly" block is added (-2, all
+  // compiling). 271 after the runtime-deployment cold read: the Workers
+  // execution-limits best practice became prose (-1, compiling). 275 after
+  // the examples cold read: ten invented "Key code" blocks became shell
+  // commands and source links (-10 compiling, +14 skipped). 274 after the
+  // custom-plugins cold read: a nested README fence stopped leaking out (-1).
+  // 278 once docs/how-it-fits-together.md joins the corpus (+4, all compiling).
+  // 282 in M110a: docs/authorization.md joins the corpus (+4, all compiling).
+  // 286 in M110b: its Scoped Roles section (+4, all compiling).
+  total: 286,
+  ts: 224,
+  compile: 191,
   external: 33,
   pseudocode: 0,
-  skipped: 48,
+  skipped: 62,
 };
 
-describe('actual-fence compiler — all ten guides (shared engine)', () => {
+describe('actual-fence compiler — every curated guide (shared engine)', () => {
   it('compiles every compile fence against the workspace', async () => {
     const all = await allFences();
     const toCompile = all.filter(

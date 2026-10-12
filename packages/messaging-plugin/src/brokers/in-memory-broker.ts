@@ -2,6 +2,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -11,6 +12,7 @@ import type { InMemoryBrokerOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 
 /**
@@ -142,8 +144,8 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * longer delays or aborts delivery to its siblings.
    * @since 0.1.0
    */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /**
@@ -152,13 +154,16 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * promise is RETAINED and its rejection routed to the failure path below —
    * never dropped, never unhandled. @internal
    */
-  // Resolves-on-hand-off is the documented contract, not a forgotten await.
-  // deno-lint-ignore require-await
+  // Resolves-on-hand-off is still the documented contract; the await below is
+  // real (options validation), so this is no longer a lint exception.
   async publishWithHeaders<T>(
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const subs = this.#subscribers.get(topic) ?? [];
     if (subs.length === 0) {
       return;
@@ -168,7 +173,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
       topic,
       messageId: this.#runtime.uuid(),
       timestamp: new Date(this.#runtime.now()),
-      headers,
+      headers: wireHeaders,
     };
 
     const serialized = this.#serializer.serialize(message);

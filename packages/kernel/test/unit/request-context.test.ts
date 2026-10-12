@@ -8,8 +8,7 @@
  * guard — it fails against a shared module-scope sentinel.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRequest } from '@setu-ts/common';
 
 import { createRequestContext } from '../../src/context/request-context.ts';
@@ -116,4 +115,12 @@ describe('createRequestContext — the rest of the context', () => {
     ctx.services.register('per-request', { value: 2 });
     expect(registry.has('per-request')).toBe(false);
   });
+});
+
+it('caches the parsed query record while keeping different requests independent', () => {
+  const first = contextFor();
+  const second = contextFor();
+  expect(first.query).toEqual({ page: '2' });
+  expect(first.query).toBe(first.query);
+  expect(first.query).not.toBe(second.query);
 });

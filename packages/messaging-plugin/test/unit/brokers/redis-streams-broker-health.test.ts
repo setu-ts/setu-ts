@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRedisStreamsClient } from '../../../src/interfaces/index.ts';
 import { RedisStreamsBroker } from '../../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../../src/serializers/json-serializer.ts';
@@ -14,6 +13,9 @@ function makeRedisClient(ping?: () => Promise<string>): IRedisStreamsClient {
     xadd: () => Promise.resolve('0-1'),
     xgroup: () => Promise.resolve('OK'),
     xreadgroup: () => Promise.resolve(null),
+    xpending: () => Promise.resolve([]),
+    xclaim: () => Promise.resolve([]),
+    xinfo: () => Promise.resolve([]),
     xack: () => Promise.resolve(0),
     quit: async () => {},
     connect: async () => {},

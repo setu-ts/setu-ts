@@ -15,11 +15,11 @@ import {
   SchemaPerTenant,
   SubdomainResolver,
   TENANT_CACHE_PREFIX_STATE_KEY,
+  TenantDataStoreNotReadyError,
   tenantMiddleware,
   TenantNotResolvedError,
 } from '../../src/index.ts';
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 /** The complete published VALUE surface. Types are excluded (erasable). */
 const EXPECTED_VALUES = [
@@ -34,16 +34,18 @@ const EXPECTED_VALUES = [
   'SchemaPerTenant',
   'SubdomainResolver',
   'TENANT_CACHE_PREFIX_STATE_KEY',
+  'TenantDataStoreNotReadyError',
   'TenantNotResolvedError',
   'getTenantCachePrefix',
   'tenantMiddleware',
 ] as const;
 
 describe('barrel exports', () => {
-  it('exports exactly the documented values, and nothing else (M89a: unchanged surface)', () => {
-    // The M56 defect class in reverse: this milestone changed internal
-    // behaviour only, so the value surface must not have grown by a single
-    // symbol.
+  it('exports exactly the documented values, and nothing else', () => {
+    // The M56 defect class in reverse: the value surface must match the plan's
+    // §4 exactly. M101c added exactly one value symbol —
+    // `TenantDataStoreNotReadyError` (the factory arm's named refusal); the
+    // two promoted ports are types and so stay out of this list.
     expect(Object.keys(barrel).sort()).toEqual([...EXPECTED_VALUES].sort());
   });
 
@@ -61,6 +63,7 @@ describe('barrel exports', () => {
     expect(typeof DatabasePerTenant.prototype.resolveDatabase).toEqual('function');
     expect(typeof MemoryTenantDataStore.prototype.create).toEqual('function');
     expect(TenantNotResolvedError.prototype instanceof Error).toEqual(true);
+    expect(TenantDataStoreNotReadyError.prototype instanceof Error).toEqual(true);
     expect(typeof CAPABILITIES.MULTI_TENANCY).toEqual('string');
     expect(CAPABILITIES.MULTI_TENANCY).toEqual('multi-tenancy');
   });

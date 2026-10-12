@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration tests for the React Router plugin.
  *
@@ -11,10 +12,10 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { errorHandler, forbidden } from '@setu-ts/exceptions';
 import type { IPluginContext, RouteHandler } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
@@ -25,11 +26,8 @@ import { createFakeLoadContextFactory } from '../fixtures/fake-handler.ts';
 type RouterMethod = (p: string, h: RouteHandler) => void;
 
 /** Bind an ephemeral port, release it, return the number. */
-function findFreePort(): number {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
+function findFreePort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 /** Read a whole `ReadableStream<Uint8Array>` body to a string. */
@@ -59,7 +57,7 @@ function fakeLoader(
 
 describe('react-router integration (real socket)', () => {
   it('streams an SSR document over the socket through the catch-all', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const handler: SsrRequestHandler = (_request, _loadContext) =>
       Promise.resolve(
@@ -101,7 +99,7 @@ describe('react-router integration (real socket)', () => {
   });
 
   it('does NOT shadow a 2-static app route (/api/health) with the catch-all', async () => {
-    const port = findFreePort();
+    const port = await findFreePort();
 
     const handler: SsrRequestHandler = (_request, _loadContext) =>
       Promise.resolve(
@@ -136,6 +134,47 @@ describe('react-router integration (real socket)', () => {
       const page = await fetch(`http://127.0.0.1:${port}/dashboard`);
       expect(page.headers.get('content-type')).toContain('text/html');
       expect(await page.text()).toContain('SSR');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('keeps SSR HTML refusals distinct from RFC 9457 kernel refusals', async () => {
+    const port = await findFreePort();
+    const handler: SsrRequestHandler = () =>
+      Promise.resolve(
+        new Response('<html><body>route boundary: forbidden</body></html>', {
+          status: 403,
+          headers: { 'Content-Type': 'text/html' },
+        }),
+      );
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ReactRouterPlugin({
+          serverBuildPath: './build/server',
+          loadRequestHandler: fakeLoader(handler),
+        }),
+      ],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }), {
+      name: 'error-handler',
+      priority: 0,
+    });
+    app.router.get('/api/refused', () => {
+      throw forbidden('API refusal');
+    });
+    await app.start({ port });
+    try {
+      const page = await fetch(`http://127.0.0.1:${port}/forbidden`);
+      expect(page.status).toBe(403);
+      expect(page.headers.get('content-type')).toContain('text/html');
+      expect(await page.text()).toContain('route boundary: forbidden');
+
+      const api = await fetch(`http://127.0.0.1:${port}/api/refused`);
+      expect(api.status).toBe(403);
+      expect(api.headers.get('content-type')).toContain('application/problem+json');
+      expect((await api.json() as { title: string }).title).toBe('Forbidden');
     } finally {
       await app.stop();
     }

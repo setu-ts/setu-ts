@@ -58,7 +58,9 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/storage-plugin/README.md': 3,
   // M93b: +4 for the integration-event producer/consumer, correlation,
   // dual-publish and domain-mapping examples.
-  'packages/messaging-plugin/README.md': 10,
+  // M107: +3 for the outbox usage, the backend mappings and the Workers wiring.
+  // M108: +2 for the inbox usage and the operator release loop.
+  'packages/messaging-plugin/README.md': 16,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
   'packages/multi-tenancy-plugin/README.md': 3,
@@ -81,19 +83,30 @@ const READMES: Readonly<Record<string, number>> = {
   // M100e: +1 for the passkeys configuration example; the browser-ceremony
   // snippet is a ```js fence (plain browser fetch, no Setu-TS import) the
   // engine deliberately skips.
-  'packages/auth-plugin/README.md': 16,
+  // M110a: +1 for the Authorization Policies example.
+  // M110b: +1 for the Scoped Roles example.
+  // M101h: +1 for the authorization-diagnostics registration example.
+  'packages/auth-plugin/README.md': 19,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
-  'packages/session-plugin/README.md': 11,
+  // M101c: +1 for the Tenant binding opt-out example.
+  'packages/session-plugin/README.md': 12,
   'packages/audit-plugin/README.md': 3,
-  'packages/common/README.md': 2,
+  // M101h: +1 for the Redaction policy-shape example.
+  'packages/common/README.md': 3,
   // M92: +1 for the @Render example.
   // M99d: +1 for the Non-HTTP ingress example (the `ingress` option the README
   // previously documented nowhere).
-  'packages/decorator-plugin/README.md': 6,
+  // M110a: +1 for the Authorization policies (@Policy/@RequirePolicy) example.
+  // M110b: +1 for the Scoped roles (@ScopedRoles/@ScopedPermissions) example.
+  'packages/decorator-plugin/README.md': 8,
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.
   'packages/view-plugin/README.md': 6,
+  // M103: the new package's README is born gated — usage, a catalogue source,
+  // the view-rendering path, the React Router loader recipe, and both halves
+  // of the browser recipe (the exposing plugin and the `/format` client).
+  'packages/localization-plugin/README.md': 6,
   'packages/validation-plugin/README.md': 2,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 10,
@@ -102,7 +115,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/react-router-plugin/README.md': 4,
   'packages/starters/rest-starter/README.md': 7,
   'packages/starters/microservice-starter/README.md': 6,
-  'packages/starters/full-stack-starter/README.md': 7,
+  'packages/starters/full-stack-starter/README.md': 8,
   // v0.6.0 follow-up: half of the package READMEs had never had a single fence
   // compiled — the list only ever grew when a milestone happened to touch a
   // README, so `kernel`, `runtime`, `sdk`, `exceptions` and `testing` sat
@@ -110,6 +123,9 @@ const READMES: Readonly<Record<string, number>> = {
   // producing false failures of its own; the nine still outstanding are named
   // in the ungated-coverage assertion below so the gap cannot be forgotten.
   'packages/cache-plugin/README.md': 2,
+  // M101h: the events README is born gated — installation, usage, the
+  // aggregate-local recorder and the new dispatch-diagnostics example.
+  'packages/events-plugin/README.md': 4,
   'packages/config-plugin/README.md': 6,
   'packages/di-plugin/README.md': 2,
   'packages/exceptions/README.md': 3,
@@ -117,16 +133,23 @@ const READMES: Readonly<Record<string, number>> = {
   // M98d: +1 for the opt-in health-observations example.
   'packages/health-plugin/README.md': 3,
   'packages/http-security-plugin/README.md': 2,
+  // M109a: the new package's README is born gated — the usage example and the
+  // derived-key forwarding example.
+  'packages/idempotency-plugin/README.md': 3,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 3,
-  'packages/mail-plugin/README.md': 2,
+  // M102: +1 for the component-template example rendered through the view engine.
+  'packages/mail-plugin/README.md': 3,
   'packages/metrics-plugin/README.md': 2,
   'packages/runtime/README.md': 3,
   // M98n: +1 for the devtool-gated observed-fetch composition.
   'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,
-  'packages/testing/README.md': 9,
+  'packages/testing/README.md': 10,
+  // M111d: the npm create entry. Shell lines only, so it is gated at zero —
+  // a TypeScript fence added later is then visible here rather than unchecked.
+  'packages/create/README.md': 0,
 };
 
 /** Reads every fence the engine would compile from one README. */
@@ -162,7 +185,6 @@ const UNGATED: readonly string[] = [
   'packages/cloudflare-plugin/README.md',
   'packages/cqrs-plugin/README.md',
   'packages/database-plugin/README.md',
-  'packages/events-plugin/README.md',
   'packages/notification-plugin/README.md',
   'packages/openapi-plugin/README.md',
   'packages/secrets-plugin/README.md',
@@ -197,7 +219,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(40);
+    expect(Object.keys(READMES)).toHaveLength(44);
 
     // And pin the COVERAGE: every package README is gated or explicitly named
     // as a known gap. Half of them were in neither before v0.6.0, which is how

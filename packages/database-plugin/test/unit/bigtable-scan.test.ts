@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { NormalizedQuery } from '@setu-ts/common';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { planBigtableScan } from '../../src/adapters/bigtable/bigtable-scan.ts';

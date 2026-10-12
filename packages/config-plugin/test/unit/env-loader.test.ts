@@ -7,8 +7,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { loadEnv, loadEnvWithProvenance } from '../../src/services/env-loader.ts';
 import { createFakeFileSystem, createRuntime } from '../fixtures/fake-runtime.ts';

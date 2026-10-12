@@ -14,8 +14,7 @@
  *      (the optional-parameter compatibility claim).
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, isWebSocketUpgradeRequest } from '@setu-ts/common';
 import type {
   IPlugin,

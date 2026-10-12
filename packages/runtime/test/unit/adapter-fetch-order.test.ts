@@ -3,8 +3,7 @@
  * consultation (M70a). Verifies the fetch handler ordering across adapters.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { UPGRADE_INTENT } from '@setu-ts/common';
 import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
 import { DenoHttpAdapter, type DenoServeHost } from '../../src/adapters/deno/deno-http-adapter.ts';

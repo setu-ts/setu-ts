@@ -274,7 +274,9 @@ export function resolveBigtableTarget(
     );
   }
 
-  const columns: Record<string, BigtableColumnAddress> = {};
+  // Null-prototype, so a field named after an inherited member (`constructor`,
+  // `toString`) is looked up as an unmapped field rather than as that member.
+  const columns: Record<string, BigtableColumnAddress> = Object.create(null);
   const qualifierOwner = new Map<string, string>();
   const declared = Object.entries(override?.columns ?? {});
   for (const [field, spec] of declared) {

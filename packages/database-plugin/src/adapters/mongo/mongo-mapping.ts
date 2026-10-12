@@ -16,7 +16,7 @@ import type { IMongoObjectId, IMongoObjectIdCtor } from './mongo-client-types.ts
 /**
  * How one entity name maps onto a physical Mongo collection.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface MongoEntityMapping {
   /**
@@ -108,7 +108,7 @@ export type { IMongoObjectId };
  * @param entity - The entity name passed to `getRepository()`
  * @param mapping - The per-entity overrides, or none
  * @returns The resolved target
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function resolveMongoTarget(
   entity: string,
@@ -141,7 +141,7 @@ export function resolveMongoTarget(
  * @param document - The raw driver document
  * @param target - The resolved entity target
  * @returns A shallow copy with `_id` renamed to the mapped primary key
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function fromDriverDocument(
   document: Record<string, unknown>,
@@ -205,7 +205,7 @@ export function fromDriverDocument(
  *
  * @param value - The raw driver `_id`
  * @returns The repository-visible primary-key value
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function fromDriverId(value: unknown): unknown {
   const kind = typeof value;
@@ -227,7 +227,7 @@ export function fromDriverId(value: unknown): unknown {
  * @param target - The resolved entity target
  * @param objectIdCtor - The driver `ObjectId` constructor (for the `'objectId'` branch)
  * @returns A shallow copy with the primary-key field renamed to `_id`
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function toDriverDocument(
   row: Record<string, unknown>,
@@ -291,7 +291,7 @@ export function toDriverDocument(
  *
  * @param value - The driver id value; never `null` or `undefined`
  * @returns The id as a string
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function toIdString(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -324,7 +324,7 @@ export function toIdString(value: unknown): string {
  * @param idType - The target's id strategy
  * @param objectIdCtor - The driver `ObjectId` constructor; required when `idType` converts
  * @returns The id in driver form
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function toDriverId(
   value: unknown,

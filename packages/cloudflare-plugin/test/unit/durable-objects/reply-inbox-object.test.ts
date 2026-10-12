@@ -1,3 +1,12 @@
+import { WorkersResponse } from '../../../../../test/node-helpers.ts';
+import { afterAll, beforeAll } from 'vitest';
+const nativeResponse = globalThis.Response;
+beforeAll(() => {
+  globalThis.Response = WorkersResponse;
+});
+afterAll(() => {
+  globalThis.Response = nativeResponse;
+});
 /**
  * The hibernation case is the one that would have shipped green. Sockets are
  * accepted with `state.acceptWebSocket`, so the runtime may evict the object
@@ -6,8 +15,7 @@
  * membership in a field passes every other test in this file.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { ReplyInboxObjectCore } from '../../../src/durable-objects/reply-inbox-object.ts';
 import { FakeDurableObjectState, FakeServerSocket, linkedPair } from '../../do-fakes.ts';

@@ -4,7 +4,9 @@
  * Publishes to topics, subscribes through consumer-group subscriptions, and
  * supports request-reply via a shared reply topic with per-instance
  * subscriptions. Topics must pre-exist; the consumer-group subscription
- * ({@linkcode SubscribeOptions.queue}) is created when absent.
+ * ({@linkcode SubscribeOptions.queue}, default `<defaultQueue>.<topic ID>`) is
+ * created when absent, and an existing one bound to another topic is refused
+ * with {@linkcode PubSubSubscriptionBoundElsewhereError}.
  *
  * The SDK is lazy-loaded through {@linkcode loadPubSubModule} and adapted to
  * the domain port via {@linkcode adaptPubSubModule}, or injected directly as
@@ -17,6 +19,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -26,15 +29,63 @@ import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
-import { ReplyInboxUnavailableError } from '../errors.ts';
+import { PubSubSubscriptionBoundElsewhereError, ReplyInboxUnavailableError } from '../errors.ts';
 
 /** Default reply topic for request-reply. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
 
-/** Default consumer-group subscription name. */
+/** Default consumer-group subscription-name PREFIX (M101b: `<prefix>.<topic>`). */
 const DEFAULT_QUEUE = 'messaging-consumers';
+
+/** The service's subscription-ID length cap (Pub/Sub resource-naming rules). */
+const MAX_SUBSCRIPTION_NAME_LENGTH = 255;
+
+/** gRPC `ALREADY_EXISTS`. */
+const GRPC_ALREADY_EXISTS = 6;
+
+/**
+ * Derives the default subscription for a topic: `<defaultQueue>.<topic ID>`
+ * (M101b, V8-2).
+ *
+ * Pub/Sub subscription names are project-global, so one shared default meant
+ * a second topic attached to the first topic's subscription. `.` joins (the
+ * package's own `rr.req.` convention; Kafka's `:` is illegal in a Pub/Sub ID).
+ * Pub/Sub reserves no character, so the parts are NOT recoverable by splitting.
+ *
+ * The topic's ID is used, never the name as given: a caller may name the
+ * topic fully qualified (`projects/p/topics/orders`), and `/` is illegal in a
+ * subscription ID — the service answers `INVALID_ARGUMENT` (measured on the
+ * emulator), where the pre-M101b fixed default was accepted.
+ *
+ * @param defaultQueue - The configured prefix
+ * @param topic - The subscribed topic, short or fully qualified
+ * @returns The per-topic subscription name
+ */
+function deriveDefaultSubscription(defaultQueue: string, topic: string): string {
+  const marker = topic.lastIndexOf('/topics/');
+  const topicId = topic.startsWith('projects/') && marker !== -1
+    ? topic.slice(marker + '/topics/'.length)
+    : topic;
+  return `${defaultQueue}.${topicId}`;
+}
+
+/**
+ * Reports whether the fully-qualified topic the service says a subscription is
+ * bound to is the topic the caller asked for. The caller may name a topic
+ * either short (`orders`, meaning THIS project's) or fully qualified
+ * (`projects/p/topics/orders`). Compared exactly: Pub/Sub allows cross-project
+ * subscriptions, so a `/topics/orders` suffix alone would accept a subscription
+ * bound to another project's same-named topic.
+ */
+function isSameTopic(boundTopic: string, requestedTopic: string, projectId: string): boolean {
+  const expected = requestedTopic.startsWith('projects/')
+    ? requestedTopic
+    : `projects/${projectId}/topics/${requestedTopic}`;
+  return boundTopic === expected;
+}
 
 /**
  * Declares the constructors used from the real GCP Pub/Sub SDK so the adapter
@@ -43,11 +94,25 @@ const DEFAULT_QUEUE = 'messaging-consumers';
  */
 export interface PubSubSdkModule {
   PubSub: new (options: { projectId: string; credentials?: unknown }) => {
-    topic(topicName: string): {
+    topic(topicName: string, options?: { messageOrdering?: boolean }): {
       publishMessage(
-        message: { data: Uint8Array; attributes?: Record<string, string> },
+        message: {
+          data: Uint8Array;
+          attributes?: Record<string, string>;
+          orderingKey?: string;
+        },
       ): Promise<string>;
-      createSubscription(subscriptionName: string): Promise<unknown[]>;
+      createSubscription(
+        subscriptionName: string,
+        options?: { enableMessageOrdering?: boolean },
+      ): Promise<unknown[]>;
+      /**
+       * Resumes a paused ordering key (M106 §3.5). The SDK pauses a key after a
+       * failed ORDERED publish and refuses further publishes for it until this
+       * is called. Optional so a hand-built module double that does not
+       * model ordering still satisfies this type; the real SDK has it.
+       */
+      resumePublishing?(orderingKey: string): void;
     };
     subscription(subscriptionName: string): {
       on(
@@ -76,6 +141,13 @@ export interface PubSubSdkModule {
       on(event: 'error', handler: (err: unknown) => void): void;
       close(): Promise<void>;
       delete(): Promise<void>;
+      /**
+       * Reads the subscription's metadata (M101b). The SDK resolves a tuple
+       * whose first element is the `google.pubsub.v1.ISubscription`; only its
+       * fully-qualified `topic` is read, to refuse attaching to a subscription
+       * that is bound to another topic.
+       */
+      getMetadata(): Promise<[{ topic?: string | null }, ...unknown[]]>;
     };
     close(): Promise<void>;
   };
@@ -86,11 +158,17 @@ export interface PubSubSdkModule {
  * SDK directly.
  */
 export interface IPubSubTransport {
-  /** Publish bytes to a topic. */
+  /**
+   * Publish bytes to a topic.
+   *
+   * @param orderingKey - Native Pub/Sub ordering key (M106 §3.3); omitted means
+   *   unordered
+   */
   publish(
     topic: string,
     bytes: Uint8Array,
     attributes?: Readonly<Record<string, string>>,
+    orderingKey?: string,
   ): Promise<void>;
   /**
    * Open a subscription on a topic. Creates the subscription when absent.
@@ -145,10 +223,25 @@ export interface PubSubOptions {
   credentials?: unknown;
   /** Injected transport (bypasses lazy SDK load). */
   client?: IPubSubTransport;
-  /** Default consumer-group subscription name. */
+  /**
+   * Default consumer-group subscription-name PREFIX (default
+   * `'messaging-consumers'`). A subscription with no
+   * {@linkcode SubscribeOptions.queue} uses `<defaultQueue>.<topic ID>`, one
+   * subscription per topic, because Pub/Sub subscription names are
+   * project-global (M101b).
+   */
   defaultQueue?: string;
   /** Shared reply topic for request-reply (must pre-exist). */
   replyTopic?: string;
+  /**
+   * Create the transport's own subscriptions with message ordering enabled
+   * (default `false`), required before a native `orderingKey` is delivered in
+   * order. Fixed at subscription creation and it costs throughput, so it is
+   * opt-in (M106 §3.5). Refused together with {@link client}: an injected
+   * transport creates its own subscriptions, so pass the flag to
+   * `adaptPubSubModule` instead.
+   */
+  enableMessageOrdering?: boolean;
   /** Optional logger. */
   logger?: { error: (msg: string) => void };
 }
@@ -160,9 +253,12 @@ export interface PubSubOptions {
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadPubSubModule(): Promise<PubSubSdkModule> {
-  const mod = await import('npm:@google-cloud/pubsub@^6');
+  const mod = await import('@google-cloud/pubsub');
   return mod as unknown as PubSubSdkModule;
 }
+
+/** Most `Topic` handles {@linkcode adaptPubSubModule} keeps while idle (M106 audit L3). */
+const MAX_CACHED_TOPICS = 1024;
 
 /**
  * Adapts the real GCP Pub/Sub SDK module to the domain port.
@@ -177,18 +273,70 @@ export function adaptPubSubModule(
     projectId: string;
     credentials?: unknown;
     logger?: { error: (msg: string) => void } | undefined;
+    enableMessageOrdering?: boolean | undefined;
   },
 ): IPubSubTransport {
   const pubsub = new mod.PubSub({ projectId: options.projectId, credentials: options.credentials });
+
+  // M106 §3.5: the SDK keeps its ordered queue per `Topic` OBJECT, so one cached
+  // Topic per name is required — building a fresh Topic per publish lets
+  // concurrent publishes for one key race.
+  //
+  // The cache is bounded (M106 audit L3), least-recently-used first, and evicts
+  // only a handle with NOTHING in flight: every earlier publish on it has
+  // settled, so the next one on a fresh handle cannot overtake it. When every
+  // handle is busy the cache runs over the bound until one settles, so it is
+  // bounded by the topics in use at once rather than the topics ever named.
+  //
+  // `idle` holds exactly the cached names with nothing in flight, in recency
+  // order (a Map iterates in insertion order), so eviction takes the oldest
+  // idle name in O(1) and never walks the busy ones — the busy set is bounded
+  // only by the application's concurrency (PR #427 review).
+  const topics = new Map<string, { handle: ReturnType<typeof pubsub.topic>; inFlight: number }>();
+  const idle = new Set<string>();
+  const evictIdle = (): void => {
+    for (const name of idle) {
+      if (topics.size <= MAX_CACHED_TOPICS) return;
+      idle.delete(name);
+      topics.delete(name);
+    }
+  };
 
   return {
     publish: async (
       topic: string,
       bytes: Uint8Array,
       attributes?: Readonly<Record<string, string>>,
+      orderingKey?: string,
     ): Promise<void> => {
-      const message = attributes ? { data: bytes, attributes: { ...attributes } } : { data: bytes };
-      await pubsub.topic(topic).publishMessage(message);
+      let entry = topics.get(topic);
+      if (entry === undefined) {
+        entry = { handle: pubsub.topic(topic, { messageOrdering: true }), inFlight: 0 };
+        topics.set(topic, entry);
+      }
+      idle.delete(topic); // busy now; re-enters `idle` as most recent once settled
+      const { handle } = entry;
+      const message = {
+        data: bytes,
+        ...(attributes ? { attributes: { ...attributes } } : {}),
+        ...(orderingKey !== undefined ? { orderingKey } : {}),
+      };
+      entry.inFlight++;
+      try {
+        await handle.publishMessage(message);
+      } catch (error) {
+        // The SDK pauses an ordering key after a failed ORDERED publish and
+        // refuses further publishes for it until `resumePublishing`; without
+        // this one transient failure blocks that key for the process lifetime.
+        if (orderingKey !== undefined) {
+          handle.resumePublishing?.(orderingKey);
+        }
+        throw error;
+      } finally {
+        entry.inFlight--;
+        if (entry.inFlight === 0) idle.add(topic);
+        evictIdle();
+      }
     },
     open: async (
       topic: string,
@@ -204,20 +352,37 @@ export function adaptPubSubModule(
         },
       ) => void,
     ): Promise<IPubSubSubscription> => {
-      // Create subscription on the topic if absent.
+      const sub = pubsub.subscription(subscription);
+
+      // Create subscription on the topic if absent. Ordering is FIXED at
+      // creation, so it is passed only when configured.
       try {
-        await pubsub.topic(topic).createSubscription(subscription);
+        await pubsub.topic(topic).createSubscription(
+          subscription,
+          options.enableMessageOrdering ? { enableMessageOrdering: true } : undefined,
+        );
       } catch (err) {
         // Narrow catch to ALREADY_EXISTS (gRPC code 6) only; rethrow everything else
         // including NOT_FOUND (gRPC code 5). Match on the documented error-code
         // discriminator rather than String(err) which is representation-dependent.
         const grpcCode = (err as { code?: number }).code;
-        if (grpcCode !== 6) {
+        if (grpcCode !== GRPC_ALREADY_EXISTS) {
           throw err;
         }
+        // M101b (V8-2): subscription names are project-global, so an existing
+        // one may be bound to ANOTHER topic. Attaching to it would hand this
+        // topic's handler the other topic's messages with no log. A missing
+        // `topic` cannot prove the binding either, so it is refused too.
+        const [metadata] = await sub.getMetadata();
+        const boundTopic = metadata.topic ?? '';
+        if (!isSameTopic(boundTopic, topic, options.projectId)) {
+          throw new PubSubSubscriptionBoundElsewhereError(
+            subscription,
+            boundTopic === '' ? '(unknown)' : boundTopic,
+            topic,
+          );
+        }
       }
-
-      const sub = pubsub.subscription(subscription);
 
       sub.on('error', (err) => {
         if (options.logger) {
@@ -273,6 +438,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   #injectedClient: IPubSubTransport | undefined;
   #defaultQueue: string;
   #replyTopic: string;
+  #enableMessageOrdering: boolean;
   #logger: { error: (msg: string) => void } | undefined;
   #transport: IPubSubTransport | null = null;
   #ready = false;
@@ -294,8 +460,17 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     this.#projectId = options?.projectId ?? '';
     this.#credentials = options?.credentials;
     this.#injectedClient = options?.client;
+    if (this.#injectedClient !== undefined && options?.enableMessageOrdering !== undefined) {
+      // Ordering is fixed when a subscription is created, and an injected
+      // transport creates its own — accepting the flag would do nothing.
+      throw new RangeError(
+        'GcpPubSubBroker: `enableMessageOrdering` has no effect with an injected `client`. ' +
+          'Pass it to `adaptPubSubModule` when building the transport instead.',
+      );
+    }
     this.#defaultQueue = options?.defaultQueue ?? DEFAULT_QUEUE;
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
+    this.#enableMessageOrdering = options?.enableMessageOrdering ?? false;
     this.#logger = options?.logger;
     this.#subscriptions = new Map();
     this.#rr = new RequestReplyCore({
@@ -372,7 +547,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     assertNotCloudflareWorkers(
       this.#runtime,
       'GCP Pub/Sub',
-      'npm:@google-cloud/pubsub@^6',
+      '@google-cloud/pubsub',
     );
 
     if (this.#injectedClient !== undefined) {
@@ -389,6 +564,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         projectId: this.#projectId,
         credentials: this.#credentials,
         logger: this.#logger,
+        enableMessageOrdering: this.#enableMessageOrdering,
       });
     }
 
@@ -447,8 +623,8 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     return reachable !== false;
   }
 
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
@@ -456,13 +632,16 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#transport) {
       throw new Error('GcpPubSubBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     const bytes = new TextEncoder().encode(serialized);
-    await this.#transport.publish(topic, bytes, headers);
+    await this.#transport.publish(topic, bytes, wireHeaders, validated.orderingKey);
   }
 
   async subscribe<T>(
@@ -474,8 +653,15 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       throw new Error('GcpPubSubBroker is not connected');
     }
 
+    const queue = options?.queue ?? deriveDefaultSubscription(this.#defaultQueue, topic);
+    if (queue.length > MAX_SUBSCRIPTION_NAME_LENGTH) {
+      throw new Error(
+        `Pub/Sub subscription name for topic ${JSON.stringify(topic)} is ${queue.length} ` +
+          `characters; the service allows at most ${MAX_SUBSCRIPTION_NAME_LENGTH}. Pass a ` +
+          'shorter SubscribeOptions.queue.',
+      );
+    }
     const subscriptionId = this.#runtime.uuid();
-    const queue = options?.queue ?? this.#defaultQueue;
 
     const sub = await this.#transport.open(topic, queue, (msg) => {
       (async () => {

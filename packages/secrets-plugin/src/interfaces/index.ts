@@ -165,6 +165,15 @@ export interface SecretsProviderOptions {
   client?: IAwsSecretsClient | IGcpSecretsClient | IAzureSecretsClient;
   /** (`vault`) Injected `fetch`-shaped function; defaults to global `fetch`. */
   http?: IVaultHttp;
+  /**
+   * (`vault`) Bound on one Vault request, in milliseconds. A request that
+   * fails on the network or does not answer in time rejects with
+   * `SecretProviderUnavailableError` (`503`). `0` disables the bound.
+   * Default `5000`.
+   *
+   * @since 0.9.0
+   */
+  requestTimeoutMs?: number;
 }
 
 /**

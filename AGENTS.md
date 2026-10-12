@@ -30,16 +30,29 @@ Do NOT add or duplicate project rules in this file — put them in `CLAUDE.md` o
 
 ## Step 0 — be on the milestone's feature branch
 
-`main` is protected. This is the single most common way work goes wrong here, so confirm it before
+`develop` and `main` are both protected. `develop` is the integration branch and the target of every
+PR except release and hotfix PRs, which go into `main`; `main` holds only the last release and is
+the repository's default branch, so pass `--base develop` to `gh pr create` (CLAUDE.md "Branches").
+Being on the wrong branch is the single most common way work goes wrong here, so confirm it before
 reading docs or writing code:
 
 ```bash
+git worktree list                    # the task's branch may already have a worktree — use it
 git branch --show-current
 ```
 
+Every new task starts in a NEW worktree at `.claude/worktrees/<name>`, never in the main checkout,
+which stays on `develop` (AI_GUIDELINES §15.4):
+
+```bash
+git fetch origin
+git worktree add -b <branch> .claude/worktrees/<name> origin/develop   # origin/main for a hotfix
+```
+
 One `feat/[milestone]-[description]` branch holds ALL of a milestone's work **and its fixes** until
-it merges. Do not open a `fix/…` branch for an unmerged milestone — `fix/…` is only for a defect in
-already-merged `main`. Never commit to `main`.
+it merges into `develop`; start it from `origin/develop`. Do not open a `fix/…` branch for an
+unmerged milestone — `fix/…` is only for a defect in already-merged `develop`, and `hotfix/…` (cut
+from `main`) only for a defect in a published release. Never commit to `develop` or `main`.
 
 ## Verification gates
 
@@ -54,7 +67,7 @@ deno task test:coverage      # read the ANSI-stripped PER-FILE table; the exit c
 A milestone that adds or changes a package also runs, on a **committed** tree:
 
 ```bash
-deno task publish:check
+deno task release:publish --dry-run
 deno task release:verify <version>
 ```
 
@@ -109,10 +122,10 @@ These are plain markdown and tool-agnostic; read and follow them directly.
   procedure. `.roo/rules-verify-milestone/01-verify-only.md` adds the policy that goes with it:
   verify the committed tree, report every defect as a finding, and never fix what you are verifying.
 - **Review before merge:** `.roo/rules-code-review/01-review-only.md` for the policy. Scope starts
-  at `git diff main...HEAD` on the milestone's `feat/…` branch and deliberately reads past it — that
-  file names the seams. Correctness findings block the merge; reuse / simplification / efficiency
-  cleanups are advisory. On any pass after the first, the previous round's fixes are the part you
-  have not reviewed.
+  at `git diff develop...HEAD` on the milestone's `feat/…` branch and deliberately reads past it —
+  that file names the seams. Correctness findings block the merge; reuse / simplification /
+  efficiency cleanups are advisory. On any pass after the first, the previous round's fixes are the
+  part you have not reviewed.
 - **Commit before reporting done:** `.roo/rules-code/01-commit-before-done.md`.
 
 ## Evidence, not vibes

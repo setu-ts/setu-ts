@@ -7,8 +7,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { ConfigDiagnosticsOptions } from '../../src/options.ts';
 import {
@@ -67,6 +66,7 @@ describe('ConfigDiagnosticsOptions | compilation', () => {
       [{ KEY: '' }, CONFIG_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ KEY: 'x'.repeat(65) }, CONFIG_DIAGNOSTICS_ERRORS.aliasBytes],
       [{ KEY: 'bad\nalias' }, CONFIG_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ KEY: 'bad\u202ealias' }, CONFIG_DIAGNOSTICS_ERRORS.aliasControl],
     ];
     for (const [keys, expected] of cases) {
       try {

@@ -7,44 +7,31 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
-import { integer, pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
-import { drizzle as nodePostgresDrizzle } from 'npm:drizzle-orm@0.45.2/node-postgres';
-import { Pool } from 'npm:pg@^8.0.0';
-import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
-import {
-  integer as sqliteInteger,
-  sqliteTable,
-  text as sqliteText,
-} from 'npm:drizzle-orm@0.45.2/sqlite-core';
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  isNull,
-  lt,
-  lte,
-  or,
-  sql,
-} from 'npm:drizzle-orm@0.45.2';
-import { drizzle as mysqlDrizzle } from 'npm:drizzle-orm@0.45.2/mysql-proxy';
-import { mysqlTable, text as mysqlText } from 'npm:drizzle-orm@0.45.2/mysql-core';
+import { describe, expect, it } from 'vitest';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
+import { drizzle } from 'drizzle-orm/pg-proxy';
+import { integer, pgTable, text } from 'drizzle-orm/pg-core';
+import { drizzle as nodePostgresDrizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import { drizzle as sqliteDrizzle } from 'drizzle-orm/sqlite-proxy';
+import { integer as sqliteInteger, sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { drizzle as mysqlDrizzle } from 'drizzle-orm/mysql-proxy';
+import { mysqlTable, text as mysqlText } from 'drizzle-orm/mysql-core';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
 import {
   createDrizzleDataSource,
   DrizzleAdapter,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { HealthPlugin } from '@setu-ts/health-plugin';
+import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
 import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
-import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
+import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { NormalizedQuery } from '@setu-ts/common';
 
 const users = pgTable('users', {
@@ -809,7 +796,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
 // unset variable is reported as IGNORED (the M70c trap).
 // ---------------------------------------------------------------------------
 
-const livePgUrl = Deno.env.get('POSTGRES_URL');
+const livePgUrl = process.env['POSTGRES_URL'];
 const skipLivePg = livePgUrl === undefined;
 
 /** The one-row table the two live cases drive. Dropped on teardown. */
@@ -818,9 +805,121 @@ const pgAccounts = pgTable('x90f_classified_accounts', {
   balance: integer('balance').notNull(),
 });
 
+/**
+ * A primary key AND a secondary unique column, for the duplicate-key cases.
+ * The table name is unique per run, so the case never adopts, empties or drops
+ * a pre-existing table in whatever database `POSTGRES_URL` names.
+ */
+const pgMembersTable = `dupkey_members_${crypto.randomUUID().replaceAll('-', '')}`;
+const pgMembers = pgTable(pgMembersTable, {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+});
+
+describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
+  it(
+    'M105 conditional writes persist matches and leave misses unchanged, including in transactions',
+    { skip: skipLivePg },
+    async () => {
+      const tableName = `m105_${crypto.randomUUID().replaceAll('-', '')}`;
+      const table = pgTable(tableName, {
+        id: text('id').primaryKey(),
+        name: text('name'),
+        role: text('role'),
+      });
+      const pool = new Pool({ connectionString: livePgUrl! });
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(
+          nodePostgresDrizzle(pool),
+          (db, work) => db.transaction(work),
+        ),
+        drizzleTables: { Row: table },
+      });
+      await pool.query(`CREATE TABLE "${tableName}" (id text primary key, name text, role text)`);
+      await adapter.connect();
+      try {
+        await conditionalContract(
+          adapter.createDataSource('Row'),
+          'a',
+          'missing',
+          { id: 'a', role: 'owner', name: 'old' },
+          { role: 'owner' },
+          { name: 'new' },
+        );
+        const tx = await adapter.beginTransaction();
+        try {
+          await conditionalContract(
+            tx.createDataSource('Row'),
+            'tx',
+            'missing',
+            { id: 'tx', role: 'owner', name: 'old' },
+            { role: 'owner' },
+            { name: 'new' },
+          );
+          await tx.commit();
+        } catch (error) {
+          await tx.rollback();
+          throw error;
+        }
+      } finally {
+        await adapter.disconnect();
+        await pool.query(`DROP TABLE "${tableName}"`);
+        await pool.end();
+      }
+    },
+  );
+  it('a duplicate primary key or unique column reaches the caller as DuplicateKeyError', {
+    skip: skipLivePg,
+  }, async () => {
+    const pool = new Pool({ connectionString: livePgUrl!, max: 2 });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        nodePostgresDrizzle(pool),
+        (database, work) => database.transaction(work),
+      ),
+      drizzleTables: { Member: pgMembers },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
+    // No IF NOT EXISTS and no DELETE: the name is fresh, so creating it fails
+    // loudly rather than adopting someone else's table.
+    await pool.query(
+      `CREATE TABLE "${pgMembersTable}" (id text primary key, email text not null unique)`,
+    );
+    try {
+      const repo = service.getRepository('Member');
+      await repo.create({ id: 'm1', email: 'ada@example.com' });
+
+      for (
+        const duplicate of [{ id: 'm1', email: 'eve@example.com' }, {
+          id: 'm2',
+          email: 'ada@example.com',
+        }]
+      ) {
+        const refusal = await repo.create(duplicate).catch((e: unknown) => e);
+        expect(refusal).toBeInstanceOf(DuplicateKeyError);
+        expect((refusal as DuplicateKeyError).entity).toBe('Member');
+        // SQLSTATE 23505 stays reachable through `cause` for the log.
+        let cursor: unknown = (refusal as Error).cause;
+        let sawUniqueViolation = false;
+        for (let depth = 0; depth < 6 && cursor !== undefined && cursor !== null; depth++) {
+          if ((cursor as { code?: unknown }).code === '23505') sawUniqueViolation = true;
+          cursor = (cursor as { cause?: unknown }).cause;
+        }
+        expect(sawUniqueViolation).toBe(true);
+      }
+      expect(await repo.count()).toBe(1);
+    } finally {
+      await pool.query(`DROP TABLE IF EXISTS "${pgMembersTable}"`);
+      await pool.end();
+      await adapter.disconnect();
+    }
+  });
+});
+
 describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35-2)', () => {
   it('a real SERIALIZABLE conflict reaches the caller as SerializationConflictError', {
-    ignore: skipLivePg,
+    skip: skipLivePg,
   }, async () => {
     const pool = new Pool({ connectionString: livePgUrl!, max: 5 });
     const db = nodePostgresDrizzle(pool);
@@ -892,7 +991,7 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
     }
   });
 
-  it('an exhausted pool answers DatabaseUnavailableError', { ignore: skipLivePg }, async () => {
+  it('an exhausted pool answers DatabaseUnavailableError', { skip: skipLivePg }, async () => {
     // X35-2: the application owns the pool, so the case is produced by a
     // bounded `connectionTimeoutMillis` exhausted by a held connection — the
     // exact shape a saturated deployment presents.
@@ -927,6 +1026,94 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
       holder.release();
       await pool.end();
       await adapter?.disconnect();
+    }
+  });
+
+  /**
+   * Boots a plugin app over a 3-connection pool and, when `serveFirst` is
+   * set, completes one repository read through it; then holds every
+   * connection and queues a caller behind them.
+   */
+  async function saturatedPoolApp(serveFirst: boolean) {
+    const pool = new Pool({ connectionString: livePgUrl!, max: 3 });
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'drizzle',
+          options: {
+            drizzleInstance: createDrizzleDatabase(
+              nodePostgresDrizzle(pool),
+              (database, work) => database.transaction(work),
+            ),
+            drizzleTables: { Account: pgAccounts },
+            poolStats: () => ({
+              total: pool.totalCount,
+              idle: pool.idleCount,
+              waiting: pool.waitingCount,
+            }),
+          },
+        }),
+        HealthPlugin(),
+      ],
+    });
+    await app.start();
+    if (serveFirst) {
+      await app.services.get<IDatabaseService>(CAPABILITIES.DATABASE).query('SELECT 1');
+    }
+    const holders = await Promise.all([pool.connect(), pool.connect(), pool.connect()]);
+    const waiter = pool.connect();
+    return {
+      app,
+      pool,
+      async read() {
+        const health = (await app.inject({ method: 'GET', url: 'http://localhost/health' }))
+          .json() as {
+            checks?: Record<string, { status: string; data?: { reachable?: unknown } }>;
+          };
+        const ready = (await app.inject({ method: 'GET', url: 'http://localhost/ready' }))
+          .statusCode;
+        return { database: health.checks?.['database'], ready };
+      },
+      async stop() {
+        for (const holder of holders) holder.release();
+        (await waiter).release();
+        await app.stop();
+        await pool.end();
+      },
+    };
+  }
+
+  it('a saturated real pool still completing queries keeps /ready at 200 (M101a V8-3)', {
+    skip: skipLivePg,
+  }, async () => {
+    // Every connection held and a caller queued behind them: the shape that
+    // used to queue the probe too, time it out at the 2 s bound and fail
+    // `/ready` on a replica that was merely busy.
+    const booted = await saturatedPoolApp(true);
+    try {
+      expect(booted.pool.waitingCount).toBeGreaterThan(0);
+      const { database, ready } = await booted.read();
+      expect(database?.status).toBe('up');
+      expect(database?.data?.reachable).toBe('unknown');
+      expect(ready).toBe(200);
+    } finally {
+      await booted.stop();
+    }
+  });
+
+  it('a full real pool that has completed no query reads degraded (M101a V8-3)', {
+    skip: skipLivePg,
+  }, async () => {
+    // The same capacity snapshot a hung database presents: nothing finishes,
+    // so the indicator must not call it saturation.
+    const booted = await saturatedPoolApp(false);
+    try {
+      const { database, ready } = await booted.read();
+      expect(database?.status).toBe('degraded');
+      expect(ready).toBe(503);
+    } finally {
+      await booted.stop();
     }
   });
 });

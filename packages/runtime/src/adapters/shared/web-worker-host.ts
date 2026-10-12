@@ -128,7 +128,15 @@ export function createWebWorkerHost(
           worker.onmessage = (event) => listener(event.data);
         },
         onError: (listener: (error: Error) => void) => {
-          worker.onerror = (event) => listener(normalizeErrorEvent(event));
+          worker.onerror = (event) => {
+            // A worker error the host does not cancel propagates to the
+            // parent: on Deno a task module that throws at import surfaced as
+            // `Uncaught (in promise) Error: Unhandled error in child worker`
+            // and killed the host process (measured). The listener is the
+            // handler, so the event is reported here and nowhere else.
+            (event as { preventDefault?: () => void } | null)?.preventDefault?.();
+            listener(normalizeErrorEvent(event));
+          };
         },
         // Present only when this runtime names an event that actually fires
         // (`exactOptionalPropertyTypes` — the key is omitted, not undefined).

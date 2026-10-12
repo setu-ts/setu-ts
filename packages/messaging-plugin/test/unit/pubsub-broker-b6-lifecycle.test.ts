@@ -13,8 +13,7 @@
  *   D. Pub/Sub ownership — transport open does NOT independently create
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import type { IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';

@@ -1,3 +1,4 @@
+import { denoBinary, run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Unit tests for the M98m storage operation observations: the option
  * validation, the bounded collector (states, expiry boundaries, stale
@@ -6,8 +7,7 @@
  * fallback double-count, rejection identity, unhandled-rejection behavior),
  * and the plugin registration and cleanup.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { IStorageDiagnosticsSource, StorageDiagnosticsSnapshot } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -161,7 +161,7 @@ describe('storage diagnostics — option validation', () => {
     ],
     [
       'a control-character alias',
-      () => ({ enabled: true, alias: 'a\u001bb' }),
+      () => ({ enabled: true, alias: 'a\u202eb' }),
       RangeError,
       STORAGE_DIAGNOSTICS_ERRORS.aliasControl,
     ],
@@ -720,11 +720,11 @@ describe('storage diagnostics — service seam', () => {
       void service.get('x');
     `;
     for (const arg of ['observed', 'unobserved']) {
-      const output = await new Deno.Command(Deno.execPath(), {
+      const output = await runProcess(denoBinary(), {
         args: ['run', '--quiet', '--no-lock', '--eval', code, arg],
         stdout: 'null',
         stderr: 'null',
-      }).output();
+      });
       // An unhandled rejection terminates the process with a non-zero code.
       expect(output.code, `arg=${arg}`).not.toBe(0);
     }

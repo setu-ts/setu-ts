@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { generateCommandHandler } from '../../src/schematics/command-handler.ts';
 import { generateEventHandler } from '../../src/schematics/event-handler.ts';

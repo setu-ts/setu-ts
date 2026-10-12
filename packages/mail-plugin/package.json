@@ -1,0 +1,64 @@
+{
+  "name": "@setu-ts/mail-plugin",
+  "version": "0.9.0",
+  "description": "Email over log, SMTP, SES, or SendGrid, with a zero-dependency template engine",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/mail-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/mail-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-sesv2": "^3",
+    "nodemailer": "^10"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-sesv2": {
+      "optional": true
+    },
+    "nodemailer": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-sesv2": "^3",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/view-plugin": "workspace:^",
+    "@types/node": "^24",
+    "hono": "^4.12.30",
+    "nodemailer": "^10",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

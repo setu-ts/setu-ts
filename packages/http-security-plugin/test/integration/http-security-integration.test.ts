@@ -5,8 +5,7 @@
  * and request context, proving short-circuit behavior and cross-concern
  * observable side effects through the public surface.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 
 import type {

@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
+import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runAdoptCommand } from '../../src/commands/adopt.ts';
@@ -235,6 +235,117 @@ describe('runAdoptCommand', () => {
     expect(h.out.text()).toContain('would create /work/svc/setu.workspace.json');
   });
 
+  it('returns 130 without moving anything when already interrupted', async () => {
+    const fs = createFakeFs(PROJECT);
+    const controller = new AbortController();
+    controller.abort();
+    const err = createRecorder();
+    expect(
+      await runAdoptCommand(parseArgs([]), {
+        fs,
+        cwd: '/work/svc',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+      }),
+    ).toBe(130);
+    expect(fs.read('/work/svc/main.ts')).toContain('createApp');
+    expect(fs.has('/work/svc/apps/svc/main.ts')).toBe(false);
+    expect(err.text()).toContain('Interrupted;');
+  });
+
+  // A pre-0.9 project pins the framework from JSR (Deno) or through the JSR npm
+  // alias (npm); the workspace root maps neither any more, so adoption moves
+  // the member's pins onto the npm names and says which it moved.
+  it('moves a Deno project off JSR pins as it adopts it', async () => {
+    const h = harness({
+      ...PROJECT,
+      '/work/svc/deno.json': JSON.stringify({
+        tasks: { start: 'deno run main.ts' },
+        imports: { '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^0.8.0' },
+      }),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/svc/apps/svc/deno.json')) as {
+      imports: Record<string, string>;
+    };
+    expect(manifest.imports['@setu-ts/kernel']).toMatch(/^npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain(
+      `moved @setu-ts/kernel from jsr:@setu-ts/kernel@^0.8.0 to ${
+        manifest.imports['@setu-ts/kernel']
+      }`,
+    );
+  });
+
+  // A Deno manifest may carry JSONC comments and trailing commas; `JSON.parse`
+  // used to skip such a file silently, leaving its JSR pins unmapped. Its pins
+  // move and its comments survive, because the rewrite edits values in place.
+  it('moves a commented deno.json off JSR pins and keeps its comments', async () => {
+    const h = harness({
+      ...PROJECT,
+      '/work/svc/deno.json': [
+        '{',
+        '  // framework pins',
+        '  "imports": { "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0", },',
+        '}',
+        '',
+      ].join('\n'),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = h.fs.read('/work/svc/apps/svc/deno.json');
+    expect(manifest).toContain('// framework pins');
+    expect(manifest).toMatch(/"@setu-ts\/kernel": "npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain('moved @setu-ts/kernel from jsr:@setu-ts/kernel@^0.8.0');
+  });
+
+  // A `deno.jsonc` project: the manifest moves with the member (it used to stay
+  // at the root, beside the workspace's new `deno.json`), its pins move onto npm,
+  // and its comments survive.
+  it('moves a deno.jsonc manifest into the member and rewrites its pins', async () => {
+    const { ['/work/svc/deno.json']: _dropped, ...withoutJson } = PROJECT;
+    const h = harness({
+      ...withoutJson,
+      '/work/svc/deno.jsonc': [
+        '{',
+        '  // framework pins',
+        '  "imports": { "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0", },',
+        '}',
+        '',
+      ].join('\n'),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const member = h.fs.read('/work/svc/apps/svc/deno.jsonc');
+    expect(member).toContain('// framework pins');
+    expect(member).toMatch(/"@setu-ts\/kernel": "npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain('moved deno.jsonc -> apps/svc/deno.jsonc');
+    // The root holds the workspace manifest alone.
+    expect(h.fs.has('/work/svc/deno.jsonc')).toBe(false);
+    expect(JSON.parse(h.fs.read('/work/svc/deno.json'))).toHaveProperty('workspace');
+  });
+
+  it('reports a manifest it cannot read rather than skipping it silently', async () => {
+    const h = harness({ ...PROJECT, '/work/svc/deno.json': '{ "imports": { ' });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    expect(h.err.text()).toContain('to move its framework pins onto npm');
+    expect(h.err.text()).toContain('by hand');
+  });
+
+  it('moves an npm project off the JSR alias as it adopts it', async () => {
+    const h = harness({
+      ...NODE_PROJECT,
+      '/work/svc/package.json': JSON.stringify({
+        scripts: { start: 'tsx main.ts' },
+        dependencies: { '@setu-ts/kernel': 'npm:@jsr/setu-ts__kernel@^0.8.0' },
+      }),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/svc/apps/svc/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.dependencies['@setu-ts/kernel']).toMatch(/^\^\d/);
+    expect(h.out.text()).toContain('moved @setu-ts/kernel from npm:@jsr/setu-ts__kernel@^0.8.0');
+  });
+
   it('moves the project under apps/ and writes the workspace above it', async () => {
     const h = harness();
     expect(await h.run(['--port', '4000'])).toBe(0);
@@ -253,6 +364,77 @@ describe('runAdoptCommand', () => {
     expect(h.fs.read(`/work/svc/apps/svc/${DISCOVERY_MODULE}`)).toContain(
       'export const SERVICE_PORT = 4000;',
     );
+  });
+
+  it('adopts through prototype filesystem methods with their original receiver', async () => {
+    class PrototypeFs implements IFileSystem {
+      constructor(private readonly backing: IFileSystem) {}
+      readFile(path: string) {
+        return this.backing.readFile(path);
+      }
+      writeFile(path: string, data: Uint8Array) {
+        return this.backing.writeFile(path, data);
+      }
+      stat(path: string) {
+        return this.backing.stat(path);
+      }
+      readdir(path: string) {
+        return this.backing.readdir(path);
+      }
+      realPath(path: string) {
+        return this.backing.realPath!(path);
+      }
+      mkdir(path: string, options?: { readonly recursive?: boolean }) {
+        return this.backing.mkdir(path, options);
+      }
+      rm(path: string, options?: { readonly recursive?: boolean }) {
+        return this.backing.rm(path, options);
+      }
+    }
+    const backing = createFakeFs(PROJECT);
+    const err = createRecorder();
+    expect(
+      await runAdoptCommand(parseArgs([]), {
+        fs: new PrototypeFs(backing),
+        cwd: '/work/svc',
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(0);
+    expect(err.text()).toBe('');
+    expect(backing.read('/work/svc/apps/svc/setu.config.ts')).toContain('createApp');
+    expect(backing.read('/work/svc/apps/svc/main.ts')).toContain('port: SERVICE_PORT');
+    expect(backing.has('/work/svc/main.ts')).toBe(false);
+  });
+
+  it('returns 130 and names incomplete recovery after nested batch rollback fails', async () => {
+    const backing = createFakeFs(PROJECT);
+    const controller = new AbortController();
+    const err = createRecorder();
+    const fs: IFileSystem = {
+      ...backing,
+      async writeFile(path, data) {
+        if (controller.signal.aborted && path === '/work/svc/setu.config.ts') {
+          throw new Error('restore denied');
+        }
+        await backing.writeFile(path, data);
+        if (path === `/work/svc/${WORKSPACE_MANIFEST}`) controller.abort();
+      },
+    };
+    expect(
+      await runAdoptCommand(parseArgs([]), {
+        fs,
+        cwd: '/work/svc',
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+      }),
+    ).toBe(130);
+    expect(err.text()).toContain('Interrupted; rollback was incomplete:');
+    expect(err.text()).toContain('/work/svc/setu.config.ts: restore denied');
+    expect(err.text()).not.toContain('files this run wrote were removed');
+    expect(backing.read('/work/svc/main.ts')).toBe(PROJECT['/work/svc/main.ts']);
+    expect(backing.has('/work/svc/setu.config.ts')).toBe(false);
   });
 
   // Without this the converted member binds 3000 while every sibling's map names
@@ -489,4 +671,98 @@ describe('runAdoptCommand', () => {
     expect(code).toBe(1);
     expect(err.text()).toContain('read-only volume');
   });
+});
+
+it('reports scalar failures while planning top-level and nested adoption paths', async () => {
+  for (const nested of [false, true]) {
+    const fs = createFakeFs(PROJECT);
+    if (nested) fs.readdir = () => Promise.reject('cannot enumerate');
+    else fs.realPath = () => Promise.reject('path unavailable');
+    const result = await planAdoption(fs, '/work/svc', 'apps/svc');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain(nested ? 'cannot enumerate' : 'path unavailable');
+    }
+  }
+});
+
+it('prunes only directories and preserves ordinary top-level files', async () => {
+  const fs = createFakeFs({ '/root/config.ts': 'keep' });
+  expect(await pruneAdoptedDirectories(fs, '/root', ['config.ts', 'absent'])).toEqual([]);
+  expect(fs.read('/root/config.ts')).toBe('keep');
+});
+
+it('reports scalar move failures without deleting the original', async () => {
+  const fs = createFakeFs({ '/work/file': 'original' });
+  fs.writeFile = () => Promise.reject('write refused');
+  const result = await moveFile(fs, '/work', { from: 'file', to: 'apps/file' });
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.message).toContain('write refused');
+  expect(fs.has('/work/file')).toBe(true);
+});
+
+it('reports write and entry-read failures without throwing scalar errors', async () => {
+  for (const stage of ['workspace-write', 'entry-read', 'entry-write']) {
+    const h = harness();
+    const read = h.fs.readFile.bind(h.fs);
+    const write = h.fs.writeFile.bind(h.fs);
+    let entryReads = 0;
+    let entryWrites = 0;
+    h.fs.readFile = (path) => {
+      if (path === '/work/svc/apps/svc/main.ts' && ++entryReads === 2 && stage === 'entry-read') {
+        return Promise.reject('read refused');
+      }
+      return read(path);
+    };
+    h.fs.writeFile = (path, bytes) => {
+      if (stage === 'workspace-write' && path === '/work/svc/setu.workspace.json') {
+        return Promise.reject('write refused');
+      }
+      if (path === '/work/svc/apps/svc/main.ts' && ++entryWrites === 2 && stage === 'entry-write') {
+        return Promise.reject('rewrite refused');
+      }
+      return write(path, bytes);
+    };
+    expect(await h.run(['adopt'])).toBe(1);
+    expect(h.err.text()).toContain('refused');
+  }
+});
+
+it('reports a scalar failure from the application log and refuses an unnamed root project', async () => {
+  const h = harness();
+  expect(
+    await runAdoptCommand(parseArgs(['adopt']), {
+      fs: h.fs,
+      cwd: '/work/svc',
+      log: () => {
+        throw 'log refused';
+      },
+      error: h.err.sink,
+    }),
+  ).toBe(1);
+  expect(h.err.text()).toContain('Failed to adopt: log refused');
+  expect(
+    await runAdoptCommand(parseArgs(['adopt']), {
+      fs: createFakeFs(),
+      cwd: '/',
+      log: () => {},
+      error: h.err.sink,
+    }),
+  ).toBe(2);
+});
+
+it('moves a root-directory file without trying to create an empty parent path', async () => {
+  const fs = createFakeFs({ '/file': 'kept' });
+  expect(await moveFile(fs, '/', { from: 'file', to: 'a' })).toEqual({ ok: true });
+  expect(fs.read('/a')).toBe('kept');
+  expect(fs.has('/file')).toBe(false);
+  expect(fs.mkdirs).not.toContain('');
+});
+
+it('reports an Error while resolving an adoption path', async () => {
+  const fs = createFakeFs(PROJECT);
+  fs.realPath = () => Promise.reject(new Error('path unavailable'));
+  const result = await planAdoption(fs, '/work/svc', 'apps/svc');
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.message).toContain('path unavailable');
 });

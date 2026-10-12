@@ -4,8 +4,7 @@
  * Covers each sanitization rule individually, combined order-of-operations,
  * and the factory pattern (createSanitizer + sanitize).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createSanitizer, sanitize } from '../../src/sanitizers/sanitizer.ts';
 
 /**

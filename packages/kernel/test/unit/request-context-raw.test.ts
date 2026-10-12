@@ -3,8 +3,7 @@
  * `IRequestContext.raw` (M70a).
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRequest } from '@setu-ts/common';
 import { createRequestContext } from '../../src/context/request-context.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

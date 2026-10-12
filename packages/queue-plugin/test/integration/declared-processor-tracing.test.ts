@@ -12,8 +12,7 @@
  * plugin wires its own registration sites; a test that constructs `TracedQueue`
  * directly cannot see it.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IJob, IPlugin, IQueue, ISpan, ITelemetryService, SpanOptions } from '@setu-ts/common';

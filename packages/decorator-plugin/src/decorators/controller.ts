@@ -4,6 +4,8 @@
  *
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import { classDecorator } from '../metadata/context-bridge.ts';
 import type { SetuClassDecorator } from '../metadata/context-bridge.ts';
 

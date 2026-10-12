@@ -4,8 +4,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { DI_WIRING } from '../../../src/templates/di.ts';
 import { CLASS_BASED_PLUGINS } from '../../../src/templates/class-based.ts';
@@ -16,10 +15,9 @@ describe('DI_WIRING', () => {
     expect(DI_WIRING.symbol).toBe('DiPlugin');
   });
 
-  it('emits autoRegister: true, because the default disables the container', () => {
-    // `autoRegister` defaults to `false`, and both the external resolver and the
-    // registry fallback are gated on it — a bare `DiPlugin()` makes every
-    // `@Inject(CAPABILITIES.X)` throw at startup. E3.
+  it('states autoRegister: true explicitly', () => {
+    // Both the external resolver and the registry fallback are gated on it;
+    // without it every `@Inject(CAPABILITIES.X)` throws at startup. E3.
     expect(DI_WIRING.args).toBe('{ autoRegister: true }');
   });
 });

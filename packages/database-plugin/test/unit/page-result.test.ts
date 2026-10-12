@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { normalizePageQuery, PageNormalizationError } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 

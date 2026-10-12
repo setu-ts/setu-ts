@@ -6,11 +6,19 @@
 
 import type {
   IAuthorizationDiagnosticsSource,
+  IAuthorizationPolicyService,
   IPlugin,
   IPluginContext,
   IRuntimeServices,
+  PolicyDefinition,
 } from '@setu-ts/common';
-import { CAPABILITIES, createPathMatcher, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createPathMatcher,
+  PLUGIN_PRIORITY,
+  resolveProbeTiming,
+  SCOPED_RBAC_POLICY,
+} from '@setu-ts/common';
 import type { IAuthStrategy, IPrincipal, ISessionService } from '@setu-ts/common';
 import type { AuthPluginOptions } from '../interfaces/index.ts';
 import { JwtService } from '../services/jwt-service.ts';
@@ -43,9 +51,17 @@ import type { CompiledPasskeys } from '../passkeys/ceremonies.ts';
 import { PasskeyCeremonies } from '../passkeys/ceremonies.ts';
 import { registerPasskeyRoutes } from '../passkeys/routes.ts';
 import { loadSaml } from '../saml/loader.ts';
+import { validatePolicyDefinition } from '../policies/define-policy.ts';
+import { PolicyService } from '../policies/policy-service.ts';
+import { scanPolicyGuards } from '../policies/startup-scan.ts';
 import { registerSamlRoutes } from '../saml/routes.ts';
+import { compileScopedRbac } from '../scoped/options.ts';
+import type { CompiledScopedRbac } from '../scoped/options.ts';
+import { createScopedRbac } from '../scoped/scoped-policy.ts';
+import type { ScopedRbac } from '../scoped/scoped-policy.ts';
+import { GrantResolutionError } from '../scoped/errors.ts';
 import type { LoadedSamlProvider } from '../saml/routes.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 const AUTH_MIDDLEWARE_PRIORITY = 300;
 
@@ -56,6 +72,8 @@ const AUTH_MIDDLEWARE_PRIORITY = 300;
  * - IJwtService under CAPABILITIES.JWT when `jwt` is configured
  * - IAuthService under CAPABILITIES.AUTH
  * - IAuthorizationService under CAPABILITIES.AUTHORIZATION when `rbac` is configured
+ * - IAuthorizationPolicyService under CAPABILITIES.AUTHORIZATION_POLICIES, always
+ *   (holding the `policies` option's definitions; sealed once the app starts)
  *
  * @param options - Plugin configuration options
  * @returns A configured IPlugin instance
@@ -116,6 +134,15 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     compiledSignIn === null || compiledSignIn.passkeys === null
       ? null
       : compilePasskeys(compiledSignIn.passkeys);
+  // Authorization policies (M110a): validated HERE, at construction, like
+  // every other option, so a malformed policy or a duplicate name refuses
+  // before any application exists.
+  const policies = compilePolicies(options.policies);
+  // Scoped RBAC (M110b): validated here too. Needs `rbac` (its catalogue) and,
+  // for 'sign-in' timing, `signIn`.
+  const compiledScoped: CompiledScopedRbac | null = options.scopedRbac === undefined
+    ? null
+    : compileScopedRbac(options.scopedRbac, options.rbac, compiledSignIn !== null);
   if (options.http !== undefined && compiledIssuers.length === 0 && compiledSignIn === null) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: http is only read for issuers and signIn; configure one or drop http',
@@ -124,12 +151,15 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
 
   return {
     name: 'auth-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [
       ...(options.jwt === undefined ? [] : [CAPABILITIES.JWT]),
       CAPABILITIES.AUTH,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
       ...(options.rbac === undefined ? [] : [CAPABILITIES.AUTHORIZATION]),
+      // M110a: always provided, independent of rbac — DecoratorPlugin's
+      // class-form policies need a registry even when `policies` is absent.
+      CAPABILITIES.AUTHORIZATION_POLICIES,
       // M100c: one owner of "who is signed in", resolved by applications'
       // password logins and by every later federation milestone.
       ...(compiledSignIn === null ? [] : [CAPABILITIES.AUTH_SESSION]),
@@ -143,6 +173,11 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     register(ctx: IPluginContext): void | Promise<void> {
       // Resolve runtime
       const runtime = ctx.services.get<IRuntimeServices>('runtime');
+      // Scoped RBAC (M110b): built before the sign-in block, which reads it
+      // for 'sign-in' timing. The logger is read at call time.
+      const scoped: ScopedRbac | null = compiledScoped === null
+        ? null
+        : createScopedRbac(compiledScoped, resolveProbeTiming(runtime), () => ctx.logger);
 
       // The outbound seam is shared by the issuer key-set caches (M100b) and the
       // sign-in routes (M100c): one place to configure it, one place to fake it.
@@ -321,6 +356,20 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         const authSessionService = new AuthSessionService({
           sessionService,
           now: () => runtime.now(),
+          ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in' ? {} : {
+            scopedGrants: {
+              resolveAll: async (principal) => {
+                const outcome = await scoped.resolver.resolveFromSources(principal, {
+                  kind: 'all',
+                });
+                if (!outcome.ok) {
+                  scoped.evaluator.report(outcome);
+                  throw new GrantResolutionError(outcome.reason, outcome.source);
+                }
+                return outcome.grants;
+              },
+            },
+          }),
           ...(mfa === null ? {} : {
             // The configured TTL passes through untouched; `AuthSessionService`
             // owns the default and is the only reader of the value, so the
@@ -332,6 +381,9 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           }),
         });
         ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
+        scoped?.resolver.useStoredGrants((request, principal) =>
+          authSessionService.storedGrants(request, principal)
+        );
 
         strategies.push(
           new AuthSessionStrategy({
@@ -475,6 +527,33 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       if (rbacService !== null) {
         ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
       }
+      // Authorization policies (M110a). The logger is read at CALL time, so a
+      // logger registered after this plugin still receives a throwing
+      // policy's report.
+      const policyService = new PolicyService(() => ctx.logger);
+      for (const policy of policies) {
+        policyService.define(policy);
+      }
+      if (scoped !== null) {
+        policyService.define(scoped.policy);
+        // Factory sources resolve once every plugin has registered — the
+        // first phase at which the registry holds every capability (M101c).
+        ctx.lifecycle.onInit(() => {
+          scoped.resolver.bind(ctx.services);
+        });
+      }
+      ctx.services.register(CAPABILITIES.AUTHORIZATION_POLICIES, policyService);
+      // After every plugin has registered its routes and before the server
+      // listens: a guard naming an unregistered policy fails start(), and the
+      // policy set is then fixed for the life of the application.
+      ctx.lifecycle.onBootstrap(() => {
+        scanPolicyGuards(
+          ctx.router.listRoutes(),
+          ctx.services.get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES),
+        );
+        policyService.seal();
+      });
+
       let authorizationSource: IAuthorizationDiagnosticsSource;
       if (authorizationPolicy === null) {
         authorizationSource = createDisabledAuthorizationSource();
@@ -516,4 +595,38 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       return loadSamlRoutes === null ? undefined : loadSamlRoutes();
     },
   };
+}
+
+/**
+ * Validates the `policies` option: each definition, and that no two share a
+ * name. Returns the validated, frozen copies.
+ */
+function compilePolicies(
+  policies: AuthPluginOptions['policies'],
+): readonly PolicyDefinition[] {
+  if (policies === undefined) {
+    return [];
+  }
+  if (!Array.isArray(policies)) {
+    throw new AuthPluginConfigurationError('auth-plugin: policies must be an array');
+  }
+  const names = new Set<string>();
+  return policies.map((policy) => {
+    const validated = validatePolicyDefinition(policy);
+    // Reserved whether or not `scopedRbac` is set, so enabling it later can
+    // never silently shadow an application policy (M110b plan §3.2).
+    if (validated.name === SCOPED_RBAC_POLICY) {
+      throw new AuthPluginConfigurationError(
+        `auth-plugin: the policy name ${JSON.stringify(SCOPED_RBAC_POLICY)} is reserved for ` +
+          'scoped RBAC — configure AuthPlugin({ scopedRbac }) instead',
+      );
+    }
+    if (names.has(validated.name)) {
+      throw new AuthPluginConfigurationError(
+        `auth-plugin: two authorization policies are named ${JSON.stringify(validated.name)}`,
+      );
+    }
+    names.add(validated.name);
+    return validated;
+  });
 }

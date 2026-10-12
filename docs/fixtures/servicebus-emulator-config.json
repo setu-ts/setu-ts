@@ -64,6 +64,38 @@
                 }
               }
             ]
+          },
+          {
+            "Name": "orders-dedup",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "RequiresDuplicateDetection": true,
+              "DuplicateDetectionHistoryTimeWindow": "PT1M"
+            },
+            "Subscriptions": [
+              {
+                "Name": "consumers",
+                "Properties": {
+                  "LockDuration": "PT10S",
+                  "MaxDeliveryCount": 10
+                }
+              }
+            ]
+          },
+          {
+            "Name": "orders-ordering",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H"
+            },
+            "Subscriptions": [
+              {
+                "Name": "consumers",
+                "Properties": {
+                  "LockDuration": "PT10S",
+                  "MaxDeliveryCount": 10
+                }
+              }
+            ]
           }
         ]
       }

@@ -6,9 +6,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { html } from '@hono/hono/html';
+import { describe, expect, it } from 'vitest';
+import { html } from 'hono/html';
 
 import type { Component } from '@setu-ts/common';
 import { ViewEngine } from '../../src/engines/view-engine.ts';

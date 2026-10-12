@@ -1,8 +1,7 @@
 /**
  * SubdomainResolver tests.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { assertSome } from '../fixtures/option.ts';
 import {
   extractSubdomainTenant,

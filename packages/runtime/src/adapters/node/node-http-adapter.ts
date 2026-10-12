@@ -3,8 +3,9 @@
  * `@hono/node-server` (Hono's platform serve layer).
  *
  * Uses an injectable {@linkcode NodeServeHost} interface that exposes
- * `serve({ fetch, port, hostname })` defaulting to a lazy `npm:` import of
- * `@hono/node-server@^2.0.0`. This allows unit testing without a real Node
+ * `serve({ fetch, port, hostname })` defaulting to a lazy import of
+ * `@hono/node-server` (a regular dependency of this package, so a bare install
+ * can serve on Node). This allows unit testing without a real Node
  * server. `serve()` is called with node-server's own defaults, which install
  * its lightweight `Request`/`Response` as globals — see the note on
  * `defaultNodeServeHost`.
@@ -16,6 +17,7 @@ import type {
   IHttpAdapter,
   IRequest,
   IResponse,
+  ResponseSnapshot,
   RpcFetchHandler,
   ServerHandle,
   WebSocketUpgradeIntent,
@@ -42,6 +44,43 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
+ * The writable half of a Node exchange, as far as this adapter touches it:
+ * `@hono/node-server` writes every response's status and headers through one
+ * `writeHead(status, headers)` call.
+ */
+export interface NodeOutgoing {
+  /**
+   * Writes the status line and headers. Typed loosely so Node's own
+   * `(status, statusMessage?, headers?)` overloads satisfy it.
+   *
+   * @param status - The response status
+   * @param rest - An optional status message and the header record
+   * @returns Whatever the underlying response returns
+   */
+  writeHead(status: number, ...rest: unknown[]): unknown;
+}
+
+/**
+ * The second argument `@hono/node-server` passes to a fetch callback.
+ */
+export interface NodeFetchEnv {
+  /** The Node response the reply is written to. */
+  readonly outgoing?: NodeOutgoing;
+}
+
+/**
+ * The fetch callback handed to {@linkcode NodeServeHost.serve}.
+ *
+ * @param request - The web request
+ * @param env - node-server's per-request environment, when served by it
+ * @returns The web response
+ */
+export type NodeFetchCallback = (
+  request: Request,
+  env?: NodeFetchEnv,
+) => Response | Promise<Response>;
+
+/**
  * Minimal interface covering the `@hono/node-server` `serve()` operation.
  * Inject this interface to test the adapter without a real Node server.
  */
@@ -53,7 +92,12 @@ export interface NodeServeHost {
    * @returns A promise resolving to a Node.js HTTP server handle
    */
   serve(options: {
-    fetch: (request: Request) => Response | Promise<Response>;
+    // Spelled out rather than naming the internal NodeFetchCallback, so this
+    // published interface references no type the barrel does not export.
+    fetch: (
+      request: Request,
+      env?: { readonly outgoing?: { writeHead(status: number, ...rest: unknown[]): unknown } },
+    ) => Response | Promise<Response>;
     port: number;
     hostname?: string;
     overrideGlobalObjects?: boolean;
@@ -83,7 +127,7 @@ export interface NodeServer {
 const defaultNodeServeHost: NodeServeHost = {
   serve: async (options) => {
     // Lazy import — only loads when listen() is actually called
-    const mod = await import('npm:@hono/node-server@^2.0.0');
+    const mod = await import('@hono/node-server');
     // node-server's own `Request`/`Response` are installed as globals, which
     // is its default and what every Hono-on-Node deployment already runs.
     //
@@ -101,6 +145,67 @@ const defaultNodeServeHost: NodeServeHost = {
     return mod.serve({ ...options });
   },
 };
+
+// ---------------------------------------------------------------------------
+// Content-type parity
+// ---------------------------------------------------------------------------
+
+/**
+ * Reports whether a web `Response` built from this snapshot would carry no
+ * `content-type`.
+ *
+ * The Fetch standard gives only a string body an implied type
+ * (`text/plain;charset=UTF-8`); byte and stream bodies get none, and Deno,
+ * Bun and Workers send none. `@hono/node-server` instead writes
+ * `text/plain; charset=UTF-8` for every body that lacks one, so a streamed or
+ * byte response would reach a Node client labelled as text.
+ *
+ * @param snapshot - The framework response snapshot
+ * @returns True when the body is bytes or a stream and no header names a type
+ * @internal - Not exported from package index
+ */
+export function lacksNativeContentType(snapshot: ResponseSnapshot): boolean {
+  if (snapshot.body === null || typeof snapshot.body === 'string') {
+    return false;
+  }
+  const init = snapshot.responseInit?.headers;
+  if (init === undefined) {
+    return !snapshot.headers.has('content-type');
+  }
+  if (init instanceof Headers) {
+    return !init.has('content-type');
+  }
+  const names = Array.isArray(init) ? init.map(([name]) => name) : Object.keys(init);
+  return !names.some((name) => name.toLowerCase() === 'content-type');
+}
+
+/**
+ * Removes the `content-type` node-server is about to add to one response.
+ *
+ * Wraps `writeHead` on this exchange only, for one call: node-server writes
+ * the head exactly once per response, after it has built the header record
+ * with its default type in it.
+ *
+ * @param outgoing - The Node response for this exchange
+ * @internal - Not exported from package index
+ */
+export function suppressDefaultContentType(outgoing: NodeOutgoing): void {
+  const writeHead = outgoing.writeHead;
+  outgoing.writeHead = function (status, ...rest) {
+    outgoing.writeHead = writeHead;
+    for (const arg of rest) {
+      if (typeof arg === 'object' && arg !== null && !Array.isArray(arg)) {
+        const headers = arg as Record<string, unknown>;
+        for (const name of Object.keys(headers)) {
+          if (name.toLowerCase() === 'content-type') {
+            delete headers[name];
+          }
+        }
+      }
+    }
+    return writeHead.call(this, status, ...rest);
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Handle
@@ -264,8 +369,8 @@ export class NodeHttpServerHandle {
    * raw `upgrade` event (not the fetch path), but the upgrade listener also
    * runs the framework handler first before handshaking.
    */
-  createFetchHandler(): (request: Request) => Response | Promise<Response> {
-    return (request: Request): Response | Promise<Response> => {
+  createFetchHandler(): NodeFetchCallback {
+    return (request: Request, env?: NodeFetchEnv): Response | Promise<Response> => {
       const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
 
       if (!this.#handler) {
@@ -282,10 +387,10 @@ export class NodeHttpServerHandle {
       const frameworkResponse = this.#handler(frameworkRequest);
       if (isPromiseLike(frameworkResponse)) {
         return Promise.resolve(frameworkResponse).then((resolved) =>
-          this.#finishFetch(request, frameworkRequest, resolved)
+          this.#finishFetch(request, frameworkRequest, resolved, env)
         );
       }
-      return this.#finishFetch(request, frameworkRequest, frameworkResponse);
+      return this.#finishFetch(request, frameworkRequest, frameworkResponse, env);
     };
   }
 
@@ -296,12 +401,14 @@ export class NodeHttpServerHandle {
    * @param request - The original web request
    * @param frameworkRequest - The normalized request, carrying any upgrade intent
    * @param frameworkResponse - The framework response to serialize
+   * @param env - node-server's per-request environment, when served by it
    * @returns The web response, or a promise of it when an upgrade is performed
    */
   #finishFetch(
     request: Request,
     frameworkRequest: IRequest,
     frameworkResponse: IResponse,
+    env: NodeFetchEnv | undefined,
   ): Response | Promise<Response> {
     // Check for upgrade intent (for the rare case an upgrade reaches fetch).
     const intent = upgradeIntentOf(frameworkRequest);
@@ -309,7 +416,11 @@ export class NodeHttpServerHandle {
       return this.#performUpgrade(request, intent);
     }
 
-    return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+    const snapshot = frameworkResponse.snapshot();
+    if (env?.outgoing !== undefined && lacksNativeContentType(snapshot)) {
+      suppressDefaultContentType(env.outgoing);
+    }
+    return mapSnapshotToWebResponse(snapshot);
   }
 
   /**
@@ -342,7 +453,7 @@ export function isNodeHttpServerHandle(handle: ServerHandle): handle is NodeHttp
  * Node HTTP adapter implementation.
  *
  * @param host - Injected Node serve host (defaults to lazy @hono/node-server)
- * @param wsModule - Injected `ws` module (defaults to a lazy `npm:ws` import)
+ * @param wsModule - Injected `ws` module (defaults to a lazy `ws` import)
  * @param options - Adapter options; `maxBodyBytes` bounds the body read
  */
 export class NodeHttpAdapter implements IHttpAdapter {

@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
 import { createRedactionService } from '@setu-ts/common';
@@ -154,7 +153,7 @@ describe('PinoLogger', () => {
     // Guard: only run when pino is NOT installed (the error path).
     try {
       // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      await import('npm:pino@10.x');
+      await import('pino');
       return; // pino IS installed — skip this test
     } catch {
       // pino not available — the error path should be exercised.
@@ -248,7 +247,7 @@ describe('PinoLogger', () => {
     // Guard: skip if pino is not installed in this environment.
     try {
       // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
-      await import('npm:pino@10.x');
+      await import('pino');
     } catch {
       // Pino not available — skip this test rather than failing.
       return;

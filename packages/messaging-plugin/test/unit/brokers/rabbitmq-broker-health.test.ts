@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { IAmqpConnection } from '../../../src/interfaces/index.ts';
 import { RabbitMqBroker } from '../../../src/brokers/rabbitmq-broker.ts';
@@ -68,19 +67,32 @@ interface FakeAmqp {
   channelOpens: () => number;
   /** Number of channel close() calls (the probe must close every channel it opens). */
   channelCloses: () => number;
+  /** Number of createConfirmChannel() calls on the connection. */
+  confirmChannelOpens: () => number;
+  consumerCalls: Array<readonly [string, unknown]>;
 }
 
-function makeAmqp(): FakeAmqp {
+function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
   let consumeCalls = 0;
   let openCalls = 0;
+  let confirmOpenCalls = 0;
   let closeCalls = 0;
   const listeners = new Map<string, Array<(err?: unknown) => void>>();
+  const consumerCalls: Array<readonly [string, unknown]> = [];
 
   const makeChannel = () => ({
     assertExchange: () => Promise.resolve(),
-    assertQueue: (queue: string) => Promise.resolve({ queue }),
+    assertQueue: (queue: string) => {
+      consumerCalls.push(['queue', queue]);
+      return Promise.resolve({ queue });
+    },
+    prefetch: (count: number) => {
+      consumerCalls.push(['prefetch', count]);
+      return Promise.resolve();
+    },
     bindQueue: () => Promise.resolve(),
     consume: () => {
+      consumerCalls.push(['consume', undefined]);
       consumeCalls++;
       return Promise.resolve({ consumerTag: `c-${consumeCalls}` });
     },
@@ -89,6 +101,9 @@ function makeAmqp(): FakeAmqp {
     cancel: () => Promise.resolve(),
     deleteQueue: () => Promise.resolve(),
     publish: () => true,
+    // A real amqplib channel is an EventEmitter; retrying groups require it.
+    on: () => {},
+    off: () => {},
     close: () => {
       closeCalls++;
       return Promise.resolve();
@@ -100,6 +115,14 @@ function makeAmqp(): FakeAmqp {
       openCalls++;
       return Promise.resolve(makeChannel());
     },
+    ...(opts.confirm
+      ? {
+        createConfirmChannel: () => {
+          confirmOpenCalls++;
+          return Promise.resolve(makeChannel());
+        },
+      }
+      : {}),
     close: () => Promise.resolve(),
     on: (event: string, listener: (err?: unknown) => void) => {
       const arr = listeners.get(event) ?? [];
@@ -124,11 +147,39 @@ function makeAmqp(): FakeAmqp {
     },
     consumeCount: () => consumeCalls,
     channelOpens: () => openCalls,
+    confirmChannelOpens: () => confirmOpenCalls,
     channelCloses: () => closeCalls,
+    consumerCalls,
   };
 }
 
 describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
+  it('reapplies non-default prefetch and declares recovery queues before replay consumption', async () => {
+    const clock = makeClock();
+    const { client, fire, consumerCalls } = makeAmqp({ confirm: true });
+    const broker = new RabbitMqBroker(makeRuntime(clock), new JsonSerializer(), {
+      client,
+      prefetch: 7,
+      consumerRetry: { delaysMs: [17, 53] },
+      deadLetterMaxLength: 9,
+    });
+    await broker.connect();
+    await broker.subscribe('t', () => {}, { queue: 'q' });
+    const initial = [...consumerCalls];
+    expect(initial).toEqual([
+      ['prefetch', 7],
+      ['queue', 'q'],
+      ['queue', 'q.retry.17ms'],
+      ['queue', 'q.retry.53ms'],
+      ['queue', 'q.dead'],
+      ['consume', undefined],
+    ]);
+    fire('close');
+    clock.advance(10000);
+    await flush();
+    expect(consumerCalls.slice(initial.length)).toEqual(initial);
+    await broker.disconnect();
+  });
   it('reports down (not started) before connect', async () => {
     const { client } = makeAmqp();
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
@@ -223,6 +274,29 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     // a duplicated replay, which is precisely the defect the sibling
     // error+close test exists to catch.
     expect(consumeCount()).toBe(before + 1);
+  });
+
+  it('the drive-mode reconnect reopens a CONFIRM channel, never a plain one', async () => {
+    // One channel factory serves connect() and the reconnect: a reconnect that
+    // fell back to createChannel() would silently stop confirming publishes
+    // after the first broker restart.
+    const clock = makeClock();
+    const runtime = makeRuntime(clock);
+    const { client, fire, confirmChannelOpens, channelOpens } = makeAmqp({ confirm: true });
+    const broker = new RabbitMqBroker(runtime, new JsonSerializer(), { client });
+    await broker.connect();
+    expect(confirmChannelOpens()).toBe(1);
+    const plainBefore = channelOpens();
+
+    fire('close');
+    clock.advance(10_000);
+    await flush();
+
+    expect(confirmChannelOpens()).toBe(2);
+    // The reconnect opened no plain channel. (Plain channels are opened only
+    // by the reachability probe's throwaway channel, which nothing here calls.)
+    expect(channelOpens()).toBe(plainBefore);
+    await broker.disconnect();
   });
 
   it('a failing reconnect retries rather than terminating', async () => {

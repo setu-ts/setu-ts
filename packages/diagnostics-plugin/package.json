@@ -1,0 +1,61 @@
+{
+  "name": "@setu-ts/diagnostics-plugin",
+  "version": "0.9.0",
+  "description": "Authenticated local diagnostics connector: signed loopback polling for the devtool",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/diagnostics-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/diagnostics-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/events-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/queue-plugin": "workspace:^",
+    "@setu-ts/realtime-backplane-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/sdk": "workspace:^",
+    "@setu-ts/sse-plugin": "workspace:^",
+    "@setu-ts/storage-plugin": "workspace:^",
+    "@setu-ts/telemetry-plugin": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

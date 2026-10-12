@@ -34,7 +34,7 @@ import type {
   WebSocketRouteEntry,
 } from '../interfaces/index.ts';
 import { resolveOptions, WebSocketService } from '../services/websocket-service.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /** Plugin name. */
 const PLUGIN_NAME = 'websocket-plugin';
@@ -109,7 +109,7 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
 
   return {
     name: PLUGIN_NAME,
-    version: denoJson.version,
+    version: VERSION,
     optionalDependencies: ['logger', CAPABILITIES.REALTIME_BACKPLANE],
     provides: [CAPABILITIES.WEBSOCKET],
     priority: PLUGIN_PRIORITY.NORMAL,

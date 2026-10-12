@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { httpStatusHintOf } from '@setu-ts/common';
 
 import * as api from '../../src/index.ts';
@@ -10,6 +9,7 @@ describe('secrets-plugin barrel exports', () => {
       'SecretsPlugin',
       'SecretsService',
       'ReadOnlySecretProviderError',
+      'SecretProviderUnavailableError',
       'EnvProvider',
       'AwsKmsProvider',
       'GcpSecretManagerProvider',
@@ -29,6 +29,19 @@ describe('secrets-plugin barrel exports', () => {
     expect(error.name).toBe('ReadOnlySecretProviderError');
     expect(error.provider).toBe('EnvProvider');
     expect(httpStatusHintOf(error)?.status).toBe(501);
+  });
+
+  // M101a V8-4: the outage class is public surface for the same reason.
+  it('exports SecretProviderUnavailableError, branded 503 with its cause', () => {
+    const cause = new TypeError('fetch failed');
+    const error = new api.SecretProviderUnavailableError('HashiCorpVaultProvider', cause);
+    expect(error.name).toBe('SecretProviderUnavailableError');
+    expect(error.provider).toBe('HashiCorpVaultProvider');
+    expect(error.cause).toBe(cause);
+    expect(error.message).toContain('fetch failed');
+    expect(httpStatusHintOf(error)?.status).toBe(503);
+    // A non-Error cause still renders into the log message.
+    expect(new api.SecretProviderUnavailableError('P', 'timeout').message).toContain('timeout');
   });
 
   it('SecretsPlugin produces a plugin with the secrets capability', () => {

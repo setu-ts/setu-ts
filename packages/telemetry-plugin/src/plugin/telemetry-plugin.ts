@@ -36,7 +36,7 @@ import {
   createInactiveTraceSource,
   SpanObservationCollector,
 } from '../diagnostics/span-observation-collector.ts';
-import denoJson from '../../deno.json' with { type: 'json' };
+import { VERSION } from '../version.ts';
 
 /**
  * Middleware priority for telemetry (inside metrics at 20, outside auth at 300).
@@ -207,7 +207,7 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
 
   return {
     name: 'telemetry-plugin',
-    version: denoJson.version,
+    version: VERSION,
     provides: [CAPABILITIES.TELEMETRY, CAPABILITIES.TRACE_DIAGNOSTICS],
     // Optional edge on the logger capability: the kernel resolver orders the
     // provider (e.g. LoggerPlugin) before this plugin so the outcome reporter's

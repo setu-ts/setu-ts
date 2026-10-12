@@ -361,15 +361,18 @@ export function createFakeDrizzleInstance(): {
             where(expr: unknown): { returning: () => Promise<Record<string, unknown>[]> } {
               return {
                 async returning(): Promise<Record<string, unknown>[]> {
-                  const id = extractWhereId(expr);
                   const store = getStore(tableName);
-                  if (id) {
-                    const existing = store.records.get(id);
-                    if (existing) {
-                      const updated = { ...existing, ...data };
-                      store.records.set(id, updated);
-                      return [{ ...updated }];
-                    }
+                  const conditions = conditionsFor(expr);
+                  const found = [...store.records.entries()].find(([id, row]) =>
+                    conditions.length > 0
+                      ? conditions.every(([field, value]) => row[field] === value)
+                      : id === extractWhereId(expr)
+                  );
+                  if (found !== undefined) {
+                    const [key, existing] = found;
+                    const updated = { ...existing, ...data };
+                    store.records.set(key, updated);
+                    return [{ ...updated }];
                   }
                   return [];
                 },
@@ -386,11 +389,15 @@ export function createFakeDrizzleInstance(): {
         where(expr: unknown): { returning: () => Promise<Record<string, unknown>[]> } {
           return {
             async returning(): Promise<Record<string, unknown>[]> {
-              const id = extractWhereId(expr);
-              if (!id) return [];
               const store = getStore(tableName);
-              const existing = store.records.get(id);
-              if (!existing) return [];
+              const conditions = conditionsFor(expr);
+              const found = [...store.records.entries()].find(([id, row]) =>
+                conditions.length > 0
+                  ? conditions.every(([field, value]) => row[field] === value)
+                  : id === extractWhereId(expr)
+              );
+              if (found === undefined) return [];
+              const [id, existing] = found;
               store.records.delete(id);
               return [{ ...existing }];
             },

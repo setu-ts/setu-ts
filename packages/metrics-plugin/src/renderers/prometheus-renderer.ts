@@ -12,14 +12,54 @@ import type { MetricSnapshot, MetricValue } from '../interfaces/index.ts';
  * @returns The escaped value
  */
 function escapeLabelValue(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\n')
-    .replace(/"/g, '\\"');
+  return replaceUnescapableControls(
+    value
+      .replace(/\\/g, '\\\\')
+      .replace(/\n/g, '\\n')
+      .replace(/"/g, '\\"'),
+  );
 }
 
 /**
- * Escapes `# HELP` text for Prometheus format: backslash and newline only
+ * Encodes the control characters the text format has no escape for. Format
+ * 0.0.4 defines escapes for backslash, double quote and line feed only, and a
+ * parser rejects any other backslash sequence, so a raw carriage return, NUL or
+ * other C0/DEL character in an application-supplied label value (a worker-pool
+ * `task_module` specifier, for example) can split or corrupt lines in a
+ * line-oriented consumer. Called after line feeds are escaped, so a `\n`
+ * survives as its escape.
+ *
+ * The encoding uses U+FFFD as an escape marker: a control character becomes
+ * U+FFFD followed by its two lowercase hex digits, a lone UTF-16 surrogate
+ * becomes U+FFFD, `u` and its four hex digits, and a literal U+FFFD becomes two
+ * markers. The three forms are told apart by the character after the marker (a
+ * hex digit, `u`, or the marker), so the encoding is injective and two distinct
+ * label values can never render as the same sample line, which the format
+ * requires to be unique. Lone surrogates must be encoded too, because UTF-8
+ * encoding would otherwise turn each one into a literal U+FFFD and collide with
+ * the marker. Valid surrogate pairs and text containing none of these are
+ * returned unchanged.
+ *
+ * @param text - Already-escaped text
+ * @returns The text with every remaining control character encoded
+ */
+function replaceUnescapableControls(text: string): string {
+  return text.replace(
+    // deno-lint-ignore no-control-regex
+    /[\u0000-\u001f\u007f\ufffd]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+    (char) => {
+      if (char === '\ufffd') return '\ufffd\ufffd';
+      const code = char.charCodeAt(0);
+      return code >= 0xd800
+        ? `\ufffdu${code.toString(16)}`
+        : `\ufffd${code.toString(16).padStart(2, '0')}`;
+    },
+  );
+}
+
+/**
+ * Escapes `# HELP` text for Prometheus format: backslash and newline, plus the
+ * unescapable control characters (see {@linkcode replaceUnescapableControls})
  * (double-quote is NOT escaped in HELP, unlike label values). Prevents a
  * help string containing a newline from splitting the HELP directive.
  *
@@ -27,9 +67,11 @@ function escapeLabelValue(value: string): string {
  * @returns The escaped help text
  */
 function escapeHelp(help: string): string {
-  return help
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\n');
+  return replaceUnescapableControls(
+    help
+      .replace(/\\/g, '\\\\')
+      .replace(/\n/g, '\\n'),
+  );
 }
 
 /**

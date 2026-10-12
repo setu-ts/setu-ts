@@ -24,6 +24,8 @@
  *
  * @module
  */
+import '../metadata/symbol-metadata.ts';
+
 import type { RedirectMetadata, ResponseHeaderMetadata } from '../metadata/metadata-store.ts';
 
 /** Lowest status the web `Response` constructor accepts. */

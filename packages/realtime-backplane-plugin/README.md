@@ -17,7 +17,8 @@ application code touched.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/realtime-backplane-plugin
+npm install @setu-ts/realtime-backplane-plugin
+# Deno: deno add npm:@setu-ts/realtime-backplane-plugin
 ```
 
 ## Usage
@@ -146,7 +147,7 @@ worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does
   retry budget, so the two partition cases above behave as described; lowering it below that budget
   makes a dropped connection reject sooner too.
 - **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
-  nowhere reads as a failure. It resolved without sending before 0.8.0.
+  nowhere reads as a failure. Earlier releases resolved it without sending.
 - **`close()` during an outage still releases both connections.** Each step runs even when an
   earlier one fails, a connection whose QUIT fails is force-closed through `disconnect()` (without
   it, ioredis reconnects and re-subscribes once an unreachable server returns), and the first

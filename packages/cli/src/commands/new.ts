@@ -8,6 +8,7 @@
  * @module
  */
 
+import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
@@ -25,11 +26,13 @@ import {
   DEFAULT_DEVTOOL_PORT,
   devtoolRuntimeRefusal,
   devtoolStarterRefusal,
+  standaloneDevtoolPort,
   withDevtool,
 } from '../devtool/planner.ts';
 import {
   APP_VERB,
   EXIT_ERROR,
+  EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
@@ -66,10 +69,12 @@ import {
   findExisting,
   firstDuplicatePath,
   type GeneratedFile,
+  interruptedRunRetryHint,
   joinPath,
   resolveDir,
   writeFiles,
 } from '../utils/file-writer.ts';
+import { interruptionMessage } from '../utils/interruption.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -92,9 +97,11 @@ export interface NewDependencies {
    * when it is absent — every gate in this repository reaches the CLI through
    * an in-process `runCli` that passes none — no prompt is ever attempted and
    * each absent flag takes its documented default. The terminal implementation
-   * is supplied by `src/main.ts` only behind `Deno.stdin.isTerminal()`.
+   * is supplied by `src/main.ts` only when stdin is a terminal.
    */
   readonly ask?: Prompter;
+  /** Cooperative interruption signal checked at prompts and writes. */
+  readonly interrupt?: AbortSignal;
 }
 
 /**
@@ -426,14 +433,17 @@ function applyBrokerOverlay(
  * @param args - The parsed arguments, read for `--template` and `--port`
  * @returns The planned files, or the refusal to print
  */
-function planProject(
+async function planProject(
   name: string,
   runtime: TargetRuntime,
   args: ParsedArgs,
-): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
-  readonly ok: false;
-  readonly message: string;
-} {
+  probe?: PortProbe,
+): Promise<
+  { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
+    readonly ok: false;
+    readonly message: string;
+  }
+> {
   // `--port` sets a workspace's base port and means nothing to a standalone
   // project, whose entry binds 3000. Accepting it silently would report success
   // for a project that ignores the number the user chose.
@@ -543,7 +553,14 @@ function planProject(
   }
   // Absent, the port is the documented standalone default, overridable with
   // --devtool-port and range-checked by the shared port-flag reader.
-  const devHost = withDevtool(overlaid, devtoolPortFlag.port ?? DEFAULT_DEVTOOL_PORT);
+  const devtoolPort = devtoolPortFlag.port ?? await standaloneDevtoolPort(probe);
+  if (devtoolPort === undefined) {
+    return {
+      ok: false,
+      message: 'No bindable standalone devtool port remains between 4919 and 5019.',
+    };
+  }
+  const devHost = withDevtool(overlaid, devtoolPort);
   return {
     ok: true,
     files: projectFiles(name, runtime, devHost),
@@ -586,7 +603,7 @@ export async function runNewCommand(
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
     deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
     deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
-    deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
+    deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default node)`);
     deps.log(
       `  --workspace         Create a monorepo root; add services with ` +
         `\`${PROGRAM_NAME} generate ${APP_VERB} <name>\``,
@@ -632,9 +649,14 @@ export async function runNewCommand(
   // It is a no-op when no prompter is present (nothing would be asked anyway),
   // never an error.
   const yes = args.flags['yes'] === true || args.flags['y'] === true;
-  const chosen = yes || deps.ask === undefined
-    ? args
+  const selection = yes || deps.ask === undefined
+    ? { kind: 'resolved' as const, args }
     : await resolveNewChoices(args, deps.ask, deps.log);
+  if (selection.kind === 'cancelled') {
+    deps.error('Cancelled; nothing was written.');
+    return EXIT_INTERRUPTED;
+  }
+  const chosen = selection.args;
 
   const runtimeFlag = stringFlag(chosen.flags, 'runtime');
   if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
@@ -645,7 +667,7 @@ export async function runNewCommand(
     );
     return EXIT_USAGE;
   }
-  const runtime: TargetRuntime = runtimeFlag ?? 'deno';
+  const runtime: TargetRuntime = runtimeFlag ?? 'node';
 
   const names = deriveNames(rawName);
   // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never
@@ -675,7 +697,7 @@ export async function runNewCommand(
   if (workspace) {
     plan = planWorkspace(projectName, runtime, chosen);
   } else {
-    const projectPlan = planProject(projectName, runtime, chosen);
+    const projectPlan = await planProject(projectName, runtime, chosen, deps.portAvailable);
     if (projectPlan.ok) planNotice = projectPlan.notice;
     plan = projectPlan;
   }
@@ -719,25 +741,38 @@ export async function runNewCommand(
   }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${file.path}`);
+    for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
     return EXIT_OK;
   }
 
   const existing = await findExisting(deps.fs, files);
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
-    for (const path of existing) deps.error(`  ${path}`);
+    for (const path of existing) deps.error(`  ${escapeName(path)}`);
+    const retryHint = interruptedRunRetryHint(existing, root);
+    if (retryHint !== undefined) deps.error(retryHint);
     return EXIT_ERROR;
   }
 
   try {
-    await writeFiles(deps.fs, files);
+    const formatted = await formatForTarget(files, runtime, undefined, deps.error);
+    const outcomes = await writeFiles(
+      deps.fs,
+      formatted,
+      deps.interrupt === undefined ? { root: root } : { root: root, signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
   } catch (cause) {
-    deps.error(`Failed to write: ${cause instanceof Error ? cause.message : String(cause)}`);
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    deps.error(
+      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
     return EXIT_ERROR;
   }
-
-  for (const file of files) deps.log(`created ${file.path}`);
   deps.log('');
 
   if (workspace) {

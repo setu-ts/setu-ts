@@ -9,8 +9,7 @@
  * @module
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type {
   IIngressBehavior,
   IJob,
@@ -131,6 +130,27 @@ describe('QueuePlugin behaviour chain (M86 §3.3a/§3.4)', () => {
     // The payload is THE job object the processor received — not a copy.
     expect(envelope?.payload).toBe(seen[0]);
     expect(seen[0]?.data).toBe(payload);
+  });
+
+  it('carries the dispatch consumer identity: the job name (M109a §3.19)', async () => {
+    const { ctx, services, runtime } = createHarness();
+    const envelopes: IngressContext[] = [];
+    const plugin = QueuePlugin({
+      adapter: 'memory',
+      pollIntervalMs: POLL_MS,
+      behaviors: [envelopeRecorder(envelopes)],
+    });
+    await plugin.register(ctx);
+
+    const queue = services.get<IQueue>('queue');
+    queue.process('charge-card', () => {});
+    await queue.add('charge-card', {});
+    await runtime.advanceMs(POLL_MS * 2);
+
+    expect(envelopes).toHaveLength(1);
+    // The ingress idempotency key is scoped by this value, so it must be the
+    // job NAME and not something per delivery.
+    expect(envelopes[0]?.consumer).toBe('charge-card');
   });
 
   it('runs behaviours in declared order, and every behaviour sees the same envelope', async () => {

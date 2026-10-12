@@ -24,10 +24,11 @@ import type {
   PageResult,
   TransactionOptions,
 } from '@setu-ts/common';
+import { DuplicateKeyError } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
-  type NativeDrizzleQueryHandle,
+  type DrizzleQueryHandleProvider,
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
 import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dynamo-data-source.ts';
@@ -79,8 +80,13 @@ function accessPathOf(dataSource: DataSource): string | undefined {
  * SQLSTATE, the statement — stays reachable for the log while the served
  * `detail` stays the class's fixed sentence.
  */
-function classifiedOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
+function classifiedOrOriginal(
+  error: unknown,
+  adapterType: DatabaseAdapterType,
+  entity?: string,
+): unknown {
   const kind = classifyDriverError(error, adapterType);
+  if (kind === 'duplicate') return duplicateKeyError(error, entity);
   if (kind === 'conflict') {
     return new SerializationConflictError(
       'The database rejected the write because a concurrent transaction changed the same data.',
@@ -94,6 +100,67 @@ function classifiedOrOriginal(error: unknown, adapterType: DatabaseAdapterType):
     );
   }
   return error;
+}
+
+/**
+ * The adapter type of every constructed {@linkcode DatabaseService}, keyed by
+ * the instance. Module-private: `_adapterType` is a TypeScript `private`
+ * member, and the inbox bridge (M108 §3.10) must refuse Cosmos and Bigtable by
+ * name without widening `IDatabaseService` or the exported class's surface.
+ */
+const ADAPTER_TYPES = new WeakMap<
+  object,
+  { readonly type: DatabaseAdapterType; readonly adapter: IDatabaseAdapter }
+>();
+
+/**
+ * Reports the adapter type behind a database service, and the adapter
+ * instance itself (so a `'custom'` arm wrapping a shipped adapter can be
+ * recognised by its class).
+ *
+ * Internal — not exported from the package barrel.
+ *
+ * @internal
+ * @param service - The service a store bridge resolved
+ * @returns The adapter type and instance, or `undefined` for an
+ *   `IDatabaseService` that is not this package's `DatabaseService` (an
+ *   application's own implementation)
+ */
+export function adapterInfoOf(
+  service: IDatabaseService,
+): { readonly type: DatabaseAdapterType; readonly adapter: IDatabaseAdapter } | undefined {
+  return ADAPTER_TYPES.get(service);
+}
+
+/**
+ * Builds the {@linkcode DuplicateKeyError} for a classified driver error,
+ * naming the entity when the interception site knows it.
+ */
+function duplicateKeyError(cause: unknown, entity: string | undefined): DuplicateKeyError {
+  return new DuplicateKeyError(
+    entity === undefined
+      ? 'The database rejected the write because it would duplicate a unique key.'
+      : `The database rejected the write to '${entity}' because it would duplicate a unique key.`,
+    entity === undefined ? { cause } : { entity, cause },
+  );
+}
+
+/**
+ * Classifies a rejection raised by `commit()`, where only a duplicate key is
+ * mapped.
+ *
+ * A commit rejection is otherwise rethrown unchanged because its outcome can
+ * be unknown: a lost acknowledgement may follow a write the server applied,
+ * so the retry-safe `409`/`503` contracts are not advertised there. A
+ * duplicate key is different. It is the server's own refusal of the write,
+ * and the backends that detect it at commit (D1's atomic `batch()`, a Cosmos
+ * transactional batch, the memory and Bigtable deferred writes) apply nothing
+ * when they refuse.
+ */
+function duplicateAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
+  return classifyDriverError(error, adapterType) === 'duplicate'
+    ? duplicateKeyError(error, undefined)
+    : error;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +201,7 @@ export class DatabaseService implements IDatabaseService {
     /** The adapter type (used for unsupported-operation checks). */
     private readonly _adapterType: DatabaseAdapterType,
     /** Adapter-specific options for logging and tuning. */
-    private readonly _options?: DatabaseAdapterOptions,
+    private readonly _options?: DatabaseAdapterOptions | undefined,
     /** Optional logger for query logging. */
     private readonly _logger?: { debug(msg: string, meta?: Record<string, unknown>): void },
     /** Monotonic clock — injected from `ctx.runtime.hrtime()`. NEVER `Date.now()`. */
@@ -146,7 +213,25 @@ export class DatabaseService implements IDatabaseService {
     private readonly _setTimer: (fn: () => void, ms: number) => unknown = defaultSetTimer,
     /** Timer clearance arm — injected from `ctx.runtime`. */
     private readonly _clearTimer: (handle: unknown) => void = defaultClearTimer,
-  ) {}
+  ) {
+    ADAPTER_TYPES.set(this, { type: _adapterType, adapter: _adapter });
+    // The typed-query seam (M70j) is attached here rather than declared as a
+    // computed-key method: a computed-key class member cannot be emitted under
+    // `isolatedDeclarations` (TS9038) even with an explicit type, so the
+    // symbol key is assigned through the structural provider cast and read
+    // back structurally by `readDrizzleQueryHandle` — the runtime shape is
+    // unchanged.
+    (this as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE] = () => {
+      assertDrizzleAdapter(this._adapterType);
+      const handle = readDrizzleQueryHandle(this._adapter);
+      if (handle.scope !== 'outer') {
+        throw new Error(
+          "Drizzle query access expected 'outer' scope but received 'transaction' scope.",
+        );
+      }
+      return handle;
+    };
+  }
 
   /** Returns a repository bound to the named entity on the outer database scope. */
   getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {
@@ -155,18 +240,6 @@ export class DatabaseService implements IDatabaseService {
     }
     const dataSource = this.wrapDataSource(entity, this._createDataSource(entity));
     return new InternalRepo<Entity, Id>(dataSource);
-  }
-
-  /** Provide the configured native Drizzle instance through the internal protocol. */
-  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
-    assertDrizzleAdapter(this._adapterType);
-    const handle = readDrizzleQueryHandle(this._adapter);
-    if (handle.scope !== 'outer') {
-      throw new Error(
-        "Drizzle query access expected 'outer' scope but received 'transaction' scope.",
-      );
-    }
-    return handle;
   }
 
   /** @inheritdoc */
@@ -213,7 +286,7 @@ export class DatabaseService implements IDatabaseService {
       // A commit rejection can mean the server applied the write before its
       // acknowledgement was lost. Its outcome is unknown, so never advertise
       // the retry-safe contract reserved for definitely rejected operations.
-      if (committing) throw error;
+      if (committing) throw duplicateAtCommitOrOriginal(error, this._adapterType);
       // X38-1 (M90f): a conflict surfaced inside a repository call was
       // already classified by the `wrapDataSource` wrapper, and
       // `classifyDriverError` returns `null` for a package-owned error — so
@@ -379,6 +452,8 @@ export class DatabaseService implements IDatabaseService {
     // the underlying source has no `findPage`, the wrapper fabricates none, so
     // absence still means "cannot page by cursor", never "no more rows".
     const findPageImpl = ds.findPage?.bind(ds);
+    const updateWhereImpl = ds.updateWhere?.bind(ds);
+    const deleteWhereImpl = ds.deleteWhere?.bind(ds);
 
     return {
       // Spread FIRST, so an OWN ENUMERABLE member `IDataSource` does not
@@ -417,7 +492,41 @@ export class DatabaseService implements IDatabaseService {
             }
             return result;
           } catch (error) {
-            throw classifiedOrOriginal(error, adapterType);
+            throw classifiedOrOriginal(error, adapterType, entity);
+          }
+        },
+      }),
+      ...(updateWhereImpl === undefined ? {} : {
+        async updateWhere(id, where, data) {
+          const start = now();
+          try {
+            const result = await updateWhereImpl(id, where, data);
+            if (enabled && logger !== undefined) {
+              logger.debug(`[${entity}] updateWhere`, {
+                operation: 'updateWhere',
+                durationMs: now() - start,
+              });
+            }
+            return result;
+          } catch (error) {
+            throw classifiedOrOriginal(error, adapterType, entity);
+          }
+        },
+      }),
+      ...(deleteWhereImpl === undefined ? {} : {
+        async deleteWhere(id, where) {
+          const start = now();
+          try {
+            const result = await deleteWhereImpl(id, where);
+            if (enabled && logger !== undefined) {
+              logger.debug(`[${entity}] deleteWhere`, {
+                operation: 'deleteWhere',
+                durationMs: now() - start,
+              });
+            }
+            return result;
+          } catch (error) {
+            throw classifiedOrOriginal(error, adapterType, entity);
           }
         },
       }),
@@ -435,7 +544,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async findById(id) {
@@ -450,7 +559,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async create(data) {
@@ -465,7 +574,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async update(id, data) {
@@ -480,7 +589,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       async delete(id) {
@@ -495,7 +604,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
       // BOTH parameters are forwarded. Taking only `where` dropped the
@@ -515,7 +624,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error, adapterType);
+          throw classifiedOrOriginal(error, adapterType, entity);
         }
       },
     };

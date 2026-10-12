@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import type { IQueue, IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -245,6 +244,32 @@ describe('QueuePlugin', () => {
 
     const queue = ctx.services.get<IQueue>('queue');
     expect(queue).toBeDefined();
+  });
+
+  it('the rabbitmq arm ignores commandTimeoutMs — it bounds Redis commands only (M101a)', async () => {
+    const fakeClient = {
+      createChannel: () =>
+        Promise.resolve({
+          assertQueue: () => Promise.resolve({ queue: 'test' }),
+          publish: () => true,
+          get: () => Promise.resolve(false),
+          ack: () => {},
+          close: () => Promise.resolve(),
+        }),
+      close: () => Promise.resolve(),
+    };
+    // A value the redis arm refuses at construction is neither validated nor
+    // read on the rabbitmq arm.
+    expect(() => QueuePlugin({ adapter: 'redis', commandTimeoutMs: -1 })).toThrow(RangeError);
+    const ctx = new FakeContext();
+    const plugin = QueuePlugin({
+      adapter: 'rabbitmq',
+      url: 'amqp://localhost:5672',
+      client: fakeClient as never,
+      commandTimeoutMs: -1,
+    });
+    await plugin.register(ctx as never);
+    expect(ctx.services.get<IQueue>('queue')).toBeDefined();
   });
 
   it('drops wrong-shaped redis client and falls through to lazy-load', async () => {

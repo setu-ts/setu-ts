@@ -17,6 +17,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   EventDiagnosticsRecord,
   EventDiagnosticsSnapshot,
@@ -65,22 +66,12 @@ export const EVENT_COLLECTOR_ERRORS = {
   notEnabled: 'Event diagnostics: enabled must be the literal true.',
   badAlias: 'Event diagnostics: alias must be a string.',
   aliasBytes: 'Event diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Event diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Event diagnostics: an alias contains a control, format or line-separator character.',
   badEvents: 'Event diagnostics: events must map event types to aliases.',
   tooManyEvents: 'Event diagnostics: more than 64 approved event types.',
   duplicateAlias: 'Event diagnostics: an event alias is not unique.',
 } as const;
-
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /** Reports whether a value is a plain non-null, non-array object. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -102,7 +93,7 @@ function assertAliasShape(alias: string): void {
   if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
     throw new RangeError(EVENT_COLLECTOR_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(EVENT_COLLECTOR_ERRORS.aliasControl);
   }
 }

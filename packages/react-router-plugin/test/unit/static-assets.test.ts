@@ -3,8 +3,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IFileSystem, RouteHandler } from '@setu-ts/common';
 import { createStaticAssetHandler } from '../../src/assets/static-assets.ts';
 

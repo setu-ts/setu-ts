@@ -260,3 +260,36 @@ export function validateEnvelope(
   }
   return envelope as unknown as IntegrationEventEnvelope<unknown>;
 }
+
+/**
+ * Runs the definition's parser over a validated envelope's `data`, turning a
+ * throw into the `'parse'` rejection. Internal — the plain and the inbox
+ * subscription paths share it, so the two cannot drift about what a parse
+ * failure is.
+ *
+ * @internal
+ * @param envelope - The validated envelope
+ * @param definition - The contract the consumer subscribed with
+ * @returns The parsed payload
+ * @throws {IntegrationEventRejectedError} With reason `'parse'`, the parser's
+ *   thrown value as `cause`
+ */
+export function parseEnvelopeData<T>(
+  envelope: IntegrationEventEnvelope<unknown>,
+  definition: IntegrationEventDefinition<T>,
+): T {
+  try {
+    return definition.parse(envelope.data);
+  } catch (cause) {
+    throw new IntegrationEventRejectedError({
+      reason: 'parse',
+      topic: definition.topic,
+      expectedType: definition.type,
+      expectedVersion: definition.version,
+      detail: `the parse function rejected the payload — ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+      cause,
+    });
+  }
+}

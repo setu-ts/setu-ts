@@ -9,7 +9,7 @@
  *
  * The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * {@linkcode MongoAdapterOptions.client} (preferred — the application
- * constructs and configures it) or a lazy literal `import('npm:mongodb@^6.21.0')`
+ * constructs and configures it) or a lazy literal `import('mongodb')`
  * at {@linkcode connect} time. Transactions use a driver session and refuse
  * late — at {@linkcode beginTransaction}, never at {@linkcode connect} — so a
  * standalone `mongod` that never opens one is still a valid deployment.
@@ -52,7 +52,7 @@ import type { MongoTarget } from './mongo-mapping.ts';
  *   options: { url: 'mongodb://localhost:27017/mydb' },
  * }));
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export class MongoAdapter implements IDatabaseAdapter {
   /** MongoDB snapshot isolation is not the portable serializable guarantee. */
@@ -224,9 +224,18 @@ export class MongoAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Opens a driver session and calls `startTransaction()`. A deployment
-   * without a replica set fails here, with the driver's own error wrapped in
-   * {@linkcode MongoTransactionUnavailableError} — never at `connect()`.
+   * Opens a driver session and calls `startTransaction()`.
+   *
+   * A deployment without a replica set does NOT fail here on the real
+   * `mongodb` driver: measured against a standalone `mongo:8` (M107),
+   * `startTransaction()` resolves, and the refusal surfaces at the FIRST
+   * operation inside the transaction — a read and a write alike — as the
+   * driver's own, unwrapped `MongoServerError` with `code: 20` and
+   * `codeName: 'IllegalOperation'` ("Transaction numbers are only allowed on a
+   * replica set member or mongos"). It never fails at `connect()`. The
+   * {@linkcode MongoTransactionUnavailableError} wrapping below applies only
+   * to a driver whose `startTransaction()` itself throws, which the real
+   * driver does not.
    *
    * @inheritdoc
    */
@@ -328,7 +337,7 @@ export type { MongoTarget };
  *
  * @param url - The connection string
  * @returns The database name, or `undefined` when none is encoded
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function parseDatabaseFromUrl(url: string): string | undefined {
   const match = /^mongodb(?:\+srv)?:\/\/[^/]+\/([^/?]+)/.exec(url);

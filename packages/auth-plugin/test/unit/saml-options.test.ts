@@ -2,8 +2,7 @@
  * The `saml` sign-in arm's construction refusals, and the configuration handed
  * to node-saml, field by field (M100f plan §3.2).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { compileSignIn } from '../../src/sign-in/config.ts';
 import type { SamlProvider } from '../../src/interfaces/index.ts';

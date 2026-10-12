@@ -13,8 +13,7 @@
  * show that the bodyless fast path is taken before `.body` is ever touched.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   mapWebRequestToFrameworkRequest,
   RequestBodyTooLargeError,

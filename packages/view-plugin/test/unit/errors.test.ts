@@ -4,9 +4,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createElement as h } from '@hono/hono/jsx';
+import { describe, expect, it } from 'vitest';
+import { createElement as h } from 'hono/jsx';
 
 import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { renderComponent } from '../../src/render/normalize.ts';

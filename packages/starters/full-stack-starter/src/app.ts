@@ -3,8 +3,9 @@
  */
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
-import type { IPlugin } from '@setu-ts/common';
+import type { IPlugin, RuntimePlatform } from '@setu-ts/common';
 import { errorHandler } from '@setu-ts/exceptions';
+import { detectRuntime } from '@setu-ts/runtime';
 // Import microservice-starter via bare specifier to enable cross-tier composition
 import { buildMicroservicePlugins } from '@setu-ts/microservice-starter';
 import type { FullStackStarterOptions } from './options.ts';
@@ -25,12 +26,38 @@ import { StaticPlugin } from '@setu-ts/static-plugin';
 /**
  * Builds the canonical full-stack plugin set. Composes from {@linkcode buildMicroservicePlugins}
  * and appends the full-stack plugins (cache, events, cqrs, scheduler, audit, secrets, storage, mail).
- * The list is exported for advanced custom composition.
+ * On Cloudflare Workers the scheduler is left out unless `options.scheduler` is given (see
+ * {@linkcode composeFullStackPlugins}). The list is exported for advanced custom composition.
  *
  * @param options - Optional per-plugin configuration arms.
  * @returns Array of {@linkcode IPlugin} instances in registration order.
  */
 export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IPlugin[] {
+  return composeFullStackPlugins(options, detectRuntime());
+}
+
+/**
+ * Builds the full-stack plugin set for an already-detected platform. Internal:
+ * the starter's `RuntimePlugin()` detects the platform the same way, so the two
+ * agree; taking it as a parameter is what lets a test reach the Workers branch.
+ *
+ * On Cloudflare Workers the scheduler is left out unless `options.scheduler` is
+ * given: `SchedulerPlugin` refuses that platform at `register()`, because its
+ * timers do not survive isolate eviction. Workers schedules through Cron
+ * Triggers (`cloudflare-plugin`'s `WorkersCron`). An explicit `scheduler` arm is
+ * still registered there, so the plugin's own error names that remedy.
+ *
+ * @param options - Optional per-plugin configuration arms.
+ * @param platform - The platform the application runs on.
+ * @returns Array of {@linkcode IPlugin} instances in registration order.
+ */
+export function composeFullStackPlugins(
+  options: FullStackStarterOptions,
+  platform: RuntimePlatform,
+): IPlugin[] {
+  const scheduler = platform === 'cloudflare-workers' && options.scheduler === undefined
+    ? []
+    : [SchedulerPlugin(options.scheduler)];
   // Start with the microservice base set
   const plugins: IPlugin[] = [
     ...buildMicroservicePlugins(options),
@@ -38,7 +65,7 @@ export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IP
     CachePlugin(options.cache),
     EventsPlugin(options.events),
     CqrsPlugin(options.cqrs),
-    SchedulerPlugin(options.scheduler),
+    ...scheduler,
     AuditPlugin(options.audit),
     SecretsPlugin(options.secrets),
     StoragePlugin(options.storage),

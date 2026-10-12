@@ -29,7 +29,7 @@ import {
 export const DISCOVERY_MODULE = 'src/discovery/services.ts';
 
 /** The specifier a member's own modules import {@linkcode DISCOVERY_MODULE} by. */
-export const DISCOVERY_SPECIFIER = `./${DISCOVERY_MODULE}`;
+export const DISCOVERY_SPECIFIER: string = `./${DISCOVERY_MODULE}`;
 
 /** The exported constant carrying the member's own port. */
 export const SERVICE_PORT_EXPORT = 'SERVICE_PORT';
@@ -99,7 +99,7 @@ function collapse(expression: string): string {
 export function renderDiscoveryModule(
   member: WorkspaceMember,
   all: readonly WorkspaceMember[],
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
 ): string {
   // Plain `.sort()`, like every other determinism sort in this package
   // (`seamNames`, `readArtifactNames`, `readModuleNames`). `localeCompare`

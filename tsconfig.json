@@ -1,0 +1,161 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/common"
+    },
+    {
+      "path": "./packages/kernel"
+    },
+    {
+      "path": "./packages/runtime"
+    },
+    {
+      "path": "./packages/exceptions"
+    },
+    {
+      "path": "./packages/di-plugin"
+    },
+    {
+      "path": "./packages/decorator-plugin"
+    },
+    {
+      "path": "./packages/logger-plugin"
+    },
+    {
+      "path": "./packages/config-plugin"
+    },
+    {
+      "path": "./packages/validation-plugin"
+    },
+    {
+      "path": "./packages/database-plugin"
+    },
+    {
+      "path": "./packages/cache-plugin"
+    },
+    {
+      "path": "./packages/events-plugin"
+    },
+    {
+      "path": "./packages/cqrs-plugin"
+    },
+    {
+      "path": "./packages/messaging-plugin"
+    },
+    {
+      "path": "./packages/queue-plugin"
+    },
+    {
+      "path": "./packages/auth-plugin"
+    },
+    {
+      "path": "./packages/http-security-plugin"
+    },
+    {
+      "path": "./packages/scheduler-plugin"
+    },
+    {
+      "path": "./packages/metrics-plugin"
+    },
+    {
+      "path": "./packages/health-plugin"
+    },
+    {
+      "path": "./packages/openapi-plugin"
+    },
+    {
+      "path": "./packages/telemetry-plugin"
+    },
+    {
+      "path": "./packages/secrets-plugin"
+    },
+    {
+      "path": "./packages/audit-plugin"
+    },
+    {
+      "path": "./packages/resilience-plugin"
+    },
+    {
+      "path": "./packages/storage-plugin"
+    },
+    {
+      "path": "./packages/mail-plugin"
+    },
+    {
+      "path": "./packages/notification-plugin"
+    },
+    {
+      "path": "./packages/feature-flags-plugin"
+    },
+    {
+      "path": "./packages/multi-tenancy-plugin"
+    },
+    {
+      "path": "./packages/testing"
+    },
+    {
+      "path": "./packages/cli"
+    },
+    {
+      "path": "./packages/create"
+    },
+    {
+      "path": "./packages/sdk"
+    },
+    {
+      "path": "./packages/starters/rest-starter"
+    },
+    {
+      "path": "./packages/starters/microservice-starter"
+    },
+    {
+      "path": "./packages/starters/full-stack-starter"
+    },
+    {
+      "path": "./packages/sse-plugin"
+    },
+    {
+      "path": "./packages/react-router-plugin"
+    },
+    {
+      "path": "./packages/worker-pool-plugin"
+    },
+    {
+      "path": "./packages/websocket-plugin"
+    },
+    {
+      "path": "./packages/realtime-backplane-plugin"
+    },
+    {
+      "path": "./packages/session-plugin"
+    },
+    {
+      "path": "./packages/service-discovery-plugin"
+    },
+    {
+      "path": "./packages/grpc-plugin"
+    },
+    {
+      "path": "./packages/cloudflare-plugin"
+    },
+    {
+      "path": "./packages/graphql-plugin"
+    },
+    {
+      "path": "./packages/static-plugin"
+    },
+    {
+      "path": "./packages/view-plugin"
+    },
+    {
+      "path": "./packages/localization-plugin"
+    },
+    {
+      "path": "./packages/diagnostics-plugin"
+    },
+    {
+      "path": "./packages/idempotency-plugin"
+    }
+  ]
+}

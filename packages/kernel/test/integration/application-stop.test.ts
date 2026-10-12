@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
@@ -193,4 +192,27 @@ describe('Application — onStopping', () => {
 
     expect(runs).toBe(1);
   });
+});
+
+it('drains an admitted request through the runtime polling timer before shutdown', async () => {
+  const fake = createFakeRuntime();
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => release = resolve);
+  const started = new Promise<void>((resolve) => entered = resolve);
+  const app = createApplication({ plugins: [runtimePluginWith(fake)] });
+  app.router.get('/pending', async (ctx) => {
+    entered();
+    await gate;
+    return ctx.response.text('finished');
+  });
+  await app.start();
+  const pending = app.inject({ method: 'GET', url: '/pending' });
+  await started;
+  const stopping = app.stop();
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  release();
+  expect((await pending).statusCode).toBe(200);
+  fake.tick(50);
+  await stopping;
 });

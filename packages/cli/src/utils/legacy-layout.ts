@@ -28,6 +28,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath } from './file-writer.ts';
+import { escapeName } from './names.ts';
 import { HTTP_SEAM_BARREL, HTTP_SEAM_DIR, REGISTER_ROUTES_EXPORT } from '../seams/http.ts';
 
 /** Where HTTP artifacts lived before E8, relative to the project root. */
@@ -67,7 +68,7 @@ export function legacyLayoutNotice(files: readonly string[]): readonly string[] 
   if (files.length === 0) return [];
 
   return [
-    `${LEGACY_HTTP_DIR}/ still holds ${files.length} file(s): ${files.join(', ')}.`,
+    `${LEGACY_HTTP_DIR}/ still holds ${files.length} file(s): ${escapeName(files.join(', '))}.`,
     `  That directory was merged into ${HTTP_SEAM_DIR}/. Until you move them, ` +
     `${HTTP_SEAM_BARREL} is`,
     `  imported by nothing and everything generated into it is unreachable.`,

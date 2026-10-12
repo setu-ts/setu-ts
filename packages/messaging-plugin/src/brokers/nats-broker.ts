@@ -3,6 +3,7 @@ import type {
   ISubscription,
   MessageHandler,
   MessageMetadata,
+  PublishOptions,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -11,20 +12,60 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
+import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
-import { JetStreamStreamError, JetStreamUnavailableError } from '../errors.ts';
+import {
+  JetStreamStreamError,
+  JetStreamUnavailableError,
+  NatsConsumerNameCollisionError,
+} from '../errors.ts';
 import { describeError } from './describe-error.ts';
+import { toJetStreamConsumerName } from './nats-consumer-name.ts';
+
+/** Consumer metadata key recording the raw queue a consumer was created for (M101b). */
+const QUEUE_METADATA_KEY = 'setu.queue';
+
+/**
+ * JetStream's own de-duplication header — the broker's NATIVE mapping for
+ * `deduplicationId`. The `nats-` prefix is reserved for callers, so the
+ * framework writes it here.
+ */
+const NATS_MSG_ID_HEADER = 'Nats-Msg-Id';
+
+/** JetStream API error code for "consumer already exists" (probed, nats-server 2.14). */
+const CONSUMER_EXISTS_ERR_CODE = 10148;
+
+/** The fields of a consumer's config that decide whether this queue may attach. */
+interface ConsumerIdentity {
+  readonly durable_name?: string;
+  readonly filter_subject?: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Reports whether a `jsm.consumers.add` rejection means the name is already
+ * taken by a consumer whose config differs (the server is idempotent for an
+ * identical config, so this arm is reached only on a difference).
+ */
+function isConsumerExistsError(err: unknown): boolean {
+  const apiError = (err as { api_error?: { err_code?: unknown } } | null)?.api_error;
+  if (apiError?.err_code === CONSUMER_EXISTS_ERR_CODE) {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : '';
+  return message.includes('already exists') || message.includes('duplicate');
+}
 
 /**
  * Lazily load nats at runtime.
  *
  * @returns The nats module
- * @throws {Error} If the npm:nats package cannot be resolved
+ * @throws {Error} If the nats package cannot be resolved
  */
-async function loadNats(): Promise<typeof import('npm:nats@2.x')> {
-  const mod = await import('npm:nats@2.x');
+async function loadNats(): Promise<typeof import('nats')> {
+  const mod = await import('nats');
   return mod;
 }
 
@@ -103,6 +144,24 @@ interface ActiveConsumer {
 }
 
 /**
+ * Describes a publish JetStream did not acknowledge. The client's own message
+ * is bare (`503`, `TIMEOUT`), so this names the subject and, for `503` — the
+ * code a subject no stream captures is refused with (measured on nats 2.29) —
+ * the remedy.
+ */
+function describePublishRefusal(topic: string, error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === '503') {
+    return `NATS JetStream refused the message published to ${JSON.stringify(topic)}: no ` +
+      "stream captures this subject. Add it to the stream's subjects " +
+      '(NatsOptions.streamSubjects when the broker creates the stream).';
+  }
+  return `NATS JetStream did not acknowledge the message published to ${JSON.stringify(topic)}: ${
+    describeError(error)
+  }`;
+}
+
+/**
  * NATS JetStream message broker implementation.
  *
  * @since 0.1.0
@@ -122,6 +181,8 @@ export class NatsBroker implements MessageBrokerAdapter {
   #js: unknown | null = null;
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
+  /** Consumer name → raw queue for this broker's own subscriptions (M101b collision refusal). */
+  #consumerQueues = new Map<string, string>();
   #rr: RequestReplyCore;
   #supervisor: ReconnectSupervisor;
   #probe: () => Promise<boolean>;
@@ -348,6 +409,7 @@ export class NatsBroker implements MessageBrokerAdapter {
       }
     }
     this.#activeConsumers.clear();
+    this.#consumerQueues.clear();
     if (this.#connection) {
       const realConn = this.#connection as unknown as { close(): void };
       realConn.close();
@@ -440,39 +502,67 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   /** Publishes a message with framework-owned transport headers. @internal */
-  publishWithHeaders<T>(
+  async publishWithHeaders<T>(
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     if (!this.#connection) {
-      return Promise.reject(new Error('NatsBroker is not connected'));
+      throw new Error('NatsBroker is not connected');
     }
+    const validated = await validatePublishOptions(options);
+    const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     const encoder = new TextEncoder();
     const data = encoder.encode(serialized);
 
+    // `js.publish` answers with a promise of the server's PubAck. Awaiting it
+    // is what makes a resolved publish mean "stored": unawaited, a refusal
+    // resolved as a success and escaped as an unhandled rejection, which
+    // terminates a Deno or Node process. The client bounds the wait itself
+    // (measured: TIMEOUT after 5 s against a paused server).
     const realJs = this.#js as unknown as {
-      publish(subject: string, data: Uint8Array, options?: { headers: INatsHeaders }): void;
+      publish(
+        subject: string,
+        data: Uint8Array,
+        options?: { headers: INatsHeaders } | { msgID: string },
+      ): Promise<unknown>;
     };
     const natsHeaders = this.#headersFactory?.();
-    if (natsHeaders) {
-      for (const [key, value] of Object.entries(headers)) natsHeaders.set(key, value);
-      realJs.publish(topic, data, { headers: natsHeaders });
-    } else {
-      // No `MsgHdrs` factory: an injected connection carries no nats module, so
-      // there is nothing to build headers with. Publishing still succeeds, but
-      // trace context cannot cross this broker — report it once rather than
-      // dropping the header silently on every publish.
-      this.#reportMissingHeaderChannel(headers);
-      realJs.publish(topic, data);
+    try {
+      if (natsHeaders) {
+        for (const [key, value] of Object.entries(wireHeaders)) natsHeaders.set(key, value);
+        // NATS's native mapping: the server de-duplicates within the stream's
+        // `duplicate_window` from this header. Framework-written, because the
+        // `nats-` prefix is reserved for callers.
+        if (validated.deduplicationId !== undefined) {
+          natsHeaders.set(NATS_MSG_ID_HEADER, validated.deduplicationId);
+        }
+        await realJs.publish(topic, data, { headers: natsHeaders });
+      } else {
+        // No `MsgHdrs` factory: an injected connection carries no nats module,
+        // so there is nothing to build headers with. Publishing still
+        // succeeds, but trace context and caller headers cannot cross this
+        // broker — report it once rather than dropping them silently on every
+        // publish. The de-duplication id survives: nats.js's own `msgID`
+        // option builds the `Nats-Msg-Id` header internally, so the server
+        // still de-duplicates.
+        this.#reportMissingHeaderChannel(wireHeaders);
+        if (validated.deduplicationId !== undefined) {
+          await realJs.publish(topic, data, { msgID: validated.deduplicationId });
+        } else {
+          await realJs.publish(topic, data);
+        }
+      }
+    } catch (error) {
+      throw new Error(describePublishRefusal(topic, error), { cause: error });
     }
-    return Promise.resolve();
   }
 
   /**
@@ -481,8 +571,11 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @typeParam T - The message payload type
    * @param topic - The subject to subscribe to
    * @param handler - The handler to invoke for each message
-   * @param options - Optional subscription options (queue for durable consumer name)
+   * @param options - Optional subscription options (queue for durable consumer name,
+   *   encoded through `toJetStreamConsumerName`)
    * @returns The subscription handle
+   * @throws {NatsConsumerNameCollisionError} When the queue's consumer name
+   *   already belongs to a different queue or topic
    * @since 0.1.0
    */
   async subscribe<T>(
@@ -495,7 +588,15 @@ export class NatsBroker implements MessageBrokerAdapter {
     }
 
     const subscriptionId = this.#runtime.uuid();
-    const consumerName = options?.queue ?? `messaging-${this.#runtime.uuid()}`;
+    // M101b (V8-6): the raw queue may contain characters the nats client
+    // refuses in a consumer name (the reply inbox's `rr.inbox.<uuid>` always
+    // does), so it is encoded; the SUBJECT filter below stays verbatim.
+    const queue = options?.queue ?? `messaging-${this.#runtime.uuid()}`;
+    const consumerName = toJetStreamConsumerName(queue);
+    const mappedQueue = this.#consumerQueues.get(consumerName);
+    if (mappedQueue !== undefined && mappedQueue !== queue) {
+      throw new NatsConsumerNameCollisionError(queue, mappedQueue, consumerName);
+    }
 
     const realJs = this.#js!;
 
@@ -511,27 +612,37 @@ export class NatsBroker implements MessageBrokerAdapter {
     const jsmTyped = jsm as unknown as {
       consumers: {
         add(stream: string, config: unknown): Promise<unknown>;
+        info(stream: string, name: string): Promise<{ config: ConsumerIdentity }>;
       };
     };
 
-    // Ensure durable consumer exists
+    // Ensure durable consumer exists. The raw queue is recorded as consumer
+    // metadata so a later process can tell which queue created the name.
     try {
       await jsmTyped.consumers.add(this.#streamName, {
         name: consumerName,
         filter_subject: topic,
         durable_name: consumerName,
         ack_policy: 'explicit',
+        metadata: { [QUEUE_METADATA_KEY]: queue },
       });
     } catch (err) {
-      const e = err as Error;
-      // Consumer may already exist - that's fine
-      if (
-        !e.message.includes('consumer name already exists') &&
-        !e.message.includes('duplicate')
-      ) {
-        throw e;
+      // The server answers an IDENTICAL config idempotently, so this arm is
+      // reached only when a consumer of this name exists with a different
+      // config — another queue, another topic, or one created before M101b
+      // without the metadata. Attaching blindly would let two independent
+      // queues (or two topics) split one consumer's deliveries.
+      if (!isConsumerExistsError(err)) {
+        throw err;
+      }
+      const { config } = await jsmTyped.consumers.info(this.#streamName, consumerName);
+      const recordedQueue = config.metadata?.[QUEUE_METADATA_KEY];
+      const owner = recordedQueue ?? config.durable_name ?? consumerName;
+      if (owner !== queue || config.filter_subject !== topic) {
+        throw new NatsConsumerNameCollisionError(queue, owner, consumerName);
       }
     }
+    this.#consumerQueues.set(consumerName, queue);
 
     const realJsTyped = realJs as unknown as {
       consumers: {
@@ -719,9 +830,11 @@ export class NatsBroker implements MessageBrokerAdapter {
     }
     this.#headerWarningEmitted = true;
     this.#logger?.error(
-      'NatsBroker: transport headers dropped because no NATS headers factory is available. ' +
-        'Pass NatsOptions.headersFactory (for example `() => nats.headers()`) alongside an ' +
-        'injected client so trace context can cross the broker.',
+      'NatsBroker: transport headers (trace context, publish-option headers and the ' +
+        'ordering key) dropped because no NATS headers factory is available; a ' +
+        'de-duplication id is still applied as the native message id. Pass ' +
+        'NatsOptions.headersFactory (for example `() => nats.headers()`) alongside an ' +
+        'injected client so headers can cross the broker.',
     );
   }
 }
@@ -730,10 +843,13 @@ function toHeaderRecord(headers: unknown): Readonly<Record<string, string>> {
   if (!headers || typeof headers !== 'object') return {};
   const candidate = headers as { keys?: unknown; get?: unknown };
   if (typeof candidate.keys !== 'function' || typeof candidate.get !== 'function') return {};
-  const values: Record<string, string> = {};
+  const entries: [string, string][] = [];
   for (const key of candidate.keys() as Iterable<string>) {
     const value = (candidate.get as (name: string) => unknown)(key);
-    if (typeof value === 'string') values[key] = value;
+    if (typeof value === 'string') entries.push([key, value]);
   }
-  return values;
+  // `Object.fromEntries`, never assignment: Node and Bun keep the
+  // `Object.prototype.__proto__` setter, which would swallow a delivered
+  // `__proto__` header (M106 §10 obligation 4).
+  return Object.fromEntries(entries);
 }

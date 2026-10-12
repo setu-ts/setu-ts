@@ -6,6 +6,7 @@ import {
   type ITelemetryService,
   type MessageHandler,
   parseTraceparentToContext,
+  type PublishOptions,
   type RequestHandler,
   type RequestOptions,
   type SubscribeOptions,
@@ -42,14 +43,15 @@ export class TracedBroker implements MessageBrokerAdapter {
     return this.#broker.isHealthy?.() ?? Promise.resolve(true);
   }
 
-  publish<T>(topic: string, message: T): Promise<void> {
-    return this.publishWithHeaders(topic, message, {});
+  publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
+    return this.publishWithHeaders(topic, message, {}, options);
   }
 
   publishWithHeaders<T>(
     topic: string,
     message: T,
     headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
   ): Promise<void> {
     return this.#telemetry.withSpan(
       `publish ${topic}`,
@@ -59,10 +61,13 @@ export class TracedBroker implements MessageBrokerAdapter {
           _opaque: TELEMETRY_CONTEXT_OPAQUE,
           ...context,
         });
+        // `traceparent` is a FRAMEWORK header: it rides the framework channel and
+        // is never merged into the caller's options, so the reserved-name rule
+        // has nothing to refuse and the caller cannot overwrite the trace.
         const propagated = traceparent
           ? { ...headers, [TRACEPARENT_HEADER]: traceparent }
           : headers;
-        return this.#broker.publishWithHeaders(topic, message, propagated);
+        return this.#broker.publishWithHeaders(topic, message, propagated, options);
       },
       { kind: 'producer', attributes: this.#attributes(topic, 'publish') },
     );

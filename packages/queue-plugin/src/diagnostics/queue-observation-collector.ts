@@ -27,6 +27,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   IQueueDiagnosticsSource,
   IRuntimeServices,
@@ -78,14 +79,15 @@ const MAX_CONCURRENCY = 4;
  *
  * @internal
  */
-export const QUEUE_COLLECTOR_ERRORS = {
+export const QUEUE_COLLECTOR_ERRORS: Readonly<Record<string, string>> = {
   badOptions: 'Queue diagnostics: the diagnostics option must be an object.',
   notEnabled: 'Queue diagnostics: enabled must be the literal true.',
   badInstanceAlias: 'Queue diagnostics: instanceAlias must be a string.',
   badQueues: 'Queue diagnostics: queues must map job names to aliases.',
   tooManyQueues: 'Queue diagnostics: more than 64 approved queues.',
   aliasBytes: 'Queue diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Queue diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Queue diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Queue diagnostics: a queue alias is not unique.',
   badDepths: 'Queue diagnostics: depths must be an object.',
   badInterval: 'Queue diagnostics: depths.intervalMs must be an integer from 1000 to 300000.',
@@ -123,17 +125,6 @@ export interface CompiledQueueDiagnosticsPolicy {
   readonly depths: CompiledQueueDepthPolicy | null;
 }
 
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** Reports whether a value is a plain non-null, non-array object. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -159,7 +150,7 @@ function assertAliasShape(alias: string): void {
   if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
     throw new RangeError(QUEUE_COLLECTOR_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new RangeError(QUEUE_COLLECTOR_ERRORS.aliasControl);
   }
 }
@@ -453,6 +444,13 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
   readonly #jobAliases = new Map<string, string>();
   /** Approved queue alias → latest counts. */
   readonly #depths = new Map<string, RetainedDepth>();
+  /**
+   * Whether a depth cycle has ever retained a row (M101a V8-23). Rows are now
+   * REPLACED per cycle, so an empty map no longer means "nothing retained
+   * yet": a later wholly failed cycle leaves the source `ready`, with the
+   * `failure` saying why its rows are absent.
+   */
+  #depthsRetained = false;
   /** Job names whose RAW count promise has not settled. */
   readonly #countsInFlight = new Set<string>();
   readonly #deadlineTimers = new Set<TimerHandle>();
@@ -653,7 +651,7 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
     }
     return deepFreeze({
       ...common,
-      state: this.#sequence === 0 && this.#depths.size === 0 ? 'no-data' : 'ready',
+      state: this.#sequence === 0 && !this.#depthsRetained ? 'no-data' : 'ready',
       attempts,
       depths,
       next: attempts.length > 0 ? attempts[attempts.length - 1].sequence : after,
@@ -706,6 +704,7 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
     this.#attempts.length = 0;
     this.#jobAliases.clear();
     this.#depths.clear();
+    this.#depthsRetained = false;
     this.#countsInFlight.clear();
     this.#attemptsInFlight = 0;
   }
@@ -715,9 +714,9 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
    * processes, starting at the rotation cursor, with at most `concurrency`
    * count calls in flight — counting raw calls left over from an earlier
    * cycle. Skipped when closed or when a predecessor cycle is still
-   * reporting, so cycles never overlap. Fresh counts are committed together
-   * once the cycle's reporting races finish, each tagged with the cycle's
-   * coverage.
+   * reporting, so cycles never overlap. Fresh counts REPLACE the retained
+   * rows once the cycle's reporting races finish, each tagged with the
+   * cycle's coverage; a name the cycle did not read keeps no row.
    */
   async #runCycle(reader: QueueDepthReader, policy: CompiledQueueDepthPolicy): Promise<void> {
     if (this.#closed || this.#cycleInFlight) {
@@ -729,6 +728,7 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
         this.#depthCoverage = 'unavailable';
         this.#failure = 'none';
         this.#depths.clear();
+        this.#depthsRetained = false;
         return;
       }
       const registered = new Set(reader.names());
@@ -780,6 +780,15 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
       const coverage: QueueDepthCycleCoverage = fresh.size === names.length
         ? 'complete'
         : 'partial';
+      // M101a V8-23: the cycle REPLACES the retained rows. A name this cycle
+      // did not read (timed out, failed, never reached) has NO row, rather
+      // than keeping its last count — a retained `ready: 0` under a climbing
+      // `ageMs` is a zero presented as current. The source-level `failure` and
+      // `depthCoverage: 'partial'` say why it is absent.
+      this.#depths.clear();
+      if (fresh.size > 0) {
+        this.#depthsRetained = true;
+      }
       for (const [name, result] of fresh) {
         this.#depths.set(this.#policy.aliasByName.get(name)!, {
           ...result.depths,

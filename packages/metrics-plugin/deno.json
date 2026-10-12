@@ -1,17 +1,19 @@
 {
   "name": "@setu-ts/metrics-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.8.0"
-  },
   "test": {
     "permissions": {
       "read": true,
       "import": true,
       "env": true,
-      "sys": ["hostname"]
+      "sys": [
+        "hostname"
+      ]
     }
+  },
+  "imports": {
+    "vitest": "npm:vitest@5.0.3"
   }
 }

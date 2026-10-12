@@ -86,7 +86,7 @@ function getOtelApi(): OtelApi | null {
 export type ContextActivationReporter = (outcome: ContextManagerOutcome) => void;
 
 /**
- * Module handle returned by lazy-loading `npm:@opentelemetry/sdk-trace-base`.
+ * Module handle returned by lazy-loading `@opentelemetry/sdk-trace-base`.
  *
  * @internal
  */
@@ -116,7 +116,7 @@ export interface OtelSdkModule {
 }
 
 /**
- * Module handle returned by lazy-loading `npm:@opentelemetry/resources`.
+ * Module handle returned by lazy-loading `@opentelemetry/resources`.
  *
  * @internal
  */
@@ -300,6 +300,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
         kind?: number;
         attributes?: Record<string, unknown>;
         parentContext?: TelemetryContext;
+        root?: boolean;
       },
     ) {
       const otelSpanOptions: Record<string, unknown> = {};
@@ -308,6 +309,13 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
       }
       if (spanOptions?.kind !== undefined) {
         otelSpanOptions.kind = spanOptions.kind;
+      }
+      // A root span ignores every parent: OTel's own `SpanOptions.root` drops
+      // the ACTIVE span, and no parent context is built from `parentContext`,
+      // so the span starts a new trace whatever is running around it.
+      if (spanOptions?.root === true) {
+        otelSpanOptions.root = true;
+        return tracer.startSpan(name, otelSpanOptions);
       }
 
       // N1 fix: build an OTel parent context and pass it as the 3rd arg.
@@ -437,12 +445,12 @@ export async function loadOtelTracerProvider(
   }
 
   // Lazy-load sdk-trace-base
-  const sdkMod = await import('npm:@opentelemetry/sdk-trace-base@^2.9.0');
+  const sdkMod = await import('@opentelemetry/sdk-trace-base');
   // Lazy-load resources
-  const resourcesMod = await import('npm:@opentelemetry/resources@^2.9.0');
+  const resourcesMod = await import('@opentelemetry/resources');
   // Lazy-load the OTel API (transitive dep of sdk-trace-base) for span parenting.
   // F2 fix: typed import — properly cast to OtelApi interface.
-  const apiMod = await import('npm:@opentelemetry/api@^1.9.0');
+  const apiMod = await import('@opentelemetry/api');
   setOtelApi(apiMod as OtelApi);
 
   // Span activation is opt-out. When it is attempted the outcome is reported,

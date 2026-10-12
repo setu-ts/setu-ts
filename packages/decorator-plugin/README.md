@@ -233,8 +233,13 @@ schema and a description the declaration does not carry.
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
 - **Security** — `@Roles`, `@Permissions` (enforced — see below), `@Public` (unrestricted OpenAPI
   marking)
+- **Authorization policies** — `@Policy`, `@Ability`, `@RequirePolicy` (see Authorization policies
+  below)
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
+- **Idempotency** — `@Idempotent(options?)`, appended LAST in a route's middleware (after guards,
+  declarative authorization and validation), so a refused or invalid request consumes no key; it
+  requires a `CAPABILITIES.IDEMPOTENCY` provider — see `@setu-ts/idempotency-plugin`
 - **Views** — `@Render(Component)` (renders through a `CAPABILITIES.VIEW` provider — see
   `@setu-ts/view-plugin`)
 - **Response shaping** — `@HttpCode`, `@ResponseHeader`, `@Redirect`
@@ -244,18 +249,30 @@ schema and a description the declaration does not carry.
 
 ## Options
 
-| Option            | Type            | Default | Description                                                                                                                                                                       |
-| ----------------- | --------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `controllers`     | `Constructor[]` | `[]`    | Controller classes to register explicitly.                                                                                                                                        |
-| `ingress`         | `Constructor[]` | `[]`    | Classes carrying non-HTTP ingress decorators (`@Processor`, `@Cron`, `@OnEvent`, …); registered during `onInit`. Independent of `controllers` — see Non-HTTP ingress.             |
-| `services`        | `Constructor[]` | `[]`    | Service classes to register explicitly.                                                                                                                                           |
-| `modules`         | `Constructor[]` | `[]`    | Root `@Module` classes to flatten depth-first; imported module providers register before controllers.                                                                             |
-| `autoDiscover`    | `boolean`       | `false` | Scan `controllersPath` for decorated classes.                                                                                                                                     |
-| `controllersPath` | `string`        | —       | Glob path used when `autoDiscover` is `true`.                                                                                                                                     |
-| `enforceSchemas`  | `boolean`       | `true`  | Append the validation capability's middleware for each present `@ValidateXxx` target. `false` keeps schemas description-only (OpenAPI) and silences the missing-provider warning. |
-| `enforceRoles`    | `boolean`       | `true`  | Append enforcing authorization middleware for each route carrying `@Roles`/`@Permissions`. `false` keeps the metadata description-only and silences the missing-provider warning. |
+| Option            | Type            | Default | Description                                                                                                                                                                                        |
+| ----------------- | --------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `controllers`     | `Constructor[]` | `[]`    | Controller classes to register explicitly.                                                                                                                                                         |
+| `ingress`         | `Constructor[]` | `[]`    | Classes carrying non-HTTP ingress decorators (`@Processor`, `@Cron`, `@OnEvent`, …); registered during `onInit`. Independent of `controllers` — see Non-HTTP ingress.                              |
+| `services`        | `Constructor[]` | `[]`    | Service classes to register explicitly.                                                                                                                                                            |
+| `modules`         | `Constructor[]` | `[]`    | Root `@Module` classes to flatten depth-first; imported module providers register before controllers.                                                                                              |
+| `autoDiscover`    | `boolean`       | `false` | Scan `controllersPath` for decorated classes.                                                                                                                                                      |
+| `controllersPath` | `string`        | —       | Glob path used when `autoDiscover` is `true`.                                                                                                                                                      |
+| `enforceSchemas`  | `boolean`       | `true`  | Append the validation capability's middleware for each present `@ValidateXxx` target. `false` keeps schemas description-only (OpenAPI) and silences the missing-provider warning.                  |
+| `enforceRoles`    | `boolean`       | `true`  | Append enforcing authorization middleware for each route carrying `@Roles`/`@Permissions`. `false` keeps the metadata description-only and silences the missing-provider warning.                  |
+| `policies`        | `Constructor[]` | `[]`    | `@Policy` classes to construct (with constructor injection) and register with AuthPlugin's policy service before any controller. Refused without a `CAPABILITIES.AUTHORIZATION_POLICIES` provider. |
 
 Discovery failures are logged as warnings and never crash the application.
+
+## Node and Bun: the `Symbol.metadata` carrier
+
+Node 24 and Bun 1.4 do not define `Symbol.metadata`, which TC39 decorators store their metadata
+under. Importing `@setu-ts/decorator-plugin` installs it once, write-if-absent:
+`Symbol.metadata ??= Symbol.for('Symbol.metadata')`. This is a deliberate global mutation at module
+load; on Deno, which defines the symbol, it does nothing. Import the package before any module that
+defines a decorated class — an `import { Controller } from '@setu-ts/decorator-plugin'` in that
+module already guarantees it. A class evaluated first, or a bundle that dropped the import as
+side-effect-free, fails at definition with `DecoratorMetadataUnavailableError`, whose message names
+both remedies.
 
 ## Security
 
@@ -274,10 +291,116 @@ affected route naming both remedies (register a provider under `CAPABILITIES.AUT
 `@Roles`/`@Permissions` restriction. It does **not** exempt a route from a guard or from that
 enforcement; a restricted route keeps its derived OpenAPI security requirement.
 
+## Authorization policies
+
+`@Policy(name)` marks a class as an authorization policy and `@Ability()` marks each ability method;
+a method named `before` is the policy's `before` hook. List the class in `policies`, and require an
+ability on a route with `@RequirePolicy(policy, ability, target?)` — the target is a value or an
+extractor called per request:
+
+```typescript
+import type { IPrincipal } from '@setu-ts/common';
+import {
+  Ability,
+  Controller,
+  DecoratorPlugin,
+  Patch,
+  Policy,
+  RequirePolicy,
+} from '@setu-ts/decorator-plugin';
+
+interface Post {
+  readonly id: string;
+  readonly authorId: string;
+}
+
+@Policy('post')
+class PostPolicy {
+  @Ability()
+  update(principal: IPrincipal, post: Post | undefined): boolean {
+    return post?.authorId === principal.id;
+  }
+}
+
+@Controller('/posts')
+class PostController {
+  @Patch('/:id')
+  @RequirePolicy(PostPolicy, 'update', (ctx) => ({ id: ctx.params.id ?? '', authorId: 'ann' }))
+  update(): { readonly saved: boolean } {
+    return { saved: true };
+  }
+}
+
+export const decorators = DecoratorPlugin({
+  policies: [PostPolicy],
+  controllers: [PostController],
+});
+```
+
+The policy service comes from `AuthPlugin` (`@setu-ts/auth-plugin`), which must be registered:
+`register()` fails, naming the route, when it is missing or when a `@RequirePolicy` names a policy
+or ability that is not registered. `@RequirePolicy` also accepts a `definePolicy` definition, may be
+repeated (every one must allow, top to bottom), and runs after guards and `@Roles`/`@Permissions`
+but before validation — so an extractor reading the body sees the unvalidated body. Refusals are
+`401` (anonymous) and `403` (signed in), the same bodies as AuthPlugin's `requirePolicy` guard;
+`enforceRoles` does not affect `@RequirePolicy`. See
+[Authorization](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md).
+
+## Scoped roles
+
+`@ScopedRoles(roles, scope?)` (any-of) and `@ScopedPermissions(permissions, scope?)` (all-of)
+require a catalogue role or permission **in the request's scope** — the class form of AuthPlugin's
+`requireScopedRole` / `requireScopedPermission`. The scope defaults to the resolved request tenant;
+pass a `ScopeSource` from `@setu-ts/common` to read it elsewhere:
+
+```typescript
+import { scopeFromParam } from '@setu-ts/common';
+import {
+  Controller,
+  DecoratorPlugin,
+  Get,
+  Post,
+  ScopedPermissions,
+  ScopedRoles,
+} from '@setu-ts/decorator-plugin';
+
+@Controller('/invoices')
+@ScopedRoles(['viewer'])
+class InvoiceController {
+  @Get('/')
+  list(): string[] {
+    return [];
+  }
+
+  // A method decorator overrides the class default.
+  @Post('/:id/approve')
+  @ScopedPermissions(['invoices:approve'])
+  approve(): { readonly approved: boolean } {
+    return { approved: true };
+  }
+
+  @Get('/orgs/:orgId')
+  @ScopedRoles(['org-admin'], scopeFromParam('orgId', 'organisation'))
+  forOrg(): string[] {
+    return [];
+  }
+}
+
+export const decorators = DecoratorPlugin({ controllers: [InvoiceController] });
+```
+
+They need `AuthPlugin({ rbac, scopedRbac })`: `register()` fails, naming the route, when no policy
+service is registered or a name is outside the catalogue (a role a tenant defines at runtime is
+checked through the permissions it bundles). They run after `@Roles`/`@Permissions` and
+`@RequirePolicy`, answer `401`/`403` with the same bodies as the guards, and are not governed by
+`enforceRoles`. See
+[Scoped Roles](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md#scoped-roles).
+
 ## Exports
 
 | Export                       | Kind      |
 | ---------------------------- | --------- |
+| `Ability`                    | function  |
 | `ApiOperation`               | function  |
 | `ApiResponse`                | function  |
 | `ApiTags`                    | function  |
@@ -298,6 +421,7 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `getParameterResolver`       | function  |
 | `Header`                     | function  |
 | `HttpCode`                   | function  |
+| `Idempotent`                 | function  |
 | `Inject`                     | function  |
 | `Injectable`                 | function  |
 | `Module`                     | function  |
@@ -307,6 +431,7 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `Params`                     | function  |
 | `parseCookies`               | function  |
 | `Permissions`                | function  |
+| `Policy`                     | function  |
 | `Processor`                  | function  |
 | `Public`                     | function  |
 | `Query`                      | function  |
@@ -314,10 +439,13 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `Redirect`                   | function  |
 | `registerParameterResolver`  | function  |
 | `Render`                     | function  |
+| `RequirePolicy`              | function  |
 | `resolveParameter`           | function  |
 | `resolveParameters`          | function  |
 | `ResponseHeader`             | function  |
 | `Roles`                      | function  |
+| `ScopedPermissions`          | function  |
+| `ScopedRoles`                | function  |
 | `Subscribe`                  | function  |
 | `UseFilters`                 | function  |
 | `UseGuards`                  | function  |
@@ -340,6 +468,7 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `Patch`                      | const     |
 | `Post`                       | const     |
 | `Put`                        | const     |
+| `AbilityOptions`             | interface |
 | `ApiOperationConfig`         | interface |
 | `ApiResponseConfig`          | interface |
 | `DecoratorPluginOptions`     | interface |
@@ -356,6 +485,8 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `MiddlewareLike`             | type      |
 | `ModuleImporter`             | type      |
 | `ParameterType`              | type      |
+| `PolicyClassAbility`         | type      |
+| `PolicyClassTarget`          | type      |
 | `RenderDecorator`            | type      |
 | `SetuClassDecorator`         | type      |
 | `SetuClassOrMethodDecorator` | type      |

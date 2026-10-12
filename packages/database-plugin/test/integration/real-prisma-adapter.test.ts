@@ -27,16 +27,18 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
+import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { PrismaRepository } from '../../src/adapters/prisma/prisma-repository.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
+import { DatabaseService } from '../../src/services/database-service.ts';
+import { DuplicateKeyError } from '@setu-ts/common';
 import type { PrismaAdapterOptions } from '../../src/interfaces/index.ts';
 
-const postgresUrl = Deno.env.get('POSTGRES_URL');
+const postgresUrl = process.env['POSTGRES_URL'];
 /**
  * Whether the live cases run. Declared with the BDD `ignore` option rather
  * than an early `return`, so an unset `POSTGRES_URL` is reported as
@@ -60,6 +62,7 @@ interface ModelDelegate {
 
 /** The structural surface of the generated client this suite drives. */
 interface GeneratedPrismaClient {
+  $on(event: 'query', listener: (event: { query: string }) => void): void;
   tenantMember: ModelDelegate;
   enrollment: ModelDelegate;
   auditEvent: ModelDelegate;
@@ -69,7 +72,9 @@ interface GeneratedPrismaClient {
 
 /** The generated module's export this suite constructs. */
 interface GeneratedClientModule {
-  PrismaClient: new (options: { adapter: unknown }) => GeneratedPrismaClient;
+  PrismaClient: new (
+    options: { adapter: unknown; log?: { emit: 'event'; level: 'query' }[] },
+  ) => GeneratedPrismaClient;
 }
 
 /** A per-run discriminator keeping rows of one run out of another's asserts. */
@@ -92,23 +97,96 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
  * Called inside each guarded body so a fresh clone (no generated client, no
  * container) never loads either import.
  */
-async function connectPrisma(): Promise<GeneratedPrismaClient> {
+async function connectPrisma(queries?: string[]): Promise<GeneratedPrismaClient> {
   const [{ PrismaPg }, generated] = await Promise.all([
-    import('npm:@prisma/adapter-pg@^7.10.0'),
+    import('@prisma/adapter-pg'),
     import(GENERATED_CLIENT_URL.href) as Promise<GeneratedClientModule>,
   ]);
   const client = new generated.PrismaClient({
     adapter: new PrismaPg({ connectionString: url }),
+    ...(queries === undefined
+      ? {}
+      : { log: [{ emit: 'event' as const, level: 'query' as const }] }),
   });
+  if (queries !== undefined) client.$on('query', (event) => queries.push(event.query));
   await client.$connect();
   return client;
 }
 
 describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   it(
+    'M105 emits one conjoined UPDATE or DELETE and carries conditionals into interactive transactions',
+    { skip: skipReal },
+    async () => {
+      const queries: string[] = [];
+      const client = await connectPrisma(queries);
+      const adapter = new PrismaAdapter({ prismaClient: client });
+      await adapter.connect();
+      try {
+        const source = adapter.createDataSource('AuditEvent');
+        const id = `m105-${suffix}`;
+        await source.create({
+          id,
+          run: suffix,
+          userId: 'owner',
+          createdAt: new Date(0),
+          profile: {},
+        });
+        queries.length = 0;
+        expect(await source.updateWhere!(id, { userId: 'owner' }, { profile: { changed: true } }))
+          .toMatchObject({ profile: { changed: true } });
+        expect(queries).toHaveLength(1);
+        expect(queries[0]).toMatch(/^UPDATE .* WHERE .*"id".* AND .*"userId".* RETURNING /);
+        queries.length = 0;
+        expect(await source.updateWhere!(id, { userId: 'other' }, { profile: { bad: true } }))
+          .toBeNull();
+        expect(queries).toHaveLength(1);
+        expect(await source.findById(id)).toMatchObject({ profile: { changed: true } });
+        await expect(source.updateWhere!(id, { unknownColumn: 1 }, { profile: { bad: true } }))
+          .rejects.toThrow();
+        await expect(source.deleteWhere!(id, { unknownColumn: 1 })).rejects.toThrow();
+        queries.length = 0;
+        expect(await source.deleteWhere!(id, { userId: 'other' })).toBe(false);
+        expect(queries).toHaveLength(1);
+        expect(await source.findById(id)).not.toBeNull();
+        queries.length = 0;
+        expect(await source.deleteWhere!(id, { userId: 'owner' })).toBe(true);
+        expect(queries).toHaveLength(1);
+        expect(queries[0]).toMatch(/^DELETE .* WHERE .*"id".* AND .*"userId".* RETURNING /);
+        expect(await source.findById(id)).toBeNull();
+        await conditionalContract(
+          source,
+          `${id}-second`,
+          `${id}-missing`,
+          { id: `${id}-second`, run: suffix, userId: 'owner', createdAt: new Date(0), profile: {} },
+          { userId: 'owner' },
+          { profile: { changed: true } },
+        );
+        const tx = await adapter.beginTransaction();
+        try {
+          await conditionalContract(
+            tx.createDataSource('AuditEvent'),
+            `${id}-tx`,
+            `${id}-missing`,
+            { id: `${id}-tx`, run: suffix, userId: 'owner', createdAt: new Date(0), profile: {} },
+            { userId: 'owner' },
+            { profile: { changed: true } },
+          );
+          await tx.commit();
+        } catch (error) {
+          await tx.rollback();
+          throw error;
+        }
+      } finally {
+        await adapter.disconnect();
+        await client.$disconnect();
+      }
+    },
+  );
+  it(
     'round-trips a composite key through the repository surface on the unnamed-@@id model (P1/P6)',
     {
-      ignore: skipReal,
+      skip: skipReal,
     },
     async () => {
       const client = await connectPrisma();
@@ -159,7 +237,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   );
 
   it('refuses the named-@@id model without compositeKeyName and succeeds with it (P2)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const client = await connectPrisma();
 
@@ -210,7 +288,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
 
   it(
     'matches a nested-path filter against real JSONB rows (P7)',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const client = await connectPrisma();
       const adapter = new PrismaAdapter({ prismaClient: client });
@@ -252,7 +330,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
     },
   );
 
-  it('filters a Date range over real timestamptz rows (P9)', { ignore: skipReal }, async () => {
+  it('filters a Date range over real timestamptz rows (P9)', { skip: skipReal }, async () => {
     const client = await connectPrisma();
     const adapter = new PrismaAdapter({ prismaClient: client });
     await adapter.connect();
@@ -304,7 +382,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   });
 
   it('walks a tied fixture across three pages returning every row exactly once (P10/P11)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const client = await connectPrisma();
     const adapter = new PrismaAdapter({ prismaClient: client });
@@ -363,7 +441,7 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   });
 
   it('LOSES rows on the tied fixture when the key tiebreaker is omitted (P11 negative control)', {
-    ignore: skipReal,
+    skip: skipReal,
   }, async () => {
     const client = await connectPrisma();
     const adapter = new PrismaAdapter({ prismaClient: client });
@@ -459,7 +537,7 @@ interface TransactionalPrismaClient {
 describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)', () => {
   it(
     'a real SERIALIZABLE write conflict classifies as conflict',
-    { ignore: skipReal },
+    { skip: skipReal },
     async () => {
       const client = await connectPrisma();
       const transactional = client as unknown as GeneratedPrismaClient & TransactionalPrismaClient;
@@ -500,4 +578,35 @@ describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)'
       }
     },
   );
+});
+
+describe('PrismaAdapter against live PostgreSQL — duplicate key', () => {
+  it('a duplicate primary key reaches the caller as DuplicateKeyError (P2002)', {
+    skip: skipReal,
+  }, async () => {
+    const client = await connectPrisma();
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'prisma');
+    try {
+      const repo = service.getRepository('AuditEvent');
+      const row = {
+        id: `dup-${suffix}`,
+        run: `dup-${suffix}`,
+        userId: 'u1',
+        createdAt: new Date('2026-01-15T10:00:00Z'),
+        profile: {},
+      };
+      await repo.create(row);
+
+      const refusal = await repo.create(row).catch((e: unknown) => e);
+      expect(refusal).toBeInstanceOf(DuplicateKeyError);
+      expect((refusal as DuplicateKeyError).entity).toBe('AuditEvent');
+      // Prisma maps SQLSTATE 23505 onto its own P2002 before the app sees it.
+      expect(((refusal as Error).cause as { code?: unknown }).code).toBe('P2002');
+    } finally {
+      await adapter.disconnect();
+      await client.$disconnect();
+    }
+  });
 });

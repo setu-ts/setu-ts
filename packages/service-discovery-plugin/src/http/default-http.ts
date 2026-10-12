@@ -2,7 +2,7 @@
  * The default {@linkcode IDiscoveryHttp}, over web-standard `fetch`.
  *
  * Consul and the Kubernetes API server are plain HTTP JSON, so there is no
- * client library worth an `npm:` import and this package ships an empty
+ * client library worth an npm dependency and this package ships an empty
  * dependency graph. `fetch` is injectable so every provider test drives the
  * real seam without a socket.
  *

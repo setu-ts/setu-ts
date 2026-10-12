@@ -66,9 +66,11 @@ describe('isPrerelease', () => {
 describe('buildReleaseBody', () => {
   it('carries a pinned install line, the notes, and the pre-alpha.8 note', () => {
     const body = buildReleaseBody('### Added\n\n- A thing.', '0.1.0-alpha.9');
-    // Pinned, because JSR never points `latest` at a prerelease — an unpinned
-    // instruction in the release notes installs nothing.
-    expect(body).toContain('jsr:@setu-ts/kernel@0.1.0-alpha.9');
+    // Pinned so a reader installs the release they are reading.
+    expect(body).toContain(
+      'npm install @setu-ts/kernel@0.1.0-alpha.9 @setu-ts/runtime@0.1.0-alpha.9',
+    );
+    expect(body).not.toContain('jsr:');
     expect(body).toContain('- A thing.');
     expect(body).toContain('Releases before `v0.1.0-alpha.8` shipped as tags only');
   });
@@ -213,7 +215,7 @@ const SUITE_CONSUMERS: readonly {
 }[] = [
   {
     workflow: '.github/workflows/release.yml',
-    job: 'release',
+    job: 'gates',
     expectedStep: (step) => step,
   },
   {
@@ -297,6 +299,22 @@ describe('release workflow wiring', () => {
     );
   });
 
+  it('fetches full history in every workflow that runs the suite', async () => {
+    // The suite runs `release:verify`, whose check 9 needs the previous `v*`
+    // tag reachable from HEAD. drift.yml checked out shallow, so the check
+    // refused there while passing on every PR, and the weekly job filed issue
+    // #413 blaming dependency drift for a failure no dependency caused.
+    // Required of the PR job too, as the reference the consumers follow.
+    const depth = activeLine('fetch-depth: 0');
+    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(jobBlock(ci, 'deno')).toMatch(depth);
+    for (const consumer of SUITE_CONSUMERS) {
+      const workflow = await Deno.readTextFile(consumer.workflow);
+      expect({ workflow: consumer.workflow, depth: depth.test(jobBlock(workflow, consumer.job)) })
+        .toEqual({ workflow: consumer.workflow, depth: true });
+    }
+  });
+
   it('starts every backend the PR job starts, in every workflow that runs the suite', async () => {
     // A backend a workflow does not start is a guarded suite that skips there
     // while passing on every PR. That is invisible: only `REDIS_URL` has a
@@ -331,22 +349,23 @@ describe('release workflow wiring', () => {
     const environment = [...jobSection(prJob, 'env').matchAll(/^ +([A-Z0-9_]+): (\S+)$/gm)];
     expect(environment.length).toBeGreaterThan(10);
 
-    // The five backends that cannot be service containers — each needs a
-    // command or an argument, and `options` reaches `docker create` BEFORE the
-    // image while the command comes after it — so no image or endpoint pin
-    // above reaches them. Compared byte-for-byte against ci.yml's own steps
-    // rather than pinned as literals, so changing an image, a published port,
-    // a command or a readiness probe on the PR side requires the same change
-    // in every consumer; a hand-written literal is what let these drift
-    // already. Only Bigtable was compared before, which left the other three
-    // free to diverge.
-    const stepBackends = [
-      'Start the Cloud Bigtable emulator',
-      'Start the NATS server (JetStream)',
-      'Start Kafka (KRaft single-node)',
-      'Start MinIO (S3 storage outage suite)',
-      'Start Keycloak (outside-issuer suite)',
-    ];
+    // The backends that cannot be service containers — each needs a command
+    // or an argument, and `options` reaches `docker create` BEFORE the image
+    // while the command comes after it — so no image or endpoint pin above
+    // reaches them. Compared byte-for-byte against ci.yml's own steps rather
+    // than pinned as literals, so changing an image, a published port, a
+    // command or a readiness probe on the PR side requires the same change in
+    // every consumer.
+    //
+    // The step NAMES are derived too: every PR-job step that runs `docker run`.
+    // This list was hand-written, and M107's MongoDB replica-set step was added
+    // to all three workflows but not to it, so drift.yml's copy shipped without
+    // its `continue-on-error: true` and nothing here noticed.
+    const stepBackends = [...prJob.matchAll(/^ +- name: (.+)$/gm)]
+      .map((match) => match[1]!)
+      .filter((name) => stepBlock(prJob, name).includes('docker run'));
+    expect(stepBackends).toContain('Start a MongoDB replica set (outbox suites)');
+    expect(stepBackends.length).toBeGreaterThanOrEqual(6);
 
     for (const { workflow, job, expectedStep } of SUITE_CONSUMERS) {
       const text = await Deno.readTextFile(workflow);

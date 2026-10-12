@@ -71,11 +71,11 @@ So the sequencing rule is absolute:
 - **Implementing an approved plan** → **Code**, on the milestone's `feat/…` branch, following
   `CLAUDE.md`.
 - **Fixing gate or review findings on an unmerged milestone** → **Code**, on that same `feat/…`
-  branch. Never a `fix/…` branch: that is only for a defect in already-merged `main`.
+  branch. Never a `fix/…` branch: that is only for a defect in already-merged `develop`.
 - **Verifying a committed milestone** → **Verify Milestone**, following
   `.roo/skills/verify-milestone/SKILL.md` end to end.
 - **Reviewing before merge** → **Code Review**, read-only, at high effort, over
-  `git diff main...HEAD`.
+  `git diff develop...HEAD`.
 - **Security-auditing before merge** → **Security Audit**, following
   `.roo/skills/security-audit/SKILL.md`, whenever the plan names a committed-tree security audit or
   the diff crosses a trust boundary. This gate is started with `new_task`, not `switch_mode` — see

@@ -5,17 +5,12 @@
  * The Prisma probe verifies the ungenerated package boundary; the adapter
  * therefore requires an application-generated client to be injected.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import {
-  CreateTableCommand,
-  DeleteTableCommand,
-  DynamoDBClient,
-} from 'npm:@aws-sdk/client-dynamodb@^3';
+import { describe, expect, it } from 'vitest';
+import { CreateTableCommand, DeleteTableCommand, DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { createLazyBigtableLoader, createLazyDynamoLoader } from '../../src/index.ts';
 
-const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
-const bigtableEndpoint = Deno.env.get('BIGTABLE_EMULATOR_ENDPOINT');
+const dynamoEndpoint = process.env['DYNAMODB_ENDPOINT'];
+const bigtableEndpoint = process.env['BIGTABLE_EMULATOR_ENDPOINT'];
 const skipDynamo = dynamoEndpoint === undefined;
 const endpoint = dynamoEndpoint ?? '';
 const dynamoCredentials = {
@@ -31,7 +26,7 @@ describe('Real ORM imports (guarded)', () => {
     try {
       // This is intentionally the published, ungenerated package rather than
       // application-local output. Prisma v7 must not be treated as usable here.
-      imported = await import('npm:@prisma/client@7.8.0');
+      imported = await import('@prisma/client');
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
     }
@@ -81,7 +76,7 @@ describe('Real ORM imports (guarded)', () => {
   });
 
   it('the Bigtable lazy loader performs the real npm import and reaches the emulator', {
-    ignore: bigtableEndpoint === undefined,
+    skip: bigtableEndpoint === undefined,
   }, async () => {
     // Drives `createLazyBigtableLoader` itself rather than a bare `import()`,
     // so the seam's own adaptation — not merely the specifier — is exercised,
@@ -111,7 +106,7 @@ describe('Real ORM imports (guarded)', () => {
     let error: Error | null = null;
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      imported = await import('npm:drizzle-orm@^0.45.2');
+      imported = await import('drizzle-orm');
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
     }
@@ -136,7 +131,7 @@ describe('Real ORM imports (guarded)', () => {
 
   it(
     'DynamoDB lazy SDK import drives a facade command round trip',
-    { ignore: skipDynamo },
+    { skip: skipDynamo },
     async () => {
       const tableName = `m80_import_${crypto.randomUUID().replaceAll('-', '')}`;
       const admin = new DynamoDBClient({

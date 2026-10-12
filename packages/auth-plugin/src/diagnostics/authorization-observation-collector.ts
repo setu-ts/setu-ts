@@ -20,6 +20,7 @@
  *
  * @module
  */
+import { hasForbiddenAliasCharacter } from '@setu-ts/common';
 import type {
   AuthorizationCoverage,
   AuthorizationDecisionObservation,
@@ -56,26 +57,16 @@ const COLLECTOR_ERRORS = {
     'Authorization diagnostics: roles and permissions must be objects of exact name to alias.',
   tooManyRules: 'Authorization diagnostics: more than 128 approved rules in one map.',
   aliasBytes: 'Authorization diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
-  aliasControl: 'Authorization diagnostics: an alias contains a control character.',
+  aliasControl:
+    'Authorization diagnostics: an alias contains a control, format or line-separator character.',
   duplicateAlias: 'Authorization diagnostics: an alias is not unique within its map.',
   badRevision:
-    'Authorization diagnostics: policyRevision must be 1 to 64 UTF-8 bytes with no control character.',
+    'Authorization diagnostics: policyRevision must be 1 to 64 UTF-8 bytes with no control, format or line-separator character.',
   badInstanceId: 'Authorization diagnostics: read requires a non-empty instance identifier.',
   badCursor: 'Authorization diagnostics: after must be a non-negative safe integer.',
   badLimit: 'Authorization diagnostics: limit must be an integer from 1 to 128.',
   beyondSequence: 'Authorization diagnostics: after is beyond the retained sequence.',
 } as const;
-
-/** C0/C1 control code points, described by code point to avoid a literal regex class. */
-function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /** Recursively freezes a DTO so a reader holding it observes nothing after. */
 function deepFreeze<T>(value: T): T {
@@ -119,7 +110,7 @@ function assertAlias(alias: unknown, seen: Set<string>): string {
   if (typeof alias !== 'string' || alias.length === 0 || utf8ByteLength(alias) > MAX_ALIAS_BYTES) {
     throw new Error(COLLECTOR_ERRORS.aliasBytes);
   }
-  if (hasControlCharacter(alias)) {
+  if (hasForbiddenAliasCharacter(alias)) {
     throw new Error(COLLECTOR_ERRORS.aliasControl);
   }
   if (seen.has(alias)) {
@@ -172,7 +163,7 @@ export function compileAuthorizationDiagnosticsOptions(
     if (
       typeof options.policyRevision !== 'string' || options.policyRevision.length === 0 ||
       utf8ByteLength(options.policyRevision) > MAX_ALIAS_BYTES ||
-      hasControlCharacter(options.policyRevision)
+      hasForbiddenAliasCharacter(options.policyRevision)
     ) {
       throw new Error(COLLECTOR_ERRORS.badRevision);
     }

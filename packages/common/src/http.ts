@@ -65,6 +65,25 @@ export interface IRequest {
    */
   tenant?: ITenant;
   /**
+   * The resolved locale — a BCP 47 tag from the application's supported set —
+   * populated by the localization plugin's middleware (priority 45). Absent
+   * when no localization plugin is registered, or on a path its middleware
+   * excludes.
+   *
+   * Like `tenant`, it accepts one implicit write per request; use
+   * {@linkcode replaceLocale} for an intentional replacement, such as
+   * applying a signed-in user's saved preference once authentication (300)
+   * has run. Three things to keep in mind: a reader running at a LOWER
+   * middleware priority than 45 sees `undefined` (the priority table orders
+   * them, exactly as for `tenant` at 40); a response cache keys on the value
+   * present when the cache runs, so an override must precede the cache
+   * lookup to be reflected in it; and this is a preference, never an
+   * authorization input — any client can choose any supported locale.
+   *
+   * @since 0.9.0
+   */
+  locale?: string;
+  /**
    * An abort signal that fires when the underlying HTTP connection is
    * severed (client disconnect, timeout). Populated by the HTTP adapter
    * from the native `Request.signal`; optional because injected / test

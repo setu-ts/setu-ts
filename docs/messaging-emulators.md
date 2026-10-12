@@ -36,10 +36,13 @@ permission does not authorize that lookup — the suite fails with
 resolution entirely, so `127.0.0.1:8085` needs no permission beyond the endpoint itself. This is
 invisible with `--allow-all`, which is why the standalone command above works either way.
 
-**Restart the emulator between runs.** The suite suffixes its own topics per run, but the RPC case
-uses the shared `messaging.replies` reply topic and a second consecutive run against the same
-emulator instance fails with `RequestTimeoutError: Request timed out waiting for a reply`.
-`docker restart he-pubsub` (its state is in memory) before each run.
+**Repeated runs share one emulator instance.** The suite suffixes its own topics per run, and since
+M101b a subscription with no `queue` is named per topic (`messaging-consumers.<topic>`), so a second
+consecutive run needs no restart. The restart this paragraph used to advise was masking a defect,
+not emulator statefulness: Pub/Sub subscription names are project-global, and the old single default
+`messaging-consumers` attached the second run's `rr.req.<topic>` responder to the first run's
+(deleted) topic, so its request timed out. The suite now passes twice against one instance, and
+reverting the per-topic default reproduces that timeout on the second run.
 
 **What it proves that a fake cannot:** delivery through the real gRPC streaming pull into the
 `on('message')` bridge; that a handler throw reaches the platform as a `nack` and produces a genuine

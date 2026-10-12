@@ -7,9 +7,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { Redis } from 'npm:ioredis@5.x';
+import { describe, expect, it } from 'vitest';
+import { Redis } from 'ioredis';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -25,7 +24,7 @@ import {
 
 describe('REAL Redis queue adapter: connection errors', () => {
   it('route to the logger, de-duplicated, and never to the console', {
-    ignore: REDIS_URL === undefined,
+    skip: REDIS_URL === undefined,
   }, async () => {
     const logger = new RecordingLogger();
     let app: IKernelApplication | undefined;
@@ -49,7 +48,7 @@ describe('REAL Redis queue adapter: connection errors', () => {
   });
 
   it('attaches no listener to an injected client', {
-    ignore: REDIS_URL === undefined,
+    skip: REDIS_URL === undefined,
   }, async () => {
     const client = new Redis(redisUrl(), { lazyConnect: true });
     const injected = client as unknown as NonNullable<QueuePluginOptions['client']>;

@@ -1,3 +1,4 @@
+import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * End-to-end test for generated client code against the REAL `HttpClient`.
  *
@@ -7,12 +8,14 @@
  * that generated paths are relative and correctly formatted.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createClient, HttpClientError } from '../../src/index.ts';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { createApi, isGetUserByIdError } from '../fixtures/generated-client.ts';
 import type { NotFound } from '../fixtures/generated-client.ts';
 import { createApi as createParamsApi } from '../fixtures/params-client.ts';
+import * as redirectClient from '../fixtures/redirect-client.ts';
 import type { ClientResponse } from '../../src/index.ts';
 
 function makeFetch(
@@ -25,6 +28,42 @@ function makeFetch(
 }
 
 describe('generated-client e2e', () => {
+  it('follows a real 303 and exposes only the target response', async () => {
+    const port = await nodeUnusedPort();
+
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/redirect', (ctx) => ctx.response.redirect('/target', 303));
+    app.router.get('/target', (ctx) => ctx.response.json({ followed: true }));
+    await app.start({ hostname: '127.0.0.1', port });
+    try {
+      const client = createClient({ baseUrl: `http://127.0.0.1:${port}` });
+      const response = await redirectClient.createApi(client).followRedirect();
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual({ followed: true });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('narrows an unfollowed 303 (no Location) through the generated guard', async () => {
+    const port = await nodeUnusedPort();
+
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/redirect', (ctx) => ctx.response.status(303).text('no location'));
+    await app.start({ hostname: '127.0.0.1', port });
+    try {
+      const client = createClient({ baseUrl: `http://127.0.0.1:${port}` });
+      const error = await redirectClient.createApi(client).followRedirect().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(redirectClient.isFollowRedirectError(error)).toBe(true);
+      if (redirectClient.isFollowRedirectError(error)) expect(error.status).toBe(303);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('calls a generated GET method through createClient with injected fetch', async () => {
     let lastUrl = '';
     let lastMethod = '';

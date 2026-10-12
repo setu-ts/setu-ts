@@ -1,5 +1,4 @@
-import { beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { IPrincipal } from '@setu-ts/common';
 
 import { createFakeRequestContext } from '../fixtures/fake-request-context.ts';
@@ -138,6 +137,14 @@ describe('parameter resolver', () => {
   it('@Param without name returns undefined', async () => {
     const ctx = createFakeRequestContext({ params: { id: '42' } });
     expect(await resolveParameter(ctx, { index: 0, type: 'param' })).toBeUndefined();
+  });
+
+  it('resolves an absent @Header(name) to undefined, never null', async () => {
+    // `Headers.get` answers null; the source is typed `string | undefined`, so a
+    // handler testing `!== undefined` must not see a missing header as present.
+    const ctx = createFakeRequestContext({ headers: {} });
+    expect(await resolveParameter(ctx, { index: 0, type: 'header', name: 'authorization' }))
+      .toBeUndefined();
   });
 
   it('@Header without name returns undefined', async () => {

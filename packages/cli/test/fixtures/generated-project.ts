@@ -1,3 +1,11 @@
+import {
+  denoBinary,
+  run as runProcess,
+  spawnProcess,
+  unusedPort as nodeUnusedPort,
+} from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 /**
  * Helpers for type-checking a project the CLI just scaffolded.
  *
@@ -12,7 +20,7 @@
  */
 
 /** This repository's root, three levels up from `packages/cli/test/`. */
-export const REPO_ROOT: string = new URL('../../../../', import.meta.url).pathname.replace(
+export const REPO_ROOT: string = fileURLToPath(new URL('../../../../', import.meta.url)).replace(
   /\/$/,
   '',
 );
@@ -70,7 +78,7 @@ export function workspaceEntrypoint(pkg: string): string {
  */
 export async function useWorkspacePackages(root: string): Promise<void> {
   const manifestPath = `${root}/deno.json`;
-  const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as {
+  const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
     imports?: Record<string, string>;
     compilerOptions?: Record<string, unknown>;
   };
@@ -89,7 +97,38 @@ export async function useWorkspacePackages(root: string): Promise<void> {
   manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
   // Trailing newline, or a later `deno fmt --check` on the repointed project
   // would flag the fixture's own rewrite rather than anything the CLI emitted.
-  await Deno.writeTextFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await nodeFs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await dropFrameworkDependencies(root);
+}
+
+/**
+ * Removes the framework packages from a project's `package.json`, when it has
+ * one (a Workers project, or a template with a frontend build).
+ *
+ * Deno resolves every `package.json` dependency before it type-checks, and the
+ * framework's ranges name a version npm does not carry until the release is
+ * cut. The import map rewritten above already supplies each one, so the entry
+ * here is redundant for the check and only able to fail it.
+ *
+ * @param root - The project directory
+ */
+async function dropFrameworkDependencies(root: string): Promise<void> {
+  const path = `${root}/package.json`;
+  let text: string;
+  try {
+    text = await nodeFs.readFile(path, 'utf8');
+  } catch {
+    return;
+  }
+  const manifest = JSON.parse(text) as Record<string, unknown>;
+  for (const section of ['dependencies', 'devDependencies']) {
+    const entries = manifest[section] as Record<string, string> | undefined;
+    if (entries === undefined) continue;
+    for (const name of Object.keys(entries)) {
+      if (name.startsWith('@setu-ts/')) delete entries[name];
+    }
+  }
+  await nodeFs.writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /** What a `deno check` subprocess reported. */
@@ -111,16 +150,17 @@ export async function denoCheck(
   root: string,
   files: readonly string[],
 ): Promise<CheckResult> {
-  const command = new Deno.Command(Deno.execPath(), {
-    // `--node-modules-dir=none` because a template that also emits a
-    // package.json (a frontend build) would otherwise switch Deno into
-    // node_modules resolution, and the gate must not run an npm install to
-    // type-check generated TypeScript.
-    args: ['check', '--node-modules-dir=none', '--config', `${root}/deno.json`, ...files],
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const { code, stderr } = await command.output();
+  const command = () =>
+    runProcess(denoBinary(), {
+      // `--node-modules-dir=none` because a template that also emits a
+      // package.json (a frontend build) would otherwise switch Deno into
+      // node_modules resolution, and the gate must not run an npm install to
+      // type-check generated TypeScript.
+      args: ['check', '--node-modules-dir=none', '--config', `${root}/deno.json`, ...files],
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+  const { code, stderr } = await command();
   return { code, stderr: new TextDecoder().decode(stderr) };
 }
 
@@ -140,9 +180,9 @@ export async function denoCheck(
  */
 export async function collectSources(dir: string): Promise<string[]> {
   const found: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of await nodeFs.opendir(dir)) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       found.push(...(await collectSources(path)));
     } else if (entry.name.endsWith('.ts')) {
       found.push(path);
@@ -161,12 +201,8 @@ export async function collectSources(dir: string): Promise<string[]> {
  *
  * @returns A free TCP port
  */
-export function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
+export function unusedPort(): Promise<number> {
+  return nodeUnusedPort();
 }
 
 /** How a booted project ended after it was signalled. */
@@ -206,18 +242,18 @@ export interface SignalOutcome {
  */
 export async function bootAndSignal(
   project: string,
-  signal: Deno.Signal,
+  signal: NodeJS.Signals,
 ): Promise<SignalOutcome> {
-  const port = unusedPort();
+  const port = await unusedPort();
   const entry = `${project}/main.ts`;
 
-  const child = new Deno.Command(Deno.execPath(), {
+  const child = spawnProcess(denoBinary(), {
     args: ['run', '-A', '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
     cwd: project,
     env: { PORT: String(port) },
     stdout: 'piped',
     stderr: 'piped',
-  }).spawn();
+  });
 
   let served = false;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -277,21 +313,22 @@ export async function bootAndProbe(
   project: string,
   probe: string,
 ): Promise<Record<string, unknown>> {
-  await Deno.writeTextFile(`${project}/run-probe.ts`, probe);
-  const command = new Deno.Command(Deno.execPath(), {
-    args: [
-      'run',
-      '-A',
-      '--node-modules-dir=none',
-      '--config',
-      `${project}/deno.json`,
-      `${project}/run-probe.ts`,
-    ],
-    cwd: project,
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const { code, stdout, stderr } = await command.output();
+  await nodeFs.writeFile(`${project}/run-probe.ts`, probe);
+  const command = () =>
+    runProcess(denoBinary(), {
+      args: [
+        'run',
+        '-A',
+        '--node-modules-dir=none',
+        '--config',
+        `${project}/deno.json`,
+        `${project}/run-probe.ts`,
+      ],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+  const { code, stdout, stderr } = await command();
   const out = new TextDecoder().decode(stdout);
   if (code !== 0) {
     throw new Error(`probe exited ${code}\n${new TextDecoder().decode(stderr)}`);
@@ -334,8 +371,9 @@ export interface ProbeOutcome {
 export async function withGeneratedServer<T>(
   project: string,
   drive: (origin: string) => Promise<T>,
+  workspacePort?: number,
 ): Promise<{ readonly result: T; readonly output: string }> {
-  const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
+  const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
     tasks?: Record<string, string>;
   };
   const start = manifest.tasks?.['start'];
@@ -350,10 +388,10 @@ export async function withGeneratedServer<T>(
   // boots a file the CLI never emitted. It also proves `--allow-env` is in the
   // generated permission set: without it this boot fails with NotCapable
   // rather than silently binding a default.
-  const port = unusedPort();
+  const port = workspacePort ?? await unusedPort();
   const entry = `${project}/main.ts`;
 
-  const child = new Deno.Command(Deno.execPath(), {
+  const child = spawnProcess(denoBinary(), {
     args: [
       'run',
       ...flags,
@@ -366,7 +404,7 @@ export async function withGeneratedServer<T>(
     env: { PORT: String(port) },
     stdout: 'piped',
     stderr: 'piped',
-  }).spawn();
+  });
 
   const origin = `http://127.0.0.1:${port}`;
   let served = false;

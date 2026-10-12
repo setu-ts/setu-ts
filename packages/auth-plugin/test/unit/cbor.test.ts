@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   decodeCbor,
@@ -119,4 +118,10 @@ describe('decodeCbor', () => {
     expect(second.ok && second.value).toBe(1);
     expect(second.ok && second.bytesRead).toBe(1);
   });
+});
+
+it('refuses malformed members within definite arrays and maps', () => {
+  for (const bytes of ['1c', '8218', '81f6', 'a1f600', 'a100f6']) {
+    expect(decodeCbor(hex(bytes)).ok).toBe(false);
+  }
 });

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   contextToTraceparent,
   extractContextFromHeaders,
@@ -8,6 +7,7 @@ import {
   TRACEPARENT_HEADER,
   TRACESTATE_HEADER,
 } from '../../src/index.ts';
+import type { SpanContext, TraceparentSource } from '../../src/index.ts';
 
 describe('W3C trace context codec', () => {
   it('round-trips a valid traceparent', () => {
@@ -15,6 +15,18 @@ describe('W3C trace context codec', () => {
       '00-0123456789abcdef0123456789abcdef-0123456789abcdef-01',
     );
     expect(contextToTraceparent(context)).toBe(
+      '00-0123456789abcdef0123456789abcdef-0123456789abcdef-01',
+    );
+  });
+
+  it('formats the span-context shape without an opaque marker', () => {
+    const span: SpanContext = {
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: '01',
+    };
+    const source: TraceparentSource = span;
+    expect(contextToTraceparent(source)).toBe(
       '00-0123456789abcdef0123456789abcdef-0123456789abcdef-01',
     );
   });

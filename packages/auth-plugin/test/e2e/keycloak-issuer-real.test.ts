@@ -7,15 +7,14 @@
  * RSA encryption key beside the signing key.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { AuthPlugin, requireAuth } from '../../src/index.ts';
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
 
-const BASE = Deno.env.get('KEYCLOAK_URL');
+const BASE = process.env['KEYCLOAK_URL'];
 const REALM = `${BASE}/realms/setu`;
 
 async function clientToken(clientId: string, secret: string): Promise<string> {
@@ -82,7 +81,7 @@ async function me(app: IKernelApplication, token: string) {
   });
 }
 
-describe('Keycloak issuer (real)', { ignore: BASE === undefined }, () => {
+describe('Keycloak issuer (real)', { skip: BASE === undefined }, () => {
   it('authenticates a client-credentials token for the configured audience', async () => {
     const app = await buildApp();
     try {

@@ -1,6 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
+import { describe, expect, it } from 'vitest';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
-import { expect } from '@std/expect';
 import { resolveHost } from '../../../src/templates/project-files.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
@@ -111,7 +110,12 @@ describe('withWorkspaceMember — the transport overlay', () => {
   // duplicate plugin name at start() — so a broker REWRITES that wiring. A
   // second registration would scaffold a member that type-checks and cannot boot.
   it('rewrites the template messaging wiring rather than adding a second one', () => {
-    const member = withWorkspaceMember(hostOf('microservice'), transportSpec('redis'), 'orders');
+    const member = withWorkspaceMember(
+      hostOf('microservice'),
+      transportSpec('redis'),
+      'orders',
+      workspaceProfile('deno'),
+    );
     const messaging = member.plugins.filter((p) => p.pkg === 'messaging-plugin');
     expect(messaging).toHaveLength(1);
     // An environment read with the local address as its FALLBACK, not a literal:
@@ -130,7 +134,12 @@ describe('withWorkspaceMember — the transport overlay', () => {
     // X2-3: `--transport rabbitmq` rewrote the broker and left `QueuePlugin()`
     // on memory, so background jobs in the one template built for distributed
     // work were process-local — lost on restart and invisible to a replica.
-    const member = withWorkspaceMember(hostOf('microservice'), transportSpec('redis'), 'orders');
+    const member = withWorkspaceMember(
+      hostOf('microservice'),
+      transportSpec('redis'),
+      'orders',
+      workspaceProfile('deno'),
+    );
     const queue = member.plugins.filter((p) => p.pkg === 'queue-plugin');
 
     expect(queue).toHaveLength(1);

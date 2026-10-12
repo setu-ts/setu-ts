@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-console
 /**
  * Unit test: `ConsoleLogger` normalizes a raw `Error` in metadata before
  * emission (X2-5), so it renders its `message` and `stack` rather than `{}`;
@@ -6,9 +7,7 @@
  *
  * @module
  */
-// deno-lint-ignore-file no-console
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

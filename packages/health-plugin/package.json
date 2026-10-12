@@ -1,0 +1,48 @@
+{
+  "name": "@setu-ts/health-plugin",
+  "version": "0.9.0",
+  "description": "Health, liveness, and readiness probes with pluggable indicators",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/health-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/health-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

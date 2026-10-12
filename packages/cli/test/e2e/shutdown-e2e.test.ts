@@ -1,3 +1,5 @@
+import { tempDir } from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The graceful-shutdown gate: scaffolds a project, boots it, and stops it the way
  * a container runtime does.
@@ -17,14 +19,13 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { bootAndSignal, useWorkspacePackages } from '../fixtures/generated-project.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /**
@@ -59,12 +60,12 @@ describe('generated entry — graceful shutdown', () => {
   const logs: string[] = [];
 
   beforeEach(async () => {
-    root = await Deno.makeTempDir({ prefix: 'setu-shutdown-' });
+    root = await tempDir({ prefix: 'setu-shutdown-' });
     logs.length = 0;
   });
 
   afterEach(async () => {
-    await Deno.remove(root, { recursive: true });
+    await nodeFs.rm(root, { recursive: true });
   });
 
   /**
@@ -85,10 +86,10 @@ describe('generated entry — graceful shutdown', () => {
 
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     it(`runs the shutdown hooks and exits 0 on ${signal}`, async () => {
-      expect(await run(['new', 'svc'])).toBe(0);
+      expect(await run(['new', 'svc', '--runtime', 'deno'])).toBe(0);
       const project = `${root}/svc`;
       await useWorkspacePackages(project);
-      await Deno.writeTextFile(`${project}/src/plugins/index.ts`, SHUTDOWN_PROBE_BARREL);
+      await nodeFs.writeFile(`${project}/src/plugins/index.ts`, SHUTDOWN_PROBE_BARREL);
 
       const outcome = await bootAndSignal(project, signal);
 

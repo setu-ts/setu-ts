@@ -4,8 +4,7 @@
  * gRPC, and 503 is returned during drain.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

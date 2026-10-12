@@ -4,9 +4,8 @@
  * @module
  */
 import type { IRequestContext, ITenant, ITenantRepository } from '@setu-ts/common';
-import type { IMultiTenancyService } from '@setu-ts/common';
-import type { ITenantDataStore } from '../interfaces/index.ts';
-import { TenantNotResolvedError } from '../errors.ts';
+import type { IMultiTenancyService, ITenantDataStore } from '@setu-ts/common';
+import { TenantDataStoreNotReadyError, TenantNotResolvedError } from '../errors.ts';
 import { TenantRepository } from '../repositories/tenant-repository.ts';
 
 /**
@@ -17,14 +16,39 @@ const DEFAULT_SEPARATOR = ':';
 /**
  * Implements `IMultiTenancyService`: current-tenant lookup, repository
  * factory, and cache-key prefixing.
+ *
+ * The store is late-bound (M101c, V8-8): when the plugin's `dataStore` option
+ * is a `RegistryFactory`, the service is constructed with no store and the
+ * resolved one is handed to {@linkcode bindStore} from the plugin's `onInit`
+ * hook. A repository request before that point throws
+ * {@linkcode TenantDataStoreNotReadyError} — unreachable on the HTTP path
+ * (every `register()` phase completes before any `onInit`, and the tenant
+ * middleware runs per request), reachable only from a `register()`-time call,
+ * which is a misuse worth naming.
  */
 export class MultiTenancyService implements IMultiTenancyService {
-  private readonly store: ITenantDataStore;
+  private store: ITenantDataStore | null;
   private readonly separator: string;
 
-  constructor(options: { store: ITenantDataStore; separator?: string }) {
-    this.store = options.store;
+  constructor(options: { store?: ITenantDataStore; separator?: string }) {
+    this.store = options.store ?? null;
     this.separator = options.separator ?? DEFAULT_SEPARATOR;
+  }
+
+  /**
+   * Hands the resolved store to the service, from the plugin's `onInit` hook
+   * when the `dataStore` option was a factory (M101c, V8-8).
+   */
+  bindStore(store: ITenantDataStore): void {
+    this.store = store;
+  }
+
+  /** The bound store; throws when it is not bound yet. */
+  private requireStore(): ITenantDataStore {
+    if (this.store === null) {
+      throw new TenantDataStoreNotReadyError();
+    }
+    return this.store;
   }
 
   /** Return the tenant resolved for this request context, or `undefined`. */
@@ -46,7 +70,7 @@ export class MultiTenancyService implements IMultiTenancyService {
         'Tenant not resolved: set ctx.request.tenant via middleware, or call getRepository only after resolution.',
       );
     }
-    return new TenantRepository<Entity, Id>(this.store, tenant.id, entity);
+    return new TenantRepository<Entity, Id>(this.requireStore(), tenant.id, entity);
   }
 
   /**
@@ -59,7 +83,7 @@ export class MultiTenancyService implements IMultiTenancyService {
     tenantId: string,
     entity: string,
   ): ITenantRepository<Entity, Id> {
-    return new TenantRepository<Entity, Id>(this.store, tenantId, entity);
+    return new TenantRepository<Entity, Id>(this.requireStore(), tenantId, entity);
   }
 
   /**

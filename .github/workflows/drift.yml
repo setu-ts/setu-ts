@@ -32,6 +32,7 @@ jobs:
     # `test/unit/release-notes.test.ts`, which reads what this job must declare
     # out of ci.yml rather than from a hand-written list.
     env:
+      # Includes guarded messaging Redis Streams restart/redelivery tests.
       REDIS_URL: redis://localhost:6379
       SQS_ENDPOINT_URL: http://localhost:9324
       SQS_REGION: us-east-1
@@ -51,6 +52,8 @@ jobs:
       # this exact endpoint, which is also the host:port the package manifest's
       # net grant scopes.
       DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+      # M109b within-real uses this separate guard for the same emulator.
+      DYNAMODB_ENDPOINT_URL: http://127.0.0.1:8000
       # M82 §3.13: the real-emulator Bigtable suite (database-plugin) guards on
       # this exact endpoint, which is also the host:port the package manifest's
       # net grant scopes. `127.0.0.1` rather than `localhost` deliberately: the
@@ -66,7 +69,30 @@ jobs:
       # package manifest's net grant scopes. Started by the steps below.
       NATS_URL: nats://127.0.0.1:4222
       KAFKA_BROKERS: 127.0.0.1:9092
+      # M107 §6 (C8): the outbox real-backend suites (messaging-plugin) guard on
+      # these. `OUTBOX_POSTGRES_URL` is a DISTINCT variable from the bare one
+      # so the database-plugin live-Postgres cells (which need a generated Prisma
+      # client) keep ignoring here. Port 5433, not 5432: it is the port
+      # database-plugin's net grant already names, and the one the local
+      # backend runs on. `MONGODB_RS_URI` is a single-node REPLICA SET on its own
+      # port — the `mongo` service below is standalone, and a standalone server
+      # refuses transactions, which the outbox needs.
+      OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
+      MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true
     services:
+      # M107 §6 (C8): PostgreSQL for the outbox real-backend suites, on host port
+      # 5433 (see OUTBOX_POSTGRES_URL above).
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 127.0.0.1:5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
       mongo:
         image: mongo:8
         ports:
@@ -163,14 +189,47 @@ jobs:
           # deliberately resolves EVERY range fresh (`--reload --frozen=false`)
           # and then runs the whole suite against whatever upstream published
           # this week — unreviewed third-party code, by design. It needs no git
-          # credential: its only git command is a local `git ls-files`, and the
-          # issue-filing step gets its token explicitly through GH_TOKEN rather
-          # than from the git config.
+          # credential: every git command it runs is a LOCAL read (`git
+          # ls-files` here, and the suite's `git describe`/`git log` below), and
+          # the issue-filing step gets its token explicitly through GH_TOKEN
+          # rather than from the git config.
           persist-credentials: false
+          # The suite runs `release:verify`, whose check 9 lists the pull
+          # requests merged since the previous `v*` tag. A shallow checkout has
+          # no tag, so that check refused with "No release tag is reachable" and
+          # filed issue #413 as dependency drift when nothing had drifted. ci.yml
+          # and release.yml already fetch full history for the same check;
+          # `test/unit/release-notes.test.ts` now asserts every suite consumer
+          # does. The fetch happens during checkout, while the credential is
+          # still held, so dropping it above costs nothing here.
+          fetch-depth: 0
 
       - uses: denoland/setup-deno@v2
         with:
           deno-version: 2.9.6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+
+      # The package suites run on Node since M111b, so they must see this week's
+      # resolution too: installing the committed pnpm-lock.yaml would test the
+      # locked versions and report a drifted ioredis, amqplib, kafkajs, mongodb
+      # or AWS SDK as a green `test` row. The committed lock is kept for the
+      # report's comparison, then removed so pnpm resolves every declared range
+      # fresh. Like the backend steps below it carries continue-on-error, so a
+      # failed resolution reaches the report instead of skipping it.
+      - name: Resolve Node test dependencies fresh
+        id: node-resolve
+        continue-on-error: true
+        run: |
+          cp pnpm-lock.yaml "$RUNNER_TEMP/pnpm-lock.committed.yaml"
+          rm pnpm-lock.yaml
+          pnpm install --no-frozen-lockfile
 
       # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
       # KEYCLOAK_URL. A step rather than a `services:` container because the
@@ -196,7 +255,7 @@ jobs:
           docker logs keycloak
           exit 1
 
-      # The four backends that cannot be `services:` containers, because each
+      # The backends that cannot be `services:` containers, because each
       # needs a command or an argument and `options` reaches `docker create`
       # BEFORE the image while the command comes after it. ci.yml carries the
       # reasoning per backend; these are byte-identical to its steps, which the
@@ -261,6 +320,39 @@ jobs:
           done
           echo 'kafka did not become ready'
           docker logs m90d-kafka
+          exit 1
+
+      # M107 §6 (C8): a single-node MongoDB REPLICA SET for the outbox suites.
+      # It cannot be the `mongo` service: `--replSet` is a command-line flag a
+      # service block cannot pass (`options` reaches `docker create` before the
+      # image), and that service must stay standalone, because the outbox's
+      # startup refusal of a standalone server is itself under test. Its own
+      # port, so both run side by side. Readiness means a PRIMARY exists, not an
+      # open port: transactions are refused until the member is elected.
+      - name: Start a MongoDB replica set (outbox suites)
+        continue-on-error: true
+        run: |
+          docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8 \
+            --replSet rs0 --port 27018 --bind_ip_all
+          for _ in $(seq 1 60); do
+            if docker exec mongo-rs mongosh --port 27018 --quiet \
+              --eval 'db.runCommand({ ping: 1 }).ok' > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec mongo-rs mongosh --port 27018 --quiet --eval \
+            "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27018' }] })"
+          for _ in $(seq 1 60); do
+            if docker exec mongo-rs mongosh --port 27018 --quiet \
+              --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q true; then
+              echo 'mongodb replica set ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'mongodb replica set did not elect a primary'
+          docker logs mongo-rs
           exit 1
 
       - name: Start MinIO (S3 storage outage suite)
@@ -381,7 +473,11 @@ jobs:
         id: test
         if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        run: deno task test --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
+        run: |
+          node scripts/codemods/std-to-vitest.ts --check
+          pnpm test:coverage
+          deno task test:deno-lane --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
+          deno task test:coverage --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
 
       - name: Attribute drift and summarize gates
         id: report
@@ -392,6 +488,7 @@ jobs:
           LINT_OUTCOME: ${{ steps.lint.outcome }}
           CHECK_OUTCOME: ${{ steps.check.outcome }}
           TEST_OUTCOME: ${{ steps.test.outcome }}
+          NODE_RESOLUTION_OUTCOME: ${{ steps.node-resolve.outcome }}
         run: |
           report="$RUNNER_TEMP/dependency-drift.md"
           if [ "$RESOLUTION_OUTCOME" = success ]; then
@@ -400,14 +497,35 @@ jobs:
             printf '%s\n' '## Dependency drift' '' \
               'Fresh resolution failed before the gates could run. The resolve step emits an error annotation naming the owning workspace package and source file.' > "$report"
           fi
+          # The Node side of the same question: every resolved `name@version`
+          # key (packages and snapshots) the fresh pnpm lock added or dropped
+          # against the committed one. Rows start with "| `" so they raise the
+          # issue exactly as the Deno table's rows do.
+          if [ "$NODE_RESOLUTION_OUTCOME" = success ]; then
+            keys() { sed -n "s/^  '\{0,1\}\([^ ']*@[0-9][^ ']*\)'\{0,1\}:\$/\1/p" "$1" | sort -u; }
+            keys "$RUNNER_TEMP/pnpm-lock.committed.yaml" > "$RUNNER_TEMP/pnpm-keys.committed"
+            keys pnpm-lock.yaml > "$RUNNER_TEMP/pnpm-keys.fresh"
+            {
+              printf '%s\n' '' '## Node dependency drift (pnpm)' ''
+              if cmp -s "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh"; then
+                echo 'The fresh pnpm resolution matches the committed pnpm-lock.yaml.'
+              else
+                printf '%s\n' '| Resolution | Change |' '| --- | --- |'
+                comm -23 "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh" | sed 's/.*/| `&` | removed |/'
+                comm -13 "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh" | sed 's/.*/| `&` | added |/'
+              fi
+            } >> "$report"
+          fi
           printf '%s\n' '' '## Fresh-resolution gates' '' \
             '| Gate | Result |' '| --- | --- |' \
             "| resolve | $RESOLUTION_OUTCOME |" \
+            "| node-resolve | $NODE_RESOLUTION_OUTCOME |" \
             "| fmt | $FORMAT_OUTCOME |" \
             "| lint | $LINT_OUTCOME |" \
             "| check | $CHECK_OUTCOME |" \
             "| test | $TEST_OUTCOME |" >> "$report"
           if grep -q '^| `' "$report" || [ "$RESOLUTION_OUTCOME" != success ] || \
+            [ "$NODE_RESOLUTION_OUTCOME" != success ] || \
             [ "$FORMAT_OUTCOME" = failure ] || [ "$LINT_OUTCOME" = failure ] || \
             [ "$CHECK_OUTCOME" = failure ] || [ "$TEST_OUTCOME" = failure ]; then
             echo 'action_required=true' >> "$GITHUB_OUTPUT"

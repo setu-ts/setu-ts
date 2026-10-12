@@ -1,51 +1,130 @@
 /**
- * The `setu` executable entry point.
+ * The `setu` process boundary on Node.
  *
- * This is the one module that owns the process boundary: `Deno.args`,
- * `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`.
- * Everything else takes those as injected dependencies and is therefore
- * testable without terminating the test runner.
+ * {@linkcode runMain} owns everything a run needs from its host and returns the
+ * exit code; {@linkcode nodeProcess} is the real host. The executable entry,
+ * `src/bin.ts`, joins the two, and is the only module that runs on load.
  *
  * @module
  */
 
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import process from 'node:process';
+import { createServer } from 'node:net';
+import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from './cli.ts';
 import { EXIT_ERROR } from './constants.ts';
 import { createTerminalPrompter } from './prompt.ts';
+import { createLineReader } from './terminal-line.ts';
 
-const runtime = createDenoRuntimeServices();
-
-if (runtime.fs === undefined) {
-  console.error('setu requires filesystem access. Re-run with --allow-read --allow-write.');
-  Deno.exit(EXIT_ERROR);
+/** @ignore Runtime capabilities used by the executable boundary. */
+export interface MainRuntime {
+  readonly fs?: IFileSystem;
+  readonly now: () => number;
+  readonly onSignal?: (signal: 'SIGINT', handler: () => void) => void;
 }
 
-// Prompting is supplied ONLY behind isTerminal(): a human's non-interactive
-// shell, CI, and every script fall through to the documented defaults rather
-// than being asked anything. This is the SECOND line of defense — the primary
-// guarantee is that `ask` is optional and no programmatic caller passes it, and
-// the third is `prompt()`'s own measured null return on a non-terminal.
-const prompter = Deno.stdin.isTerminal()
-  ? createTerminalPrompter(() => Deno.stdin.isTerminal(), prompt, console.log)
-  : undefined;
+/** @ignore Host process operations used by the executable boundary. */
+export interface MainProcess {
+  readonly args: readonly string[];
+  readonly cwd: () => string;
+  readonly isTerminal: () => boolean;
+  /**
+   * Reads one answer, resolving `null` when there is none — EOF, an
+   * interrupt, or the signal aborting first.
+   */
+  readonly prompt: (message: string, signal?: AbortSignal) => Promise<string | null>;
+  readonly log: (message: string) => void;
+  readonly error: (message: string) => void;
+  readonly portAvailable: (port: number) => Promise<boolean>;
+  /** Releases anything the host opened for the run (the terminal reader). */
+  readonly dispose?: () => void;
+}
 
-Deno.exit(
-  await runCli(Deno.args, {
-    fs: runtime.fs,
-    cwd: Deno.cwd(),
-    now: () => runtime.now(),
+/** @ignore Runs the CLI boundary and returns the code the host should exit with. */
+export async function runMain(runtime: MainRuntime, host: MainProcess): Promise<number> {
+  const interruption = new AbortController();
+  runtime.onSignal?.('SIGINT', () => interruption.abort());
+
+  if (runtime.fs === undefined) {
+    host.error('setu requires filesystem access.');
+    return EXIT_ERROR;
+  }
+
+  const prompter = host.isTerminal()
+    ? createTerminalPrompter(host.isTerminal, host.prompt, host.log, interruption.signal)
+    : undefined;
+
+  try {
+    return await runCli(host.args, {
+      fs: runtime.fs,
+      cwd: host.cwd(),
+      now: runtime.now,
+      log: host.log,
+      error: host.error,
+      interrupt: interruption.signal,
+      ...(prompter === undefined ? {} : { ask: prompter }),
+      portAvailable: host.portAvailable,
+    });
+  } finally {
+    host.dispose?.();
+  }
+}
+
+/**
+ * @ignore Builds the real Node process adapter used by the executable.
+ *
+ * A Ctrl+C typed at a question arrives inside `readline` as a keystroke, not as
+ * a process signal, so it is delivered as one: emitting the `SIGINT` EVENT runs
+ * the handler {@linkcode runMain} registered, which aborts the run exactly as an
+ * outside signal would, so there is one interrupt path rather than two. It is
+ * an event, never `process.kill`: a real signal terminates the process outright
+ * on Windows, and on any platform where no handler was registered.
+ *
+ * @param onInterrupt - Replaces the event; for tests
+ */
+export function nodeProcess(onInterrupt: () => void = emitInterrupt): MainProcess {
+  const reader = createLineReader({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: process.stdin.isTTY === true,
+    onInterrupt,
+  });
+  return {
+    args: process.argv.slice(2),
+    cwd: () => process.cwd(),
+    isTerminal: () => process.stdin.isTTY === true,
+    prompt: (message, signal) => reader.read(message, signal),
     log: (message) => console.log(message),
     error: (message) => console.error(message),
-    ...(prompter === undefined ? {} : { ask: prompter }),
-    portAvailable: (port: number): Promise<boolean> => {
-      try {
-        const listener = Deno.listen({ hostname: '127.0.0.1', port });
-        listener.close();
-        return Promise.resolve(true);
-      } catch {
-        return Promise.resolve(false);
-      }
-    },
-  }),
-);
+    portAvailable: (port) => portIsFree(port),
+    dispose: () => reader.close(),
+  };
+}
+
+/**
+ * @ignore Delivers an interrupt to this process's `SIGINT` handlers as an event.
+ *
+ * Never a real signal: `process.kill(process.pid, 'SIGINT')` terminates the
+ * process outright on Windows, and on any platform where no handler was
+ * registered, before output drains or cleanup runs.
+ */
+export function emitInterrupt(): void {
+  process.emit('SIGINT', 'SIGINT');
+}
+
+/** Whether nothing is listening on a loopback port, decided by binding it. */
+function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(false));
+    try {
+      server.listen({ host: '127.0.0.1', port }, () => {
+        server.close(() => resolve(true));
+      });
+    } catch {
+      // An out-of-range port throws synchronously rather than emitting
+      // `'error'`; it is not a port anything can bind either.
+      resolve(false);
+    }
+  });
+}

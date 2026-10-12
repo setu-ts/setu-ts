@@ -8,8 +8,7 @@
  * merely by being loaded and every other test imports concrete modules
  * (the M56 defect class).
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import * as barrel from '../../src/index.ts';
 

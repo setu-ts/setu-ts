@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
 import { PROGRAM_NAME, TARGET_RUNTIMES } from '../../src/constants.ts';

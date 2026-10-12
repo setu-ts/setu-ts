@@ -1,8 +1,7 @@
 /** Tests for the broker string-sink diagnostic renderer. @module */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
-import { describeError } from '../../src/brokers/describe-error.ts';
+import { describeError, describeLogText } from '../../src/brokers/describe-error.ts';
 
 describe('describeError', () => {
   it('renders aggregate members, classifiers, and a cause chain in one line', () => {
@@ -138,3 +137,18 @@ const STAGES = [
   '[1 aggregate error(s) omitted]',
   '<- Error: c',
 ] as const;
+
+describe('describeLogText', () => {
+  // Driven directly: the RabbitMQ dead-letter log line that used to reach the
+  // budget is now bounded by AMQP's 255-byte names (M106 audit O5), so no
+  // in-package caller exceeds it any more.
+  it('truncates a line over the budget at 8192 characters with the marker', () => {
+    const line = describeLogText('x'.repeat(10_000));
+    expect([...line].length).toBeLessThanOrEqual(8192);
+    expect(line).toMatch(/… \[truncated\]$/u);
+  });
+
+  it('leaves a line within the budget unmarked', () => {
+    expect(describeLogText('short line')).toBe('short line');
+  });
+});

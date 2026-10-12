@@ -179,6 +179,7 @@ describe('Documentation snippet validation — guide content invariants', () => 
     'docs/programmatic-api.md',
     'docs/custom-plugins.md',
     'docs/plugin-architecture.md',
+    'docs/how-it-fits-together.md',
     'docs/examples.md',
     'docs/decorators.md',
     'docs/runtime-deployment.md',

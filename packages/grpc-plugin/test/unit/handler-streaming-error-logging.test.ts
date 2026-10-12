@@ -25,8 +25,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { buildConnectRouter } from '../../src/transports/connect-router-builder.ts';
 import {
   createFakeConnectRuntime,
@@ -615,4 +614,24 @@ describe('gRPC handler wrapper — callable thenables and throwing `then` getter
     expect(errors[0].metadata?.procedure).toBe('example.Stream/serverStream');
     expect(errors[0].metadata?.message).toBe('then getter threw');
   });
+});
+
+it('supplies iterator cancellation fallbacks when the producer has no cleanup methods', async () => {
+  const { logger, errors } = makeCapturingLogger();
+  const runtime = buildStreamService({
+    serverStream: () => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.resolve({ done: true, value: undefined }),
+      }),
+    }),
+    bidiStream: 42,
+  }, () => logger);
+  const implementation = runtime.registered[0]!.implementation;
+  const stream = (implementation['serverStream'] as () => AsyncIterable<unknown>)();
+  const iterator = stream[Symbol.asyncIterator]();
+  expect(await iterator.return!()).toEqual({ done: true, value: undefined });
+  const error = new Error('consumer refusal');
+  await expect(iterator.throw!(error)).rejects.toBe(error);
+  expect(errors).toHaveLength(1);
+  expect(implementation['bidiStream']).toBe(42);
 });

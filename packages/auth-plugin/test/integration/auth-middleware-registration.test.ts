@@ -2,8 +2,7 @@
  * AuthPlugin middleware composition through a real kernel application.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HandlerResult, IPlugin, IPluginContext, IRequestContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

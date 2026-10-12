@@ -1,3 +1,10 @@
+import {
+  denoBinary,
+  run as runProcess,
+  spawnProcess,
+  tempDir,
+} from '../../../../test/node-helpers.ts';
+import * as nodeFs from 'node:fs/promises';
 /**
  * The end-to-end gate for the devtool opt-in.
  *
@@ -13,28 +20,32 @@
  * @module
  */
 
-import { afterEach, beforeEach, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
-import type { IFileSystem } from '@setu-ts/common';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
+import type {
+  CacheDiagnosticsResponse,
+  HealthDiagnosticsSnapshot,
+  IFileSystem,
+} from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
   unusedPort,
   useWorkspacePackages,
   workspaceEntrypoint,
 } from '../fixtures/generated-project.ts';
+import { VERSION } from '../../src/version.ts';
 
-const runtime = createDenoRuntimeServices();
+const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 let root = '';
 
 beforeEach(async () => {
-  root = await Deno.makeTempDir({ prefix: 'setu-devtool-e2e-' });
+  root = await tempDir({ prefix: 'setu-devtool-e2e-' });
 });
 
 afterEach(async () => {
-  await Deno.remove(root, { recursive: true }).catch(() => {});
+  await nodeFs.rm(root, { recursive: true }).catch(() => {});
 });
 
 /** Runs the CLI with the temp root as its working directory. */
@@ -53,18 +64,23 @@ async function denoRun(
   cwd: string,
   args: readonly string[],
   env: Record<string, string> = {},
-): Promise<{ code: number; output: string }> {
-  const command = new Deno.Command(Deno.execPath(), {
-    args: [...args],
-    cwd,
-    env,
-    stdin: 'null',
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const { code, stdout, stderr } = await command.output();
+): Promise<{ code: number; output: string; stdout: string }> {
+  const command = () =>
+    runProcess(denoBinary(), {
+      args: [...args],
+      cwd,
+      env,
+      stdin: 'null',
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+  const { code, stdout, stderr } = await command();
   const decoder = new TextDecoder();
-  return { code, output: `${decoder.decode(stdout)}${decoder.decode(stderr)}` };
+  return {
+    code,
+    stdout: decoder.decode(stdout),
+    output: `${decoder.decode(stdout)}${decoder.decode(stderr)}`,
+  };
 }
 
 /** A fresh valid credential pair, shaped exactly as the launcher would hand it over. */
@@ -132,14 +148,14 @@ async function bootDev(
   appPort: number,
   env: Record<string, string>,
 ): Promise<Booted> {
-  const child = new Deno.Command(Deno.execPath(), {
+  const child = spawnProcess(denoBinary(), {
     args: ['task', 'dev'],
     cwd: project,
     env: { PORT: String(appPort), ...env },
     stdin: 'null',
     stdout: 'piped',
     stderr: 'piped',
-  }).spawn();
+  });
   let exited = false;
   const exiting = child.status.then(() => {
     exited = true;
@@ -185,13 +201,236 @@ async function bootDev(
 }
 
 describe('a scaffolded devtool project, driven end to end', () => {
+  it('generates ready health/cache sources for dev while production keeps both disabled', async () => {
+    const devtoolPort = await unusedPort();
+    const appPort = await unusedPort();
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'sources',
+        '--template',
+        'rest',
+        '--devtool',
+        '--devtool-port',
+        String(devtoolPort),
+      ]),
+    ).toBe(0);
+    const project = `${root}/sources`;
+    expect(await run(['add', 'cache'], project)).toBe(0);
+    await useWorkspacePackages(project);
+    const formatted = await denoRun(project, ['fmt', '--check']);
+    expect(formatted.code, formatted.output).toBe(0);
+    const configPath = `${project}/setu.config.ts`;
+    const config = "import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';\n" +
+      (await nodeFs.readFile(configPath, 'utf8')).replace(
+        '  return app;',
+        `  app.router.get('/cache-probe', async (ctx) => {
+    const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
+    await cache.set('probe', 'value');
+    await cache.get('probe');
+    return ctx.response.json({ ok: true });
+  });
+  return app;`,
+      );
+    await nodeFs.writeFile(configPath, config);
+    const probe =
+      `import { CAPABILITIES, type ICacheDiagnosticsSource, type IHealthDiagnosticsSource } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+const app = createApp();
+await app.start();
+try {
+  const health = app.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS).snapshot('production-probe');
+  const cache = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS).map((source) => source.snapshot());
+  console.log(JSON.stringify({ health: health.state, cache: cache.map((source) => source.state) }));
+} finally { await app.stop(); }
+`;
+    await nodeFs.writeFile(`${project}/production-probe.ts`, probe);
+    const production = await denoRun(project, ['run', '-A', 'production-probe.ts']);
+    expect(production.code, production.output).toBe(0);
+    expect(production.stdout).toContain('"health":"disabled"');
+    expect(production.stdout).toContain('"cache":["disabled"]');
+    try {
+      await nodeFs.writeFile(
+        configPath,
+        config.replace('devtool === undefined ? {} : DEVTOOL_SOURCES', 'DEVTOOL_SOURCES'),
+      );
+      const broken = await denoRun(project, ['run', '-A', 'production-probe.ts']);
+      expect(broken.code, broken.output).toBe(0);
+      expect(broken.stdout).not.toContain('"health":"disabled"');
+      expect(broken.stdout).not.toContain('"cache":["disabled"]');
+    } finally {
+      await nodeFs.writeFile(configPath, config);
+    }
+    const checked = await denoRun(project, ['task', 'check']);
+    expect(checked.code, checked.output).toBe(0);
+    const credentials_ = credentials();
+    const booted = await bootDev(project, appPort, credentials_.env);
+    try {
+      await nodeFs.writeFile(
+        `${project}/source-driver.ts`,
+        DRIVER.replace(
+          'const snapshot = await client.snapshot();',
+          `await fetch(\`http://127.0.0.1:\${appPort}/health\`);
+await fetch(\`http://127.0.0.1:\${appPort}/cache-probe\`);
+const health = await client.health();
+const cache = await client.cache();
+console.log('__SOURCES__' + JSON.stringify({ health, cache }));
+const snapshot = await client.snapshot();`,
+        ),
+      );
+      const driven = await denoRun(project, [
+        'run',
+        '--allow-net',
+        'source-driver.ts',
+        String(devtoolPort),
+        String(appPort),
+        credentials_.sessionId,
+        credentials_.sessionKey,
+      ]);
+      expect(driven.code, driven.output).toBe(0);
+      const reportLine = driven.stdout.split('\n').find((line) => line.startsWith('__SOURCES__'))!;
+      const report = JSON.parse(reportLine.slice('__SOURCES__'.length)) as {
+        health: HealthDiagnosticsSnapshot;
+        cache: CacheDiagnosticsResponse;
+      };
+      expect(report.health.state).toBe('ready');
+      expect(report.health.observations.length).toBeGreaterThan(0);
+      expect(report.cache.sources.length).toBe(1);
+      expect(report.cache.state).toBe('ready');
+      expect(report.cache.sources[0]?.snapshot.records.length).toBeGreaterThan(0);
+    } finally {
+      await booted.stop();
+    }
+  });
+  it('formats both standalone and workspace development entries without a repair', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'formatted', '--devtool'])).toBe(0);
+    const standalone = await denoRun(`${root}/formatted`, ['fmt', '--check']);
+    expect(standalone.output).not.toContain('not formatted');
+    expect(standalone.code).toBe(0);
+    expect(await run(['new', '--runtime', 'deno', 'workspace', '--workspace'])).toBe(0);
+    expect(await run(['generate', 'app', 'orders', '--devtool'], `${root}/workspace`)).toBe(0);
+    const member = await denoRun(`${root}/workspace/apps/orders`, ['fmt', '--check']);
+    expect(member.output).not.toContain('not formatted');
+    expect(member.code).toBe(0);
+  });
+  it('stops and exits when a hand-edited factory drops either part of the composition', async () => {
+    for (const dropped of ['plugins', 'diagnostics']) {
+      const appPort = await unusedPort();
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          dropped,
+          '--devtool',
+          '--devtool-port',
+          String(await unusedPort()),
+        ]),
+      )
+        .toBe(
+          0,
+        );
+      const project = `${root}/${dropped}`;
+      await useWorkspacePackages(project);
+      const path = `${project}/setu.config.ts`;
+      const source = await nodeFs.readFile(path, 'utf8');
+      await nodeFs.writeFile(
+        path,
+        source.replace(
+          dropped === 'plugins'
+            ? '...(devtool?.plugins ?? [])'
+            : '...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {})',
+          '...[]',
+        ),
+      );
+      const result = await denoRun(project, ['task', 'dev'], {
+        ...credentials().env,
+        PORT: String(appPort),
+      });
+      expect(result.code, result.output).toBe(1);
+      expect(result.output).toContain(
+        dropped === 'plugins'
+          ? 'did not pass the devtool composition'
+          : 'not created with kernel diagnostics enabled',
+      );
+      expect(await fetch(`http://127.0.0.1:${appPort}/`).then(() => true).catch(() => false)).toBe(
+        false,
+      );
+    }
+  });
+
+  it('boots a reallocated workspace entry and answers the signed client at its new port', async () => {
+    const appPort = await unusedPort();
+    const oldPort = await unusedPort();
+    const newPort = await unusedPort();
+    expect(
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(appPort)]),
+    ).toBe(0);
+    const workspace = `${root}/acme`;
+    expect(
+      await run([
+        'generate',
+        'app',
+        'orders',
+        '--devtool',
+        '--devtool-port',
+        String(oldPort),
+        '--dir',
+        workspace,
+      ]),
+    ).toBe(0);
+    const manifestPath = `${workspace}/setu.workspace.json`;
+    const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8'));
+    manifest.devtoolBasePort = newPort;
+    await nodeFs.writeFile(manifestPath, JSON.stringify(manifest));
+    expect(await run(['workspace', 'ports', '--reallocate', '--dir', workspace])).toBe(0);
+    const project = `${workspace}/apps/orders`;
+    expect(await nodeFs.readFile(`${project}/main.dev.ts`, 'utf8')).toContain(`port: ${newPort},`);
+    expect(await nodeFs.readFile(`${workspace}/.dockerignore`, 'utf8')).toContain(
+      'apps/*/main.dev.ts',
+    );
+    await useWorkspacePackages(project);
+    const pair = credentials();
+    const booted = await bootDev(project, appPort, pair.env);
+    try {
+      await nodeFs.writeFile(`${project}/driver.ts`, DRIVER);
+      const result = await denoRun(project, [
+        'run',
+        '--allow-net',
+        'driver.ts',
+        String(newPort),
+        String(appPort),
+        pair.sessionId,
+        pair.sessionKey,
+      ]);
+      expect(result.code, result.output).toBe(0);
+      expect(JSON.parse(result.output.trim().split('\n').pop()!).instanceId).not.toBeNull();
+      expect(
+        await fetch(`http://127.0.0.1:${oldPort}/v1/status`).then(() => true).catch(() => false),
+      ).toBe(false);
+    } finally {
+      await booted.stop();
+    }
+  });
   it(
     'type-checks, boots with credentials, and answers the real client',
     { timeout: 240_000 },
     async () => {
-      const devtoolPort = unusedPort();
-      const appPort = unusedPort();
-      expect(await run(['new', 'shop', '--devtool', '--devtool-port', String(devtoolPort)])).toBe(
+      const devtoolPort = await unusedPort();
+      const appPort = await unusedPort();
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'shop',
+          '--devtool',
+          '--devtool-port',
+          String(devtoolPort),
+        ]),
+      ).toBe(
         0,
       );
       const project = `${root}/shop`;
@@ -206,7 +445,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
       const credentials_ = credentials();
       const booted = await bootDev(project, appPort, credentials_.env);
       try {
-        await Deno.writeTextFile(`${project}/driver.ts`, DRIVER);
+        await nodeFs.writeFile(`${project}/driver.ts`, DRIVER);
         const driven = await denoRun(project, [
           'run',
           '--allow-net',
@@ -217,7 +456,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
           credentials_.sessionKey,
         ]);
         expect(driven.code, driven.output).toBe(0);
-        const report = JSON.parse(driven.output.trim().split('\n').pop()!) as {
+        const report = JSON.parse(driven.stdout.trim().split('\n').pop()!) as {
           instanceId: string | null;
           events: number;
         };
@@ -230,9 +469,19 @@ describe('a scaffolded devtool project, driven end to end', () => {
   );
 
   it('refuses to boot without credentials, with a named message and no connector', async () => {
-    const devtoolPort = unusedPort();
-    const appPort = unusedPort();
-    expect(await run(['new', 'shop', '--devtool', '--devtool-port', String(devtoolPort)])).toBe(0);
+    const devtoolPort = await unusedPort();
+    const appPort = await unusedPort();
+    expect(
+      await run([
+        'new',
+        '--runtime',
+        'deno',
+        'shop',
+        '--devtool',
+        '--devtool-port',
+        String(devtoolPort),
+      ]),
+    ).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
 
@@ -244,22 +493,26 @@ describe('a scaffolded devtool project, driven end to end', () => {
   });
 
   it('enables the devtool on a project carrying the pre-M98c factory, refusing first', async () => {
-    const devtoolPort = unusedPort();
-    const appPort = unusedPort();
-    expect(await run(['new', 'legacy'])).toBe(0);
+    const devtoolPort = await unusedPort();
+    const appPort = await unusedPort();
+    expect(await run(['new', '--runtime', 'deno', 'legacy'])).toBe(0);
     const project = `${root}/legacy`;
-    await useWorkspacePackages(project);
 
     // Rewrite the config to the shape every pre-M98c project carries: a
     // zero-parameter factory and NO devtool weave in the body — the shape
     // `deno run` silently discards arguments against.
     const configPath = `${project}/setu.config.ts`;
-    const config = await Deno.readTextFile(configPath);
-    await Deno.writeTextFile(
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    await nodeFs.writeFile(
       configPath,
       config
         .replace(
-          /export function createApp\([\s\S]*?\): IApplication \{/,
+          "import type { IPlugin } from '@setu-ts/common';",
+          "import type { IApplication, IPlugin } from '@setu-ts/common';",
+        )
+        .replace(/type IKernelApplication,\s*/g, '')
+        .replace(
+          /export function createApp\([\s\S]*?\): IKernelApplication \{/,
           'export function createApp(): IApplication {',
         )
         .replace('      ...(devtool?.plugins ?? []),\n', '')
@@ -277,43 +530,68 @@ describe('a scaffolded devtool project, driven end to end', () => {
     // A developer-owned task and an unrelated top-level key, asserted intact
     // below — the merge case, exercised on the same project.
     const manifestPath = `${project}/deno.json`;
-    const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as Record<string, unknown>;
+    const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
     manifest['//devtool-note'] = 'hand-written key';
     (manifest['tasks'] as Record<string, string>)['db:push'] = 'deno run -A tools/push.ts';
-    await Deno.writeTextFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await nodeFs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
     // The refusal: named, quoting the fix, writing NOTHING.
     const refused = await run(['devtool', 'enable', '--dir', project]);
     expect(refused).toBe(1);
     expect(
-      await Deno.readTextFile(`${project}/setu.config.ts`),
+      await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8'),
     ).toContain('export function createApp(): IApplication {');
     expect(
-      (JSON.parse(await Deno.readTextFile(manifestPath)) as { tasks: Record<string, string> })
+      (JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as { tasks: Record<string, string> })
         .tasks['dev'],
     )
       .toBeUndefined();
 
+    const signatureOnly = (await nodeFs.readFile(configPath, 'utf8')).replace(
+      'export function createApp(): IApplication {',
+      'export function createApp(_env?: Readonly<Record<string, unknown>>, devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions }): IApplication {',
+    );
+    await nodeFs.writeFile(configPath, signatureOnly);
+    expect(await run(['devtool', 'enable', '--dir', project])).toBe(1);
+    await nodeFs.writeFile(
+      configPath,
+      signatureOnly.replace(
+        'export function createApp(_env?: Readonly<Record<string, unknown>>, devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions }): IApplication {',
+        'export function createApp(): IApplication {',
+      ),
+    );
+
     // Apply the edit the refusal names — the factory takes the devtool
     // composition as its SECOND parameter and the composition reaches the
     // constructor — exactly what a developer follows it with.
-    await Deno.writeTextFile(
+    await nodeFs.writeFile(
       configPath,
-      (await Deno.readTextFile(configPath))
+      (await nodeFs.readFile(configPath, 'utf8'))
         .replace(
           "import { createApplication } from '@setu-ts/kernel';",
           "import { createApplication, type KernelDiagnosticsOptions } from '@setu-ts/kernel';",
         )
         .replace(
           "import type { IApplication } from '@setu-ts/common';",
+          "import type { IPlugin } from '@setu-ts/common';",
+        )
+        .replace(
           "import type { IApplication, IPlugin } from '@setu-ts/common';",
+          "import type { IPlugin } from '@setu-ts/common';",
+        )
+        .replace(
+          'type KernelDiagnosticsOptions',
+          'type IKernelApplication, type KernelDiagnosticsOptions',
         )
         .replace(
           'export function createApp(): IApplication {',
           'export function createApp(\n' +
             '  _env?: Readonly<Record<string, unknown>>,\n' +
             '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
-            '): IApplication {',
+            '): IKernelApplication {',
         )
         .replace(
           '      RuntimePlugin(),\n',
@@ -330,7 +608,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
       await run(['devtool', 'enable', '--dir', project, '--devtool-port', String(devtoolPort)]),
     )
       .toBe(0);
-    const after = JSON.parse(await Deno.readTextFile(manifestPath)) as {
+    const after = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
       tasks: Record<string, string>;
       imports: Record<string, string>;
       '//devtool-note'?: string;
@@ -342,25 +620,30 @@ describe('a scaffolded devtool project, driven end to end', () => {
     // The enable flow added the pin the entry resolves through — the exact
     // specifier the create-time paths write, not a registry fall-through.
     expect(after.imports['@setu-ts/diagnostics-plugin']).toBe(
-      'jsr:@setu-ts/diagnostics-plugin@^0.8.0',
+      `npm:@setu-ts/diagnostics-plugin@^${VERSION}`,
     );
     // Repoint the pin at this workspace too, so the check and the boot below
-    // measure the workspace source rather than a published JSR snapshot —
+    // measure the workspace source rather than a published snapshot —
     // the same repointing `useWorkspacePackages` performs, applied to the key
     // the enable flow just added.
     const repointed = { ...after };
     repointed.imports['@setu-ts/diagnostics-plugin'] = workspaceEntrypoint('diagnostics-plugin');
-    await Deno.writeTextFile(manifestPath, `${JSON.stringify(repointed, null, 2)}\n`);
+    await nodeFs.writeFile(manifestPath, `${JSON.stringify(repointed, null, 2)}\n`);
+
+    await useWorkspacePackages(project);
 
     // The project type-checks THROUGH the new check task — the arity mismatch
     // would be TS2554 here — and serves a snapshot.
     const checked = await denoRun(project, ['task', 'check']);
     expect(checked.code, checked.output).toBe(0);
+    const tested = await denoRun(project, ['task', 'test']);
+    expect(tested.code, tested.output).toBe(0);
+    expect(tested.output).toContain('1 passed');
 
     const credentials_ = credentials();
     const booted = await bootDev(project, appPort, credentials_.env);
     try {
-      await Deno.writeTextFile(`${project}/driver.ts`, DRIVER);
+      await nodeFs.writeFile(`${project}/driver.ts`, DRIVER);
       const driven = await denoRun(project, [
         'run',
         '--allow-net',
@@ -371,7 +654,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
         credentials_.sessionKey,
       ]);
       expect(driven.code, driven.output).toBe(0);
-      const report = JSON.parse(driven.output.trim().split('\n').pop()!) as {
+      const report = JSON.parse(driven.stdout.trim().split('\n').pop()!) as {
         instanceId: string | null;
       };
       expect(report.instanceId).not.toBeNull();

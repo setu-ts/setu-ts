@@ -1,0 +1,36 @@
+{
+  "name": "@setu-ts/idempotency-plugin",
+  "version": "0.9.0",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "sys": [
+        "hostname",
+        "osRelease"
+      ],
+      "net": [
+        "127.0.0.1:6379",
+        "localhost:6379",
+        "127.0.0.1:5433",
+        "127.0.0.1:27017",
+        "127.0.0.1:27018",
+        "127.0.0.1:8000",
+        "127.0.0.1:8086"
+      ]
+    }
+  },
+  "imports": {
+    "@aws-sdk/client-dynamodb": "npm:@aws-sdk/client-dynamodb@^3",
+    "drizzle-orm/node-postgres": "npm:drizzle-orm@0.45.2/node-postgres",
+    "drizzle-orm/pg-core": "npm:drizzle-orm@0.45.2/pg-core",
+    "ioredis": "npm:ioredis@5.x",
+    "mongodb": "npm:mongodb@^6.21.0",
+    "pg": "npm:pg@^8.0.0",
+    "vitest": "npm:vitest@5.0.3",
+    "zod-v3": "npm:zod@^3.24.0"
+  }
+}

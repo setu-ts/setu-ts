@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/secrets-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "license": "MIT",
   "exports": "./src/index.ts",
   "test": {
@@ -11,5 +11,12 @@
       "sys": ["hostname", "osRelease"],
       "net": ["127.0.0.1", "localhost:4566"]
     }
+  },
+  "imports": {
+    "@aws-sdk/client-secrets-manager": "npm:@aws-sdk/client-secrets-manager@^3",
+    "@azure/identity": "npm:@azure/identity@^4",
+    "@azure/keyvault-secrets": "npm:@azure/keyvault-secrets@^4",
+    "@google-cloud/secret-manager": "npm:@google-cloud/secret-manager@^5",
+    "vitest": "npm:vitest@5.0.3"
   }
 }

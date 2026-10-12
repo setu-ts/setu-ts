@@ -1,7 +1,7 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
+import { createFakeApp } from '../fixtures/fake-app.ts';
 import { PROGRAM_NAME, VERSION } from '../../src/constants.ts';
 
 interface Harness {
@@ -12,7 +12,7 @@ interface Harness {
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}): Harness {
-  const fs = createFakeFs(seed);
+  const fs = createFakeFs({ '/work/deno.json': '{}', ...seed });
   const out = createRecorder();
   const err = createRecorder();
   return {
@@ -31,6 +31,44 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
 }
 
 describe('runCli', () => {
+  it('escapes manifest pin keys and values without creating extra refusal lines', async () => {
+    const controls = ['\n', '\r', '\0', '\t', '\u001b', '\u2028', '\u2029', '\u202e'];
+    for (const control of controls) {
+      const key = `@setu-ts/common${control}FORGED-KEY`;
+      const value = `canary-pin${control}FORGED-VALUE`;
+      const h = harness({
+        '/work/deno.json': JSON.stringify({
+          tasks: { start: 'deno run --allow-net --allow-env main.ts' },
+          imports: { [key]: value },
+        }),
+        '/work/setu.config.ts': 'export const createApp = makeApplicationFactory();',
+      });
+      expect(await h.run(['devtool', 'enable'])).toBe(1);
+      const lines = h.err.text().split('\n');
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toBe('Framework pins in /work/deno.json disagree with this CLI:');
+      const escaped = `\\u${control.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      expect(lines[1]).toBe(
+        `  @setu-ts/common${escaped}FORGED-KEY: canary-pin${escaped}FORGED-VALUE; expected npm:@setu-ts/common${escaped}FORGED-KEY@^${VERSION}`,
+      );
+      expect(lines[2]).toContain('upgrade the project first');
+      expect(h.fs.writes).toEqual([]);
+    }
+  });
+
+  it('keeps legitimate devtool enable working after pin refusals', async () => {
+    const h = harness({
+      '/work/deno.json': JSON.stringify({
+        tasks: { start: 'deno run --allow-net --allow-env main.ts' },
+        imports: { '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
+      }),
+      '/work/setu.config.ts': 'export const createApp = makeApplicationFactory();',
+    });
+    expect(await h.run(['devtool', 'enable'])).toBe(0);
+    expect(h.fs.has('/work/main.dev.ts')).toBe(true);
+    expect(h.err.text()).toBe('');
+  });
+
   describe('--version', () => {
     it('prints the version from the package deno.json and returns 0', async () => {
       const h = harness();
@@ -83,13 +121,13 @@ describe('runCli', () => {
     it('routes new', async () => {
       const h = harness();
       expect(await h.run(['new', 'app'])).toBe(0);
-      expect(h.fs.has('/work/app/deno.json')).toBe(true);
+      expect(h.fs.has('/work/app/package.json')).toBe(true);
     });
 
     it('routes the n alias', async () => {
       const h = harness();
       expect(await h.run(['n', 'app'])).toBe(0);
-      expect(h.fs.has('/work/app/deno.json')).toBe(true);
+      expect(h.fs.has('/work/app/package.json')).toBe(true);
     });
 
     it('routes generate', async () => {
@@ -111,7 +149,7 @@ describe('runCli', () => {
     });
 
     it('passes --dir through to the command', async () => {
-      const h = harness();
+      const h = harness({ '/other/deno.json': '{}' });
       expect(await h.run(['g', 'service', 'billing', '--dir', '/other'])).toBe(0);
       expect(h.fs.has('/other/src/services/billing.service.ts')).toBe(true);
     });
@@ -125,6 +163,7 @@ describe('runCli', () => {
           transport: 'http',
           members: [{ name: 'orders', port: 3000 }],
         }),
+        '/work/apps/orders/.setu-member': '',
       });
       const out = createRecorder();
       expect(
@@ -179,6 +218,60 @@ describe('runCli', () => {
   });
 
   describe('plugin-command dispatch', () => {
+    for (const command of ['commands', 'probe:run']) {
+      it(`refuses already-interrupted ${command} before loading user code`, async () => {
+        const controller = new AbortController();
+        controller.abort();
+        let loaded = false;
+        const err = createRecorder();
+        expect(
+          await runCli([command], {
+            fs: createFakeFs({ '/work/setu.config.ts': 'x' }),
+            cwd: '/work',
+            now: () => 0,
+            log: () => {},
+            error: err.sink,
+            interrupt: controller.signal,
+            loadApp: () => {
+              loaded = true;
+              return Promise.resolve({ createApp: () => createFakeApp() });
+            },
+          }),
+        ).toBe(130);
+        expect(loaded).toBe(false);
+        expect(err.text()).toContain('Interrupted;');
+      });
+    }
+
+    it('interrupts a pending plugin handler and awaits application shutdown', async () => {
+      const controller = new AbortController();
+      let release: () => void = () => {};
+      const waiting = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const app = createFakeApp([{
+        name: 'probe:run',
+        handler: () => {
+          controller.abort();
+          return waiting;
+        },
+      }]);
+      const err = createRecorder();
+      const code = await runCli(['probe:run'], {
+        fs: createFakeFs({ '/work/setu.config.ts': 'x' }),
+        cwd: '/work',
+        now: () => 0,
+        log: () => {},
+        error: err.sink,
+        interrupt: controller.signal,
+        loadApp: () => Promise.resolve({ createApp: () => app }),
+      });
+      release();
+      expect(code).toBe(130);
+      expect(app.stopCount()).toBe(1);
+      expect(app.isStarted()).toBe(false);
+      expect(err.text()).toContain('plugin command stopped');
+    });
     const appModule =
       (commands: readonly { name: string; handler: () => void }[]) => (_url: string) =>
         Promise.resolve({
@@ -191,7 +284,13 @@ describe('runCli', () => {
 
     /** A harness whose project has a config module registering `commands`. */
     function withApp(commands: readonly { name: string; handler: () => void }[]) {
-      const fs = createFakeFs({ '/work/setu.config.ts': 'export function createApp() {}' });
+      const fs = createFakeFs({
+        '/work/deno.json': '{}',
+        // Installed, as `deno install` leaves it: the CLI imports the
+        // project's config from Node, which resolves through node_modules.
+        '/work/node_modules/@setu-ts/kernel/package.json': '{}',
+        '/work/setu.config.ts': 'export function createApp() {}',
+      });
       const out = createRecorder();
       const err = createRecorder();
       let booted = false;
@@ -249,7 +348,7 @@ describe('runCli', () => {
         }]);
         expect(await h.run(['new', 'app'])).toBe(0);
         expect(shadowed).toBe(false);
-        expect(h.fs.has('/work/app/deno.json')).toBe(true);
+        expect(h.fs.has('/work/app/package.json')).toBe(true);
       });
 
       it('does not let a plugin shadow generate', async () => {
@@ -296,7 +395,7 @@ describe('runCli', () => {
   });
 
   it('forwards an injected custom-schematic loader', async () => {
-    const fs = createFakeFs();
+    const fs = createFakeFs({ '/work/deno.json': '{}' });
     const out = createRecorder();
     const code = await runCli(['g', 'custom', 'my-gen', 'thing'], {
       fs,
@@ -325,7 +424,11 @@ describe('runCli', () => {
       ask: {
         select(question) {
           asked.push(question);
-          return Promise.resolve(question.startsWith('Template?') ? 'rest' : undefined);
+          return Promise.resolve(
+            question.startsWith('Template?')
+              ? { kind: 'answer' as const, value: 'rest' }
+              : { kind: 'unavailable' as const },
+          );
         },
       },
     });

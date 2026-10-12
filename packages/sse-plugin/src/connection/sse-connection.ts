@@ -105,7 +105,7 @@ export class SseConnection implements IConn {
 
     // Initial retry frame: enqueue raw `retry: <ms>\n\n` as the very first bytes.
     if (retryMs !== undefined) {
-      this.#enqueue(`retry: ${retryMs}\n\n`);
+      this.#enqueue(() => `retry: ${retryMs}\n\n`);
     }
   }
 
@@ -115,14 +115,12 @@ export class SseConnection implements IConn {
 
   /** Enqueue an encoded SSE message. */
   send(msg: SseMessage): void {
-    if (!this.#isOpen) return;
-    this.#enqueue(encodeSseMessage(msg));
+    this.#enqueue(() => encodeSseMessage(msg));
   }
 
   /** Enqueue a plain-text comment frame. */
   comment(text: string): void {
-    if (!this.#isOpen) return;
-    this.#enqueue(encodeSseComment(text));
+    this.#enqueue(() => encodeSseComment(text));
   }
 
   /** Close the connection (idempotent). */
@@ -131,17 +129,13 @@ export class SseConnection implements IConn {
   }
 
   /** Internal enqueue with backpressure guard (§3.6). */
-  #enqueue(frame: string): void {
-    if (!this.#isOpen || !this.#controller) return;
-    this.#doEnqueue(frame);
-  }
-
-  #doEnqueue(frame: string): void {
+  #enqueue(frame: () => string): void {
     if (!this.#isOpen || !this.#controller) return;
 
     // Backpressure check (§3.6).
     // M98l: every frame this path writes — a message, a comment, a heartbeat
     // — is counted here, once. Only the outcome reaches the collector.
+    const encoded = this.#encoder.encode(frame());
     const observer = realtimeObserverOf(this);
     const desired = this.#controller.desiredSize;
     if (desired !== null && desired < -SSE_MAX_BACKLOG_BYTES) {
@@ -152,7 +146,7 @@ export class SseConnection implements IConn {
     }
 
     try {
-      this.#controller.enqueue(this.#encoder.encode(frame));
+      this.#controller.enqueue(encoded);
     } catch {
       observer?.observe('send', false);
       // Controller already closed.

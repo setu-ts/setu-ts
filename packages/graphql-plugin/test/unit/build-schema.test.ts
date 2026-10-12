@@ -2,8 +2,7 @@
  * Tests for build-schema.ts
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { buildSchema } from '../../src/schema/build-schema.ts';
 import { GraphqlSchemaError } from '../../src/errors/graphql-errors.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';

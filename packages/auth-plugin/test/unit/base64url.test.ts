@@ -2,8 +2,7 @@
  * Tests for base64url encoding/decoding utilities.
  */
 
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { decodeBase64Url, encodeBase64Url } from '../../src/utils/base64url.ts';
 
 describe('encodeBase64Url', () => {

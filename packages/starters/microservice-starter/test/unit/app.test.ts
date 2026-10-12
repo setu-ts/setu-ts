@@ -1,8 +1,7 @@
 /**
  * @module microservice-starter unit tests
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { buildMicroservicePlugins, createMicroserviceApp } from '../../src/index.ts';
 import type { MicroserviceStarterOptions } from '../../src/options.ts';
 import { CAPABILITIES, type IPlugin } from '@setu-ts/common';

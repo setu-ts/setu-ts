@@ -6,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { PassThrough } from 'node:stream';
 import type { IS3Backend } from '../../src/interfaces/index.ts';
 import {

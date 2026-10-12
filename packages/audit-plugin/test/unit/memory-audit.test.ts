@@ -1,8 +1,7 @@
 /**
  * Tests for MemoryAuditStorage.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { MemoryAuditStorage } from '../../src/storage/memory-audit.ts';
 import type { StoredAuditEntry } from '../../src/interfaces/index.ts';
 

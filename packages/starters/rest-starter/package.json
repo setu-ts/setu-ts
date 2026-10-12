@@ -1,0 +1,67 @@
+{
+  "name": "@setu-ts/rest-starter",
+  "version": "0.9.0",
+  "description": "createRestApp — a pre-wired REST plugin set with per-plugin option arms",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/starters/rest-starter"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/starters/rest-starter",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/di-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/graphql-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/http-security-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/realtime-backplane-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/service-discovery-plugin": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
+    "@setu-ts/sse-plugin": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

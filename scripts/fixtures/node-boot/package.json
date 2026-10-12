@@ -1,0 +1,5 @@
+{
+  "name": "setu-node-boot",
+  "private": true,
+  "type": "module"
+}

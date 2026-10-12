@@ -4,8 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   createFetchInstrumentation,
   createHttpInstrumentation,
@@ -80,7 +79,7 @@ describe('http-instrumentation', () => {
     expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
     // The reported specifier must equal the literal in the default import.
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-http@^0.220.0');
+    expect(result.specifier).toBe('@opentelemetry/instrumentation-http');
   });
 
   it('loadFetchInstrumentation should use an injected zero-argument importFn', async () => {
@@ -92,7 +91,7 @@ describe('http-instrumentation', () => {
     const result = await loadFetchInstrumentation(undefined, importFn);
     expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-undici@^0.30.0');
+    expect(result.specifier).toBe('@opentelemetry/instrumentation-undici');
   });
 
   it('loadHttpInstrumentation should reject when importFn rejects', async () => {

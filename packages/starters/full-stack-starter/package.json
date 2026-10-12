@@ -1,0 +1,66 @@
+{
+  "name": "@setu-ts/full-stack-starter",
+  "version": "0.9.0",
+  "description": "createFullStackApp — the microservice set plus caching, CQRS, storage, and SSR",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/starters/full-stack-starter"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/starters/full-stack-starter",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/audit-plugin": "workspace:^",
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/cqrs-plugin": "workspace:^",
+    "@setu-ts/events-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/feature-flags-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/mail-plugin": "workspace:^",
+    "@setu-ts/microservice-starter": "workspace:^",
+    "@setu-ts/multi-tenancy-plugin": "workspace:^",
+    "@setu-ts/notification-plugin": "workspace:^",
+    "@setu-ts/react-router-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
+    "@setu-ts/secrets-plugin": "workspace:^",
+    "@setu-ts/static-plugin": "workspace:^",
+    "@setu-ts/storage-plugin": "workspace:^"
+  },
+  "devDependencies": {
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
+    "@types/node": "^24",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { SendGridProvider, toSendGridBody } from '../../src/providers/sendgrid-provider.ts';
 import type { IMailHttp, OutgoingMail } from '../../src/interfaces/index.ts';
@@ -84,5 +83,22 @@ describe('SendGridProvider', () => {
       provider.send({ from: 'me@x.com', to: 'a@x.com', subject: 'Hi' }),
     ).rejects.toThrow('SendGrid send failed: HTTP 401');
     expect(calls[0]?.url).toBe('https://eu.sendgrid.example/send');
+  });
+
+  it('rejects a send before connect and after disconnect, making no HTTP request', async () => {
+    // Before this, a send after app.stop() still POSTed a REAL email to
+    // SendGrid. Observed through `.catch`, so a synchronous throw would fail.
+    const { http, calls } = fakeHttp();
+    const provider = new SendGridProvider({ apiKey: 'k', http });
+    const message: OutgoingMail = { from: 'me@x.com', to: 'a@x.com', subject: 'Hi' };
+    const before = await provider.send(message).then(() => 'resolved', (e: Error) => e.message);
+    expect(before).toBe('SendGridProvider is not connected');
+
+    await provider.connect();
+    await provider.disconnect();
+    const after = await provider.send(message).then(() => 'resolved', (e: Error) => e.message);
+    expect(after).toBe('SendGridProvider is not connected');
+
+    expect(calls).toHaveLength(0);
   });
 });

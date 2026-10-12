@@ -154,9 +154,9 @@ describe('parseArgs', () => {
     expect(parsed.base).toBe('origin/main');
   });
 
-  it('defaults the diff base to main', () => {
+  it('defaults the diff base to develop, the integration branch', () => {
     const parsed = parseArgs([]);
-    expect(parsed.base).toBe('main');
+    expect(parsed.base).toBe('develop');
     expect(parsed.selectors).toEqual([]);
   });
 });

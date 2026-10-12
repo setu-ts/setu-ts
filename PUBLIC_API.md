@@ -67,41 +67,45 @@
 58. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
 59. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
 60. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
-61. [Boundary-Type Compatibility](#boundary-type-compatibility)
-62. [Summary](#summary)
+61. [IdempotencyPlugin() (`@setu-ts/idempotency-plugin`)](#idempotencyplugin-setu-tsidempotency-plugin)
+62. [Localization Plugin (`@setu-ts/localization-plugin`)](#localization-plugin-setu-tslocalization-plugin)
+63. [Boundary-Type Compatibility](#boundary-type-compatibility)
+64. [Summary](#summary)
 
 ---
 
 ## Installation
 
-Packages are published to [JSR](https://jsr.io) under the `@setu-ts` scope and are consumable from
-every runtime:
+Packages are published to [npm](https://www.npmjs.com/org/setu-ts) under the `@setu-ts` scope and
+are consumable from every runtime:
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime
-
-# npm / pnpm / yarn (via JSR's npm compatibility layer)
-npx jsr add @setu-ts/kernel @setu-ts/runtime
-pnpm dlx jsr add @setu-ts/kernel @setu-ts/runtime
+# npm (pnpm add / yarn add work the same way)
+npm install @setu-ts/kernel @setu-ts/runtime
 
 # bun
-bunx jsr add @setu-ts/kernel @setu-ts/runtime
+bun add @setu-ts/kernel @setu-ts/runtime
+
+# Deno
+deno add npm:@setu-ts/kernel npm:@setu-ts/runtime
 ```
 
 Add plugins as needed:
 
 ```bash
-deno add jsr:@setu-ts/logger-plugin jsr:@setu-ts/config-plugin \
-         jsr:@setu-ts/validation-plugin jsr:@setu-ts/database-plugin \
-         jsr:@setu-ts/auth-plugin jsr:@setu-ts/openapi-plugin
+npm install @setu-ts/logger-plugin @setu-ts/config-plugin \
+            @setu-ts/validation-plugin @setu-ts/database-plugin \
+            @setu-ts/auth-plugin @setu-ts/openapi-plugin
 ```
 
 Or use a starter bundle:
 
 ```bash
-deno add jsr:@setu-ts/rest-starter
+npm install @setu-ts/rest-starter
 ```
+
+Earlier releases were published on JSR (`jsr:@setu-ts/…`) and stay there; nothing new is published
+to JSR.
 
 ---
 
@@ -153,9 +157,9 @@ No decorators. No DI. No reflection. Just a router and a runtime.
 
 ## Kernel diagnostics (`@setu-ts/kernel` + `@setu-ts/common`)
 
-**Since 0.8.0.** An optional, read-only view of application composition and kernel execution. Enable
-it explicitly per application; an omitted `diagnostics` option creates no collector, metadata
-mirror, ring, or timer anywhere in the kernel, and `IApplication.diagnostics` is absent.
+An optional, read-only view of application composition and kernel execution. Enable it explicitly
+per application; an omitted `diagnostics` option creates no collector, metadata mirror, ring, or
+timer anywhere in the kernel, and `IApplication.diagnostics` is absent.
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -726,7 +730,7 @@ interface ConfigDiagnosticsOptions {
   configuration loads normally. This exists so an application can resolve configuration before its
   plugins are constructed and then hand the plugin that same object, rather than letting it load a
   second snapshot a moment later that the composition never saw.
-- **`diagnostics`** — The opt-in value-free provenance policy (0.8.0), below.
+- **`diagnostics`** — The opt-in value-free provenance policy, below.
 
 ### loadConfig()
 
@@ -828,6 +832,8 @@ so throws a clear startup error.
 ### Hot Reload
 
 **Deferred.** Configuration is an immutable application-startup snapshot.
+
+<!-- version:history -->
 
 ### Configuration Provenance (0.8.0)
 
@@ -1180,6 +1186,45 @@ MongoDB route; the `'mongodb'` provider string on the Prisma union is retained o
 it is a published export (AI_GUIDELINES §9.2), and the `contains`-to-`$regex` reasoning behind
 `PASSTHROUGH_PROVIDERS` stays correct for any future Prisma-Mongo client.
 
+### Transactional idempotency store (M109b)
+
+`createDatabaseIdempotencyStore(options?: DatabaseIdempotencyStoreOptions)` returns a
+`RegistryFactory<ITransactionalIdempotencyStore>` for `IdempotencyPlugin`'s `transactional.store`.
+`entity` defaults to `'Idempotency'`; `database` selects `database.<name>`, or the default
+`CAPABILITIES.DATABASE` when omitted or `'default'`. The factory resolves the database and runtime
+services at initialization. The record and business work must use the same database.
+
+`run` creates a claim (`id`), executes business work through that transaction's `IUnitOfWork`,
+creates the encoded result (`${id}.r`), and commits. It uses two creates, with no update or delete.
+`find` requires both rows with the idempotency kind and their correct roles. `purge` preserves
+incomplete, foreign-kind and invalid-envelope records, and deletes a complete record only when an
+in-transaction re-read still finds it expired. That re-read narrows but does not close one race: two
+concurrent purges can delete a record a client re-created between them (closed on MongoDB; about one
+round trip on PostgreSQL READ COMMITTED; the deferred commit on DynamoDB and D1). A conditional
+delete (M105) would close it. `verify` runs the two-create pattern and rolls it back before the
+first call.
+
+`TransactionalStoreUnavailableError` carries `entity` and `reason`: `'cosmos-unsupported'`,
+`'bigtable-unsupported'`, `'mongodb-standalone'` or `'entity-unavailable'`. An adapter refusal can
+be retained as its `cause`. A missing/unreadable entity fails startup.
+
+| Backend              | Tier-C behavior                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Memory               | Supported in one process; a loser is refused at commit and replays.                                                                                                                                                                                                                                                                                                                          |
+| PostgreSQL / Drizzle | Supported; the claim insert blocks the loser until the winner commits, then the loser replays. Each blocked call holds a connection.                                                                                                                                                                                                                                                         |
+| PostgreSQL / Prisma  | As Drizzle: a concurrent loser blocks on the winner's claim insert before running `fn`, then replays. Prisma's `transactionTimeout` does not interrupt that wait (measured with a 1 s loser timeout against a winner holding the key 8 s: the loser waited and replayed). A loser whose own work exceeds its timeout answers `'store-failed'` (`503`); there is no timeout-to-`409` mapping. |
+| SQLite / Drizzle     | Supported with a Promise-aware transaction bridge; one writer at a time, with replay or busy/locked conflict depending on timing.                                                                                                                                                                                                                                                            |
+| D1                   | Supported via the custom adapter arm; deferred batch commits one business write, but concurrent calls execute `fn` twice and its outside effects run twice.                                                                                                                                                                                                                                  |
+| MongoDB replica set  | Supported with pre-existing collections; the concurrent loser gets `conflict`, then replays on retry.                                                                                                                                                                                                                                                                                        |
+| DynamoDB             | Supported with deferred `TransactWriteItems`; a concurrent loser replays or gets `conflict`. Both calls execute `fn`; database work commits once, outside effects run twice. `TransactionConflictException` is documented-unverified on DynamoDB Local (M90f). Eventually consistent reads can also miss a just-committed record; commit uniqueness still prevents a second business write.  |
+| MongoDB standalone   | Refused with `mongodb-standalone`.                                                                                                                                                                                                                                                                                                                                                           |
+| Cosmos DB            | Refused with `cosmos-unsupported`: the record cannot share the business partition.                                                                                                                                                                                                                                                                                                           |
+| Bigtable             | Refused with `bigtable-unsupported`.                                                                                                                                                                                                                                                                                                                                                         |
+
+**Not verified:** DynamoDB's overlapping-service `TransactionConflictException` outcome on DynamoDB
+Local (M90f). Tier C was driven against a real Prisma 7.10 client on PostgreSQL once, by hand; the
+committed real-backend suite uses Drizzle.
+
 ### Repository Pattern
 
 ```typescript
@@ -1368,8 +1413,17 @@ before the indicator reports it. A Drizzle registration that supplies
 `DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
 documented pool API — also publishes the returned `DatabasePoolCapacity` snapshot
 (`{ total, idle, waiting }`) under `data.capacity`. Omitted, the payload carries no capacity fields.
-Capacity is data, not policy: no threshold is applied and no status changes because of it
-(caller-facing pool-timeout status mapping is M90f). A snapshot the callback returns in a malformed
+Capacity is data, not policy: no threshold is applied, and the snapshot changes one row only.
+**Since M101a**, when it shows every connection busy with callers waiting (`idle === 0` and
+`waiting > 0`), the probe queues no `SELECT 1` and the indicator reports `up` with
+`reachable: 'unknown'` while queries through the adapter are still completing (one completed within
+the last 10 seconds; with none, a full pool is a hung database and reports `degraded`; once
+`getDrizzleDatabase`/`getDrizzleTransaction` has handed out the native instance, whose queries
+bypass the adapter, progress is unobservable and a saturated pool reads `up`) — saturation, not an
+outage, so `/ready` does not pull every saturated replica at once. Without `poolStats` that row
+cannot be read, so a pool connection timeout or an unanswered probe reports `degraded` (a pool
+connection timeout reported `down` before M101a: the database never answered either way).
+Caller-facing pool-timeout status mapping is M90f. A snapshot the callback returns in a malformed
 shape is dropped exactly like an absent one — a broken reading is never published as a number. A
 callback that throws, or one whose counters violate the documented shape (a negative count, or
 `idle` exceeding `total`, which counts idle + in use), is dropped the same way: capacity is omitted
@@ -1415,16 +1469,18 @@ interface IRepository<Entity, Id extends EntityKey = string> {
   create(data: Partial<Entity>): Promise<Entity>;
   update(id: Id, data: Partial<Entity>): Promise<Entity>;
   delete(id: Id): Promise<boolean>;
+  updateWhere?(id: Id, where: WritePrecondition, data: Partial<Entity>): Promise<Entity | null>;
+  deleteWhere?(id: Id, where: WritePrecondition): Promise<boolean>;
   exists(id: Id): Promise<boolean>;
   count(options?: CountOptions): Promise<number>;
 }
 ```
 
-Every member of `IRepository` is **required** — including `findPage`, which is easy to miss because
-the sibling `IDataSource.findPage?` is optional. A class implementing `IRepository` directly,
-without extending `BaseRepository`, must supply `findPage`; the in-repo reference implementor is
-`packages/database-plugin/test/fixtures/repository-implementor.ts`, and the reader-side step is in
-[docs/upgrading.md](docs/upgrading.md).
+Every member except `updateWhere?` and `deleteWhere?` is **required** — including `findPage`, which
+is easy to miss because the sibling `IDataSource.findPage?` is optional. A class implementing
+`IRepository` directly, without extending `BaseRepository`, must supply `findPage`; the in-repo
+reference implementor is `packages/database-plugin/test/fixtures/repository-implementor.ts`, and the
+reader-side step is in [docs/upgrading.md](docs/upgrading.md).
 
 <!-- version:history -->
 
@@ -1494,9 +1550,12 @@ to return. An unknown `where` or `filter` field is **not** refused: without a sc
 cannot tell an unknown column from one absent on every row, and matching nothing is a defensible
 answer.
 
-Uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be by a
-schema-less store. Use this adapter for development and tests, and run integration tests against the
-backend you deploy on.
+A `create` whose caller-supplied primary key is already stored is **refused** — the key is the one
+constraint this adapter knows, and a duplicate would leave a row no lookup by id can address; for
+the same reason an `update` cannot change a primary-key value (MongoDB's immutable `_id` rule).
+Other uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be
+by a schema-less store. Use this adapter for development and tests, and run integration tests
+against the backend you deploy on.
 
 ### Custom Adapters (external backends)
 
@@ -1540,6 +1599,12 @@ interface IDataSource {
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>>;
   delete(id: EntityKey): Promise<boolean>;
+  updateWhere?(
+    id: EntityKey,
+    where: WritePrecondition,
+    data: Partial<Record<string, unknown>>,
+  ): Promise<Record<string, unknown> | null>;
+  deleteWhere?(id: EntityKey, where: WritePrecondition): Promise<boolean>;
   findPage?(query: NormalizedQuery): Promise<PageResult>;
   count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number>;
 }
@@ -1547,6 +1612,66 @@ interface IDataSource {
 
 A data source owns query evaluation end to end — it applies `where`, `orderBy`, `offset`/`limit` and
 `select` itself, and `BaseRepository` must not re-apply any of them.
+
+**Conditional writes (M105, since 0.9.0).** Both optional members address the supplied key AND
+require every predicate field to equal its value at the write. `updateWhere` returns the updated row
+or `null`; `deleteWhere` returns whether a row was deleted. An absent key and a predicate miss have
+the same outcome and write nothing. The key and predicate remain separate conjunctions even when the
+predicate names a key field.
+
+`WritePrecondition`, exported by `@setu-ts/common`, is `Readonly<Record<string, string | number>>`.
+`checkWritePrecondition(where, data?)` returns a `WritePreconditionCheck`: `{ ok: false, problem }`,
+or `{ ok: true, where, data }` carrying private copies of the inputs. It requires a non-empty plain
+equality object, non-empty field names without a `$` prefix or `.`, string or finite-number values,
+and, when supplied, a non-empty plain update payload. Each field is read once into the copy and the
+copy is what gets validated and written, so an input that changes between reads (a `Proxy`) cannot
+send something other than what passed. An own `__proto__` key is refused, in the predicate and in
+the payload, because Node and Bun drop it from any object a backend rebuilds by assignment. Every
+implementation validates direct calls as well as repository calls. `checkWritePrecondition`'s
+refusal reasons quote no caller field name or value, and Prisma's validation message — which renders
+the whole query — is replaced with a fixed sentence. No other guarantee is made about message text:
+key handling shared with `findById`/`update`/`delete`, adapter mapping and marshalling refusals, and
+driver or server errors (a type the column rejects, an unknown column) may quote caller keys, field
+names or values, as for every other repository operation. Responses mask them (X12-3), so they reach
+server logs only. Invalid inputs reject with `UnsupportedQueryFeatureError` feature
+`'write-precondition'` (unbranded) — except a direct call to the D1 data source, which rejects with
+`CloudflareUnsupportedError`, since `cloudflare-plugin` cannot import `database-plugin`'s error.
+Through a repository the check runs in `BaseRepository` first, so every backend answers
+`'write-precondition'` there. `BaseRepository` rejects missing support with
+`UnsupportedQueryFeatureError` feature `'conditional-write'` (HTTP hint 501), before any I/O. Both
+members stay optional for implementors.
+
+| Data source                  | Write mechanism                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| Memory, outside transactions | Synchronous key lookup, predicate check and mutation                                              |
+| Prisma                       | Native `update`/`delete`, key conjoined with `AND: [where]`; `P2025` means no match               |
+| Drizzle                      | Key and predicate joined with `and(...)`, native `RETURNING`                                      |
+| MongoDB                      | `$and: [idFilter, whereFilter]`, `findOneAndUpdate` / `deleteOne`                                 |
+| D1                           | Bound `UPDATE` / `DELETE`, `WHERE key AND predicate`, `RETURNING`                                 |
+| DynamoDB                     | Native `ConditionExpression`, key existence AND aliased equality fields                           |
+| Cosmos DB                    | Read and check, then `_etag` IfMatch guarded `replace` / `delete`; retry 412 at most three rounds |
+| Bigtable                     | CheckAndMutateRow with nested per-field conditions, newest cell capped before value comparison    |
+
+Deferred transaction sources (memory overlay, D1 batch, DynamoDB buffer, Cosmos batch and Bigtable)
+omit both members: the result is unknown until commit, so the repository refuses
+`'conditional-write'`. Prisma, Drizzle and MongoDB transaction sources carry them. The tenant and
+inbox bridges use the conditional path when offered and fall back only on absence or that named
+refusal. The outbox requires native conditional writes and refuses unsupported sources at startup.
+Other errors propagate. On that fallback the tenant bridge reads ownership and then writes by key,
+so a delete-and-recreate under a reused caller-supplied key in between can move the write onto
+another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back separately;
+the tenant bridge checks the returned tenant on both paths before returning it.
+
+**`__proto__` fields.** The conditional members refuse an own `__proto__` field in the predicate and
+the payload on every adapter. Cosmos DB and DynamoDB also refuse one in a plain `create`/`update`
+payload (DynamoDB at any depth, because the AWS SDK returns such an attribute without a value), and
+neither lets a stored `__proto__` field set a read row's prototype: Cosmos returns it as an ordinary
+field, DynamoDB omits the attribute the SDK cannot deliver.
+
+**Stored representation.** Predicate scalars compare with the stored representation. DynamoDB date
+attributes encoded as ISO strings require the ISO string; Bigtable's typed/json codecs use their
+configured scalar encoding. Neither member translates a `Date` or allows a document path or operator
+in the predicate.
 
 **Breaking for implementors as of M79.** `findById`/`update`/`delete` moved from `string | number`
 to `EntityKey`, which adds a composite-record arm. A parameter is contravariant, so an adapter still
@@ -1784,8 +1909,11 @@ MongoDB refuses `$and: []`/`$or: []` outright, and those are the answers Memory 
 
 `rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an
 application reaches the injected client directly for native commands, exactly as it does for a
-Prisma raw query. Transactions use a `startSession()` and are refused at `beginTransaction()` with
-`MongoTransactionUnavailableError` on a deployment that is not a replica set, never at `connect()`.
+Prisma raw query. Transactions use a `startSession()`; on a deployment that is not a replica set
+they are refused late, never at `connect()`. On the real driver the refusal surfaces at the first
+operation inside the transaction as the driver's own unwrapped `MongoServerError` (`code: 20`,
+`codeName: 'IllegalOperation'`), not at `beginTransaction()` (measured, M107);
+`MongoTransactionUnavailableError` wraps only a `startTransaction()` that itself throws.
 
 `IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam, and the real driver
 implements their structural shapes: `IMongoClient.connect()` is `Promise<unknown>` because the
@@ -2221,6 +2349,21 @@ against a real server (SQLSTATE `40001` through Drizzle and Prisma's `P2034` ali
 reproducible against DynamoDB Local or the local emulator, and Cosmos's connect refusal is a startup
 failure that never reaches a client.
 
+**A duplicate key answers `409 Conflict`.** A write that would duplicate a primary key or a unique
+index is thrown as `DuplicateKeyError` (exported from `@setu-ts/common`, so a package that may not
+import this one can raise or recognise it), where every backend used to reach the client as a masked
+`500`. The signals, each measured against the real engine: PostgreSQL SQLSTATE `23505`, Prisma's
+`P2002`, MySQL's `ER_DUP_ENTRY` (by probe; CI runs no MySQL), MongoDB code `11000`, Cosmos `409`,
+and SQLite's `UNIQUE constraint failed`, which is the only signal Cloudflare D1 carries. The memory,
+DynamoDB and Bigtable adapters raise the class themselves. Numeric codes are read only under their
+own adapter, as for the conflict class. It is **not** retryable: the served `detail` says the
+conflicting write was rejected, never that it is safe to retry. The class carries the targeted
+`entity` when the failing repository call names one. At `commit()` a duplicate is the one class
+mapped, because the backends that detect it there (D1's atomic batch, a Cosmos transactional batch,
+a DynamoDB `TransactWriteItems` whose cancellation reason sits on a create's `Put`, a buffered
+memory or Bigtable create) apply nothing when they refuse; any other commit rejection is still
+rethrown unchanged.
+
 **Programmatic migrations answer `501 Not Implemented` too.** `UnsupportedMigrationError` names a
 distinct framework-capability refusal rather than pretending a migration is a raw query or a query
 shape. Every current adapter lacks programmatic migration support and delegates it to its own CLI,
@@ -2245,6 +2388,130 @@ The four transaction and concurrency errors — `MongoTransactionUnavailableErro
 `BigtableTransactionScopeError` — are deliberately **not** branded and keep their masked `500`: they
 may legitimately quote backend state, and a concurrency conflict is transient and retryable rather
 than permanent, which is a different contract statement deserving its own decision.
+
+### Transactional outbox store (M107)
+
+`createDatabaseOutboxStore(options?)` returns a `RegistryFactory<IOutboxStore>` — the shipped
+implementation of the `IOutboxStore` port in `@setu-ts/common` over `IDatabaseService` (the M101c
+`createDatabaseTenantDataStore` shape). It is passed to the messaging plugin's `outbox.store`
+option, which resolves it in `onInit` and runs `verify()` there.
+
+```typescript
+import { createDatabaseOutboxStore } from '@setu-ts/database-plugin';
+
+const store = createDatabaseOutboxStore({ entity: 'Outbox', database: 'orders' });
+```
+
+| Export                        | Kind      | Notes                                                                                                                                                                                            |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `createDatabaseOutboxStore`   | function  | Resolves `CAPABILITIES.DATABASE`, or `database.<name>` for `database: '<name>'` (`'default'` is the bare token). Throws `TypeError` at the call for an empty `entity`                            |
+| `DatabaseOutboxStoreOptions`  | interface | `entity?` (default `'Outbox'`), `database?` — must be the database the caller's unit of work belongs to, or the row is never relayed by this store                                               |
+| `OutboxStoreUnavailableError` | class     | Rejected by `verify()`; `entity`, `reason` (`'bigtable'`, `'dynamodb-index'`, `'mongodb-replica-set'`, `'conditional-writes-unsupported'`, `'entity-unavailable'`), the adapter error as `cause` |
+
+- **Discriminator.** Every row carries `kind: 'setu-outbox'` (`OUTBOX_RECORD_KIND`); every read
+  (`scanPending`, `failedKeys`, `stats`, `purge`) requires it, and a lookup by id before a
+  transition treats a row of another `kind` as `missing`.
+- **Conditional transitions.** `claim(id, { claimVersion, leaseUntil })` requires `kind`, `pending`
+  and the read version, increments it by one and sets the lease. `markSent`/`markFailure` require
+  the held version, including `deleteNow` through `deleteWhere`; a pending version miss is
+  `claim-lost`. Status misses are `not-pending` or `not-failed`; another kind is `missing`.
+  `markInvalid(id, now)` uses only kind/status, writes `failed`/`invalid-row`, clears the lease and
+  preserves attempts. `markFailure` and `release('retry')` clear the lease; release preserves the
+  version. Unexplained misses retry at most three rounds. Native conditional writes are required; no
+  fallback remains. `sentBy` is only an operator diagnostic, absent from outcomes.
+- **Columns.** The row is the record's own fields; an absent optional field is written as `null` and
+  read back as absent. `failedKeys` selects only `tenantId` and `orderingKey`; `purge` deletes
+  `sent` then `discarded` rows with `settledAt < before`, at most `limit` per status.
+- **`verify()`** runs `scanPending(undefined, 1)`, then
+  `transaction(uow => uow.getRepository(entity).findAll({ where: { kind, status: 'pending' }, limit: 1 }))`,
+  then
+  `updateWhere('setu-outbox-claim-probe', { kind, status: 'pending', claimVersion: -1 }, { claimVersion: 0 })`
+  and `deleteWhere` with the same id and predicate — both, because `retainSentMs: 0` deletes a sent
+  row conditionally after it is published. No row can carry version `-1` (`append` writes `0` and a
+  claim only increments), so neither probe writes, even to a row appended under the probe id. The
+  old SQL schema without `claim_version` is refused at the first step, the relay query. A
+  `conditional-write` refusal is `conditional-writes-unsupported`. An `UnsupportedQueryFeatureError`
+  from `bigtable` is `'bigtable'`; one from `dynamodb` for `orderBy` is `'dynamodb-index'` (a GSI
+  `{ partitionKey: 'status', sortKey: 'position' }`, projection `ALL`, is required); a cause chain
+  carrying `code: 20` with `codeName: 'IllegalOperation'` — what a standalone MongoDB answers at the
+  first operation inside a transaction — is `'mongodb-replica-set'`; anything else is
+  `'entity-unavailable'`. On memory and MongoDB a missing entity cannot be detected (both create
+  lazily). Every refusal is a rejected promise.
+
+### Consumer inbox store (M108)
+
+`createDatabaseInboxStore(options?)` returns a `RegistryFactory<IInboxStore>` — the shipped
+implementation of the `IInboxStore` port in `@setu-ts/common` over `IDatabaseService`. It is passed
+to the messaging plugin's `inbox.store` option, which resolves it in `onInit` and runs `verify()`
+there.
+
+```typescript
+import { createDatabaseInboxStore } from '@setu-ts/database-plugin';
+
+const store = createDatabaseInboxStore({ entity: 'Inbox', database: 'orders' });
+```
+
+| Export                       | Kind      | Notes                                                                                                                                                                                                                |
+| ---------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createDatabaseInboxStore`   | function  | Resolves `CAPABILITIES.DATABASE` (or `database.<name>`) and `CAPABILITIES.RUNTIME`. Throws `TypeError` at the call for an empty `entity`                                                                             |
+| `DatabaseInboxStoreOptions`  | interface | `entity?` (default `'Inbox'`), `database?` — must be the database the handlers write to                                                                                                                              |
+| `InboxStoreUnavailableError` | class     | Rejected by `verify()`; `entity`, `reason` (`'cosmos-unsupported'`, `'bigtable-unsupported'`, `'mongodb-standalone'`, `'transaction-scope'`, `'entity-unavailable'`), the adapter error as `cause` when there is one |
+
+- **`run`** opens one transaction, creates the marker FIRST, then runs the work with the unit of
+  work; any rejection rolls both back. A duplicate marker id rejects (the adapter's
+  `DuplicateKeyError`, or a write conflict on a MongoDB replica set).
+- **Discriminator.** Every row carries `kind: 'setu-inbox'` (`INBOX_RECORD_KIND`); every read
+  (`find`, `parked`, `stats`, `purge`) requires it, and a row of another `kind` is missing.
+- **Conditional writes.** `recordFailure` compares `kind` and the read `attempts` value in the
+  write, retrying misses at most five rounds; `release` requires `kind` and `status: 'parked'`.
+  Without conditional support, or for a non-safe-integer count, the two-call fallback can lose an
+  increment under concurrent failures.
+- **`verify()`** refuses Cosmos DB and Bigtable by adapter arm or class, runs `purge(0, 1)`, then a
+  transaction that creates two probe rows and always rolls back: a `BigtableTransactionScopeError`
+  at the second row is `'transaction-scope'`, a cause chain carrying `code: 20` with
+  `codeName: 'IllegalOperation'` is `'mongodb-standalone'`, anything else `'entity-unavailable'`.
+  Nothing the probe writes survives.
+
+### Scoped RBAC sources (M110b)
+
+`createDatabaseGrantSource(options)` and `createDatabaseRoleSource(options)` return
+`RegistryFactory` values for AuthPlugin's `scopedRbac` option — the grant source for a
+`{ kind: 'custom', source }` arm and the role source for `customRoles` — resolved in AuthPlugin's
+`onInit`, so `DatabasePlugin` may be registered in either order. Both read the default
+`CAPABILITIES.DATABASE` service through the repository surface and portable `FilterExpression`s, so
+they run on every adapter; no SQL is written and no value is interpolated.
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+import { createDatabaseGrantSource, createDatabaseRoleSource } from '@setu-ts/database-plugin';
+
+const auth = AuthPlugin({
+  rbac: { roles: { approver: { permissions: ['invoices:approve'] } } },
+  scopedRbac: {
+    sources: [{ kind: 'custom', source: createDatabaseGrantSource({ entity: 'role_grants' }) }],
+    customRoles: createDatabaseRoleSource({ entity: 'tenant_roles' }),
+  },
+});
+```
+
+| Option   | Grant source (`DatabaseGrantSourceOptions`)                                   | Role source (`DatabaseRoleSourceOptions`)                                       |
+| -------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `entity` | Required: one row per grant                                                   | Required: one row per (scope, role, permission)                                 |
+| `fields` | `GrantFields` — `subject` / `role` / `scopeType` / `scopeId` (those defaults) | `RoleFields` — `scopeType` / `scopeId` / `role` / `permission` (those defaults) |
+| `name`   | Log name (default `'database-grants'`)                                        | Log name (default `'database-roles'`)                                           |
+| `limit`  | Most matching rows, 1–10 001 (default 10 001); more refuses the question      | Most matching rows, 1–100 000 (default 100 000); more refuses the question      |
+
+A grant row whose `scopeType` and `scopeId` are both `null` is a GLOBAL grant; a row with only one
+`null` is passed through and dropped by AuthPlugin's validator. A `chain` question is ONE query —
+the subject, and either a global row or a row in one of the asked scopes; an `all` question (sign-in
+timing) reads every row of the subject. Each question reads at most `limit + 1` rows, and more than
+`limit` matching rows REJECT it — the check then denies — rather than returning an arbitrary subset,
+which would under-grant unpredictably; AuthPlugin's own `maxGrantsPerPrincipal` bounds the union
+afterwards. The role source groups rows into one definition per (scope, role) and skips a row
+missing any column. Every field name must be an identifier (`[A-Za-z_][A-Za-z0-9_]*`), so it can
+never be read as an operator; an empty `entity`, a non-identifier field, or an out-of-range `limit`
+throws `TypeError` when the factory is called. A query does not start once the evaluator's deadline
+has passed. Verified against real PostgreSQL (Drizzle) and MongoDB.
 
 ### Multiple Databases
 
@@ -2290,6 +2557,93 @@ authorization when RBAC is configured:
 - `IAuthService` under `CAPABILITIES.AUTH` (`'authentication'`) — passive strategy chain + login.
 - `IAuthorizationService` under `CAPABILITIES.AUTHORIZATION` (`'authorization'`) — RBAC checks, only
   when `rbac` is supplied.
+- `IAuthorizationPolicyService` under `CAPABILITIES.AUTHORIZATION_POLICIES`
+  (`'authorization-policies'`) — asynchronous, target-aware policy checks (M110a), ALWAYS
+  registered, holding the `policies` option's definitions and any class-form policies
+  DecoratorPlugin registers.
+
+**Authorization policies (M110a).** `definePolicy({ name, abilities, before? })` validates a policy
+(lowercase kebab-case name, at least one ability, no ability named `before`) and returns a frozen
+copy typed by its ability names; register it through `AuthPlugin({ policies })`, which refuses a
+malformed policy or a duplicate name when `AuthPlugin(...)` is called. An ability is a check
+`(principal, target) => boolean | Promise<boolean>`, or `{ anonymous: true, check }` to be called
+with `null` for an anonymous request. The rules are fixed: an unknown policy or ability REJECTS with
+`UnknownPolicyError`; an anonymous principal is denied (`401`) before a non-anonymous check runs;
+for a signed-in principal `before` runs first — `true` allows, `undefined` falls through, anything
+else (`null` included) denies; only a literal `true` allows; and a throw or rejection from `before`
+or the check denies and is logged once at `error` with the policy, ability, hook and serialized
+error — never the target or the principal. `requirePolicy(policy, ability, target?)` is the route
+guard: `501` with no policy service, `401` when an anonymous request is denied, `403` when a
+signed-in principal is denied, otherwise `next()`; `target` is a value or an extractor
+`(ctx) => T | undefined | Promise<T | undefined>` (a function is ALWAYS treated as an extractor),
+and an extractor's throw propagates unchanged. An anonymous request to an ability that needs a
+principal is refused `401` BEFORE the extractor runs, so it costs no lookup and cannot learn from
+the extractor whether a record exists. Whether the ability needs a principal is read from the
+REGISTERED policy on each request, never from the guard's own policy object, so a guard the startup
+scan never saw (a route added after `start()`, a global middleware) behaves the same; a guard naming
+an unregistered policy or ability rejects without running the extractor. An `undefined` principal
+passed to `can`/`authorize` is anonymous, exactly like `null`. A policy or ability name longer than
+128 characters is truncated in an `UnknownPolicyError`'s message and fields, with the removed length
+noted. It is branded for OpenAPI `deriveSecurity` as authenticated unless the ability is anonymous;
+the brand is fixed from the guard's own policy object when the guard is built, which the startup
+scan proves agrees with the registered policy only for routes present at `start()`. The service's
+`can` resolves a boolean and `authorize` rejects a denial with `AuthorizationDeniedError`, which
+carries a `401`/`403` status hint whose title and detail are the guards' own, so under
+`errorHandler` a thrown denial answers the guard's exact body (without `errorHandler` the kernel
+answers `500`). AuthPlugin's `onBootstrap` hook scans every registered route and fails `start()`
+when a `requirePolicy` guard names a policy or ability that is not registered, or one whose
+registered ability disagrees with the guard's policy object on `anonymous` (a different policy
+registered under the same name); it then SEALS the registry, so `define` after `start()` throws. Not
+scanned: a route added after `start()` and a guard added as global middleware — an unknown name
+there rejects per request (fail closed). A policy is identified by its NAME. See
+[Authorization](docs/authorization.md).
+
+**Scoped RBAC (M110b).** `scopedRbac` (requires `rbac`) grants a catalogue role IN a scope — a
+`ScopeRef { type, id }` naming a tenant, organisation, team or region — rather than everywhere.
+AuthPlugin defines ONE built-in policy, `SCOPED_RBAC_POLICY` (`'scoped-rbac'`, a reserved name an
+application policy may not take), on the M110a evaluator: every catalogue permission is an ability
+`perm:<permission>` and every catalogue role an ability `role:<role>`, and the target is a
+`ScopedRbacTarget { scope, context? }` — so no new capability token is added and the M110a rules
+(only `true` allows, `401` before the check for an anonymous request, a throw denies) apply
+unchanged. The wildcard `*` is never an ability. `requireScopedRole(role | roles, { scope? })` is
+any-of and `requireScopedPermission(permission | permissions, { scope? })` is all-of; `scope` is a
+`ScopeSource` — `scopeFromTenant()` (the default: the resolved `ctx.request.tenant`),
+`scopeFromParam(param, type)`, a fixed `ScopeRef`, `null` (global grants only) or a function. Both
+guards answer `501` with no policy service, `401` anonymous BEFORE the scope source runs, `403` on a
+deny, and are refused at `start()` by the M110a scan when they name a permission or role outside the
+catalogue — so a typo is a startup error, never a silent `403`. Grants come from `sources`, UNIONED:
+`{ kind: 'static', grants }`, `{ kind: 'claims', map }`, and `{ kind: 'custom', source }` (any
+`IGrantSource`, or a `RegistryFactory` resolved at `onInit`, which is how
+`createDatabaseGrantSource` plugs in); one source that rejects, throws or exceeds `sourceTimeoutMs`
+DENIES the whole check (fail closed), logged with the source name, the scope TYPE and the error
+class only — never an id, a principal or a message. A grant applies in its own scope and, through
+`inheritsFrom(scope, signal)`, in every scope that inherits from it (child requests inherit parent
+grants, never the reverse); the walk is depth-first with cycle refusal and the `maxScopeDepth` /
+`maxScopeNodes` bounds, any of which denies. A `null`-scope grant is global unless
+`grantableIn[role]` restricts the role to `scopeTypes` (and `global: false`, the default). Tenant
+consistency: a check whose OWN scope has `tenantScopeType` (default `'tenant'`) and names a tenant
+other than the resolved request tenant denies — a route parameter cannot reach outside the caller's
+tenant. That comparison needs the request: the guards and decorators pass it, and a direct
+`policies.can(...)` call made while serving a request must pass it as the target's `context` —
+without it the scope is checked against the grants alone. Per-scope custom roles (`customRoles`, an
+`IScopedRoleSource`) bundle CATALOGUE permissions only, resolve against the roles defined in the
+grant's OWN scope, cannot shadow a catalogue role, and are checked through permissions — a guard
+naming a custom role is refused at startup. `timing` decides revocation latency for `static` and
+`custom` sources: `'request'` (default; memoised per request),
+`{ kind: 'cache', ttlMs,
+maxEntries }` (an LRU on the monotonic clock with in-flight coalescing; up
+to `ttlMs`) and `'sign-in'` (requires `signIn`; resolved once by `IAuthSessionService.signIn`,
+stored under a PRIVATE session key — never in `claims`, so a token carrying a same-named claim
+grants nothing — carried through a pending second factor, and in force until sign-out or session
+expiry; a source failure rejects sign-in with `GrantResolutionError`, a `503` status hint). A
+`custom` source is handed only the principal's id and `iss` claim — the fields its shared answer is
+keyed by — never other claims, roles or permissions. A `claims` source is mapped on every check from
+the credential being checked and is never memoised, cached or coalesced, because two tokens for one
+principal can carry different claims (under `'sign-in'` it is mapped once, from the credential that
+signed in). Every bound refuses an out-of-range value, `NaN` included, when `AuthPlugin(...)` is
+called. Scoped decisions are NOT observed by M98h `authorizationDiagnostics` — its collector watches
+only the global RBAC evaluator — so no scope identifier reaches the diagnostics connector. See
+[Authorization](docs/authorization.md#scoped-roles).
 
 `jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,
 `apiKey`, `session`, or `strategies`; `local` alone cannot recognize a later request. A JWT-only
@@ -2406,7 +2760,7 @@ what changed is that the refusal is legible.
 | Export                              | File                                          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `AuthPlugin`                        | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `issuers` / `signIn` / `http` / `apiKey` / `local` / `rbac` / `session` / `strategies` / `authorizationDiagnostics`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `issuers` / `signIn` / `http` / `apiKey` / `local` / `rbac` / `policies` / `session` / `strategies` / `authorizationDiagnostics`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `AuthMiddlewareOption`              | `src/interfaces/index.ts`                     | Global authentication middleware priority and path exclusions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `AuthPluginConfigurationError`      | `src/errors.ts`                               | Invalid passive-strategy or middleware configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `AuthorizationDiagnosticsOptions`   | `src/interfaces/index.ts`                     | M98h opt-in for minimized authorization decision explanations through the diagnostics connector                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -2436,6 +2790,22 @@ what changed is that the refusal is legible.
 | `requireAnyRole`                    | `src/guards/index.ts`                         | Guard: require any of the given roles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `requireAllPermissions`             | `src/guards/index.ts`                         | Guard: require all of the given permissions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `publicRoute`                       | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `definePolicy`                      | `src/policies/define-policy.ts`               | M110a: validates a policy and returns a frozen copy typed by its ability names and target; throws `AuthPluginConfigurationError` when malformed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `requirePolicy`                     | `src/policies/policy-guard.ts`                | M110a route guard over `IAuthorizationPolicyService`: 501 / 401 / 403 / `next()`; target value or per-request extractor; refused at startup when its policy ability is not registered                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `AuthorizationDeniedError`          | `src/policies/errors.ts`                      | M110a: `authorize`'s denial rejection — `failure` / `policy` / `ability`, branded with the guards' `401`/`403` status hint                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `UnknownPolicyError`                | `src/policies/errors.ts`                      | M110a: rejection for an unregistered policy or ability (`policy`, `ability?`); unbranded, so a masked `500`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `PolicyDenial`                      | `src/policies/errors.ts`                      | M110a: `'authentication-required' \| 'insufficient-privileges'`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `requireScopedRole`                 | `src/scoped/scoped-guards.ts`                 | M110b route guard: any-of catalogue roles in the request's scope (`scopeFromTenant()` by default); 501 / 401 / 403 / `next()`; refused at startup for a name outside the catalogue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `requireScopedPermission`           | `src/scoped/scoped-guards.ts`                 | M110b route guard: all-of catalogue permissions in the request's scope; otherwise as `requireScopedRole`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `ScopedGuardOptions`                | `src/scoped/scoped-guards.ts`                 | M110b: `{ scope?: ScopeSource }` for the two scoped guards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `GrantResolutionReason`             | `src/scoped/errors.ts`                        | M110b: `'source-failed' \| 'source-timeout' \| 'grant-limit'` — `GrantResolutionError.reason`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GrantResolutionError`              | `src/scoped/errors.ts`                        | M110b: sign-in-timing grant resolution failed (`reason`, `source?`); `503` status hint, no caller input in the message                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ScopedRbacOptions`                 | `src/interfaces/index.ts`                     | M110b: the `scopedRbac` option — sources, `inheritsFrom`, `tenantScopeType`, `grantableIn`, `customRoles`, `timing` and the bounds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `GrantSourceConfig`                 | `src/interfaces/index.ts`                     | M110b: `static` / `claims` / `custom` grant source arms                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `StaticGrant`                       | `src/interfaces/index.ts`                     | M110b: `{ subject, role, scope }` written into configuration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `ClaimsGrantMapper`                 | `src/interfaces/index.ts`                     | M110b: `(claims, principal) => ScopedGrant[]` for the `claims` arm                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ScopedRoleLimit`                   | `src/interfaces/index.ts`                     | M110b: `grantableIn` entry — `scopeTypes`, `global?`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `ScopedRbacTiming`                  | `src/interfaces/index.ts`                     | M110b: `'request'` / `'sign-in'` / `{ kind: 'cache', ttlMs, maxEntries }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `requireMfa`                        | `src/guards/index.ts`                         | M100d step-up guard: 401 anonymous, 403 `second-factor-required` when `claims.amr` lacks `otp` or `pop`; a non-array `amr` counts as absent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `TotpService`                       | `src/mfa/totp-service.ts`                     | M100d app-instantiated TOTP service: `beginEnrolment` / `confirmEnrolment` / `verify` / `verifyRecoveryCode` / `generateRecoveryCodes` / `disable` / `completeSignIn` / `completeSignInWithRecoveryCode`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `TotpServiceOptions`                | `src/mfa/totp-service.ts`                     | `TotpService` constructor options (`store` / `runtime` / `issuer`) — deliberately NO TTL option                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -2486,6 +2856,7 @@ what changed is that the refusal is legible.
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`        | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `IAuthService`                      | re-export                                     | From `@setu-ts/common`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `IJwtService`                       | re-export                                     | From `@setu-ts/common`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `IAuthorizationPolicyService`       | re-export                                     | From `@setu-ts/common` (M110a)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `IAuthorizationService`             | re-export                                     | From `@setu-ts/common`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `IAuthStrategy`                     | re-export                                     | From `@setu-ts/common`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `IPrincipal`                        | re-export                                     | From `@setu-ts/common`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -2536,10 +2907,11 @@ JWT with the separate `IJwtService` resolved from `'jwt'` (or issue an access + 
 `RefreshTokenService` — see Refresh Tokens below).
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
 import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 app.router.post('/auth/login', async (ctx) => {
-  const auth = ctx.services.get<IAuthService>('authentication');
+  const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
   const jwt = ctx.services.get<IJwtService>('jwt');
   const { username, password } = await ctx.request.json();
 
@@ -2661,9 +3033,9 @@ applications sharing one Redis deployment do not count against each other. Pass 
 pre-namespacing keys.
 
 The application constructs `RedisRateLimitStore`, so no plugin supplies its connection-error
-reporter. Since 0.8.0 pass `connectionErrorReporter` — built with `createConnectionErrorReporter`
-from `@setu-ts/common` over your logger — and the `'error'` events of the client the store builds
-are logged (first error at `warn`, repeats at `debug`, recovery at `info`) instead of printed by
+reporter. Pass `connectionErrorReporter` — built with `createConnectionErrorReporter` from
+`@setu-ts/common` over your logger — and the `'error'` events of the client the store builds are
+logged (first error at `warn`, repeats at `debug`, recovery at `info`) instead of printed by
 `ioredis` to `console.error` on every reconnect attempt. Absent, `ioredis` keeps its console
 fallback. An injected `client` never gets a listener.
 
@@ -2904,7 +3276,16 @@ omits that header.
 Stateless Origin/Referer validation for unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`). The
 request's own origin (from `request.url`) is always implicitly trusted. `trustedOrigins` adds
 further allowed origins. Both headers absent → pass through (non-browser clients). Optional
-`customHeader` requires that header on unsafe methods (403 when absent).
+`customHeader` requires that header on unsafe methods (403 when absent). `exclude` lists paths
+(exact string or `RegExp`) that skip the check entirely — checked before the method test, so an
+excluded path is never inspected. It is for a protocol endpoint whose own defences make the check
+redundant (the SAML ACS: its signed assertion, single-use request and binding cookie), not for an
+application form route. An origin allowlist cannot admit an IdP that serves
+`Referrer-Policy:
+no-referrer` (Keycloak does) — the browser posts with `Origin: null`, and
+`trustedOrigins: ['null']` admits every opaque-origin `POST` on every route — so the documented SAML
+recipe is `exclude:
+['/auth/<provider>/acs']` here and in the session plugin's form CSRF.
 
 #### Request Size (`requestSizeMiddleware`)
 
@@ -3021,12 +3402,19 @@ backend to reach). The probe is cached for 5 seconds and bounded at 2 seconds th
 when the store offers no probe. A store that cannot probe is never reported as reachable — the
 absent capability stays explicitly `'unknown'`.
 
-**Connection errors.** Since 0.8.0 the Redis store routes the `'error'` events of the `ioredis`
-client it builds to the application logger through `createConnectionErrorReporter` (common): the
-first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a
-listener `ioredis` prints every reconnect failure to `console.error`, bypassing the logger and
-redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
-unchanged; the indicator still reports the outage.
+**Connection errors.** The Redis store routes the `'error'` events of the `ioredis` client it builds
+to the application logger through `createConnectionErrorReporter` (common): the first error of an
+outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a listener `ioredis`
+prints every reconnect failure to `console.error`, bypassing the logger and redaction. An injected
+client gets no listener — it belongs to the caller. Health semantics are unchanged; the indicator
+still reports the outage.
+
+**Command bound.** Since M101a the Redis store's `options.commandTimeoutMs` (default `15000`, `0`
+disables) is the ioredis `commandTimeout` on the client it builds. A paused or partitioned Redis
+keeps its socket open, so a command used to wait forever; it now rejects inside the bound, is
+counted `failed` in the cache observations, and the `cache` indicator reports `down`. Not applied to
+an injected client. A value outside `0`–`2147483647` throws `RangeError` when `CachePlugin(...)` is
+called.
 
 ### Cache diagnostics (M98i)
 
@@ -3084,14 +3472,30 @@ app.router.get('/users/:id', {
 
 #### Options
 
-| Option              | Type                         | Default              | Behavior                                                                                                                                                                                                                                  |
-| ------------------- | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ttlSeconds`        | `number`                     | store default        | Per-route TTL override in seconds; when omitted the store's `defaultTtl` applies                                                                                                                                                          |
-| `key`               | `(ctx) => string`            | `${method}:${url}`   | Custom cache key generator. The tenant discriminator segment is composed around this key too, so a tenant-aware application stores one entry per tenant even when a custom key is supplied                                                |
-| `vary`              | `(ctx) => readonly string[]` | —                    | Per-request discriminator values appended to the key after the tenant segment. Each returned string is length-prefixed and joined in order, so two requests differing in any value never share an entry; omitted leaves the key unchanged |
-| `bypass`            | `(ctx) => boolean`           | —                    | When `true`, skip caching entirely for this request and pass through to the handler                                                                                                                                                       |
-| `store`             | `string`                     | `CAPABILITIES.CACHE` | Capability token for the cache store to use                                                                                                                                                                                               |
-| `cacheableStatuses` | `number[]`                   | `[200]`              | HTTP status codes eligible for caching                                                                                                                                                                                                    |
+| Option              | Type                         | Default              | Behavior                                                                                                                                                                                                                                              |
+| ------------------- | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttlSeconds`        | `number`                     | store default        | Per-route TTL override in seconds; when omitted the store's `defaultTtl` applies                                                                                                                                                                      |
+| `key`               | `(ctx) => string`            | `${method}:${url}`   | Custom cache key generator. The tenant and locale discriminator segments are composed around this key too, so a tenant-aware application stores one entry per tenant even when a custom key is supplied                                               |
+| `vary`              | `(ctx) => readonly string[]` | —                    | Per-request discriminator values appended to the key after the tenant and locale segments. Each returned string is length-prefixed and joined in order, so two requests differing in any value never share an entry; omitted leaves the key unchanged |
+| `bypass`            | `(ctx) => boolean`           | —                    | When `true`, skip caching entirely for this request and pass through to the handler                                                                                                                                                                   |
+| `store`             | `string`                     | `CAPABILITIES.CACHE` | Capability token for the cache store to use                                                                                                                                                                                                           |
+| `cacheableStatuses` | `number[]`                   | `[200]`              | HTTP status codes eligible for caching                                                                                                                                                                                                                |
+
+#### Key composition
+
+The key is `tenant segment + locale segment + vary segment + base key`. The tenant segment comes
+from `ctx.request.tenant?.id` and the locale segment (M103) from `ctx.request.locale`, each
+length-prefixed and empty when absent — so an application with neither multi-tenancy nor
+localization keeps byte-identical keys. Both segments are read **when `cacheMiddleware` runs**: a
+route-level `cacheMiddleware` runs after every global middleware and sees whatever global middleware
+set, while a GLOBAL registration must have a higher priority number than the middleware that sets
+each one — the tenant middleware (40) and the locale middleware (45 by default, or the configured
+`middleware.priority`). Where the locale middleware is applied per route instead
+(`middleware.enabled: false`), a global cache runs before it, so the cache belongs on that route,
+listed after `localeMiddleware`. A `replaceLocale` override is reflected only when it runs before
+the cache lookup; a route that changes the locale inside its handler must not be response-cached.
+The segments protect this plugin's own store only — a shared cache or CDN relies on the `Vary`
+header the localization middleware writes.
 
 ### ICacheStore Interface
 
@@ -3768,28 +4172,28 @@ package README's "What `SameSite` does not separate".
 
 ### Options
 
-| Option               | Type                                   | Default                    | Behavior                                                                                                                                                                                                                                                                                             |
-| -------------------- | -------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `secret`             | `string \| readonly string[]`          | resolved                   | Index 0 seals; every entry can open, so rotation does not log users out                                                                                                                                                                                                                              |
-| `secretName`         | `string`                               | `SESSION_SECRET`           | Name looked up in `CAPABILITIES.SECRETS` and then in `runtime.env`                                                                                                                                                                                                                                   |
-| `mode`               | `'encrypt' \| 'sign'`                  | `'encrypt'`                | `'sign'` is HMAC-only and leaves the payload READABLE by the client                                                                                                                                                                                                                                  |
-| `store`              | `'memory' \| 'cache' \| ISessionStore` | —                          | Omitted keeps the payload in the cookie; set moves it server-side                                                                                                                                                                                                                                    |
-| `maxAge`             | `number` (seconds)                     | `7200`                     | Enforced from a stamp inside the payload, not from the cookie's `Max-Age`                                                                                                                                                                                                                            |
-| `rolling`            | `boolean`                              | `false`                    | `true` re-issues on every response, extending expiry                                                                                                                                                                                                                                                 |
-| `idleTimeoutMs`      | `number`                               | —                          | Expiry after this long with no requests. Refreshed by ANY request including a read-only one, so setting it commits on every response to advance the activity stamp; it does not extend absolute expiry                                                                                               |
-| `maxCookieBytes`     | `number`                               | `4096`                     | Throws `SessionTooLargeError` rather than emitting a cookie browsers drop                                                                                                                                                                                                                            |
-| `cookie.name`        | `string`                               | `setu_session`             | Renamed from `hono_session` — see the CHANGELOG migration note; pin the old name to preserve in-flight sessions                                                                                                                                                                                      |
-| `cookie.path`        | `string`                               | `'/'`                      |                                                                                                                                                                                                                                                                                                      |
-| `cookie.domain`      | `string`                               | —                          | Omitted produces a host-only cookie                                                                                                                                                                                                                                                                  |
-| `cookie.sameSite`    | `'strict' \| 'lax' \| 'none'`          | `'lax'`                    | `'none'` forces `Secure`                                                                                                                                                                                                                                                                             |
-| `cookie.secure`      | `boolean`                              | `true`                     | Escape hatch for plain-HTTP local development                                                                                                                                                                                                                                                        |
-| `cookie.httpOnly`    | `boolean`                              | `true`                     |                                                                                                                                                                                                                                                                                                      |
-| `csrf`               | `CsrfFormOptions`                      | —                          | Presence registers `csrfFormMiddleware` at priority 275                                                                                                                                                                                                                                              |
-| `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                                                                                                                                                                                                                                                        |
-| `csrf.headerName`    | `string`                               | `'x-csrf-token'`           | Header accepted as an alternative token source for `fetch` posts; an explicit name still wins. Read first, so a client that sends it triggers no body parse. No longer required for `multipart/form-data`, whose FIELD is read too (M94b) — but a token arriving as a multipart FILE part is refused |
-| `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                                                                                                                                                                                                                                                       |
-| `csrf.exclude`       | `readonly (string \| RegExp)[]`        | —                          | Exact paths or regular expressions that skip form CSRF. Use only for a separately-mounted non-browser protocol surface; application form paths must remain protected.                                                                                                                                |
-| `tenantBinding`      | `boolean`                              | `true`                     | Seals the resolved tenant id into the session on commit; replaying it under a different tenant is refused with `403` before the handler. Inert when either side has no tenant; `false` disables both                                                                                                 |
+| Option               | Type                                   | Default                    | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `secret`             | `string \| readonly string[]`          | resolved                   | Index 0 seals; every entry can open, so rotation does not log users out                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `secretName`         | `string`                               | `SESSION_SECRET`           | Name looked up in `CAPABILITIES.SECRETS` and then in `runtime.env`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `mode`               | `'encrypt' \| 'sign'`                  | `'encrypt'`                | `'sign'` is HMAC-only and leaves the payload READABLE by the client                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `store`              | `'memory' \| 'cache' \| ISessionStore` | —                          | Omitted keeps the payload in the cookie; set moves it server-side                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `maxAge`             | `number` (seconds)                     | `7200`                     | Enforced from a stamp inside the payload, not from the cookie's `Max-Age`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `rolling`            | `boolean`                              | `false`                    | `true` re-issues on every response, extending expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `idleTimeoutMs`      | `number`                               | —                          | Expiry after this long with no requests. Refreshed by ANY request including a read-only one, so setting it commits on every response to advance the activity stamp; it does not extend absolute expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `maxCookieBytes`     | `number`                               | `4096`                     | Throws `SessionTooLargeError` rather than emitting a cookie browsers drop                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `cookie.name`        | `string`                               | `setu_session`             | Renamed from `hono_session` — see the CHANGELOG migration note; pin the old name to preserve in-flight sessions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `cookie.path`        | `string`                               | `'/'`                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `cookie.domain`      | `string`                               | —                          | Omitted produces a host-only cookie                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `cookie.sameSite`    | `'strict' \| 'lax' \| 'none'`          | `'lax'`                    | `'none'` forces `Secure`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `cookie.secure`      | `boolean`                              | `true`                     | Escape hatch for plain-HTTP local development                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `cookie.httpOnly`    | `boolean`                              | `true`                     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `csrf`               | `CsrfFormOptions`                      | —                          | Presence registers `csrfFormMiddleware` at priority 275                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `csrf.headerName`    | `string`                               | `'x-csrf-token'`           | Header accepted as an alternative token source for `fetch` posts; an explicit name still wins. Read first, so a client that sends it triggers no body parse. No longer required for `multipart/form-data`, whose FIELD is read too (M94b) — but a token arriving as a multipart FILE part is refused                                                                                                                                                                                                                                                                                                                                                                                       |
+| `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `csrf.exclude`       | `readonly (string \| RegExp)[]`        | —                          | Exact paths or regular expressions that skip form CSRF. Use only for a separately-mounted non-browser protocol surface; application form paths must remain protected.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `tenantBinding`      | `boolean`                              | `true`                     | Seals the resolved tenant id into the session on commit; replaying it under a different tenant is refused with `403` before the handler. The compare runs on whichever side sees the tenant second — the session middleware when the tenant resolves first, the tenant middleware when it resolves after the session loads — so resolver priority does not matter. A tenant written by application code inside a handler is seen by neither compare before the handler: it is sealed at commit on an unbound session (a bound one is never re-bound) and compared on the next request. Inert when either side has no tenant; `false` disables both compare sites in every middleware order |
 
 ### Exports
 
@@ -3919,6 +4323,10 @@ a React frontend with Server-Side Rendering (SSR) and file-based routing. React 
 framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
 assets are served over `runtime.fs?.readFile`.
 
+A route-middleware refusal on a document request is rendered by React Router's `ErrorBoundary` as
+HTML with the thrown status. The kernel error responder governs kernel routes and is deliberately
+not applied to that document protocol; API callers needing Problem Details call a kernel API route.
+
 ### Registration
 
 ```typescript
@@ -4012,6 +4420,19 @@ app.router.get('/api/health', (ctx) => {
 - `contextKeyFor<T>(name, defaultValue): RouterContextKey<T>` — returns the key for a name,
   memoised, so the same name always yields the **same object**. Use it for any key an application
   declares for itself; see the note below on why a `{ defaultValue }` literal silently fails there.
+- `viteDevExternals({ packages, resolve }): ViteDevExternalsPlugin` — a Vite plugin for development
+  mode under Deno, passed to `vite.createServer({ plugins })`. It resolves each listed package, and
+  any subpath of one, with `resolve` (pass `import.meta.resolve` from the development entry) and
+  marks the result external, in the SSR environment only: a browser cannot import that specifier, so
+  a client import is left to Vite. It appends the resolved specifiers to the SSR environment's
+  `resolve.builtins` in `configResolved`, appending because a configured list replaces Vite's
+  default one, which holds the Node built-ins. The patterns are `jsr:` and `npm:` specifiers, plus
+  the directory of each package mapped to a `file:` URL. Vite's runner then imports the module
+  natively instead of loading a second copy. It is typed structurally (`ViteDevExternalsOptions`,
+  `ViteDevExternalsPlugin`, `ViteDevExternalId`, `ViteHookContext`, `ViteResolvedEnvironments`), so
+  this package imports no Vite. `setu new --template full-stack` emits a `dev.ts` that uses it on
+  Deno, Node and Bun; on Node and Bun Vite externalises `node_modules` packages anyway, so it
+  changes nothing there.
 - `interface RouterContextKey<T>` — `{ readonly defaultValue?: T }`. Structurally identical to React
   Router's `RouterContext<T>`, so keys from this package and keys from `createContext<T>()` are
   interchangeable.
@@ -4075,6 +4496,11 @@ export default defineConfig({
 Declared under `environments.ssr.build`, deliberately: React Router builds through Vite's
 Environment API, and neither a top-level `ssr.external` nor `environments.ssr.resolve.external`
 reaches that build. `setu new --template full-stack` emits all of this already.
+
+Development mode needs the same guarantee from Vite's dev SSR runner, which loads route modules
+itself. Unaided it cannot resolve a JSR import at all, and it would inline a package mapped to a
+local path as a second copy. `viteDevExternals` keeps those packages external there too, resolved by
+the runtime.
 
 The same externalisation is what lets a **server-only** module (`*.server.ts`) import a framework
 package by value at all. Client-reachable modules must stick to `import type`, which is erased: the
@@ -4184,16 +4610,24 @@ app.router.post('/thumbnail', async (ctx) => {
 
 ### Options
 
-| Option            | Type                              | Default                  | Description                                            |
-| ----------------- | --------------------------------- | ------------------------ | ------------------------------------------------------ |
-| `defaultPoolSize` | `number`                          | `availableParallelism()` | Workers per pool.                                      |
-| `maxQueue`        | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.      |
-| `taskTimeoutMs`   | `number`                          | `30000`                  | Per-task timeout; `0` disables. Timed-out worker dies. |
-| `pools`           | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.     |
-| `host`            | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.     |
+| Option             | Type                              | Default                  | Description                                                                                                                                               |
+| ------------------ | --------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxWorkers`       | `number`                          | See budget rule below    | Total worker slots across all modules; `Infinity` disables.                                                                                               |
+| `startupTimeoutMs` | `number`                          | `10000`                  | Deadline for a spawned worker to signal ready: a positive integer from 1 through 2147483647. `0` cannot disable it; an invalid value throws `RangeError`. |
+| `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                                                                                         |
+| `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                                                                                         |
+| `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.                                                                                |
+| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                                                                                        |
+| `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                                                                                        |
 
 ### Interface Reference
 
+- `WorkerPoolService` — the `IWorkerPool` implementation the plugin registers under
+  `CAPABILITIES.WORKER_POOL`; exported for direct construction in tests. Its constructor refuses an
+  invalid `maxWorkers`, `startupTimeoutMs` or task timeout with `RangeError`, as the plugin factory
+  does.
+- `TaskPoolOptions` / `WorkerPoolPluginOptions` — the per-module overrides and plugin options in the
+  table above.
 - `IWorkerPool.run<TInput, TOutput>(taskModule, input, options?): Promise<TOutput>` — run a task,
   creating the pool for `taskModule` lazily on first use.
 - `IWorkerPool.stats(): readonly TaskPoolStats[]` — one snapshot per pool
@@ -4209,8 +4643,87 @@ app.router.post('/thumbnail', async (ctx) => {
   `remoteName`, and `remoteStack`.
 - `WorkerTaskTimeoutError` — the task exceeded its timeout; the worker was terminated and replaced.
   Carries `taskModule` and `timeoutMs`.
+- `WorkerExitError` — the worker thread ended while its task was in flight, on a runtime that
+  reports worker exits (Node, Bun; Deno reports none). Carries `taskModule` and the exit `code`
+  (`null` when the runtime reports none).
 - `WorkerQueueFullError` — the pool's pending queue is at its bound. Carries `taskModule` and
   `limit`.
+
+### Sizing and shared memory
+
+Each module has its own pool; `size` bounds that pool and `maxWorkers` bounds their sum. The
+service-wide default is `max(availableParallelism(), defaultPoolSize ?? 0, sum(pools[*].size))`.
+Explicit pool sizes therefore fit concurrently; modules using fallback sizes share the budget.
+`maxWorkers: Infinity` restores the previous unbounded sum. Other values must be positive safe
+integers; `NaN`, zero, negative and fractional values throw `RangeError` at plugin or service
+construction, naming the option and refused value.
+
+When the budget is full, a requester evicts another module's ready idle worker; otherwise it waits.
+Freed capacity is reserved for waiting modules, with modules that have queued tasks and no slots
+served first, then FIFO among equals. A busy module hands over a worker after a task settles if
+another module has no slot. Timeouts include time waiting for this budget. Rotation costs a worker
+spawn; size `maxWorkers` at least as large as the number of task modules active concurrently when
+that cost matters. Workers stay resident between bursts; there is no timed idle reaping.
+
+**Timeouts are validated.** `taskTimeoutMs` (plugin-wide and per pool) and a per-call `timeoutMs`
+must be `0` (disabled) or a positive integer no greater than 2 147 483 647, the largest delay a
+runtime timer honours. Anything else throws `RangeError` at construction, or rejects that `run()`
+call before admission: `NaN` and negative values used to disable the timeout silently, and larger
+values overflowed the timer and timed every task out after about 1 ms. Each option is read once and
+the pools use exactly the validated value; only the own enumerable keys of `pools` are read, so an
+entry inherited through a prototype is ignored.
+
+**Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
+`timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other
+task modules wait (until their own timeouts, or forever if theirs are disabled too) until the
+process restarts. The pool does not reclaim a running task the application allowed to run
+indefinitely; `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers` (a per-call
+`timeoutMs: 0` cannot be seen at registration, so it gets no warning). Keep a timeout on modules
+that share the budget, or opt out of the bound with `maxWorkers: Infinity`.
+
+**Containers:** CPU limits lower `availableParallelism()` (measured on Deno and Node with
+`--cpus=2`); pods without CPU limits see all node cores. Set an explicit bound for the pod's memory
+budget. A trivial module measured about 12 MB per worker on Deno, 13.5 MB on Node and 1.5 MB on Bun;
+imports and task data increase that cost. **The bound counts pool slots, not threads or memory.** A
+worker the pool terminates (on a timeout, a startup deadline or a hand-over) leaves the budget at
+once, but on Deno `Worker.terminate()` does not stop a thread that never yields: a timed-out
+CPU-bound task keeps its thread, memory and CPU until its code returns. Measured on Deno with
+`maxWorkers: 1`: five timed-out busy-loop tasks left 0 slots and four extra threads at about 500%
+CPU. Node and Bun were not measured. Treat a task timeout as a correctness bound rather than a
+resource bound for CPU-bound code that can loop, and have long tasks check a deadline and return.
+
+**Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
+serialization and scheduling do not cost more than the computation.
+
+**SharedArrayBuffer:** structured clone shares it instead of copying it. A buffer nested in the
+input can be written by the worker and read by its caller after the promise settles. A task's
+settlement does not mean its worker has stopped using the buffer: on Deno a task that times out
+keeps running, and keeps writing, after its promise has rejected (measured: 50 of 200 bytes written
+at the rejection, all 200 a second later). After a successful result the worker is done with the
+buffer. After a rejection, a timeout especially, treat the buffer as still shared and do not reuse
+it. While a task runs, do not touch the buffer unless coordinating access with Atomics. SAB-backed
+views are refused by `BodyInit` and some `SubtleCrypto` operations: copy into an ordinary
+ArrayBuffer-backed view first. An ordinary `ArrayBuffer` input is copied, so the caller's original
+stays unchanged.
+
+See [`apps/worker-pool`](apps/worker-pool) for a runnable off-thread, fairness and shared-memory
+smoke check. A synchronous spawn failure rejects the oldest pending task as a crash, clears its
+timer, and holds no worker budget. The pool continues scheduling the remaining queue; repeated spawn
+failures settle one task per attempt rather than leaving queued tasks stranded.
+
+A worker that does not signal ready within `startupTimeoutMs` (default 10 s, applied even with
+`taskTimeoutMs: 0`) is terminated, its slot returns to the budget, and the oldest waiting task for
+that module rejects with `WorkerTaskError` (`remoteName: 'WorkerStartupTimeout'`). When a queued
+task expires while another module has work and no worker, the expiring module yields a starting
+worker to it, so a module that never becomes ready cannot starve the others under steady demand.
+Callbacks from removed slots are ignored. A worker error that settles no task (an idle worker
+crashing, or a startup crash with nothing queued) is logged as a warning with its `taskModule`,
+since it rejects nothing a caller could see. Termination throws/rejections are contained; shutdown
+waits at most 1,000 ms per termination, including already-retired slots. This bounds waiting, not
+physical thread exit: a failing host can leave a worker alive. Module metadata remains retained for
+the service lifetime. `NaN` or `Infinity` legacy default/pool sizes contribute zero to the derived
+budget; their per-pool behavior remains unchanged, while independently valid configured modules
+remain usable.
 
 ### Notes
 
@@ -4219,12 +4732,13 @@ app.router.post('/thumbnail', async (ctx) => {
   threads: the plugin still registers, but `run()` rejects with `WorkerPoolUnavailableError` and the
   health indicator reports `available: false`. One codebase deploys everywhere.
 - **Error vs crash.** A thrown handler is a healthy worker reporting failure (`WorkerTaskError`, the
-  worker is retained). A worker-level crash drops the worker and re-dispatches its queued work to
-  survivors. A timeout terminates and replaces the worker (in-flight JS cannot be cancelled).
+  worker remains eligible for reuse or budget hand-over). A worker-level crash drops the worker and
+  re-dispatches its queued work to survivors. A timeout terminates and replaces the worker
+  (in-flight JS cannot be cancelled).
 - **Structured clone only.** `input`/`output` must be structured-clonable — no functions or class
   instances. A clone failure surfaces as a rejected `run()` on both dispatch paths (immediately, and
-  when the task is dispatched later from the queue); the worker is retained and the pool keeps
-  serving.
+  when the task is dispatched later from the queue); the worker remains usable, and the pool keeps
+  serving under the shared budget.
 - **A worker that ends its own thread** settles its in-flight task with `WorkerExitError` and frees
   the slot, independently of the task timeout — where the runtime reports the exit. It does on Node
   (`node:worker_threads` `'exit'`) and on Bun (its non-standard `'close'`); it does **not** on Deno,
@@ -4235,7 +4749,9 @@ app.router.post('/thumbnail', async (ctx) => {
   `taskTimeoutMs` resolves to `0` on a runtime that cannot report an exit.
 - **Node `.ts` task modules** need an app-level loader/build, exactly as the frontend build is the
   app's responsibility (AI_GUIDELINES §12.2); the plugin consumes the module specifier as given.
-- Health indicator `worker-pool` reports `{ available, exitDetection, pools }`.
+- Health indicator `worker-pool` reports `{ available, exitDetection, pools, budget }`; `budget` is
+  `{ maxWorkers, workers }`, with the resolved bound (`null` for `Infinity`) and the sum of pool
+  slots.
 - **Metrics (opt-in by capability).** When `CAPABILITIES.METRICS` is registered, the plugin
   publishes six series, all labelled `task_module`: gauges `worker_pool_workers`,
   `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
@@ -4264,6 +4780,8 @@ development-only entry point the production graph never imports; the package REA
 composition and the Deno permission grant that refuses the bind independently. Loopback is not
 authentication (the HMAC-SHA-256 signed protocol is) and not encryption (a privileged local sniffer
 reads authenticated bytes; remote and production use are unsupported).
+
+<!-- version:history -->
 
 | Export                       | Kind      | Since |
 | ---------------------------- | --------- | ----- |
@@ -4583,19 +5101,20 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ### Options
 
-| Option                                               | Provider                | Description                                                                                                                   |
-| ---------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                       |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                      |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                           |
-| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                            |
-| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected). |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                     |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                     |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                |
+| Option                                               | Provider                | Description                                                                                                                      |
+| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                   |
+| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                          |
+| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                         |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                              |
+| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                   |
+| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                               |
+| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).    |
+| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                   |
+| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                        |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                        |
+| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                   |
+| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. A value outside `0`–`2147483647` throws `RangeError` at startup. |
 
 ### Exports
 
@@ -4603,6 +5122,18 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 - `SecretsService` — the `ISecretManager` implementation (provider + read cache).
 - `EnvProvider`, `AwsKmsProvider`, `GcpSecretManagerProvider`, `AzureKeyVaultProvider`,
   `HashiCorpVaultProvider` — provider classes.
+- `SecretProviderUnavailableError` — **since M101a**, a provider that cannot be reached, answered
+  **`503 Service Unavailable`** through a status hint. `HashiCorpVaultProvider` rejects with it when
+  a request fails on the network or does not answer inside `options.requestTimeoutMs` — the body
+  read included, so headers followed by silence count as no answer; the transport error is kept as
+  `cause` for the log and never reaches the response body. A Vault that answers with an HTTP error
+  is reachable and keeps its handling: `404` reads as `null`, any other error status rejects with a
+  plain `Error`. `provider` names the unreachable provider. Since M101a the provider also
+  percent-encodes each `/`-separated segment of a secret name and refuses an empty, `.` or `..`
+  segment, or a name longer than 4096 characters once encoded, before sending anything; a read body
+  over 1 MiB is refused with a plain `Error`, with memory held per read bounded by the same 1 MiB;
+  and a name quoted in any `secrets-plugin` error message has its C0 and C1 control characters, DEL,
+  and U+2028/U+2029 escaped as `\uXXXX`, cut after 256 characters.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write
@@ -4921,12 +5452,59 @@ app.register(MessagingPlugin({
 }));
 ```
 
-**Connection errors.** Since 0.8.0 the `'redis-streams'` broker routes the `'error'` events of the
-`ioredis` client it builds to the application logger through `createConnectionErrorReporter`
-(common): the first error of an outage at `warn`, identical repeats at `debug`, the recovery at
-`info`. Without a listener `ioredis` prints every reconnect failure to `console.error`, bypassing
-the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
-semantics are unchanged; the indicator still reports the outage.
+**Connection errors.** The `'redis-streams'` broker routes the `'error'` events of the `ioredis`
+client it builds to the application logger through `createConnectionErrorReporter` (common): the
+first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a
+listener `ioredis` prints every reconnect failure to `console.error`, bypassing the logger and
+redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
+unchanged; the indicator still reports the outage.
+
+**RabbitMQ consumer recovery (0.9.0).** Durable consumer groups retry transient handler failures
+through durable quorum `Q.retry.<delay>ms` queues (queue-level TTL, default-exchange DLX back to
+`Q`, at-least-once dead-lettering with `reject-publish` overflow, so a copy is held rather than
+dropped while `Q` cannot take it). Delays must be nonempty, nondecreasing positive integer
+milliseconds ≤2147483647. Total attempts and dead-letter cap must be positive safe integers. Invalid
+options throw `RangeError` at construction. Deserialize failures and `IntegrationEventRejectedError`
+dead-letter immediately; then `isRetryable` runs (false dead-letters, throwing logs and retries),
+then the attempt budget applies. The original is acked after the persistent retry/dead-letter
+publish is accepted on the same captured channel. Disposition failure leaves it unacked, closes that
+channel (returning it to `Q`) and starts the reconnect-and-replay recovery, which re-declares the
+helper queues; a late confirm or a crash between publish and ack can duplicate it. Handlers must be
+idempotent. `Q.dead` carries preserved properties/headers (less `expiration`, `userId`, `CC` and
+`BCC`, which the broker would act on) plus `x-setu-attempts`, `x-setu-topic`, and a 1 KiB UTF-8
+`x-setu-error` description. Changing the cap requires draining and deleting `Q.dead`. Private
+exclusive queues and RPC reply inboxes retain nack-and-discard. `consumerRetry: false` retains the
+operator-DLX path. Prefetch is re-applied on reconnect, which re-declares retry and dead queues
+before consuming. Retry/dead copies are mandatory; correlated `basic.return` rejects disposition
+despite a positive confirm. The framework replaces `x-setu-disposition-id` per copy, preserving the
+message ID. Recovery requires confirm channels with `on`/`off` return listeners and `close()`,
+including injected clients: `subscribe()` refuses a retrying consumer group without them, before
+declaring anything, rather than letting every failure stay unacked until `prefetch` stalls the
+consumer. With retries enabled, group names ending in `.dead` or `.retry.<digits>ms` are reserved,
+and helper names must fit 255 UTF-8 bytes. Names are validated before declaration (at construction
+for declarative instances). Rename conflicting groups or set `consumerRetry: false`; migrate
+existing queues occupying helper names before enabling retries.
+
+**Redis Streams recovery (0.9.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
+redeliver, including after restart, so handlers must be idempotent. The first retry delay must
+exceed the longest handler runtime: it also guards against another replica stealing in-flight work.
+Reclaim atomically claims up to ten idle pending entries per pass; delivery metadata and
+acknowledgement share the new-entry path. Deserialize/missing-payload failures and
+`IntegrationEventRejectedError` dead-letter immediately. Other failures use the classifier and total
+delivery budget. Dead-letter `XADD MAXLEN ~` to `<topic>.dead.<group>` precedes source `XACK`, with
+original fields plus `x-setu-source-id` and `x-setu-deliveries`; crashes between writes can
+duplicate entries. Pending consumers survive shutdown, while empty consumers are deleted and old
+foreign empty consumers are swept.
+
+All counts are positive safe integers; all new millisecond options are positive integers
+≤2147483647. Empty/decreasing delay arrays and invalid numeric values throw `RangeError` at
+construction. No `consumerRetry: false` arm exists. Injected `IRedisStreamsClient` facades require
+`xpending(...args)` returning `[id, owner, idleMs, deliveries][]`, `xclaim(...args)` returning
+`([id, fields] | null)[]`, and `xinfo(...args)` returning consumer field/value arrays, plus `xgroup`
+accepting `DELCONSUMER` and returning a number for that command. Redis 6.2 null claims of trimmed
+entries are acknowledged; Redis 7 removes them server-side. Empty race-loser claims are never
+acknowledged. See the [messaging README](packages/messaging-plugin/README.md#redis-streams-recovery)
+for defaults, retention, ordering, and command cost.
 
 ### Plugin Options
 
@@ -4964,6 +5542,13 @@ interface MemoryMessagingOptions extends MessagingCommonOptions {
   broker?: 'memory';
 }
 
+/** Shared retry shape; defaults and lease semantics depend on the broker. @since 0.9.0 */
+interface ConsumerRetryOptions {
+  readonly maxAttempts?: number;
+  readonly delaysMs?: readonly number[];
+  readonly isRetryable?: (error: unknown) => boolean;
+}
+
 // ── Redis Streams ────────────────────────────────────────────────────────────────────
 interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   broker: 'redis-streams';
@@ -4977,19 +5562,51 @@ interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   pollIntervalMs?: number;
   /** XREADGROUP block timeout in ms. */
   blockSizeMs?: number;
+  /** Total delivery budget, including initial delivery. Default 5. */
+  consumerRetry?: ConsumerRetryOptions;
+  /** Pending reclaim interval, default 5000 ms. */
+  reclaimIntervalMs?: number;
+  /** Approximate per-group dead-letter MAXLEN, default 10000. */
+  deadLetterMaxLen?: number;
+  /** Foreign empty consumer inactivity threshold, default 3600000 ms. */
+  consumerIdleSweepMs?: number;
 }
 
 // ── RabbitMQ ─────────────────────────────────────────────────────────────────────────
 interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  /** Group retry policy, default 5 attempts and [5000, 30000, 120000, 600000] ms. @since 0.9.0 */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /** Q.dead retention cap, default 10000; changing requires draining/deleting Q.dead. @since 0.9.0 */
+  deadLetterMaxLength?: number;
+  /** Unacked delivery limit per consumer, integer 1–65535, default 32. @since 0.9.0 */
+  prefetch?: number;
   broker: 'rabbitmq';
   /** AMQP connection URL. */
   url?: string;
   /** Injected AMQP connection. */
   client?: IAmqpConnection;
-  /** Topic exchange name. @defaultValue 'messaging' */
+  /**
+   * Topic exchange name, at most 255 UTF-8 bytes (an AMQP short string; longer
+   * is refused at construction). @defaultValue 'messaging'
+   */
   exchangeName?: string;
-  /** Default consumer group / queue name. */
+  /**
+   * Default consumer group / queue name. A private queue is named
+   * `<defaultQueue>-<uuid>`, so it must be at most 218 UTF-8 bytes; longer is
+   * refused at construction.
+   */
   defaultQueue?: string;
+  /**
+   * Publish every message persistent (`delivery_mode` 2), so it survives a broker restart.
+   * `false` restores the pre-0.9.0 transient publishes. @defaultValue true @since 0.9.0
+   */
+  persistentMessages?: boolean;
+  /**
+   * Bound on one `publish()` in ms — every broker round trip, including the publisher confirm.
+   * `0` disables it; outside `0`–`2147483647` throws `RangeError` at `MessagingPlugin(...)`.
+   * @defaultValue 15000 @since 0.9.0
+   */
+  publishTimeoutMs?: number;
 }
 
 // ── NATS (JetStream) ─────────────────────────────────────────────────────────────────
@@ -5012,11 +5629,22 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
    * (M90d / X28-2). Supplied and the stream is absent → the broker creates it
    * with exactly these subjects. Absent and the stream is absent → startup
    * rejects with `JetStreamStreamError`, naming the stream and both remedies.
-   * An existing stream is never touched either way.
+   * An existing stream is never touched either way. An RPC-capable stream must
+   * also cover `rr.req.<topic>` and `rr.inbox.>` (M101b); NATS refuses two
+   * streams with overlapping subjects, so one stream per account owns
+   * `rr.inbox.>`.
    * @since 0.5.0
    */
   streamSubjects?: readonly string[];
-  /** Default consumer group / queue name. */
+  /**
+   * Default consumer group / queue name. A queue becomes the JetStream durable
+   * consumer name with each character the nats client refuses (`.`, `*`, `>`,
+   * `/`, `\`, whitespace) escaped as `_` + two hex digits — `orders.eu` →
+   * `orders_2eeu` (M101b). A queue whose encoding collides with another queue's,
+   * or that is reused across topics, rejects `subscribe()` with
+   * `NatsConsumerNameCollisionError`. The raw queue is recorded as consumer
+   * metadata, which needs NATS 2.10+.
+   */
   defaultQueue?: string;
 }
 
@@ -5041,6 +5669,25 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
   defaultQueue?: string;
   /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
+  /**
+   * Retry budget (M101b). Forwarded to `new Kafka({ retry })` unless `client` is
+   * injected, and read by `subscribe()` to retry `UNKNOWN_TOPIC_OR_PARTITION` —
+   * which a KRaft broker answers to the request that auto-creates a topic, and
+   * which kafkajs does not retry. Exponential: `retries` after the first attempt,
+   * from `initialRetryTime`, growing by `multiplier` up to `maxRetryTime`
+   * (kafkajs's defaults: 5 / 300 ms / 2 / 30 000 ms). Still unknown after the
+   * budget → `KafkaTopicUnavailableError`. Every field is validated at
+   * construction, `factor` (kafkajs's jitter) included, held to [0, 1].
+   * @since 0.9.0
+   */
+  retry?: {
+    maxRetryTime?: number;
+    initialRetryTime?: number;
+    /** kafkajs's jitter, between 0 and 1. */
+    factor?: number;
+    multiplier?: number;
+    retries?: number;
+  };
 }
 
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
@@ -5052,8 +5699,25 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   projectId?: string;
   /** Service-account credentials. Optional when client is injected. */
   credentials?: unknown;
+  /**
+   * Prefix of the per-topic default subscription. Since M101b a subscription with
+   * no `queue` uses `<defaultQueue>.<topic ID>` (a fully-qualified topic name
+   * contributes only its ID): Pub/Sub subscription names are
+   * project-global, so the previously shared name attached a second topic to the
+   * first topic's subscription. An existing subscription bound to another topic is
+   * refused with `PubSubSubscriptionBoundElsewhereError`; a name over 255
+   * characters is refused at `subscribe()`.
+   * @defaultValue 'messaging-consumers'
+   */
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Refused on this arm (compile error, and `RangeError` from a standalone
+   * `GcpPubSubBroker`): the injected transport creates its own subscriptions, so
+   * the broker cannot switch ordering on. Pass `enableMessageOrdering` to
+   * `adaptPubSubModule` when building the transport instead.
+   */
+  enableMessageOrdering?: never;
 }
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
@@ -5065,8 +5729,16 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   credentials?: unknown;
   /** Mutually exclusive with the injected arm — client?: never. */
   client?: never;
+  /** Per-topic default subscription prefix — see the injected arm. @defaultValue 'messaging-consumers' */
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Create the broker's own subscriptions with message ordering (M106), which a
+   * native `orderingKey` needs to be delivered in order. Fixed when a
+   * subscription is created and it costs throughput, so it is opt-in.
+   * @defaultValue false
+   */
+  enableMessageOrdering?: boolean;
 }
 
 /** GCP Pub/Sub options — exclusive union of injected and production arms. */
@@ -5313,15 +5985,26 @@ configuration verdict this broker reaches on its own, so that one arm has no `ca
 | `JetStreamUnavailableError` | `connect()` finds no JetStream on the server — start it with the `-js` flag. The raw `503` the server answered is the `cause`.                                   |
 | `JetStreamStreamError`      | The stream is absent and `streamSubjects` was not supplied (the message names both remedies), or the server refused the stream read/create (`cause` carries it). |
 
+Three more name failures the real brokers impose and a permissive fake accepts (M101b). Each is
+thrown by `subscribe()`, so a declared subscription rejects `start()` with it:
+
+| Error                                   | Thrown when                                                                                                                                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PubSubSubscriptionBoundElsewhereError` | The Pub/Sub subscription already exists and is bound to another topic. Carries `subscription`, `boundTopic` (fully qualified, or `'(unknown)'` when the service reported none) and `requestedTopic`.                     |
+| `NatsConsumerNameCollisionError`        | The queue's JetStream consumer name already belongs to a different queue (an encoding collision such as `orders.eu` / `orders_2eeu`) or a different topic. Carries `queue`, `existingQueue` and `consumerName`.          |
+| `KafkaTopicUnavailableError`            | The Kafka broker still reports the topic unknown after the `retry` budget — it does not auto-create. Carries `topic` and `groupId`; the kafkajs `UNKNOWN_TOPIC_OR_PARTITION` error is the `cause`. Pre-create the topic. |
+
 > **Broker support.** Request-reply is available on **all supported broker types** — in-memory,
 > Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which
 > delegates to the injected `IMessageBroker`).
 >
 > **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
 > default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
-> either pre-create it or enable `auto.create.topics.enable`. Each broker instance reads that topic
-> under its own consumer group, so every instance receives every reply and discards those it did not
-> originate; give a high-traffic service its own `replyTopic` to bound that fan-out.
+> either pre-create it or enable `auto.create.topics.enable`; the same holds for every subscribed
+> topic, whose absence on a non-auto-creating broker rejects with `KafkaTopicUnavailableError`. Each
+> broker instance reads that topic under its own consumer group, so every instance receives every
+> reply and discards those it did not originate; give a high-traffic service its own `replyTopic` to
+> bound that fan-out.
 
 > **RPC and pub/sub are separate channels.** `request`/`respond` travel on a channel derived from
 > the topic, not on the topic itself. A plain `subscribe('orders', …)` therefore never observes an
@@ -5401,7 +6084,10 @@ export {
   CloudBrokerUnavailableError,
   JetStreamStreamError,
   JetStreamUnavailableError,
+  KafkaTopicUnavailableError,
   MessagingNotSupportedError,
+  NatsConsumerNameCollisionError,
+  PubSubSubscriptionBoundElsewhereError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
@@ -5409,6 +6095,7 @@ export {
 
 // Option types
 export type {
+  ConsumerRetryOptions,
   CustomMessagingOptions,
   EventsMessagingBridgeOptions,
   InMemoryBrokerOptions,
@@ -5444,6 +6131,47 @@ export type {
   ServiceBusOptions,
 } from '@setu-ts/messaging-plugin';
 
+// Transactional outbox (M107)
+export {
+  OutboxEnvelopeTooLargeError,
+  OutboxNotReadyError,
+  OutboxRelayUnscheduledError,
+  OutboxRowStateError,
+  OutboxStoreVerifyTimeoutError,
+  OutboxUnknownTenantError,
+} from '@setu-ts/messaging-plugin';
+export type {
+  IOutbox,
+  OutboxCommonOptions,
+  OutboxHealthOptions,
+  OutboxOptions,
+  OutboxRelayOptions,
+  OutboxStoreEntry,
+  OutboxSweepResult,
+  OutboxWriteInput,
+} from '@setu-ts/messaging-plugin';
+
+// Consumer inbox (M108)
+export {
+  InboxConsumerConflictError,
+  InboxNotConfiguredError,
+  InboxNotReadyError,
+  InboxPurgeUnscheduledError,
+  InboxRowStateError,
+  InboxStoreVerifyTimeoutError,
+} from '@setu-ts/messaging-plugin';
+export type {
+  IInbox,
+  InboxOptions,
+  InboxPurgeOptions,
+  InboxReleaseResult,
+  InboxStoreEntry,
+  IntegrationEventInboxHandler,
+  IntegrationEventInboxOptions,
+  IntegrationEventSubscribeOptions,
+  ParkedInboxEntry,
+} from '@setu-ts/messaging-plugin';
+
 // Re-exported types from @setu-ts/common
 export type {
   IMessageBroker,
@@ -5456,6 +6184,90 @@ export type {
 
 > **Kafka Commit Model:** Kafka uses the producer/consumer commit model — handler success
 > auto-commits; a thrown handler prevents commit.
+
+---
+
+### Publish options — ordering key, de-duplication ID and headers
+
+`publish` takes an optional trailing `PublishOptions` (from `@setu-ts/common`):
+
+```typescript
+interface PublishOptions {
+  readonly orderingKey?: string; // ≤ 128 UTF-8 bytes
+  readonly deduplicationId?: string; // ≤ 128 UTF-8 bytes
+  readonly headers?: Readonly<Record<string, string>>; // ≤ 32 headers, ≤ 1024 bytes each
+}
+
+publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void>;
+```
+
+Every option is carried as a transport header beside any native mapping, so it is observable through
+`MessageMetadata.headers` on every broker and never silently dropped. Use the exported constants
+`ORDERING_KEY_HEADER` (`'x-setu-ordering-key'`) and `DEDUPLICATION_ID_HEADER`
+(`'x-setu-deduplication-id'`) to read them.
+
+| Broker          | `orderingKey`                                         | `deduplicationId`                                                      |
+| --------------- | ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| Kafka           | message `key` → one partition, in order               | header only                                                            |
+| Pub/Sub         | native `orderingKey` (needs an ordering subscription) | header only                                                            |
+| NATS            | header only                                           | `Nats-Msg-Id` → server de-duplicates within the stream's dedup window  |
+| Service Bus     | header only                                           | `messageId` → de-duplicated only on an entity with duplicate detection |
+| RabbitMQ        | header only                                           | header, and the `messageId` property                                   |
+| Redis Streams   | header only                                           | header only                                                            |
+| In-memory       | header only                                           | header only                                                            |
+| `WorkersBroker` | envelope field, surfaced as the header                | envelope field, surfaced as the header                                 |
+
+**What `orderingKey` promises.** It decides **placement** — the same key reaches the same partition,
+retry queue or ordered subscription where the broker has one — not the order handlers **finish** in.
+What a handler failure does to order differs per broker:
+
+- **Order kept by blocking:** Kafka (a throwing handler leaves the offset uncommitted, so one
+  failing message stalls its whole partition until it succeeds) and Pub/Sub on an ordering
+  subscription.
+- **Service Bus — the condition decides, so it is always stated.** Measured 2026-10-07 both ways: at
+  the broker's default `maxConcurrentCalls` (1) the abandoned message is redelivered before the next
+  is handled (order kept by blocking); at `maxConcurrentCalls: 2` the later message is handled first
+  (order lost).
+- **Order lost on retry:** RabbitMQ, Redis Streams and NATS redelivery — later messages for the key
+  are handled while the failed one waits.
+
+A consumer that needs order compares the delivered envelope's version and drops or defers a stale
+message.
+
+**What a consumer may trust, and what a producer must not derive.**
+
+1. A delivered `x-setu-ordering-key` or `x-setu-deduplication-id` header is a **hint written by
+   whoever published the message** — validation runs on the publish side only — so a foreign or
+   compromised producer can send any value under these names. Use it to order or de-duplicate your
+   own work, **never to authorize anything**.
+2. A `deduplicationId` derived from request input lets the caller who chooses it suppress another
+   message with the same id for the broker's window (NATS's `duplicate_window`, 120 s by default;
+   Service Bus's configured detection window). Derive it from a producer-assigned id — the envelope
+   id `publishIntegrationEvent` uses by default is one.
+3. An `orderingKey` derived from request input lets a caller concentrate load on one Kafka partition
+   or one Pub/Sub ordering key (1 MB/s per key), and on a log-compacted Kafka topic it lets the
+   caller erase an earlier message that carries the same key. Derive it from an aggregate the
+   application owns.
+
+Invalid options are rejected with a `RangeError` **as a rejected promise** (never a synchronous
+throw), naming the field and the rule; a refused value is never echoed. A header name a broker or
+its server acts on (`traceparent`, `tracestate`, `cc`, `bcc`, `payload`, `nats-*`, `x-setu-*`,
+RabbitMQ's `x-death` / `x-delivery-count` / `x-acquired-count` / `x-delay` and the `x-first-death-*`
+/ `x-last-death-*` forms) is refused on **every** broker, compared case-insensitively. A `goog`
+prefix is refused too, as a precaution: Pub/Sub's reservation of it is stated only by third-party
+documentation, and the emulator accepts `goog` attributes.
+
+The `Cloudflare Workers` broker has no transport header channel, so it carries all three options as
+envelope fields and surfaces them on delivery as the same headers. On publish it refuses invalid
+options with the same `RangeError` as every other broker; on delivery, an envelope `orderingKey`,
+`deduplicationId` or header entry that fails the shared rules — or every caller header, when the
+record holds more than `MAX_PUBLISH_HEADERS` entries — is dropped, never surfaced, since a foreign
+producer may have written the envelope.
+
+One exception to "never silently dropped" above: a `NatsBroker` given an injected connection and no
+`headersFactory` has nothing to build NATS headers with, so caller headers and the ordering key are
+dropped and reported once through the logger; the de-duplication id is still applied, as nats.js's
+native `msgID`.
 
 ---
 
@@ -5546,17 +6358,22 @@ records the outcome of every real publish — the **data plane** — and `reacha
 FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs` (default
 `5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected topic or a
 quota error is an application-level fact, never an outage) resolves `false` until a successful
-publish or a positive management probe contradicts it. The plane distinction is the substance: the
-management round trip proves the **management** plane is reachable — evidence about the data plane,
-never proof of it — and that gap is what let a stopped namespace report `up` while every publish
-threw. Two further changes: every arm's probe is bounded by the indicator's `createCachedProbe`
-(5-second TTL, 2-second bound), so a probe that cannot answer — a **hung** broker, the condition a
-stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health` open; and
-the RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the
-connection-fault flag read that a hung broker never trips. Residual exposure, stated rather than
-implied: a deployment whose Service Bus management plane is unreachable and that publishes nothing
-keeps reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who
-needs the signal can publish synthetically.
+publish or a positive management probe contradicts it. **Since M101a** that retained failure is
+answered at once: the management probe runs in the background and only a `true` answer clears the
+outcome, for the NEXT read. Before, `reachability()` awaited the probe, whose own 2-second bound
+tied the indicator's, so the indicator's bound fired first and a recorded outage was reported `up`.
+A failure inside a window the indicator has already cached as `up` is reported at the first poll
+after that 5-second cache expires. The plane distinction is the substance: the management round trip
+proves the **management** plane is reachable — evidence about the data plane, never proof of it —
+and that gap is what let a stopped namespace report `up` while every publish threw. Two further
+changes: every arm's probe is bounded by the indicator's `createCachedProbe` (5-second TTL, 2-second
+bound), so a probe that cannot answer — a **hung** broker, the condition a stopped one never
+produces — settles `reachable: 'unknown'` instead of holding `/health` open; and the RabbitMQ probe
+is a real round trip (a throwaway channel open/close), replacing the connection-fault flag read that
+a hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
+Bus management plane is unreachable and that publishes nothing keeps reporting
+`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
+can publish synthetically.
 
 ### Integration event contracts
 
@@ -5572,7 +6389,8 @@ import {
   publishIntegrationEvent,
 } from '@setu-ts/messaging-plugin';
 
-// The contract: four fields, validated eagerly. The topic MUST end with the
+// The contract: four required fields (plus an optional `orderingKey`
+// selector, below), validated eagerly. The topic MUST end with the
 // exact `.v${version}` suffix — the versioned-topic rollout policy enforced
 // by the factory, not documented prose. A pre-existing unversioned topic has
 // no definition; keep using the raw broker.publish/subscribe surface for it.
@@ -5610,6 +6428,31 @@ const subscription = onIntegrationEvent(orderPlaced, async (payload, envelope) =
 const causal = causedBy(envelope); // { correlationId: envelope.correlationId ?? envelope.id, causationId: envelope.id }
 ```
 
+**Publish options (M106).** `publishIntegrationEvent` takes an optional sixth argument,
+`PublishOptions` (see "Publish options" above), validated once as on every broker. Two defaults
+differ from a raw `broker.publish`:
+
+- `deduplicationId` defaults to the envelope `id`, so a retried publish of the SAME envelope is
+  de-duplicated where the broker supports it. A caller-supplied `deduplicationId` wins.
+- `orderingKey` comes from the caller first, then from the definition's optional
+  `orderingKey(envelope)` selector, then none. The selector is called only when the caller supplied
+  no key; a selector that throws, or returns a value the rules refuse, rejects the publish.
+
+```typescript
+const orderShipped = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.shipped',
+  version: 1,
+  topic: 'orders.shipped.v1',
+  parse: (value) => value as { orderId: string },
+  // Keep every event for one order on one partition / ordering key.
+  orderingKey: (envelope) => `order-${envelope.data.orderId}`,
+});
+
+await publishIntegrationEvent(runtime, broker, orderShipped, { orderId: '123' }, undefined, {
+  headers: { 'x-tenant': 'acme' },
+});
+```
+
 The wire envelope, published as the message payload:
 
 | Field              | Type     | Present always? | Meaning                                                          |
@@ -5645,8 +6488,9 @@ The ten exported symbols of this section: the four functions above (`defineInteg
 class (rejections, below), and five types:
 
 - **`IntegrationEventDefinition<T>`** (interface) — the contract `defineIntegrationEvent` returns
-  and both directions read: readonly `type`, `version`, `topic`, and `parse: (value: unknown) => T`.
-  `parse` runs on the consumer side only.
+  and both directions read: readonly `type`, `version`, `topic`, `parse: (value: unknown) => T`, and
+  the optional `orderingKey?(envelope): string | undefined` selector (M106). `parse` runs on the
+  consumer side only.
 - **`IntegrationEventEnvelope<T>`** (interface) — the wire shape in the table above. The handler
   receives it with `data` rebuilt to the parsed value, so `envelope.data === payload` holds on every
   delivery.
@@ -5657,6 +6501,13 @@ class (rejections, below), and five types:
 - **`IntegrationEventHandler<T>`** (type) — `(payload: T, envelope: IntegrationEventEnvelope<T>`,
   `metadata: MessageMetadata) => void | Promise<void>`: parsed payload first, envelope second,
   transport metadata third.
+- **`onIntegrationEvent` overloads (M108).** With `options.inbox` the call takes an
+  `IntegrationEventInboxHandler<T, S>` — the same three arguments plus the inbox transaction's unit
+  of work, `S` inferred from the handler's annotation — and returns a
+  `RegistryFactory<SubscriptionDefinition>` (see [Consumer inbox](#consumer-inbox-m108)). Without it
+  the call is unchanged and returns a `SubscriptionDefinition`; the inbox overload is declared
+  first, and the legacy options take `inbox?: never`, so an options variable carrying `inbox` is
+  typed as the factory it is.
 - **`IntegrationEventRejectionReason`** (type) —
   `'malformed' | 'type-mismatch' | 'version-mismatch' | 'parse'`, the `reason` discriminant of
   `IntegrationEventRejectedError` (table below).
@@ -5689,6 +6540,224 @@ application policy, written out explicitly — `event.type` is deliberately not 
 `type`, and `event.occurredOn` (when the fact happened) is deliberately not the envelope's
 `occurredAt` (when it was published).
 
+### Transactional outbox (M107)
+
+`MessagingPlugin({ outbox })` writes an integration event as a row in the SAME database transaction
+as the business change, through the caller's own unit of work, and relays committed rows to the
+broker afterwards. The store is reached through the `IOutboxStore` port in `@setu-ts/common` —
+normally `createDatabaseOutboxStore()` from `@setu-ts/database-plugin` — never by resolving
+`CAPABILITIES.DATABASE`.
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import { createDatabaseOutboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import type { IOutbox } from '@setu-ts/messaging-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+
+app.register(SchedulerPlugin());
+app.register(DatabasePlugin({ type: 'memory' }));
+app.register(MessagingPlugin({ outbox: { store: createDatabaseOutboxStore() } }));
+await app.start();
+
+const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+await db.transaction(async (uow) => {
+  await uow.getRepository('Order').create(order);
+  await outbox.write(uow, orderPlaced, { orderId: order.id });
+});
+outbox.dispatch(); // optional: sweep now rather than at the next tick
+```
+
+**The promise.** At-least-once delivery of every committed row. At most one relay holds a row's
+claim at a time, provided the relays' wall clocks agree within `relay.maxClockSkewMs`. A relay
+starts publishing only while its claim leaves room for the publish, status write and clock skew. Any
+number of relays keep per-key order among FIRST publishes, provided rows of one key commit in write
+order and the writers' clocks agree. Delivery order is what the broker gives it (as documented by
+the broker); consumers compare `aggregateVersion`.
+
+Never exactly once: a repeat carries the same envelope and deduplication id, which a consumer inbox
+absorbs. Two windows remain: a relay can pause AFTER the fence check and resume after its lease; and
+a publish the broker accepts after it was abandoned can arrive late. Those repeats can arrive out of
+order. A relay paused past its claim BEFORE the fence check publishes nothing.
+
+| Export                          | Kind      | Notes                                                                                                                                                                   |
+| ------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IOutbox`                       | interface | `write(scope, definition, payload, input?)` → envelope id; `dispatch()` (never throws); `sweep()`; `purge()`; `release(id, action, options?)`                           |
+| `OutboxOptions`                 | type      | `OutboxCommonOptions` plus exactly one of `store` (one store) and `stores` (per tenant id); supplying both is a compile error                                           |
+| `OutboxCommonOptions`           | interface | `maxEnvelopeBytes`, `background`, `relay`, `health`, `retainSentMs`, `purgeBatch`, `purgeIntervalMs`                                                                    |
+| `OutboxRelayOptions`            | interface | `schedule`, `intervalMs`, `pageSize`, `scanLimit`, `publishLimit`, `maxFailedScan`, `maxAttempts`, backoff bounds, the sweep deadline, `claimLeaseMs`, `maxClockSkewMs` |
+| `OutboxHealthOptions`           | interface | `degradedAfterMs` (default 60 000), `overlapWindowMs` (default 600 000)                                                                                                 |
+| `OutboxStoreEntry`              | type      | an `IOutboxStore` or a `RegistryFactory<IOutboxStore>`, resolved in `onInit`                                                                                            |
+| `OutboxWriteInput`              | interface | `metadata?`, `options?` (`PublishOptions`, the `publishIntegrationEvent` precedence), `tenantId?`                                                                       |
+| `OutboxSweepResult`             | interface | `origin`, `scanned`, `published`, `failures`, `poisoned`, `endedBy`                                                                                                     |
+| `OutboxEnvelopeTooLargeError`   | class     | `write` — the serialized envelope exceeds `maxEnvelopeBytes` (`bytes`, `limit`); the caller's transaction rolls back                                                    |
+| `OutboxRelayUnscheduledError`   | class     | `start()` — the relay is scheduled (the default) but no `CAPABILITIES.SCHEDULER` is registered                                                                          |
+| `OutboxUnknownTenantError`      | class     | `write` / `release` with per-tenant `stores` naming no tenant, or one with no store; the tenant id is never quoted                                                      |
+| `OutboxRowStateError`           | class     | `release` — `outcome: 'missing'` or `'not-failed'` (with the row's `status`)                                                                                            |
+| `OutboxNotReadyError`           | class     | any call before `onInit` resolved and verified the store                                                                                                                |
+| `OutboxStoreVerifyTimeoutError` | class     | `start()` — a store's `verify()` did not settle within `relay.storeTimeoutMs` (`timeoutMs`); no tenant or store is named                                                |
+
+**Wiring.** With `outbox` set the plugin also provides `CAPABILITIES.OUTBOX` (`outbox.<name>` for a
+named instance), declares `CAPABILITIES.SCHEDULER` and `CAPABILITIES.METRICS` as optional
+dependencies (ordering only), and registers an `outbox` (`outbox.<name>`) health indicator. Without
+it, nothing changes. Every numeric option is validated when `MessagingPlugin(...)` is called; a
+value out of range, `NaN` or a fraction throws a `RangeError` naming the option, and
+`relay.publishTimeoutMs + 2 * relay.storeTimeoutMs >= relay.sweepDeadlineMs` is refused.
+
+- **`onInit`.** With `relay.schedule` (default `true`) and no scheduler registered, `start()`
+  rejects `OutboxRelayUnscheduledError` before any store I/O. Otherwise each store entry is
+  resolved, each store's `verify()` runs — a refusal (`OutboxStoreUnavailableError` from the bridge)
+  fails `start()` — the outbox is activated, and two jobs are scheduled with `IScheduler.every`:
+  `outbox-relay[.<name>]` every `relay.intervalMs` (default 1000) and `outbox-purge[.<name>]` every
+  `purgeIntervalMs` (default 60 000). With `relay: { schedule: false }` nothing is scheduled; call
+  `sweep()` and `purge()` yourself (on Cloudflare Workers, from a Cron Trigger).
+- **One deadline.** `relay.sweepDeadlineMs` defaults to 30 000 on the monotonic clock and bounds the
+  sweep and purge across all stores. The strict relation is
+  `publishTimeoutMs + 2 * storeTimeoutMs < sweepDeadlineMs`; the default 15 000 ms reserve leaves
+  the first 15 000 ms for row starts. A purge call running past the deadline rejects; deletions
+  already completed stay completed.
+- **Shutdown.** The relay drains in an `onShutdown` hook, which the kernel runs before ANY close
+  hook — the broker's and the database's included: the outbox becomes closing (`dispatch()` is a
+  no-op and a failure writes no attempt), both jobs are removed, and the in-flight sweep is awaited.
+  An `onClose` hook repeats the same drain idempotently, because a failed `start()` runs close hooks
+  only; it is registered ahead of the broker's own close hook, so the drain precedes the disconnect
+  on that path too.
+- **Health.** `down` with `ready: false` before the store is verified and once closing; `down` with
+  `reachable: false` when `stats()` does not answer (cached 5 s, bounded 2 s); `degraded` with
+  `data.reasons` from a fixed vocabulary — cluster-wide, from the store: `oldest-pending-age` (past
+  `health.degradedAfterMs`), `failed-rows`, `failed-scan-cap` (a store's failed count reaches
+  `relay.maxFailedScan`); per instance, from this relay: `blocked-key-cap`, `store-write-failing`,
+  `relay-overlap` (a replica that never sweeps reports none of these). `data` carries counts, ages
+  in ms and the last local sweep's counts — never a tenant id, ordering key, topic or error text.
+- **Metrics.** With `CAPABILITIES.METRICS` registered: counters `outbox_published_total`,
+  `outbox_publish_failures_total`, `outbox_poisoned_total` (labels `outbox`, `topic`) and
+  `outbox_overlaps_total` (`outbox`, `kind`); gauges `outbox_pending_rows` and
+  `outbox_oldest_pending_seconds` (`outbox`), written from each fresh store read the health
+  indicator makes. `topic` comes only from a decoded row and is capped at 100 distinct values per
+  instance, then `other`; an undecodable poisoned row is labelled `invalid-row`. Every write is
+  guarded — a failing metrics backend never reaches the relay. The two gauges are written ONLY when
+  the health indicator reads the store, so they are as fresh as the last `/health` poll.
+- **Ordering limits.** The relay reads the PENDING set, never a watermark: a row whose transaction
+  commits after a later row of its key was published is still published (measured on real
+  PostgreSQL), but after that later row — order holds only among rows of one key that commit in
+  write order. `position` is taken from each writer's clock, clamped per process only, so across
+  replicas order also assumes the writers' clocks agree.
+- **Claims and overlap.** `relay.claimLeaseMs` defaults to 30 000, range 1–3 600 000; it must cover
+  `publishTimeoutMs + 2 * storeTimeoutMs + maxClockSkewMs`. `maxClockSkewMs` defaults to 5 000,
+  range 0–60 000; zero assumes perfectly agreeing clocks and is unsafe across hosts. A held row
+  blocks its key until `now ≥ leaseUntil + maxClockSkewMs`; before publishing the relay requires
+  `now + publishTimeoutMs + storeTimeoutMs + maxClockSkewMs ≤ leaseUntil`. Kinds `fenced`,
+  `claim-lost` and `duplicate` degrade health as `relay-overlap` for the configured window, for any
+  sweep origin. Claim-time contention has no shipped signal. `retainSentMs: 0` disables only
+  `duplicate`. A shared scheduler lock saves redundant scans; without it every replica scans every
+  interval. The lock TTL rule no longer bears on correctness. DynamoDB's conditional claim checks
+  the latest base item even after a stale GSI page (AWS's documented model, exercised on DynamoDB
+  Local rather than the service).
+- **Retention.** `purge()` deletes `sent` and `discarded` rows whose `settledAt` is older than
+  `retainSentMs` (default 7 days), at most `purgeBatch` per status per store; `failed` rows are
+  never purged. `retainSentMs: 0` deletes at mark-sent.
+- **`release` has no built-in authorization.** It is an operator capability; the application gates
+  the route that calls it. It takes effect at the relay's next lap.
+- **Tenancy.** `write(…, { tenantId })` records the tenant (column isolation, one `store`) or
+  selects the store (`stores`, database per tenant). The selected store must read the database the
+  caller's unit of work writes to — a caller obligation nothing can check, because a unit of work
+  carries no database identity; a mismatched row is relayed under the wrong tenant, or never. The
+  tenant is never a published header.
+- **Trust.** A row is re-validated on every read (size, id, options, ordering-key agreement, topic
+  format) and a failing row is `failed` with `lastError: 'invalid-row'`, never published; but a
+  VALID row's topic is published as stored. Protect the outbox table like the broker credentials.
+- **Trace.** `write` stores the active `traceparent`; each row is published inside an
+  `outbox relay <topic>` span parented to it, so request → relay → publish → receive is one trace. A
+  row without a valid `traceparent` gets `SpanOptions.root`, never the span of the request that
+  dispatched the sweep. A custom broker without the framework-header channel (`WorkersBroker`) drops
+  the producer's `traceparent`.
+- **Cloudflare Workers.** `relay: { schedule: false }`, `background: waitUntil`, and Cron Triggers
+  on `WorkersCron` calling `outbox.sweep()` and `outbox.purge()`, with the outbox in a D1 table
+  through `D1Adapter`. Driven at unit level (`D1Adapter` over real SQLite); not on real workerd.
+- **Backends.** The per-backend requirements are under
+  [Transactional outbox store](#transactional-outbox-store-m107) in the database plugin; the
+  messaging plugin README carries the DDL (PostgreSQL, SQLite/D1) and the adapter mappings.
+
+### Consumer inbox (M108)
+
+`MessagingPlugin({ inbox })` plus `onIntegrationEvent(definition, handler, { inbox: { consumer } })`
+records each event a consumer applied, keyed by `(consumer, topic, envelope id)`, in the SAME
+transaction as the handler's writes. The store is reached through the `IInboxStore` port in
+`@setu-ts/common` — normally `createDatabaseInboxStore()` from `@setu-ts/database-plugin`.
+
+```typescript
+import { createDatabaseInboxStore, DatabasePlugin } from '@setu-ts/database-plugin';
+import type { IUnitOfWork } from '@setu-ts/database-plugin';
+import { MessagingPlugin, onIntegrationEvent } from '@setu-ts/messaging-plugin';
+
+app.register(DatabasePlugin({ type: 'memory' }));
+app.register(MessagingPlugin({
+  inbox: { store: createDatabaseInboxStore() },
+  subscriptions: [
+    onIntegrationEvent(personHired, async (payload, _envelope, _metadata, uow: IUnitOfWork) => {
+      await uow.getRepository('PayrollRecord').create({ id: payload.personId });
+    }, { inbox: { consumer: 'payroll' } }),
+  ],
+}));
+```
+
+**The promise.** For one consumer name, the handler's writes through the supplied unit of work are
+committed at most once per topic and envelope id while the marker is retained; a delivery after the
+marker is purged is processed again. Nothing is promised about effects outside that unit of work,
+about two processes using one consumer name with different handlers, or about a database other than
+the store's.
+
+| Export                             | Kind      | Notes                                                                                                                                 |
+| ---------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `IInbox`                           | interface | `parked(limit?)` (never the envelope); `release(rowId, 'retry' \| 'discard')`; `purge()`                                              |
+| `InboxOptions`                     | interface | `store`, `maxAttempts?`, `retainMs?` (7 days), `storeTimeoutMs?` (5000), `maxParkedEnvelopeBytes?` (262 144), `purge?`                |
+| `InboxPurgeOptions`                | interface | `schedule?` (`true`), `intervalMs?` (60 000), `batch?` (100)                                                                          |
+| `InboxStoreEntry`                  | type      | an `IInboxStore` or a `RegistryFactory<IInboxStore>`, resolved in `onInit`                                                            |
+| `ParkedInboxEntry`                 | interface | `rowId`, `consumer`, `topic`, `envelopeId?`, `attempts`, `updatedAt`, `lastError?`                                                    |
+| `InboxReleaseResult`               | interface | `topic`, and for `retry` the stored `envelope` (absent when too large or unreadable)                                                  |
+| `IntegrationEventInboxHandler`     | type      | `(payload, envelope, metadata, scope: S)`                                                                                             |
+| `IntegrationEventInboxOptions`     | interface | `consumer` (a valid publish id, required), `instance?` (resolves `inbox.<instance>`)                                                  |
+| `IntegrationEventSubscribeOptions` | type      | `SubscribeOptions & { inbox: IntegrationEventInboxOptions }`                                                                          |
+| `InboxNotConfiguredError`          | class     | resolution — `reason: 'unregistered'` (no `MessagingPlugin({ inbox })`) or `'foreign-provider'` (a replacement provider of the token) |
+| `InboxConsumerConflictError`       | class     | resolution — a second subscription with the same `consumer` on the same topic in one inbox                                            |
+| `InboxNotReadyError`               | class     | `state: 'not-started'` (resolution or a call before the store is verified) or `'closed'`                                              |
+| `InboxPurgeUnscheduledError`       | class     | `start()` — `purge.schedule` (the default) without a `CAPABILITIES.SCHEDULER`                                                         |
+| `InboxStoreVerifyTimeoutError`     | class     | `start()` — `verify()` did not settle within `storeTimeoutMs`                                                                         |
+| `InboxRowStateError`               | class     | `release` — `outcome: 'invalid-id'`, `'missing'` or `'not-parked'` (with the marker's `status`)                                       |
+
+- **Delivery.** Validate the envelope; read the marker (present → acknowledge); parse; then ONE
+  transaction that creates the marker first and runs the handler. After ANY rejection the marker is
+  read again: present → acknowledge (another delivery handled it); absent → the handler failed. Row
+  ids are a SHA-256 of `(consumer, topic, envelope id)`, so any string id is keyable and one
+  consumer's topics never suppress each other; the raw id is stored only when it is a valid publish
+  id.
+- **Queue.** The broker `queue` defaults to `inbox.` plus 16 hex characters of a 64-bit FNV-1a hash
+  of the consumer and the topic — legal on every broker, and one per pair barring an accidental
+  64-bit collision (both names are application configuration; build neither from untrusted input) —
+  so the subscription is a durable consumer group that redelivers. Service Bus creates no
+  subscriptions, so set `queue` explicitly there and create that subscription.
+- **Retention.** `purge()` deletes rows of every status older than `retainMs`, parked markers and
+  their envelopes included, at most `purge.batch` per status per run — so the table stays within the
+  window only while inflow per status stays below that rate.
+- **Logs.** A failed store call is logged with the error's class name only (the `errorKind` log
+  field), never its message, which a driver may fill with the statement's bound parameters.
+- **Failures.** Without `maxAttempts` a failure is rethrown and the broker's budget applies (NATS
+  redelivers without limit and Kafka blocks the partition). With it, failures are counted outside
+  the transaction and at the limit the delivery is parked and acknowledged; a parse rejection parks
+  at once.
+- **Wiring.** With `inbox` set the plugin also provides `CAPABILITIES.INBOX` (`inbox.<name>`),
+  declares `CAPABILITIES.SCHEDULER` as an optional dependency, registers an `inbox` health indicator
+  (`down` before verification and after close, `degraded` with `parked-rows`,
+  `up`/`reachable:
+  'unknown'` when the count does not answer within 2 s), verifies the store at
+  `onInit` before any inbox subscription is resolved, schedules `inbox-purge[.<name>]`, and closes
+  in an `onClose` hook registered after the broker's, so a delivery in flight during `stop()` is not
+  refused.
+- **Backends.** Memory, Prisma, Drizzle, D1, a MongoDB replica set and DynamoDB; Cosmos and Bigtable
+  are refused. The DDL is in the messaging plugin README.
+
 ## Queue (`@setu-ts/queue-plugin`)
 
 Provides background job queue with Memory and Redis adapters.
@@ -5704,7 +6773,8 @@ Provides background job queue with Memory and Redis adapters.
 - **`RedisQueueOptions`** — Redis adapter configuration
 - **`RabbitMqQueue`** — RabbitMQ queue adapter via amqplib (polling via basicGet, TTL+DLX for
   delays)
-- **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`)
+- **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`,
+  `persistentMessages?`, `publishTimeoutMs?`, `reportWarning?`)
 - **`SqsQueue`** — AWS SQS queue adapter via `@aws-sdk/client-sqs` (receipt-handle bookkeeping,
   `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, dead-letter ordering)
 - **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`, `region?`,
@@ -5793,12 +6863,31 @@ app.register(QueuePlugin({
 }));
 ```
 
-**Connection errors.** Since 0.8.0 the `'redis'` adapter routes the `'error'` events of the
-`ioredis` client it builds to the application logger through `createConnectionErrorReporter`
-(common): the first error of an outage at `warn`, identical repeats at `debug`, the recovery at
-`info`. Without a listener `ioredis` prints every reconnect failure to `console.error`, bypassing
-the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
-semantics are unchanged; the indicator still reports the outage.
+**Connection errors.** The `'redis'` adapter routes the `'error'` events of the `ioredis` client it
+builds to the application logger through `createConnectionErrorReporter` (common): the first error
+of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a listener
+`ioredis` prints every reconnect failure to `console.error`, bypassing the logger and redaction. An
+injected client gets no listener — it belongs to the caller. Health semantics are unchanged; the
+indicator still reports the outage.
+
+**Command bound.** Since M101a the `'redis'` adapter's `commandTimeoutMs` option (default `15000`,
+`0` disables) is the ioredis `commandTimeout` on the client it builds, so a paused server makes
+`add()` reject and a poll record the failure instead of waiting forever. Not applied to an injected
+`client`. A value outside `0`–`2147483647` throws `RangeError` when `QueuePlugin(...)` is called. A
+depth row in the observations describes the latest cycle only: a name that cycle did not read has no
+row, and the source's `failure` plus `depthCoverage: 'partial'` say why — an unreadable depth is
+never a retained zero.
+
+**RabbitMQ durability.** Since 0.9.0 the `'rabbitmq'` adapter publishes every job persistent
+(`persistentMessages`, default `true`) through a publisher-confirm channel. Its ready/delay/dead
+queues are durable, and a durable queue keeps only persistent messages across a broker restart —
+before 0.9.0 a restart discarded every job not yet processed. `add()` resolves once RabbitMQ has
+accepted the job; a retry or dead-letter acknowledges the reserved job only after its replacement is
+accepted, so a broker failure in between can run a job twice but never loses it. `publishTimeoutMs`
+(default `15000`, `0` disables) bounds each publish, queue declarations included; a value outside
+`0`–`2147483647` throws `RangeError` when `QueuePlugin(...)` is called. A rejection is not proof the
+job was dropped. An injected connection without `createConfirmChannel()` keeps a plain channel and
+the adapter reports one warning through the logger.
 
 ### Declarative processors and behaviours
 
@@ -5855,12 +6944,12 @@ attempt number was not a positive safe integer, or because its runner failed bef
 settlement (which releases the slot). No payload, header, raw id, claim token, credential, attempt
 limit or thrown value is captured: the observer signatures cannot accept them.
 
-| Adapter    | Settlement evidence                                                          | Depths                                     |
-| ---------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
-| `memory`   | confirmed (in-process)                                                       | `process-local`                            |
-| `redis`    | confirmed (awaited server commands)                                          | `shared-backend` when the client can count |
-| `rabbitmq` | `unknown` — channel `ack`/`publish` are unconfirmed                          | `unavailable`                              |
-| `sqs`      | `unknown` — a lapsed claim or failed dead-letter send is absorbed and logged | `unavailable`                              |
+| Adapter    | Settlement evidence                                                            | Depths                                     |
+| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| `memory`   | confirmed (in-process)                                                         | `process-local`                            |
+| `redis`    | confirmed (awaited server commands)                                            | `shared-backend` when the client can count |
+| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed) | `unavailable`                              |
+| `sqs`      | `unknown` — a lapsed claim or failed dead-letter send is absorbed and logged   | `unavailable`                              |
 
 `depths` is its own opt-in because counting costs backend work: one cycle at bootstrap and one per
 `intervalMs` (1,000–300,000), never overlapping, at most `concurrency` (1–4) count calls in flight,
@@ -6109,7 +7198,15 @@ schedule until the registering plugin re-creates it. For durable background work
   scheduler (Cloudflare Workers); catch it by identity to branch on the refusal
 - **`SchedulerPluginOptions`** — Plugin configuration options (`timezone?`, `distributedLock?`)
 - **`DistributedLockOptions`** — Lock configuration (`enabled?`, `storage?`, `url?`, `client?`,
-  `lock?`, `ttlMs?`)
+  `lock?`, `ttlMs?`, `acquireTimeoutMs?`, `commandTimeoutMs?`). **Since M101a** every lock acquire
+  is bounded by `acquireTimeoutMs` (default `5000`, `0` waits indefinitely), whichever lock is in
+  use: an acquire still unsettled at the bound is a skipped fire — logged, counted `lockFailed` in
+  the execution observations, and re-armed for the next slot — and a token it returns later is
+  released. `commandTimeoutMs` is the ioredis `commandTimeout` on the client `RedisLock` builds
+  (default `acquireTimeoutMs`, or `15000` when that is `0`; never applied to an injected client or
+  lock); a timed-out `SET` may still apply on the server, so `RedisLock` releases that exact token
+  before rethrowing. Either value outside `0`–`2147483647`, or a `commandTimeoutMs` above a non-zero
+  `acquireTimeoutMs`, throws `RangeError` when `SchedulerPlugin(...)` is called
 - **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation
 - **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`
 - **`IScheduler`** — Scheduler service interface (re-exported from `@setu-ts/common`)
@@ -6148,12 +7245,12 @@ unless you inject one via `client`, or supply your own `IDistributedLock` via `l
 priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
 if the lock expires mid-run, another instance may start the same job.
 
-Since 0.8.0 a Redis lock client the plugin builds routes the `'error'` events of the `ioredis`
-client it builds to the application logger through `createConnectionErrorReporter` (common): the
-first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a
-listener `ioredis` prints every reconnect failure to `console.error`, bypassing the logger and
-redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
-unchanged; a lock that cannot reach Redis still fails its `acquire`.
+A Redis lock client the plugin builds routes the `'error'` events of the `ioredis` client it builds
+to the application logger through `createConnectionErrorReporter` (common): the first error of an
+outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a listener `ioredis`
+prints every reconnect failure to `console.error`, bypassing the logger and redaction. An injected
+client gets no listener — it belongs to the caller. Health semantics are unchanged; a lock that
+cannot reach Redis still fails its `acquire`.
 
 **Multi-instance deduplication** works across replicas sharing one lock backend. `cron` and `every`
 fires each claim a never-released _slot_ lock keyed on the fire's intended time
@@ -6725,31 +7822,33 @@ app.router.post('/users', async (ctx) => {
 
 ### Options
 
-| Option                                               | Provider   | Description                                                      |
-| ---------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
-| `provider`                                           | —          | `'log'` (default), `'smtp'`, `'ses'`, `'sendgrid'`.              |
-| `defaults.from`                                      | all        | Sender applied when a message omits `from`; else `send` throws.  |
-| `templates`                                          | all        | Named `{ html?, text? }` body templates for `sendTemplate`.      |
-| `options.host` / `port` / `secure` / `auth`          | `smtp`     | nodemailer transport config (ignored when `transport` injected). |
-| `options.transport`                                  | `smtp`     | Injected `ISmtpTransport` facade (bypasses the lazy import).     |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `ses`      | AWS client config (ignored when `client` injected).              |
-| `options.client`                                     | `ses`      | Injected `ISesClient` facade (bypasses the lazy SDK import).     |
-| `options.apiKey` / `endpoint`                        | `sendgrid` | SendGrid API key (Bearer) and endpoint (default v3 send URL).    |
-| `options.http`                                       | `sendgrid` | Injected `fetch`-shaped function (defaults to global `fetch`).   |
-| `options.sink`                                       | `log`      | Called with each sent `OutgoingMail` — a read-back seam.         |
+| Option                                               | Provider   | Description                                                                                                                                            |
+| ---------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider`                                           | —          | `'log'` (default), `'smtp'`, `'ses'`, `'sendgrid'`.                                                                                                    |
+| `defaults.from`                                      | all        | Sender applied when a message omits `from`; else `send` throws.                                                                                        |
+| `templates`                                          | all        | Named body templates for `sendTemplate`: `{ html?, text? }` strings, or `{ view, text? }` view components rendered through `CAPABILITIES.VIEW` (M102). |
+| `options.host` / `port` / `secure` / `auth`          | `smtp`     | nodemailer transport config (ignored when `transport` injected).                                                                                       |
+| `options.transport`                                  | `smtp`     | Injected `ISmtpTransport` facade (bypasses the lazy import).                                                                                           |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `ses`      | AWS client config (ignored when `client` injected).                                                                                                    |
+| `options.client`                                     | `ses`      | Injected `ISesClient` facade (bypasses the lazy SDK import).                                                                                           |
+| `options.apiKey` / `endpoint`                        | `sendgrid` | SendGrid API key (Bearer) and endpoint (default v3 send URL).                                                                                          |
+| `options.http`                                       | `sendgrid` | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                                         |
+| `options.sink`                                       | `log`      | Called with each sent `OutgoingMail` — a read-back seam.                                                                                               |
 
 ### Exports
 
 - `MailPlugin(options?)` — plugin factory. `createProvider(type, options, ctx)` — provider builder.
 - `MailService` — the `IMailer` implementation (default-`from` resolution + template dispatch).
-- `TemplateEngine`, `escapeHtml` — the `{{ variable }}` renderer and its HTML escaper.
+- `TemplateEngine`, `escapeHtml` — the template renderer (both arms; `render` is asynchronous since
+  M102) and its HTML escaper.
 - `LogProvider`, `SmtpProvider`, `SesProvider`, `SendGridProvider` — provider classes.
 - `adaptNodemailerModule` / `loadNodemailerModule` / `toNodemailerMessage` /
   `validateSmtpTransport`, `adaptSesModule` / `loadSesModule` / `toSesInput` / `validateSesClient`,
   `toSendGridBody` — provider adapter/mapper/validator helpers.
 - `MailServiceOptions`, `MailPluginOptions`, `MailProviderType`, `MailProviderOptions`,
-  `MailTemplate`, `OutgoingMail`, `RenderedTemplate`, `LogProviderOptions`, `SmtpProviderOptions`,
-  `NodemailerModule`, `SesProviderOptions`, `SesSdkModule`, `SendGridProviderOptions` — types.
+  `MailTemplate`, `MailStringTemplate`, `MailComponentTemplate`, `OutgoingMail`, `RenderedTemplate`,
+  `LogProviderOptions`, `SmtpProviderOptions`, `NodemailerModule`, `SesProviderOptions`,
+  `SesSdkModule`, `SendGridProviderOptions` — types.
 - `ISmtpTransport`, `ISesClient`, `IMailHttp` — structural injection types.
 - `IMailer`, `MailMessage` — re-exported from `@setu-ts/common`.
 
@@ -6771,12 +7870,34 @@ app.router.post('/users', async (ctx) => {
   AI_GUIDELINES §2.2 forbids it importing `mail-plugin` to find a probe.
 - `sendTemplate`'s envelope is `Omit<MailMessage, 'html' | 'text'>` — `subject` stays REQUIRED; the
   template provides the `html`/`text` bodies only, never the subject.
-- In an HTML template, interpolated `data` values are HTML-escaped (`& < > " '`); text templates
-  substitute raw. A placeholder whose key is absent from `data`, or an unknown template name,
-  throws.
+- `MailTemplate` is a union of two arms that never mix in one template (a template carrying both
+  `view` and `html` is a compile error). **String arm** (`MailStringTemplate`): in an HTML template,
+  interpolated `data` values are HTML-escaped (`& < > " '`); text templates substitute raw. A
+  placeholder whose key is absent from `data`, or an unknown template name, rejects. **Component
+  arm** (`MailComponentTemplate`, M102): `view` and the optional `text` are `Component`s rendered
+  through the `IViewEngine` registered under `CAPABILITIES.VIEW`, with `data` passed verbatim as
+  each component's props — `view` into `html`, `text` into `text` (verbatim; write it as a plain
+  `(props) => string` function, since one written with the `html` tag or JSX is HTML-escaped by its
+  runtime and puts entities such as `&amp;` into a plain-text body). Escaping is the rendering
+  runtime's (an `html` tagged template and a JSX component escape; a hand-written template literal
+  does not). There is NO missing-key check on this arm: an absent key renders as `undefined` rather
+  than throwing, because the committed `sendTemplate` types `data` as `Record<string, unknown>`; the
+  compile-time route is `engine.render(Component,
+  props)` by hand, then `mailer.send`.
+  `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and resolves the engine ONCE
+  at `register()`; a component template configured with no provider **fails at `register()`** naming
+  both remedies (register `ViewPlugin` or any other provider of the token, or remove the component
+  templates) — never on the first `sendTemplate`. Only the registry is consulted: a
+  container-supplied engine registered by `DecoratorPlugin` lands after this plugin has run. A
+  rendering failure (`ViewRenderError`, `UnresolvedSuspenseError`) propagates unwrapped and the
+  provider is never reached.
+- `TemplateEngine.render(name, data)` returns `Promise<RenderedTemplate>` (asynchronous since M102,
+  because `IViewEngine.render` may answer a promise); every refusal is a rejection.
 - `LogProvider` never sends real email — it records each message (`.messages`), forwards to `sink`,
-  and logs via `ctx.logger`. `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only;
-  `SendGridProvider` is the Cloudflare Workers-portable path.
+  and logs via `ctx.logger`. Like every provider, it refuses a send outside `connect()`..
+  `disconnect()` with `'LogProvider is not connected'`, so a send after `app.stop()` rejects.
+  `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only; `SendGridProvider` is the
+  Cloudflare Workers-portable path.
 
 ---
 
@@ -7109,50 +8230,51 @@ await repo.create({ id: 'ord-1' });
 
 ### Options
 
-| Option                  | Type                                                                                              | Required | Description                                                                                                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `resolver`              | `'subdomain' \| 'header' \| 'path' \| 'jwt' \| ITenantResolver \| ITenantResolver[]`              | yes      | Discriminant for tenant resolution method, or a custom resolver / array of resolvers                                                                                                                                      |
-| `subdomain.baseDomain?` | `string`                                                                                          | no       | Stripped from host to isolate tenant label; absent → first host label is tenant id                                                                                                                                        |
-| `header.name?`          | `string`                                                                                          | no       | Header to read; default `'x-tenant-id'`                                                                                                                                                                                   |
-| `path.segment?`         | `number`                                                                                          | no       | Path segment index to read; default `0`                                                                                                                                                                                   |
-| `jwt.claim?`            | `string`                                                                                          | no       | JWT claim to read; default `'tenant_id'`                                                                                                                                                                                  |
-| `jwt.headerName?`       | `string`                                                                                          | no       | Authorization header name; default `'authorization'`                                                                                                                                                                      |
-| `jwt.decode?`           | `(token: string) => Record<string, unknown> \| null`                                              | no       | Custom decoder; falls back to `IJwtService.decode` from `CAPABILITIES.JWT` if absent                                                                                                                                      |
-| `database`              | `'column-per-tenant' \| 'schema-per-tenant' \| 'database-per-tenant' \| ITenantIsolationStrategy` | no       | Isolation strategy the data store is expected to implement; default `'column-per-tenant'`                                                                                                                                 |
-| `dataStore?`            | `ITenantDataStore`                                                                                | no       | Injected CRUD backend; default `MemoryTenantDataStore`                                                                                                                                                                    |
-| `cache.prefix?`         | `boolean`                                                                                         | no       | When `true`, stamps resolved prefix into `ctx.state` via `getTenantCachePrefix()`                                                                                                                                         |
-| `cache.separator?`      | `string`                                                                                          | no       | Default `':'` — used by `prefixCacheKey` and the `ctx.state` stamp                                                                                                                                                        |
-| `required?`             | `boolean`                                                                                         | no       | When `true`, short-circuits unresolved requests at 400 without calling `next()`                                                                                                                                           |
-| `rejectionStatus?`      | `number`                                                                                          | no       | Status code for required-tenant short-circuit; default `400`                                                                                                                                                              |
-| `exclude?`              | `readonly (string \| RegExp)[]`                                                                   | no       | Paths that skip tenant resolution entirely (exact string or `RegExp.test`); default the six operational probes (`/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`); `[]` restores the previous behaviour |
-| `middlewarePriority?`   | `number`                                                                                          | no       | Priority for auto-added middleware; default `40`                                                                                                                                                                          |
+| Option                  | Type                                                                                              | Required | Description                                                                                                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolver`              | `'subdomain' \| 'header' \| 'path' \| 'jwt' \| ITenantResolver \| ITenantResolver[]`              | yes      | Discriminant for tenant resolution method, or a custom resolver / array of resolvers                                                                                                                                                                                      |
+| `subdomain.baseDomain?` | `string`                                                                                          | no       | Stripped from host to isolate tenant label; absent → first host label is tenant id                                                                                                                                                                                        |
+| `header.name?`          | `string`                                                                                          | no       | Header to read; default `'x-tenant-id'`                                                                                                                                                                                                                                   |
+| `path.segment?`         | `number`                                                                                          | no       | Path segment index to read; default `0`                                                                                                                                                                                                                                   |
+| `jwt.claim?`            | `string`                                                                                          | no       | JWT claim to read; default `'tenant_id'`                                                                                                                                                                                                                                  |
+| `jwt.headerName?`       | `string`                                                                                          | no       | Authorization header name; default `'authorization'`                                                                                                                                                                                                                      |
+| `jwt.decode?`           | `(token: string) => Record<string, unknown> \| null`                                              | no       | Custom decoder; falls back to `IJwtService.decode` from `CAPABILITIES.JWT` if absent                                                                                                                                                                                      |
+| `database`              | `'column-per-tenant' \| 'schema-per-tenant' \| 'database-per-tenant' \| ITenantIsolationStrategy` | no       | Isolation strategy the data store is expected to implement; default `'column-per-tenant'`                                                                                                                                                                                 |
+| `dataStore?`            | `ITenantDataStore \| RegistryFactory<ITenantDataStore>`                                           | no       | Injected CRUD backend; default `MemoryTenantDataStore`. A factory (for example `createDatabaseTenantDataStore()`) is resolved once at `onInit`, so it may read a capability such as `CAPABILITIES.DATABASE` — `DatabasePlugin` may be registered after the tenancy plugin |
+| `cache.prefix?`         | `boolean`                                                                                         | no       | When `true`, stamps resolved prefix into `ctx.state` via `getTenantCachePrefix()`                                                                                                                                                                                         |
+| `cache.separator?`      | `string`                                                                                          | no       | Default `':'` — used by `prefixCacheKey` and the `ctx.state` stamp                                                                                                                                                                                                        |
+| `required?`             | `boolean`                                                                                         | no       | When `true`, short-circuits unresolved requests at 400 without calling `next()`                                                                                                                                                                                           |
+| `rejectionStatus?`      | `number`                                                                                          | no       | Status code for required-tenant short-circuit; default `400`                                                                                                                                                                                                              |
+| `exclude?`              | `readonly (string \| RegExp)[]`                                                                   | no       | Paths that skip tenant resolution entirely (exact string or `RegExp.test`); default the six operational probes (`/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`); `[]` restores the previous behaviour                                                 |
+| `middlewarePriority?`   | `number`                                                                                          | no       | Priority for auto-added middleware; default `40`                                                                                                                                                                                                                          |
 
 ### Exports
 
-| Symbol                                                                                                             | Kind        | Description                                                                                |
-| ------------------------------------------------------------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------ |
-| `MultiTenancyPlugin`                                                                                               | function    | Plugin factory — registers `IMultiTenancyService` under `CAPABILITIES.MULTI_TENANCY`       |
-| `tenantMiddleware`                                                                                                 | function    | Middleware factory — resolve tenant, set `ctx.request.tenant`, short-circuit when required |
-| `getTenantCachePrefix`                                                                                             | function    | Accessor reading the tenant cache prefix from `ctx.state`                                  |
-| `TENANT_CACHE_PREFIX_STATE_KEY`                                                                                    | const       | Module-level key constant (`'multi-tenancy-plugin:cache-prefix'`)                          |
-| `SubdomainResolver`                                                                                                | class       | Resolves tenant from URL host subdomain                                                    |
-| `HeaderResolver`                                                                                                   | class       | Resolves tenant from configurable HTTP header                                              |
-| `PathResolver`                                                                                                     | class       | Resolves tenant from configurable path segment index                                       |
-| `JwtResolver`                                                                                                      | class       | Resolves tenant from JWT claim (uses unverified decode)                                    |
-| `ColumnPerTenant`                                                                                                  | class       | Column-per-tenant isolation strategy (default)                                             |
-| `SchemaPerTenant`                                                                                                  | class       | Schema-per-tenant isolation strategy                                                       |
-| `DatabasePerTenant`                                                                                                | class       | Database-per-tenant isolation strategy                                                     |
-| `MemoryTenantDataStore`                                                                                            | class       | Zero-dependency in-process default store with cross-tenant isolation                       |
-| `TenantNotResolvedError`                                                                                           | class       | Thrown by `getRepository` when tenant has not been resolved                                |
-| `MultiTenancyPluginOptions`                                                                                        | interface   | The argument type of `MultiTenancyPlugin(...)`                                             |
-| `ResolverConfig`                                                                                                   | type        | The `resolver` option's type — discriminant string, custom resolver, or chain              |
-| `DatabaseStrategyKind`                                                                                             | type        | The `database` option's discriminant strings                                               |
-| `SubdomainResolverOptions`, `HeaderResolverOptions`, `PathResolverOptions`, `JwtResolverOptions`                   | interfaces  | Per-resolver option shapes, also the resolver constructors' argument types                 |
-| `TenantCacheOptions`                                                                                               | interface   | The `cache` option shape (`prefix`, `separator`)                                           |
-| `MemoryTenantDataStoreOptions`                                                                                     | interface   | `MemoryTenantDataStore` constructor options (`generateId`)                                 |
-| `ITenantDataStore`                                                                                                 | interface   | Internal port for tenant-scoped CRUD (app injection seam)                                  |
-| `ITenantIsolationStrategy`                                                                                         | type        | Discriminated union with `'column' \| 'schema' \| 'database'` arms; narrow on `kind`       |
-| Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@setu-ts/common`                   |
+| Symbol                                                                                                             | Kind        | Description                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------ | ----------- | ---------------------------------------------------------------------------------------------- |
+| `MultiTenancyPlugin`                                                                                               | function    | Plugin factory — registers `IMultiTenancyService` under `CAPABILITIES.MULTI_TENANCY`           |
+| `tenantMiddleware`                                                                                                 | function    | Middleware factory — resolve tenant, set `ctx.request.tenant`, short-circuit when required     |
+| `getTenantCachePrefix`                                                                                             | function    | Accessor reading the tenant cache prefix from `ctx.state`                                      |
+| `TENANT_CACHE_PREFIX_STATE_KEY`                                                                                    | const       | Module-level key constant (`'multi-tenancy-plugin:cache-prefix'`)                              |
+| `SubdomainResolver`                                                                                                | class       | Resolves tenant from URL host subdomain                                                        |
+| `HeaderResolver`                                                                                                   | class       | Resolves tenant from configurable HTTP header                                                  |
+| `PathResolver`                                                                                                     | class       | Resolves tenant from configurable path segment index                                           |
+| `JwtResolver`                                                                                                      | class       | Resolves tenant from JWT claim (uses unverified decode)                                        |
+| `ColumnPerTenant`                                                                                                  | class       | Column-per-tenant isolation strategy (default)                                                 |
+| `SchemaPerTenant`                                                                                                  | class       | Schema-per-tenant isolation strategy                                                           |
+| `DatabasePerTenant`                                                                                                | class       | Database-per-tenant isolation strategy                                                         |
+| `MemoryTenantDataStore`                                                                                            | class       | Zero-dependency in-process default store with cross-tenant isolation                           |
+| `TenantDataStoreNotReadyError`                                                                                     | class       | Thrown by `getRepository`/`getRepositoryFor` before a factory `dataStore` resolves in `onInit` |
+| `TenantNotResolvedError`                                                                                           | class       | Thrown by `getRepository` when tenant has not been resolved                                    |
+| `MultiTenancyPluginOptions`                                                                                        | interface   | The argument type of `MultiTenancyPlugin(...)`                                                 |
+| `ResolverConfig`                                                                                                   | type        | The `resolver` option's type — discriminant string, custom resolver, or chain                  |
+| `DatabaseStrategyKind`                                                                                             | type        | The `database` option's discriminant strings                                                   |
+| `SubdomainResolverOptions`, `HeaderResolverOptions`, `PathResolverOptions`, `JwtResolverOptions`                   | interfaces  | Per-resolver option shapes, also the resolver constructors' argument types                     |
+| `TenantCacheOptions`                                                                                               | interface   | The `cache` option shape (`prefix`, `separator`)                                               |
+| `MemoryTenantDataStoreOptions`                                                                                     | interface   | `MemoryTenantDataStore` constructor options (`generateId`)                                     |
+| `ITenantDataStore`                                                                                                 | interface   | Internal port for tenant-scoped CRUD (app injection seam)                                      |
+| `ITenantIsolationStrategy`                                                                                         | type        | Discriminated union with `'column' \| 'schema' \| 'database'` arms; narrow on `kind`           |
+| Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@setu-ts/common`                       |
 
 ### Notes
 
@@ -7176,10 +8298,16 @@ await repo.create({ id: 'ord-1' });
   via `useIsolation()`. `MemoryTenantDataStore` derives its partition scope from it
   (column-stamping; the schema/database labels as partition-map keys — no physical schema or
   database is created). A store that never receives `useIsolation` partitions by raw tenant id.
-- **A strategy NAMES the isolation; a store delivers it.** No shipped database adapter is told the
-  strategy and none creates schemas or databases. A `register()` warning fires when a non-`'column'`
-  strategy is selected with no `dataStore` injected, and the `JwtResolver` arm of `resolver` warns
-  that tenant identity comes from an UNVERIFIED claim.
+- **A strategy NAMES the isolation; a store delivers it.** The shipped database bridge,
+  `createDatabaseTenantDataStore` from `@setu-ts/database-plugin`, is the one store told the
+  strategy over a real backend, and it supports `'column'` only: it conjoins the tenant column to
+  every read and stamps it on every write, and throws `TenantStoreStrategyUnsupportedError` at
+  startup for `'schema'`/`'database'` (IRepository offers no schema or database switch). Its column
+  is the strategy's (`new ColumnPerTenant('org_id')` names another), and key lookups go through the
+  repository's own `findById`, so a primary key not named `id` is addressed as its adapter is
+  configured. A `register()` warning fires when a non-`'column'` strategy is selected with no
+  `dataStore` injected, and the `JwtResolver` arm of `resolver` warns that tenant identity comes
+  from an UNVERIFIED claim.
 - **Auto-added at priority 40.** Runs after observability (metrics 20 / telemetry 30), before auth
   (300). Exported for manual re-ordering.
 
@@ -7391,6 +8519,11 @@ wire shape and inspector manifest are in `docs/diagnostics-protocol.md`.
 ## Metrics (`@setu-ts/metrics-plugin`)
 
 Provides Prometheus metrics.
+
+Label values are escaped per text format 0.0.4 (backslash, double quote, line feed). Any other
+control character (carriage return, NUL, the rest of C0 and DEL) has no escape in that format and is
+replaced with U+FFFD in label values and HELP text, so an application-supplied value cannot split an
+exposition line.
 
 ### Service Interface
 
@@ -7679,17 +8812,18 @@ The telemetry contract is framework-owned and exported from `@setu-ts/common` (z
 importable without the OTel SDK installed). The telemetry-plugin translates these to OTel types at
 its implementation seam.
 
-| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                                                            |
-| -------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`. Plus the OPTIONAL `activeSpanContext?(): SpanContext \| undefined` (see below). |
-| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                                                        |
-| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                                                   |
-| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                                                  |
-| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                                                  |
-| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                                                   |
-| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below.                      |
-| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                                       |
-| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                                       |
+| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`. Plus the OPTIONAL `activeSpanContext?(): SpanContext \| undefined` (see below).                                                                                                                                                                                                   |
+| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                                                                                                                                                                                                                                                          |
+| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                                                                                                                                                                                                                                                     |
+| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext; readonly root?: boolean }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below. `root: true` (M107) starts a parentless span, ignoring both `parentContext` and the active span; an `ITelemetryService` implementation that ignores it starts the span under the ACTIVE span. |
+| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                                                                                                                                                                                                                                         |
+| `TraceparentSource`        | interface       | Structural `traceId?`/`spanId?`/`traceFlags?` input accepted by `contextToTraceparent`; both `TelemetryContext` and `SpanContext` satisfy it.                                                                                                                                                                                                                                                                                                                                                                    |
+| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 > **Implicit parent/child linking is conditional.** Since M75 the plugin DOES register an OTel
 > `ContextManager` — the `AsyncLocalStorageContextManager` from the optional
@@ -8098,23 +9232,88 @@ const spec = openapi.getSpec();
 
 ## CLI (`@setu-ts/cli`)
 
-`@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation.
-Install it with an explicit binary name, because Deno's default inference would name it after the
-package (`cli`):
+Devtool enabling requires all existing `@setu-ts/*` pins to equal this CLI version (`^VERSION`). A
+generated factory must accept the composition as its second argument and use both spreads:
 
-```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
+```typescript
+import type { IPlugin } from '@setu-ts/common';
+import type { IKernelApplication, KernelDiagnosticsOptions } from '@setu-ts/kernel';
+
+export function createApp(
+  _env?: Readonly<Record<string, unknown>>,
+  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+): IKernelApplication {
+  return createApplication({
+    plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
+    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
+  });
+}
 ```
 
-`--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
-pins projects to its own version — so on release day the install fails without it.
+Keep the existing plugin list. The generated entry checks registration and `app.diagnostics` after
+start, stops and exits 1 if the composition was dropped. Workspace connectors allocate from
+`devtoolBasePort`, recorded on first allocation (default `basePort + 1000`, capped at 65535); the
+first explicit `--devtool-port` records that range start. Reallocation updates CLI-rendered entries
+and refuses edited entries before any write. Standalone defaults probe 4919 through 5019 and report
+the chosen port; `new --devtool` also writes it into the project README. Re-enabling an unchanged
+standalone entry retains its recorded port without probing again.
+
+`@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation. It
+is a Node program (Node 22 or later), published to npm with a `bin`, so it runs without an install
+or installs globally; `@setu-ts/create` makes `npm create @setu-ts` the same as `setu new`:
+
+```bash
+npx @setu-ts/cli new my-app
+npm create @setu-ts my-app -- --template rest
+npm install --global @setu-ts/cli               # then: setu new my-app
+```
+
+A scaffolded project depends on the framework packages from npm under their own names, pinned to the
+CLI's own version — on every target, Deno included (`npm:@setu-ts/…` in its import map). Every
+target installs with its own package manager: `npm install` (Node, Workers), `bun install` (Bun),
+`deno install` (Deno).
+
+The CLI loads a project's TypeScript — `setu.config.ts` for plugin commands, a custom schematic —
+through `tsx`, from the project's own `node_modules`. A Deno project sets `nodeModulesDir: "auto"`,
+so `deno install` creates that directory; until it has, plugin commands refuse by name and name the
+command that fixes it. A Deno project pinning the framework from JSR (`jsr:@setu-ts/…`, 0.8 and
+earlier) is refused the same way, pointing at the upgrade guide.
+
+### `@setu-ts/cli/main` — the process boundary
+
+| Export          | Kind      | Description                                                                                                                                   |
+| --------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                   |
+| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                |
+| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                        |
+| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                            |
+| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?` |
+
+**Breaking (0.9.0):** `MainProcess.prompt` is asynchronous and takes the run's interrupt signal, so
+an interrupt ends a pending question rather than waiting for Enter; `denoProcess` is removed,
+replaced by `nodeProcess`. Both executables set `process.exitCode` rather than calling
+`process.exit`, so output still draining to a pipe is not cut off.
+
+### `@setu-ts/create`
+
+| Export       | Kind     | Description                                                                                |
+| ------------ | -------- | ------------------------------------------------------------------------------------------ |
+| `createArgs` | function | `(argv: readonly string[]) => string[]` — the `setu new` arguments `npm create` stands for |
+
+Its `create` executable runs `runMain` with `createArgs(process.argv.slice(2))`, so it accepts
+exactly what `setu new` accepts.
 
 ### Commands
+
+Every socket-target scaffold includes `test/app.test.ts`: it starts the application's own
+`createApp()` through `createTestApp`, injects its smoke-test endpoint, and stops it. Workers needs
+the platform environment and emits no smoke test; its `test` task permits an empty suite.
+`setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`.
 
 ```bash
 # Scaffold a project (creates ./my-app)
 setu new my-app
-setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers (manifest + start command; code is portable)
+setu new my-app --runtime deno                 # node (default) | deno | bun | cloudflare-workers (manifest + start command; code is portable)
 setu new my-app --template rest                # rest | microservice | class-based | full-stack
 setu new my-app --template microservice --runtime bun
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
@@ -8184,7 +9383,7 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--env-file <path>`                             | `new`, `generate app`                       | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a development value in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                   |
 | `--depends-on <member>`                         | `generate app`                              | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`. Duplicate or missing names are usage errors, as is using it anywhere but `generate app`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `--devtool`                                     | `new`, `generate app`                       | Opts the project (or member) into the local diagnostics connector: emits a `main.dev.ts` development entry the production graph never imports, adds `dev` and `check` tasks, and — for a workspace member — records a `devtoolPort`. Refused by name on a non-Deno runtime, on a starter-composed template (kernel diagnostics must be enabled at construction), and, for `--devtool-port`, when the port is already used. The generated entry reads `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` from the environment and refuses to start without a valid pair; it never generates, writes or prints one. In a workspace the launcher also sets `SETU_DEVTOOL_MEMBER` to the member it is inspecting, and the generated `scripts/dev.ts` forwards all three to that member's child alone, blanking them for every sibling. **All three names are published CLI surface**: renaming one is a breaking change to every scaffolded project, and the root workspace `dev` task's `--allow-env` grant is scoped to exactly them. |
-| `--devtool-port <n>`                            | `new`, `generate app`, `devtool enable`     | The IPv4 loopback port the connector binds. Range-checked like `--port`; refused when it equals any member's application or devtool port. Absent, it is allocated in a workspace and defaults to 4919 standalone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `--devtool-port <n>`                            | `new`, `generate app`, `devtool enable`     | The IPv4 loopback port the connector binds. Range-checked like `--port`; refused when it equals any member's application or devtool port. Absent, it is allocated in a workspace and probes 4919 through 5019 standalone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `--transport <name>`                            | `new --workspace`                           | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `--transport-url <url>`                         | `new --workspace`                           | Replaces the baked local fallback for the endpoint-shaped broker transports. A usage error for `http`, `grpc` and `memory`, which have no broker to address, and for `pubsub` and `service-bus`, whose connection value is a project id or a secret read from the environment — that refusal names the variable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--style functional\|class-based`               | `new`, `generate app`                       | The decorator-and-DI axis, separate from `--template`: `functional` (default) installs neither `DecoratorPlugin` nor `DiPlugin`; `class-based` installs both together. Accepted on the styleable templates `rest` and `microservice`; refused with no template to apply to, with an unknown value, and on `full-stack`, which composes through a starter and has no controller or ingress seam. `--template class-based` is a byte-identical alias of `--template rest --style class-based`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -8218,11 +9417,18 @@ than "anything under `@setu-ts/`", because the range written is the CLI's OWN ve
 correct for packages released as one version with it — so a typo is refused, naming what is
 accepted, rather than pinned to a version that does not exist.
 
-When a project carries both `deno.json` and `package.json` — a Workers or Node target does, one for
-its build and one for `setu generate`'s plugin gating — **both** are updated, so the gate and the
-build cannot disagree about what is installed. `deno.json` gets a `jsr:` specifier under `imports`;
-`package.json` gets the npm-compat `npm:@jsr/setu-ts__<name>` form under `dependencies`. Re-adding a
-package already present at the same version reports that and writes nothing.
+Deno projects update only `deno.json` imports, even when a full-stack frontend has its own
+`package.json`. Node, Bun and Workers update every manifest they carry. Every pin comes from npm: a
+Deno import holds `npm:@setu-ts/<name>@^<version>` and a `package.json` dependency holds
+`^<version>`. Testing uses npm `devDependencies`. Existing key order is retained; sorted maps
+receive a sorted insertion, otherwise the new framework key follows the existing scope block.
+Re-adding the same pin leaves the dependency map unchanged.
+
+The twelve safe zero-configuration providers listed in [the CLI guide](docs/cli.md) are registered
+above the emitted development-plugin anchor in either generator style. Unrecognized source is
+preserved. Starter compositions print their option arm; installing a package does not authorize a
+duplicate registration. Existing development diagnostics modules are refreshed with names-only
+approval maps and known plugin calls receive development-only options.
 
 It writes the manifest and **reports** the install command rather than running it. The command
 matches the project's toolchain, detected from its manifests the same way `setu generate` detects
@@ -8237,9 +9443,8 @@ it:
 
 That is deliberate. On the day of a release the pin is younger than Deno's 24-hour
 minimum-dependency-age policy, so the flags need to be visible rather than buried in a failing
-subprocess — and it keeps the command free of the `run` permission. On Node, Bun or Workers, when it
-writes a `package.json` entry and the project's `.npmrc` does not route the `@jsr` scope to JSR, it
-also prints the `@jsr:registry=https://npm.jsr.io` line the install needs.
+subprocess — and it keeps the command free of the `run` permission. No registry mapping is printed:
+every package resolves from the default npm registry.
 
 A **workspace root** is refused (exit `2`, nothing written) — recognised by `setu.workspace.json`, a
 `deno.json` `workspace` key, or a `package.json` `workspaces` key. Framework packages are pinned in
@@ -8251,11 +9456,17 @@ manifest cannot be parsed, `2` for an unknown package name, a missing argument, 
 
 ### Exit codes
 
-| Code | Meaning                                                                                                                                                                                                                                                     |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success (including `--help` and `--version`).                                                                                                                                                                                                               |
-| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                         |
-| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| Code  | Meaning                                                                                                                                                                                                                                                     |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`   | Success (including `--help` and `--version`).                                                                                                                                                                                                               |
+| `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                         |
+| `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                                                                   |
+
+For plugin commands, an already-aborted `CliDependencies.interrupt` prevents boot. Aborting during a
+handler stops awaiting its result and awaits `app.stop()` before returning `130`. The CLI cannot
+cancel arbitrary handler code or undo external side effects; the application's shutdown hooks must
+release its resources. Startup is allowed to settle before checking interruption and shutting down.
 
 ### Interactive scaffolding
 
@@ -8273,10 +9484,11 @@ terminal implementation only behind `Deno.stdin.isTerminal()`; and Deno's own `p
 
 The two exported types:
 
-| Export         | Kind      | Members                                                                                                         |
-| -------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
-| `Prompter`     | interface | `select(question, choices): Promise<string \| undefined>` — undefined means "no answer could be taken".         |
-| `PromptChoice` | interface | `{ value, label }` — the value written into the flag record, and one descriptive line shown above the question. |
+| Export            | Kind      | Members                                                                                                         |
+| ----------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
+| `Prompter`        | interface | Since 0.9.0, `select(question, choices): Promise<PromptSelection>` — answer, unavailable, or cancelled.         |
+| `PromptChoice`    | interface | `{ value, label }` — the value written into the flag record, and one descriptive line shown above the question. |
+| `PromptSelection` | type      | Since 0.9.0, `{ kind: 'answer', value } \| { kind: 'unavailable' } \| { kind: 'cancelled' }`.                   |
 
 `createTerminalPrompter` is deliberately NOT exported: its only consumer is the executable entry
 point, which imports it directly.
@@ -8328,11 +9540,11 @@ function is needed. In a class-based project the same path holds the `APP_SERVIC
 > dependency.
 
 > **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
-> `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, so a
-> scaffolded Workers project emits `package.json` (npm-compat `@jsr/…` dependencies, `wrangler`
-> pinned in `devDependencies`, and `dev`/`deploy` scripts) plus `.npmrc`, and
-> `npm install && npx wrangler dev` works as printed. The Deno target does NOT get one: it resolves
-> through the import map, and a `package.json` switches Deno to node_modules resolution.
+> `src/index.ts` with esbuild, which does not read a Deno import map, so a scaffolded Workers
+> project emits `package.json` (`@setu-ts/*` dependencies from npm, `wrangler` pinned in
+> `devDependencies`, and `dev`/`deploy` scripts), and `npm install && npx wrangler dev` works as
+> printed. The Deno target does NOT get one: it resolves through the import map, and a
+> `package.json` switches Deno to node_modules resolution.
 
 **The decorator-free way to serve HTTP is `setu generate route`.** It emits
 `register<Name>Routes(router: IRouterApi)` and is ungated, so it works in a project with no plugins
@@ -8519,10 +9731,11 @@ workspace created before this keeps its shape.
 
 Three facts were measured, and each shaped the result. **Bun needs no root shape of its own** — it
 reads npm `workspaces` — but it installs into each MEMBER's `node_modules` as well as the root, so
-the generated ignore file and image account for both. **A workspace-root `.npmrc` maps the `@jsr`
-scope** for every member, and without it not one framework package resolves. And **a sibling library
-resolves by its package name** under npm exactly as it does under Deno, so libraries needed no
-per-runtime design beyond their manifest.
+the generated ignore file and image account for both. **No registry mapping is needed**: every
+member takes the framework from npm, so the root carries no `.npmrc` (before `0.9.0` one mapped the
+`@jsr` scope, and without it no framework package resolved). And **a sibling library resolves by its
+package name** under npm exactly as it does under Deno, so libraries needed no per-runtime design
+beyond their manifest.
 
 **Cloudflare Workers is refused as a workspace target**, with the reason: each Worker is its own
 deploy unit with its own `wrangler.toml`, so several in one repository are several deployments
@@ -8595,8 +9808,8 @@ hand-written work.
 
 The managed files are the CLI-owned **seam barrels** — one `index.ts` per generated family
 (`src/modules/`, `src/controllers/`, `src/services/`, `src/middleware/`, `src/plugins/`,
-`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). Nothing else is managed, and no flag can
-make it so.
+`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). The development-only source policy
+`src/devtool/diagnostics.ts` is also CLI-managed. No flag can make an arbitrary path managed.
 
 ### Generated code is wired
 
@@ -8630,13 +9843,16 @@ Notes on the three that are not wired, and one that is conditional:
   `app.router.get(path, { handler, middleware: [requireX()] })` or `@UseGuards(requireX())` on a
   controller or handler. `auth-plugin` publishes no guard list, and the only barrel-shaped
   alternative — the global pipeline — would answer `401` for `/health`, `/metrics` and every public
-  route, because the emitted guard rejects a request with no `ctx.request.user`. A wiring that must
-  not be applied is not a wiring.
-- **`job` is transport-agnostic on purpose.** Registering it as a queue processor would start a
-  worker loop polling for a job name nothing enqueues; scheduling it needs a cron expression the
-  artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue registration,
-  but cannot infer which transport or scheduling details this artifact needs. The emitted JSDoc
-  shows both calls; pick one.
+  route. The emitted guard delegates to `requirePermission('<name>')`, enforcing the installed
+  authorization provider for anonymous and insufficient-permission requests. A wiring that must not
+  be applied is not a wiring.
+- **`job` is transport-agnostic in functional projects.** Class-based projects require queue and
+  emit a decorated processor through the ingress seam; without queue the command refuses before
+  writing and names `setu add queue`. In functional projects, registering it as a queue processor
+  would start a worker loop polling for a job name nothing enqueues; scheduling it needs a cron
+  expression the artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue
+  registration, but cannot infer which transport or scheduling details this artifact needs. The
+  emitted JSDoc shows both calls; pick one.
 - **`migration` has no consumer.** No plugin registers a CLI command, so there is no
   `setu db:migrate` and nothing reads migration files. Apply them from your own script or your ORM's
   tooling.
@@ -8743,11 +9959,11 @@ full-stack` is deliberately not a host: its layering is `routes → features →
 and it has no `src/modules/` concept.
 
 A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
-setup — as a `deno.json` import on Deno and Cloudflare Workers, and as an `npm:@jsr/std__*` alias in
-`devDependencies` on Node and Bun, which get a `package.json` and no `deno.json`. Only a directory
-holding both `<name>.controller.ts` and `<name>.service.ts` is treated as a module, so unrelated
-folders under `src/modules/` (a shared-helpers directory, say) are left out of the barrel rather
-than breaking it.
+setup — as a `deno.json` import on Deno and Cloudflare Workers. Node and Bun declare neither: their
+emitted test uses the built-in `node:test` and `bun:test`, because `@std/testing/bdd` calls
+`Deno.test`. Only a directory holding both `<name>.controller.ts` and `<name>.service.ts` is treated
+as a module, so unrelated folders under `src/modules/` (a shared-helpers directory, say) are left
+out of the barrel rather than breaking it.
 
 The emitted controller's handlers take **only the arguments their `@Params(...)` names** and return
 plain values, which the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a
@@ -8770,14 +9986,13 @@ commands, so the two can never disagree. The factory deliberately does NOT start
 
 ```typescript
 // setu.config.ts (--template rest)
-import { createApplication } from '@setu-ts/kernel';
-import type { IApplication } from '@setu-ts/common';
+import { createApplication, type IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 // … logging, validation, security, health, metrics, OpenAPI, decorators
 import { errorHandler } from '@setu-ts/exceptions';
 
-export function createApp(): IApplication {
+export function createApp(): IKernelApplication {
   const app = createApplication({
     plugins: [RuntimePlugin(), ConfigPlugin({ envFilePath: '.env', envFileOptional: true })],
   });
@@ -8806,11 +10021,11 @@ flag for the other three is still deferred (see "Not in this release").
 ```typescript
 // setu.config.ts (--template full-stack)
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
-import type { IApplication } from '@setu-ts/common';
+import type { IKernelApplication } from '@setu-ts/kernel';
 import { getCsrfToken, getSession } from '@setu-ts/session-plugin';
 import { csrfContext, sessionContext } from './app/lib/context-keys.ts';
 
-export async function createApp(): Promise<IApplication> {
+export async function createApp(): Promise<IKernelApplication> {
   return await createFullStackAppFromConfig((config) => ({
     reactRouter: {
       serverBuildPath: './build/server/index.js',
@@ -8960,20 +10175,23 @@ always supplies it. `GeneratedFile` carries an optional `managed` flag — see "
 
 ### Programmatic API
 
-| Export             | Kind     | Purpose                                                                         |
-| ------------------ | -------- | ------------------------------------------------------------------------------- |
-| `runCli`           | function | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                 |
-| `CliDependencies`  | type     | The `fs` / `cwd` / `now` / `log` / `error` bundle `runCli` requires.            |
-| `deriveNames`      | function | Produces the five naming forms every schematic uses.                            |
-| `DerivedNames`     | type     | The result of `deriveNames`.                                                    |
-| `GeneratedFile`    | type     | `{ path, contents, managed? }` — one file a schematic asks to create.           |
-| `Schematic`        | type     | `(names, options) => readonly GeneratedFile[]`.                                 |
-| `SchematicOptions` | type     | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`). |
-| `PROGRAM_NAME`     | const    | `'setu'` — interpolated into every usage string.                                |
-| `TemplateName`     | type     | The `--template` value union, for callers building argv programmatically.       |
-| `ModuleLoader`     | type     | The seam a custom schematic module is loaded through.                           |
-| `AppLoader`        | type     | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).        |
-| `detectPlugins`    | function | Reads a project manifest and returns the installed `@setu-ts` names.            |
+| Export             | Kind      | Purpose                                                                               |
+| ------------------ | --------- | ------------------------------------------------------------------------------------- |
+| `runCli`           | function  | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                       |
+| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting and interruption. |
+| `deriveNames`      | function  | Produces the five naming forms every schematic uses.                                  |
+| `DerivedNames`     | type      | The result of `deriveNames`.                                                          |
+| `GeneratedFile`    | type      | `{ path, contents, managed? }` — one file a schematic asks to create.                 |
+| `Schematic`        | type      | `(names, options) => readonly GeneratedFile[]`.                                       |
+| `SchematicOptions` | type      | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`).       |
+| `PROGRAM_NAME`     | const     | `'setu'` — interpolated into every usage string.                                      |
+| `TemplateName`     | type      | The `--template` value union, for callers building argv programmatically.             |
+| `ModuleLoader`     | type      | The seam a custom schematic module is loaded through.                                 |
+| `AppLoader`        | type      | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).              |
+| `PromptChoice`     | interface | One value and label offered by a `Prompter`.                                          |
+| `Prompter`         | interface | Programmatic interactive-question seam.                                               |
+| `PromptSelection`  | type      | Answer, unavailable input, or user cancellation.                                      |
+| `detectPlugins`    | function  | Reads a project manifest and returns the installed `@setu-ts` names.                  |
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
 `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is
@@ -8999,19 +10217,21 @@ The three starters share one option chain:
 MicroserviceStarterOptions extends RestStarterOptions`, so an arm
 added to the REST tier is available on all three.
 
-| Export                         | Kind     | Package                                            |
-| ------------------------------ | -------- | -------------------------------------------------- |
-| `createRestApp`                | function | `rest-starter`                                     |
-| `buildRestPlugins`             | function | `rest-starter`                                     |
-| `RestStarterOptions`           | type     | `rest-starter`                                     |
-| `RealtimeArm`                  | type     | all three (re-exported along the tier's pin chain) |
-| `createMicroserviceApp`        | function | `microservice-starter`                             |
-| `buildMicroservicePlugins`     | function | `microservice-starter`                             |
-| `MicroserviceStarterOptions`   | type     | `microservice-starter`                             |
-| `createFullStackApp`           | function | `full-stack-starter`                               |
-| `buildFullStackPlugins`        | function | `full-stack-starter`                               |
-| `createFullStackAppFromConfig` | function | `full-stack-starter`                               |
-| `FullStackStarterOptions`      | type     | `full-stack-starter`                               |
+| Export                            | Kind     | Package                                                              |
+| --------------------------------- | -------- | -------------------------------------------------------------------- |
+| `createRestApp`                   | function | `rest-starter`                                                       |
+| `buildRestPlugins`                | function | `rest-starter`                                                       |
+| `RestStarterOptions`              | type     | `rest-starter`                                                       |
+| `RealtimeArm`                     | type     | all three (re-exported along the tier's pin chain)                   |
+| `createMicroserviceApp`           | function | `microservice-starter`                                               |
+| `buildMicroservicePlugins`        | function | `microservice-starter`                                               |
+| `MicroserviceStarterOptions`      | type     | `microservice-starter`                                               |
+| `createFullStackApp`              | function | `full-stack-starter`                                                 |
+| `buildFullStackPlugins`           | function | `full-stack-starter`                                                 |
+| `createFullStackAppFromConfig`    | function | `full-stack-starter`                                                 |
+| `fullStackConfigOf`               | function | Returns the exact config snapshot used by the config-driven factory. |
+| `FullStackConfigUnavailableError` | class    | Thrown when the accessor receives an app built by another factory.   |
+| `FullStackStarterOptions`         | type     | `full-stack-starter`                                                 |
 
 Each arm is one plugin's option object, threaded through unchanged. **Gated arms are absent unless
 supplied**, so a starter called with no options registers exactly its always-on set:
@@ -9039,6 +10259,11 @@ Notes:
 - **Workers portability varies by arm.** `di`, `realtime.websocket`, `realtime.sse`, and a
   `'memory'` backplane are Workers-portable. A `'redis'` backplane is not (raw socket); a
   `'messaging'` backplane is portable only if its broker is.
+- **The full-stack tier leaves `SchedulerPlugin` out on Cloudflare Workers.** The plugin refuses
+  that platform at `register()`, so registering it unconditionally made every full-stack Workers
+  application fail to start. The starter reads the platform with `detectRuntime()`, as its own
+  `RuntimePlugin()` does, and omits the scheduler there unless a `scheduler` arm is passed; schedule
+  on Workers with `cloudflare-plugin`'s `WorkersCron`.
 - **`session` is gated because it cannot be defaulted.** `SessionPlugin` throws during `register()`
   without an adequate secret, so an always-on arm would stop every starter application from booting
   until one was supplied. It is also genuinely optional: a token-authenticated API has no cookie.
@@ -9073,6 +10298,9 @@ where
 `FromConfigOptions = { config?: ConfigPluginOptions; env?: Readonly<Record<string, unknown>> }`. The
 resolver is called exactly once; if it throws, or configuration fails to load, the returned promise
 rejects and no partially-composed application exists.
+
+`fullStackConfigOf(app): IConfig` returns that exact snapshot for post-factory code. It throws the
+exported `FullStackConfigUnavailableError` when the application was built by another factory.
 
 **`env` is required on Cloudflare Workers.** Bindings arrive as the `env` argument of the `fetch`
 handler, never process-wide, so runtime services built before a request report an EMPTY environment
@@ -9557,6 +10785,8 @@ app.middleware.add(rateLimit({ max: 100, windowMs: 60000 }));
 ### Middleware Class
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+
 class AuthMiddleware implements IMiddleware {
   constructor(private authService: IAuthService) {}
 
@@ -9578,7 +10808,7 @@ class AuthMiddleware implements IMiddleware {
 }
 
 // Register
-const auth = app.services.get<IAuthService>('authentication');
+const auth = app.services.get<IAuthService>(CAPABILITIES.AUTH);
 app.middleware.add(new AuthMiddleware(auth));
 ```
 
@@ -10178,6 +11408,16 @@ app.register({
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
+### Diagnostics alias character policy
+
+`hasForbiddenAliasCharacter(value: string): boolean` returns true for any Unicode control (Cc),
+format (Cf), line separator (Zl, U+2028) or paragraph separator (Zp, U+2029) character, including
+bidi overrides and zero-width format characters. Each refusal reads "contains a control, format or
+line-separator character". Diagnostics sources, kernel labels and the connector wire validation
+share this pure predicate; each keeps its byte limit and fixed error message. Printable Unicode such
+as `é` remains accepted. The browser SDK maintains the same policy locally to preserve its type-only
+common imports.
+
 ### Redaction
 
 `createRedactionService(policy)` compiles a synchronous `RedactionPolicy` once and returns an
@@ -10191,15 +11431,44 @@ metadata, preserves unclassified subtrees by identity, and descends only into pl
 arrays. The logger, telemetry, and audit plugins accept either a policy or an `IRedactionService`
 through their `redaction` option; this is an option-passed pure utility, not a capability token.
 
+`RedactionPolicy` has three members:
+
+| Member            | Type                                                             | Purpose                                                                   |
+| ----------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `fields`          | `Readonly<Record<string, DataClassification \| FieldRedaction>>` | Dot-path patterns and the classification or `FieldRedaction` each carries |
+| `redactors`       | `Readonly<Record<string, Redactor>>`                             | Redactor selected by the matched classification                           |
+| `defaultRedactor` | `Redactor`                                                       | Fallback when `redactors` has no entry for that classification            |
+
+`FieldRedaction` is `{ readonly classification: DataClassification; readonly redactor?: Redactor }`
+— the value arm that lets one classification carry two treatments. For every matched field,
+`redactValue`/`redactRecord` select a redactor in this order: the matched field's own `redactor`
+(when it has one), then `redactors[classification]`, then `defaultRedactor`, then `eraseRedactor`.
+`RedactionContext.classification` always reports the matched classification. A field's `redactor`
+and `classification` are read as own properties only: an inherited `redactor` is ignored, and an
+entry without its own string `classification` is erased.
+
+`DataClassification` is one of four framework constants or any application-defined string (which
+reaches `redactors[<string>]`):
+
+| Constant                      | Value      |
+| ----------------------------- | ---------- |
+| `DATA_CLASSIFICATIONS.PII`    | `'pii'`    |
+| `DATA_CLASSIFICATIONS.PHI`    | `'phi'`    |
+| `DATA_CLASSIFICATIONS.PCI`    | `'pci'`    |
+| `DATA_CLASSIFICATIONS.SECRET` | `'secret'` |
+
 ### Values (runtime exports)
 
 | Export                                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `CAPABILITIES`                                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103), `OUTBOX: 'outbox'` (transactional outbox, `outbox.<name>` for a named messaging instance, M107), `INBOX: 'inbox'` (consumer inbox, `inbox.<name>` for a named messaging instance, M108)                                                                                                                                                                                                                                                                                                                                        |
 | `createCapabilityToken(name)`                          | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `encodeFrameData(data)`                                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `createCachedProbe(options)`                           | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `withDeadline(run, options)`                           | function | **Since M101a.** Runs one backend call under a bound whose expiry is a recorded failure: `run` receives an `AbortSignal` to forward; the call is raced against the deadline (an injected seam may ignore the signal), and on expiry the signal is aborted and the promise REJECTS with `options.onTimeout()`. The call's own rejection is never swallowed. `timeoutMs: 0` arms no timer. The request-path counterpart of `createCachedProbe`, which never rejects. Prefer a client's native per-command timeout where one exists                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `deadlineRangeError(name, timeoutMs)`                  | function | **Since M101a.** Returns the `RangeError` naming `name` for a deadline outside `0`–`2147483647` (including `NaN`), or `null` when valid — so an option holder can refuse a bad value at construction with the same message `withDeadline` uses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `DeadlineOptions`                                      | type     | **Since M101a.** `{ timeoutMs, onTimeout, timing? }` for `withDeadline`; `timing` is the `setTimer`/`clearTimer` surface, typically `resolveProbeTiming(ctx.runtime)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `resolveProbeTiming(runtime)`                          | function | Resolves a probe's clock-and-timer surface — `{ hrtime, setTimer, clearTimer }` bound to the injected `IRuntimeServices` (e.g. `ctx.runtime`), ready to spread into `createCachedProbe`'s options. NO ambient `performance.now()`/`Date.now()` fallback: all time access outside `packages/runtime` goes through `IRuntimeServices` (AI_GUIDELINES §4), so a caller with no runtime to inject has no clock the probe may lawfully read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `createConnectionErrorReporter(options)`               | function | Builds a de-duplicating sink for one connection's error events from `{ source, logger }`, where `logger` is a thunk read at CALL time. The first error of a run, or one whose message differs from the previous, logs at `warn`; a repeat of the previous message logs at `debug` with a `repeats` count; `recovered()` after at least one error logs once at `info` and resets, so the next outage warns again. Only the error's message is logged, never its stack. Neither method throws — a failing logger or an unstringifiable value is swallowed, since the caller is an event-emitter listener. An accessor returning `undefined` drops the event (no log sink is registered; the owning package's `isHealthy` probe still reports the outage)                                                                                                                                                                                                                                        |
 | `attachConnectionErrorReporter(client, reporter)`      | function | Attaches a reporter to a client's `'error'` (→ `report`) and `'ready'` (→ `recovered`) events, returning `false` when the value exposes no `on` method. For clients a package BUILT: an injected client belongs to the caller, and adding an `'error'` listener to it would silence the caller's own handling, since `ioredis` falls back to `console.error` only when no listener exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -10218,6 +11487,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | `serializeError(value)`                                | function | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause?, classifiers?, errors?, omittedErrorCount? }`) with the `cause` chain followed to a bounded depth. `classifiers` only carries strings, finite numbers, and booleans from `code`, `errno`, `syscall`, `severity`, `constraint`, `codeName`, and `statusCode`; payload objects such as query data and `$metadata` are omitted. `errors` is present only for an `AggregateError`. Classifier strings cap at 512 Unicode code points, `AggregateError.errors` caps at eight direct members, and one call produces at most 64 error nodes; a truncated aggregate reports `omittedErrorCount`. A non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another. |
 | `causeMessage(value)`                                  | function | Extracts a caller-facing message from any thrown value: its `message` when it is an `Error`, `String(value)` otherwise. The one-line counterpart of `serializeError` — that shapes a record for a log sink, this supplies the sentence that goes inside another error's message. Pure. Here because `resolveRegistryEntry` and `@setu-ts/scheduler-plugin`'s declared-job refusal must produce the SAME sentence for the two arms of one option, and §2.2 forbids one reading the other's copy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `parseJsonBody(text)`                                  | function | Parses one request-body text as JSON — the ONE parse all three `IRequest.json()` implementations (`@setu-ts/runtime`'s served HTTP path, the kernel's `inject()`, `@setu-ts/testing`'s `MockRequest`) share, so a malformed body answers `400` at every producer rather than a masked `500` on the served path while the test path answered `400` (X37-1). Throws `MalformedRequestBodyError`, carrying the platform `SyntaxError` as `cause` (M90f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `DuplicateKeyError`                                    | class    | A write that would duplicate a primary key or a unique index, branded `409 Conflict` with the fixed detail "A record with the same unique key already exists. The conflicting write was rejected." Carries the targeted `entity` when known and the driver error as `cause`, never served. Not retryable. In `common` because `@setu-ts/database-plugin` and `@setu-ts/cloudflare-plugin` raise it and any store recording "already processed" with a unique insert must recognise it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `MalformedRequestBodyError`                            | class    | The malformed request body rejection, branded `400 Bad Request` at construction with the fixed detail "The request body could not be parsed as JSON." The `cause` is the platform `SyntaxError` — kept for the log, never served (M90f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `parseFormBody(body, contentType)`                     | function | Parses one request body as a form — the ONE parse all three `IRequest.formData?()` implementations (`@setu-ts/runtime`'s served HTTP path, the kernel's `inject()`, `@setu-ts/testing`'s `MockRequest`) share, and the function every accessor-less fallback path calls (M94b). Adopts the web `FormData` semantics — ordered `getAll` for repeated names, `entries()` in wire order, file-versus-text discriminated on `filename !== undefined` (`filename=""` is still a file) — over a framework-owned value whose bytes stay synchronous. Throws `UnsupportedFormEncodingError` (`415`) for a non-form content-type (JSON, a missing content-type, a multipart type with no `boundary=`); an UNPARSEABLE multipart body yields an EMPTY form, the promoted parser's released behaviour, documented as the accessor's limit (M94b)                                                                                                                                                         |
 | `formEncodingOf(contentType)`                          | function | Classifies a content-type as `'urlencoded'` or `'multipart'` — case-insensitively and parameter-tolerantly — or `undefined` when the type is not a parseable form, a multipart type with no `boundary=` included. The ONE classifier the upload middleware's multipart guard and the CSRF verifier's form guard both read, replacing two private `includes()` checks that had drifted on case folding (M94b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -10226,6 +11496,7 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | `resolveResponseStatus(status, target)`                | function | Returns a status the web `Response` constructor accepts, clamping anything outside `[200, 599]`, any non-integer, and the null-body statuses `204`/`205`/`304` (in range, but the Fetch standard forbids the body every path here writes — unclamped, the runtime mapper would drop that body and serve a bodiless `204`, discarding the error) to `500` and reporting it through the logger capability when the target carries one. Applied by `respondWithError` before it delegates, and by `createErrorResponder`'s responder before it builds the error, so the formatted body's status member and the written status cannot disagree. Exists because three shipped call sites take a status the APPLICATION authors (`FlagGuardOptions.statusCode`, the multi-tenancy `rejectionStatus`, a `WebSocketGuardDecision.status`), so a typo such as `4004` for `404` otherwise threw `RangeError` out of the error path itself.                                                              |
 | `respondWithError(ctx, init)`                          | function | Writes an error response through the request's published `IErrorResponder` (the application's configured format), falling back to `{ error, detail? }` when `errorHandler` has not published one. The seam that lets a package that produces error responses but may not import `@setu-ts/exceptions` answer in the configured format (M70f).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `respondWithAuthorizationFailure(ctx, failure)`        | function | Writes the standard 401, 403, or 501 authorization refusal through `respondWithError`, so independent authorization entry points retain identical configured formatting. The four `AuthorizationFailure` arms: `authentication-required` (401 "Unauthorized"), `not-configured` (501 "Not Implemented"), `insufficient-privileges` (403 "Forbidden", no role or permission named), and `second-factor-required` (403 "Forbidden", "Second factor required" — names only the required action, never the factor or the policy, M100d).                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `authorizationFailureInit(failure)`                    | function | **Since M110a.** The ONE owner of each standard refusal's `{ status, title, detail }` (a frozen `HttpStatusHint`): `respondWithAuthorizationFailure` writes it and AuthPlugin's `AuthorizationDeniedError` brands itself with it, so a guard's refusal and a thrown denial answer the same body under the configured error format                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `ERROR_RESPONDER_STATE_KEY`                            | const    | `exceptions:error-responder`, the `ctx.state` key under which `errorHandler` publishes its `IErrorResponder`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `brandErrorResponder(fn, r)`                           | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `errorResponderOf(fn)`                                 | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -10235,59 +11506,70 @@ through their `redaction` option; this is an option-passed pure utility, not a c
 | `HTTP_STATUS_HINT`                                     | const    | `Symbol.for('setu.http.status-hint')`, the key the two functions above use. `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `validatedStateKey(target)`                            | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `Body()`/`Query()`/`Param()` sources read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `CLIENT_IP_STATE_KEY`                                  | const    | `http-security-plugin:client-ip`, the cross-package key `ipSecurityMiddleware` writes and `rateLimitMiddleware` reads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `SESSION_STATE_KEY`                                    | const    | `session-plugin:session`, the `ctx.state` key under which `session-plugin`'s middleware parks the live `ISession` and `multi-tenancy-plugin`'s tenant middleware reads it back for the tenant-binding compare (M101c, V8-7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `SESSION_TENANT_BINDING_KEY`                           | const    | `__setu_tenant`, the reserved session-payload key under which the sealed tenant binding is stored and read by both compare sites (M101c, V8-7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `SESSION_TENANT_BINDING_STATE_KEY`                     | const    | `session-plugin:tenant-binding`, set to `true` by `session-plugin`'s middleware when `tenantBinding` is on; `multi-tenancy-plugin`'s tenant-side compare runs only when it reads `true`, so `tenantBinding: false` disables both compare sites in every middleware order (M101c, V8-7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `tenantBindingMismatch(session, tenantId)`             | function | The pure tenant-binding compare shared by the two compare sites (M101c, V8-7): `true` only when the session is bound to a DIFFERENT tenant than the one resolved for the request; inert for an unbound session or a tenant-less request                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `createPathMatcher(patterns)`                          | function | Builds a path-exclusion predicate from `readonly PathPattern[]`; strings match exactly and regular expressions are tested against the path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `sealRequestIdentity(request)`                         | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `sealRequestIdentity(request)`                         | function | Installs the one-implicit-write request identity guard for `user`, `tenant` and `locale`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `replacePrincipal(request, principal)`                 | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `replaceTenant(request, tenant)`                       | function | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `replaceLocale(request, locale)`                       | function | Deliberately replaces `request.locale` after it has been guarded — the localization middleware's write, and the application's way to apply a signed-in user's saved preference once authentication has run (M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `isPromiseLike(value)`                                 | function | Duck-typed thenable test (M87) — see the note below the Types table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ### Types
 
-| Group               | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`, `JsonValue` — the recursive JSON-safe value type (M74); `SseMessage.data` is typed with it, and its object arm admits `undefined` because `JSON.stringify` drops such a key                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`, `PathPattern` — one path-exclusion entry (`string \| RegExp`); a string is an exact match, never a prefix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `ResponseSnapshotInit`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest`, `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf` |
-| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`, `ConnectionErrorReporter`, `ConnectionErrorReporterOptions`, `ConnectionErrorLogger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                                                                                                             |
-| Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Ingress             | `IngressKind`, `IngressContext<TPayload>`, `BehaviorLike<TWork, TResult>`, `IIngressBehavior`, `composeBehaviorChain`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Notifications       | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError`, `AuthorizationFailure` — the request-scoped error responder seam, standard authorization refusals, and the pure error serializer (M70f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`, `WebSocketUpgradeGuard`, `WebSocketGuardDecision`                                                                                                                                                                                                                                                                                                                                                              |
-| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `SessionView`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Auth session        | `IAuthSessionService`, `SignInOptions`, `SignInOutcome`, `AuthMethod`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Group                  | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tokens                 | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Shared types           | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`, `JsonValue` — the recursive JSON-safe value type (M74); `SseMessage.data` is typed with it, and its object arm admits `undefined` because `JSON.stringify` drops such a key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Utilities              | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`, `PathPattern` — one path-exclusion entry (`string \| RegExp`); a string is an exact match, never a prefix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Plugin contract        | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Plugin context APIs    | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Service registry       | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| HTTP                   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `ResponseSnapshotInit`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest`, `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf`                                                                                                                                                                                                                      |
+| Runtime                | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| DI (optional)          | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Logging                | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Config                 | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Validation             | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Health                 | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`, `ConnectionErrorReporter`, `ConnectionErrorReporterOptions`, `ConnectionErrorLogger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Metrics                | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Auth                   | `IPrincipal`, `IJwtService`, `JwtSignOptions` — `IPrincipal` is `{ id: string; roles?: readonly string[]; permissions?: readonly string[]; claims?: Readonly<Record<string, unknown>> }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Database               | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Cache                  | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Events                 | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Messaging              | `IMessageBroker`, `PublishOptions`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`, `ORDERING_KEY_HEADER`, `DEDUPLICATION_ID_HEADER`, `MAX_PUBLISH_ID_BYTES`, `parsePublishOptions`, `ParsedPublishOptions`, `publishIdProblem`, `isValidPublishId`, `MAX_PUBLISH_HEADERS`, `MAX_PUBLISH_HEADER_NAME_BYTES`, `MAX_PUBLISH_HEADER_VALUE_BYTES`, `RESERVED_HEADER_NAMES`, `RESERVED_HEADER_PREFIXES`, `publishHeaderNameProblem`, `publishHeaderValueProblem`                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Ingress                | `IngressKind`, `IngressContext<TPayload>`, `BehaviorLike<TWork, TResult>`, `IIngressBehavior`, `composeBehaviorChain`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Queue                  | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Scheduler              | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Secrets                | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Audit                  | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Resilience             | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Storage                | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Mail                   | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Notifications          | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Errors                 | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError`, `AuthorizationFailure` — the request-scoped error responder seam, standard authorization refusals, and the pure error serializer (M70f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Feature flags          | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Multi-tenancy          | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| SSR                    | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| SSE                    | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Realtime backplane     | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| WebSocket              | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`, `WebSocketUpgradeGuard`, `WebSocketGuardDecision`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Worker pool            | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Session                | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `SessionView`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Auth session           | `IAuthSessionService`, `SignInOptions`, `SignInOutcome`, `AuthMethod`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Authorization policies | `IAuthorizationPolicyService`, `PolicyDefinition`, `PolicyAbility`, `PolicyCheck`, `AnonymousPolicyCheck`, `PolicyRef`, `PolicyAbilityInfo`, `PolicyTarget` — the asynchronous, target-aware check (M110a) served under `CAPABILITIES.AUTHORIZATION_POLICIES` (`can` / `authorize` / `describe` / `define`). The bare `PolicyDefinition` (`A = string`, `T = never`, `before` a METHOD signature) is the type-erased form a registry stores, which is what makes every typed policy assignable to it under `strictFunctionTypes`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Scoped RBAC            | `SCOPED_RBAC_POLICY`, `scopedPermissionAbility`, `scopedRoleAbility`, `isScopeType`, `MAX_SCOPE_ID_LENGTH`, `ScopeRef`, `ScopedGrant`, `GrantQuery`, `IGrantSource`, `IScopedRoleSource`, `ScopedRoleDefinition`, `ScopedRbacTarget`, `ScopeSource`, `scopeFromTenant`, `scopeFromParam` — the M110b contracts AuthPlugin's built-in `scoped-rbac` policy evaluates and DecoratorPlugin/DatabasePlugin name without importing AuthPlugin. A scope type is lowercase kebab-case (`isScopeType`); an id is non-empty and at most `MAX_SCOPE_ID_LENGTH` (256) UTF-16 code units, refused rather than truncated. `GrantQuery` is `{ kind: 'chain', scopes }` (the check's scope and those it inherits from, plus global grants) or `{ kind: 'all' }` (sign-in timing only). `scopeFromParam` and `scopeFromTenant` resolve `undefined` for an absent, empty or over-long id, which leaves the scope unresolved and the check DENIES (never a global check) |
+| Service discovery      | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| DNS                    | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| gRPC                   | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Cloudflare             | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| View rendering         | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Localization           | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Outbox                 | `IOutboxStore`, `IOutboxWriteScope`, `OutboxRecord`, `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, `OUTBOX_RECORD_KIND` — the transactional-outbox store port (`append`, `scanPending`, `failedKeys`, `claim`, `markInvalid`, `markSent`, `markFailure`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws), the row shape (every field a JSON scalar, times as epoch ms; `claimVersion` starts at zero and is claimable in `[0, Number.MAX_SAFE_INTEGER - 1]`, `leaseUntil` starts at zero; PostgreSQL `bigint`, SQLite/D1 64-bit `INTEGER`, JSON numbers elsewhere), the conditional-transition outcome (`applied` / `missing` / `not-pending` / `not-failed` / `claim-lost`), and the `'setu-outbox'` discriminator every row carries and every read requires (M107)                                                                                                                                 |
+| Inbox                  | `IInboxStore`, `InboxRecord`, `InboxStatus`, `InboxIds`, `InboxFailureUpdate`, `InboxReleaseOutcome`, `InboxStoreStats`, `INBOX_RECORD_KIND` — the consumer-inbox store port (`find`, `run`, `recordFailure`, `park`, `parked`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws; `run` creates the marker first in one transaction), the row shape (every field a JSON scalar, times as epoch ms), the release outcome (`applied` / `missing` / `not-parked`), and the `'setu-inbox'` discriminator every row carries and every read requires (M108)                                                                                                                                                                                                                                                                                                                                                                         |
+| Idempotency            | `IIdempotencyStore`, `IdempotencyClaimRequest`, `IdempotencyClaimResult`, `IdempotencySettleResult`, `IIdempotencyService`, `IdempotentRouteOptions`, `IdempotencyKeySource`, `IdempotencyFingerprintSource`, `IdempotentIngressOptions`, `IdempotentIngressCommonOptions`, `IngressIdempotencyKeySource`, `IngressIdempotencyFingerprintSource` — the store port, the service contract served under `CAPABILITIES.IDEMPOTENCY`, and the route/ingress option types (M109a). The record is an opaque string so every store holds identical bytes; the mechanism lives in `@setu-ts/idempotency-plugin`. `IngressContext.consumer` (below) is the dispatch identity the ingress key is scoped by.                                                                                                                                                                                                                                                       |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
@@ -10452,10 +11734,17 @@ Contract notes:
   is severed (client disconnect, timeout). Populated by the HTTP adapter from the native
   `Request.signal`; optional because injected / test requests may not carry one. Added in
   Milestone 42.
-- `IRequest.user` and `IRequest.tenant` each allow one implicit assignment per request; a later
-  assignment throws. `replacePrincipal` and `replaceTenant` are the explicit escapes for an
-  intentional replacement. This catches late accidental overwrites, not authorization bypasses: a
-  write before authentication is still the permitted first write.
+- `IRequest.user`, `IRequest.tenant` and `IRequest.locale` each allow one implicit assignment per
+  request; a later assignment throws. `replacePrincipal`, `replaceTenant` and `replaceLocale` are
+  the explicit escapes for an intentional replacement. This catches late accidental overwrites, not
+  authorization bypasses: a write before authentication is still the permitted first write.
+- `IRequest.locale?: string` (M103) — the request's resolved BCP 47 tag, written by the localization
+  plugin's middleware at priority 45 and absent without that plugin or on a path it excludes. It is
+  a flagged, optional, source-compatible widening on the `tenant` precedent. Three things to keep in
+  mind: a reader running BELOW priority 45 sees `undefined` (the priority table orders it, exactly
+  as for `tenant` at 40); a response cache keys on the value present when the cache runs, so an
+  override must happen before the lookup to be reflected there; and it is a preference, never an
+  authorization input — any client can select any supported locale.
 - The application service registry seals after `runBootstrap()`. Its `register`, `registerFactory`,
   and `unregister` methods then throw; request-scoped child registries remain mutable. Startup-time
   `override: true` mutations log at `info`, and successful unregisters log at `warn` through the
@@ -10513,6 +11802,8 @@ vocabularies `DiagnosticsNodeKind`, `DiagnosticsEdgeKind`, `DiagnosticsSnapshotS
 value and no capability token, because the reader is reached through the application, never resolved
 from the registry. Activation, label allowlists, and the projection bounds are the kernel's — see
 [Kernel diagnostics](#kernel-diagnostics-setu-tskernel--setu-tscommon).
+
+<!-- version:history -->
 
 ### Inspector contracts (0.8.0)
 
@@ -10685,15 +11976,65 @@ the first consumer: its absence latches `provider-identity-unavailable` and a fa
 
 `IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
 the immutable work envelope supplied to an ingress behaviour:
-`{ kind, name, payload, attempt?, headers? }`. Queue and scheduler populate the 1-based `attempt`;
-messaging supplies transport headers when available and WebSocket frames supply neither optional
-field.
+`{ kind, name, payload, attempt?, headers?, consumer? }`. Queue and scheduler populate the 1-based
+`attempt`; messaging supplies transport headers when available and WebSocket frames supply neither
+optional field.
+
+`consumer` (M109a) is a DISPATCH identity, not a capability and not a state bag: the subscription's
+`SubscribeOptions.queue` when given, otherwise `subscription:<instance>:<n>` (unique per
+subscription per process) on `'messaging'`, and the job name on `'queue'`; it is absent on
+`'scheduler'` and `'websocket'`. It exists so per-consumer state — an idempotency record — is keyed
+per subscriber rather than per topic. The envelope's "no `state`, no `services`" rule stands: a
+behaviour still reaches a capability through its `RegistryFactory` arm.
 
 `IIngressBehavior.handle(context, next)` is the void-result contract for non-HTTP work.
 `BehaviorLike<TWork, TResult>` is the structural shape shared with CQRS, and `composeBehaviorChain`
 runs behaviours in declared order. A behaviour that does not call `next()` short-circuits the
 terminal handler; a thrown error follows that ingress's existing error path. The common composer is
 also consumed internally by CQRS; it adds no CQRS surface.
+
+### Idempotency
+
+`CAPABILITIES.IDEMPOTENCY` (`'idempotency'`) names the service an idempotency provider registers;
+the port (`IIdempotencyStore`), the service contract (`IIdempotencyService`) and the route/ingress
+option types live in `@setu-ts/common` so a store adapter (`memory`, Redis, a Cloudflare Durable
+Object) and the decorator plugin can consume them without importing one another (AI_GUIDELINES
+§2.2). The mechanism — `IdempotencyPlugin`, `idempotent()`, `idempotentIngress()`, `@Idempotent` —
+lives in `@setu-ts/idempotency-plugin`; see that package's section. The guarantee is **no duplicate
+processing within the limits of the store** — it is not a single-execution guarantee.
+
+Tier C adds `ITransactionalIdempotencyStore`, with `find(id)`, `run(claim, work)`,
+`purge(before, limit)` and `verify()`. `run` owns the transaction and passes its scope to `work`,
+which returns `{ result: string, value: R }`. `find` returns a `TransactionalIdempotencyRecord` or
+`undefined` when either row is missing or foreign. `IDEMPOTENCY_RECORD_KIND` is the exported value
+`'setu-idempotency'`.
+
+`TransactionalIdempotencyClaim` carries `id`, `fingerprint`, `createdAt` and `expiresAt`.
+`TransactionalIdempotencyRecord` adds the encoded `result`. The timestamps are epoch milliseconds;
+`expiresAt` makes a record eligible for purge, and it remains authoritative until purged.
+
+`IdempotentWithinOptions` requires `key`, `namespace` and `scope`; it accepts optional
+`fingerprint: unknown` and `ttlMs: number`. Keys are 1–255 printable non-space ASCII characters,
+excluding `"`; namespace is 1–256 printable ASCII characters, and scope is 0–512. Scope must come
+from authenticated identity, typically `JSON.stringify([tenantId, principalId])`; `''` deliberately
+makes the key global. Do not join parts with a separator that can appear inside them: distinct
+identities can collide. The default TTL is 86,400,000 ms, bounded to an integer from 60,000 to
+2,592,000,000 ms. `IdempotentWithinResult<R>` carries `value: R` and `replayed: boolean`; value is
+the JSON round trip on both paths, so dates become strings and JSON-omitted members are absent.
+
+The new `IIdempotencyService` contract includes two **required** tier-C members:
+
+```typescript
+within<R, S = unknown>(
+  options: IdempotentWithinOptions,
+  fn: (scope: S) => Promise<R>,
+): Promise<IdempotentWithinResult<R>>;
+purgeTransactional(): Promise<number>;
+```
+
+`S` is the caller's unchecked annotation of the store scope, normally `IUnitOfWork`. Without a
+configured transactional store, both members reject with
+`IdempotencyConfigurationError('transactional', …)`. A replacement provider must implement both.
 
 `WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
 either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
@@ -10786,6 +12127,9 @@ Contract notes:
 - **`app.fetch()` rejects rather than throwing synchronously** when no `http-adapter` capability is
   registered, so the Workers `export default { fetch: app.fetch }` entry point sees a failed promise
   instead of an unhandled exception.
+- **`app.fetch` is bound to its application**, so it works passed around as a bare function. That
+  entry point needs it: Cloudflare calls `exported.fetch(request, …)`, which made `this` the
+  exported object, and before the binding every such request answered 500.
 - **Contribution-token pattern**: `ctx.health.register()`, `ctx.metrics.register()`,
   `ctx.openapi.addSchema()`, `ctx.cli.register()`, and `ctx.decorators.register()` funnel
   contributions into multi-provider services under the Step-1 tokens; consumers retrieve them with
@@ -11201,11 +12545,12 @@ Contract notes:
 - **Hierarchical containers**: `createScope()` returns a child container that shares singletons with
   the parent but has its own scoped-instance cache. A scope is created and disposed explicitly by
   the application; the framework creates no scope per request.
-- **Auto-registration** (`autoRegister: true`): resolving a token not in the container falls back to
-  the kernel's `ServiceRegistry`. The first successful fallback is cached as a singleton; explicit
-  DI registrations always take precedence. `ClassProvider.inject` dependencies also use this
-  two-tier resolution, so framework capability tokens (`CAPABILITIES.LOGGER`, etc.) work as
-  constructor dependencies without pre-registration.
+- **Auto-registration** (`autoRegister`, default `true` since 0.9.0): resolving a token not in the
+  container falls back to the kernel's `ServiceRegistry`; `false` confines resolution to the
+  container's own registrations. The first successful fallback is cached as a singleton; explicit DI
+  registrations always take precedence. `ClassProvider.inject` dependencies also use this two-tier
+  resolution, so framework capability tokens (`CAPABILITIES.LOGGER`, etc.) work as constructor
+  dependencies without pre-registration.
 - **No runtime-specific APIs**: the container uses no `Date.now()`, `crypto.*`, or `process.*` — it
   is pure TypeScript and runtime-independent.
 
@@ -11232,6 +12577,19 @@ carry full JSDoc.
 > method level with `@Params(...)` and constructor dependencies at the class level with
 > `@Inject(...)`; both are positional, the Nth entry binding the Nth argument. `@Params` is checked
 > against the handler's own signature, which the legacy parameter decorators never were.
+
+> **Importing the package installs `Symbol.metadata` when the runtime lacks it.** Node 24 and Bun
+> 1.4 do not define the well-known symbol, so TypeScript's decorator emit hands every decorator
+> `context.metadata === undefined`. Evaluating `@setu-ts/decorator-plugin` sets
+> `Symbol.metadata ??= Symbol.for('Symbol.metadata')` once, at module load — a write-if-absent
+> global mutation, the one module-level exception to AI_GUIDELINES §11.5 (maintainer-approved for
+> M111a). On Deno, which defines the symbol, it is a no-op. The registered key is the one `tsx`,
+> esbuild and Bun's compiler already use, so two copies of the package and those transforms agree on
+> one carrier. A decorated class evaluated **before** the package is imported — or a bundle that
+> dropped the import as side-effect-free — fails at class definition with a named
+> `DecoratorMetadataUnavailableError` whose message gives both remedies, rather than a bare
+> `TypeError`; the package manifest declares no `sideEffects: false`, and the Node manifest
+> generator refuses one that would let a bundler drop the installing module.
 
 ### Values (decorator-plugin exports)
 
@@ -11262,6 +12620,9 @@ carry full JSDoc.
 | `HttpCode`                                                   | function | Method decorator — the success status a handler answers with when it returns a plain value. Written to the response builder BEFORE the method runs, so a returned `HandlerResult` (`ctx.response.status(202).json(...)`) still wins and a `@Render` route composes with it. Must be an integer in `[200, 599]`, refused at `register()` otherwise; NOT narrowed to `2xx`. `204`/`205`/`304` serve bodiless. Derived into the OpenAPI document via `deriveResponseStatus` (M97b)                                                                                                                                                                                                                |
 | `ResponseHeader`                                             | function | Method decorator — one fixed response header; repeatable for DISTINCT names. The same name twice, an invalid name or value, or `Location` alongside `@Redirect` are each refused at `register()`. A multi-valued header wants `ctx.response.appendHeader(...)` through `@Params(Ctx())`. Deliberately NOT derived into the document: an OpenAPI response-header entry needs a schema and description the declaration does not carry (M97b)                                                                                                                                                                                                                                                     |
 | `Redirect`                                                   | function | Method decorator — sets the status and `Location`; `302` by default. The status must be an integer in `[300, 399]`, and the target must be non-blank and a value the runtime will carry as a `Location` header — both refused at `register()`, because an invalid header value throws while the response headers are written (`500` on every request) and a blank one serves a redirect no client can follow. It does NOT short-circuit: a decorator cannot decline to call the method, so the handler still runs and a plain return is still serialised. One handler may not carry both `@Redirect` and `@HttpCode`, since both set the status. Derived into the document as its `3xx` (M97b) |
+| `Idempotent`                                                 | function | Method decorator — marks an UNSAFE route idempotent. Its middleware is appended LAST in the route's chain, after guards, declarative authorization and the validation band, so a refused or invalid request consumes no key. Requires a `CAPABILITIES.IDEMPOTENCY` provider: without one `register()` fails naming the controller and handler, and `@Idempotent` on a safe method (`GET`/`HEAD`/`OPTIONS`) is refused too. The stored response is replayed by whichever store the provider serves (M109a)                                                                                                                                                                                      |
+| `Policy` / `Ability` / `RequirePolicy`                       | function | **Since M110a.** `@Policy(name)` marks a class as an authorization policy; `@Ability({ anonymous? })` marks each ability method (a method named `before` is the policy's `before` hook). `DecoratorPlugin({ policies })` constructs each class like a controller — with constructor injection — and registers it with AuthPlugin's `IAuthorizationPolicyService` before any controller. `@RequirePolicy(policy, ability, target?)` (repeatable, all-of, top to bottom) takes a `@Policy` class or a `definePolicy` definition and requires the ability on a route: `501` with no policy service, `401` / `403` on a denial, the same bodies as AuthPlugin's `requirePolicy`                    |
+| `ScopedRoles` / `ScopedPermissions`                          | function | **Since M110b.** Class/method decorators requiring catalogue roles (any-of) or permissions (all-of) in the request's scope, over AuthPlugin's built-in `scoped-rbac` policy; the optional second argument is a `ScopeSource` (default `scopeFromTenant()`). Validated at `register()`; `501` / `401` / `403` like `requireScopedRole` / `requireScopedPermission`                                                                                                                                                                                                                                                                                                                              |
 | `RenderDecorator`                                            | type     | The type `Render` returns: a standard method decorator whose `value` parameter is narrowed to `(...args: never[]) => P \| HandlerResult \| Promise<P \| HandlerResult>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -11279,28 +12640,29 @@ carry full JSDoc.
 
 ### Types
 
-| Export                       | Kind | Purpose                                                                                                                                                        |
-| ---------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`     | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `ingress?`, `modules?`, `enforceSchemas?`, `enforceRoles?`) |
-| `InjectableOptions`          | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                                               |
-| `ModuleOptions`              | type | Options for `@Module()` (`controllers?`, `providers?`, `imports?`; no `exports`)                                                                               |
-| `ApiOperationConfig`         | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                                                                      |
-| `ApiResponseConfig`          | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                                              |
-| `HttpMethodDecorator`        | type | `(path?: string) => SetuMethodDecorator`                                                                                                                       |
-| `ParamSource`                | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                                                     |
-| `SourceValues`               | type | Maps a source tuple onto the handler parameter tuple it binds                                                                                                  |
-| `InjectToken`                | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                                                |
-| `OptionalToken`              | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                                                      |
-| `SetuClassDecorator`         | type | A standard class decorator that records metadata and leaves the class unchanged                                                                                |
-| `SetuMethodDecorator`        | type | A standard method decorator that records metadata and leaves the method unchanged                                                                              |
-| `SetuClassOrMethodDecorator` | type | A standard decorator valid in either position, discriminating on `context.kind`                                                                                |
-| `MiddlewareLike`             | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                                              |
-| `CustomParameterResolver`    | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                                              |
-| `ParameterMetadata`          | type | Parameter metadata captured by a `@Params(...)` source                                                                                                         |
-| `ParameterType`              | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                                             |
-| `DiscoveryOptions`           | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                                                         |
-| `DiscoveryResult`            | type | Result of discovery (`controllers`, `services`, `errors`)                                                                                                      |
-| `ModuleImporter`             | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                                                           |
+| Export                                                        | Kind | Purpose                                                                                                                                                                      |
+| ------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`                                      | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `ingress?`, `modules?`, `enforceSchemas?`, `enforceRoles?`, `policies?`)  |
+| `AbilityOptions` / `PolicyClassAbility` / `PolicyClassTarget` | type | **Since M110a.** `@Ability`'s options, and the helpers typing `@RequirePolicy`'s ability (a policy class's method names) and target (read off the method's second parameter) |
+| `InjectableOptions`                                           | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                                                             |
+| `ModuleOptions`                                               | type | Options for `@Module()` (`controllers?`, `providers?`, `imports?`; no `exports`)                                                                                             |
+| `ApiOperationConfig`                                          | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                                                                                    |
+| `ApiResponseConfig`                                           | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                                                            |
+| `HttpMethodDecorator`                                         | type | `(path?: string) => SetuMethodDecorator`                                                                                                                                     |
+| `ParamSource`                                                 | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                                                                   |
+| `SourceValues`                                                | type | Maps a source tuple onto the handler parameter tuple it binds                                                                                                                |
+| `InjectToken`                                                 | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                                                              |
+| `OptionalToken`                                               | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                                                                    |
+| `SetuClassDecorator`                                          | type | A standard class decorator that records metadata and leaves the class unchanged                                                                                              |
+| `SetuMethodDecorator`                                         | type | A standard method decorator that records metadata and leaves the method unchanged                                                                                            |
+| `SetuClassOrMethodDecorator`                                  | type | A standard decorator valid in either position, discriminating on `context.kind`                                                                                              |
+| `MiddlewareLike`                                              | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                                                            |
+| `CustomParameterResolver`                                     | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                                                            |
+| `ParameterMetadata`                                           | type | Parameter metadata captured by a `@Params(...)` source                                                                                                                       |
+| `ParameterType`                                               | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                                                           |
+| `DiscoveryOptions`                                            | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                                                                       |
+| `DiscoveryResult`                                             | type | Result of discovery (`controllers`, `services`, `errors`)                                                                                                                    |
+| `ModuleImporter`                                              | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                                                                         |
 
 Contract notes:
 
@@ -11334,12 +12696,43 @@ Contract notes:
   false` keeps the metadata description-only and
   silences the warning — the pre-M89a behaviour. The appended middleware is M57-branded, so
   `deriveSecurity` documents decorated routes.
+- **`@RequirePolicy` is validated at `register()` and always enforced (M110a).** Each
+  `@RequirePolicy` appends one middleware AFTER `@Roles`/`@Permissions` and BEFORE interceptors,
+  ordinary middleware, filters and validation — so a target extractor reading the body sees the
+  UNVALIDATED body. `register()` throws, naming the route, when no
+  `CAPABILITIES.AUTHORIZATION_POLICIES` provider is registered or when the named policy or ability
+  is not registered (an ordinary method of a policy class type-checks and is refused here), or when
+  the referenced class or definition does not declare that ability with the registered policy's
+  `anonymous` flag (a different policy sharing the registered one's name — the same refusal
+  `requirePolicy` meets at startup). An anonymous request to a non-anonymous ability is refused
+  before the target extractor runs. `enforceRoles` does not govern it. Listing `policies` with no
+  provider, a class without `@Policy`, or one without an `@Ability()` method throws too. The
+  middleware is branded authenticated unless the ability is anonymous, and a route's `@Public`
+  OpenAPI marker is omitted when any `@RequirePolicy` requires a principal. The two packages may not
+  import each other, so `@RequirePolicy` and `requirePolicy` are two thin middlewares over one
+  service, pinned together by a parity test.
+- **`@ScopedRoles` / `@ScopedPermissions` are validated at `register()` and always enforced
+  (M110b).** `@ScopedRoles(roles, scope?)` (any-of) and `@ScopedPermissions(permissions, scope?)`
+  (all-of) are the class form of AuthPlugin's `requireScopedRole` / `requireScopedPermission`;
+  `scope` is a `ScopeSource` defaulting to `scopeFromTenant()`. Class level sets a default, method
+  level overrides it, per decorator. Each appends one middleware — roles, then permissions — AFTER
+  `@Roles`/`@Permissions` and `@RequirePolicy`. An empty list or a non-string name throws at
+  decoration time; `register()` throws, naming the route, when no
+  `CAPABILITIES.AUTHORIZATION_POLICIES` provider is registered or a name is outside the scoped RBAC
+  catalogue (so `AuthPlugin({ rbac, scopedRbac })` is required, and a per-scope custom role cannot
+  be named). Per request: `501` with no policy service, `401` for an anonymous request before the
+  scope source runs, `403` on a deny; an unresolved scope denies. The middleware is branded
+  authenticated, and the route's `@Public` OpenAPI marker is omitted. Refusal bodies are
+  byte-identical with the guards', pinned by a parity test under
+  `errorHandler({ format: 'rfc9457' })`.
 - **`Body()`/`Query()`/`Param()` read the VALIDATED value when one exists.** Each checks `ctx.state`
   under `validatedStateKey(target)` first — presence-tested with `has`, so a validated `null` or `0`
   is honoured — and falls back to the raw source when absent. A Zod `transform` or `default`
-  therefore reaches the handler instead of being discarded. `Header()` and `Cookie()` deliberately
-  read their raw sources: headers resolve case-insensitively through `headers.get(name)`, which the
-  validated record would break, and no schema key exists for cookies.
+  therefore reaches the handler instead of being discarded. Declare that parsed type on the source —
+  `Body<T>()`, `Query<T>()` — since the source cannot infer it from the schema. `Header()` and
+  `Cookie()` deliberately read their raw sources: headers resolve case-insensitively through
+  `headers.get(name)`, which the validated record would break, and no schema key exists for cookies.
+  An absent header or cookie resolves to `undefined`, matching their `string | undefined` type.
 - **No reflection**: metadata is stored in plain `Map`s keyed by class reference, not via
   `Reflect.getMetadata()`. No `reflect-metadata` dependency.
 - **Decorator composition**: cross-cutting decorators (`@Params`, `@ValidateBody`, `@Roles`, …) run
@@ -11457,6 +12850,7 @@ streaming-response reader.
 | `TestAppFromPlugins`  | `src/test-app.ts`                  | Hand-assembled arm                            |
 | `TestAppFromApp`      | `src/test-app.ts`                  | Composition-root arm                          |
 | `overrideCapability`  | `src/override-capability.ts`       | Capability replacement plugin builder         |
+| `overrideProvider`    | `src/override-provider.ts`         | DI container provider replacement builder     |
 | `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                           |
 | `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                               |
 | `collectStream`       | `src/inject.ts`                    | Collect streaming response body               |
@@ -11505,6 +12899,10 @@ const app = await createTestApp({
 
 `TestAppOptions` — `createTestApp(options?)` — is a **union of two mutually exclusive arms**, so
 supplying both `plugins` and `app` is a compile error rather than a runtime throw.
+
+New scaffold factories return `IKernelApplication` (or `Promise<IKernelApplication>`). For an older
+project, replace the factory's `IApplication` annotation with `IKernelApplication`, imported from
+`@setu-ts/kernel`. Await an async factory before passing its result to `createTestApp`.
 
 `TestAppFromPlugins` — assemble by hand (unit scope):
 
@@ -11561,6 +12959,18 @@ the ordering edge hangs on and how a plugin is depended upon at all; a provider 
 capability without declaring it fails startup with `Capability '<token>' is already registered`. For
 either, exclude the provider and supply the double ahead of its consumers —
 `without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
+
+`overrideProvider<T>(token: string, provider: Provider<T>, options?: ProviderOptions): IPlugin`
+replaces a provider in the DI container, which `overrideCapability` cannot reach: with `DiPlugin`
+registered, `DecoratorPlugin` puts each `@Injectable` class into the container, and the container
+refuses a second registration of a token. The plugin depends on `CAPABILITIES.DI_CONTAINER` and
+registers at `PLUGIN_PRIORITY.NORMAL`, so it runs after `DiPlugin` and before `DecoratorPlugin`
+(`PLUGIN_PRIORITY.LOW`). It registers the double on the container, then publishes a container that
+swallows the application's later registration of the same token and passes every other call through,
+so every class that injects the token is constructed with the double. `start()` fails from
+`register()` when the application has no container or the real provider was registered first, and
+from an `onInit` hook when nothing registered, resolved or checked for the token, which is how a
+mistyped token surfaces.
 
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the
@@ -11687,7 +13097,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.8.0
+npm install @setu-ts/sdk@^0.9.0
 ```
 
 ### createClient()
@@ -11735,25 +13145,41 @@ interface ClientOptions {
   headers?: Record<string, string>;
   fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
   timing?: IClientTiming;
-  retry?: RetryPolicy;
+  retry?: ClientRetryPolicy;
   circuitBreaker?: CircuitBreakerPolicy;
   rateLimit?: ClientRateLimitPolicy;
+  idempotency?: ClientIdempotencyOptions;
   requestInterceptors?: ClientRequestInterceptor[];
   responseInterceptors?: ClientResponseInterceptor[];
 }
 ```
 
-| Option                 | Consumer                     | Behavior                                                      |
-| ---------------------- | ---------------------------- | ------------------------------------------------------------- |
-| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`         |
-| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win         |
-| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`         |
-| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`           |
-| `retry`                | retry strategy               | `limit < 1` throws at construction                            |
-| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                        |
-| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                  |
-| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution            |
-| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure |
+`ClientRetryPolicy` adds the client-side server-hint cap to the shared retry policy:
+
+```typescript
+type ClientRetryPolicy = RetryPolicy & {
+  readonly maxRetryAfterMs?: number;
+};
+```
+
+| Option                 | Consumer                     | Behavior                                                                                                                                        |
+| ---------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`              | `HttpClient` URL resolver    | Required base for every relative `ClientRequest.path`                                                                                           |
+| `headers`              | `HttpClient` request builder | Cloned into each request; request-specific values win                                                                                           |
+| `fetch`                | `HttpClient` transport       | Called after policy gates; defaults to global `fetch`                                                                                           |
+| `timing`               | retry, breaker, limiter      | Optional; defaults to `createDefaultClientTiming()`                                                                                             |
+| `retry`                | retry strategy               | `limit` must be a positive safe integer; every configured or derived delay must be finite, non-negative, and at most `2_147_483_647` ms         |
+| `maxRetryAfterMs`      | retry strategy               | `ClientRetryPolicy` member; same timer-safe bound. A larger `Retry-After` surfaces the response error immediately, without sleeping or retrying |
+| `circuitBreaker`       | origin breaker map           | `threshold < 1` throws at construction                                                                                                          |
+| `rateLimit`            | origin limiter map           | Non-positive `maxRequests`/`windowMs` throws                                                                                                    |
+| `requestInterceptors`  | request pipeline             | Run once in array order before resilient execution                                                                                              |
+| `responseInterceptors` | response pipeline            | Run in array order after successful parse; skipped on failure                                                                                   |
+
+When `maxRetryAfterMs` is absent, the cap is the policy's largest computed backoff: `delay` for
+fixed backoff, or `delay * 2 ** (limit - 1)` for exponential backoff. A `Retry-After` at or below
+the effective cap replaces the computed delay. Policy validation rejects runtime strings and
+non-finite or timer-overflowing values so the derived cap cannot fail open or be clamped into an
+immediate retry by the runtime.
 
 ### ClientRequest
 
@@ -11764,9 +13190,35 @@ interface ClientRequest<TBody = unknown> {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   json?: TBody;
+  idempotencyKey?: string;
   signal?: AbortSignal;
 }
 ```
+
+`ClientRequest.idempotencyKey` supplies a caller-owned key. `ClientOptions.idempotency` enables
+generated keys through `ClientIdempotencyOptions`: `methods?: readonly string[]` defaults to
+`['POST', 'PATCH']`, `header?: string` defaults to `'Idempotency-Key'`, and
+`generateKey?: () => string` defaults to 32 lowercase hex characters from 16 random bytes. Methods
+must be 1–16 HTTP tokens and the header must be an HTTP token. Default key generation requires
+`crypto.getRandomValues` at construction. Both supplied and generated keys are validated before
+network I/O: 1–255 characters from `0x21`–`0x7E`, excluding `"`.
+
+One key is set before request interceptors and reused for every retry attempt. A static default key
+header is refused when `idempotency` is configured, as is a supplied key conflicting with a merged
+request header. When `idempotency` is configured and a request in one of its methods already carries
+the configured header, that header's value is validated and used as the key, and no key is generated
+— the path a generated operation takes when its document declares the header. Without `idempotency`,
+merely setting the header does not opt into keyed retries. With a retry policy, a keyed request can
+retry any method, including `409`, as well as the existing 408/425/429/5xx and transport failures. A
+keyed request outside the safe method set (for example, POST or PATCH) never retries a parsing or
+interceptor failure after a `2xx` arrives. Safe methods retain their existing retry behavior.
+Without either idempotency option, retry behavior is unchanged.
+
+Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
+with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
+A keyed request carries a non-safelisted header, so a cross-origin browser call triggers a CORS
+preflight; the server must list the configured header (default `Idempotency-Key`) in
+`Access-Control-Allow-Headers`.
 
 ### ClientResponse
 
@@ -11792,6 +13244,10 @@ Request interceptors receive a mutable `ClientRequestContext` (resolved `URL` an
 execute once in registration order before the outbound attempt sequence. Response interceptors
 receive a successful `ClientResponse<T>` and its immutable request description; they are skipped
 entirely when the request throws.
+
+`createTraceContextInterceptor(source)` reads `source.activeSpanContext?()` per request, validates
+the W3C identifiers, and sets `traceparent` unless the caller already supplied it. Missing or
+invalid active contexts set nothing.
 
 ### IClientTiming and createDefaultClientTiming()
 
@@ -11919,7 +13375,7 @@ interface OpenApiCodegenOptions {
 | Component type           | PascalCase from the component name (`User` → `export type User`)                                                                                                                                                                                                                                                                                                                               |
 | Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                                                                                                                                                                                                                                                                      |
 | Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                                                                                                                                                                                                                                                                     |
-| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                                                                                                                                                                                                                                                                     |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted for every declared non-2xx response, auto-follow redirects (`301`, `302`, `303`, `307`, `308`) included — Fetch returns one unfollowed when it carries no `Location`                                                                                                                                     |
 | Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                                                                                                                                                                                                                                                                        |
 | Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                                                                                                                                                                                                                                                                         |
 | Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                                                                                                                                                                                                                                                                                |
@@ -11942,8 +13398,8 @@ _slow type_: it blocks automatic `.d.ts` generation, so a consumer could not pub
 containing the generated file — while the file's own header tells them not to edit it. Naming the
 interface is also the only way a consumer can name the client's type.
 
-**Declared error responses are typed.** For each operation declaring a non-2xx response the
-generator emits a union discriminated on the literal `status`, plus a narrowing guard:
+**Declared error responses are typed.** For each operation declaring an observable non-2xx response
+the generator emits a union discriminated on the literal `status`, plus a narrowing guard:
 
 ```typescript
 export type GetUserByIdError =
@@ -11956,6 +13412,13 @@ export function isGetUserByIdError(e: unknown): e is GetUserByIdError { … }
 keeps meaning exactly what it did. The union must be discriminated on `status` to be usable —
 `HttpClientError<A> | HttpClientError<B>` is not, because `status` is `number` on both arms. A
 `default` response and range codes such as `4XX` are skipped: they name no single status.
+
+Every declared `3xx` keeps a typed error arm, including the statuses the web transport follows
+(`301`, `302`, `303`, `307`, and `308`): Fetch returns such a response unfollowed when it carries no
+`Location`, and the client throws `HttpClientError` with that status. An operation declaring an
+auto-follow redirect or the OpenAPI `3XX` range returns `unknown`, even when it also declares a
+`2xx` schema: the runtime `Location` selects a follow target body the source operation does not
+describe.
 
 **Generated output is `deno fmt`- and `deno lint`-clean.** Two-space indentation, nested inline
 object types indented, no lint pragma (`{}` is emitted as `Record<PropertyKey, never>`, which is
@@ -12275,6 +13738,9 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `DistributedLockObjectCore`, `DistributedLockObjectCoreOptions`                                                                                                                                                                                                                                                                         | class + type  |
 | `DurableObjectBackplane`, `DurableObjectBackplaneOptions`                                                                                                                                                                                                                                                                               | class + type  |
 | `DurableObjectLock`, `DurableObjectLockOptions`                                                                                                                                                                                                                                                                                         | class + type  |
+| `IdempotencyObjectCore`, `IdempotencyObjectCoreOptions`                                                                                                                                                                                                                                                                                 | class + type  |
+| `DurableObjectIdempotencyStore`, `DurableObjectIdempotencyStoreOptions`                                                                                                                                                                                                                                                                 | class + type  |
+| `IIdempotencyObjectState`                                                                                                                                                                                                                                                                                                               | type          |
 | `asUpgradeResponse`, `DurableObjectUpgradeResponse`                                                                                                                                                                                                                                                                                     | fn + type     |
 | `createDefaultDurableObjectWebSocketHost`, `DurableObjectWebSocketHost`, `DurableObjectWebSocketPair`                                                                                                                                                                                                                                   | fn + types    |
 | `IDurableObjectState`, `IDurableObjectStorage`, `IDurableObjectWebSocket`, `IDurableObjectClientSocket`, `DurableObjectMessageEvent`                                                                                                                                                                                                    | types         |
@@ -12553,6 +14019,29 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   **`X-Cache-Api`** (`HIT`/`MISS`/`BYPASS`), never `X-Cache`, so an operator can tell which layer
   answered. `caches.default` is **per-datacenter**: a hit rate measured in one location says nothing
   about another, and a `delete` does not evict globally.
+- **The default key carries the resolved tenant and locale.** The key is a URL string, which the
+  platform matches with no request headers, so `Vary` cannot separate entries in this cache — and
+  before the tenant was keyed, tenant A's cached page was served to tenant B for the TTL. When
+  `ctx.request.tenant` and/or `ctx.request.locale` is set, the default key is the request URL's own
+  text with `setu-cache-tenant=<encoded id>` and then `setu-cache-locale=<encoded locale>`
+  concatenated after it, in that order. The query is never re-serialized and the parameter never
+  `set`: `set` would strip a client-supplied copy from the key while the handler still saw it, and
+  re-serializing would fold encoding variants (`?p=%32` and `?p=2`) into one entry, either way
+  letting one client choose what another is served. Without a tenant or locale the key is the URL
+  unchanged, except as below. Four kinds of request are served uncached (`X-Cache-Api: BYPASS`)
+  because no key could keep them apart from another: a URL whose text is not its own WHATWG
+  serialization (Deno, and Node for some targets, deliver the request target as sent, while the
+  Cache API parses a key before matching), a URL carrying a fragment (delivered by Deno, Node and
+  Bun, ignored by the Cache API when matching), a tenant id or locale that is not well-formed UTF-16
+  (`encodeURIComponent` cannot encode a lone surrogate), and a request lacking a tenant or locale
+  whose URL already contains `setu-cache-tenant=` or `setu-cache-locale=` (its key would equal a
+  tenanted or localized request's). Workers normalizes the URL and strips the fragment, so the first
+  two do not arise there. The tenant and locale are the ones present when the middleware runs, so
+  the same conditions as `cache-plugin` apply: the middleware must run after the tenant (40) and
+  locale (45) middleware (globally, at a higher priority number than theirs; per route, listed after
+  them), and a `replaceTenant` or `replaceLocale` made inside the handler is not reflected — such a
+  route must not be cached here. A custom `key` replaces this and must include the tenant and locale
+  itself.
 - **The platform's cache refusals are checked before the write, not discovered by it.**
   `caches.default.put` throws for a non-GET request, status 206, `Vary: *`, and an uncleared
   `Set-Cookie`; `assessCacheability` reports each as a `CacheRefusal` and the middleware skips the
@@ -12994,7 +14483,7 @@ rather than a deliberate empty render.
 | ------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `ViewPlugin`              | function | Plugin factory — registers the selected engine under `CAPABILITIES.VIEW` and a `view` health indicator reporting it (always `up`) |
 | `renderView`              | function | Functional entry point — `renderView(ctx, component, props)` resolves the engine per request and answers `IResponse.html(...)`    |
-| `raw`                     | function | The escaping opt-out, re-exported from `@hono/hono/html` so an application does not import hono directly                          |
+| `raw`                     | function | The escaping opt-out, re-exported from `hono/html` so an application does not import hono directly                                |
 | `ViewRenderError`         | class    | A component threw while rendering (original carried as `cause`), or returned `undefined` (almost always a missing `return`)       |
 | `UnresolvedSuspenseError` | class    | The rendered tree holds a pending `<Suspense>` boundary; buffered rendering would serve only the fallback, so it is refused       |
 | `ViewPluginOptions`       | type     | The discriminated options union above                                                                                             |
@@ -13018,6 +14507,155 @@ rather than a deliberate empty render.
 - **Layouts are components.** A layout is an ordinary component taking `children`. There is no
   plugin-level `layout` option: it would wrap every render, including fragment responses where a
   full document is wrong.
+
+## IdempotencyPlugin() (`@setu-ts/idempotency-plugin`)
+
+A repeated HTTP request, queue job or broker message is recognised by its key, and a repeat of
+completed work is answered from its record or skipped instead of running again, over one
+`claim`/`complete`/`release` state machine and an in-process, Redis or Cloudflare Durable Object
+store. The guarantee is **no duplicate processing within the limits of the store** — it is not a
+single-execution guarantee. Tier C (`within`, M109b) extends this to plain code: the work and its
+record commit in ONE database transaction, so a lost race rolls the business writes back with the
+claim. See [`packages/idempotency-plugin/README.md`](packages/idempotency-plugin/README.md) for
+placement, the HTTP check order, failure classification, replay rules, the ingress allow-list, the
+tier-C backend table and the store guarantees.
+
+`within` returns the JSON round trip of what `fn` returned on both the first call and a replay.
+Dates become ISO strings, `undefined` object members are absent, and nested `toJSON()` output
+determines the stored value. A `void` result returns `undefined` on both paths.
+
+### Values (runtime exports)
+
+| Export                          | Kind     | Purpose                                                                                   |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `IdempotencyPlugin`             | function | Registers `IIdempotencyService` under `CAPABILITIES.IDEMPOTENCY` and the health indicator |
+| `idempotent`                    | function | Builds the route-level HTTP middleware (list it LAST)                                     |
+| `idempotentIngress`             | function | Builds the ingress behaviour over a required `topics`/`jobNames` allow-list               |
+| `derivedIdempotencyKey`         | function | Reads the store key the middleware recorded, to forward to a provider                     |
+| `IdempotencyRefusedError`       | class    | An ingress refusal, carrying `reason`, `ingress` and `target`                             |
+| `IdempotencyConfigurationError` | class    | An option refusal, carrying the failing `option` path                                     |
+| `IdempotencyWithinError`        | class    | A tier-C refusal or failure, carrying `reason` and a status hint (M109b)                  |
+| `IdempotencyVerifyTimeoutError` | class    | `start()` rejects with it when a store's `verify()` outlives `storeTimeoutMs` (M109b)     |
+| `IDEMPOTENCY_KEY_HEADER`        | const    | `'Idempotency-Key'`                                                                       |
+| `IDEMPOTENT_REPLAYED_HEADER`    | const    | `'Idempotent-Replayed'`                                                                   |
+
+### Types
+
+| Export                                 | Kind | Purpose                                                                                           |
+| -------------------------------------- | ---- | ------------------------------------------------------------------------------------------------- |
+| `IdempotencyPluginOptions`             | type | The `IdempotencyPlugin` options (`store`, leases, ttl, cap, `transactional`)                      |
+| `IdempotencyStoreConfig`               | type | The store arm (`memory`, `redis` built/injected, `custom`)                                        |
+| `IRedisIdempotencyClient`              | type | The Redis facade an injected client must satisfy                                                  |
+| `IdempotencyRefusalReason`             | type | The union carried by `IdempotencyRefusedError.reason`                                             |
+| `IdempotencyWithinErrorReason`         | type | The union carried by `IdempotencyWithinError.reason` (M109b)                                      |
+| `TransactionalIdempotencyOptions`      | type | The `transactional` option: `store`, `ttlMs`, `storeTimeoutMs`, `maxResultBytes`, `purge` (M109b) |
+| `TransactionalIdempotencyPurgeOptions` | type | The retention purge's `schedule`, `intervalMs` and `batch` (M109b)                                |
+
+### The queue retry span versus the lease
+
+A crashed holder's claim blocks redeliveries of its key until the lease lapses, and each redelivery
+inside the lease consumes a queue attempt. The retry span (the sum of
+`computeBackoffMs(2..maxAttempts)`) must EXCEED the lease: with the default backoff and the default
+30 s ingress lease that means `defaultMaxAttempts ≥ 6`. The queue's retry configuration is not
+readable from this plugin, so this is documented, not checked.
+
+---
+
+## Localization Plugin (`@setu-ts/localization-plugin`)
+
+Message catalogues per locale, request locale resolution, and a formatter shared with the browser,
+shipped in **Milestone 103**. The plugin registers an `ILocalizer` under
+`CAPABILITIES.LOCALIZATION`, validates every catalogue at `register()`, and resolves each request's
+locale into `IRequest.locale`. Zero npm dependencies: plurals, numbers and dates come from `Intl`.
+
+### Registration
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LocalizationPlugin, localizerFor } from '@setu-ts/localization-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    LocalizationPlugin({
+      supportedLocales: ['en', 'de'],
+      catalogues: { en: { greeting: 'Hello {name}' }, de: { greeting: 'Hallo {name}' } },
+    }),
+  ],
+});
+
+app.router.get('/', (ctx) => ctx.response.text(localizerFor(ctx).t('greeting', { name: 'Ada' })));
+```
+
+### Options
+
+`LocalizationPluginOptions` requires exactly one of `catalogues` and `source` — supplying both or
+neither is a compile error, and a JavaScript caller is refused at construction.
+
+| Option                   | Type                                       | Default         | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------ | ------------------------------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `supportedLocales`       | `readonly string[]`                        | —               | BCP 47 tags, canonicalized; the first is the default. Refused when empty, malformed, duplicated, longer than 35 characters (no client could select it), or unknown to the runtime's `Intl`.                                                                                                                                                                                                                                                                                                                                                    |
+| `catalogues`             | `Record<string, MessageCatalogue>`         | —               | Static catalogues keyed by tag, validated at `register()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `source`                 | `IMessageSource`                           | —               | Loaded once at `register()` (a rejection fails startup), validated identically; the health indicator reports `injected[:name]`.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `allowPartialCatalogues` | `boolean`                                  | `false`         | Accept a locale missing keys the default defines: one warning per locale at `register()`, the default's message served for the gap.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `onMissing`              | `'key' \| 'throw'`                         | `'key'`         | A key no catalogue defines answers the key (warned once per key, at most 256 tracked), or throws `MissingMessageError`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `timeZone`               | `string`                                   | runtime zone    | IANA zone `Date` values are formatted in; refused at construction when `Intl` does not recognize it.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `tenantLocale`           | `(tenant: ITenant) => string \| undefined` | —               | The tenant's default, consulted after `Accept-Language`; matched like any candidate. A throw propagates (application code, not client input).                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `middleware.enabled`     | `boolean`                                  | `true`          | `false` registers no global middleware; attach `localeMiddleware(...)` yourself.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `middleware.priority`    | `number`                                   | `45`            | After tenant resolution (40), before logging (50). Must be an integer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `middleware.query`       | `string \| false`                          | `'locale'`      | The query parameter source; `false` disables it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `middleware.cookie`      | `string \| false`                          | `'setu_locale'` | The cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `middleware.exclude`     | `readonly PathPattern[]`                   | six probe paths | Skipped entirely — no resolution, no headers. Default `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`; `[]` disables.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `exposeCatalogues`       | `{ basePath; cacheControl? }`              | off             | Registers `GET <basePath>/:locale`. `basePath` must be one or more plain path segments (letters, digits, `.`, `_`, `~`, `-`), with no segment of only `.` or `..` (URL parsing removes those, so the route would be unreachable), and not the root, which would claim every unrouted single-segment `GET`; `cacheControl` defaults to `private, max-age=3600` (never shared: a session with `rolling` or `idleTimeoutMs` refreshes its cookie on every response) and is refused at construction when the platform's `Headers` would reject it. |
+
+### Exports
+
+| Export                      | Kind     | Purpose                                                                                                                        |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `LocalizationPlugin`        | function | Plugin factory — registers the localizer, the resolution middleware, the opt-in catalogue route and a `localization` indicator |
+| `localizerFor`              | function | `localizerFor(ctx)` — the localizer for `ctx.request.locale`; the default locale when absent, negotiated when unsupported      |
+| `localeMiddleware`          | function | The resolution middleware, for an application registering it per route group under `middleware.enabled: false`                 |
+| `MissingMessageError`       | class    | `t()` under `onMissing: 'throw'` for a key no catalogue defines; carries `key` and `locale`                                    |
+| `MissingPluralCountError`   | class    | A plural message formatted without a finite numeric `count`; carries `key` when known                                          |
+| `UnsupportedLocaleError`    | class    | `forLocale(tag)` for a tag outside the supported set — callers pass configuration there, never client text                     |
+| `IMessageSource`            | type     | `{ name?; load(): Promise<Record<string, MessageCatalogue>> }`                                                                 |
+| `LocaleMiddlewareOptions`   | type     | `localeMiddleware`'s options                                                                                                   |
+| `LocalizationPluginOptions` | type     | The options above                                                                                                              |
+
+The subpath **`@setu-ts/localization-plugin/format`** exports
+`format(message, values, locale,
+options?)`, `negotiateLocale(candidates, supported, excluded?)`,
+`parseAcceptLanguage(value)` and the types `FormatValues`, `FormatOptions` and `AcceptLanguage`. Its
+runtime graph is confined to its own modules — a test walks `deno info --json` to enforce it — so it
+is safe in a browser bundle.
+
+### Behavior notes
+
+- **Resolution order:** query parameter, cookie, `Accept-Language`, `tenantLocale`, then the
+  default. Every candidate is canonicalized inside a guard (a malformed tag is "no match") and
+  matched against `supportedLocales` only, exactly, then with subtags stripped right to left
+  (`de-Latn-AT` → `de-Latn` → `de`). A `*` range selects the first supported locale no `q=0` range
+  excludes; exclusion applies to `*` only, and the plugin never answers `406`.
+- **Bounded input:** `Accept-Language` is cut to 1024 characters before splitting, at most 16 ranges
+  are read, and a range over 35 characters is dropped; a query or cookie candidate over 35
+  characters is ignored before any canonicalization.
+- **Headers:** `Vary: Accept-Language` (plus `Cookie` while the cookie source is on) is appended
+  before the handler on every governed response. `Content-Language` is written after the handler
+  from the FINAL `ctx.request.locale`, only when that is a supported tag and the response has none;
+  a rejected `next()` writes none. `Vary: Cookie` makes most CDN caching ineffective — the
+  documented cost of the cookie source.
+- **Missing keys never fail a request** by default; a partial locale falls back to the default
+  locale's message, formatted in the REQUEST's locale (numbers, dates and plural rules follow the
+  reader), which is also what a browser formatting the served catalogue does. The catalogue route
+  serves each locale overlaid on the default, so a browser falls back the same way.
+- **The formatter escapes nothing**; escaping belongs to the renderer, as for `IViewEngine.render`.
+  In English `count: 0` selects the `other` plural form.
+- **Shared code, not identical output across runtimes:** `Intl` data differs between runtimes, and a
+  `Date` formats in the runtime's zone unless `timeZone` is set on both sides.
+- **No `optionalDependencies` on tenancy:** the tenant default is read per request, which middleware
+  priority (40 < 45) orders. The plugin declares `CAPABILITIES.LOGGER` only, so a partial-catalogue
+  warning raised during `register()` reaches the logger.
 
 ## Boundary-Type Compatibility
 

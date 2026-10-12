@@ -44,14 +44,14 @@ const board = createRealtimeClient({
 ## Installation
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/sdk@^0.8.0
-
 # npm / pnpm / yarn
-npx jsr add @setu-ts/sdk@^0.8.0
+npm install @setu-ts/sdk@^0.9.0
 
 # Bun
-bunx jsr add @setu-ts/sdk@^0.8.0
+bun add @setu-ts/sdk@^0.9.0
+
+# Deno
+deno add npm:@setu-ts/sdk@^0.9.0
 ```
 
 ## Quick Start
@@ -83,17 +83,18 @@ console.log(res.data); // User
 
 `createClient(options)` takes:
 
-| Option                 | Type                          | Default                                 | Description                                       |
-| ---------------------- | ----------------------------- | --------------------------------------- | ------------------------------------------------- |
-| `baseUrl`              | `string`                      | —                                       | Base URL for every request. Required.             |
-| `headers`              | `HeadersInit`                 | —                                       | Headers merged into every request.                |
-| `fetch`                | `typeof fetch`                | global `fetch`                          | Injected transport.                               |
-| `timing`               | `IClientTiming`               | `performance.now()` + abort-aware sleep | Clock and sleep seam, so tests need no real time. |
-| `retry`                | `RetryPolicy`                 | off                                     | Retry with fixed or exponential backoff.          |
-| `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Rolling-window breaker.                           |
-| `rateLimit`            | `ClientRateLimitPolicy`       | off                                     | Sliding-window limiter.                           |
-| `requestInterceptors`  | `ClientRequestInterceptor[]`  | `[]`                                    | Run in order before the request.                  |
-| `responseInterceptors` | `ClientResponseInterceptor[]` | `[]`                                    | Run in order after the response.                  |
+| Option                 | Type                          | Default                                 | Description                                                             |
+| ---------------------- | ----------------------------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| `baseUrl`              | `string`                      | —                                       | Base URL for every request. Required.                                   |
+| `headers`              | `HeadersInit`                 | —                                       | Headers merged into every request.                                      |
+| `fetch`                | `typeof fetch`                | global `fetch`                          | Injected transport.                                                     |
+| `timing`               | `IClientTiming`               | `performance.now()` + abort-aware sleep | Clock and sleep seam, so tests need no real time.                       |
+| `retry`                | `ClientRetryPolicy`           | off                                     | Retry with fixed or exponential backoff.                                |
+| `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Rolling-window breaker.                                                 |
+| `rateLimit`            | `ClientRateLimitPolicy`       | off                                     | Sliding-window limiter.                                                 |
+| `idempotency`          | `ClientIdempotencyOptions`    | off                                     | Generated keys for `POST`/`PATCH`; see [Keyed retries](#keyed-retries). |
+| `requestInterceptors`  | `ClientRequestInterceptor[]`  | `[]`                                    | Run in order before the request.                                        |
+| `responseInterceptors` | `ClientResponseInterceptor[]` | `[]`                                    | Run in order after the response.                                        |
 
 `fetch` and `timing` are the two seams that keep the client testable without a network or real time
 — `Date.now()` appears nowhere in this package. See [Resilience](#resilience) for the three policy
@@ -110,17 +111,18 @@ injected `fetch` is always used as-is, which is what tests rely on.)
 
 ### ClientOptions
 
-| Option                 | Type                          | Description                                                                 |
-| ---------------------- | ----------------------------- | --------------------------------------------------------------------------- |
-| `baseUrl`              | `string` (required)           | Base URL for every request                                                  |
-| `headers`              | `Record<string, string>`      | Default headers cloned into each request                                    |
-| `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                   |
-| `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)          |
-| `retry`                | `RetryPolicy`                 | Retry policy (retries transport failures + 408/425/429/5xx on safe methods) |
-| `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                           |
-| `rateLimit`            | `ClientRateLimitPolicy`       | Per-origin sliding-window rate limiter                                      |
-| `requestInterceptors`  | `ClientRequestInterceptor[]`  | Run once before resilient execution                                         |
-| `responseInterceptors` | `ClientResponseInterceptor[]` | Run after successful parse; skipped on failure                              |
+| Option                 | Type                          | Description                                                                                            |
+| ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `baseUrl`              | `string` (required)           | Base URL for every request                                                                             |
+| `headers`              | `Record<string, string>`      | Default headers cloned into each request                                                               |
+| `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                                              |
+| `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)                                     |
+| `retry`                | `ClientRetryPolicy`           | Retry policy (transport failures + 408/425/429/5xx on safe methods; any method, and `409`, when keyed) |
+| `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                                                      |
+| `rateLimit`            | `ClientRateLimitPolicy`       | Per-origin sliding-window rate limiter                                                                 |
+| `idempotency`          | `ClientIdempotencyOptions`    | Generated idempotency keys; see [Keyed retries](#keyed-retries)                                        |
+| `requestInterceptors`  | `ClientRequestInterceptor[]`  | Run once before resilient execution                                                                    |
+| `responseInterceptors` | `ClientResponseInterceptor[]` | Run after successful parse; skipped on failure                                                         |
 
 ### Request
 
@@ -131,6 +133,7 @@ interface ClientRequest<TBody = never> {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   json?: TBody;
+  idempotencyKey?: string;
   signal?: AbortSignal;
 }
 ```
@@ -212,9 +215,32 @@ const client = createClient({
 });
 ```
 
-Retries transport rejections and statuses 408, 425, 429, 500-599. Only retries safe methods (GET,
-HEAD, OPTIONS, PUT, DELETE). When a retryable response carries a `Retry-After` header with
-delta-seconds, that delay replaces the computed backoff.
+Retries transport rejections and statuses 408, 425, 429, 500-599. By default, only retries safe
+methods (GET, HEAD, OPTIONS, PUT, DELETE). When a retryable response carries a `Retry-After` header
+with delta-seconds, that delay replaces the computed backoff only when it is within the policy cap.
+Set `maxRetryAfterMs` explicitly, or omit it to use the policy's largest fixed/exponential backoff.
+A larger hint surfaces the original `HttpClientError` immediately, with its headers intact.
+
+At construction, `limit` must be a positive safe integer, `delay` must be finite and non-negative,
+and every explicit or derived delay must be at most `2_147_483_647` ms, the portable JavaScript
+timer maximum. Runtime strings, non-finite values, and timer-overflowing delays are rejected so they
+cannot disable the cap or be clamped into an immediate retry.
+
+### Keyed retries
+
+`ClientRequest.idempotencyKey` supplies a key; `ClientOptions.idempotency` generates one by default
+for `POST` and `PATCH`. The default header is `Idempotency-Key`; configure `idempotency.header` to
+match the server. When `ClientOptions.idempotency` applies to the request's method and
+`ClientRequest.idempotencyKey` is absent, a request that already carries the configured header uses
+its value as the key. Without matching configuration the header is sent but does not make the
+request keyed, and a request carrying both `idempotencyKey` and that header is refused rather than
+either value replacing the other. The same key is reused across retry attempts, including a
+retryable `409`.
+
+Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
+with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
+A keyed request carries a non-safelisted header, so a cross-origin browser call triggers a CORS
+preflight; the server must list that header in `Access-Control-Allow-Headers`.
 
 ### Circuit Breaker
 
@@ -286,6 +312,11 @@ const client = createClient({
 
 Request interceptors receive a mutable `ClientRequestContext` (resolved `URL` and `Headers`) and
 execute once in registration order before the outbound attempt sequence.
+
+Use `createTraceContextInterceptor(telemetry)` to propagate the active span as a W3C `traceparent`.
+It reads `activeSpanContext()` per request, preserves a caller-supplied header, and omits invalid or
+absent contexts. The telemetry service is structural and imported type-only, so the SDK keeps its
+zero-runtime-dependency boundary.
 
 ### Response Interceptors
 
@@ -363,8 +394,8 @@ publish or format it has nowhere to go.
   suffixed name too. This matters because `@setu-ts/openapi-plugin` names a reused response schema
   `${operationId}Response${status}` — exactly the derivation used here — so a schema that is both
   reused and enclosed in an inline body used to abort generation outright.
-- **Declared error responses are typed.** An operation declaring a non-2xx response also emits a
-  union discriminated on the literal `status` and a narrowing guard:
+- **Declared error responses are typed.** An operation declaring an observable non-2xx response also
+  emits a union discriminated on the literal `status` and a narrowing guard:
 
   ```typescript
   try {
@@ -375,6 +406,12 @@ publish or format it has nowhere to go.
     }
   }
   ```
+
+  Every declared `3xx` keeps its error arm, the auto-follow statuses (`301`, `302`, `303`, `307`,
+  and `308`) included: Fetch returns such a response itself when it carries no `Location`, and the
+  client then throws `HttpClientError` with that status. Any operation declaring an auto-follow
+  redirect or a `3XX` range returns `unknown`, because the follow target body is selected at runtime
+  and is not described by the source operation.
 
   `HttpClientError` is generic in its body (`HttpClientError<TBody = unknown>`), so the bare name
   means what it always did. The union is discriminated on `status` because
@@ -528,55 +565,58 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 
 ## Exports
 
-| Export                        | Kind      |
-| ----------------------------- | --------- |
-| `createApiKeyAuthInterceptor` | function  |
-| `createBearerAuthInterceptor` | function  |
-| `createClient`                | function  |
-| `createDefaultClientTiming`   | function  |
-| `createObservedFetch`         | function  |
-| `createRealtimeClient`        | function  |
-| `createSseClient`             | function  |
-| `generateOpenApiClient`       | function  |
-| `ClientCircuitOpenError`      | class     |
-| `HttpClientError`             | class     |
-| `OpenApiCodegenError`         | class     |
-| `CircuitBreakerPolicy`        | interface |
-| `ClientOptions`               | interface |
-| `ClientRateLimitPolicy`       | interface |
-| `ClientRequest`               | interface |
-| `ClientRequestContext`        | interface |
-| `ClientResponse`              | interface |
-| `IClientTiming`               | interface |
-| `IHttpClient`                 | interface |
-| `IRealtimeClient`             | interface |
-| `ISseClient`                  | interface |
-| `IWebSocketTransport`         | interface |
-| `ObservedFetch`               | interface |
-| `ObservedFetchOptions`        | interface |
-| `OpenApiCodegenOptions`       | interface |
-| `RawSseEvent`                 | interface |
-| `RealtimeClientOptions`       | interface |
-| `RealtimeMessage`             | interface |
-| `RealtimeReconnectOptions`    | interface |
-| `RetryPolicy`                 | interface |
-| `SdkOpenApiDocument`          | interface |
-| `SdkOpenApiOperation`         | interface |
-| `SdkOpenApiParameter`         | interface |
-| `SdkOpenApiPathItem`          | interface |
-| `SdkOpenApiRequestBody`       | interface |
-| `SdkOpenApiResponse`          | interface |
-| `SdkOpenApiSchema`            | interface |
-| `SseClientOptions`            | interface |
-| `SseEvent`                    | interface |
-| `SseReconnectOptions`         | interface |
-| `BackoffStrategy`             | type      |
-| `ClientRequestInterceptor`    | type      |
-| `ClientResponseInterceptor`   | type      |
-| `RealtimeClientState`         | type      |
-| `SseClientState`              | type      |
-| `SseEventMap`                 | type      |
-| `WebSocketFactory`            | type      |
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `createApiKeyAuthInterceptor`   | function  |
+| `createBearerAuthInterceptor`   | function  |
+| `createClient`                  | function  |
+| `createDefaultClientTiming`     | function  |
+| `createObservedFetch`           | function  |
+| `createRealtimeClient`          | function  |
+| `createSseClient`               | function  |
+| `createTraceContextInterceptor` | function  |
+| `generateOpenApiClient`         | function  |
+| `ClientCircuitOpenError`        | class     |
+| `HttpClientError`               | class     |
+| `OpenApiCodegenError`           | class     |
+| `CircuitBreakerPolicy`          | interface |
+| `ClientIdempotencyOptions`      | interface |
+| `ClientOptions`                 | interface |
+| `ClientRateLimitPolicy`         | interface |
+| `ClientRequest`                 | interface |
+| `ClientRequestContext`          | interface |
+| `ClientResponse`                | interface |
+| `IClientTiming`                 | interface |
+| `IHttpClient`                   | interface |
+| `IRealtimeClient`               | interface |
+| `ISseClient`                    | interface |
+| `IWebSocketTransport`           | interface |
+| `ObservedFetch`                 | interface |
+| `ObservedFetchOptions`          | interface |
+| `OpenApiCodegenOptions`         | interface |
+| `RawSseEvent`                   | interface |
+| `RealtimeClientOptions`         | interface |
+| `RealtimeMessage`               | interface |
+| `RealtimeReconnectOptions`      | interface |
+| `RetryPolicy`                   | interface |
+| `SdkOpenApiDocument`            | interface |
+| `SdkOpenApiOperation`           | interface |
+| `SdkOpenApiParameter`           | interface |
+| `SdkOpenApiPathItem`            | interface |
+| `SdkOpenApiRequestBody`         | interface |
+| `SdkOpenApiResponse`            | interface |
+| `SdkOpenApiSchema`              | interface |
+| `SseClientOptions`              | interface |
+| `SseEvent`                      | interface |
+| `SseReconnectOptions`           | interface |
+| `BackoffStrategy`               | type      |
+| `ClientRequestInterceptor`      | type      |
+| `ClientResponseInterceptor`     | type      |
+| `ClientRetryPolicy`             | type      |
+| `RealtimeClientState`           | type      |
+| `SseClientState`                | type      |
+| `SseEventMap`                   | type      |
+| `WebSocketFactory`              | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

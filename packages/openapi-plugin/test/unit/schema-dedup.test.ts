@@ -8,9 +8,8 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { z } from 'npm:zod@^3.24.0';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod-v3';
 import type { RouteInfo } from '@setu-ts/common';
 
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';

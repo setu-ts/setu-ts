@@ -4,8 +4,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { ServiceDiscoveryService } from '../../src/services/service-discovery-service.ts';
 import { resolveOptions, type ServiceDiscoveryPluginOptions } from '../../src/options.ts';

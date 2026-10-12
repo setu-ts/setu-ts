@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { ISqsTransport } from '../../../src/adapters/sqs-queue.ts';
 import { SqsQueue } from '../../../src/adapters/sqs-queue.ts';
 import { FakeRuntimeServices } from '../../fixtures/fake-runtime.ts';
