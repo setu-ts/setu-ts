@@ -218,9 +218,9 @@ export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<s
  * it is refused here, by name, first. A workspace member is satisfied by its
  * workspace root's `node_modules`, where a Deno workspace links its packages.
  *
- * The search is bounded: the project itself, then its ancestors up to the
- * nearest workspace root (a directory holding {@linkcode WORKSPACE_MANIFEST})
- * and no further. An unbounded walk would accept a `node_modules/@setu-ts/kernel`
+ * The search is bounded: the project itself, then — only when it is a listed
+ * member — its ancestors up to its workspace root, and no further (see
+ * {@linkcode installSearchDirs}). An unbounded walk would accept a `node_modules/@setu-ts/kernel`
  * planted in a shared parent such as `/tmp` as "installed", and Node would then
  * import and run it (M111d audit round 2, N1). With the bound, a kernel is found
  * only where the project's own resolution reaches it first.
