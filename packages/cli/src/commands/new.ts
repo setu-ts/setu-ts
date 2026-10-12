@@ -96,7 +96,7 @@ export interface NewDependencies {
    * when it is absent — every gate in this repository reaches the CLI through
    * an in-process `runCli` that passes none — no prompt is ever attempted and
    * each absent flag takes its documented default. The terminal implementation
-   * is supplied by `src/main.ts` only behind `Deno.stdin.isTerminal()`.
+   * is supplied by `src/main.ts` only when stdin is a terminal.
    */
   readonly ask?: Prompter;
   /** Cooperative interruption signal checked at prompts and writes. */
