@@ -18,8 +18,16 @@ The project targets Node by default; pass `--runtime deno`, `--runtime bun` or
 `--runtime cloudflare-workers` for another target. See the
 [CLI README](https://github.com/setu-ts/setu-ts/tree/main/packages/cli) for every template and flag.
 
-## API
+## Exports
 
-| Export       | Kind     | Purpose                                                   |
-| ------------ | -------- | --------------------------------------------------------- |
-| `createArgs` | function | Maps `npm create @setu-ts` arguments onto `setu new` ones |
+| Export       | Kind     |
+| ------------ | -------- |
+| `createArgs` | function |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Public API
+
+The full surface is in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#setu-tscreate).

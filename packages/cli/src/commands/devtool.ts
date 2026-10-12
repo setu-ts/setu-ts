@@ -750,31 +750,32 @@ async function enableStandalone(
     return EXIT_USAGE;
   }
 
-  try {
-    // An empty or foreign directory is "not a project", not "the wrong runtime":
-    // the runtime detector reads no manifest there and answers Node.
-    if (!(await anyPresent(deps.fs, dir, ['deno.json', 'deno.jsonc', 'package.json']))) {
-      return reportInapplicable(
-        deps,
-        `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
-      );
+  const manifestRead = await readWritableDenoManifest(deps.fs, dir);
+  if (manifestRead.kind === 'missing') {
+    // No Deno manifest: an npm project is the wrong runtime, while a directory
+    // with no manifest at all is not a project — the runtime detector would read
+    // that as Node and report the runtime, which names the wrong problem.
+    try {
+      if (await isPresent(deps.fs, joinPath(dir, 'package.json'))) {
+        // Never Deno without a Deno manifest, so this always refuses.
+        const runtime = await detectTargetRuntime(deps.fs, dir);
+        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime)!);
+      }
+    } catch (cause) {
+      return reportInapplicable(deps, escapeName(describeCause(cause)));
     }
+    return reportInapplicable(
+      deps,
+      `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
+    );
+  }
+  try {
     const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir));
     if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } catch (cause) {
-    return reportInapplicable(
-      deps,
-      escapeName(cause instanceof Error ? cause.message : String(cause)),
-    );
+    return reportInapplicable(deps, escapeName(describeCause(cause)));
   }
 
-  const manifestRead = await readWritableDenoManifest(deps.fs, dir);
-  if (manifestRead.kind === 'missing') {
-    return reportInapplicable(
-      deps,
-      `No deno.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
-    );
-  }
   if (manifestRead.kind === 'refused') {
     deps.error(manifestRead.message);
     return EXIT_ERROR;
@@ -990,27 +991,24 @@ function frameworkPinRefusal(handle: DenoJsonHandle): string | undefined {
 }
 
 /**
- * Whether any of the named files exists in a directory. Only a missing path is
- * absent; any other failure is thrown, so an unreadable manifest is reported
- * rather than read as absence.
+ * Whether a path exists. Only a missing path is absent; any other failure is
+ * thrown, so an unreadable manifest is reported rather than read as absence.
  *
  * @param fs - The filesystem to probe
- * @param dir - The directory
- * @param names - The file names to look for
- * @returns True when at least one exists
+ * @param path - The absolute path
+ * @returns True when it exists
  */
-async function anyPresent(
-  fs: IFileSystem,
-  dir: string,
-  names: readonly string[],
-): Promise<boolean> {
-  for (const name of names) {
-    try {
-      await fs.stat(joinPath(dir, name));
-      return true;
-    } catch (cause) {
-      if (!isMissingPath(cause)) throw cause;
-    }
+async function isPresent(fs: IFileSystem, path: string): Promise<boolean> {
+  try {
+    await fs.stat(path);
+    return true;
+  } catch (cause) {
+    if (isMissingPath(cause)) return false;
+    throw cause;
   }
-  return false;
+}
+
+/** A thrown value's message, or its string form. */
+function describeCause(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

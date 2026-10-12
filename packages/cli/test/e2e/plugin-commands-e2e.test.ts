@@ -24,6 +24,12 @@ import { npmInstall, type RegistryOverlay, runIn, startOverlay } from '../fixtur
 
 const SETU = new URL('../../src/bin.ts', import.meta.url).pathname;
 
+/**
+ * A case installs from the overlay, runs several project scripts and may build
+ * a frontend before booting, so it outlives the suite's 30 s default by far.
+ */
+const INSTALL_TIMEOUT_MS = 600_000;
+
 let overlay: RegistryOverlay;
 let root = '';
 
@@ -101,7 +107,7 @@ async function projectWithCommand(runtime: 'node' | 'deno'): Promise<string> {
 }
 
 describe('setu runs a plugin-contributed command', () => {
-  it('from an installed Node project', async () => {
+  it('from an installed Node project', { timeout: INSTALL_TIMEOUT_MS }, async () => {
     const project = await projectWithCommand('node');
     const install = await npmInstall(project, overlay);
     expect(install.code, install.output).toBe(0);
@@ -115,7 +121,9 @@ describe('setu runs a plugin-contributed command', () => {
     expect(ran.stdout).toContain('HELLO-FROM-PLUGIN');
   });
 
-  it('from a Deno project once deno install has linked node_modules', async () => {
+  it('from a Deno project once deno install has linked node_modules', {
+    timeout: INSTALL_TIMEOUT_MS,
+  }, async () => {
     const project = await projectWithCommand('deno');
 
     // Not installed: the CLI cannot import the config from Node, and says how

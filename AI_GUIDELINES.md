@@ -707,15 +707,21 @@ A public API is any export from a package's `src/index.ts` file.
 - Importing a module must not execute side effects.
 - No code at module top level that modifies global state.
 - Registration happens in `register()` functions, not at import time.
-- **The one named exception** (maintainer-approved 2026-10-11, M111a):
+- **Two named exceptions.** The first (maintainer-approved 2026-10-11, M111a):
   `packages/decorator-plugin/src/metadata/symbol-metadata.ts` installs `Symbol.metadata` at module
   top level, write-if-absent (`Symbol.metadata ??= Symbol.for('Symbol.metadata')`). Node and Bun do
   not define that spec-defined well-known symbol, and TypeScript's TC39 decorator emit creates
   decorator metadata only when it exists, so without the install a `tsc`-compiled decorated class
   crashes at definition. The module never overwrites an existing symbol (a no-op on Deno), every
   `src/decorators/*.ts` imports it first, and a missing carrier fails with the named
-  `DecoratorMetadataUnavailableError`. No other module may use this exception; a new case needs its
-  own maintainer decision.
+  `DecoratorMetadataUnavailableError`.
+- The second (maintainer-approved 2026-10-12, M111d): the two executables, `packages/cli/src/bin.ts`
+  (`setu`) and `packages/create/src/bin.ts` (`npm create @setu-ts`), run the CLI at module top
+  level, because an npm `bin` is a module that runs on load. Each is reached only through its
+  package's `bin` entry, is excluded from every `exports` subpath, is listed in its package's
+  `sideEffects`, and sets `process.exitCode` rather than calling `process.exit`. All logic lives in
+  `runMain`, which is importable without effect.
+- No other module may use these exceptions; a new case needs its own maintainer decision.
 
 ### 11.6 No `console.log` in Production Code
 

@@ -254,6 +254,45 @@ describe('runAdoptCommand', () => {
     expect(err.text()).toContain('Interrupted;');
   });
 
+  // A pre-0.9 project pins the framework from JSR (Deno) or through the JSR npm
+  // alias (npm); the workspace root maps neither any more, so adoption moves
+  // the member's pins onto the npm names and says which it moved.
+  it('moves a Deno project off JSR pins as it adopts it', async () => {
+    const h = harness({
+      ...PROJECT,
+      '/work/svc/deno.json': JSON.stringify({
+        tasks: { start: 'deno run main.ts' },
+        imports: { '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^0.8.0' },
+      }),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/svc/apps/svc/deno.json')) as {
+      imports: Record<string, string>;
+    };
+    expect(manifest.imports['@setu-ts/kernel']).toMatch(/^npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain(
+      `moved @setu-ts/kernel from jsr:@setu-ts/kernel@^0.8.0 to ${
+        manifest.imports['@setu-ts/kernel']
+      }`,
+    );
+  });
+
+  it('moves an npm project off the JSR alias as it adopts it', async () => {
+    const h = harness({
+      ...NODE_PROJECT,
+      '/work/svc/package.json': JSON.stringify({
+        scripts: { start: 'tsx main.ts' },
+        dependencies: { '@setu-ts/kernel': 'npm:@jsr/setu-ts__kernel@^0.8.0' },
+      }),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/svc/apps/svc/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.dependencies['@setu-ts/kernel']).toMatch(/^\^\d/);
+    expect(h.out.text()).toContain('moved @setu-ts/kernel from npm:@jsr/setu-ts__kernel@^0.8.0');
+  });
+
   it('moves the project under apps/ and writes the workspace above it', async () => {
     const h = harness();
     expect(await h.run(['--port', '4000'])).toBe(0);

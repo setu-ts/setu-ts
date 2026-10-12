@@ -12,6 +12,30 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### The framework installs from npm; Node is the default target
+
+From 0.9.0 the packages are published to npm under their own names (`@setu-ts/kernel`, …), and the
+CLI is a Node program. What an existing project changes depends on its target:
+
+- **Node, Bun or Workers project.** Replace each `npm:@jsr/setu-ts__<pkg>@^0.8.0` dependency with
+  `^0.9.0` under the key it already has (`"@setu-ts/kernel": "^0.9.0"`), delete the
+  `@jsr:registry=…` line from `.npmrc` (or the file, if that was its only line), and reinstall.
+- **Deno project.** Replace each `jsr:@setu-ts/<pkg>@^0.8.0` import with
+  `npm:@setu-ts/<pkg>@^0.9.0`, add `"nodeModulesDir": "auto"` to `deno.json`, and run
+  `deno install`. The CLI now imports `setu.config.ts` from Node to find plugin commands, so it
+  reads the project's `node_modules`; until `deno install` has created it, `setu <command>` refuses
+  and says so.
+- **A project you are adopting into a workspace.** `setu adopt` rewrites both pre-0.9 forms onto npm
+  as it moves the project, and reports each pin it changed.
+
+Scaffolding without `--runtime` now produces a Node project; pass `--runtime deno` where a script
+relied on the old default. Install the CLI from npm: `npx @setu-ts/cli …`, `npm create @setu-ts`, or
+`npm install --global @setu-ts/cli`.
+
+Code that embeds the CLI through `@setu-ts/cli/main`: `MainProcess.prompt` now returns
+`Promise<string | null>` and takes the run's interrupt signal as a second argument, and
+`denoProcess` is replaced by `nodeProcess`.
+
 ### `RedactionPolicy.fields` values may now be a `FieldRedaction`
 
 No action is required for a policy that supplies classification strings — every existing policy

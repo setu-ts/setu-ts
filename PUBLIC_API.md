@@ -9252,16 +9252,50 @@ and refuses edited entries before any write. Standalone defaults probe 4919 thro
 the chosen port; `new --devtool` also writes it into the project README. Re-enabling an unchanged
 standalone entry retains its recorded port without probing again.
 
-`@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation.
-Install it with an explicit binary name, because Deno's default inference would name it after the
-package (`cli`):
+`@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation. It
+is a Node program (Node 22 or later), published to npm with a `bin`, so it runs without an install
+or installs globally; `@setu-ts/create` makes `npm create @setu-ts` the same as `setu new`:
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
+npx @setu-ts/cli new my-app
+npm create @setu-ts my-app -- --template rest
+npm install --global @setu-ts/cli               # then: setu new my-app
 ```
 
-`--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
-pins projects to its own version — so on release day the install fails without it.
+A scaffolded project depends on the framework packages from npm under their own names, pinned to the
+CLI's own version — on every target, Deno included (`npm:@setu-ts/…` in its import map). Every
+target installs with its own package manager: `npm install` (Node, Workers), `bun install` (Bun),
+`deno install` (Deno).
+
+The CLI loads a project's TypeScript — `setu.config.ts` for plugin commands, a custom schematic —
+through `tsx`, from the project's own `node_modules`. A Deno project sets `nodeModulesDir: "auto"`,
+so `deno install` creates that directory; until it has, plugin commands refuse by name and name the
+command that fixes it. A Deno project pinning the framework from JSR (`jsr:@setu-ts/…`, 0.8 and
+earlier) is refused the same way, pointing at the upgrade guide.
+
+#### `@setu-ts/cli/main` — the process boundary
+
+| Export          | Kind      | Description                                                                                                                                   |
+| --------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                   |
+| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                |
+| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                        |
+| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                            |
+| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?` |
+
+**Breaking (0.9.0):** `MainProcess.prompt` is asynchronous and takes the run's interrupt signal, so
+an interrupt ends a pending question rather than waiting for Enter; `denoProcess` is removed,
+replaced by `nodeProcess`. Both executables set `process.exitCode` rather than calling
+`process.exit`, so output still draining to a pipe is not cut off.
+
+#### `@setu-ts/create`
+
+| Export       | Kind     | Description                                                                                |
+| ------------ | -------- | ------------------------------------------------------------------------------------------ |
+| `createArgs` | function | `(argv: readonly string[]) => string[]` — the `setu new` arguments `npm create` stands for |
+
+Its `create` executable runs `runMain` with `createArgs(process.argv.slice(2))`, so it accepts
+exactly what `setu new` accepts.
 
 ### Commands
 
@@ -9273,7 +9307,7 @@ the platform environment and emits no smoke test; its `test` task permits an emp
 ```bash
 # Scaffold a project (creates ./my-app)
 setu new my-app
-setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers (manifest + start command; code is portable)
+setu new my-app --runtime deno                 # node (default) | deno | bun | cloudflare-workers (manifest + start command; code is portable)
 setu new my-app --template rest                # rest | microservice | class-based | full-stack
 setu new my-app --template microservice --runtime bun
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)

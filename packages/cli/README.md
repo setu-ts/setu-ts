@@ -5,21 +5,25 @@ framework.
 
 ## Installation
 
+`setu` is a Node program (Node 22 or later), published to npm with a `bin`. Run it without an
+install, install it globally, or start through `npm create`:
+
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.8.0/main
+npx @setu-ts/cli new my-app
+npm install --global @setu-ts/cli          # then: setu new my-app
+npm create @setu-ts my-app                 # the same as setu new my-app
 ```
 
-Use the global install, or pass `--no-config --no-lock` to an ad-hoc `deno run` inside a project so
-Deno does not write the CLI's dependency graph into the project's lockfile.
-
-The `-n setu` is required, not decorative: Deno derives the binary name from the package, which for
-a package called `cli` would install a binary named `cli`. All help text shows `setu`.
+It loads a project's TypeScript — `setu.config.ts` for plugin commands, a custom schematic — through
+`tsx`, resolving the project's own imports from its `node_modules`. A Deno project sets
+`nodeModulesDir: "auto"` so `deno install` creates that directory; run it once before
+`setu <plugin-command>`.
 
 ## Scaffolding a project
 
 ```bash
-setu new my-app                                  # Deno, minimal (runtime plugin only)
-setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers — see below
+setu new my-app                                  # Node, minimal (runtime plugin only)
+setu new my-app --runtime deno                   # node (default) | deno | bun | cloudflare-workers — see below
 setu new my-app --template rest                  # rest | microservice | class-based | full-stack
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template rest --env-file config/.env.local
@@ -177,7 +181,9 @@ A relative `--dir` is resolved against the working directory.
 
 ## Devtool development
 
-`setu new --devtool` and `setu devtool enable <member>` opt a project into the
+The devtool is Deno-only — the diagnostics listener refuses every other runtime before it binds — so
+these commands need a Deno project (`--runtime deno`). `setu new --devtool` and
+`setu devtool enable <member>` opt a project into the
 [local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md):
 they emit a `main.dev.ts` development entry the production graph never imports, add `dev` and
 `check` tasks, and — for a workspace member — record a `devtoolPort` in `setu.workspace.json`,
@@ -185,8 +191,8 @@ allocated so it never collides with any member's application port
 (`setu workspace ports --reallocate` moves both together).
 
 ```bash
-setu new my-app --devtool              # standalone; connector probes from 4919; override with --devtool-port <n>
-setu new acme --workspace && cd acme
+setu new my-app --runtime deno --devtool   # standalone; connector probes from 4919; override with --devtool-port <n>
+setu new acme --workspace --runtime deno && cd acme
 setu generate app orders --devtool     # member; the devtool port is allocated
 setu devtool enable billing            # a member that already exists
 setu devtool enable                    # a standalone project that already exists

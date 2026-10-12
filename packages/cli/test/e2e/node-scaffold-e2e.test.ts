@@ -49,6 +49,12 @@ const HOSTS: readonly (readonly [label: string, args: readonly string[], boots: 
   ['rest on workers', ['--template', 'rest', '--runtime', 'cloudflare-workers'], false],
 ];
 
+/**
+ * A case installs from the overlay, runs several project scripts and may build
+ * a frontend before booting, so it outlives the suite's 30 s default by far.
+ */
+const INSTALL_TIMEOUT_MS = 600_000;
+
 let overlay: RegistryOverlay;
 let root = '';
 
@@ -97,14 +103,16 @@ async function scaffoldAndInstall(args: readonly string[]): Promise<string> {
 }
 
 describe('a scaffolded npm project runs its own scripts', () => {
-  it('scaffolds Node when no target is named', async () => {
+  it('scaffolds Node when no target is named', { timeout: INSTALL_TIMEOUT_MS }, async () => {
     expect(await run(['new', 'shop'])).toBe(0);
     await nodeFs.stat(`${root}/shop/package.json`);
     await expect(nodeFs.stat(`${root}/shop/deno.json`)).rejects.toThrow();
   });
 
   for (const [label, args, boots] of HOSTS) {
-    it(`installs, checks, lints, formats, tests${boots ? ' and serves' : ''}: ${label}`, async () => {
+    it(`installs, checks, lints, formats, tests${boots ? ' and serves' : ''}: ${label}`, {
+      timeout: INSTALL_TIMEOUT_MS,
+    }, async () => {
       const project = await scaffoldAndInstall(args);
 
       // A socket target carries a composition-root smoke test (M101g); a Workers
@@ -150,7 +158,9 @@ describe('a scaffolded npm project runs its own scripts', () => {
       ['functional', ['--template', 'rest']],
     ] as const
   ) {
-    it(`generates code that checks, lints, formats, tests and serves: ${style}`, async () => {
+    it(`generates code that checks, lints, formats, tests and serves: ${style}`, {
+      timeout: INSTALL_TIMEOUT_MS,
+    }, async () => {
       expect(await run(['new', 'shop', ...args])).toBe(0);
       const project = `${root}/shop`;
       for (
@@ -176,7 +186,7 @@ describe('a scaffolded npm project runs its own scripts', () => {
   // `--broker redis` declares the client its plugin loads: a package manager
   // never installs an optional peer for the consumer, so before M111d the first
   // boot failed at the plugin's own `import('ioredis')`.
-  it('installs the client a selected broker loads', async () => {
+  it('installs the client a selected broker loads', { timeout: INSTALL_TIMEOUT_MS }, async () => {
     const project = await scaffoldAndInstall(['--template', 'microservice', '--broker', 'redis']);
     expect(await installed(project, 'ioredis')).toBe(true);
     const checked = await npmRun(project, 'check');
@@ -186,7 +196,7 @@ describe('a scaffolded npm project runs its own scripts', () => {
   // The generated entry stops the application on SIGTERM through the runtime's
   // signal seam, so a container stop runs every shutdown hook instead of
   // killing the process mid-request.
-  it('stops gracefully on SIGTERM', async () => {
+  it('stops gracefully on SIGTERM', { timeout: INSTALL_TIMEOUT_MS }, async () => {
     const project = await scaffoldAndInstall(['--template', 'rest']);
     const outcome = await nodeBootAndSignal(project, 'SIGTERM');
     expect({ code: outcome.code, signal: outcome.signal }, outcome.output).toEqual({

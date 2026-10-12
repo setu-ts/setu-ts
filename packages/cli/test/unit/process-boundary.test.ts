@@ -130,6 +130,17 @@ describe('the process boundary of packages/cli/src', () => {
     }
   });
 
+  it("routes the Node host's prompt through its reader, and releases it on dispose", async () => {
+    const host = nodeProcess(() => {});
+    const interrupted = new AbortController();
+    interrupted.abort();
+    // An already-interrupted run never asks: no reader is opened on stdin.
+    expect(await host.prompt('Template? ', interrupted.signal)).toBeNull();
+    host.dispose?.();
+    // Disposed: every later question answers "no answer" rather than reading.
+    expect(await host.prompt('Again? ')).toBeNull();
+  });
+
   it('disposes the host after the run, so an open terminal reader cannot keep it alive', async () => {
     let disposed = 0;
     const host: MainProcess = {

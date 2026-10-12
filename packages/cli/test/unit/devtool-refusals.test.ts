@@ -624,6 +624,48 @@ describe('devtool enable branch coverage', () => {
     expect(h.err.text()).toContain('No deno.json or package.json in /ws');
   });
 
+  // The devtool is Deno-only. A project with no Deno manifest but an npm one is
+  // the wrong runtime, named by what it IS; only a directory with neither
+  // manifest is "not a project".
+  for (
+    const [runtime, start] of [['node', 'tsx main.ts'], ['bun', 'bun run main.ts']] as const
+  ) {
+    it(`refuses a ${runtime} project by naming its runtime`, async () => {
+      const h = workspaceHarness({
+        '/ws/package.json': JSON.stringify({ scripts: { start } }),
+        '/ws/setu.config.ts': 'export function createApp() {}',
+      });
+      expect(await h.run(['enable'])).toBe(1);
+      expect(h.err.text()).toContain('The devtool requires the Deno runtime');
+      expect(h.err.text()).toContain(`a ${runtime} project could never start`);
+      expect(h.fs.writes).toEqual([]);
+    });
+  }
+
+  it('reports a package.json it cannot stat rather than reading it as absent', async () => {
+    for (
+      const [failure, shown] of [[new Error('permission denied'), 'permission denied'], [
+        'plain',
+        'plain',
+      ]] as const
+    ) {
+      const h = workspaceHarness({});
+      const failing = {
+        ...h.fs,
+        stat: (path: string) =>
+          path === '/ws/package.json' ? Promise.reject(failure) : h.fs.stat(path),
+      };
+      const code = await runDevtoolCommand(parseArgs(['enable']), {
+        fs: failing,
+        cwd: '/ws',
+        log: () => {},
+        error: h.err.sink,
+      });
+      expect(code).toBe(1);
+      expect(h.err.text()).toContain(shown);
+    }
+  });
+
   it('refuses a standalone project whose deno.json is not JSON', async () => {
     const h = workspaceHarness({
       '/ws/deno.json': '{ broken',
