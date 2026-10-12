@@ -18,9 +18,8 @@
  *   next step derived from the shape alone tells a Bun developer to run `npm
  *   start`. It also installs into each member's own `node_modules` rather than
  *   only a hoisted root, which both generated ignore files account for.
- * - **A workspace-root `.npmrc` maps the `@jsr` scope for members.** Verified by
- *   installing `@setu-ts/{kernel,common,runtime}` into a two-member npm workspace
- *   and serving a request from one of them.
+ * - **Members install the framework from the npm registry under its own names.**
+ *   No registry mapping is needed, so the workspace root carries no `.npmrc`.
  * - **A sibling library resolves by its package NAME under npm too**, through the
  *   symlinks npm creates in the root `node_modules` — the same property the Deno
  *   arm relies on, so libraries need no per-runtime design.
@@ -300,8 +299,8 @@ export async function detectProjectRuntime(
     }
   };
 
-  if (await has('deno.json')) return 'deno';
-  if (!(await has('package.json'))) return 'deno';
+  if ((await has('deno.json')) || (await has('deno.jsonc'))) return 'deno';
+  if (!(await has('package.json'))) return 'node';
   return (await has('bun.lock')) || (await has('bun.lockb')) ? 'bun' : 'node';
 }
 

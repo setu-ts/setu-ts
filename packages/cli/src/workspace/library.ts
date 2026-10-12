@@ -68,7 +68,7 @@ export function librarySpecifier(scope: string, name: string): string {
 export function libraryFiles(
   scope: string,
   names: DerivedNames,
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
 ): readonly GeneratedFile[] {
   const specifier = librarySpecifier(scope, names.kebab);
   const root = joinPath(LIBS_DIR, names.kebab);
@@ -197,8 +197,33 @@ ${onDeno ? 'deno task test' : 'npm test'}
 \`\`\`
 `;
 
+  // A Deno library ALSO declares its name and exports in a `package.json`, so
+  // that `deno install` under the root's `nodeModulesDir: "auto"` links it into
+  // `node_modules` — the only place the Node `setu` CLI can resolve it from when
+  // it imports a member's `setu.config.ts` (M111d §3.4, probed). Deno itself
+  // keeps resolving it through the `deno.json` above.
+  const nodeVisibility = onDeno
+    ? [{
+      path: joinPath(root, 'package.json'),
+      contents: `${
+        JSON.stringify(
+          {
+            name: specifier,
+            version: '0.1.0',
+            private: true,
+            type: 'module',
+            exports: { '.': './src/index.ts' },
+          },
+          null,
+          2,
+        )
+      }\n`,
+    }]
+    : [];
+
   return [
     manifest,
+    ...nodeVisibility,
     { path: joinPath(root, 'src/index.ts'), contents: barrel },
     { path: joinPath(root, `test/${names.kebab}.test.ts`), contents: test },
     { path: joinPath(root, 'README.md'), contents: readme },

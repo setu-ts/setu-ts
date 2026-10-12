@@ -20,6 +20,7 @@
  * @module
  */
 
+import { FRAMEWORK_RANGE, frameworkSpecifier } from '../templates/framework-specifier.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { DOCKERFILE, DOCKERIGNORE, workspaceContainerFiles } from '../workspace/compose.ts';
 import { transportSpec } from '../workspace/transport.ts';
@@ -84,7 +85,7 @@ const DEVTOOL_DEPENDENCY = '@setu-ts/diagnostics-plugin';
  * `--devtool` and one enabled later carry the identical entry — which is what
  * makes the byte-identical no-op outcome reachable on both.
  */
-const DEVTOOL_IMPORT = `jsr:${DEVTOOL_DEPENDENCY}@^${VERSION}`;
+const DEVTOOL_IMPORT = frameworkSpecifier('diagnostics-plugin', 'deno');
 
 /** Dependencies reached by the devtool command. */
 export interface DevtoolCommandDependencies {
@@ -955,19 +956,26 @@ async function resolveDevtoolPort(
   return candidate;
 }
 
-/** Refuses mixed framework versions before any manifest merge. */
+/**
+ * Refuses mixed framework versions before any manifest merge.
+ *
+ * A pin passes only as the npm form this CLI writes —
+ * `npm:@setu-ts/<pkg>@^<version>`, optionally with a subpath. A project still
+ * pinned to `jsr:` predates the npm packages; it is refused with the upgrade
+ * guide named, never accepted because its version happens to match.
+ */
 function frameworkPinRefusal(handle: DenoJsonHandle): string | undefined {
   const wrong = Object.entries(handle.imports).filter(([key, value]) =>
     key.startsWith('@setu-ts/') &&
     (typeof value !== 'string' ||
-      /^jsr:@setu-ts\/[^@]+@(\^[^/]+)(?:\/.*)?$/.exec(value)?.[1] !== `^${VERSION}`)
+      /^npm:@setu-ts\/[^@]+@(\^[^/]+)(?:\/.*)?$/.exec(value)?.[1] !== FRAMEWORK_RANGE)
   );
   if (wrong.length === 0) return undefined;
   return `Framework pins in ${escapeName(handle.path)} disagree with this CLI:\n` +
     wrong.map(([key, value]) =>
-      `  ${escapeName(key)}: ${escapeName(String(value))}; expected jsr:${
-        escapeName(key)
-      }@^${VERSION}`
+      `  ${escapeName(key)}: ${escapeName(String(value))}; expected ${
+        escapeName(frameworkSpecifier(key.slice('@setu-ts/'.length), 'deno'))
+      }`
     ).join('\n') +
     `\nThe devtool entry imports types that exist only at ${VERSION}; upgrade the project first (see docs/upgrading.md), then run this again.`;
 }

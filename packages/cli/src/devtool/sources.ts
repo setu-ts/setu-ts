@@ -246,15 +246,22 @@ function normalizedSegments(path: string): readonly string[] {
 }
 
 /**
- * Whether an import target is the framework package `pkg` itself: the published
- * `jsr:` or npm-compatibility specifier (optionally versioned or with a subpath),
+ * Whether an import target is the framework package `pkg` itself: the npm
+ * specifier this CLI writes, or a pre-0.9 `jsr:` or npm-compatibility one
+ * (optionally versioned or with a subpath),
  * or a filesystem path whose last `packages/` segment is that package's
  * directory (a workspace checkout). Anything else — another package, a path that
  * only passes through `<pkg>/`, a URL — is a retarget (audit rounds 6 and 7).
  */
 function namesFrameworkPackage(pkg: string, value: string): boolean {
   for (
-    const prefix of [`jsr:@setu-ts/${pkg}`, `jsr:/@setu-ts/${pkg}`, `npm:@jsr/setu-ts__${pkg}`]
+    const prefix of [
+      `npm:@setu-ts/${pkg}`,
+      `npm:/@setu-ts/${pkg}`,
+      `jsr:@setu-ts/${pkg}`,
+      `jsr:/@setu-ts/${pkg}`,
+      `npm:@jsr/setu-ts__${pkg}`,
+    ]
   ) {
     if (value.startsWith(prefix)) {
       const rest = value.slice(prefix.length);

@@ -602,7 +602,7 @@ export async function runNewCommand(
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
     deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
     deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
-    deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
+    deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default node)`);
     deps.log(
       `  --workspace         Create a monorepo root; add services with ` +
         `\`${PROGRAM_NAME} generate ${APP_VERB} <name>\``,
@@ -666,7 +666,7 @@ export async function runNewCommand(
     );
     return EXIT_USAGE;
   }
-  const runtime: TargetRuntime = runtimeFlag ?? 'deno';
+  const runtime: TargetRuntime = runtimeFlag ?? 'node';
 
   const names = deriveNames(rawName);
   // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never

@@ -99,7 +99,7 @@ function collapse(expression: string): string {
 export function renderDiscoveryModule(
   member: WorkspaceMember,
   all: readonly WorkspaceMember[],
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
 ): string {
   // Plain `.sort()`, like every other determinism sort in this package
   // (`seamNames`, `readArtifactNames`, `readModuleNames`). `localeCompare`

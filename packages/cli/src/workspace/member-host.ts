@@ -40,7 +40,7 @@ export function withWorkspaceMember(
   host: ResolvedHost,
   transport: TransportSpec,
   member: string,
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
   endpoint?: string,
 ): ResolvedHost {
   return withTransport(withDiscoveryMap(host), transport, member, profile, endpoint);

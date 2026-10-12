@@ -174,7 +174,7 @@ export async function resolveNewChoices(
   const rawRuntime = flags['runtime'];
   const runtime = typeof rawRuntime === 'string' && isTargetRuntime(rawRuntime)
     ? rawRuntime
-    : 'deno';
+    : 'node';
   // Resolved through the SAME resolver the command uses, so the broker and
   // queue questions run against the styled host — not a second lookup that
   // could disagree with what the pipeline renders.

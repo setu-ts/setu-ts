@@ -16,7 +16,6 @@ import {
   CONFIG_MODULE,
   PROGRAM_NAME,
   type TargetRuntime,
-  VERSION,
 } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
@@ -39,9 +38,7 @@ import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
-
-/** Semver range the scaffolded project pins framework packages to. */
-const RANGE = `^${VERSION}`;
+import { frameworkSpecifier } from './framework-specifier.ts';
 
 /**
  * The devtool composition parameter every generated factory accepts as its
@@ -1030,12 +1027,12 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
  * Builds the Deno `imports` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `jsr:` URL
+ * @returns Specifier → `npm:@setu-ts/…` specifier
  */
-function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
+function frameworkImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const imports: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
-    imports[`@setu-ts/${pkg}`] = `jsr:@setu-ts/${pkg}@${RANGE}`;
+    imports[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'deno');
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
@@ -1043,17 +1040,16 @@ function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, 
 }
 
 /**
- * Builds the npm `dependencies` map for a generated project, using JSR's npm
- * compatibility names.
+ * Builds the npm `dependencies` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `npm:@jsr/…` range
+ * @returns Package name → caret range
  */
 function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     if (DEV_FRAMEWORK_PACKAGES.has(pkg)) continue;
-    deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
+    deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
   }
   return { ...deps, ...host.manifest?.npmDependencies };
 }
@@ -1071,7 +1067,7 @@ const DEV_FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set(['testing']);
  *
  * @param host - The resolved template host
  * @param runtime - The target runtime
- * @returns Specifier → `npm:@jsr/…` range
+ * @returns Package name → caret range
  */
 function npmDevFrameworkDependencies(
   host: ResolvedHost,
@@ -1080,7 +1076,7 @@ function npmDevFrameworkDependencies(
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     if (DEV_FRAMEWORK_PACKAGES.has(pkg)) {
-      deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
+      deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
     }
   }
   return deps;
@@ -1496,7 +1492,7 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
  *   no `package.json`, so an npm toolchain would otherwise have nowhere to be
  *   declared. Only one template needs this.
  * - **Cloudflare Workers, always.** `wrangler` bundles with esbuild, which
- *   resolves neither `jsr:` specifiers nor a Deno import map, so every Workers
+ *   resolves no Deno import map, so every Workers
  *   project needs its framework packages in a `package.json` regardless of
  *   template.
  *
@@ -1521,7 +1517,7 @@ function standaloneNpmFiles(
   // through the import map instead) must not acquire a package.json — that
   // switches Deno to node_modules resolution.
   // Workers ALWAYS needs one: `wrangler` bundles `src/index.ts` with esbuild,
-  // which resolves neither `jsr:` specifiers nor a Deno import map, so a project
+  // which resolves no Deno import map, so a project
   // declaring its framework packages only in `deno.json` fails `wrangler dev`
   // with one `Could not resolve "@setu-ts/…"` per package — while the CLI's own
   // next-step hint already said `npm install && npx wrangler dev`. There was
@@ -1569,8 +1565,6 @@ function standaloneNpmFiles(
         )
       }\n`,
     },
-    // JSR packages resolve from npm only when the @jsr scope is mapped.
-    ...(onWorkers ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }] : []),
     {
       path: 'tsconfig.json',
       contents: `${
@@ -1799,7 +1793,13 @@ describe('application composition', () => {
             // it; the renderer never did.
             //
             // Refused in a workspace member, where the root declares it instead.
-            ...(!isWorkspaceMember && manifest?.npmBuild !== undefined
+            //
+            // Every standalone Deno project carries it too (M111d §3.4): the
+            // `setu` CLI runs on Node and imports `setu.config.ts` through Node
+            // resolution, which cannot read this import map — `deno install`
+            // links `node_modules/@setu-ts/*` under this setting, and that link
+            // is what the import resolves through.
+            ...(!isWorkspaceMember && (runtime === 'deno' || manifest?.npmBuild !== undefined)
               ? { nodeModulesDir: 'auto' }
               : {}),
             // Declared by the template rather than fixed here: `deno check` reads
@@ -1807,7 +1807,7 @@ describe('application composition', () => {
             // JSX needs `jsx`, and decorated classes need nothing, because the
             // decorator surface is TC39 standard decorators.
             ...(compilerOptions === undefined ? {} : { compilerOptions }),
-            imports: jsrImports(host, runtime),
+            imports: frameworkImports(host, runtime),
           },
           null,
           2,
@@ -1852,8 +1852,6 @@ describe('application composition', () => {
         )
       }\n`,
     });
-    // JSR packages resolve from npm only when the @jsr scope is mapped.
-    files.push({ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' });
     files.push({
       path: 'tsconfig.json',
       contents: `${

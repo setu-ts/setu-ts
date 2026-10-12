@@ -25,9 +25,9 @@ import {
   EXIT_USAGE,
   PROGRAM_NAME,
   type TargetRuntime,
-  VERSION,
 } from '../constants.ts';
 import { joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
+import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { stringFlag } from '../args.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
@@ -596,14 +596,14 @@ export async function runAddCommand(
     readonly section: string;
     readonly range: string;
   }[] = [
-    { file: 'deno.json', section: 'imports', range: `jsr:${specifier}@^${VERSION}` },
-    { file: 'deno.jsonc', section: 'imports', range: `jsr:${specifier}@^${VERSION}` },
+    { file: 'deno.json', section: 'imports', range: frameworkSpecifier(bare, 'deno') },
+    { file: 'deno.jsonc', section: 'imports', range: frameworkSpecifier(bare, 'deno') },
     {
       file: 'package.json',
       section: [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.section === 'dev'
         ? 'devDependencies'
         : 'dependencies',
-      range: `npm:@jsr/setu-ts__${bare}@^${VERSION}`,
+      range: frameworkSpecifier(bare, 'npm'),
     },
   ];
 
@@ -752,12 +752,6 @@ export async function runAddCommand(
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
   printWiringNote(configSource, bare, deps.log);
-  // Deno is excluded on measurement, not assumption: a Deno full-stack project
-  // carries a `package.json` (its Vite build) and no `.npmrc`, and
-  // `deno install` resolves the `npm:@jsr/…` entry there without one.
-  if (runtime !== 'deno' && edits.some((edit) => edit.path === joinPath(dir, 'package.json'))) {
-    await printJsrRegistryNote(deps.fs, dir, deps.log);
-  }
   printPermissionNote(specifier, deps.log);
   return EXIT_OK;
 }
@@ -801,39 +795,6 @@ function installCommand(runtime: TargetRuntime): string {
     case 'cloudflare-workers':
       return 'npm install';
   }
-}
-
-/** The registry line npm and Bun need to resolve an `npm:@jsr/…` entry. */
-const JSR_REGISTRY_LINE = '@jsr:registry=https://npm.jsr.io';
-
-/**
- * Warns when a `package.json` entry was written that the project cannot resolve.
- *
- * The entry is `npm:@jsr/setu-ts__<pkg>`, which npm and Bun look up on the npm
- * registry unless an `.npmrc` routes the `@jsr` scope to JSR. `setu new` emits
- * that file; a project assembled by hand may not have it, and the install would
- * then fail naming a package that does not exist on npm.
- *
- * @param fs - The filesystem to read through
- * @param dir - The project directory
- * @param log - Output sink
- */
-async function printJsrRegistryNote(
-  fs: IFileSystem,
-  dir: string,
-  log: (message: string) => void,
-): Promise<void> {
-  try {
-    const npmrc = new TextDecoder().decode(await fs.readFile(joinPath(dir, '.npmrc')));
-    if (npmrc.split('\n').some((line) => line.trim() === JSR_REGISTRY_LINE)) return;
-  } catch {
-    // Missing: fall through to the note.
-  }
-  log('');
-  log('Note:');
-  log(`  Add this line to ${escapeName(joinPath(dir, '.npmrc'))}, or the install cannot`);
-  log('  find @jsr packages:');
-  log(`    ${JSR_REGISTRY_LINE}`);
 }
 
 /**

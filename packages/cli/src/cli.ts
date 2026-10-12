@@ -107,7 +107,7 @@ function printHelp(log: (message: string) => void): void {
   log('  --dry-run           Print what would be created, write nothing');
   log('  --dir <path>        Operate on this directory instead of the CWD');
   log(`  --config <path>     Load the app from this module instead of ./${CONFIG_MODULE}`);
-  log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (new; default deno)`);
+  log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (new; default node)`);
   log('  --yes, -y           Take every `new` default and ask nothing');
   log('');
   log('Schematics:');

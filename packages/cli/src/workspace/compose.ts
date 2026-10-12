@@ -265,11 +265,10 @@ ARG MEMBER
 
 WORKDIR /srv
 
-# The root manifest, the lockfile and the npm scope mapping first: they change far
-# less often than member source, so they earn their own cache layer. \`.npmrc\` is
-# not optional — the framework packages come from JSR through npm compatibility,
-# and without the scope mapping none of them resolve.
-COPY package.json ${profile.lockfile}* .npmrc ./
+# The root manifest and the lockfile first: they change far less often than member
+# source, so they earn their own cache layer. The framework packages install from
+# the npm registry under their own names, so no registry mapping is copied.
+COPY package.json ${profile.lockfile}* ./
 
 # The member's own manifest, before its source: an install needs it, and copying
 # the source first would invalidate the install layer on every code change.
@@ -398,7 +397,7 @@ ${envLines}${dependsBlock}
 export function workspaceContainerFiles(
   manifest: WorkspaceManifest,
   transport: TransportSpec,
-  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
+  profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
 ): readonly GeneratedFile[] {
   const backing = transport.compose;
 
