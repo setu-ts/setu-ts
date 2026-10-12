@@ -4,7 +4,7 @@
  * Every broker, queue and RPC client is an OPTIONAL peer of the plugin that
  * loads it, and a package manager never installs an optional peer for the
  * consumer — so a project scaffolded with `--broker redis` failed at its first
- * boot, at the plugin's lazy `import('ioredis')`. The selected arm adds its
+ * boot, at the plugin's lazy import of `ioredis`. The selected arm adds its
  * client to the project itself: a caret range in `package.json`, an `npm:`
  * entry in a Deno import map. The ranges are the plugins' own peer ranges, and
  * a test holds this table equal to the framework's dependency table so the two

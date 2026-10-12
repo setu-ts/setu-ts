@@ -12,14 +12,14 @@ import { tempDir } from '../../../../test/node-helpers.ts';
 import { spawn } from 'node:child_process';
 import * as nodeFs from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from '../../src/cli.ts';
 import { VERSION } from '../../src/constants.ts';
 
-const SETU = new URL('../../src/bin.ts', import.meta.url).pathname;
-const CREATE = new URL('../../../create/src/bin.ts', import.meta.url).pathname;
+const SETU = fileURLToPath(new URL('../../src/bin.ts', import.meta.url));
+const CREATE = fileURLToPath(new URL('../../../create/src/bin.ts', import.meta.url));
 
 let root = '';
 beforeEach(async () => {

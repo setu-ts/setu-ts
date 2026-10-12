@@ -17,8 +17,9 @@ All notable changes to this project are documented here. The format follows
   CLI writes into such a project is Prettier-formatted, so it passes its own `format:check` from the
   first run. A selected broker, queue or gRPC transport now adds its client package (`ioredis`,
   `amqplib`, `nats`, `kafkajs`, the cloud SDKs, Connect) to the project — package managers never
-  install an optional peer, so such a scaffold used to fail at its first boot. Migrations
-  (`db:migrate`) and gRPC code generation (`proto:gen`) run on every target.
+  install an optional peer, so such a scaffold used to fail at its first boot. The generated
+  migration runner (`src/migrations/run.ts`, run with `npx tsx`, `bun run` or `deno run -A`) and
+  gRPC code generation (`proto:gen`) run on every target.
 
 - **npm publishing machinery (M111c).** All 51 manifests gain publish metadata, `src` and LICENSE in
   their tarballs, and audited `sideEffects` declarations. The decorator metadata module is retained;

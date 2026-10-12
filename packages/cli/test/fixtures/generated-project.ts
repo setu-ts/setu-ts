@@ -5,6 +5,7 @@ import {
   unusedPort as nodeUnusedPort,
 } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 /**
  * Helpers for type-checking a project the CLI just scaffolded.
  *
@@ -19,7 +20,7 @@ import * as nodeFs from 'node:fs/promises';
  */
 
 /** This repository's root, three levels up from `packages/cli/test/`. */
-export const REPO_ROOT: string = new URL('../../../../', import.meta.url).pathname.replace(
+export const REPO_ROOT: string = fileURLToPath(new URL('../../../../', import.meta.url)).replace(
   /\/$/,
   '',
 );

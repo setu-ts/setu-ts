@@ -16,13 +16,13 @@ import { denoBinary, tempDir } from '../../../../test/node-helpers.ts';
 import { spawn } from 'node:child_process';
 import * as nodeFs from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from '../../src/cli.ts';
 import { npmInstall, type RegistryOverlay, runIn, startOverlay } from '../fixtures/node-project.ts';
 
-const SETU = new URL('../../src/bin.ts', import.meta.url).pathname;
+const SETU = fileURLToPath(new URL('../../src/bin.ts', import.meta.url));
 
 /**
  * A case installs from the overlay, runs several project scripts and may build
@@ -119,6 +119,18 @@ describe('setu runs a plugin-contributed command', () => {
     const ran = await setu(project, ['greet:hello']);
     expect(ran.code, ran.stderr).toBe(0);
     expect(ran.stdout).toContain('HELLO-FROM-PLUGIN');
+
+    // Control: the project's framework is the INSTALLED tarball, not workspace
+    // source. Poison the installed kernel's entry; a run that still redirected
+    // the project's imports to source would keep passing.
+    const entry = `${project}/node_modules/@setu-ts/kernel/dist/index.js`;
+    // Prepended, so every export stays declared and linking succeeds; the
+    // throw is what evaluating the installed copy does.
+    const original = await nodeFs.readFile(entry, 'utf8');
+    await nodeFs.writeFile(entry, `throw new Error('INSTALLED-KERNEL-LOADED');\n${original}`);
+    const poisoned = await setu(project, ['greet:hello']);
+    expect(poisoned.code).not.toBe(0);
+    expect(poisoned.stderr + poisoned.stdout).toContain('INSTALLED-KERNEL-LOADED');
   });
 
   it('from a Deno project once deno install has linked node_modules', {

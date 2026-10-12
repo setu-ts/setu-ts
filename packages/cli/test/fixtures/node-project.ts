@@ -108,6 +108,29 @@ export function npmRun(project: string, script: string): Promise<CommandResult> 
   return runIn(project, 'npm', ['run', '--silent', script]);
 }
 
+/**
+ * Signals a child spawned with `detached: true` together with everything it
+ * started: `npm` and `tsx` each run the entry in a child of their own, so
+ * signalling the direct child alone would leave the application holding the
+ * pipes this fixture waits on.
+ *
+ * A negative PID addresses the process group on POSIX. Windows has no process
+ * groups, so there the direct child is signalled and the tree kill falls back to
+ * `taskkill /T`; these e2e suites run on Linux in CI.
+ */
+function signalTree(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (pid === undefined) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      process.kill(-pid, signal);
+    }
+  } catch {
+    // The group is already gone; its status and output remain.
+  }
+}
+
 /** A running `npm start`, killed as a whole process group. */
 interface StartedServer {
   readonly status: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
@@ -137,11 +160,7 @@ function startServer(project: string, port: number): StartedServer {
     status,
     output: () => output,
     signal(signal) {
-      try {
-        process.kill(-child.pid!, signal);
-      } catch {
-        // The group is already gone; its status and output remain.
-      }
+      signalTree(child.pid, signal);
     },
   };
 }
@@ -214,10 +233,14 @@ export async function nodeBootAndSignal(
   signal: NodeJS.Signals,
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }> {
   const port = await unusedPort();
+  // Its own process group, so the CLEANUP below reaches the application `tsx`
+  // runs as a child; the signal under test still goes to `tsx` alone, which
+  // relays it — exactly what a container's PID 1 receives.
   const child = spawn(`${project}/node_modules/.bin/tsx`, ['main.ts'], {
     cwd: project,
     env: { ...projectEnv(project), PORT: String(port) },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
   });
   let output = '';
   child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
@@ -230,14 +253,16 @@ export async function nodeBootAndSignal(
     status.then(() => false),
   ]);
   if (!served) {
-    child.kill('SIGKILL');
+    signalTree(child.pid, 'SIGKILL');
     await status;
     throw new Error(`The project never served a request:\n${output}`);
   }
   child.kill(signal);
-  const watchdog = setTimeout(() => child.kill('SIGKILL'), 15_000);
+  const watchdog = setTimeout(() => signalTree(child.pid, 'SIGKILL'), 15_000);
   const ended = await status;
   clearTimeout(watchdog);
+  // A clean exit of `tsx` can still leave a straggler in the group; reap it.
+  signalTree(child.pid, 'SIGKILL');
   return { ...ended, output };
 }
 

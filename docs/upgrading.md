@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### The framework installs from npm; Node is the default target
+### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`
 
 From 0.9.0 the packages are published to npm under their own names (`@setu-ts/kernel`, …), and the
 CLI is a Node program. What an existing project changes depends on its target:

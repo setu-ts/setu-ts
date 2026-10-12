@@ -1,7 +1,7 @@
 import { spawnProcess, tempDir } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from '../../src/cli.ts';
@@ -18,7 +18,7 @@ function spawnFixture(root: string, mode: 'handled' | 'unhandled' | 'prompt') {
       new URL('../../../../test/node-source-register.ts', import.meta.url).href,
       '--import',
       pathToFileURL(tsx).href,
-      new URL('../fixtures/sigint-scaffold.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('../fixtures/sigint-scaffold.ts', import.meta.url)),
       root,
       mode,
     ],

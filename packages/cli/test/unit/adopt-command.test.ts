@@ -277,6 +277,34 @@ describe('runAdoptCommand', () => {
     );
   });
 
+  // A Deno manifest may carry JSONC comments and trailing commas; `JSON.parse`
+  // used to skip such a file silently, leaving its JSR pins unmapped. Its pins
+  // move and its comments survive, because the rewrite edits values in place.
+  it('moves a commented deno.json off JSR pins and keeps its comments', async () => {
+    const h = harness({
+      ...PROJECT,
+      '/work/svc/deno.json': [
+        '{',
+        '  // framework pins',
+        '  "imports": { "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.8.0", },',
+        '}',
+        '',
+      ].join('\n'),
+    });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    const manifest = h.fs.read('/work/svc/apps/svc/deno.json');
+    expect(manifest).toContain('// framework pins');
+    expect(manifest).toMatch(/"@setu-ts\/kernel": "npm:@setu-ts\/kernel@\^/);
+    expect(h.out.text()).toContain('moved @setu-ts/kernel from jsr:@setu-ts/kernel@^0.8.0');
+  });
+
+  it('reports a manifest it cannot read rather than skipping it silently', async () => {
+    const h = harness({ ...PROJECT, '/work/svc/deno.json': '{ "imports": { ' });
+    expect(await h.run(['--port', '4000'])).toBe(0);
+    expect(h.err.text()).toContain('to move its framework pins onto npm');
+    expect(h.err.text()).toContain('by hand');
+  });
+
   it('moves an npm project off the JSR alias as it adopts it', async () => {
     const h = harness({
       ...NODE_PROJECT,

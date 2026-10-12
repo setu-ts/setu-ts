@@ -1527,7 +1527,7 @@ describe('the interactive seam on setu new', () => {
       cwd: '/work',
       log: () => {},
       error: () => {},
-      ask: createTerminalPrompter(() => true, () => '', () => {}),
+      ask: createTerminalPrompter(() => true, () => Promise.resolve(''), () => {}),
     });
     expect(code).toBe(0);
     const yes = harness();

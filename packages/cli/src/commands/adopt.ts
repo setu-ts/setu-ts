@@ -348,6 +348,9 @@ export async function runAdoptCommand(
     // A pre-0.9 project pins the framework through JSR or its npm alias, which
     // the workspace root no longer maps. Its manifest moves onto the npm names.
     const manifestKind = profile.manifestKind;
+    // `deno.json` only: adoption moves the files the CLI emits, and a project's
+    // own `deno.jsonc` is not one of them. The manifest may still carry JSONC
+    // comments, which the rewrite reads and keeps.
     const manifestPath = joinPath(
       project,
       joinPath(memberRoot, manifestKind === 'deno' ? 'deno.json' : 'package.json'),
@@ -361,6 +364,18 @@ export async function runAdoptCommand(
     const pins = pinSource === undefined
       ? { contents: undefined, rewrites: [] }
       : rewriteLegacyPins(pinSource, manifestKind);
+    if (pins.unreadable !== undefined) {
+      // Never silent: the project still pins the framework however it did before,
+      // and the workspace root maps no JSR registry for it.
+      deps.error(
+        `Could not read ${escapeName(manifestPath)} to move its framework pins onto npm: ${
+          escapeName(pins.unreadable)
+        }`,
+      );
+      deps.error(
+        'Rewrite any jsr:@setu-ts/* or npm:@jsr/setu-ts__* pins to the npm packages by hand.',
+      );
+    }
     if (pins.contents !== undefined) {
       await writeFiles(
         deps.fs,

@@ -169,7 +169,9 @@ WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
 # The registry the install step resolves from. Unset by default, which is the
 # public npm registry; a gate building against a local registry passes it with
-# \`--build-arg\`. An ARG never reaches the running container's environment.
+# \`--build-arg\`. An ARG never reaches the running container's environment, but
+# its value IS recorded in the image history: pass a registry URL here, never a
+# credential — an authenticated registry belongs in a \`--secret\` mount.
 ARG NPM_CONFIG_REGISTRY=
 
 RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
@@ -288,7 +290,9 @@ COPY lib[s] ./${LIBS_DIR}/
 
 # The registry the install step resolves from. Unset by default, which is the
 # public npm registry; a gate building against a local registry passes it with
-# \`--build-arg\`. An ARG never reaches the running container's environment.
+# \`--build-arg\`. An ARG never reaches the running container's environment, but
+# its value IS recorded in the image history: pass a registry URL here, never a
+# credential — an authenticated registry belongs in a \`--secret\` mount.
 ARG NPM_CONFIG_REGISTRY=
 
 RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && ${profile.install}

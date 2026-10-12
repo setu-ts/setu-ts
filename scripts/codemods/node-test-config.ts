@@ -42,6 +42,8 @@ const include = member === 'tooling'
   ? [
     'scripts/codemods/*.ts',
     'test/node-helpers.ts',
+    // Decides which importers a source redirect may NOT touch (M111d).
+    'test/node-source-hooks.ts',
     // The scaffold-install gates' packer and local registry (M111d): `node:`
     // APIs only, and the overlay binds a real socket, which the root Deno lane
     // grants no permission for.

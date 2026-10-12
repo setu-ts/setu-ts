@@ -4,6 +4,7 @@ import {
   spawnProcess,
   tempDir,
 } from '../../../../test/node-helpers.ts';
+import { fileURLToPath } from 'node:url';
 import * as nodeFs from 'node:fs/promises';
 /**
  * The gate M63 exists for: a stock scaffold is installed, formatted, linted,
@@ -266,7 +267,9 @@ async function denoRunRetry(
  * @returns Its exit code and combined output
  */
 async function prettierCheck(project: string): Promise<{ code: number; output: string }> {
-  const bin = new URL('../../node_modules/prettier/bin/prettier.cjs', import.meta.url).pathname;
+  const bin = fileURLToPath(
+    new URL('../../node_modules/prettier/bin/prettier.cjs', import.meta.url),
+  );
   const result = await runProcess(process.execPath, {
     args: [bin, '--check', '.'],
     cwd: project,

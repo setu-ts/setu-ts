@@ -74,6 +74,63 @@ afterEach(async () => {
   await nodeFs.rm(root, { recursive: true }).catch(() => {});
 });
 
+/** What one request served: enough to tell the advertised endpoint from a catch-all. */
+interface Served {
+  readonly status: number;
+  /** The path the response finally came from, after any redirect. */
+  readonly landed: string;
+  readonly json: boolean;
+  readonly body: string;
+}
+
+/** Fetches `path`, following redirects, and records what was served. */
+async function fetchServed(origin: string, path: string): Promise<Served> {
+  const response = await fetch(`${origin}${path}`);
+  const body = await response.text();
+  return {
+    status: response.status,
+    landed: new URL(response.url).pathname,
+    json: (response.headers.get('content-type') ?? '').includes('json'),
+    body,
+  };
+}
+
+/**
+ * The properties a path's response must carry, by what the README says it serves.
+ * Each entry is something a fallthrough page (an SSR catch-all, a sign-in
+ * redirect, the hello-world route) does NOT have.
+ */
+function expectedFor(path: string, host: string): Partial<Served> & Record<string, unknown> {
+  const has = (needle: string) => ({ body: expect.stringContaining(needle) });
+  switch (path) {
+    case '/health':
+    case '/live':
+    case '/ready':
+      return { status: 200, landed: path, json: true, ...has('"status"') };
+    case '/metrics':
+      return { status: 200, landed: path, ...has('# TYPE ') };
+    case '/openapi.json':
+      return { status: 200, landed: path, json: true, ...has('"openapi"') };
+    case '/docs':
+      return { status: 200, landed: path, ...has('swagger') };
+    case '/greetings':
+      return { status: 200, landed: path, json: true };
+    case '/greetings/Setu':
+      return { status: 200, landed: path, ...has('Setu') };
+    case '/products':
+      // Behind sign-in: it must redirect, and land on the sign-in form.
+      return { status: 200, landed: '/login', ...has('<form') };
+    case '/login':
+      return { status: 200, landed: path, ...has('<form') };
+    case '/':
+      return host === 'full-stack'
+        ? { status: 200, landed: path, ...has('<html') }
+        : { status: 200, landed: path, json: true };
+    default:
+      throw new Error(`No expectation for advertised path ${path} — add one.`);
+  }
+}
+
 /** Runs the CLI with the temp root as its working directory. */
 async function run(args: readonly string[]): Promise<number> {
   return await runCli(args, {
@@ -131,18 +188,16 @@ describe('a scaffolded npm project runs its own scripts', () => {
       const advertised = await advertisedPaths(project);
       // Vacuity guard: every host lists at least `/`.
       expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(1);
-      const statuses: Record<string, number> = {};
+      const served: Record<string, Served> = {};
       const { output } = await withNodeServer(project, async (origin) => {
-        for (const path of advertised) {
-          const response = await fetch(`${origin}${path}`);
-          statuses[path] = response.status;
-          await response.body?.cancel();
-        }
+        for (const path of advertised) served[path] = await fetchServed(origin, path);
       });
       for (const path of advertised) {
-        // `fetch` follows redirects, so a page behind sign-in lands on the
-        // sign-in form and answers 200 as well.
-        expect({ path, status: statuses[path] }, output).toEqual({ path, status: 200 });
+        expect({ path, ...served[path] }, output).toEqual({
+          path,
+          ...served[path],
+          ...expectedFor(path, label),
+        });
       }
     });
   }
@@ -174,18 +229,19 @@ describe('a scaffolded npm project runs its own scripts', () => {
         const result = await npmRun(project, script);
         expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
       }
-      const { result, output } = await withNodeServer(project, async (origin) => {
-        const response = await fetch(`${origin}/widget`);
-        await response.body?.cancel();
-        return response.status;
-      });
-      expect(result, output).toBe(200);
+      const { result, output } = await withNodeServer(
+        project,
+        async (origin) => await fetchServed(origin, '/widget'),
+      );
+      // The generated module's own list route answers the stub service's empty
+      // list as JSON — not merely some 200 a catch-all could also return.
+      expect(result, output).toEqual({ ...result, status: 200, json: true, body: '{"items":[]}' });
     });
   }
 
   // `--broker redis` declares the client its plugin loads: a package manager
   // never installs an optional peer for the consumer, so before M111d the first
-  // boot failed at the plugin's own `import('ioredis')`.
+  // boot failed at the plugin's own lazy import of `ioredis`.
   it('installs the client a selected broker loads', { timeout: INSTALL_TIMEOUT_MS }, async () => {
     const project = await scaffoldAndInstall(['--template', 'microservice', '--broker', 'redis']);
     expect(await installed(project, 'ioredis')).toBe(true);
