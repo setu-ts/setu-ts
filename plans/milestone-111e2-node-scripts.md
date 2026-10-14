@@ -449,8 +449,34 @@ these negative controls, each observed failing and then reverted:
 | Trusted repository scripts             | scoped `--allow-*` flags                               | unrestricted `node`                                                                                                                                               | loss of defence in depth for the repository's own code; release scripts touching npm/JSR are unchanged in what they call                                                                                     |
 | Registry tarball reads (`@since` gate) | Deno with `--allow-net` scoped to two hosts            | Node `fetch`, hosts fixed in code; the 64 MiB decompression cap kept                                                                                              | host scoping is now by code rather than by flag; `test/unit/check-since-tags.test.ts` asserts only the two hosts are fetched                                                                                 |
 
+**Reviewed flow.** `check:docs` reads every Markdown file, evaluates each `assert:js` claim in a
+child process, renders each documented view component in a second child process, and compares the
+results. Both children run code taken from documents in the working tree.
+
+**Assets.** The repository's git credentials (`.git/config` in a CI checkout carries a token),
+environment variables (CI secrets, a developer's tokens), local files outside the package sources
+(`.env`, keys), and the integrity of the working tree.
+
+**Attackers.** (1) A contributor whose pull request adds or edits an `assert:js` row or a documented
+component, run by CI or by a reviewer checking the branch out; (2) a hostile value inside a document
+that escapes the `vm` context. CI already runs a pull request's test code with full access, so the
+sandboxes bound what a document can do on a developer's machine and do not claim to contain a pull
+request in CI.
+
+**Obligations for the implementation audit.**
+
+1. A claim and a probe receive an empty environment.
+2. A claim and a probe can read only the import grants in `scripts/lib/sandbox.ts` (plus the probe's
+   scratch directory): `.git`, the root README and any `.env` are refused.
+3. Neither can write a file or start a child process.
+4. A hung claim or probe is killed at its deadline, with its process group, and fails the gate.
+5. A failing, malformed or truncated result batch fails closed.
+6. The `@since` gate fetches only `jsr.io` and `registry.npmjs.org`, and keeps its 64 MiB
+   decompression cap.
+7. The trusted scripts' dropped permissions (§3.4) cover only repository-authored code.
+
 A committed-tree security audit runs before merge, per CLAUDE.md, because the two sandboxed gates
-cross a trust boundary.
+cross a trust boundary. This review was completed during implementation (the M101a precedent).
 
 ## 11. Corrections made during implementation
 
