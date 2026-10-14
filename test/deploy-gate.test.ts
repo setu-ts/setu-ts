@@ -389,7 +389,8 @@ describe('graceful shutdown in the containerized examples', () => {
     // A rejecting onShutdown hook makes stop() reject. Verified against a real app: without
     // .catch the process dies with "Uncaught (in promise)" and Deno.exit(0) never runs.
     for (const path of MATRIX_ENTRY_POINTS) {
-      expect(read(path)).toMatch(/app\.stop\(\)[\s\S]{0,300}\.catch\(/);
+      // `\s*`: Prettier breaks a long chain before `.stop()`.
+      expect(read(path)).toMatch(/app\s*\.stop\(\)[\s\S]{0,300}\.catch\(/);
     }
   });
 });
