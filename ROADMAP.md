@@ -13908,7 +13908,8 @@ own tests and the Deno-target CLI gate.
 
 - Prettier and ESLint with `typescript-eslint`, configured to keep the rules the gates enforce
   today: `no-explicit-any`, `consistent-type-imports` (in place of `verbatim-module-syntax`),
-  `no-console` outside `cli`/`scripts`, unused-variable errors with no underscore escape, and a
+  `no-console` outside `cli`/`scripts`, unused-variable errors that ignore a leading `_` exactly as
+  `deno lint` does (1,381 sites rely on it; removing the escape is a separate decision), and a
   restricted-syntax rule for `new Function` (which `deno lint` never caught — a gain).
 - Root `test/` moves to Vitest alongside the scripts it tests.
 - The Deno scripts ported to Node (`tsx` or compiled); the doc gates (`check:docs`, `check:plan`,
@@ -13919,6 +13920,16 @@ own tests and the Deno-target CLI gate.
 - `apps/*` move to pnpm; `check:apps` runs them on Node; `apps/compiled-binary` moves to Node SEA or
   is retired with the reason recorded.
 - **Exit:** `deno.json`, `deno.lock` and every `deno task` are gone from the root; CI green.
+
+Delivered as three PRs, in order:
+
+- **111e1** — Prettier and ESLint replace `deno fmt` and `deno lint` for the repository's own code,
+  matching today's formatting settings and lint gate. The `deno task fmt`, `fmt:check` and `lint`
+  names stay, re-pointed, so workflows and test pins are unchanged.
+- **111e2** — repository scripts and root `test/` move to Node (Vitest); the doc gates are
+  re-pointed and the JSDoc ratchet re-measured.
+- **111e3** — CI on `actions/setup-node` + pnpm, `apps/*` on pnpm, `apps/compiled-binary` decided
+  after a Node SEA probe, and `deno.json`/`deno.lock` removed from the root.
 
 ### Milestone 111f: Governing Documents and the JSR Sunset
 
@@ -14187,4 +14198,7 @@ patch by construction and gains nothing new here.
 | 111c      | ✅     | every member + release tooling — npm publishing machinery (dry runs; the cut follows 111d) ([#448](https://github.com/setu-ts/setu-ts/pull/448))                                                                                              |
 | 111d      | ✅     | cli — Node-first: npm `bin`, Node as the default generated target ([#450](https://github.com/setu-ts/setu-ts/pull/450))                                                                                                                       |
 | 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
+| 111e1     | ⬜     | Prettier + ESLint replace deno fmt / deno lint; task names kept                                                                                                                                                                               |
+| 111e2     | ⬜     | repository scripts and root tests on Node (Vitest); doc gates re-pointed                                                                                                                                                                      |
+| 111e3     | ⬜     | CI on pnpm, apps on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                                           |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |

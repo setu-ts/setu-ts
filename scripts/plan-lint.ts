@@ -46,7 +46,18 @@ const NON_PLAN = /^(?:TEMPLATE|README)\.md$/;
  * digits-only pattern rejected every one of them, so no sub-milestone plan
  * could ever lint clean.
  */
-const CANONICAL_ROOT = /^(?:milestone-\d+[a-z]?-[a-z0-9.-]+|TEMPLATE|README)\.md$/;
+const CANONICAL_ROOT = /^(?:milestone-\d+(?:[a-z]\d?)?-[a-z0-9.-]+|TEMPLATE|README)\.md$/;
+
+/**
+ * Reports whether a file name may sit at `plans/` root. A milestone number takes an optional
+ * letter and, for a lettered milestone split into numbered parts (M111e1), one digit after it.
+ *
+ * @param name - The file's base name.
+ * @returns `true` for a canonical plan, `TEMPLATE.md` or `README.md`.
+ */
+export function isCanonicalPlanName(name: string): boolean {
+  return CANONICAL_ROOT.test(name);
+}
 
 /** Every plan must contain a heading matching each of these. */
 const REQUIRED_SECTIONS: readonly { readonly label: string; readonly match: RegExp }[] = [
@@ -175,7 +186,7 @@ async function rootHygiene(): Promise<Finding[]> {
   const findings: Finding[] = [];
   for await (const entry of Deno.readDir(PLANS_DIR)) {
     if (!entry.isFile || !entry.name.endsWith('.md')) continue;
-    if (!CANONICAL_ROOT.test(entry.name)) {
+    if (!isCanonicalPlanName(entry.name)) {
       findings.push({
         file: `${PLANS_DIR}/${entry.name}`,
         line: null,
