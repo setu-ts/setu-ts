@@ -162,4 +162,17 @@ describe('dependency drift gate configuration', () => {
     const guards = text.match(/if: always\(\) && steps\.resolve\.outcome == 'success'/g);
     expect(guards?.length).toBe(4);
   });
+
+  it('runs format and lint only after the fresh Node install succeeded', async () => {
+    const text = await readWorkflow();
+    // Prettier and ESLint come from that install (M111e1). Without this guard a
+    // failed resolution would be reported as a format or lint failure.
+    for (const name of ['Format check', 'Lint']) {
+      const start = text.indexOf(`- name: ${name}\n`);
+      const step = text.slice(start, text.indexOf('\n\n', start));
+      expect(step).toContain(
+        "if: always() && steps.resolve.outcome == 'success' && steps.node-resolve.outcome == 'success'",
+      );
+    }
+  });
 });

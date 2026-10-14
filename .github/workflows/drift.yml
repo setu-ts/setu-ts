@@ -443,18 +443,20 @@ jobs:
           # recovered, so this is not dependency drift.
           exit 0
 
-      # `deno fmt` and `deno lint` accept neither `--lock` nor `--frozen` and
-      # never read a lockfile, so neither can run "against fresh resolution".
-      # They stay as ordinary gates -- a fresh graph cannot change their result.
+      # Prettier and ESLint (M111e1) run from the freshly resolved Node install,
+      # so a dependency drift CAN change their result, and both also need that
+      # install to have succeeded: without the node-resolve guard a failed
+      # resolution would report as a format or lint failure. The fixture half
+      # of fmt:check is `deno fmt`, which reads no lockfile.
       - name: Format check
         id: fmt
-        if: always() && steps.resolve.outcome == 'success'
+        if: always() && steps.resolve.outcome == 'success' && steps.node-resolve.outcome == 'success'
         continue-on-error: true
         run: deno task fmt:check
 
       - name: Lint
         id: lint
-        if: always() && steps.resolve.outcome == 'success'
+        if: always() && steps.resolve.outcome == 'success' && steps.node-resolve.outcome == 'success'
         continue-on-error: true
         run: deno task lint
 
