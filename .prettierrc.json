@@ -5,5 +5,14 @@
   "semi": true,
   "trailingComma": "all",
   "proseWrap": "always",
-  "endOfLine": "lf"
+  "endOfLine": "lf",
+  "embeddedLanguageFormatting": "off",
+  "overrides": [
+    {
+      "files": ["*.md"],
+      "options": {
+        "embeddedLanguageFormatting": "auto"
+      }
+    }
+  ]
 }

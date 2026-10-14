@@ -16,9 +16,7 @@ import { UserList } from '../fixtures/users.tsx';
 
 /** An `html`-tag component authored in a plain .ts file. */
 function TaggedPage(props: { readonly users: readonly string[] }) {
-  return html`<ul>
-    ${props.users.map((user) => html`<li>${user}</li>`)}
-  </ul>`;
+  return html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
 }
 
 describe('escaping', () => {

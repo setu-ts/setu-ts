@@ -181,13 +181,7 @@ try {
     ),
   });
 
-  const query = gql`
-    {
-      books {
-        title
-      }
-    }
-  `;
+  const query = gql`{ books { title } }`;
   const first = await apollo.query({ query, fetchPolicy: 'no-cache' });
   const second = await apollo.query({ query, fetchPolicy: 'no-cache' });
 
