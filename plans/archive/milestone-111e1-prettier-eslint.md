@@ -64,16 +64,21 @@ the rules the current gates enforce carried across, while every other gate keeps
 ### 3.1 Prettier configuration
 
 - **Decision:** `.prettierrc.json` = `printWidth 100`, `tabWidth 2`, `singleQuote`, `semi`,
-  `trailingComma "all"`, `proseWrap "always"`, `endOfLine "lf"` — the `deno fmt` settings
-  (maintainer decision 2026-10-14). `.prettierignore` carries every current `fmt.exclude` and global
-  `exclude` entry, plus three groups whose bytes another mechanism owns: the five SDK `*-client.ts`
-  fixtures (§3.4); every file `node-manifests` generates (§1), whose `--check` already enforces
-  exact bytes; and `.github/workflows/`, which 111e3 rewrites and nine root tests pin by text. The
-  one-time reformat is a commit containing nothing but formatter output, and its SHA goes in
-  `.git-blame-ignore-revs`. Not carried: Deno's exclusions of `scripts/codemods`, `vitest.config.ts`
-  and `test/node`, which exist because Deno cannot resolve that Node code — Prettier and ESLint can,
-  so both cover it. The commit after it reconciles what the reformat moved: the 21 `file:line`
-  references in `docs/health-indicators.md`.
+  `trailingComma "all"`, `proseWrap "always"`, `endOfLine "lf"`, `embeddedLanguageFormatting "off"`
+  — the `deno fmt` settings (embedded formatting rewrites the contents of `html`/`gql` tagged
+  templates, in code and in Markdown fences alike, which changes rendered output; `deno fmt` never
+  did it, and `prettier --debug-check` does not see it — found by the Node suite and the code
+  review, guarded by `test/node/prettier-config.test.ts`) (maintainer decision 2026-10-14).
+  `.prettierignore` carries every current `fmt.exclude` and global `exclude` entry, plus three
+  groups whose bytes another mechanism owns: the five SDK `*-client.ts` fixtures (§3.4) and the
+  CLI's `devtool-source-shapes.ts` fixture, compared against generator output; every file
+  `node-manifests` generates (§1), whose `--check` already enforces exact bytes; and
+  `.github/workflows/`, which 111e3 rewrites and nine root tests pin by text. The one-time reformat
+  is a commit containing nothing but formatter output, and its SHA goes in `.git-blame-ignore-revs`.
+  Not carried: Deno's exclusions of `scripts/codemods`, `vitest.config.ts` and `test/node`, which
+  exist because Deno cannot resolve that Node code — Prettier and ESLint can, so both cover it. The
+  commit after it reconciles what the reformat moved: the 21 `file:line` references in
+  `docs/health-indicators.md`.
 - **Why:** the residual diff is algorithmic; isolating it in one commit keeps `git blame` useful and
   review of the real changes separate. Formatting a generated file or a pinned workflow would only
   trade one byte gate's failure for another's.

@@ -6198,6 +6198,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   real use: its task could run `git` only, so it rewrote 186 files and died with `NotCapable` before
   regenerating manifests, and it rewrote history in archived plans and a colocated test fixture. Two
   tests pinned `0.8.0` as a literal, which the bump correctly leaves alone, and failed.
+- **Milestone 111e1** (repository tooling — Prettier and ESLint replace `deno fmt` and `deno lint`):
+  `deno task fmt`/`fmt:check`/`lint` keep their names and now run Prettier and ESLint, so every
+  workflow and pin naming them stays true; the five SDK client fixtures keep a `deno fmt --check`,
+  the generator's output target. The 1,775-file reformat is its own commit in
+  `.git-blame-ignore-revs`. A committed codemod converted all 427 `deno-lint-ignore` directives,
+  found from a real parse after a bare scanner missed 107. ESLint then found 70 problems deno did
+  not report, including seven `@ts-ignore` comments that suppressed nothing and four errors now
+  carrying their `cause`. **Three Codex review rounds and the Node suite found what the gates did
+  not.** typescript-eslint's preset silently drops about fifteen rules deno enforced, restored;
+  `.js`/`.mjs` are parsed by `espree` because nothing type-checks them; and Prettier's embedded
+  formatting rewrote `html`/`gql` template contents in code and Markdown fences, changing rendered
+  output while `prettier --debug-check` reported no AST change — embedded formatting is off, nine
+  files restored, and a test guards it. A parity test plants each carried rule's violation —
+  complete (PR pending)
 - **Next milestone** — publish `v0.9.0` (placeholders, trust, OIDC tag), then M104, the `v0.9.0`
   client-brief run; see ROADMAP.md.
 
