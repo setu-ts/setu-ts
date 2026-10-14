@@ -6211,7 +6211,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   formatting rewrote `html`/`gql` template contents in code and Markdown fences, changing rendered
   output while `prettier --debug-check` reported no AST change — embedded formatting is off, nine
   files restored, and a test guards it. A parity test plants each carried rule's violation —
-  complete (PR pending)
+  complete (PR #455)
 - **Next milestone** — publish `v0.9.0` (placeholders, trust, OIDC tag), then M104, the `v0.9.0`
   client-brief run; see ROADMAP.md.
 
