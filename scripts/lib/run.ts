@@ -26,7 +26,9 @@ export function run(
     const child = spawn(command, [...args], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       ...(options.env === undefined ? {} : { env: options.env }),
-      detached: true,
+      // Its own process group only when a deadline must kill the whole tree; otherwise
+      // the child stays in the caller's group, so a Ctrl+C at the terminal reaches it.
+      detached: options.timeoutMs !== undefined,
       stdio: [
         options.stdin === undefined ? (options.inherit ? 'inherit' : 'ignore') : 'pipe',
         options.inherit ? 'inherit' : 'pipe',

@@ -442,12 +442,53 @@ these negative controls, each observed failing and then reverted:
 
 ## 10. Design security review
 
-| Boundary                               | Before                                      | After                                                                            | Residual risk / decision                                                                                                                |
-| -------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Prose-assertion expressions (Markdown) | `deno run` with no permissions              | `node --permission`, no grants, `env: {}`, timeout, `vm` context with no `fetch` | network reachable through a `vm` escape; accepted, because the inputs are reviewed Markdown in this repository (maintainer, 2026-10-15) |
-| Example-behaviour probe                | `deno run --allow-read`                     | `node --permission --allow-fs-read=<repo>`, `env: {}`, timeout                   | network not gated; accepted on the same basis; no write and no child process                                                            |
-| Trusted repository scripts             | scoped `--allow-*` flags                    | unrestricted `node`                                                              | loss of defence in depth for the repository's own code; release scripts touching npm/JSR are unchanged in what they call                |
-| Registry tarball reads (`@since` gate) | Deno with `--allow-net` scoped to two hosts | Node `fetch`, hosts fixed in code; the 64 MiB decompression cap kept             | host scoping is now by code rather than by flag; `test/unit/check-since-tags.test.ts` asserts only the two hosts are fetched            |
+| Boundary                               | Before                                                 | After                                                                                                            | Residual risk / decision                                                                                                                                                                                                            |
+| -------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prose-assertion expressions (Markdown) | `deno run` with no permissions (local imports allowed) | `node --permission --allow-fs-read=<repo>`, source hooks, `env: {}`, timeout, `vm` context with no `fetch` (§11) | repository files readable and network reachable through a `vm` escape; accepted, because the inputs are reviewed Markdown in this repository (maintainer, 2026-10-15); write, child process and reads outside the repository denied |
+| Example-behaviour probe                | `deno run --allow-read`                                | `node --permission --allow-fs-read=<repo>`, `env: {}`, timeout                                                   | network not gated; accepted on the same basis; no write and no child process                                                                                                                                                        |
+| Trusted repository scripts             | scoped `--allow-*` flags                               | unrestricted `node`                                                                                              | loss of defence in depth for the repository's own code; release scripts touching npm/JSR are unchanged in what they call                                                                                                            |
+| Registry tarball reads (`@since` gate) | Deno with `--allow-net` scoped to two hosts            | Node `fetch`, hosts fixed in code; the 64 MiB decompression cap kept                                             | host scoping is now by code rather than by flag; `test/unit/check-since-tags.test.ts` asserts only the two hosts are fetched                                                                                                        |
 
 A committed-tree security audit runs before merge, per CLAUDE.md, because the two sandboxed gates
 cross a trust boundary.
+
+## 11. Corrections made during implementation
+
+Each item below is a place where the plan did not survive the source or a measurement. The behaviour
+shipped is the corrected one.
+
+- **§3.5 prose assertions.** A child with no read grant cannot run the claims the documents already
+  carry: `packages/common/README.md` and `packages/auth-plugin/README.md` assert results through
+  `await import('@setu-ts/common')`, which Deno's loader allowed with no permission. The child now
+  gets `--allow-fs-read=<repository>` and the source hooks, and each claim runs as an awaited
+  `async` body with `importModuleDynamically` set to the main loader. Writing, child processes and
+  reads outside the repository stay denied, and the environment is still empty;
+  `test/prose-assertion-gate.test.ts` asserts all three plus a successful package import.
+- **§3.5 example behaviour.** `module.register` starts a loader thread, which `--permission` refuses
+  (`ERR_ACCESS_DENIED`, `WorkerThreads`). The source hooks use the synchronous
+  `module.registerHooks` instead, so no worker grant is needed.
+- **§3.8 check.** `test/browser-gate.test.ts` imports the full-stack app's Deno browser harness,
+  whose `npm:playwright@1.63.0` specifier `tsc` cannot resolve. It is excluded through
+  `CHECK_EXCLUDED_UNTIL_APPS_MOVE` in `scripts/node-manifests.ts` until M111e3 moves the apps to
+  pnpm; it still runs under Vitest.
+- **§3.9 ratchet scope.** TypeDoc reported 554 warnings. 317 are missing comments on members of
+  anonymous object types (`Foo.__type.bar`), which `deno doc --lint` never required, so
+  `inRatchetScope` excludes them and the baseline is **237**. The re-derived `CLEAN_PACKAGES` has 31
+  packages and includes all ten the Deno ratchet kept clean. TypeDoc also needed
+  `packagesRequiringDocumentation` to name every published package; without it the combined run
+  checked documentation in the root package only.
+- **§3.10 export tables.** Acceptance is no README diff except two corrections of `deno doc` output:
+  the `@setu-ts/cli/main` table lists its five exports (it rendered empty), and the deprecated
+  `IAwsS3Client` alias is an `interface` (it rendered as `reference`). A `const` initialised with an
+  arrow function or function expression is reported as `function`, as `deno doc` did.
+- **§3.11 fences.** Guide fences also import `@std/testing/bdd`, `@std/expect` and
+  `cloudflare:workers`, and README fences import `@setu-ts/localization-plugin/format`. The snippet
+  `tsconfig.json` maps the first two to Vitest re-exports, `cloudflare:workers` to a typed
+  declaration of `env` and `waitUntil` (stricter than `deno check`, which left it untyped), and
+  every package subpath to its source. The compiler runs in a worker thread with an incremental
+  context, because the uncached inventory exceeded the tooling timeout.
+- **§3.12 retained Deno users.** Two more remain until M111e3: the `check:browser` task (the
+  full-stack app's browser harness) and `test/fixtures/contract-ast.ts` (`deno doc --json`).
+  `test/node/task-surface.test.ts` pins both.
+- **§1 inventory.** `HEAD` had 62 root test files plus four script test files; the 81 counted in §1
+  included helpers and fixtures. The codemod changed 55 files.

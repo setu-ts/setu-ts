@@ -46,6 +46,13 @@ describe('repository subprocess helper', () => {
     expect(isNotFound(new Error('ENOENT'))).toBe(false);
     expect(isNotFound({ code: 'EACCES' })).toBe(false);
   });
+  it('keeps an untimed child in the caller process group so Ctrl+C reaches it', async () => {
+    const pgid = async (script: string, options = {}) =>
+      (await run('sh', ['-c', script], options)).stdout.trim();
+    const own = await pgid(`ps -o pgid= -p ${process.pid}`);
+    expect(await pgid('ps -o pgid= -p $$')).toBe(own);
+    expect(await pgid('ps -o pgid= -p $$', { timeoutMs: 5000 })).not.toBe(own);
+  });
   it('kills the child process group on timeout', async () => {
     const result = await run(
       process.execPath,
