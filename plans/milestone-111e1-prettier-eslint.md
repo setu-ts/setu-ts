@@ -70,7 +70,9 @@ the rules the current gates enforce carried across, while every other gate keeps
   fixtures (§3.4); every file `node-manifests` generates (§1), whose `--check` already enforces
   exact bytes; and `.github/workflows/`, which 111e3 rewrites and nine root tests pin by text. The
   one-time reformat is a commit containing nothing but formatter output, and its SHA goes in
-  `.git-blame-ignore-revs`. The commit after it reconciles what the reformat moved: the 21
+  `.git-blame-ignore-revs`. Not carried: Deno's exclusions of `scripts/codemods`, `vitest.config.ts`
+  and `test/node`, which exist because Deno cannot resolve that Node code — Prettier and ESLint can,
+  so both cover it. The commit after it reconciles what the reformat moved: the 21
   `file:line` references in `docs/health-indicators.md`.
 - **Why:** the residual diff is algorithmic; isolating it in one commit keeps `git blame` useful and
   review of the real changes separate. Formatting a generated file or a pinned workflow would only
@@ -98,14 +100,13 @@ the rules the current gates enforce carried across, while every other gate keeps
     `/* eslint-disable */` (deno's `ban-untagged-ignore`), and
     `linterOptions.reportUnusedDisableDirectives: 'error'` (deno's `ban-unused-ignore`).
   - Node globals (the `globals` package) for `**/*.{js,mjs}`.
-  - Global ignores from `.gitignore` via `includeIgnoreFile` (`@eslint/compat`), plus the current
-    `lint.exclude` and global `exclude` entries.
+  - Global ignores from `.gitignore` via `includeIgnoreFile` (`@eslint/compat`), plus `website/` and
+    `apps/full-stack/build/` (§3.1 says why the Node-code exclusions are not carried).
 
   Dropped, and listed in the PR: `no-sync-fn-in-async-fn` (its targets are the `Deno.*Sync` calls
   111e2 removes) and the Deno-only `no-sloppy-imports`, `no-unversioned-import`,
-  `no-deprecated-deno-api`. The eleven `jsx-*` rules are carried by `eslint-plugin-react` only if a
-  probe of it finds anything in the seven `.tsx` files; otherwise they are listed as dropped with
-  the probe's result. Recommended rules `deno lint` did not enforce stay ON; their ~70 findings are
+  `no-deprecated-deno-api`. The eleven `jsx-*` rules are dropped: `eslint-plugin-react` 7.37.5, the
+  current release, declares no ESLint 10 support (`peerDependencies.eslint` ends at `^9.7`). Recommended rules `deno lint` did not enforce stay ON; their ~70 findings are
   fixed, or disabled inline with a reason where the code is deliberate.
 - **Why:** the gate must keep everything it enforces today; a recommended preset is not that, as the
   override's `no-unreachable` shows.

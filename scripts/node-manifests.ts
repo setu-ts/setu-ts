@@ -108,6 +108,17 @@ const TEST_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
   '@hono/node-server': '^2.0.0',
 };
 
+/** The repository's formatter and linter, root-only and pinned like the test tools (M111e1 §3.5). */
+const LINT_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
+  'prettier': '3.9.10',
+  'eslint': '10.12.0',
+  '@eslint/js': '10.0.1',
+  '@eslint/compat': '2.1.1',
+  '@eslint-community/eslint-plugin-eslint-comments': '4.8.1',
+  'typescript-eslint': '8.71.2',
+  'globals': '17.13.0',
+};
+
 const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
 
 /** The package whose manifest the §3.4 safeguard-2 guard applies to. */
@@ -555,8 +566,15 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
             'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts',
           'test:coverage':
             'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts --coverage',
+          format: 'prettier --write .',
+          'format:check': 'prettier --check .',
+          lint: 'eslint .',
         },
-        devDependencies: { ...BUILD_DEV_DEPENDENCIES, ...TEST_DEV_DEPENDENCIES },
+        devDependencies: {
+          ...BUILD_DEV_DEPENDENCIES,
+          ...TEST_DEV_DEPENDENCIES,
+          ...LINT_DEV_DEPENDENCIES,
+        },
       },
       null,
       2,

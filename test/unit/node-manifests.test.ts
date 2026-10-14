@@ -491,6 +491,24 @@ describe('generateWorkspace — rendered files', () => {
     expect(root.devDependencies.typescript).toBe('6.0.3');
   });
 
+  it('carries the formatter and linter at the root, with their scripts', () => {
+    const root = JSON.parse(renderRootPackageJson(['packages/a']));
+    expect(root.scripts).toMatchObject({
+      format: 'prettier --write .',
+      'format:check': 'prettier --check .',
+      lint: 'eslint .',
+    });
+    expect(root.devDependencies).toMatchObject({
+      prettier: '3.9.10',
+      eslint: '10.12.0',
+      '@eslint/js': '10.0.1',
+      '@eslint/compat': '2.1.1',
+      '@eslint-community/eslint-plugin-eslint-comments': '4.8.1',
+      'typescript-eslint': '8.71.2',
+      globals: '17.13.0',
+    });
+  });
+
   it('writes nothing when any member is refused, and refuses a duplicate name', () => {
     const result = generateWorkspace([COMMON, { ...COMMON, dir: 'packages/twin' }]);
     expect(result.refusals).toContain('duplicate workspace member name: @setu-ts/common');
