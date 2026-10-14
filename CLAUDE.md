@@ -6211,8 +6211,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   output while `prettier --debug-check` reported no AST change — embedded formatting is off, nine
   files restored, and a test guards it. A parity test plants each carried rule's violation —
   complete (PR #455)
-- **Next milestone** — publish `v0.9.0` (placeholders, trust, OIDC tag), then M104, the `v0.9.0`
-  client-brief run; see ROADMAP.md.
+- **Milestone 111e2** (repository tooling — scripts and root tests on Node): every `scripts/*.ts`
+  runs under plain `node` through one subprocess helper (`scripts/lib/run.ts`); root tests run in
+  the Vitest `tooling` member, whose per-file thresholds replace `script-coverage.ts` over the same
+  frozen inventory plus the new helpers; `check` is `tsc` over package sources, package tests,
+  scripts and root tests (the Deno-lane files stay checked by `deno test`); the JSDoc ratchet runs
+  on TypeDoc 0.28.20; README export tables and the fence compiler use the TypeScript compiler API;
+  and the two documentation sandboxes run under `node --permission`. Every `deno task` name still
+  works, forwarding to `pnpm run`. Implemented by Codex (the first milestone of that trial); the
+  review found ten places where the plan did not match the source, each fixed and recorded in the
+  plan's §11. The ratchet is scoped to what `deno doc --lint` enforced: TypeDoc's 554 warnings
+  include 317 on anonymous object-type members, so the baseline is 237 and the clean set grew from
+  10 to 31 packages. Prose claims import the package they describe, as Deno's loader allowed, so the
+  sandbox reads package sources and `node_modules` only — granting the whole repository was tried
+  and rejected because it exposes `.git` and `.env`. `run()` first detached every child, which would
+  have let Ctrl+C orphan a long test run; it now detaches only to enforce a deadline. Two README
+  tables change, both correcting `deno doc` output. Four Deno users pass to M111e3 — complete (PR
+  pending)
+- **Next milestone** — M111e3 (CI on Node and pnpm, `apps/*` on pnpm, root `deno.json` removed).
+  `v0.9.0` is published to npm (2026-10-14); its smoke run and M104 proceed separately.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -6437,10 +6454,6 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   compensates caught I/O failures by restoring overwritten bytes, removing only files and empty
   directories it created, and reporting incomplete recovery; `adopt` reports entry rewrite failures
   rather than a port-literal mismatch — complete (PR #346).
-
-- **Milestone 111e2** (repository scripts and root tests on Node) — implementation in progress. The
-  TypeDoc ratchet is re-measured at 554 on 0.28.20; source conflicts in the retained-Deno set,
-  browser type graph and export-table no-diff acceptance remain pending before completion.
 
 ## Verification (run before declaring any work done)
 

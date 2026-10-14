@@ -1,6 +1,6 @@
 # Milestone 111e2 — repository scripts and root tests on Node (repository tooling)
 
-> **Status:** Planning. Branch: `feat/m111e2-node-scripts`. `develop` and `main` are protected — all
+> **Status:** Complete. Branch: `feat/m111e2-node-scripts`. `develop` and `main` are protected — all
 > work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
