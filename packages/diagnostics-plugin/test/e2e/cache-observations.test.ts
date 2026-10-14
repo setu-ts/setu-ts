@@ -76,9 +76,11 @@ describe('Cache observations e2e (M98i canary)', () => {
       expect(await cache.has(CANARY_KEY)).toBe(true);
       expect(await cache.delete(CANARY_KEY)).toBe(true);
       expect(await cache.delete(CANARY_KEY)).toBe(false);
-      const getOrSet = (cache as unknown as {
-        getOrSet<T>(key: string, factory: () => Promise<T>): Promise<T>;
-      }).getOrSet.bind(cache);
+      const getOrSet = (
+        cache as unknown as {
+          getOrSet<T>(key: string, factory: () => Promise<T>): Promise<T>;
+        }
+      ).getOrSet.bind(cache);
       expect(await getOrSet('computed', () => Promise.resolve(CANARY_FACTORY))).toEqual(
         CANARY_FACTORY,
       );
@@ -122,9 +124,7 @@ describe('Cache observations e2e (M98i canary)', () => {
       expect(byOp.get('delete')).toMatchObject({ count: 2, removed: 1, notRemoved: 1 });
       expect(byOp.get('clear')).toMatchObject({ count: 1, succeeded: 1 });
 
-      const sources = app.services.getAll<ICacheDiagnosticsSource>(
-        CAPABILITIES.CACHE_DIAGNOSTICS,
-      );
+      const sources = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS);
       const local = JSON.stringify(sources.map((s) => s.snapshot()));
       expect(local).toContain('primary');
 

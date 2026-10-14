@@ -17,7 +17,10 @@ const RELAY = { sweepDeadlineMs: 1000, publishTimeoutMs: 100, storeTimeoutMs: 10
 /** Tracks whether a promise has settled. */
 function track(promise: Promise<OutboxSweepResult>): { settled: () => boolean } {
   let settled = false;
-  promise.then(() => (settled = true), () => (settled = true));
+  promise.then(
+    () => (settled = true),
+    () => (settled = true),
+  );
   return { settled: () => settled };
 }
 

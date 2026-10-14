@@ -23,8 +23,7 @@ const target = { table: 'users', primaryKey: ['id'] };
 describe('D1 conditional writes', () => {
   it('conjoins key and predicate with separately bound values', () => {
     expect(buildUpdateWhere(target, 'a', { id: 'b', role: 'owner' }, { name: 'new' })).toEqual({
-      sql:
-        'UPDATE "users" SET "name" = ?1 WHERE "id" = ?2 AND "id" = ?3 AND "role" = ?4 RETURNING *',
+      sql: 'UPDATE "users" SET "name" = ?1 WHERE "id" = ?2 AND "id" = ?3 AND "role" = ?4 RETURNING *',
       params: ['new', 'a', 'b', 'owner'],
     });
     expect(buildDeleteWhere(target, 'a', { role: 'owner' })).toEqual({
@@ -63,14 +62,15 @@ describe('D1 conditional-write refusals name no caller field (M105 audit O3)', (
       new SqliteD1('CREATE TABLE users(id TEXT PRIMARY KEY, name TEXT, role TEXT)'),
       target,
     );
-    for (
-      const attempt of [
-        () => source.updateWhere!('a', { 'canary field': 'v' }, { name: 'x' }),
-        () => source.deleteWhere!('a', { 'canary field': 'v' }),
-        () => source.updateWhere!('a', { role: 'owner' }, { 'canary field': 'v' }),
-      ]
-    ) {
-      const error = await attempt().then(() => undefined, (caught: unknown) => caught);
+    for (const attempt of [
+      () => source.updateWhere!('a', { 'canary field': 'v' }, { name: 'x' }),
+      () => source.deleteWhere!('a', { 'canary field': 'v' }),
+      () => source.updateWhere!('a', { role: 'owner' }, { 'canary field': 'v' }),
+    ]) {
+      const error = await attempt().then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
       expect((error as Error).message).toMatch(/not a valid SQL identifier/);
       expect((error as Error).message).not.toContain('canary');
     }

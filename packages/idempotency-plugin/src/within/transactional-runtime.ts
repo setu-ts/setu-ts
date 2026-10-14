@@ -261,7 +261,7 @@ export function setupTransactional(
         return;
       }
       const pending = Promise.resolve().then(() =>
-        active.store.purge(ctx.runtime.now(), active.purgeBatch)
+        active.store.purge(ctx.runtime.now(), active.purgeBatch),
       );
       inFlight = pending;
       inFlightStartedAt = ctx.runtime.hrtime();

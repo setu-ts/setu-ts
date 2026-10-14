@@ -96,7 +96,7 @@ export function Params<const S extends readonly ParamSource<unknown>[]>(
   return <A extends SourceValues<S>, R>(
     value: (...args: A) => R,
     context: ClassMethodDecoratorContext,
-  ): (...args: A) => R => {
+  ): ((...args: A) => R) => {
     const handler = String(context.name);
     sources.forEach((src, index) => {
       defer(requireDecoratorMetadata(context), (store, target) => {

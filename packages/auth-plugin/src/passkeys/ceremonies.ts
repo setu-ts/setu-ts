@@ -105,8 +105,7 @@ export interface CompiledPasskeys {
   readonly userVerification: UserVerification;
   /** The optional extra registration policy, or `null`. */
   readonly mayRegister:
-    | ((context: PasskeyRegistrationContext) => boolean | Promise<boolean>)
-    | null;
+    ((context: PasskeyRegistrationContext) => boolean | Promise<boolean>) | null;
 }
 
 /** The reason a ceremony refused a response. Fixed codes, never client text. */
@@ -253,9 +252,7 @@ export function compilePasskeys(options: PasskeyOptions): CompiledPasskeys {
   for (const origin of origins) {
     const host = new URL(origin).hostname;
     if (host !== rpId && !host.endsWith(`.${rpId}`)) {
-      refuse(
-        `rpId '${rpId}' must be the host of origin '${origin}' or a registrable suffix of it`,
-      );
+      refuse(`rpId '${rpId}' must be the host of origin '${origin}' or a registrable suffix of it`);
     }
   }
   const store = options.store;
@@ -275,7 +272,8 @@ export function compilePasskeys(options: PasskeyOptions): CompiledPasskeys {
   }
   const userVerification = options.userVerification ?? 'required';
   if (
-    userVerification !== 'required' && userVerification !== 'preferred' &&
+    userVerification !== 'required' &&
+    userVerification !== 'preferred' &&
     userVerification !== 'discouraged'
   ) {
     refuse("userVerification must be 'required', 'preferred' or 'discouraged'");
@@ -487,7 +485,8 @@ export class PasskeyCeremonies {
       return { ok: false, reason: 'challenge-missing' };
     }
     if (
-      typeof clientData.origin !== 'string' || !this.#config.origins.includes(clientData.origin)
+      typeof clientData.origin !== 'string' ||
+      !this.#config.origins.includes(clientData.origin)
     ) {
       return { ok: false, reason: 'origin-refused' };
     }
@@ -544,18 +543,15 @@ export class PasskeyCeremonies {
     if (gate !== null) {
       return gate;
     }
-    const userHandle = existing[0]?.userHandle ??
-      encodeBase64Url(this.#runtime.randomBytes(USER_HANDLE_BYTES));
+    const userHandle =
+      existing[0]?.userHandle ?? encodeBase64Url(this.#runtime.randomBytes(USER_HANDLE_BYTES));
     const challenge = encodeBase64Url(this.#runtime.randomBytes(CHALLENGE_BYTES));
-    session.set(
-      WEBAUTHN_CHALLENGE_SESSION_KEY,
-      {
-        kind: 'registration',
-        challenge,
-        userHandle,
-        expiresAt: this.#runtime.now() + CHALLENGE_TTL_MS,
-      } satisfies StoredChallenge,
-    );
+    session.set(WEBAUTHN_CHALLENGE_SESSION_KEY, {
+      kind: 'registration',
+      challenge,
+      userHandle,
+      expiresAt: this.#runtime.now() + CHALLENGE_TTL_MS,
+    } satisfies StoredChallenge);
     // A new options request replaces any prior challenge (plan §3.5); the
     // write above already replaced it.
     return {
@@ -620,8 +616,8 @@ export class PasskeyCeremonies {
     if (this.#config.mayRegister !== null) {
       let allowed = false;
       try {
-        allowed = (await this.#config.mayRegister({ principal, methods, credentialCount })) ===
-          true;
+        allowed =
+          (await this.#config.mayRegister({ principal, methods, credentialCount })) === true;
       } catch {
         // A throwing policy refuses: failing open would admit the registration
         // the policy exists to stop.
@@ -686,11 +682,7 @@ export class PasskeyCeremonies {
       return { ok: false, reason: 'challenge-used' };
     }
 
-    const clientData = this.#checkClientData(
-      clientDataJson,
-      'webauthn.create',
-      taken.challenge,
-    );
+    const clientData = this.#checkClientData(clientDataJson, 'webauthn.create', taken.challenge);
     if (clientData.ok === false) {
       this.#report(`auth-plugin: passkeys registration refused (${clientData.reason})`);
       return clientData;
@@ -802,14 +794,11 @@ export class PasskeyCeremonies {
       }));
     }
     const challenge = encodeBase64Url(this.#runtime.randomBytes(CHALLENGE_BYTES));
-    session.set(
-      WEBAUTHN_CHALLENGE_SESSION_KEY,
-      {
-        kind: 'authentication',
-        challenge,
-        expiresAt: this.#runtime.now() + CHALLENGE_TTL_MS,
-      } satisfies StoredChallenge,
-    );
+    session.set(WEBAUTHN_CHALLENGE_SESSION_KEY, {
+      kind: 'authentication',
+      challenge,
+      expiresAt: this.#runtime.now() + CHALLENGE_TTL_MS,
+    } satisfies StoredChallenge);
     return {
       challenge,
       rpId: this.#config.rpId,
@@ -866,11 +855,7 @@ export class PasskeyCeremonies {
       return { ok: false, reason: 'challenge-used' };
     }
 
-    const clientData = this.#checkClientData(
-      clientDataJson,
-      'webauthn.get',
-      taken.challenge,
-    );
+    const clientData = this.#checkClientData(clientDataJson, 'webauthn.get', taken.challenge);
     if (clientData.ok === false) {
       this.#report(`auth-plugin: passkeys authentication refused (${clientData.reason})`);
       return clientData;
@@ -930,13 +915,9 @@ export class PasskeyCeremonies {
     if (algorithmName === null) {
       return { ok: false, reason: 'credential-unknown' };
     }
-    const signedData = concatBytes(
-      authDataBytes,
-      await sha256(this.#runtime, clientData.bytes),
-    );
-    const rawSignature = algorithmName === 'ES256'
-      ? derToRawSignature(signatureBytes)
-      : signatureBytes;
+    const signedData = concatBytes(authDataBytes, await sha256(this.#runtime, clientData.bytes));
+    const rawSignature =
+      algorithmName === 'ES256' ? derToRawSignature(signatureBytes) : signatureBytes;
     if (rawSignature === null) {
       return { ok: false, reason: 'signature-invalid' };
     }

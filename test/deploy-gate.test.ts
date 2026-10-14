@@ -102,10 +102,7 @@ describe('renderDrift', () => {
   });
 
   it('sorts each list so the report is stable', () => {
-    const report: DriftReport = renderDrift(
-      map({ 'z.yaml': '1', 'a.yaml': '1' }),
-      new Map(),
-    );
+    const report: DriftReport = renderDrift(map({ 'z.yaml': '1', 'a.yaml': '1' }), new Map());
     expect(report.added).toEqual(['a.yaml', 'z.yaml']);
   });
 });
@@ -122,10 +119,7 @@ describe('missingTools', () => {
 
 describe('pathCandidates', () => {
   it('expands PATH entries in order', () => {
-    expect(pathCandidates('helm', '/usr/bin:/opt/bin')).toEqual([
-      '/usr/bin/helm',
-      '/opt/bin/helm',
-    ]);
+    expect(pathCandidates('helm', '/usr/bin:/opt/bin')).toEqual(['/usr/bin/helm', '/opt/bin/helm']);
   });
 
   it('tolerates a trailing slash on a PATH entry', () => {
@@ -395,7 +389,8 @@ describe('graceful shutdown in the containerized examples', () => {
     // A rejecting onShutdown hook makes stop() reject. Verified against a real app: without
     // .catch the process dies with "Uncaught (in promise)" and Deno.exit(0) never runs.
     for (const path of MATRIX_ENTRY_POINTS) {
-      expect(read(path)).toMatch(/app\.stop\(\)[\s\S]{0,300}\.catch\(/);
+      // `\s*`: Prettier breaks a long chain before `.stop()`.
+      expect(read(path)).toMatch(/app\s*\.stop\(\)[\s\S]{0,300}\.catch\(/);
     }
   });
 });
@@ -433,16 +428,11 @@ describe('generated deployment install ordering', () => {
       env: Readonly<Record<string, string>> | undefined;
     }[] = [];
     const order: string[] = [];
-    await buildGeneratedImage(
-      '/workspace/acme',
-      'test-image',
-      REGISTRY,
-      (command, options) => {
-        calls.push({ command, cwd: options?.cwd, env: options?.env });
-        order.push(command.slice(-1)[0]!);
-        return Promise.resolve({ success: true, stdout: '', stderr: '' });
-      },
-    );
+    await buildGeneratedImage('/workspace/acme', 'test-image', REGISTRY, (command, options) => {
+      calls.push({ command, cwd: options?.cwd, env: options?.env });
+      order.push(command.slice(-1)[0]!);
+      return Promise.resolve({ success: true, stdout: '', stderr: '' });
+    });
     expect(order).toEqual(['install', 'apps/orders/main.ts', '/workspace/acme']);
     expect(calls).toHaveLength(3);
     // Every install resolves the framework from the same registry: the host's,

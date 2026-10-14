@@ -80,9 +80,7 @@ describe('QueueCollector (X8-4)', () => {
 
     new QueueCollector(metrics, () => {});
 
-    expect(metrics.created.get(QUEUE_METRICS.JOBS)).toEqual(
-      COUNTER_OPTIONS[QUEUE_METRICS.JOBS],
-    );
+    expect(metrics.created.get(QUEUE_METRICS.JOBS)).toEqual(COUNTER_OPTIONS[QUEUE_METRICS.JOBS]);
     expect(metrics.increments).toHaveLength(0);
   });
 

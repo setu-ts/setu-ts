@@ -312,8 +312,9 @@ describe('JwtService', () => {
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
         .replace(/=+$/, '');
-      await expect(jwtSvc.verify(`${forgedHeader}.${payloadB64}.${signatureB64}`))
-        .rejects.toThrow('Unexpected token algorithm');
+      await expect(jwtSvc.verify(`${forgedHeader}.${payloadB64}.${signatureB64}`)).rejects.toThrow(
+        'Unexpected token algorithm',
+      );
     });
 
     it('rejects a token whose header is not valid JSON', async () => {
@@ -321,8 +322,9 @@ describe('JwtService', () => {
       const jwtSvc = new JwtService(rt, { secret: audSecret, algorithm: 'HS256' });
       const token = await jwtSvc.sign({ sub: 'u1' });
       const [, payloadB64, signatureB64] = token.split('.');
-      await expect(jwtSvc.verify(`bm90LWpzb24.${payloadB64}.${signatureB64}`))
-        .rejects.toThrow('Invalid token header');
+      await expect(jwtSvc.verify(`bm90LWpzb24.${payloadB64}.${signatureB64}`)).rejects.toThrow(
+        'Invalid token header',
+      );
     });
   });
 });

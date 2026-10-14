@@ -81,18 +81,19 @@ describe('app loader — real import()', () => {
   });
 
   it('throws for a real file exporting no createApp', async () => {
-    await expect(loadApp(root, 'variants/no-export.ts'))
-      .rejects.toThrow("must export a 'createApp' function");
+    await expect(loadApp(root, 'variants/no-export.ts')).rejects.toThrow(
+      "must export a 'createApp' function",
+    );
   });
 
   it('throws naming the factory when it really throws', async () => {
-    await expect(loadApp(root, 'variants/throws.ts'))
-      .rejects.toThrow('missing DATABASE_URL');
+    await expect(loadApp(root, 'variants/throws.ts')).rejects.toThrow('missing DATABASE_URL');
   });
 
   it('throws when a real factory returns the wrong shape', async () => {
-    await expect(loadApp(root, 'variants/wrong-shape.ts'))
-      .rejects.toThrow('must return the application from createApplication()');
+    await expect(loadApp(root, 'variants/wrong-shape.ts')).rejects.toThrow(
+      'must return the application from createApplication()',
+    );
   });
 
   it('throws for a module that does not exist on disk', async () => {

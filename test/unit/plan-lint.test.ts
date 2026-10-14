@@ -10,7 +10,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { lintText } from '../../scripts/plan-lint.ts';
+import { isCanonicalPlanName, lintText } from '../../scripts/plan-lint.ts';
 
 const SECTIONS = [
   '## 0. Objective & scope',
@@ -27,7 +27,7 @@ const SECTIONS = [
 /** A plan with every required section, and the given text under §4. */
 function plan(surface: string): string {
   return SECTIONS.map((heading) =>
-    heading.startsWith('## 4.') ? `${heading}\n\n${surface}\n` : `${heading}\n\nText.\n`
+    heading.startsWith('## 4.') ? `${heading}\n\n${surface}\n` : `${heading}\n\nText.\n`,
   ).join('\n');
 }
 
@@ -43,8 +43,9 @@ describe('plan-lint compatibility statement', () => {
   });
 
   it('accepts `none` with a reason', () => {
-    expect(messages(plan('**Breaking for implementors:** none — every addition is optional.')))
-      .toEqual([]);
+    expect(
+      messages(plan('**Breaking for implementors:** none — every addition is optional.')),
+    ).toEqual([]);
   });
 
   it('accepts a break that names the minor carrying it, including across a reflowed line', () => {
@@ -59,8 +60,7 @@ describe('plan-lint compatibility statement', () => {
       messages(
         plan('**Breaking for implementors:** a required member; carried by the next minor.'),
       ),
-    )
-      .toEqual([]);
+    ).toEqual([]);
   });
 
   it('refuses a break that names no minor, at the statement line', () => {
@@ -83,5 +83,19 @@ describe('plan-lint compatibility statement', () => {
     const found = messages(text);
     expect(found.some((m) => m.includes('unfilled template placeholder'))).toBe(true);
     expect(found.some((m) => m.includes('compatibility statement'))).toBe(false);
+  });
+});
+
+describe('plan-lint canonical root names', () => {
+  it('accepts a milestone number, a letter, and a numbered part of a lettered milestone', () => {
+    expect(isCanonicalPlanName('milestone-98-x.md')).toBe(true);
+    expect(isCanonicalPlanName('milestone-111e-x.md')).toBe(true);
+    expect(isCanonicalPlanName('milestone-111e1-prettier-eslint.md')).toBe(true);
+  });
+
+  it('refuses scratch names and a part without its letter', () => {
+    expect(isCanonicalPlanName('milestone-111e12-x.md')).toBe(false);
+    expect(isCanonicalPlanName('fix-round-2.md')).toBe(false);
+    expect(isCanonicalPlanName('milestone-111e1.md')).toBe(false);
   });
 });

@@ -60,10 +60,11 @@ describe('createDefaultAuthHttp', () => {
 
   it('aborts through the signal', async () => {
     const controller = new AbortController();
-    const http = createDefaultAuthHttp((_url, init) =>
-      new Promise((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-      })
+    const http = createDefaultAuthHttp(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
     );
     const pending = http.get('https://x.test', { signal: controller.signal, maxBytes: 10 });
     controller.abort();
@@ -148,6 +149,7 @@ describe('createDefaultAuthHttp', () => {
     const original = globalThis.fetch;
     let receiver: unknown = null;
     globalThis.fetch = function (this: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- records the receiver under test
       receiver = this;
       return Promise.resolve(new Response('{}'));
     } as typeof fetch;

@@ -57,7 +57,7 @@ describe('HttpClient', () => {
         createClient({
           baseUrl: 'https://api.example.com',
           retry: { limit: 2, delay: 10, backoff: 'fixed', maxRetryAfterMs },
-        })
+        }),
       ).toThrow('retry.maxRetryAfterMs must be a finite non-negative number');
     }
   });
@@ -72,7 +72,7 @@ describe('HttpClient', () => {
           backoff: 'fixed',
           maxRetryAfterMs: 2_147_483_648,
         },
-      })
+      }),
     ).toThrow('retry.maxRetryAfterMs exceeds the maximum timer delay');
   });
 
@@ -91,9 +91,7 @@ describe('HttpClient', () => {
       retry: { limit: 2, delay: 10, backoff: 'fixed', maxRetryAfterMs: 1_000 },
       fetch: () => {
         attempts++;
-        return Promise.resolve(
-          new Response('', { status: 503, headers: { 'Retry-After': '2' } }),
-        );
+        return Promise.resolve(new Response('', { status: 503, headers: { 'Retry-After': '2' } }));
       },
     });
 
@@ -211,9 +209,7 @@ describe('HttpClient', () => {
       timing: fakeTiming,
       fetch: fetchImpl,
     });
-    await expect(
-      client.request({ method: 'GET', path: 'missing' }),
-    ).rejects.toThrow('404');
+    await expect(client.request({ method: 'GET', path: 'missing' })).rejects.toThrow('404');
   });
 
   it('HttpClientError carries status, headers, body', async () => {
@@ -297,10 +293,12 @@ describe('HttpClient', () => {
       baseUrl: 'https://api.example.com',
       timing: fakeTiming,
       fetch: fetchImpl,
-      responseInterceptors: [(resp) => {
-        order.push('should not run');
-        return resp;
-      }],
+      responseInterceptors: [
+        (resp) => {
+          order.push('should not run');
+          return resp;
+        },
+      ],
     });
     await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('404');
     expect(order).toEqual([]);
@@ -376,9 +374,9 @@ describe('HttpClient', () => {
 
   it('throws when path has leading slash', async () => {
     const { client } = buildClient();
-    await expect(
-      client.request({ method: 'GET', path: '/bad' }),
-    ).rejects.toThrow('no leading slash');
+    await expect(client.request({ method: 'GET', path: '/bad' })).rejects.toThrow(
+      'no leading slash',
+    );
   });
 
   it('accepts Headers instance as request headers', async () => {
@@ -591,9 +589,7 @@ describe('HttpClient', () => {
   it('rejects an absolute URL path so per-origin policy cannot be bypassed', async () => {
     const { client, calls } = buildClient();
     for (const path of ['https://evil.example.com/steal', 'http://evil.example.com/x']) {
-      await expect(client.request({ method: 'GET', path })).rejects.toThrow(
-        /must be relative/,
-      );
+      await expect(client.request({ method: 'GET', path })).rejects.toThrow(/must be relative/);
     }
     // Nothing was ever dispatched.
     expect(calls.length).toBe(0);
@@ -603,9 +599,9 @@ describe('HttpClient', () => {
     const { client, calls } = buildClient();
     // `//evil.example.com/x` also leaves the configured origin. It is caught by
     // the leading-slash guard, so the message is that one.
-    await expect(
-      client.request({ method: 'GET', path: '//evil.example.com/x' }),
-    ).rejects.toThrow(/must be relative/);
+    await expect(client.request({ method: 'GET', path: '//evil.example.com/x' })).rejects.toThrow(
+      /must be relative/,
+    );
     expect(calls.length).toBe(0);
   });
 

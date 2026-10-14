@@ -50,19 +50,15 @@ describe('loadApp', () => {
   const app = createFakeApp();
 
   it('returns the application the factory produces', async () => {
-    const loaded = await loadApp(
-      '/app',
-      undefined,
-      () => Promise.resolve({ createApp: () => app }),
+    const loaded = await loadApp('/app', undefined, () =>
+      Promise.resolve({ createApp: () => app }),
     );
     expect(loaded).toBe(app);
   });
 
   it('awaits an async factory', async () => {
-    const loaded = await loadApp(
-      '/app',
-      undefined,
-      () => Promise.resolve({ createApp: () => Promise.resolve(app) }),
+    const loaded = await loadApp('/app', undefined, () =>
+      Promise.resolve({ createApp: () => Promise.resolve(app) }),
     );
     expect(loaded).toBe(app);
   });
@@ -92,8 +88,9 @@ describe('loadApp', () => {
   });
 
   it('throws naming the path when the module cannot be imported', async () => {
-    await expect(loadApp('/app', undefined, () => Promise.reject(new Error('not found'))))
-      .rejects.toThrow('Cannot load file:///app/setu.config.ts');
+    await expect(
+      loadApp('/app', undefined, () => Promise.reject(new Error('not found'))),
+    ).rejects.toThrow('Cannot load file:///app/setu.config.ts');
   });
 
   it('preserves the import failure as the cause', async () => {
@@ -104,38 +101,45 @@ describe('loadApp', () => {
   });
 
   it('reports a non-Error import rejection', async () => {
-    await expect(loadApp('/app', undefined, () => Promise.reject('plain')))
-      .rejects.toThrow('plain');
+    await expect(loadApp('/app', undefined, () => Promise.reject('plain'))).rejects.toThrow(
+      'plain',
+    );
   });
 
   it('throws naming the expected export when it is missing', async () => {
-    await expect(loadApp('/app', undefined, () => Promise.resolve({})))
-      .rejects.toThrow("must export a 'createApp' function");
+    await expect(loadApp('/app', undefined, () => Promise.resolve({}))).rejects.toThrow(
+      "must export a 'createApp' function",
+    );
   });
 
   it('throws when the export is not a function', async () => {
-    await expect(loadApp('/app', undefined, () => Promise.resolve({ createApp: 42 })))
-      .rejects.toThrow('found number');
+    await expect(
+      loadApp('/app', undefined, () => Promise.resolve({ createApp: 42 })),
+    ).rejects.toThrow('found number');
   });
 
   it('throws naming the factory when it rejects', async () => {
-    await expect(loadApp('/app', undefined, () =>
-      Promise.resolve({
-        createApp: () => {
-          throw new Error('missing DATABASE_URL');
-        },
-      }))).rejects.toThrow(
-        'createApp() in file:///app/setu.config.ts threw: missing DATABASE_URL',
-      );
+    await expect(
+      loadApp('/app', undefined, () =>
+        Promise.resolve({
+          createApp: () => {
+            throw new Error('missing DATABASE_URL');
+          },
+        }),
+      ),
+    ).rejects.toThrow('createApp() in file:///app/setu.config.ts threw: missing DATABASE_URL');
   });
 
   it('reports a non-Error factory throw', async () => {
-    await expect(loadApp('/app', undefined, () =>
-      Promise.resolve({
-        createApp: () => {
-          throw 'bare';
-        },
-      }))).rejects.toThrow('bare');
+    await expect(
+      loadApp('/app', undefined, () =>
+        Promise.resolve({
+          createApp: () => {
+            throw 'bare';
+          },
+        }),
+      ),
+    ).rejects.toThrow('bare');
   });
 
   describe('validating what the factory returned', () => {
@@ -152,8 +156,9 @@ describe('loadApp', () => {
 
     for (const [label, value] of cases) {
       it(`rejects ${label}`, async () => {
-        await expect(loadApp('/app', undefined, () => Promise.resolve({ createApp: () => value })))
-          .rejects.toThrow('must return the application from createApplication()');
+        await expect(
+          loadApp('/app', undefined, () => Promise.resolve({ createApp: () => value })),
+        ).rejects.toThrow('must return the application from createApplication()');
       });
     }
   });
@@ -185,7 +190,8 @@ describe('loadApp — discovery-time platform bindings', () => {
           seen = env;
           return app;
         },
-      }));
+      }),
+    );
 
     expect(seen).toBeDefined();
     for (const methods of GUARD_METHODS) {
@@ -206,7 +212,8 @@ describe('loadApp — discovery-time platform bindings', () => {
             (env['DB'] as { prepare: () => unknown }).prepare();
             return app;
           },
-        })),
+        }),
+      ),
     ).rejects.toThrow('CALLED during command discovery');
   });
 
@@ -219,7 +226,8 @@ describe('loadApp — discovery-time platform bindings', () => {
           createApp: () => {
             throw new Error('D1Adapter needs a D1 binding');
           },
-        })),
+        }),
+      ),
     ).rejects.toThrow('Plugin commands are unavailable in this project');
   });
 });
@@ -293,8 +301,9 @@ describe('denoInstallRefusal', () => {
         [`${project}/deno.json`]: '{}',
         '/tmp/node_modules/@setu-ts/kernel/package.json': '{}',
       });
-      expect(await denoInstallRefusal(fs, project), `${contents} at ${project}`)
-        .toContain('deno install');
+      expect(await denoInstallRefusal(fs, project), `${contents} at ${project}`).toContain(
+        'deno install',
+      );
     }
   });
 
@@ -302,8 +311,11 @@ describe('denoInstallRefusal', () => {
   // backslashes, so a listed member must match across the two separators.
   it('recognises a listed member on a native Windows path', async () => {
     const fs = createFakeFs({ 'C:\\ws/setu.workspace.json': workspace('api') });
-    expect(await installSearchDirs(fs, 'C:\\ws\\apps\\api'))
-      .toEqual(['C:\\ws\\apps\\api', 'C:\\ws\\apps', 'C:\\ws']);
+    expect(await installSearchDirs(fs, 'C:\\ws\\apps\\api')).toEqual([
+      'C:\\ws\\apps\\api',
+      'C:\\ws\\apps',
+      'C:\\ws',
+    ]);
   });
 
   it('refuses an uninstalled Deno project, naming deno install', async () => {

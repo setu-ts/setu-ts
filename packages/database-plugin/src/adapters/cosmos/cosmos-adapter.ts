@@ -105,7 +105,8 @@ export class CosmosAdapter implements IDatabaseAdapter {
    */
   constructor(options: CosmosAdapterOptions) {
     if (
-      options.client === undefined && (options.endpoint === undefined || options.key === undefined)
+      options.client === undefined &&
+      (options.endpoint === undefined || options.key === undefined)
     ) {
       throw new Error(
         'CosmosAdapter requires either options.client or options.endpoint + options.key',
@@ -159,9 +160,13 @@ export class CosmosAdapter implements IDatabaseAdapter {
    */
   async #establish(): Promise<void> {
     const generation = this.#generation;
-    const loader: CosmosClientLoader = this.#options.client !== undefined
-      ? createInjectedClientLoader(this.#options.client)
-      : await createLazyClientLoader(this.#options.endpoint as string, this.#options.key as string);
+    const loader: CosmosClientLoader =
+      this.#options.client !== undefined
+        ? createInjectedClientLoader(this.#options.client)
+        : await createLazyClientLoader(
+            this.#options.endpoint as string,
+            this.#options.key as string,
+          );
     const client = await loader.createClient();
     const database = client.database(this.#options.database as string);
     // A database read is the cheapest proof that the endpoint, the key and the
@@ -262,7 +267,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
    *
    * @inheritdoc
    */
-  // deno-lint-ignore require-await -- the refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the refusal must REJECT, not throw synchronously
   async rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     throw new UnsupportedRawQueryError(
       'cosmos',

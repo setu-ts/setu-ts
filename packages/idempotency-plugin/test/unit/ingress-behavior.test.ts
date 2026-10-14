@@ -106,15 +106,15 @@ describe('createIngressBehavior (M109a §3.7)', () => {
       reason: 'unsupported-key-source',
     });
     const missing = behavior(store, { topics: ['t'] });
-    await expect(missing.handle(message('t', { headers: {} }), () => Promise.resolve())).rejects
-      .toMatchObject({
-        reason: 'key-missing',
-      });
+    await expect(
+      missing.handle(message('t', { headers: {} }), () => Promise.resolve()),
+    ).rejects.toMatchObject({
+      reason: 'key-missing',
+    });
     const invalid = behavior(store, { topics: ['t'] });
     await expect(
-      invalid.handle(
-        message('t', { headers: { [DEDUPLICATION_ID_HEADER]: 'has space' } }),
-        () => Promise.resolve(),
+      invalid.handle(message('t', { headers: { [DEDUPLICATION_ID_HEADER]: 'has space' } }), () =>
+        Promise.resolve(),
       ),
     ).rejects.toMatchObject({ reason: 'key-invalid' });
   });
@@ -122,9 +122,8 @@ describe('createIngressBehavior (M109a §3.7)', () => {
   it('defaults the messaging key to the deduplication header', async () => {
     const { store, calls } = recordingStore({ outcome: 'claimed', takeover: false });
     const run = behavior(store, { topics: ['t'] });
-    await run.handle(
-      message('t', { headers: { [DEDUPLICATION_ID_HEADER]: 'evt-1' } }),
-      () => Promise.resolve(),
+    await run.handle(message('t', { headers: { [DEDUPLICATION_ID_HEADER]: 'evt-1' } }), () =>
+      Promise.resolve(),
     );
     expect(calls.claim).toHaveLength(1);
   });
@@ -264,28 +263,33 @@ it('refuses missing queue ids and missing custom and header keys', async () => {
   for (const payload of [null, 1, {}, { id: 3 }]) {
     for (const key of ['auto', 'job-id'] as const) {
       await expect(
-        behavior(store, { jobNames: ['jobs'], key }).handle({
-          kind: 'queue',
-          name: 'jobs',
-          consumer: 'worker',
-          payload,
-        }, () => Promise.resolve()),
+        behavior(store, { jobNames: ['jobs'], key }).handle(
+          {
+            kind: 'queue',
+            name: 'jobs',
+            consumer: 'worker',
+            payload,
+          },
+          () => Promise.resolve(),
+        ),
       ).rejects.toMatchObject({ reason: 'key-missing' });
     }
   }
   await expect(
-    behavior(store, { topics: ['t'], key: () => undefined }).handle(
-      message('t'),
-      () => Promise.resolve(),
+    behavior(store, { topics: ['t'], key: () => undefined }).handle(message('t'), () =>
+      Promise.resolve(),
     ),
   ).rejects.toMatchObject({ reason: 'key-missing' });
   await expect(
-    behavior(store, { topics: ['t'], key: 'deduplication-header' }).handle({
-      kind: 'messaging',
-      name: 't',
-      payload: {},
-      consumer: 'c1',
-    }, () => Promise.resolve()),
+    behavior(store, { topics: ['t'], key: 'deduplication-header' }).handle(
+      {
+        kind: 'messaging',
+        name: 't',
+        payload: {},
+        consumer: 'c1',
+      },
+      () => Promise.resolve(),
+    ),
   ).rejects.toMatchObject({ reason: 'key-missing' });
   expect(calls.claim).toHaveLength(0);
 });

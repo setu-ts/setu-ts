@@ -116,38 +116,36 @@ export class RedisRateLimitStore implements RateLimitStore {
    *
    * @param options - Connection, injected client, runtime clock, key namespace
    */
-  constructor(
-    options: {
-      url?: string | undefined;
-      client?: IRateLimitRedisClient | undefined;
-      runtime: IRuntimeServices;
-      /**
-       * Namespace prepended to every key this store reads and writes.
-       * Defaults to {@linkcode DEFAULT_RATE_LIMIT_KEY_PREFIX}.
-       *
-       * `keyGenerator` produces keys such as `anonymous` and `ip:203.0.113.7`,
-       * which are generic enough that two applications sharing one managed
-       * Redis would count against each other's budget — service A's traffic
-       * exhausting service B's limit. Pass a per-application value when one
-       * Redis serves several.
-       *
-       * @since 0.5.0
-       */
-      keyPrefix?: string | undefined;
-      /**
-       * Receives the connection errors (`ioredis` `'error'` events) of the
-       * client this store BUILDS, instead of `ioredis` printing each reconnect
-       * failure to the console. Never attached to an injected `client`, which
-       * belongs to the caller. This store is constructed by the application,
-       * so no plugin supplies one: build it with `createConnectionErrorReporter`
-       * from `@setu-ts/common` over your logger. Absent, `ioredis` keeps its
-       * own console fallback.
-       *
-       * @since 0.8.0
-       */
-      connectionErrorReporter?: ConnectionErrorReporter | undefined;
-    },
-  ) {
+  constructor(options: {
+    url?: string | undefined;
+    client?: IRateLimitRedisClient | undefined;
+    runtime: IRuntimeServices;
+    /**
+     * Namespace prepended to every key this store reads and writes.
+     * Defaults to {@linkcode DEFAULT_RATE_LIMIT_KEY_PREFIX}.
+     *
+     * `keyGenerator` produces keys such as `anonymous` and `ip:203.0.113.7`,
+     * which are generic enough that two applications sharing one managed
+     * Redis would count against each other's budget — service A's traffic
+     * exhausting service B's limit. Pass a per-application value when one
+     * Redis serves several.
+     *
+     * @since 0.5.0
+     */
+    keyPrefix?: string | undefined;
+    /**
+     * Receives the connection errors (`ioredis` `'error'` events) of the
+     * client this store BUILDS, instead of `ioredis` printing each reconnect
+     * failure to the console. Never attached to an injected `client`, which
+     * belongs to the caller. This store is constructed by the application,
+     * so no plugin supplies one: build it with `createConnectionErrorReporter`
+     * from `@setu-ts/common` over your logger. Absent, `ioredis` keeps its
+     * own console fallback.
+     *
+     * @since 0.8.0
+     */
+    connectionErrorReporter?: ConnectionErrorReporter | undefined;
+  }) {
     this.#url = options.url ?? 'redis://localhost:6379';
     this.#injectedClient = options.client;
     this.#runtime = options.runtime;

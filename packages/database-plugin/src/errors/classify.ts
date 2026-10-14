@@ -201,8 +201,8 @@ export function classifyDriverError(
  * @returns `true` when any error in the cause chain carries the anchor
  */
 export function isPoolExhaustion(error: unknown): boolean {
-  return causeChainMembers(error).some(({ message }) =>
-    typeof message === 'string' && message.includes(PG_POOL_TIMEOUT_ANCHOR)
+  return causeChainMembers(error).some(
+    ({ message }) => typeof message === 'string' && message.includes(PG_POOL_TIMEOUT_ANCHOR),
   );
 }
 
@@ -342,11 +342,7 @@ function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorCla
  * A `SyntaxError`-shaped getter on a hostile value reads as "no members"
  * rather than throwing into the error path.
  */
-function safeMembers(
-  value: object,
-):
-  | DriverErrorMembers
-  | undefined {
+function safeMembers(value: object): DriverErrorMembers | undefined {
   try {
     const candidate = value as {
       code?: unknown;

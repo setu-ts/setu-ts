@@ -14,7 +14,10 @@ class WithDeps {
 }
 
 class MultiDeps {
-  constructor(readonly a: SimpleService, readonly b: WithDeps) {}
+  constructor(
+    readonly a: SimpleService,
+    readonly b: WithDeps,
+  ) {}
 }
 
 let factoryCounter = 0;

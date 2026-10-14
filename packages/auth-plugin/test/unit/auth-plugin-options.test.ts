@@ -171,7 +171,7 @@ describe('AuthPlugin', () => {
         AuthPlugin({
           apiKey: { validate: () => Promise.resolve(null) },
           middleware: { priority },
-        })
+        }),
       ).toThrow(AuthPluginConfigurationError);
     }
   });
@@ -220,15 +220,14 @@ describe('AuthPlugin', () => {
   it('refuses a malformed authorizationDiagnostics option at construction, with or without RBAC', () => {
     const malformed = { enabled: false, roles: {}, permissions: {} };
     expect(() =>
-      AuthPlugin({ jwt: { secret: 'test-secret' }, authorizationDiagnostics: malformed })
-    )
-      .toThrow('Authorization diagnostics: enabled must be the literal true.');
+      AuthPlugin({ jwt: { secret: 'test-secret' }, authorizationDiagnostics: malformed }),
+    ).toThrow('Authorization diagnostics: enabled must be the literal true.');
     expect(() =>
       AuthPlugin({
         jwt: { secret: 'test-secret' },
         rbac: { roles: {} },
         authorizationDiagnostics: malformed,
-      })
+      }),
     ).toThrow('Authorization diagnostics: enabled must be the literal true.');
   });
 
@@ -264,7 +263,7 @@ describe('AuthPlugin', () => {
       AuthPlugin({
         jwt: {},
         rbac: { roles: {} },
-      })
+      }),
     ).toThrow();
   });
 
@@ -442,9 +441,7 @@ describe('AuthPlugin', () => {
     expect(viaConfigured!.id).toBe('carol');
 
     // The default header must NOT authenticate once a custom one is configured.
-    const viaDefault = await auth.authenticate(
-      makeRequest({ authorization: `Bearer ${token}` }),
-    );
+    const viaDefault = await auth.authenticate(makeRequest({ authorization: `Bearer ${token}` }));
     expect(viaDefault).toBeNull();
   });
 });

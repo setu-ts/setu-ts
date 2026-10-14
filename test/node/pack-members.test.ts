@@ -120,10 +120,12 @@ describe('packCacheKey with a member that has no sources', () => {
 
 describe('packedEntrypoints', () => {
   it('lists every relative exports target and bin, once and sorted', () => {
-    expect(packedEntrypoints({
-      exports: { '.': { types: './dist/index.d.ts', default: './dist/index.js' }, x: 'bare' },
-      bin: { setu: './dist/bin.js' },
-    })).toEqual(['dist/bin.js', 'dist/index.d.ts', 'dist/index.js']);
+    expect(
+      packedEntrypoints({
+        exports: { '.': { types: './dist/index.d.ts', default: './dist/index.js' }, x: 'bare' },
+        bin: { setu: './dist/bin.js' },
+      }),
+    ).toEqual(['dist/bin.js', 'dist/index.d.ts', 'dist/index.js']);
     expect(packedEntrypoints({})).toEqual([]);
   });
 });
@@ -152,12 +154,14 @@ describe('packMembers', () => {
       expect(pnpm.calls.map((call) => call[1])).toEqual(['exec', 'pack']);
 
       const again = fakePnpm();
-      expect((await packMembers(root, ['packages/alpha'], again)).get('@setu-ts/alpha'))
-        .toEqual(alpha);
+      expect((await packMembers(root, ['packages/alpha'], again)).get('@setu-ts/alpha')).toEqual(
+        alpha,
+      );
       expect(again.calls).toEqual([]);
       // Published, unlocked, and no staging left behind.
-      expect((await fs.readdir(join(root, '.tmp/overlay'))).filter((e) => e !== 'build.lock'))
-        .toHaveLength(1);
+      expect(
+        (await fs.readdir(join(root, '.tmp/overlay'))).filter((e) => e !== 'build.lock'),
+      ).toHaveLength(1);
       expect(await overlayEntries(root)).toEqual(['overlay']);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -167,8 +171,9 @@ describe('packMembers', () => {
   it('refuses a pack missing an entrypoint, cleaning up staging and the lock', async () => {
     const root = await repository();
     try {
-      await expect(packMembers(root, ['packages/alpha'], fakePnpm(undefined, [])))
-        .rejects.toThrow('packed manifest names dist/index.js, absent');
+      await expect(packMembers(root, ['packages/alpha'], fakePnpm(undefined, []))).rejects.toThrow(
+        'packed manifest names dist/index.js, absent',
+      );
       expect(await overlayEntries(root)).toEqual(['overlay']);
       expect(await fs.readdir(join(root, '.tmp/overlay'))).toEqual([]);
     } finally {
@@ -180,8 +185,9 @@ describe('packMembers', () => {
     const root = await repository();
     try {
       const run: NonNullable<PackDeps['run']> = () => Promise.resolve({ stdout: 'nothing\n' });
-      await expect(packMembers(root, ['packages/alpha'], { run }))
-        .rejects.toThrow('pnpm pack reported no tarball');
+      await expect(packMembers(root, ['packages/alpha'], { run })).rejects.toThrow(
+        'pnpm pack reported no tarball',
+      );
       expect(await overlayEntries(root)).toEqual(['overlay']);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -277,8 +283,9 @@ describe('packMembers', () => {
         sleep: () => Promise.reject(new Error('must not wait on a dead owner')),
       });
       expect(packs.has('@setu-ts/alpha')).toBe(true);
-      expect((await fs.readdir(join(root, '.tmp/overlay'))).some((e) => e.includes('stale')))
-        .toBe(false);
+      expect((await fs.readdir(join(root, '.tmp/overlay'))).some((e) => e.includes('stale'))).toBe(
+        false,
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -291,16 +298,18 @@ describe('packMembers', () => {
       await fs.mkdir(join(root, '.tmp/overlay'), { recursive: true });
       expect(await acquireLock(lock, 'elsewhere', 0)).toEqual(expect.any(String));
       let clock = 0;
-      await expect(packMembers(root, ['packages/alpha'], {
-        ...fakePnpm(),
-        hostname: 'here',
-        alive: () => false,
-        now: () => clock,
-        sleep: () => {
-          clock += 20 * 60 * 1000;
-          return Promise.resolve();
-        },
-      })).rejects.toThrow('timed out waiting for');
+      await expect(
+        packMembers(root, ['packages/alpha'], {
+          ...fakePnpm(),
+          hostname: 'here',
+          alive: () => false,
+          now: () => clock,
+          sleep: () => {
+            clock += 20 * 60 * 1000;
+            return Promise.resolve();
+          },
+        }),
+      ).rejects.toThrow('timed out waiting for');
       await fs.stat(lock);
     } finally {
       await fs.rm(root, { recursive: true, force: true });

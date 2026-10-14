@@ -25,7 +25,9 @@ function pax(bytes: Uint8Array): ReadonlyMap<string, string> {
     const digits = field(bytes.subarray(offset, space));
     const length = Number(digits);
     if (
-      !/^\d+$/.test(digits) || !Number.isSafeInteger(length) || length <= space - offset + 1 ||
+      !/^\d+$/.test(digits) ||
+      !Number.isSafeInteger(length) ||
+      length <= space - offset + 1 ||
       offset + length > bytes.length
     ) {
       throw new Error('tar: invalid pax record size');
@@ -53,7 +55,9 @@ export async function gunzipBounded(
   compressed: Uint8Array<ArrayBuffer>,
   limit: number = MAX_UNPACKED_TARBALL_BYTES,
 ): Promise<Uint8Array> {
-  const reader = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))
+  const reader = new Blob([compressed])
+    .stream()
+    .pipeThrough(new DecompressionStream('gzip'))
     .getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -113,7 +117,9 @@ export function readTar(bytes: Uint8Array): ReadonlyMap<string, Uint8Array> {
     else {
       const prefix = field(header.subarray(345, 500));
       const name = field(header.subarray(0, 100));
-      const path = localPax.get('path') ?? globalPax.get('path') ??
+      const path =
+        localPax.get('path') ??
+        globalPax.get('path') ??
         (prefix === '' ? name : `${prefix}/${name}`);
       if (type === 0 || type === 48) files.set(path, body.slice());
       localPax = new Map();

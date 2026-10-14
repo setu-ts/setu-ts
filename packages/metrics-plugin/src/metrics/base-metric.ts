@@ -60,9 +60,7 @@ export abstract class MetricBase implements IMetric {
   protected validateLabels(labels: Readonly<Record<string, string>> | undefined): void {
     if (!labels) {
       if (this.#labelNames && this.#labelNames.length > 0) {
-        throw new Error(
-          `Metric "${this.#name}" requires labels: ${this.#labelNames.join(', ')}`,
-        );
+        throw new Error(`Metric "${this.#name}" requires labels: ${this.#labelNames.join(', ')}`);
       }
       return;
     }

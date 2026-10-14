@@ -17,27 +17,33 @@ describe('firstDuplicatePath', () => {
   // The overwrite check probes the filesystem, so it cannot see a path planned
   // twice within one plan — both would be written and the last would win.
   it('finds a path planned twice', () => {
-    expect(firstDuplicatePath([
-      { path: 'deno.json', contents: '{}' },
-      { path: 'main.ts', contents: '' },
-      { path: 'deno.json', contents: 'overwrites the framework manifest' },
-    ])).toBe('deno.json');
+    expect(
+      firstDuplicatePath([
+        { path: 'deno.json', contents: '{}' },
+        { path: 'main.ts', contents: '' },
+        { path: 'deno.json', contents: 'overwrites the framework manifest' },
+      ]),
+    ).toBe('deno.json');
   });
 
   it('returns the FIRST duplicate when there are several', () => {
-    expect(firstDuplicatePath([
-      { path: 'a', contents: '' },
-      { path: 'b', contents: '' },
-      { path: 'a', contents: '' },
-      { path: 'b', contents: '' },
-    ])).toBe('a');
+    expect(
+      firstDuplicatePath([
+        { path: 'a', contents: '' },
+        { path: 'b', contents: '' },
+        { path: 'a', contents: '' },
+        { path: 'b', contents: '' },
+      ]),
+    ).toBe('a');
   });
 
   it('returns undefined for a distinct plan', () => {
-    expect(firstDuplicatePath([
-      { path: 'deno.json', contents: '' },
-      { path: 'main.ts', contents: '' },
-    ])).toBeUndefined();
+    expect(
+      firstDuplicatePath([
+        { path: 'deno.json', contents: '' },
+        { path: 'main.ts', contents: '' },
+      ]),
+    ).toBeUndefined();
   });
 
   it('returns undefined for an empty plan', () => {
@@ -172,23 +178,26 @@ describe('findExisting', () => {
 
   it('propagates an unreadable target instead of treating it as absent', async () => {
     const fs = createFakeFs({ private: 'keep' });
-    await expect(findExisting({
-      ...fs,
-      stat: () => Promise.reject(new Error('permission denied')),
-    }, [{ path: 'private', contents: 'new' }])).rejects.toThrow('permission denied');
+    await expect(
+      findExisting(
+        {
+          ...fs,
+          stat: () => Promise.reject(new Error('permission denied')),
+        },
+        [{ path: 'private', contents: 'new' }],
+      ),
+    ).rejects.toThrow('permission denied');
   });
 });
 
 describe('interruptedRunRetryHint', () => {
   it('offers cleanup only when every collision is inside the directory the run would create', () => {
-    expect(interruptedRunRetryHint(
-      ['/work/app/deno.json', '/work/app/src/main.ts'],
-      '/work/app',
-    )).toContain('delete /work/app');
-    expect(interruptedRunRetryHint(
-      ['/work/app/deno.json', '/work/keep.txt'],
-      '/work/app',
-    )).toBeUndefined();
+    expect(
+      interruptedRunRetryHint(['/work/app/deno.json', '/work/app/src/main.ts'], '/work/app'),
+    ).toContain('delete /work/app');
+    expect(
+      interruptedRunRetryHint(['/work/app/deno.json', '/work/keep.txt'], '/work/app'),
+    ).toBeUndefined();
     expect(interruptedRunRetryHint([], '/work/app')).toBeUndefined();
   });
 });
@@ -197,11 +206,15 @@ describe('writeFiles', () => {
   it('classifies created, updated, and unchanged files', async () => {
     const fs = createFakeFs({ 'updated.ts': 'before', 'same.ts': 'same' });
     expect(
-      await writeFiles(fs, [
-        { path: 'created.ts', contents: 'new' },
-        { path: 'updated.ts', contents: 'after' },
-        { path: 'same.ts', contents: 'same' },
-      ], { root: '/' }),
+      await writeFiles(
+        fs,
+        [
+          { path: 'created.ts', contents: 'new' },
+          { path: 'updated.ts', contents: 'after' },
+          { path: 'same.ts', contents: 'same' },
+        ],
+        { root: '/' },
+      ),
     ).toEqual([
       { path: 'created.ts', outcome: 'created' },
       { path: 'updated.ts', outcome: 'updated' },
@@ -210,10 +223,14 @@ describe('writeFiles', () => {
   });
   it('writes every file in order', async () => {
     const fs = createFakeFs();
-    await writeFiles(fs, [
-      { path: 'src/a.ts', contents: 'A' },
-      { path: 'src/b.ts', contents: 'B' },
-    ], { root: '/' });
+    await writeFiles(
+      fs,
+      [
+        { path: 'src/a.ts', contents: 'A' },
+        { path: 'src/b.ts', contents: 'B' },
+      ],
+      { root: '/' },
+    );
     expect(fs.writes).toEqual(['src/a.ts', 'src/b.ts']);
     expect(fs.read('src/a.ts')).toBe('A');
     expect(fs.read('src/b.ts')).toBe('B');
@@ -229,11 +246,15 @@ describe('writeFiles', () => {
         return fs.mkdir(path, options);
       },
     };
-    await writeFiles(spy, [
-      { path: 'src/services/a.ts', contents: 'A' },
-      { path: 'src/services/b.ts', contents: 'B' },
-      { path: 'src/controllers/c.ts', contents: 'C' },
-    ], { root: '/' });
+    await writeFiles(
+      spy,
+      [
+        { path: 'src/services/a.ts', contents: 'A' },
+        { path: 'src/services/b.ts', contents: 'B' },
+        { path: 'src/controllers/c.ts', contents: 'C' },
+      ],
+      { root: '/' },
+    );
     expect(fs.mkdirs).toEqual(['src', 'src/services', 'src/controllers']);
     expect(recursive).toBe(false);
   });
@@ -251,8 +272,9 @@ describe('writeFiles', () => {
       ...fs,
       writeFile: () => Promise.reject(new Error('disk full')),
     };
-    await expect(writeFiles(failing, [{ path: 'a.ts', contents: 'A' }], { root: '/' }))
-      .rejects.toThrow('disk full');
+    await expect(
+      writeFiles(failing, [{ path: 'a.ts', contents: 'A' }], { root: '/' }),
+    ).rejects.toThrow('disk full');
   });
 });
 
@@ -295,7 +317,7 @@ describe('assertInsideProject (M101f re-audit N9/N10)', () => {
   it('refuses a dangling link instead of treating it as absent', async () => {
     const dangling: IFileSystem = {
       ...base,
-      readdir: (path) => path === '/p' ? Promise.resolve(['a.ts', 'ghost']) : base.readdir(path),
+      readdir: (path) => (path === '/p' ? Promise.resolve(['a.ts', 'ghost']) : base.readdir(path)),
     };
     await expect(assertInsideProject(dangling, '/p', '/p/ghost')).rejects.toThrow(
       'link to something that does not exist',
@@ -335,9 +357,16 @@ describe('assertInsideProject (M101f re-audit N9/N10)', () => {
           : fs.stat(path),
     };
     await expect(
-      writeFiles(linked, [{ path: '/p/a.ts', contents: 'A' }, { path: '/p/b.ts', contents: 'B' }], {
-        root: '/p',
-      }),
+      writeFiles(
+        linked,
+        [
+          { path: '/p/a.ts', contents: 'A' },
+          { path: '/p/b.ts', contents: 'B' },
+        ],
+        {
+          root: '/p',
+        },
+      ),
     ).rejects.toBeInstanceOf(PathEscapesProjectError);
     expect(fs.writes).toEqual([]);
   });

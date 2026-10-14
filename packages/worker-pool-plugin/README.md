@@ -67,10 +67,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IWorkerPool } from '@setu-ts/common';
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    WorkerPoolPlugin({ taskTimeoutMs: 10_000 }),
-  ],
+  plugins: [RuntimePlugin(), WorkerPoolPlugin({ taskTimeoutMs: 10_000 })],
 });
 await app.start();
 
@@ -131,6 +128,7 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   `self.close` is `undefined` altogether, so `process.exit()` is the portable way to do this.) Keep
   a task timeout on any Deno pool whose task module can terminate itself; it remains the only
   backstop there.
+
 - **Overload.** When the pending queue is at its bound, `run()` rejects with `WorkerQueueFullError`
   instead of growing memory without limit.
 - **Shutdown.** The plugin's `onClose` hook terminates every worker and rejects pending tasks.

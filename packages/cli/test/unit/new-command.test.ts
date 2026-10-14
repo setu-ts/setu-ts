@@ -140,12 +140,10 @@ describe('a template with a frontend build, on an npm target', () => {
   // The next-step hint and the README both tell a new user to run `start`.
   // Without a build first it crashed on a fresh project with "Failed to load
   // React Router server build", because the server bundle did not exist yet.
-  for (
-    const [runtime, build, entry] of [
-      ['node', 'npm run build', 'tsx main.ts'],
-      ['bun', 'bun run build', 'bun run main.ts'],
-    ] as const
-  ) {
+  for (const [runtime, build, entry] of [
+    ['node', 'npm run build', 'tsx main.ts'],
+    ['bun', 'bun run build', 'bun run main.ts'],
+  ] as const) {
     it(`builds before start on ${runtime}, as it already does before test`, async () => {
       const h = harness();
       expect(await h.run(['app', '--runtime', runtime, '--template', 'full-stack'])).toBe(0);
@@ -241,16 +239,14 @@ describe('runNewCommand', () => {
   it('creates a node project under the working directory by default', async () => {
     const h = harness();
     expect(await h.run(['my-app'])).toBe(0);
-    for (
-      const file of [
-        'package.json',
-        'tsconfig.json',
-        'main.ts',
-        'setu.config.ts',
-        'README.md',
-        '.gitignore',
-      ]
-    ) {
+    for (const file of [
+      'package.json',
+      'tsconfig.json',
+      'main.ts',
+      'setu.config.ts',
+      'README.md',
+      '.gitignore',
+    ]) {
       expect(h.fs.has(`/work/my-app/${file}`)).toBe(true);
     }
     expect(h.fs.has('/work/my-app/deno.json')).toBe(false);
@@ -278,9 +274,7 @@ describe('runNewCommand', () => {
       // The devtool composition is the SECOND parameter on every target
       // (M98c): `setu commands` passes its discovery env as the FIRST
       // argument, so a first-parameter extra would capture that proxy.
-      expect(
-        h.fs.read('/work/app/setu.config.ts'),
-      ).toContain(
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain(
         'export function createApp(\n  _env?: Readonly<Record<string, unknown>>,\n' +
           '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
           '): IKernelApplication {',
@@ -371,17 +365,15 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['shop', '--template', 'full-stack']);
 
-      for (
-        const file of [
-          'app/routes.ts',
-          'app/root.tsx',
-          'app/lib/context-keys.server.ts',
-          'app/lib/load-context.ts',
-          'app/features/products/products.server.ts',
-          'vite.config.ts',
-          'react-router.config.ts',
-        ]
-      ) {
+      for (const file of [
+        'app/routes.ts',
+        'app/root.tsx',
+        'app/lib/context-keys.server.ts',
+        'app/lib/load-context.ts',
+        'app/features/products/products.server.ts',
+        'vite.config.ts',
+        'react-router.config.ts',
+      ]) {
         expect(h.fs.has(`/work/shop/${file}`)).toBe(true);
       }
     });
@@ -528,15 +520,13 @@ describe('runNewCommand', () => {
       const h = harness();
       expect(await h.run(['app', '--template', 'rest'])).toBe(0);
       const config = h.fs.read('/work/app/setu.config.ts');
-      for (
-        const symbol of [
-          'RuntimePlugin',
-          'LoggerPlugin',
-          'ValidationPlugin',
-          'HttpSecurityPlugin',
-          'OpenApiPlugin',
-        ]
-      ) {
+      for (const symbol of [
+        'RuntimePlugin',
+        'LoggerPlugin',
+        'ValidationPlugin',
+        'HttpSecurityPlugin',
+        'OpenApiPlugin',
+      ]) {
         if (symbol !== 'ValidationPlugin') {
           expect(config).toContain(`${symbol}()`);
         }
@@ -603,17 +593,15 @@ describe('runNewCommand', () => {
       const h = harness();
       expect(await h.run(['bare'])).toBe(0);
       const config = h.fs.read('/work/bare/setu.config.ts');
-      for (
-        const absent of [
-          'APP_CONTROLLERS',
-          'APP_SERVICES',
-          'HEALTH_INDICATORS',
-          'CUSTOM_METRICS',
-          'COMMAND_HANDLERS',
-          'EVENT_HANDLERS',
-          'MODULE_CONTROLLERS',
-        ]
-      ) {
+      for (const absent of [
+        'APP_CONTROLLERS',
+        'APP_SERVICES',
+        'HEALTH_INDICATORS',
+        'CUSTOM_METRICS',
+        'COMMAND_HANDLERS',
+        'EVENT_HANDLERS',
+        'MODULE_CONTROLLERS',
+      ]) {
         expect(config).not.toContain(absent);
       }
       // The HTTP barrel IS emitted — `controller` is ungated since E8, so a
@@ -621,8 +609,9 @@ describe('runNewCommand', () => {
       // carry is the CLASS-shaped registration: no APP_CONTROLLERS above, and
       // no import of `@setu-ts/decorator-plugin` anywhere.
       expect(h.fs.has('/work/bare/src/controllers/index.ts')).toBe(true);
-      expect(h.fs.read('/work/bare/src/controllers/index.ts'))
-        .toContain('export function registerGeneratedRoutes');
+      expect(h.fs.read('/work/bare/src/controllers/index.ts')).toContain(
+        'export function registerGeneratedRoutes',
+      );
       expect(config).not.toContain('decorator-plugin');
       expect(h.fs.has('/work/bare/src/cqrs/index.ts')).toBe(false);
     });
@@ -693,9 +682,12 @@ describe('runNewCommand', () => {
       for (const symbol of ['ConfigPlugin', 'OpenApiPlugin', 'errorHandler']) {
         expect(microConfig).toContain(symbol);
       }
-      for (
-        const symbol of ['MessagingPlugin', 'QueuePlugin', 'ResiliencePlugin', 'TelemetryPlugin']
-      ) {
+      for (const symbol of [
+        'MessagingPlugin',
+        'QueuePlugin',
+        'ResiliencePlugin',
+        'TelemetryPlugin',
+      ]) {
         expect(microConfig).toContain(`${symbol}()`);
         expect(rest.fs.read('/work/app/setu.config.ts')).not.toContain(symbol);
       }
@@ -720,8 +712,9 @@ describe('runNewCommand', () => {
 
     it('scaffolds microservice on cloudflare-workers, swapping in the platform plugin', async () => {
       const h = harness();
-      expect(await h.run(['app', '--template', 'microservice', '--runtime', 'cloudflare-workers']))
-        .toBe(0);
+      expect(
+        await h.run(['app', '--template', 'microservice', '--runtime', 'cloudflare-workers']),
+      ).toBe(0);
 
       // The capabilities survive the swap; only their provider changes.
       const config = h.fs.read('/work/app/setu.config.ts');
@@ -768,9 +761,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'deno']);
       const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
-      expect(manifest.imports['@setu-ts/kernel']).toMatch(
-        /^npm:@setu-ts\/kernel@\^/,
-      );
+      expect(manifest.imports['@setu-ts/kernel']).toMatch(/^npm:@setu-ts\/kernel@\^/);
       expect(manifest.tasks.start).toContain('main.ts');
     });
 
@@ -1270,12 +1261,10 @@ describe('--workspace', () => {
     // and a trailing `--port` both arrive as the boolean `true`. Testing for a
     // string value would let the number the user typed vanish in silence — the
     // exact class this milestone refuses everywhere else.
-    for (
-      const [label, argv] of [
-        ['a negative number', ['acme', '--workspace', '--port', '-1']],
-        ['no value at all', ['acme', '--workspace', '--port']],
-      ] as const
-    ) {
+    for (const [label, argv] of [
+      ['a negative number', ['acme', '--workspace', '--port', '-1']],
+      ['no value at all', ['acme', '--workspace', '--port']],
+    ] as const) {
       it(`refuses --port with ${label}`, async () => {
         const h = harness();
         expect(await h.run([...argv])).toBe(2);
@@ -1461,9 +1450,9 @@ describe('the interactive seam on setu new', () => {
     expect(await yes.run(['svc', '--template', 'microservice', '--yes'])).toBe(0);
 
     const pathsOf = (h: Harness) =>
-      h.fs.writes.map((path) => [path, h.fs.read(path)] as const).sort(([a], [b]) =>
-        a < b ? -1 : 1
-      );
+      h.fs.writes
+        .map((path) => [path, h.fs.read(path)] as const)
+        .sort(([a], [b]) => (a < b ? -1 : 1));
     expect(pathsOf(yes)).toEqual(pathsOf(plain));
   });
 
@@ -1527,13 +1516,17 @@ describe('the interactive seam on setu new', () => {
       cwd: '/work',
       log: () => {},
       error: () => {},
-      ask: createTerminalPrompter(() => true, () => Promise.resolve(''), () => {}),
+      ask: createTerminalPrompter(
+        () => true,
+        () => Promise.resolve(''),
+        () => {},
+      ),
     });
     expect(code).toBe(0);
     const yes = harness();
     expect(await yes.run(['svc', '--yes'])).toBe(0);
     const pathsOf = (fs: FakeFs) =>
-      fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => a < b ? -1 : 1);
+      fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => (a < b ? -1 : 1));
     expect(pathsOf(enter)).toEqual(pathsOf(yes.fs));
   });
 

@@ -23,8 +23,9 @@ describe('sse schematic', () => {
     );
 
     expect(files.map((file) => file.path)).toContain('src/hooks/use-scores.ts');
-    expect(files.find((file) => file.path === 'src/hooks/use-scores.ts')?.contents)
-      .toContain("import { createSseClient } from '@setu-ts/sdk';");
+    expect(files.find((file) => file.path === 'src/hooks/use-scores.ts')?.contents).toContain(
+      "import { createSseClient } from '@setu-ts/sdk';",
+    );
   });
 
   it('generates a decorated controller when decorators select class-based mode', () => {

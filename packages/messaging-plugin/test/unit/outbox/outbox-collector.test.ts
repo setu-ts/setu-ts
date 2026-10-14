@@ -34,9 +34,7 @@ function recordingMetrics(): IMetricsService & {
       if (state.fail) throw new Error('metrics backend refused');
       writes.push({ name, value, labels: { ...labels } });
     };
-    return { inc: write, set: write, dec: write, observe: write } as unknown as
-      & ICounter
-      & IGauge;
+    return { inc: write, set: write, dec: write, observe: write } as unknown as ICounter & IGauge;
   };
   return Object.assign(state, {
     writes,

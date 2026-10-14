@@ -76,8 +76,7 @@ export interface ScopedGrant {
  * @since 0.9.0
  */
 export type GrantQuery =
-  | { readonly kind: 'chain'; readonly scopes: readonly ScopeRef[] }
-  | { readonly kind: 'all' };
+  { readonly kind: 'chain'; readonly scopes: readonly ScopeRef[] } | { readonly kind: 'all' };
 
 /**
  * A source of scoped role grants — a repository, a directory, an identity

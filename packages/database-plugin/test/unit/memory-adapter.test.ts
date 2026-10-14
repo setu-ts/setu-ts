@@ -306,12 +306,15 @@ describe('MemoryAdapter', () => {
       });
       expect(matched.map((r) => r.name)).toEqual(['Alice']);
       expect(
-        await ds.count({}, {
-          type: 'comparison',
-          field: 'name',
-          operator: 'contains',
-          value: 'li',
-        }),
+        await ds.count(
+          {},
+          {
+            type: 'comparison',
+            field: 'name',
+            operator: 'contains',
+            value: 'li',
+          },
+        ),
       ).toBe(1);
       await txn.rollback();
     });

@@ -61,10 +61,7 @@ export class MemorySessionStore implements ISessionStore {
     // Expired entries are dropped lazily on read as well; the sweep exists so
     // that sessions nobody ever revisits do not accumulate for the process's
     // lifetime.
-    this.#timer = deps.setInterval(
-      () => this.sweep(),
-      deps.sweepIntervalMs ?? DEFAULT_SWEEP_MS,
-    );
+    this.#timer = deps.setInterval(() => this.sweep(), deps.sweepIntervalMs ?? DEFAULT_SWEEP_MS);
   }
 
   /** How many entries are currently held, expired ones included. */

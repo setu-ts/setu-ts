@@ -183,9 +183,14 @@ describe('passkey routes', () => {
     // Without the header token, the ceremony POST is refused by the CSRF check.
     const refused = await jar.postJson(app, LOGIN_OPTIONS, {});
     expect(refused.status).toBe(403);
-    const accepted = await jar.postJson(app, LOGIN_OPTIONS, {}, {
-      'x-csrf-token': token,
-    });
+    const accepted = await jar.postJson(
+      app,
+      LOGIN_OPTIONS,
+      {},
+      {
+        'x-csrf-token': token,
+      },
+    );
     expect(accepted.status).toBe(200);
   });
 
@@ -256,11 +261,13 @@ describe('passkey routes', () => {
     const jar = new CookieJar();
     await jar.postJson(app, '/password-login', {});
     expect((await jar.postJson(app, REGISTER_OPTIONS, {})).status).toBe(200);
-    expect(seen).toEqual([{
-      principal: { id: 'alice', roles: ['user'] },
-      methods: ['pwd'],
-      credentialCount: 0,
-    }]);
+    expect(seen).toEqual([
+      {
+        principal: { id: 'alice', roles: ['user'] },
+        methods: ['pwd'],
+        credentialCount: 0,
+      },
+    ]);
   });
 
   it('with signIn.mfa configured, a one-factor session cannot enrol even a FIRST passkey', async () => {

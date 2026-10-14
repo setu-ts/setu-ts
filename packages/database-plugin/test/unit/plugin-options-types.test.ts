@@ -63,9 +63,8 @@ function assertOptionArms(): void {
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(
-        createFakeDrizzleInstance(),
-        (database, work) => database.transaction(work),
+      drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
+        database.transaction(work),
       ),
       drizzleTables: { user: createFakeDrizzleTable('user') },
     },
@@ -87,9 +86,8 @@ function assertOptionArms(): void {
     type: 'drizzle',
     // @ts-expect-error the Drizzle arm requires `options.drizzleTables`.
     options: {
-      drizzleInstance: createDrizzleDatabase(
-        createFakeDrizzleInstance(),
-        (database, work) => database.transaction(work),
+      drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
+        database.transaction(work),
       ),
     },
   });
@@ -252,9 +250,8 @@ describe('DatabasePlugin option arms', () => {
     const plugin = DatabasePlugin({
       type: 'drizzle',
       options: {
-        drizzleInstance: createDrizzleDatabase(
-          createFakeDrizzleInstance(),
-          (database, work) => database.transaction(work),
+        drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
+          database.transaction(work),
         ),
         drizzleTables: { user: createFakeDrizzleTable('user') },
       },

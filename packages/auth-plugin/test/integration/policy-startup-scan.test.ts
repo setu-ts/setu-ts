@@ -63,7 +63,8 @@ describe('AuthPlugin startup scan', () => {
       version: '0.0.0',
       dependencies: [CAPABILITIES.AUTHORIZATION_POLICIES],
       register(ctx) {
-        ctx.services.get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES)
+        ctx.services
+          .get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES)
           .define(unregistered);
       },
     };

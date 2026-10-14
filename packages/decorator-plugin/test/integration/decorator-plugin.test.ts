@@ -260,7 +260,10 @@ describe('DecoratorPlugin registration (integration)', () => {
     @Injectable({ token: 'repo' })
     @Inject('database', 'logger')
     class Repository {
-      constructor(readonly db: unknown, readonly logger: unknown) {}
+      constructor(
+        readonly db: unknown,
+        readonly logger: unknown,
+      ) {}
     }
     const { ctx, services } = createFakeContext();
     ctx.services.register('database', { kind: 'db' });
@@ -276,7 +279,10 @@ describe('DecoratorPlugin registration (integration)', () => {
     @Injectable({ scope: 'transient', token: 'repo' })
     @Inject('database', 'logger')
     class Repository {
-      constructor(readonly db: unknown, readonly logger: unknown) {}
+      constructor(
+        readonly db: unknown,
+        readonly logger: unknown,
+      ) {}
     }
     const { container, registered } = recordingContainer();
     const { ctx } = createFakeContext({ container });
@@ -310,7 +316,10 @@ describe('DecoratorPlugin registration (integration)', () => {
     @Injectable({ token: 'partial' })
     @Inject('logger')
     class PartialService {
-      constructor(readonly logger: unknown, readonly extra?: unknown) {}
+      constructor(
+        readonly logger: unknown,
+        readonly extra?: unknown,
+      ) {}
     }
     expect(metadataStore.getService(PartialService)?.inject).toEqual(['logger']);
   });
@@ -386,20 +395,17 @@ describe('DecoratorPlugin registration (integration)', () => {
 
   // Node always grants a real `import()` of a `file://` URL, so the default
   // discovery importer runs here unguarded (M111b; it was Deno-permission gated).
-  it(
-    'consumes autoDiscover + controllersPath (real import path)',
-    async () => {
-      const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
-        /\/$/,
-        '',
-      );
-      const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
-      const runtime = createFakeRuntime({ fs });
-      const { ctx, routes } = createFakeContext({ runtime });
-      await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
-      expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
-    },
-  );
+  it('consumes autoDiscover + controllersPath (real import path)', async () => {
+    const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
+      /\/$/,
+      '',
+    );
+    const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
+    const runtime = createFakeRuntime({ fs });
+    const { ctx, routes } = createFakeContext({ runtime });
+    await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
+    expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
+  });
 
   it('skips a non-controller class passed in the controllers list', async () => {
     class NotAController {

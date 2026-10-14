@@ -24,8 +24,7 @@ async function command(project: string, args: string[]): Promise<void> {
   }).output();
   expect(
     result.code,
-    new TextDecoder().decode(result.stdout) +
-      new TextDecoder().decode(result.stderr),
+    new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr),
   ).toBe(0);
 }
 
@@ -42,14 +41,7 @@ beforeAll(async () => {
     // everything below — the workspace repointing, `deno task build`, the
     // generated server — drives the Deno form. The Node full-stack scaffold is
     // installed, built and served by packages/cli's node-scaffold-e2e.
-    await runCli([
-      'new',
-      'shop',
-      '--template',
-      'full-stack',
-      '--runtime',
-      'deno',
-    ], {
+    await runCli(['new', 'shop', '--template', 'full-stack', '--runtime', 'deno'], {
       fs: runtime.fs!,
       cwd: scratch,
       now: () => runtime.now(),
@@ -131,18 +123,13 @@ async function referencedAssets(page: Page, origin: string): Promise<string[]> {
   return [...assets].sort();
 }
 
-async function assertAssets(
-  page: Page,
-  origin: string,
-  assets: readonly string[],
-): Promise<void> {
+async function assertAssets(page: Page, origin: string, assets: readonly string[]): Promise<void> {
   for (const path of assets) {
     const response = await page.request.get(`${origin}${path}`);
     expect(response.status(), `missing referenced asset ${path}`).toBe(200);
-    expect(response.headers()['content-type'], `wrong content type for ${path}`)
-      .toMatch(
-        path.endsWith('.css') ? /text\/css/ : /(?:text|application)\/javascript/,
-      );
+    expect(response.headers()['content-type'], `wrong content type for ${path}`).toMatch(
+      path.endsWith('.css') ? /text\/css/ : /(?:text|application)\/javascript/,
+    );
   }
 }
 
@@ -154,7 +141,7 @@ async function loginForm(page: Page, origin: string): Promise<void> {
 
 for (const target of ['example', 'scaffold'] as const) {
   describe(`full-stack browser — ${target}`, () => {
-    const project = () => target === 'example' ? `${REPO_ROOT}/apps/full-stack` : scaffold;
+    const project = () => (target === 'example' ? `${REPO_ROOT}/apps/full-stack` : scaffold);
 
     it('renders the landing page through SSR', async () => {
       await drive(project(), async (page, origin) => {
@@ -221,28 +208,28 @@ for (const target of ['example', 'scaffold'] as const) {
       });
     });
     it('degrades to a real POST and 302 with JavaScript disabled', async () => {
-      await drive(project(), async (page, origin) => {
-        await loginForm(page, origin);
-        const posted = page.waitForResponse((response) =>
-          response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/login'
-        );
-        await page.getByRole('button', { name: 'Sign in' }).click();
-        const response = await posted;
-        expect(response.status()).toBe(302);
-        await page.waitForURL('**/products');
-      }, false);
+      await drive(
+        project(),
+        async (page, origin) => {
+          await loginForm(page, origin);
+          const posted = page.waitForResponse(
+            (response) =>
+              response.request().method() === 'POST' &&
+              new URL(response.url()).pathname === '/login',
+          );
+          await page.getByRole('button', { name: 'Sign in' }).click();
+          const response = await posted;
+          expect(response.status()).toBe(302);
+          await page.waitForURL('**/products');
+        },
+        false,
+      );
     });
     it('detects missing hydration when the client entry is aborted while SSR still renders', async () => {
       await drive(project(), async (page, origin) => {
-        await page.route(
-          '**/assets/entry.client-*.js',
-          (route) => route.abort(),
-        );
+        await page.route('**/assets/entry.client-*.js', (route) => route.abort());
         await page.goto(origin, { waitUntil: 'networkidle' });
-        expect(await page.locator('body').textContent()).toContain(
-          'You are not signed in.',
-        );
+        expect(await page.locator('body').textContent()).toContain('You are not signed in.');
         await expect(
           clientTransition(
             page,
@@ -254,10 +241,7 @@ for (const target of ['example', 'scaffold'] as const) {
     });
     it('detects a document navigation on Form when the client entry is aborted', async () => {
       await drive(project(), async (page, origin) => {
-        await page.route(
-          '**/assets/entry.client-*.js',
-          (route) => route.abort(),
-        );
+        await page.route('**/assets/entry.client-*.js', (route) => route.abort());
         await loginForm(page, origin);
         await expect(
           clientTransition(

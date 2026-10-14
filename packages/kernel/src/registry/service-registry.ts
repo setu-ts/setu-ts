@@ -162,17 +162,11 @@ export class ServiceRegistry implements IServiceRegistry {
   }
 
   /** Installs the application-owned callback for startup-time mutations. */
-  setObserver(
-    observer: (kind: 'override' | 'unregister', token: CapabilityToken) => void,
-  ): void {
+  setObserver(observer: (kind: 'override' | 'unregister', token: CapabilityToken) => void): void {
     this.#observer = observer;
   }
 
-  register<T extends object>(
-    token: CapabilityToken,
-    service: T,
-    options?: RegisterOptions,
-  ): void {
+  register<T extends object>(token: CapabilityToken, service: T, options?: RegisterOptions): void {
     this.#store(token, { instance: service }, options);
   }
 
@@ -187,7 +181,8 @@ export class ServiceRegistry implements IServiceRegistry {
   get<T extends object>(token: CapabilityToken): T {
     const registration = this.#lookup(token);
     if (registration === undefined) {
-      const advice = this.#missExplanation?.(token) ??
+      const advice =
+        this.#missExplanation?.(token) ??
         'Register a plugin that provides it, or check the token spelling against CAPABILITIES.';
       throw new Error(`No service registered for capability '${token}'. ${advice}`);
     }

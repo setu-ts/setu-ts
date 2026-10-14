@@ -58,20 +58,28 @@ describe('compileScopedRbac — defaults', () => {
   });
 
   it('resolves a cyclic inheritance completely from every starting role', () => {
-    const config = compileScopedRbac({ sources: [SOURCE] }, {
-      roles: {
-        a: { permissions: ['pa'], inherits: ['b'] },
-        b: { permissions: ['pb'], inherits: ['a'] },
+    const config = compileScopedRbac(
+      { sources: [SOURCE] },
+      {
+        roles: {
+          a: { permissions: ['pa'], inherits: ['b'] },
+          b: { permissions: ['pb'], inherits: ['a'] },
+        },
       },
-    }, true);
+      true,
+    );
     expect([...config.roles.get('a')!.permissions].sort()).toEqual(['pa', 'pb']);
     expect([...config.roles.get('b')!.permissions].sort()).toEqual(['pa', 'pb']);
   });
 
   it('ignores an inherited role that is not defined', () => {
-    const config = compileScopedRbac({ sources: [SOURCE] }, {
-      roles: { a: { permissions: ['pa'], inherits: ['ghost', 'toString'] } },
-    }, true);
+    const config = compileScopedRbac(
+      { sources: [SOURCE] },
+      {
+        roles: { a: { permissions: ['pa'], inherits: ['ghost', 'toString'] } },
+      },
+      true,
+    );
     expect([...config.roles.get('a')!.permissions]).toEqual(['pa']);
   });
 
@@ -103,14 +111,16 @@ describe('compileScopedRbac — defaults', () => {
 
   it('indexes static grants by subject', () => {
     const config = compile({
-      sources: [{
-        kind: 'static',
-        grants: [
-          { subject: 'u1', role: 'viewer', scope: null },
-          { subject: 'u1', role: 'approver', scope: { type: 'tenant', id: 't1' } },
-          { subject: 'u2', role: 'viewer', scope: null },
-        ],
-      }],
+      sources: [
+        {
+          kind: 'static',
+          grants: [
+            { subject: 'u1', role: 'viewer', scope: null },
+            { subject: 'u1', role: 'approver', scope: { type: 'tenant', id: 't1' } },
+            { subject: 'u2', role: 'viewer', scope: null },
+          ],
+        },
+      ],
     });
     const source = config.sources[0];
     expect(source.kind).toBe('static');
@@ -157,10 +167,12 @@ describe('compileScopedRbac — refusals', () => {
     );
     refused(
       {
-        sources: [{
-          kind: 'static',
-          grants: [{ subject: 'u', role: 'r', scope: { type: 'T', id: 'x' } }],
-        }],
+        sources: [
+          {
+            kind: 'static',
+            grants: [{ subject: 'u', role: 'r', scope: { type: 'T', id: 'x' } }],
+          },
+        ],
       },
       'grants[0]',
     );
@@ -171,13 +183,14 @@ describe('compileScopedRbac — refusals', () => {
   it('accepts a custom source given as a factory', () => {
     expect(() =>
       compile({
-        sources: [{
-          kind: 'custom',
-          source: () => ({ name: 'x', grantsFor: () => Promise.resolve([]) }),
-        }],
-      })
-    )
-      .not.toThrow();
+        sources: [
+          {
+            kind: 'custom',
+            source: () => ({ name: 'x', grantsFor: () => Promise.resolve([]) }),
+          },
+        ],
+      }),
+    ).not.toThrow();
   });
 
   it('refuses a malformed permissions list, resolver, tenant type and role source', () => {
@@ -221,16 +234,20 @@ describe('compileScopedRbac — refusals', () => {
       'scopeTypes must be',
     );
     refused({ sources: [SOURCE], grantableIn: { viewer: {} } }, 'scopeTypes must be');
-    refused({
-      sources: [SOURCE],
-      grantableIn: { viewer: { scopeTypes: ['tenant'], global: 'yes' } },
-    }, 'global must be a boolean');
+    refused(
+      {
+        sources: [SOURCE],
+        grantableIn: { viewer: { scopeTypes: ['tenant'], global: 'yes' } },
+      },
+      'global must be a boolean',
+    );
     refused(
       { sources: [SOURCE], grantableIn: { viewer: { scopeTypes: [] } } },
       'grantable nowhere',
     );
-    expect(() => compile({ grantableIn: { viewer: { scopeTypes: [], global: true } } })).not
-      .toThrow();
+    expect(() =>
+      compile({ grantableIn: { viewer: { scopeTypes: [], global: true } } }),
+    ).not.toThrow();
   });
 
   const bounds: readonly (readonly [keyof ScopedRbacOptions, number, number])[] = [
@@ -244,9 +261,14 @@ describe('compileScopedRbac — refusals', () => {
 
   for (const [name, min, max] of bounds) {
     it(`refuses ${name} outside ${min}–${max}, NaN and fractions`, () => {
-      for (
-        const value of [min - 1, max + 1, Number.NaN, Number.POSITIVE_INFINITY, min + 0.5, '5']
-      ) {
+      for (const value of [
+        min - 1,
+        max + 1,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        min + 0.5,
+        '5',
+      ]) {
         refused({ sources: [SOURCE], [name]: value }, `${name} must be an integer`);
       }
       expect(() => compile({ [name]: min })).not.toThrow();
@@ -264,9 +286,8 @@ describe('AuthPlugin — scopedRbac construction', () => {
 
   it('refuses sign-in timing without signIn when AuthPlugin(...) is called', () => {
     expect(() =>
-      AuthPlugin({ rbac: CATALOGUE, scopedRbac: { sources: [SOURCE], timing: 'sign-in' } })
-    )
-      .toThrow('requires the signIn option');
+      AuthPlugin({ rbac: CATALOGUE, scopedRbac: { sources: [SOURCE], timing: 'sign-in' } }),
+    ).toThrow('requires the signIn option');
   });
 
   it('reserves the scoped-rbac policy name whether or not scopedRbac is set', () => {

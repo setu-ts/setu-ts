@@ -290,9 +290,7 @@ export function renderSeamImports(
   module: (kebab: string) => string,
 ): string {
   if (names.length === 0) return '';
-  return names
-    .map((name) => renderImport(symbols(deriveNames(name)), module(name)))
-    .join('\n');
+  return names.map((name) => renderImport(symbols(deriveNames(name)), module(name))).join('\n');
 }
 
 /**

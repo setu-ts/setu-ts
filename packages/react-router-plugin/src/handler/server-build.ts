@@ -30,12 +30,8 @@ type RouterContextProviderConstructor = new () => RouterLoadContext;
  * @throws {Error} When the module exposes no `RouterContextProvider` export
  * @since 0.2.0
  */
-export function createLoadContextFactory(
-  rr: Record<string, unknown>,
-): () => RouterLoadContext {
-  const Provider = rr.RouterContextProvider as
-    | RouterContextProviderConstructor
-    | undefined;
+export function createLoadContextFactory(rr: Record<string, unknown>): () => RouterLoadContext {
+  const Provider = rr.RouterContextProvider as RouterContextProviderConstructor | undefined;
 
   if (typeof Provider !== 'function') {
     throw new Error(
@@ -159,6 +155,7 @@ export async function loadRequestHandler(
       `Failed to load React Router server build from "${serverBuildPath}". ` +
         `Ensure the path is correct and the file exports a ServerBuild as default. ` +
         `Cause: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 
@@ -172,6 +169,7 @@ export async function loadRequestHandler(
     throw new Error(
       `Failed to import 'react-router'. Ensure it is available in the ` +
         `runtime/module resolution. Cause: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 
@@ -182,10 +180,7 @@ export async function loadRequestHandler(
     );
   }
 
-  const createRequestHandler = rr.createRequestHandler as (
-    build: unknown,
-    mode: string,
-  ) => unknown;
+  const createRequestHandler = rr.createRequestHandler as (build: unknown, mode: string) => unknown;
 
   return {
     handler: assembleHandler(build, createRequestHandler, mode),

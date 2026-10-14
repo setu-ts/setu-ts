@@ -66,9 +66,10 @@ const GRPC_ALREADY_EXISTS = 6;
  */
 function deriveDefaultSubscription(defaultQueue: string, topic: string): string {
   const marker = topic.lastIndexOf('/topics/');
-  const topicId = topic.startsWith('projects/') && marker !== -1
-    ? topic.slice(marker + '/topics/'.length)
-    : topic;
+  const topicId =
+    topic.startsWith('projects/') && marker !== -1
+      ? topic.slice(marker + '/topics/'.length)
+      : topic;
   return `${defaultQueue}.${topicId}`;
 }
 
@@ -94,14 +95,15 @@ function isSameTopic(boundTopic: string, requestedTopic: string, projectId: stri
  */
 export interface PubSubSdkModule {
   PubSub: new (options: { projectId: string; credentials?: unknown }) => {
-    topic(topicName: string, options?: { messageOrdering?: boolean }): {
-      publishMessage(
-        message: {
-          data: Uint8Array;
-          attributes?: Record<string, string>;
-          orderingKey?: string;
-        },
-      ): Promise<string>;
+    topic(
+      topicName: string,
+      options?: { messageOrdering?: boolean },
+    ): {
+      publishMessage(message: {
+        data: Uint8Array;
+        attributes?: Record<string, string>;
+        orderingKey?: string;
+      }): Promise<string>;
       createSubscription(
         subscriptionName: string,
         options?: { enableMessageOrdering?: boolean },
@@ -117,26 +119,24 @@ export interface PubSubSdkModule {
     subscription(subscriptionName: string): {
       on(
         event: 'message',
-        handler: (
-          msg: {
-            ack: () => void;
-            nack: () => void;
-            data: Uint8Array;
-            id: string;
-            /**
-             * The server-assigned publish time, as the SDK delivers it.
-             *
-             * Typed `Date` rather than `string` (M90d review, read off the
-             * locked `@google-cloud/pubsub@6.0.0` `subscriber.d.ts`): the real
-             * `Message.publishTime` is a `PreciseDate`, a `Date` subclass, so
-             * `Date` is the correct structural supertype and the full SDK
-             * `Message` type stays unimported. The previous `string` made the
-             * fixture model a value production never sends.
-             */
-            publishTime?: Date;
-            attributes?: Record<string, string>;
-          },
-        ) => void,
+        handler: (msg: {
+          ack: () => void;
+          nack: () => void;
+          data: Uint8Array;
+          id: string;
+          /**
+           * The server-assigned publish time, as the SDK delivers it.
+           *
+           * Typed `Date` rather than `string` (M90d review, read off the
+           * locked `@google-cloud/pubsub@6.0.0` `subscriber.d.ts`): the real
+           * `Message.publishTime` is a `PreciseDate`, a `Date` subclass, so
+           * `Date` is the correct structural supertype and the full SDK
+           * `Message` type stays unimported. The previous `string` made the
+           * fixture model a value production never sends.
+           */
+          publishTime?: Date;
+          attributes?: Record<string, string>;
+        }) => void,
       ): void;
       on(event: 'error', handler: (err: unknown) => void): void;
       close(): Promise<void>;
@@ -177,18 +177,16 @@ export interface IPubSubTransport {
   open(
     topic: string,
     subscription: string,
-    onMessage: (
-      msg: {
-        payload: string;
-        ack: () => void;
-        nack: () => void;
-        attributes?: Readonly<Record<string, string>>;
-        /** The platform-assigned message id, when the transport carried one (X28-4). */
-        messageId?: string;
-        /** The platform-assigned publish time, when the transport carried one (X28-4). */
-        timestamp?: Date;
-      },
-    ) => void,
+    onMessage: (msg: {
+      payload: string;
+      ack: () => void;
+      nack: () => void;
+      attributes?: Readonly<Record<string, string>>;
+      /** The platform-assigned message id, when the transport carried one (X28-4). */
+      messageId?: string;
+      /** The platform-assigned publish time, when the transport carried one (X28-4). */
+      timestamp?: Date;
+    }) => void,
   ): Promise<IPubSubSubscription>;
   /** Explicitly create a subscription (for RPC inbox). */
   createSubscription(topic: string, subscription: string): Promise<void>;
@@ -341,26 +339,26 @@ export function adaptPubSubModule(
     open: async (
       topic: string,
       subscription: string,
-      onMessage: (
-        msg: {
-          payload: string;
-          ack: () => void;
-          nack: () => void;
-          attributes?: Readonly<Record<string, string>>;
-          messageId?: string;
-          timestamp?: Date;
-        },
-      ) => void,
+      onMessage: (msg: {
+        payload: string;
+        ack: () => void;
+        nack: () => void;
+        attributes?: Readonly<Record<string, string>>;
+        messageId?: string;
+        timestamp?: Date;
+      }) => void,
     ): Promise<IPubSubSubscription> => {
       const sub = pubsub.subscription(subscription);
 
       // Create subscription on the topic if absent. Ordering is FIXED at
       // creation, so it is passed only when configured.
       try {
-        await pubsub.topic(topic).createSubscription(
-          subscription,
-          options.enableMessageOrdering ? { enableMessageOrdering: true } : undefined,
-        );
+        await pubsub
+          .topic(topic)
+          .createSubscription(
+            subscription,
+            options.enableMessageOrdering ? { enableMessageOrdering: true } : undefined,
+          );
       } catch (err) {
         // Narrow catch to ALREADY_EXISTS (gRPC code 6) only; rethrow everything else
         // including NOT_FOUND (gRPC code 5). Match on the documented error-code
@@ -445,11 +443,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   #subscriptions: Map<string, IPubSubSubscription>;
   #rr: RequestReplyCore;
 
-  constructor(
-    runtime: IRuntimeServices,
-    serializer: ISerializer,
-    options?: PubSubOptions,
-  ) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: PubSubOptions) {
     this.#runtime = runtime;
     this.#serializer = serializer;
     // Empty is a sentinel for "not supplied", checked in connect(). The plugin's
@@ -544,11 +538,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   async connect(): Promise<void> {
     if (this.#ready) return;
 
-    assertNotCloudflareWorkers(
-      this.#runtime,
-      'GCP Pub/Sub',
-      '@google-cloud/pubsub',
-    );
+    assertNotCloudflareWorkers(this.#runtime, 'GCP Pub/Sub', '@google-cloud/pubsub');
 
     if (this.#injectedClient !== undefined) {
       this.#transport = this.#injectedClient;

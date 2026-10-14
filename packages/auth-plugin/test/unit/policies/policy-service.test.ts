@@ -26,9 +26,11 @@ interface LogLine {
 /** A logger recording every call, so "reported once" is assertable. */
 function recordingLogger(): { readonly logger: ILogger; readonly lines: LogLine[] } {
   const lines: LogLine[] = [];
-  const record = (level: string) => (message: string, meta?: Record<string, unknown>): void => {
-    lines.push({ level, message, meta });
-  };
+  const record =
+    (level: string) =>
+    (message: string, meta?: Record<string, unknown>): void => {
+      lines.push({ level, message, meta });
+    };
   const logger = {
     debug: record('debug'),
     info: record('info'),
@@ -114,10 +116,13 @@ describe('PolicyService — anonymous principals', () => {
 
   it('skips before for an anonymous principal', async () => {
     let calls = 0;
-    const { service } = serviceWith(() => false, () => {
-      calls += 1;
-      return true;
-    });
+    const { service } = serviceWith(
+      () => false,
+      () => {
+        calls += 1;
+        return true;
+      },
+    );
     expect(await service.can(null, 'doc', 'view')).toBe(true);
     expect(calls).toBe(0);
   });
@@ -140,10 +145,13 @@ describe('PolicyService — before', () => {
   for (const row of VERDICTS) {
     it(`before → ${JSON.stringify(row.verdict) ?? 'undefined'} with check ${row.checkResult}: ${row.allowed}`, async () => {
       let checkCalled = false;
-      const { service } = serviceWith(() => {
-        checkCalled = true;
-        return row.checkResult;
-      }, () => row.verdict);
+      const { service } = serviceWith(
+        () => {
+          checkCalled = true;
+          return row.checkResult;
+        },
+        () => row.verdict,
+      );
       expect(await service.can(ALICE, 'doc', 'edit')).toBe(row.allowed);
       expect(checkCalled).toBe(row.checkCalled);
     });
@@ -165,7 +173,10 @@ describe('PolicyService — before', () => {
   });
 
   it('awaits an asynchronous before', async () => {
-    const { service } = serviceWith(() => false, () => Promise.resolve(true));
+    const { service } = serviceWith(
+      () => false,
+      () => Promise.resolve(true),
+    );
     expect(await service.can(ALICE, 'doc', 'edit')).toBe(true);
   });
 });
@@ -183,9 +194,8 @@ describe('PolicyService — a throwing policy denies and is reported once', () =
         if (row.async) return Promise.reject(new Error('db down'));
         throw new Error('db down');
       };
-      const { service, lines } = row.stage === 'check'
-        ? serviceWith(fail)
-        : serviceWith(() => true, fail);
+      const { service, lines } =
+        row.stage === 'check' ? serviceWith(fail) : serviceWith(() => true, fail);
       expect(await service.can(ALICE, 'doc', 'edit', { secret: 's3cret' })).toBe(false);
       expect(lines).toHaveLength(1);
       expect(lines[0]?.level).toBe('error');
@@ -263,9 +273,7 @@ describe('PolicyService — unknown names reject, never deny', () => {
   for (const inherited of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
     it(`never resolves the inherited name ${inherited} as an ability`, async () => {
       const { service } = serviceWith(() => true);
-      await expect(service.can(ALICE, 'doc', inherited)).rejects.toBeInstanceOf(
-        UnknownPolicyError,
-      );
+      await expect(service.can(ALICE, 'doc', inherited)).rejects.toBeInstanceOf(UnknownPolicyError);
       expect(service.describe('doc', inherited)).toBeUndefined();
     });
   }
@@ -339,8 +347,9 @@ describe('PolicyService — describe, define and seal', () => {
 
   it('refuses a duplicate name', () => {
     const { service } = serviceWith(() => true);
-    expect(() => service.define({ name: 'doc', abilities: { x: () => true } } as PolicyDefinition))
-      .toThrow(/already registered/);
+    expect(() =>
+      service.define({ name: 'doc', abilities: { x: () => true } } as PolicyDefinition),
+    ).toThrow(/already registered/);
   });
 
   it('refuses a malformed definition', () => {
@@ -353,8 +362,9 @@ describe('PolicyService — describe, define and seal', () => {
   it('refuses define once sealed, and keeps evaluating', async () => {
     const { service } = serviceWith(() => true);
     service.seal();
-    expect(() => service.define({ name: 'late', abilities: { x: () => true } } as PolicyDefinition))
-      .toThrow(/once the application has started/);
+    expect(() =>
+      service.define({ name: 'late', abilities: { x: () => true } } as PolicyDefinition),
+    ).toThrow(/once the application has started/);
     expect(await service.can(ALICE, 'doc', 'edit')).toBe(true);
   });
 
@@ -370,13 +380,16 @@ describe('PolicyService — describe, define and seal', () => {
 describe('PolicyService — audit F2: an undefined principal is anonymous', () => {
   it('denies authentication-required without calling before or the check', async () => {
     let calls = 0;
-    const { service } = serviceWith(() => {
-      calls += 1;
-      return true;
-    }, () => {
-      calls += 1;
-      return true;
-    });
+    const { service } = serviceWith(
+      () => {
+        calls += 1;
+        return true;
+      },
+      () => {
+        calls += 1;
+        return true;
+      },
+    );
     const loose = undefined as unknown as IPrincipal | null;
     expect(await service.can(loose, 'doc', 'edit')).toBe(false);
     const rejection = await service.authorize(loose, 'doc', 'edit').catch((e) => e);

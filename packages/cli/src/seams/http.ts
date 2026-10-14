@@ -126,65 +126,68 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
       }IRouterApi, IServiceRegistry } from '@setu-ts/common';`,
       ...(classBased
         ? [
-          renderSeamImports(
-            controllers,
-            (names) => [controllerClassSymbol(names)],
-            (kebab) => `./${kebab}.controller.ts`,
-          ),
-        ]
+            renderSeamImports(
+              controllers,
+              (names) => [controllerClassSymbol(names)],
+              (kebab) => `./${kebab}.controller.ts`,
+            ),
+          ]
         : []),
       ...registrars.map((entry) =>
         renderSeamImports(
           [entry.name],
           (names) => [routeRegistrarSymbol(names)],
           (kebab) => `./${kebab}${entry.suffix}`,
-        )
+        ),
       ),
-    ].filter((line) => line !== '').join('\n\n');
+    ]
+      .filter((line) => line !== '')
+      .join('\n\n');
 
-    const calls = registrars.length === 0
-      // An empty body still has to USE the parameter, or the generated project
-      // fails `noUnusedParameters` — which the drift gate applies, since it
-      // merges this workspace's compiler options into every project it checks.
-      ? '  void router;\n  void services;'
-      : `  for (const register of GENERATED_ROUTE_REGISTRARS) {\n` +
-        `    register(router, services);\n` +
-        `  }`;
+    const calls =
+      registrars.length === 0
+        ? // An empty body still has to USE the parameter, or the generated project
+          // fails `noUnusedParameters` — which the drift gate applies, since it
+          // merges this workspace's compiler options into every project it checks.
+          '  void router;\n  void services;'
+        : `  for (const register of GENERATED_ROUTE_REGISTRARS) {\n` +
+          `    register(router, services);\n` +
+          `  }`;
 
     const declarations = [
       ...(registrars.length > 0
         ? [
-          `/** A generated registrar may predate the service-registry parameter. */\n` +
-          `type GeneratedRouteRegistrar = (router: IRouterApi, services?: IServiceRegistry) => void;\n\n` +
-          `const GENERATED_ROUTE_REGISTRARS: readonly GeneratedRouteRegistrar[] = [\n` +
-          registrars.map((entry) => `  ${routeRegistrarSymbol(deriveNames(entry.name))},`).join(
-            '\n',
-          ) +
-          `\n];`,
-        ]
+            `/** A generated registrar may predate the service-registry parameter. */\n` +
+              `type GeneratedRouteRegistrar = (router: IRouterApi, services?: IServiceRegistry) => void;\n\n` +
+              `const GENERATED_ROUTE_REGISTRARS: readonly GeneratedRouteRegistrar[] = [\n` +
+              registrars
+                .map((entry) => `  ${routeRegistrarSymbol(deriveNames(entry.name))},`)
+                .join('\n') +
+              `\n];`,
+          ]
         : []),
       ...(classBased
         ? [
-          `/** Every generated controller class, for \`DecoratorPlugin({ controllers })\`. */\n` +
-          renderExportedArray(
-            APP_CONTROLLERS_EXPORT,
-            'Constructor',
-            controllers.map((name) => controllerClassSymbol(deriveNames(name))),
-          ),
-        ]
+            `/** Every generated controller class, for \`DecoratorPlugin({ controllers })\`. */\n` +
+              renderExportedArray(
+                APP_CONTROLLERS_EXPORT,
+                'Constructor',
+                controllers.map((name) => controllerClassSymbol(deriveNames(name))),
+              ),
+          ]
         : []),
       `/**\n` +
-      ` * Registers every generated route-shaped module.\n` +
-      ` *\n` +
-      ` * @param router - The router to register on, normally \`app.router\`\n` +
-      ` * @param services - The service registry, normally \`app.services\`. Optional so a\n *   setu.config.ts written before this parameter existed still compiles.\n` +
-      ` */\n` +
-      `export function ${REGISTER_ROUTES_EXPORT}(\n` +
-      `  router: IRouterApi,\n` +
-      `  services?: IServiceRegistry,\n` +
-      `): void {\n` +
-      `${calls}\n` +
-      `}`,
+        ` * Registers every generated route-shaped module.\n` +
+        ` *\n` +
+        ` * @param router - The router to register on, normally \`app.router\`\n` +
+        ` * @param services - The service registry, normally \`app.services\`. Optional so a\n *   setu.config.ts written before this parameter existed still compiles.\n` +
+        ` */\n` +
+        `export function ${REGISTER_ROUTES_EXPORT}(\n` +
+        `  router: IRouterApi,\n` +
+        `  services?: IServiceRegistry,\n` +
+        `): void {\n` +
+        `${calls}\n` +
+        `}`,
     ];
 
     return assembleSeamBarrel(header, importLines, declarations);

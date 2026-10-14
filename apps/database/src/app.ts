@@ -17,12 +17,14 @@ export function createDatabaseApp(): IKernelApplication {
   const app = createApplication({ plugins: [RuntimePlugin(), DatabasePlugin({ type: 'memory' })] });
   app.router.post('/notes', async (ctx) => {
     const note = await ctx.request.json<Note>();
-    const repository = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+    const repository = ctx.services
+      .get<IDatabaseService>(CAPABILITIES.DATABASE)
       .getRepository<Note>(NOTES);
     return ctx.response.status(201).json(await repository.create(note));
   });
   app.router.get('/notes/:id', async (ctx) => {
-    const repository = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+    const repository = ctx.services
+      .get<IDatabaseService>(CAPABILITIES.DATABASE)
       .getRepository<Note>(NOTES);
     const note = await repository.findById(ctx.params.id);
     return note === null
@@ -31,7 +33,8 @@ export function createDatabaseApp(): IKernelApplication {
   });
   app.router.patch('/notes/:id', async (ctx) => {
     const update = await ctx.request.json<Partial<Note>>();
-    const repository = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+    const repository = ctx.services
+      .get<IDatabaseService>(CAPABILITIES.DATABASE)
       .getRepository<Note>(NOTES);
     return ctx.response.json(await repository.update(ctx.params.id, update));
   });
@@ -50,7 +53,8 @@ export async function rollbackCount(app: IKernelApplication): Promise<number> {
     });
   } catch (error) {
     if (
-      !(error instanceof Error) || error.message !== 'Roll back this demonstration transaction.'
+      !(error instanceof Error) ||
+      error.message !== 'Roll back this demonstration transaction.'
     ) {
       throw error;
     }

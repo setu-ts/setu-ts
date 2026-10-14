@@ -28,9 +28,7 @@ import { VERSION } from '../version.ts';
  *
  * @since 0.1.0
  */
-export function EventsMessagingBridge(
-  options: EventsMessagingBridgeOptions,
-): IPlugin {
+export function EventsMessagingBridge(options: EventsMessagingBridgeOptions): IPlugin {
   const { eventTypes, token, topicMapping, errorHandler } = options;
 
   return {
@@ -72,7 +70,8 @@ export function EventsMessagingBridge(
 
       // Build effective error handler
       // Default: log via optional logger, then swallow
-      const effectiveErrorHandler = errorHandler ??
+      const effectiveErrorHandler =
+        errorHandler ??
         ((error: unknown, eventType: string) => {
           const errorMsg = error instanceof Error ? error.message : String(error);
           logger?.error(

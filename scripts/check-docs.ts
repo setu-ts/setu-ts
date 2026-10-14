@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Markdown documentation linter — catches the class of defect that renders a
  * committed doc wrong while every other gate stays green.
@@ -156,9 +156,7 @@ export interface FenceBlock {
  * a fence delimiter, the opening line of any fence left unclosed, and every
  * complete block
  */
-export function scanFences(
-  lines: readonly string[],
-): {
+export function scanFences(lines: readonly string[]): {
   readonly fenced: readonly boolean[];
   readonly unclosedAt: number | null;
   readonly blocks: readonly FenceBlock[];
@@ -193,9 +191,8 @@ export function scanFences(
       continue;
     }
     const delim = match[1] as string;
-    const closes = delim[0] === open.char &&
-      delim.length >= open.length &&
-      (match[2] as string).trim() === '';
+    const closes =
+      delim[0] === open.char && delim.length >= open.length && (match[2] as string).trim() === '';
     if (closes) {
       blocks.push({ line: open.line, info: open.info, bodyStart: open.line, bodyEnd: index });
       open = null;
@@ -548,7 +545,8 @@ export function findMalformedTableRows(
     // Consume the whole run of pipe-leading, unfenced lines.
     let end = index;
     while (
-      end < lines.length && fenced[end] !== true &&
+      end < lines.length &&
+      fenced[end] !== true &&
       (lines[end] as string).trim().startsWith('|')
     ) {
       end++;
@@ -562,8 +560,9 @@ export function findMalformedTableRows(
     // keeps a pipe-leading prose line out of the table it happens to precede.
     const header = run.findIndex((text, offset) => {
       const next = run[offset + 1];
-      return next !== undefined && TABLE_DELIMITER.test(next) &&
-        countCells(text) === countCells(next);
+      return (
+        next !== undefined && TABLE_DELIMITER.test(next) && countCells(text) === countCells(next)
+      );
     });
 
     if (header !== -1) {
@@ -599,11 +598,15 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
   const { fenced, unclosedAt, blocks } = scanFences(lines);
 
   for (const { block, headings } of findSwallowedHeadings(lines, blocks)) {
-    const sample = headings.slice(0, 3).map((h) => `"${h}"`).join(', ');
+    const sample = headings
+      .slice(0, 3)
+      .map((h) => `"${h}"`)
+      .join(', ');
     findings.push({
       file,
       line: block.line,
-      message: `This \`${block.info}\` block contains ${headings.length} markdown headings ` +
+      message:
+        `This \`${block.info}\` block contains ${headings.length} markdown headings ` +
         `(${sample}${headings.length > 3 ? ', …' : ''}) and runs to line ${block.bodyEnd}. ` +
         `A fence has almost certainly run past its intended end, so the document below it is ` +
         `rendering as source. Check the opening delimiter's length against its closer.`,
@@ -642,13 +645,14 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
     findings.push({
       file,
       line: row.line,
-      message: row.reason === 'unescaped-pipe'
-        ? `Table row has a \`|\` inside a code span: ${excerpt} — a pipe ends the cell even ` +
-          `inside backticks, so the cell splits and GFM drops whatever runs past the header's ` +
-          `width. Escape it as \`\\|\`.`
-        : `Table row has an unterminated code span: ${excerpt} — usually a ` +
-          `\`|\` inside a span that was not escaped as \`\\|\`, which took the closing backtick ` +
-          `with the dropped cells; otherwise a misplaced backtick.`,
+      message:
+        row.reason === 'unescaped-pipe'
+          ? `Table row has a \`|\` inside a code span: ${excerpt} — a pipe ends the cell even ` +
+            `inside backticks, so the cell splits and GFM drops whatever runs past the header's ` +
+            `width. Escape it as \`\\|\`.`
+          : `Table row has an unterminated code span: ${excerpt} — usually a ` +
+            `\`|\` inside a span that was not escaped as \`\\|\`, which took the closing backtick ` +
+            `with the dropped cells; otherwise a misplaced backtick.`,
     });
   }
 
@@ -726,7 +730,8 @@ export function checkReadmeApiLink(
       findings.push({
         file: readmePath,
         line: index + 1,
-        message: `Relative link "${match[1]}" to a repository document. JSR resolves a README's ` +
+        message:
+          `Relative link "${match[1]}" to a repository document. JSR resolves a README's ` +
           `relative links against jsr.io/@setu-ts/, so this returns a 400 on the package page. ` +
           `Use the absolute https://github.com/setu-ts/setu-ts/blob/main/... form.`,
       });
@@ -745,9 +750,9 @@ export function checkReadmeApiLink(
   }
 
   for (const [index, line] of lines.entries()) {
-    for (
-      const match of line.matchAll(/\]\((https:\/\/github\.com\/[^)\s]*PUBLIC_API\.md[^)\s]*)\)/g)
-    ) {
+    for (const match of line.matchAll(
+      /\]\((https:\/\/github\.com\/[^)\s]*PUBLIC_API\.md[^)\s]*)\)/g,
+    )) {
       const url = match[1] as string;
       const hash = url.indexOf('#');
       if (hash === -1) {
@@ -901,8 +906,10 @@ export async function checkLocalLinks(
       // Skip external links and mailto/tel. A bare `#anchor` is a same-file
       // anchor that must be validated against the current document's headings.
       if (
-        link.startsWith('http://') || link.startsWith('https://') ||
-        link.startsWith('mailto:') || link.startsWith('tel:')
+        link.startsWith('http://') ||
+        link.startsWith('https://') ||
+        link.startsWith('mailto:') ||
+        link.startsWith('tel:')
       ) {
         continue;
       }
@@ -989,8 +996,7 @@ export async function checkLocalLinks(
           findings.push({
             file,
             line: index + 1,
-            message:
-              `Generated API link "${linkPath}" does not resolve to a known generated page (${resolvedPath}).`,
+            message: `Generated API link "${linkPath}" does not resolve to a known generated page (${resolvedPath}).`,
           });
         }
         continue;
@@ -1073,8 +1079,7 @@ export async function checkLocalLinks(
             findings.push({
               file,
               line: index + 1,
-              message:
-                `Cross-file anchor "${linkPath}#${anchor}" matches no heading in ${resolvedFilePath}.`,
+              message: `Cross-file anchor "${linkPath}#${anchor}" matches no heading in ${resolvedFilePath}.`,
             });
             // The file exists, but the anchor does not — report only the anchor.
             continue;
@@ -1089,8 +1094,7 @@ export async function checkLocalLinks(
               findings.push({
                 file,
                 line: index + 1,
-                message:
-                  `Local link "${linkPath}" does not resolve to an existing file or directory.`,
+                message: `Local link "${linkPath}" does not resolve to an existing file or directory.`,
               });
             } else {
               findings.push({
@@ -1168,7 +1172,8 @@ export function checkExamplesCoverage(
       findings.push({
         file: 'docs/examples.md',
         line: 1,
-        message: `Example app "${dir}" is not documented in docs/examples.md ` +
+        message:
+          `Example app "${dir}" is not documented in docs/examples.md ` +
           `(no Markdown link resolves to apps/${dir}).`,
       });
     }
@@ -1195,7 +1200,8 @@ export function checkAppsReadmeCoverage(
       findings.push({
         file: 'apps/README.md',
         line: 1,
-        message: `Example app "${dir}" is not listed in apps/README.md ` +
+        message:
+          `Example app "${dir}" is not listed in apps/README.md ` +
           `(no Markdown link resolves to that directory).`,
       });
     }
@@ -1373,9 +1379,10 @@ const RUNTIME_CELL_VALUES = new Set(['✅', '❌', '⚠️', 'N/A']);
  * @param content - The docs/plugins.md content
  * @returns A map of package short name → section body text
  */
-export function parseCatalogSections(
-  content: string,
-): { sections: Map<string, string>; duplicates: Set<string> } {
+export function parseCatalogSections(content: string): {
+  sections: Map<string, string>;
+  duplicates: Set<string>;
+} {
   const sections = new Map<string, string>();
   const duplicates = new Set<string>();
   const lines = content.split('\n');
@@ -1443,7 +1450,10 @@ function extractRuntimeCells(
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const line = (lines[i] as string).trim();
     if (line.startsWith('|') && !line.includes('-')) {
-      const cells = line.split('|').map((c) => c.trim()).filter((c) => c !== '');
+      const cells = line
+        .split('|')
+        .map((c) => c.trim())
+        .filter((c) => c !== '');
       if (cells.length >= 4) {
         return { deno: cells[0]!, node: cells[1]!, bun: cells[2]!, workers: cells[3]! };
       }
@@ -1486,8 +1496,10 @@ export function checkPackageCatalog(
 
   // Check runtime columns in runtime-deployment.md
   if (
-    !runtimeMdContent.includes('Deno') || !runtimeMdContent.includes('Node') ||
-    !runtimeMdContent.includes('Bun') || !runtimeMdContent.includes('Workers')
+    !runtimeMdContent.includes('Deno') ||
+    !runtimeMdContent.includes('Node') ||
+    !runtimeMdContent.includes('Bun') ||
+    !runtimeMdContent.includes('Workers')
   ) {
     findings.push({
       file: 'docs/runtime-deployment.md',
@@ -1503,7 +1515,7 @@ export function checkPackageCatalog(
     if (!match) continue;
     const first = match[1] as string;
     const second = match[2];
-    const shortName = (first === 'starters' && second) ? second : first;
+    const shortName = first === 'starters' && second ? second : first;
     expected.set(shortName, pkgPath);
   }
   // "starters" is a directory, not a package — remove it.
@@ -1517,8 +1529,7 @@ export function checkPackageCatalog(
     findings.push({
       file: 'docs/plugins.md',
       line: 1,
-      message:
-        `Duplicate catalog section "@setu-ts/${name}" appears more than once in docs/plugins.md.`,
+      message: `Duplicate catalog section "@setu-ts/${name}" appears more than once in docs/plugins.md.`,
     });
   }
 
@@ -1563,8 +1574,7 @@ export function checkPackageCatalog(
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message:
-          `Package "${pkg}" has no catalog section (### @setu-ts/${pkg}) in docs/plugins.md.`,
+        message: `Package "${pkg}" has no catalog section (### @setu-ts/${pkg}) in docs/plugins.md.`,
       });
       continue;
     }
@@ -1586,8 +1596,7 @@ export function checkPackageCatalog(
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message:
-          `Package "${pkg}" catalog section has a wrong or missing README link (expected [README](${expectedReadmeLink})).`,
+        message: `Package "${pkg}" catalog section has a wrong or missing README link (expected [README](${expectedReadmeLink})).`,
       });
     }
 
@@ -1598,8 +1607,7 @@ export function checkPackageCatalog(
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message:
-          `Package "${pkg}" catalog section has a wrong or missing API link (expected [API Reference](${expectedApiLink})).`,
+        message: `Package "${pkg}" catalog section has a wrong or missing API link (expected [API Reference](${expectedApiLink})).`,
       });
     }
 
@@ -1624,10 +1632,9 @@ export function checkPackageCatalog(
           findings.push({
             file: 'docs/plugins.md',
             line: 1,
-            message:
-              `Package "${pkg}" has an invalid ${runtime} runtime cell "${value}" (allowed: ${
-                [...RUNTIME_CELL_VALUES].join(', ')
-              }).`,
+            message: `Package "${pkg}" has an invalid ${runtime} runtime cell "${value}" (allowed: ${[
+              ...RUNTIME_CELL_VALUES,
+            ].join(', ')}).`,
           });
         }
       }
@@ -1660,7 +1667,8 @@ export function checkPackageCatalog(
             const override = CATALOG_OVERRIDES.find(
               (o) => o.package === pkg && o.runtime === runtime,
             );
-            const cellMentionsProvider = override !== undefined &&
+            const cellMentionsProvider =
+              override !== undefined &&
               rawCell.toLowerCase().includes(override.provider.toLowerCase());
             if (!cellMentionsProvider) {
               findings.push({
@@ -1677,8 +1685,7 @@ export function checkPackageCatalog(
             findings.push({
               file: 'docs/plugins.md',
               line: 1,
-              message:
-                `Package "${pkg}" ${runtime} cell "${rawCell}" does not match PACKAGE_METADATA (expected "${expectedValue}").`,
+              message: `Package "${pkg}" ${runtime} cell "${rawCell}" does not match PACKAGE_METADATA (expected "${expectedValue}").`,
             });
           }
         }
@@ -1721,8 +1728,7 @@ export function checkPackageCatalog(
       findings.push({
         file: 'docs/plugins.md',
         line: 1,
-        message:
-          `Package "${pkg}" catalog section is missing the required caveat mentioning "${requiredCaveat}".`,
+        message: `Package "${pkg}" catalog section is missing the required caveat mentioning "${requiredCaveat}".`,
       });
     }
   }
@@ -1794,9 +1800,12 @@ export const POST_ALPHA_MINOR_LINES: readonly string[] = [
  */
 export function postAlphaLineArm(minors: readonly string[]): string {
   const lines = minors.map((minor) => minor.replaceAll('.', String.raw`\.`)).join('|');
-  return `(?:${lines})` + String.raw`\.\d+` +
+  return (
+    `(?:${lines})` +
+    String.raw`\.\d+` +
     String.raw`(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
-    String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`;
+    String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`
+  );
 }
 
 const SHIPPED_VERSION_LINES = [
@@ -1874,7 +1883,8 @@ export function checkInstallVersions(
         findings.push({
           file: relative,
           line: index + 1,
-          message: `Names @setu-ts version ${match[1]}, but this workspace ships ${current}. ` +
+          message:
+            `Names @setu-ts version ${match[1]}, but this workspace ships ${current}. ` +
             `An install snippet has to name the version being shipped — a stale one still ` +
             `resolves on JSR, so the command works and installs something old.`,
         });
@@ -2003,10 +2013,7 @@ export function checkVersionClaims(
   current: string,
 ): Finding[] {
   const findings: Finding[] = [];
-  const reference = new RegExp(
-    `${NOT_AFTER}v?(${SHIPPED_VERSION_LINES})${NOT_BEFORE}`,
-    'g',
-  );
+  const reference = new RegExp(`${NOT_AFTER}v?(${SHIPPED_VERSION_LINES})${NOT_BEFORE}`, 'g');
 
   for (const [file, source] of contents) {
     const relative = file.startsWith('./') ? file.slice(2) : file;
@@ -2031,7 +2038,8 @@ export function checkVersionClaims(
           findings.push({
             file: relative,
             line: block.firstLine + offset,
-            message: `Names version ${match[1]}, but this workspace ships ${current}. ` +
+            message:
+              `Names version ${match[1]}, but this workspace ships ${current}. ` +
               `If this is a statement about the current release, update it; if it is a ` +
               `record of a past one, mark the block with \`${HISTORY_MARKER}\` in a comment.`,
           });
@@ -2065,7 +2073,9 @@ async function collectMarkdown(root: string): Promise<string[]> {
           await walk(path, depth + 1);
         }
       } else if (
-        entry.name.endsWith('.md') || entry.name.endsWith('.ts') || entry.name.endsWith('.js')
+        entry.name.endsWith('.md') ||
+        entry.name.endsWith('.ts') ||
+        entry.name.endsWith('.js')
       ) {
         found.push(path);
       }
@@ -2141,9 +2151,9 @@ if (import.meta.main) {
   // Install snippets that name a version other than the one shipping. The
   // workspace version is read from one manifest rather than passed in, because
   // `release:verify` already proves all 47 agree.
-  const kernelManifest = JSON.parse(
-    await Deno.readTextFile('packages/kernel/deno.json'),
-  ) as { version?: string };
+  const kernelManifest = JSON.parse(await Deno.readTextFile('packages/kernel/deno.json')) as {
+    version?: string;
+  };
   if (kernelManifest.version === undefined) {
     findings.push({
       file: 'packages/kernel/deno.json',
@@ -2166,7 +2176,8 @@ if (import.meta.main) {
           findings.push({
             file: artifact,
             line: 1,
-            message: 'Listed in VERSIONED_ARTIFACTS but cannot be read — remove it from the ' +
+            message:
+              'Listed in VERSIONED_ARTIFACTS but cannot be read — remove it from the ' +
               'list, or restore the file whose version claim it was checking.',
           });
         }
@@ -2271,9 +2282,8 @@ if (import.meta.main) {
     // Package README `## Exports` tables must match the real barrels.
     {
       const { PUBLISHED_PACKAGES } = await import('./release-packages.ts');
-      const { collectPackageExports, diffExportsTable } = await import(
-        './package-export-collection.ts'
-      );
+      const { collectPackageExports, diffExportsTable } =
+        await import('./package-export-collection.ts');
       try {
         const exportsByPackage = await collectPackageExports(PUBLISHED_PACKAGES);
         for (const pkgPath of PUBLISHED_PACKAGES) {

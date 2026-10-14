@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- interface methods must be async
+/* eslint-disable require-await -- interface methods must be async */
 /**
  * Unit tests for UnitOfWork.
  *
@@ -65,9 +65,8 @@ describe('UnitOfWork', () => {
     };
     const uow = new UnitOfWork(txn, mockRepoFactory());
     expect(uow.getRepository('User')).toBeDefined();
-    const database = createDrizzleDatabase(
-      createFakeDrizzleInstance(),
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(createFakeDrizzleInstance(), (configured, work) =>
+      configured.transaction(work),
     );
     expect(() => getDrizzleTransaction(uow, database)).toThrow(
       'Drizzle query access requires a database-plugin service or unit of work.',
@@ -76,9 +75,8 @@ describe('UnitOfWork', () => {
 
   it('returns the transaction native handle for a Drizzle Unit of Work', () => {
     const native = { kind: 'native-tx' };
-    const database = createDrizzleDatabase(
-      createFakeDrizzleInstance(),
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(createFakeDrizzleInstance(), (configured, work) =>
+      configured.transaction(work),
     );
     const txn: IAdapterTransaction & {
       [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle;
@@ -102,9 +100,8 @@ describe('UnitOfWork', () => {
   // immediately and survive a rollback, which is the one guarantee this seam
   // exists to provide.
   it('refuses a transaction handle that reports the outer scope', () => {
-    const database = createDrizzleDatabase(
-      createFakeDrizzleInstance(),
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(createFakeDrizzleInstance(), (configured, work) =>
+      configured.transaction(work),
     );
     const outerScoped: IAdapterTransaction & {
       [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle;

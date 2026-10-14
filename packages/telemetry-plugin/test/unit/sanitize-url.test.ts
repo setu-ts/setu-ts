@@ -5,18 +5,19 @@ import { sanitizeUrl } from '../../src/attributes/sanitize-url.ts';
 
 describe('sanitizeUrl', () => {
   it('omits query strings and fragments by default', () => {
-    expect(sanitizeUrl('https://example.test/search?email=a@b.test#details', 'omit', undefined))
-      .toBe(
-        'https://example.test/search',
-      );
+    expect(
+      sanitizeUrl('https://example.test/search?email=a@b.test#details', 'omit', undefined),
+    ).toBe('https://example.test/search');
   });
 
   it('omits URL credentials before telemetry export', () => {
-    expect(sanitizeUrl(
-      'https://operator:secret@example.test/search?email=a@b.test#details',
-      'omit',
-      undefined,
-    )).toBe('https://example.test/search');
+    expect(
+      sanitizeUrl(
+        'https://operator:secret@example.test/search?email=a@b.test#details',
+        'omit',
+        undefined,
+      ),
+    ).toBe('https://example.test/search');
   });
 
   it('redacts classified query values and retains unclassified values', () => {
@@ -33,11 +34,13 @@ describe('sanitizeUrl', () => {
   it('preserves repeated query parameters while redacting each occurrence', () => {
     const service = createRedactionService({ fields: { 'query.token': 'secret' } });
 
-    expect(sanitizeUrl(
-      'https://example.test/search?tag=first&tag=second&token=one&token=two',
-      'redact',
-      service,
-    )).toBe(
+    expect(
+      sanitizeUrl(
+        'https://example.test/search?tag=first&tag=second&token=one&token=two',
+        'redact',
+        service,
+      ),
+    ).toBe(
       'https://example.test/search?tag=first&tag=second&token=%5BRedacted%5D&token=%5BRedacted%5D',
     );
   });

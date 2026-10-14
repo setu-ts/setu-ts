@@ -169,11 +169,13 @@ describe('overlapping relays', () => {
     a.broker.behaviour = () => slow.promise;
     const sweepA = a.sweep();
     await flush();
-    await (await outboxHarness({
-      shared: { db: a.db, store: a.store },
-      clock: expiredClock(0x400000),
-      options: { retainSentMs: 0 },
-    })).sweep();
+    await (
+      await outboxHarness({
+        shared: { db: a.db, store: a.store },
+        clock: expiredClock(0x400000),
+        options: { retainSentMs: 0 },
+      })
+    ).sweep();
     slow.resolve();
     await sweepA;
     expect(observer.counts).toEqual({ published: 1 });

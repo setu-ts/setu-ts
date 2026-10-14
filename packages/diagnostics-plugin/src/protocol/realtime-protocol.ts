@@ -124,11 +124,7 @@ function isSourceKind(value: unknown): value is RealtimeSourceKind {
  * enabled backplane carries `unsupported` ones. Every unread state carries
  * `null` for both values.
  */
-function isGaugesProjection(
-  value: unknown,
-  kind: RealtimeSourceKind,
-  state: string,
-): boolean {
+function isGaugesProjection(value: unknown, kind: RealtimeSourceKind, state: string): boolean {
   if (!isRecord(value) || !hasExactKeys(value, GAUGE_KEYS)) {
     return false;
   }
@@ -161,14 +157,17 @@ function isRecordProjection(value: unknown, alias: string, kind: RealtimeSourceK
   }
   const operation = value.operation;
   if (
-    value.alias !== alias || typeof operation !== 'string' ||
+    value.alias !== alias ||
+    typeof operation !== 'string' ||
     !KIND_OPERATIONS[kind].has(operation)
   ) {
     return false;
   }
   if (
-    !isCounter(value.count) || !isCounter(value.ageMs) ||
-    !isCounter(value.succeeded) || !isCounter(value.failed)
+    !isCounter(value.count) ||
+    !isCounter(value.ageMs) ||
+    !isCounter(value.succeeded) ||
+    !isCounter(value.failed)
   ) {
     return false;
   }
@@ -186,12 +185,19 @@ function isRecordProjection(value: unknown, alias: string, kind: RealtimeSourceK
  */
 function isSyntheticFailure(value: Record<string, unknown>): boolean {
   const gauges = value.gauges;
-  return value.state === 'collection-failed' && value.alias === null &&
-    value.coverage === 'owned-instance' && value.dropped === 0 &&
-    Array.isArray(value.records) && value.records.length === 0 &&
-    isRecord(gauges) && hasExactKeys(gauges, GAUGE_KEYS) &&
-    gauges.state === 'collection-failed' && gauges.openConnections === null &&
-    gauges.groups === null;
+  return (
+    value.state === 'collection-failed' &&
+    value.alias === null &&
+    value.coverage === 'owned-instance' &&
+    value.dropped === 0 &&
+    Array.isArray(value.records) &&
+    value.records.length === 0 &&
+    isRecord(gauges) &&
+    hasExactKeys(gauges, GAUGE_KEYS) &&
+    gauges.state === 'collection-failed' &&
+    gauges.openConnections === null &&
+    gauges.groups === null
+  );
 }
 
 /**
@@ -391,9 +397,7 @@ export function buildRealtimeResponse(
  * @returns `true` when the response is well formed
  * @internal
  */
-export function isRealtimeResponseProjection(
-  value: unknown,
-): value is RealtimeDiagnosticsResponse {
+export function isRealtimeResponseProjection(value: unknown): value is RealtimeDiagnosticsResponse {
   if (!isRecord(value) || !hasExactKeys(value, RESPONSE_KEYS)) {
     return false;
   }
@@ -411,9 +415,7 @@ export function isRealtimeResponseProjection(
     if (!isRecord(entry) || !hasExactKeys(entry, ENTRY_KEYS)) {
       return false;
     }
-    if (
-      entry.sourceId !== `s${index + 1}` || !isRealtimeSnapshotProjection(entry.snapshot, true)
-    ) {
+    if (entry.sourceId !== `s${index + 1}` || !isRealtimeSnapshotProjection(entry.snapshot, true)) {
       return false;
     }
     const alias = entry.snapshot.alias;

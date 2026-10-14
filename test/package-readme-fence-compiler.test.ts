@@ -158,8 +158,9 @@ async function compilableFences(readme: string) {
   return extractFences(readme, markdown)
     .filter((fence) => TS_ALIASES.has(fence.lang))
     .map((fence) => ({ fence, classified: classify(fence) }))
-    .filter(({ classified }) =>
-      classified.kind === 'compile-complete' || classified.kind === 'compile-fragment'
+    .filter(
+      ({ classified }) =>
+        classified.kind === 'compile-complete' || classified.kind === 'compile-fragment',
     );
 }
 
@@ -256,7 +257,8 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
 
     for (const readme of Object.keys(READMES)) {
       for (const { fence, classified } of await compilableFences(readme)) {
-        const file = `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
+        const file =
+          `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
           `.${fenceExtension(fence.lang)}`;
         await Deno.writeTextFile(file, assembleSource(fence, classified));
         const { code, stderr } = await denoCheck(file);

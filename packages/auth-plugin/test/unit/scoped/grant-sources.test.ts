@@ -61,13 +61,15 @@ describe('GrantResolver — sources', () => {
   it('gives a claims source an empty object when the principal carries no claims', async () => {
     let seen: unknown;
     await resolver({
-      sources: [{
-        kind: 'claims',
-        map: (claims) => {
-          seen = claims;
-          return [];
+      sources: [
+        {
+          kind: 'claims',
+          map: (claims) => {
+            seen = claims;
+            return [];
+          },
         },
-      }],
+      ],
     }).resolveFromSources(principal(), CHAIN);
     expect(seen).toEqual({});
   });
@@ -77,16 +79,18 @@ describe('GrantResolver — sources', () => {
     const controller = new AbortController();
     await resolver(
       {
-        sources: [{
-          kind: 'custom',
-          source: {
-            name: 'spy',
-            grantsFor: (who, query, signal) => {
-              calls.push(who.id, query, signal);
-              return Promise.resolve([]);
+        sources: [
+          {
+            kind: 'custom',
+            source: {
+              name: 'spy',
+              grantsFor: (who, query, signal) => {
+                calls.push(who.id, query, signal);
+                return Promise.resolve([]);
+              },
             },
           },
-        }],
+        ],
       },
       (run) => run(controller.signal),
     ).resolveFromSources(principal(), CHAIN);
@@ -98,13 +102,15 @@ describe('GrantResolver — sources', () => {
     const instance = new GrantResolver(
       compileScopedRbac(
         {
-          sources: [{
-            kind: 'custom',
-            source: (services) => {
-              registry = services;
-              return source([{ role: 'boom', scope: 7 }], 'factory-made');
+          sources: [
+            {
+              kind: 'custom',
+              source: (services) => {
+                registry = services;
+                return source([{ role: 'boom', scope: 7 }], 'factory-made');
+              },
             },
-          }],
+          ],
         },
         CATALOGUE,
         true,
@@ -123,10 +129,12 @@ describe('GrantResolver — sources', () => {
 
   it('falls back to a positional name for a source without a usable one', async () => {
     const outcome = await resolver({
-      sources: [{
-        kind: 'custom',
-        source: { name: '', grantsFor: () => Promise.reject(new Error('x')) },
-      }],
+      sources: [
+        {
+          kind: 'custom',
+          source: { name: '', grantsFor: () => Promise.reject(new Error('x')) },
+        },
+      ],
     }).resolveFromSources(principal(), CHAIN);
     expect(outcome).toMatchObject({ ok: false, source: 'custom[0]' });
   });
@@ -167,13 +175,22 @@ describe('GrantResolver — validation and failure', () => {
       scope: T1,
     };
     const outcome = await resolver({
-      sources: [{
-        kind: 'custom',
-        source: source([flipping, { role: 'viewer' }, { role: '', scope: null }, null, 'x', {
-          role: 'a',
-          scope: { type: 'T', id: 'x' },
-        }]),
-      }],
+      sources: [
+        {
+          kind: 'custom',
+          source: source([
+            flipping,
+            { role: 'viewer' },
+            { role: '', scope: null },
+            null,
+            'x',
+            {
+              role: 'a',
+              scope: { type: 'T', id: 'x' },
+            },
+          ]),
+        },
+      ],
     }).resolveFromSources(principal(), CHAIN);
     expect(outcome).toEqual({ ok: true, grants: [{ role: 'viewer', scope: T1 }], dropped: 5 });
     expect(reads).toBe(1);
@@ -202,12 +219,14 @@ describe('GrantResolver — validation and failure', () => {
 
   it('fails when a claims mapper throws synchronously', async () => {
     const outcome = await resolver({
-      sources: [{
-        kind: 'claims',
-        map: () => {
-          throw new Error('bad claim');
+      sources: [
+        {
+          kind: 'claims',
+          map: () => {
+            throw new Error('bad claim');
+          },
         },
-      }],
+      ],
     }).resolveFromSources(principal(), CHAIN);
     expect(outcome).toMatchObject({ ok: false, reason: 'source-failed', source: 'claims[0]' });
   });
@@ -215,15 +234,13 @@ describe('GrantResolver — validation and failure', () => {
   it('fails when a source answers something other than an array', async () => {
     const outcome = await resolver({
       sources: [{ kind: 'custom', source: source({ role: 'viewer' }) }],
-    })
-      .resolveFromSources(principal(), CHAIN);
+    }).resolveFromSources(principal(), CHAIN);
     expect(outcome).toEqual({ ok: false, reason: 'source-failed', source: 'directory' });
   });
 
   it('fails with source-timeout when the deadline fires', async () => {
-    const outcome = await resolver(
-      { sources: [{ kind: 'custom', source: source([]) }] },
-      () => Promise.reject(new ScopedDeadlineError()),
+    const outcome = await resolver({ sources: [{ kind: 'custom', source: source([]) }] }, () =>
+      Promise.reject(new ScopedDeadlineError()),
     ).resolveFromSources(principal(), CHAIN);
     expect(outcome).toEqual({ ok: false, reason: 'source-timeout', source: 'directory' });
   });
@@ -251,16 +268,18 @@ describe('GrantResolver — the real deadline', () => {
   it('denies a source that never settles once sourceTimeoutMs elapses, and aborts its signal', async () => {
     let signal: AbortSignal | undefined;
     const harness = scopedHarness({
-      sources: [{
-        kind: 'custom',
-        source: {
-          name: 'hang',
-          grantsFor: (_who, _query, received) => {
-            signal = received;
-            return new Promise(() => {});
+      sources: [
+        {
+          kind: 'custom',
+          source: {
+            name: 'hang',
+            grantsFor: (_who, _query, received) => {
+              signal = received;
+              return new Promise(() => {});
+            },
           },
         },
-      }],
+      ],
       sourceTimeoutMs: 50,
     });
     const pending = harness.resolver.resolveFromSources(principal(), CHAIN);

@@ -107,10 +107,7 @@ function printUsage(log: (message: string) => void): void {
  * @param deps - Filesystem, working directory, and output sinks
  * @returns `0` on success, `1` on a runtime error, `2` on a usage error
  */
-export async function runAdoptCommand(
-  args: ParsedArgs,
-  deps: AdoptDependencies,
-): Promise<number> {
+export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies): Promise<number> {
   if (args.flags['help'] === true || args.flags['h'] === true) {
     printUsage(deps.log);
     return EXIT_OK;
@@ -129,8 +126,13 @@ export async function runAdoptCommand(
     return EXIT_ERROR;
   }
 
-  const rawName = stringFlag(args.flags, 'name') ??
-    project.split('/').filter((part) => part !== '').at(-1) ?? '';
+  const rawName =
+    stringFlag(args.flags, 'name') ??
+    project
+      .split('/')
+      .filter((part) => part !== '')
+      .at(-1) ??
+    '';
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
     deps.error(
@@ -197,7 +199,7 @@ export async function runAdoptCommand(
     .map((file) =>
       file.path === WORKSPACE_MANIFEST
         ? { ...file, contents: renderWorkspaceManifest(manifest) }
-        : file
+        : file,
     );
 
   created.push({
@@ -224,9 +226,9 @@ export async function runAdoptCommand(
     );
   } catch (cause) {
     deps.error(
-      `Failed to inspect existing files: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      `Failed to inspect existing files: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
     );
     return EXIT_ERROR;
   }
@@ -306,9 +308,9 @@ export async function runAdoptCommand(
     } catch (cause) {
       if (!isMissingPath(cause)) {
         deps.error(
-          `Failed to read ${escapeName(entryPath)}: ${
-            escapeName(cause instanceof Error ? cause.message : String(cause))
-          }`,
+          `Failed to read ${escapeName(entryPath)}: ${escapeName(
+            cause instanceof Error ? cause.message : String(cause),
+          )}`,
         );
         return EXIT_ERROR;
       }
@@ -334,9 +336,9 @@ export async function runAdoptCommand(
           throw cause;
         }
         deps.error(
-          `Failed to rewrite ${escapeName(entryPath)}: ${
-            escapeName(cause instanceof Error ? cause.message : String(cause))
-          }`,
+          `Failed to rewrite ${escapeName(entryPath)}: ${escapeName(
+            cause instanceof Error ? cause.message : String(cause),
+          )}`,
         );
         deps.error(
           'Workspace files and moved project files remain in place; repair the entry before starting it.',
@@ -353,9 +355,7 @@ export async function runAdoptCommand(
     // rewrite reads and keeps.
     let manifestPath = '';
     let pinSource: string | undefined;
-    for (
-      const file of manifestKind === 'deno' ? ['deno.json', 'deno.jsonc'] : ['package.json']
-    ) {
+    for (const file of manifestKind === 'deno' ? ['deno.json', 'deno.jsonc'] : ['package.json']) {
       manifestPath = joinPath(project, joinPath(memberRoot, file));
       try {
         pinSource = new TextDecoder().decode(await deps.fs.readFile(manifestPath));
@@ -364,16 +364,17 @@ export async function runAdoptCommand(
         if (!isMissingPath(cause)) throw cause;
       }
     }
-    const pins = pinSource === undefined
-      ? { contents: undefined, rewrites: [] }
-      : rewriteLegacyPins(pinSource, manifestKind);
+    const pins =
+      pinSource === undefined
+        ? { contents: undefined, rewrites: [] }
+        : rewriteLegacyPins(pinSource, manifestKind);
     if (pins.unreadable !== undefined) {
       // Never silent: the project still pins the framework however it did before,
       // and the workspace root maps no JSR registry for it.
       deps.error(
-        `Could not read ${escapeName(manifestPath)} to move its framework pins onto npm: ${
-          escapeName(pins.unreadable)
-        }`,
+        `Could not read ${escapeName(manifestPath)} to move its framework pins onto npm: ${escapeName(
+          pins.unreadable,
+        )}`,
       );
       deps.error(
         'Rewrite any jsr:@setu-ts/* or npm:@jsr/setu-ts__* pins to the npm packages by hand.',

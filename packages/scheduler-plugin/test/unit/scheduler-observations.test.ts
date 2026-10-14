@@ -77,8 +77,7 @@ describe('compileSchedulerDiagnostics', () => {
     expect(compiled.jobs.get('nightly-sync')).toBe('sync');
     expect(compiled.jobs.get('tick')).toBe('tick-alias');
     expect(
-      compileSchedulerDiagnostics({ enabled: true, alias: 'x'.repeat(64), jobs: {} }).jobs
-        .size,
+      compileSchedulerDiagnostics({ enabled: true, alias: 'x'.repeat(64), jobs: {} }).jobs.size,
     ).toBe(0);
   });
 
@@ -125,7 +124,7 @@ describe('compileSchedulerDiagnostics', () => {
           alias: 'a',
           jobs: {},
         } as unknown as SchedulerDiagnosticsOptions,
-      })
+      }),
     ).toThrow(SCHEDULER_DIAGNOSTICS_ERRORS.enabled);
   });
 });
@@ -231,12 +230,7 @@ describe('SchedulerObservationCollector', () => {
     expect(collector.snapshot().dropped).toBe(0);
     // An EXISTING tuple (j0's fire) still updates at capacity, but its first
     // ATTEMPT tuple is new: no slot is free, so it is dropped.
-    collector.fireSettled(
-      collector.fireBegin(`j0`, 0)!,
-      'dispatched',
-      true,
-      null,
-    );
+    collector.fireSettled(collector.fireBegin(`j0`, 0)!, 'dispatched', true, null);
     expect(collector.snapshot().dropped).toBe(0);
     // A refused START is not a drop by itself — its settlement counts the
     // one ignored observation, so an attempt is dropped exactly once.
@@ -496,10 +490,15 @@ describe('observed SchedulerService fires', () => {
     const { service, collector, runtime } = observed();
     let calls = 0;
     await service.connect();
-    await service.delay('tick', 100, () => {
-      calls++;
-      throw new Error('attempt-canary');
-    }, { retry: { limit: 2, delay: 10, backoff: 'fixed' } });
+    await service.delay(
+      'tick',
+      100,
+      () => {
+        calls++;
+        throw new Error('attempt-canary');
+      },
+      { retry: { limit: 2, delay: 10, backoff: 'fixed' } },
+    );
     // Two-phase advance: the first fires the job; a macrotask lets the fire
     // chain reach the executor and arm its backoff sleep; the second fires
     // that sleep. Awaiting the first advance directly would deadlock inside
@@ -659,19 +658,18 @@ describe('SchedulerPlugin diagnostics wiring', () => {
   });
 
   it('observes fires and attempts of an app-registered job and closes cleanly', async () => {
-    let handler: (() => void | Promise<void>) | undefined;
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
         SchedulerPlugin({
-          jobs: [{
-            trigger: 'delay',
-            name: 'tick',
-            delayMs: 30,
-            handler: () => {
-              handler?.();
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'tick',
+              delayMs: 30,
+              handler: () => {},
             },
-          }],
+          ],
           diagnostics: { enabled: true, alias: 'cron', jobs: { tick: 'tick-alias' } },
         }),
       ],
@@ -694,11 +692,11 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       const snapshot = source.snapshot();
       // `tick` (declared) was approved and fired; `oneshot` was not approved
       // and is invisible.
-      expect(snapshot.records.some((r) => r.alias === 'tick-alias' && r.operation === 'fire'))
-        .toBe(true);
+      expect(snapshot.records.some((r) => r.alias === 'tick-alias' && r.operation === 'fire')).toBe(
+        true,
+      );
       expect(snapshot.records.some((r) => r.alias === 'oneshot')).toBe(false);
       expect(['ready', 'stale']).toContain(snapshot.state);
-      void handler;
     } finally {
       await app.stop();
     }
@@ -718,13 +716,15 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       plugins: [
         RuntimePlugin(),
         SchedulerPlugin({
-          behaviors: [{
-            handle: async (ctx, next) => {
-              if (ctx.name !== 'guarded') {
-                await next();
-              }
+          behaviors: [
+            {
+              handle: async (ctx, next) => {
+                if (ctx.name !== 'guarded') {
+                  await next();
+                }
+              },
             },
-          }],
+          ],
           jobs: [
             {
               trigger: 'delay',
@@ -746,9 +746,9 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(runs).toEqual(['open']);
-      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-      )[0]!.snapshot();
+      const snapshot = app.services
+        .getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)[0]!
+        .snapshot();
       expect(recordOf(snapshot, 'guarded-alias', 'fire')).toMatchObject({
         count: 1,
         started: 1,
@@ -774,19 +774,23 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       plugins: [
         RuntimePlugin(),
         SchedulerPlugin({
-          behaviors: [{
-            handle: (_ctx, next) => {
-              setTimeout(() => void next(), 20);
+          behaviors: [
+            {
+              handle: (_ctx, next) => {
+                setTimeout(() => void next(), 20);
+              },
             },
-          }],
-          jobs: [{
-            trigger: 'delay',
-            name: 'late',
-            delayMs: 10,
-            handler: () => {
-              handlerRuns++;
+          ],
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'late',
+              delayMs: 10,
+              handler: () => {
+                handlerRuns++;
+              },
             },
-          }],
+          ],
           diagnostics: { enabled: true, alias: 'cron', jobs: { late: 'late-alias' } },
         }),
       ],
@@ -795,9 +799,9 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(handlerRuns).toBe(1);
-      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-      )[0]!.snapshot();
+      const snapshot = app.services
+        .getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)[0]!
+        .snapshot();
       expect(recordOf(snapshot, 'late-alias', 'attempt')).toMatchObject({
         started: 1,
         count: 1,
@@ -815,23 +819,27 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       plugins: [
         RuntimePlugin(),
         SchedulerPlugin({
-          behaviors: [{
-            handle: async (_ctx, next) => {
-              await next();
-              await next();
+          behaviors: [
+            {
+              handle: async (_ctx, next) => {
+                await next();
+                await next();
+              },
             },
-          }],
-          jobs: [{
-            trigger: 'delay',
-            name: 'twice',
-            delayMs: 10,
-            handler: () => {
-              handlerRuns++;
-              if (handlerRuns === 2) {
-                throw new Error('second-canary');
-              }
+          ],
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'twice',
+              delayMs: 10,
+              handler: () => {
+                handlerRuns++;
+                if (handlerRuns === 2) {
+                  throw new Error('second-canary');
+                }
+              },
             },
-          }],
+          ],
           diagnostics: { enabled: true, alias: 'cron', jobs: { twice: 'twice-alias' } },
         }),
       ],
@@ -840,9 +848,9 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(handlerRuns).toBe(2);
-      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-      )[0]!.snapshot();
+      const snapshot = app.services
+        .getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)[0]!
+        .snapshot();
       expect(recordOf(snapshot, 'twice-alias', 'attempt')).toMatchObject({
         started: 2,
         count: 2,
@@ -855,20 +863,19 @@ describe('SchedulerPlugin diagnostics wiring', () => {
   });
 
   for (const chained of [false, true]) {
-    it(
-      `settles an async handler's attempt by its own promise (${
-        chained ? 'behaviour chain' : 'no behaviours'
-      })`,
-      async () => {
-        // The attempt must end when the handler's promise settles — its
-        // rejection is a failure and its duration covers the await — not when
-        // the handler function returned.
-        const app = createApplication({
-          plugins: [
-            RuntimePlugin(),
-            SchedulerPlugin({
-              ...(chained ? { behaviors: [{ handle: (_ctx, next) => next() }] } : {}),
-              jobs: [{
+    it(`settles an async handler's attempt by its own promise (${
+      chained ? 'behaviour chain' : 'no behaviours'
+    })`, async () => {
+      // The attempt must end when the handler's promise settles — its
+      // rejection is a failure and its duration covers the await — not when
+      // the handler function returned.
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          SchedulerPlugin({
+            ...(chained ? { behaviors: [{ handle: (_ctx, next) => next() }] } : {}),
+            jobs: [
+              {
                 trigger: 'delay',
                 name: 'slow',
                 delayMs: 10,
@@ -876,25 +883,25 @@ describe('SchedulerPlugin diagnostics wiring', () => {
                   await new Promise((resolve) => setTimeout(resolve, 40));
                   throw new Error('async-canary');
                 },
-              }],
-              diagnostics: { enabled: true, alias: 'cron', jobs: { slow: 'slow-alias' } },
-            }),
-          ],
-        });
-        await app.start();
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 150));
-          const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-            CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-          )[0]!.snapshot();
-          const attempt = recordOf(snapshot, 'slow-alias', 'attempt')!;
-          expect(attempt).toMatchObject({ started: 1, count: 1, succeeded: 0, failed: 1 });
-          expect(attempt.lastDurationMs).toBeGreaterThanOrEqual(30);
-        } finally {
-          await app.stop();
-        }
-      },
-    );
+              },
+            ],
+            diagnostics: { enabled: true, alias: 'cron', jobs: { slow: 'slow-alias' } },
+          }),
+        ],
+      });
+      await app.start();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        const snapshot = app.services
+          .getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)[0]!
+          .snapshot();
+        const attempt = recordOf(snapshot, 'slow-alias', 'attempt')!;
+        expect(attempt).toMatchObject({ started: 1, count: 1, succeeded: 0, failed: 1 });
+        expect(attempt.lastDurationMs).toBeGreaterThanOrEqual(30);
+      } finally {
+        await app.stop();
+      }
+    });
   }
 
   /**
@@ -917,25 +924,29 @@ describe('SchedulerPlugin diagnostics wiring', () => {
         SchedulerPlugin({
           ...(catchingBehaviour
             ? {
-              behaviors: [{
-                handle: (_ctx: unknown, next: () => Promise<void>) => {
-                  next().catch(() => {
-                    counts.caught++;
-                  });
-                },
-              }],
-            }
+                behaviors: [
+                  {
+                    handle: (_ctx: unknown, next: () => Promise<void>) => {
+                      next().catch(() => {
+                        counts.caught++;
+                      });
+                    },
+                  },
+                ],
+              }
             : {}),
-          jobs: [{
-            trigger: 'delay',
-            name: 'hostile',
-            delayMs: 10,
-            retry: { limit: 3, delay: 5, backoff: 'fixed' },
-            handler: () => {
-              counts.handlerRuns++;
-              return hostile as unknown as Promise<void>;
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'hostile',
+              delayMs: 10,
+              retry: { limit: 3, delay: 5, backoff: 'fixed' },
+              handler: () => {
+                counts.handlerRuns++;
+                return hostile as unknown as Promise<void>;
+              },
             },
-          }],
+          ],
           ...(observed
             ? { diagnostics: { enabled: true, alias: 'cron', jobs: { hostile: 'hostile-alias' } } }
             : {}),
@@ -1014,9 +1025,9 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       await app.start();
       try {
         await new Promise((resolve) => setTimeout(resolve, settleMs));
-        const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-          CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-        )[0]!.snapshot();
+        const snapshot = app.services
+          .getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)[0]!
+          .snapshot();
         runs.push({ state, attempt: recordOf(snapshot, 'job-alias', 'attempt') });
       } finally {
         await app.stop();
@@ -1059,15 +1070,17 @@ describe('SchedulerPlugin diagnostics wiring', () => {
           state,
           settleMs: 80,
           options: {
-            behaviors: [{
-              handle: async (_ctx, next) => {
-                try {
-                  state.got = await next();
-                } catch (error) {
-                  state.error = error;
-                }
-              },
-            } as IIngressBehavior],
+            behaviors: [
+              {
+                handle: async (_ctx, next) => {
+                  try {
+                    state.got = await next();
+                  } catch (error) {
+                    state.error = error;
+                  }
+                },
+              } as IIngressBehavior,
+            ],
             jobs: [{ trigger: 'delay', name: 'job', delayMs: 10, handler: returns }],
           },
         };
@@ -1094,25 +1107,27 @@ describe('SchedulerPlugin diagnostics wiring', () => {
         state,
         settleMs: 150,
         options: {
-          jobs: [{
-            trigger: 'delay',
-            name: 'job',
-            delayMs: 10,
-            retry: { limit: 3, delay: 5, backoff: 'fixed' },
-            handler: () => {
-              state.runs++;
-              const late = {
-                get then(): unknown {
-                  state.thenReads++;
-                  return state.thenReads === 1
-                    ? undefined
-                    : (_ok: unknown, fail: (reason: unknown) => void) =>
-                      fail(new Error('k5-canary'));
-                },
-              };
-              return Promise.resolve(late) as unknown as Promise<void>;
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'job',
+              delayMs: 10,
+              retry: { limit: 3, delay: 5, backoff: 'fixed' },
+              handler: () => {
+                state.runs++;
+                const late = {
+                  get then(): unknown {
+                    state.thenReads++;
+                    return state.thenReads === 1
+                      ? undefined
+                      : (_ok: unknown, fail: (reason: unknown) => void) =>
+                          fail(new Error('k5-canary'));
+                  },
+                };
+                return Promise.resolve(late) as unknown as Promise<void>;
+              },
             },
-          }],
+          ],
         },
       };
     });
@@ -1138,16 +1153,18 @@ describe('SchedulerPlugin diagnostics wiring', () => {
         settleMs: 150,
         options: {
           behaviors: [catchingLater(state.log, state.caught)],
-          jobs: [{
-            trigger: 'delay',
-            name: 'job',
-            delayMs: 10,
-            retry: { limit: 3, delay: 5, backoff: 'fixed' },
-            handler: () => {
-              state.runs++;
-              return hostile;
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'job',
+              delayMs: 10,
+              retry: { limit: 3, delay: 5, backoff: 'fixed' },
+              handler: () => {
+                state.runs++;
+                return hostile;
+              },
             },
-          }],
+          ],
         },
       };
     });
@@ -1164,20 +1181,22 @@ describe('SchedulerPlugin diagnostics wiring', () => {
         settleMs: 80,
         options: {
           behaviors: [catchingLater(state.log, state.caught)],
-          jobs: [{
-            trigger: 'delay',
-            name: 'job',
-            delayMs: 10,
-            handler: () => {
-              state.log.push('returned');
-              return {
-                then(resolve: () => void) {
-                  state.log.push('then-called');
-                  resolve();
-                },
-              } as unknown as Promise<void>;
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'job',
+              delayMs: 10,
+              handler: () => {
+                state.log.push('returned');
+                return {
+                  then(resolve: () => void) {
+                    state.log.push('then-called');
+                    resolve();
+                  },
+                } as unknown as Promise<void>;
+              },
             },
-          }],
+          ],
         },
       };
     });
@@ -1197,21 +1216,23 @@ describe('SchedulerPlugin diagnostics wiring', () => {
             ...(chained
               ? { behaviors: [{ handle: (_c, next) => next() } as IIngressBehavior] }
               : {}),
-            jobs: [{
-              trigger: 'delay',
-              name: 'job',
-              delayMs: 10,
-              handler: () => {
-                const promise = Promise.resolve();
-                Object.defineProperty(promise, 'constructor', {
-                  get() {
-                    state.reads++;
-                    return Object;
-                  },
-                });
-                return promise;
+            jobs: [
+              {
+                trigger: 'delay',
+                name: 'job',
+                delayMs: 10,
+                handler: () => {
+                  const promise = Promise.resolve();
+                  Object.defineProperty(promise, 'constructor', {
+                    get() {
+                      state.reads++;
+                      return Object;
+                    },
+                  });
+                  return promise;
+                },
               },
-            }],
+            ],
           },
         };
       });
@@ -1234,17 +1255,19 @@ describe('SchedulerPlugin diagnostics wiring', () => {
             ...(chained
               ? { behaviors: [{ handle: (_c, next) => next() } as IIngressBehavior] }
               : {}),
-            jobs: [{
-              trigger: 'every',
-              name: 'job',
-              intervalMs: 20,
-              handler: () => {
-                state.runs++;
-                const promise = Promise.resolve();
-                Object.defineProperty(promise, 'then', { value: () => {} });
-                return promise;
+            jobs: [
+              {
+                trigger: 'every',
+                name: 'job',
+                intervalMs: 20,
+                handler: () => {
+                  state.runs++;
+                  const promise = Promise.resolve();
+                  Object.defineProperty(promise, 'then', { value: () => {} });
+                  return promise;
+                },
               },
-            }],
+            ],
           },
         };
       });
@@ -1262,19 +1285,23 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       plugins: [
         RuntimePlugin(),
         SchedulerPlugin({
-          behaviors: [{
-            handle: () => {
-              throw new Error('refused-canary');
+          behaviors: [
+            {
+              handle: () => {
+                throw new Error('refused-canary');
+              },
             },
-          }],
-          jobs: [{
-            trigger: 'delay',
-            name: 'refused',
-            delayMs: 10,
-            handler: () => {
-              handlerRuns++;
+          ],
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'refused',
+              delayMs: 10,
+              handler: () => {
+                handlerRuns++;
+              },
             },
-          }],
+          ],
           diagnostics: { enabled: true, alias: 'cron', jobs: { refused: 'refused-alias' } },
         }),
       ],
@@ -1283,9 +1310,9 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(handlerRuns).toBe(0);
-      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
-        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-      )[0]!.snapshot();
+      const snapshot = app.services
+        .getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)[0]!
+        .snapshot();
       expect(recordOf(snapshot, 'refused-alias', 'fire')).toMatchObject({ started: 1, failed: 1 });
       expect(recordOf(snapshot, 'refused-alias', 'attempt')).toBeUndefined();
     } finally {
@@ -1325,9 +1352,7 @@ interface ScenarioTrace {
  * it (`runtime.hrtime`), so any observation-only clock read the scheduler
  * makes OUTSIDE the collector's guard would throw into scheduling here.
  */
-async function runScenario(
-  mode: 'off' | 'on' | 'failing',
-): Promise<{
+async function runScenario(mode: 'off' | 'on' | 'failing'): Promise<{
   trace: ScenarioTrace;
   collector: SchedulerObservationCollector | null;
   /** The collector's snapshot right after the contended cron fire (within retention). */
@@ -1365,7 +1390,11 @@ async function runScenario(
   if (mode !== 'off') {
     collector = new SchedulerObservationCollector(
       'cron',
-      new Map([['c', 'c-alias'], ['e', 'e-alias'], ['d', 'd-alias']]),
+      new Map([
+        ['c', 'c-alias'],
+        ['e', 'e-alias'],
+        ['d', 'd-alias'],
+      ]),
       runtime.now.bind(runtime),
       runtime.hrtime.bind(runtime),
     );
@@ -1388,12 +1417,17 @@ async function runScenario(
   await service.every('e', 100, (job) => {
     calls.push(`e#${job.attempts}`);
   });
-  await service.delay('d', 50, (job) => {
-    calls.push(`d#${job.attempts}`);
-    if (++flakyCalls === 1) {
-      throw new Error('attempt-canary');
-    }
-  }, { retry: { limit: 2, delay: 10, backoff: 'fixed' } });
+  await service.delay(
+    'd',
+    50,
+    (job) => {
+      calls.push(`d#${job.attempts}`);
+      if (++flakyCalls === 1) {
+        throw new Error('attempt-canary');
+      }
+    },
+    { retry: { limit: 2, delay: 10, backoff: 'fixed' } },
+  );
   await step(60);
   await step(100);
   await service.pause('e');

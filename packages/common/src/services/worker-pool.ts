@@ -175,9 +175,12 @@ export interface WorkerTaskReply {
 }
 
 function isEnvelope(message: unknown): message is { __hewp: 1; kind: string } {
-  return typeof message === 'object' && message !== null &&
+  return (
+    typeof message === 'object' &&
+    message !== null &&
     (message as { __hewp?: unknown }).__hewp === 1 &&
-    typeof (message as { kind?: unknown }).kind === 'string';
+    typeof (message as { kind?: unknown }).kind === 'string'
+  );
 }
 
 /**
@@ -199,8 +202,11 @@ export function isWorkerReadySignal(message: unknown): message is WorkerReadySig
  * @since 0.1.0
  */
 export function isWorkerTaskRequest(message: unknown): message is WorkerTaskRequest {
-  return isEnvelope(message) && message.kind === 'task' &&
-    typeof (message as { id?: unknown }).id === 'number';
+  return (
+    isEnvelope(message) &&
+    message.kind === 'task' &&
+    typeof (message as { id?: unknown }).id === 'number'
+  );
 }
 
 /**
@@ -211,7 +217,10 @@ export function isWorkerTaskRequest(message: unknown): message is WorkerTaskRequ
  * @since 0.1.0
  */
 export function isWorkerTaskReply(message: unknown): message is WorkerTaskReply {
-  return isEnvelope(message) && message.kind === 'reply' &&
+  return (
+    isEnvelope(message) &&
+    message.kind === 'reply' &&
     typeof (message as { id?: unknown }).id === 'number' &&
-    typeof (message as { ok?: unknown }).ok === 'boolean';
+    typeof (message as { ok?: unknown }).ok === 'boolean'
+  );
 }

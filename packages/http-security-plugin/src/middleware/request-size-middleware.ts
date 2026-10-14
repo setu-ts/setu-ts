@@ -38,10 +38,7 @@ export function requestSizeMiddleware(options: RequestSizeOptions = {}): Middlew
 
   const maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
 
-  return async (
-    ctx: IRequestContext,
-    next: () => Promise<void>,
-  ): Promise<void> => {
+  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const contentLength = ctx.request.headers.get('Content-Length');
 
     if (contentLength === null) {
@@ -63,8 +60,7 @@ export function requestSizeMiddleware(options: RequestSizeOptions = {}): Middlew
       respondWithError(ctx, {
         status: 413,
         title: 'Payload Too Large',
-        detail:
-          `Request body size (${size} bytes) exceeds the maximum allowed size (${maxBodySize} bytes)`,
+        detail: `Request body size (${size} bytes) exceeds the maximum allowed size (${maxBodySize} bytes)`,
       });
       return;
     }

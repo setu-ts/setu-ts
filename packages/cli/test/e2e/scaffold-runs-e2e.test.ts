@@ -73,17 +73,11 @@ const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
   ['rest on workers', ['--template', 'rest', '--runtime', 'cloudflare-workers']],
   // The one that failed: its Cloudflare wiring is the longest emitted plugin
   // call, and it emits a Durable Object class of its own.
-  [
-    'microservice on workers',
-    ['--template', 'microservice', '--runtime', 'cloudflare-workers'],
-  ],
+  ['microservice on workers', ['--template', 'microservice', '--runtime', 'cloudflare-workers']],
   // The styled host: the same microservice recipe composed with the decorator
   // and DI pair. A `HOSTS` entry alone only reaches `fmt` and `lint` — the boot
   // gets its own case in `BOOTABLE_STYLED` below.
-  [
-    'microservice class-based',
-    ['--template', 'microservice', '--style', 'class-based'],
-  ],
+  ['microservice class-based', ['--template', 'microservice', '--style', 'class-based']],
   [
     'microservice class-based on workers',
     ['--template', 'microservice', '--style', 'class-based', '--runtime', 'cloudflare-workers'],
@@ -316,8 +310,9 @@ describe('a scaffolded project is formatted and lints clean', () => {
 async function advertisedPaths(project: string): Promise<string[]> {
   const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
   const section = readme.split('## What it serves')[1]?.split('\n## ')[0] ?? '';
-  return [...section.matchAll(/^- `([^`]+)`/gm)]
-    .map((match) => (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'));
+  return [...section.matchAll(/^- `([^`]+)`/gm)].map((match) =>
+    (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'),
+  );
 }
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
@@ -427,7 +422,8 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
     // fail at the actual testing-package boundary, not just a text assertion.
     await nodeFs.writeFile(
       configPath,
-      config.replace('): IKernelApplication {', '): IApplication {')
+      config
+        .replace('): IKernelApplication {', '): IApplication {')
         .replace(/type IKernelApplication,\s*/g, '')
         .replace(
           "import type { IPlugin } from '@setu-ts/common';",
@@ -480,8 +476,9 @@ describe('a scaffolded Workers project retries a failed boot and never leaks the
   // generated entry must answer a generic 503 while reporting to the platform
   // logs, and a later request must re-attempt boot.
   it('answers 503 without the stack, and the next request re-attempts boot', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']))
-      .toBe(0);
+    expect(
+      await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']),
+    ).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
 
@@ -797,7 +794,10 @@ describe('a scaffolded full-stack project type-checks its own routes', () => {
  * @returns The name=value pairs, joined
  */
 function cookiesOf(response: Response): string {
-  return response.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0]).join('; ');
+  return response.headers
+    .getSetCookie()
+    .map((cookie) => cookie.split(';', 1)[0])
+    .join('; ');
 }
 
 describe('a scaffolded full-stack project runs both middleware layers', () => {

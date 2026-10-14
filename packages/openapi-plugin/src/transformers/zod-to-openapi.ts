@@ -276,8 +276,9 @@ function expandTypeUnions(node: unknown): void {
   for (const [keyword, value] of Object.entries(record)) {
     if (SUBSCHEMA_KEYWORDS.has(keyword)) {
       // `items` is one schema in 2020-12 and a list in older drafts.
-      if (Array.isArray(value)) { for (const item of value) expandTypeUnions(item); }
-      else expandTypeUnions(value);
+      if (Array.isArray(value)) {
+        for (const item of value) expandTypeUnions(item);
+      } else expandTypeUnions(value);
     } else if (SUBSCHEMA_LIST_KEYWORDS.has(keyword) && Array.isArray(value)) {
       for (const item of value) expandTypeUnions(item);
     } else if (SUBSCHEMA_MAP_KEYWORDS.has(keyword) && isSchemaMap(value)) {
@@ -373,13 +374,13 @@ export class ZodToOpenApi {
    */
   readonly #channels:
     | {
-      /** Claims a unique component name for a surviving `$def`. */
-      readonly onDefinitionClaim?: (hint: string) => string;
-      /** Delivers an adapted `$def` under the name claimed for it. */
-      readonly onDefinition?: (name: string, schema: OpenApiSchemaObject) => void;
-      /** Reports a node that could not be represented (still emits `{}`). */
-      readonly onUnrepresentable?: (diagnostic: { readonly reason: string }) => void;
-    }
+        /** Claims a unique component name for a surviving `$def`. */
+        readonly onDefinitionClaim?: (hint: string) => string;
+        /** Delivers an adapted `$def` under the name claimed for it. */
+        readonly onDefinition?: (name: string, schema: OpenApiSchemaObject) => void;
+        /** Reports a node that could not be represented (still emits `{}`). */
+        readonly onUnrepresentable?: (diagnostic: { readonly reason: string }) => void;
+      }
     | undefined;
   /**
    * The root node of the zod v4 conversion currently running. Zod's
@@ -653,10 +654,8 @@ export class ZodToOpenApi {
 
     // Deliver each surviving def with its internal pointers rewritten.
     for (const [key, name] of claimed) {
-      const adapted = mapRefs(
-        defs[key],
-        (ref) =>
-          ref.startsWith(DEFS_REF_PREFIX) ? refTargetFor(ref.slice(DEFS_REF_PREFIX.length)) : ref,
+      const adapted = mapRefs(defs[key], (ref) =>
+        ref.startsWith(DEFS_REF_PREFIX) ? refTargetFor(ref.slice(DEFS_REF_PREFIX.length)) : ref,
       );
       deliver(name, adapted as unknown as OpenApiSchemaObject);
     }
@@ -691,8 +690,7 @@ export class ZodToOpenApi {
     const schema: OpenApiSchemaObject = { type: 'string' };
     // Zod uses 'kind' for the check type, not 'type'
     const checks = def.checks as
-      | readonly { kind: string; value?: number | { value: number }; exact?: boolean }[]
-      | undefined;
+      readonly { kind: string; value?: number | { value: number }; exact?: boolean }[] | undefined;
 
     if (checks) {
       for (const check of checks) {
@@ -705,19 +703,21 @@ export class ZodToOpenApi {
         } else if (check.kind === 'min') {
           // Zod 3.x stores min/max value as { value: number, message: string } or plain number
           const checkValue = check.value;
-          const val = typeof checkValue === 'number'
-            ? checkValue
-            : (checkValue && typeof checkValue === 'object' && 'value' in checkValue)
-            ? (checkValue as { value: number }).value
-            : undefined;
+          const val =
+            typeof checkValue === 'number'
+              ? checkValue
+              : checkValue && typeof checkValue === 'object' && 'value' in checkValue
+                ? (checkValue as { value: number }).value
+                : undefined;
           if (typeof val === 'number') schema.minLength = val;
         } else if (check.kind === 'max') {
           const checkValue = check.value;
-          const val = typeof checkValue === 'number'
-            ? checkValue
-            : (checkValue && typeof checkValue === 'object' && 'value' in checkValue)
-            ? (checkValue as { value: number }).value
-            : undefined;
+          const val =
+            typeof checkValue === 'number'
+              ? checkValue
+              : checkValue && typeof checkValue === 'object' && 'value' in checkValue
+                ? (checkValue as { value: number }).value
+                : undefined;
           if (typeof val === 'number') schema.maxLength = val;
         }
       }
@@ -731,20 +731,21 @@ export class ZodToOpenApi {
     // Zod uses 'kind' for the check type, not 'type'
     const checks = def.checks as
       | readonly {
-        kind: string;
-        value?: number | { value: number; message: string };
-        inclusive?: boolean;
-      }[]
+          kind: string;
+          value?: number | { value: number; message: string };
+          inclusive?: boolean;
+        }[]
       | undefined;
 
     if (checks) {
       for (const check of checks) {
         const checkValue = check.value;
-        const val = typeof checkValue === 'number'
-          ? checkValue
-          : (checkValue && typeof checkValue === 'object' && 'value' in checkValue)
-          ? (checkValue as { value: number }).value
-          : undefined;
+        const val =
+          typeof checkValue === 'number'
+            ? checkValue
+            : checkValue && typeof checkValue === 'object' && 'value' in checkValue
+              ? (checkValue as { value: number }).value
+              : undefined;
 
         if (check.kind === 'min' && typeof val === 'number') {
           schema.minimum = val;
@@ -768,12 +769,18 @@ export class ZodToOpenApi {
     const minLength = def.minLength as { value?: number } | number | null | undefined;
     const maxLength = def.maxLength as { value?: number } | number | null | undefined;
 
-    const minVal = (minLength && typeof minLength === 'object' && minLength.value !== undefined)
-      ? minLength.value
-      : (typeof minLength === 'number' ? minLength : undefined);
-    const maxVal = (maxLength && typeof maxLength === 'object' && maxLength.value !== undefined)
-      ? maxLength.value
-      : (typeof maxLength === 'number' ? maxLength : undefined);
+    const minVal =
+      minLength && typeof minLength === 'object' && minLength.value !== undefined
+        ? minLength.value
+        : typeof minLength === 'number'
+          ? minLength
+          : undefined;
+    const maxVal =
+      maxLength && typeof maxLength === 'object' && maxLength.value !== undefined
+        ? maxLength.value
+        : typeof maxLength === 'number'
+          ? maxLength
+          : undefined;
 
     if (typeof minVal === 'number') {
       schema.minItems = minVal;
@@ -868,10 +875,7 @@ export class ZodToOpenApi {
     const left = def.left as ZodSchema | undefined;
     const right = def.right as ZodSchema | undefined;
     return {
-      allOf: [
-        left ? this.transform(left) : {},
-        right ? this.transform(right) : {},
-      ],
+      allOf: [left ? this.transform(left) : {}, right ? this.transform(right) : {}],
     };
   }
 

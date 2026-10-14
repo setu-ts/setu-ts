@@ -99,10 +99,7 @@ export function stripComment(line: string): string {
  * @param workflow - The file name, for reporting
  * @returns Every `actions/checkout` step in the file
  */
-export function workflowCheckoutSteps(
-  text: string,
-  workflow: string,
-): readonly CheckoutStep[] {
+export function workflowCheckoutSteps(text: string, workflow: string): readonly CheckoutStep[] {
   const raw = text.split('\n');
   const steps: CheckoutStep[] = [];
   for (let index = 0; index < raw.length; index += 1) {
@@ -154,7 +151,7 @@ async function checkoutSteps(): Promise<readonly CheckoutStep[]> {
     steps.push(...workflowCheckoutSteps(text, entry.name));
   }
   return steps.sort((a, b) =>
-    a.workflow === b.workflow ? a.line - b.line : a.workflow.localeCompare(b.workflow)
+    a.workflow === b.workflow ? a.line - b.line : a.workflow.localeCompare(b.workflow),
   );
 }
 
@@ -269,12 +266,10 @@ describe('workflow checkout credentials', () => {
     it('fails closed on a form it does not recognise', () => {
       // Flow style and a quoted value are both legal YAML and both REFUSED, so
       // an unrecognised spelling is a named failure rather than a silent pass.
-      for (
-        const yaml of [
-          'jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with: { persist-credentials: false }\n',
-          "jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          persist-credentials: 'false'\n",
-        ]
-      ) {
+      for (const yaml of [
+        'jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with: { persist-credentials: false }\n',
+        "jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          persist-credentials: 'false'\n",
+      ]) {
         expect(dropsCredential(stepOf(yaml))).toBe(false);
       }
     });

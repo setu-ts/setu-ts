@@ -218,10 +218,7 @@ export class FakeTimers {
  * Creates a fake `IRuntimeServices` whose timers are the given
  * {@linkcode FakeTimers}; `workers` is included only when provided.
  */
-export function createFakeRuntime(
-  timers: FakeTimers,
-  workers?: IWorkerHost,
-): IRuntimeServices {
+export function createFakeRuntime(timers: FakeTimers, workers?: IWorkerHost): IRuntimeServices {
   const base: IRuntimeServices = {
     platform: (): RuntimePlatform => 'deno',
     version: () => '2.0.0',

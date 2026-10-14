@@ -102,18 +102,16 @@ describe('validateQueueReadArgs', () => {
   });
 
   it('refuses a bad cursor or limit without echoing it', () => {
-    for (
-      const [after, limit] of [
-        [Number.NaN, 1],
-        [1.5, 1],
-        ['0', 1],
-        [Number.MAX_SAFE_INTEGER + 1, 1],
-        [6, 1],
-        [0, 0],
-        [0, 1.5],
-        [0, '1'],
-      ] as const
-    ) {
+    for (const [after, limit] of [
+      [Number.NaN, 1],
+      [1.5, 1],
+      ['0', 1],
+      [Number.MAX_SAFE_INTEGER + 1, 1],
+      [6, 1],
+      [0, 0],
+      [0, 1.5],
+      [0, '1'],
+    ] as const) {
       expect(() => validateQueueReadArgs(after, limit, 5)).toThrow(
         QUEUE_COLLECTOR_ERRORS.badCursor,
       );
@@ -181,9 +179,9 @@ describe('QueueObservationCollector — attempts', () => {
     target.begin(NAME_CANARY, 'id-0', 1)?.settled('completed', 'acknowledged');
     target.begin(NAME_CANARY, 'id-1', 1)?.settled('completed', 'acknowledged');
     // The last two retained attempts: sequences 4099 and 4100.
-    const aliases = target.read(QUEUE_COLLECTOR_LIMITS.jobAliases + 2).attempts.map((a) =>
-      a.jobAlias
-    );
+    const aliases = target
+      .read(QUEUE_COLLECTOR_LIMITS.jobAliases + 2)
+      .attempts.map((a) => a.jobAlias);
     expect(aliases[0]).toBe('j1');
     expect(aliases[1]).toBe(`j${QUEUE_COLLECTOR_LIMITS.jobAliases + 2}`);
     expect(target.read(0).evictedJobAliases).toBe(2);
@@ -337,22 +335,26 @@ describe('QueueObservationCollector — the M98a cursor contract', () => {
 });
 
 /** A controllable depth reader. */
-function reader(overrides: Partial<QueueDepthReader> & {
-  results?: Record<string, () => Promise<QueueDepths>>;
-} = {}): QueueDepthReader & { calls: string[] } {
+function reader(
+  overrides: Partial<QueueDepthReader> & {
+    results?: Record<string, () => Promise<QueueDepths>>;
+  } = {},
+): QueueDepthReader & { calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
     scope: overrides.scope ?? 'shared-backend',
     supported: overrides.supported ?? (() => true),
     names: overrides.names ?? (() => [NAME_CANARY, 'image.resize', 'unapproved']),
-    read: overrides.read ?? ((name: string) => {
-      calls.push(name);
-      const result = overrides.results?.[name];
-      return result === undefined
-        ? Promise.resolve({ ready: 3, processing: 1, dead: 0 })
-        : result();
-    }),
+    read:
+      overrides.read ??
+      ((name: string) => {
+        calls.push(name);
+        const result = overrides.results?.[name];
+        return result === undefined
+          ? Promise.resolve({ ready: 3, processing: 1, dead: 0 })
+          : result();
+      }),
   };
 }
 
@@ -445,16 +447,23 @@ describe('QueueObservationCollector — depth scheduler', () => {
       names: () => [NAME_CANARY, 'image.resize'],
       results: {
         'image.resize': () =>
-          fail ? Promise.reject(new Error('canary-error-SYNTHETIC')) : Promise.resolve({
-            ready: 9,
-            processing: 0,
-            dead: 1,
-          }),
+          fail
+            ? Promise.reject(new Error('canary-error-SYNTHETIC'))
+            : Promise.resolve({
+                ready: 9,
+                processing: 0,
+                dead: 1,
+              }),
       },
     });
     target.startDepths(counting);
     await settle();
-    expect(target.read(0).depths.map((d) => d.queueAlias).sort()).toEqual(['emails', 'images']);
+    expect(
+      target
+        .read(0)
+        .depths.map((d) => d.queueAlias)
+        .sort(),
+    ).toEqual(['emails', 'images']);
     fail = true;
     await runtime.advanceMs(1_000);
     const batch = target.read(0);
@@ -499,13 +508,15 @@ describe('QueueObservationCollector — depth scheduler', () => {
   it('leaves no rows after a wholly failed cycle while the source stays ready', async () => {
     const { collector: target, runtime } = collector({ depths: DEPTHS });
     let fail = false;
-    target.startDepths(reader({
-      names: () => [NAME_CANARY, 'image.resize'],
-      read: () =>
-        fail
-          ? Promise.reject(new Error('down'))
-          : Promise.resolve({ ready: 0, processing: 0, dead: 0 }),
-    }));
+    target.startDepths(
+      reader({
+        names: () => [NAME_CANARY, 'image.resize'],
+        read: () =>
+          fail
+            ? Promise.reject(new Error('down'))
+            : Promise.resolve({ ready: 0, processing: 0, dead: 0 }),
+      }),
+    );
     await settle();
     expect(target.read(0).depths).toHaveLength(2);
     fail = true;
@@ -518,15 +529,17 @@ describe('QueueObservationCollector — depth scheduler', () => {
 
   it('treats a synchronous throw and an invalid count shape as failed counts', async () => {
     const { collector: target } = collector({ depths: DEPTHS });
-    target.startDepths(reader({
-      names: () => [NAME_CANARY, 'image.resize'],
-      read: (name: string) => {
-        if (name === NAME_CANARY) {
-          throw new Error('sync');
-        }
-        return Promise.resolve({ ready: -1, processing: 0, dead: 0 });
-      },
-    }));
+    target.startDepths(
+      reader({
+        names: () => [NAME_CANARY, 'image.resize'],
+        read: (name: string) => {
+          if (name === NAME_CANARY) {
+            throw new Error('sync');
+          }
+          return Promise.resolve({ ready: -1, processing: 0, dead: 0 });
+        },
+      }),
+    );
     await settle();
     const batch = target.read(0);
     expect(batch.failure).toBe('depth-read-failed');
@@ -575,7 +588,10 @@ describe('QueueObservationCollector — depth scheduler', () => {
     await runtime.advanceMs(200);
     await runtime.advanceMs(1_000);
     await runtime.advanceMs(1_000);
-    const aliases = target.read(0).depths.map((d) => d.queueAlias).sort();
+    const aliases = target
+      .read(0)
+      .depths.map((d) => d.queueAlias)
+      .sort();
     expect(aliases).toEqual(['images', 'pdfs']);
     // The skipped, still-held queue keeps the cycle's report at timed out.
     expect(target.read(0).failure).toBe('depth-read-timed-out');
@@ -587,13 +603,15 @@ describe('QueueObservationCollector — depth scheduler', () => {
       depths: { intervalMs: 1_000, timeoutMs: 30_000, concurrency: 1 },
     });
     let started = 0;
-    target.startDepths(reader({
-      names: () => [NAME_CANARY],
-      read: () => {
-        started += 1;
-        return new Promise<QueueDepths>(() => {});
-      },
-    }));
+    target.startDepths(
+      reader({
+        names: () => [NAME_CANARY],
+        read: () => {
+          started += 1;
+          return new Promise<QueueDepths>(() => {});
+        },
+      }),
+    );
     // Intervals fire while the first cycle is still racing its 30 s deadline.
     await runtime.advanceMs(5_000);
     expect(started).toBe(1);
@@ -602,10 +620,12 @@ describe('QueueObservationCollector — depth scheduler', () => {
   it('clears every timer and retained depth on close and discards a late count', async () => {
     const { collector: target, runtime } = collector({ depths: DEPTHS });
     let release: (value: QueueDepths) => void = () => {};
-    target.startDepths(reader({
-      names: () => [NAME_CANARY],
-      read: () => new Promise<QueueDepths>((resolve) => (release = resolve)),
-    }));
+    target.startDepths(
+      reader({
+        names: () => [NAME_CANARY],
+        read: () => new Promise<QueueDepths>((resolve) => (release = resolve)),
+      }),
+    );
     await settle();
     expect(runtime.timerCount).toBeGreaterThan(0);
     target.close();
@@ -642,8 +662,7 @@ describe('readDepthResult', () => {
     expect(readDepthResult([1, 2, 3])).toBeNull();
     expect(readDepthResult({ ready: 1.5, processing: 0, dead: 0 })).toBeNull();
     expect(readDepthResult({ ready: 0, processing: '0', dead: 0 })).toBeNull();
-    expect(readDepthResult({ ready: 0, processing: 0, dead: Number.POSITIVE_INFINITY }))
-      .toBeNull();
+    expect(readDepthResult({ ready: 0, processing: 0, dead: Number.POSITIVE_INFINITY })).toBeNull();
     const hostile = {
       get ready(): number {
         throw new Error('getter');

@@ -95,7 +95,8 @@ export class IssuerKeySet {
    * @returns The keys, or `null` when no usable set exists
    */
   async keys(force = false): Promise<readonly Jwk[] | null> {
-    const fresh = this.#keys !== null &&
+    const fresh =
+      this.#keys !== null &&
       this.#runtime.hrtime() - this.#confirmedAt < this.#issuer.timings.ttlMs;
     if (this.#inflight !== null) {
       // A caller whose cached set is still fresh and who did not ask for a
@@ -138,14 +139,16 @@ export class IssuerKeySet {
   }
 
   #cooldownElapsed(): boolean {
-    return this.#lastAttemptAt === null ||
-      this.#runtime.hrtime() - this.#lastAttemptAt >= this.#issuer.timings.minRefreshIntervalMs;
+    return (
+      this.#lastAttemptAt === null ||
+      this.#runtime.hrtime() - this.#lastAttemptAt >= this.#issuer.timings.minRefreshIntervalMs
+    );
   }
 
   async #refresh(): Promise<void> {
     this.#lastAttemptAt = this.#runtime.hrtime();
     try {
-      const jwksUri = this.#issuer.jwksUri ?? await this.#discover();
+      const jwksUri = this.#issuer.jwksUri ?? (await this.#discover());
       const document = await this.#fetchJson(jwksUri);
       const keys = document.keys;
       if (!Array.isArray(keys)) {
@@ -154,8 +157,8 @@ export class IssuerKeySet {
       if (keys.length > MAX_KEYS) {
         throw new RefreshError('key-set-too-many-keys');
       }
-      this.#keys = keys.filter((key): key is Jwk =>
-        typeof key === 'object' && key !== null && !Array.isArray(key)
+      this.#keys = keys.filter(
+        (key): key is Jwk => typeof key === 'object' && key !== null && !Array.isArray(key),
       );
       this.#confirmedAt = this.#runtime.hrtime();
       this.#everFetched = true;

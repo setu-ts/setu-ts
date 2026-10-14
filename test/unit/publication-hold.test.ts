@@ -25,8 +25,10 @@ async function run(args: readonly string[]): Promise<{ code: number; out: string
 
 describe('activeHolds', () => {
   it('keeps only holds on a package the release publishes, in listed order', () => {
-    expect(activeHolds([OTHER, HOLD], ['packages/held', 'packages/also-held']))
-      .toEqual([OTHER, HOLD]);
+    expect(activeHolds([OTHER, HOLD], ['packages/held', 'packages/also-held'])).toEqual([
+      OTHER,
+      HOLD,
+    ]);
     expect(activeHolds([OTHER, HOLD], ['packages/held'])).toEqual([HOLD]);
   });
 
@@ -42,11 +44,10 @@ describe('publicationHoldRefusal', () => {
   });
 
   it('refuses the whole release, naming every held package and its reason', () => {
-    const refusal = publicationHoldRefusal([HOLD, OTHER], [
-      'packages/other',
-      'packages/held',
-      'packages/also-held',
-    ]);
+    const refusal = publicationHoldRefusal(
+      [HOLD, OTHER],
+      ['packages/other', 'packages/held', 'packages/also-held'],
+    );
     expect(refusal).toContain('Refusing to publish: 2 package(s)');
     expect(refusal).toContain('blocks the whole release');
     expect(refusal).toContain('  - packages/held: waiting on M1');
@@ -76,9 +77,11 @@ describe('the release scripts after M98o', () => {
   });
 
   it('release:verify no longer reports the completed hold', async () => {
-    const version = (JSON.parse(
-      await Deno.readTextFile(new URL('packages/kernel/deno.json', ROOT)),
-    ) as { version: string }).version;
+    const version = (
+      JSON.parse(await Deno.readTextFile(new URL('packages/kernel/deno.json', ROOT))) as {
+        version: string;
+      }
+    ).version;
     // The same grants as the `release:verify` task: check 9 reads the merge
     // log through git, and a narrower copy here would fail that check rather
     // than this test's subject.

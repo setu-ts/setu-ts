@@ -40,9 +40,9 @@ function createFakeRuntimeServices(platform: RuntimePlatform): IRuntimeServices 
     subtle: {} as SubtleCrypto,
     now: () => 0,
     hrtime: () => 0,
-    setTimeout: () => ({} as unknown),
+    setTimeout: () => ({}) as unknown,
     clearTimeout: () => {},
-    setInterval: () => ({} as unknown),
+    setInterval: () => ({}) as unknown,
     clearInterval: () => {},
     env: {},
     exit: () => {
@@ -151,7 +151,7 @@ describe('createRuntimeServices | platform resolution', () => {
             throw new Error('should not be called');
           },
         },
-      })
+      }),
     ).toThrow('No runtime adapter factory for platform: node');
   });
 

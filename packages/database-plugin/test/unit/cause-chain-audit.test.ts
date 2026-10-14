@@ -84,11 +84,9 @@ function replacementThrows(body: string): string[] {
     const end = statementEnd(body, start);
     replacements.push(body.slice(start, end));
   }
-  for (
-    const match of body.matchAll(
-      /\b(?:const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(new\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\()/g,
-    )
-  ) {
+  for (const match of body.matchAll(
+    /\b(?:const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(new\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\()/g,
+  )) {
     const name = match[1];
     const start = (match.index ?? 0) + match[0].lastIndexOf('new ');
     const end = statementEnd(body, start);
@@ -130,15 +128,15 @@ function forwardsCaughtValue(binding: string | undefined, replacement: string): 
   const opening = replacement.indexOf('(');
   const closing = opening < 0 ? undefined : closingDelimiter(replacement, opening);
   if (closing === undefined) return false;
-  const arguments_ = topLevelArguments(replacement.slice(opening + 1, closing)).filter((argument) =>
-    argument.trim().length > 0
+  const arguments_ = topLevelArguments(replacement.slice(opening + 1, closing)).filter(
+    (argument) => argument.trim().length > 0,
   );
   const options = arguments_[arguments_.length - 1];
   if (options === undefined) return false;
   const object = options.trim();
   if (!object.startsWith('{') || !object.endsWith('}')) return false;
   return topLevelArguments(object.slice(1, -1)).some((property) =>
-    forwardsCauseProperty(identifier, property)
+    forwardsCauseProperty(identifier, property),
   );
 }
 
@@ -153,8 +151,8 @@ function forwardsCauseProperty(identifier: string, property: string): boolean {
 function hasCauseViolation(source: string): boolean {
   const block = catchBlocks(source).next().value;
   if (block === undefined) throw new Error('expected a catch block');
-  return replacementThrows(block.body).some((replacement) =>
-    !forwardsCaughtValue(block.binding, replacement)
+  return replacementThrows(block.body).some(
+    (replacement) => !forwardsCaughtValue(block.binding, replacement),
   );
 }
 

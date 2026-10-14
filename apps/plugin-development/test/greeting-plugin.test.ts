@@ -15,9 +15,7 @@ describe('GreetingPlugin', () => {
         url: 'http://example.test/greet/Grace',
       });
       expect(response.statusCode).toBe(200);
-      expect(response.json<{ message: string }>().message).toBe(
-        'Hello, Grace!',
-      );
+      expect(response.json<{ message: string }>().message).toBe('Hello, Grace!');
     } finally {
       await app.stop();
     }

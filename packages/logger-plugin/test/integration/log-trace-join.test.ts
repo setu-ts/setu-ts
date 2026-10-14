@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages, and
+/* eslint-disable no-console -- guarded skip tests log SKIP messages, and */
 // the ConsoleLogger sink under test IS `console.log`.
 /**
  * X34-2 end to end — the join itself, through a real kernel application with
@@ -64,11 +64,11 @@ async function realOtel(): Promise<RealOtel | null> {
     pluginOptions: { serviceName: 'm90i-log-join', exporter: 'console' },
     // The console-exporter seam, handed the in-memory exporter so finished
     // spans are inspectable rather than printed.
-    consoleExporterCtor: (class {
+    consoleExporterCtor: class {
       constructor() {
         return exporter;
       }
-    }) as never,
+    } as never,
     validated: true,
     contextActivation: true,
   });

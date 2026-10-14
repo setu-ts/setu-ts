@@ -25,9 +25,9 @@ export function createIORedisInstrumentation(
   configArg: unknown,
 ): unknown {
   const IORedisInstrumentation = mod.IORedisInstrumentation as unknown;
-  return new (IORedisInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (IORedisInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**

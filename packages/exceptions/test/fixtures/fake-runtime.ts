@@ -138,9 +138,7 @@ export function createFakeResponse(): FakeResponseResult {
 // ---------------------------------------------------------------------------
 
 /** Create a Map-backed fake `IServiceRegistry`. */
-export function createFakeServiceRegistry(
-  map: Map<string, unknown> = new Map(),
-): IServiceRegistry {
+export function createFakeServiceRegistry(map: Map<string, unknown> = new Map()): IServiceRegistry {
   return {
     register<T>(key: string, service: T): void {
       map.set(key, service);
@@ -174,11 +172,7 @@ export class FakeLogger implements ILogger {
   readonly level: LogLevel = 'trace';
   readonly calls: Array<{ level: LogLevel; message: string; meta?: Record<string, unknown> }> = [];
 
-  private record(
-    level: LogLevel,
-    message: string,
-    meta?: Record<string, unknown>,
-  ): void {
+  private record(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
     this.calls.push({ level, message, ...(meta !== undefined && { meta }) });
   }
 

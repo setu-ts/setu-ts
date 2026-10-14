@@ -17,7 +17,8 @@ import { COMPOSE_FILE, DOCKERFILE } from '../../src/workspace/compose.ts';
 const PROJECT: Readonly<Record<string, string>> = {
   '/work/svc/deno.json': '{ "tasks": { "start": "deno run main.ts" } }\n',
   '/work/svc/setu.config.ts': 'export function createApp() {}\n',
-  '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
+  '/work/svc/main.ts':
+    `import { createApp } from './setu.config.ts';\n` +
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
   '/work/svc/README.md': '# svc\n',
   '/work/svc/.gitignore': 'coverage/\n',
@@ -43,7 +44,8 @@ const NODE_PROJECT: Readonly<Record<string, string>> = {
   '/work/svc/.npmrc': '@jsr:registry=https://npm.jsr.io\n',
   '/work/svc/tsconfig.json': '{}\n',
   '/work/svc/setu.config.ts': 'export function createApp() {}\n',
-  '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
+  '/work/svc/main.ts':
+    `import { createApp } from './setu.config.ts';\n` +
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
   '/work/svc/README.md': '# svc\n',
   '/work/svc/src/controllers/index.ts': 'export const routes = [];\n',
@@ -184,7 +186,8 @@ describe('pruneAdoptedDirectories', () => {
 });
 
 describe('rewriteEntryPort', () => {
-  const entry = `import { createApp } from './setu.config.ts';\n` +
+  const entry =
+    `import { createApp } from './setu.config.ts';\n` +
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`;
 
   it('binds the allocated port through the discovery module', () => {
@@ -197,8 +200,9 @@ describe('rewriteEntryPort', () => {
   // A developer may have changed the entry; guessing at an edit there would be
   // worse than reporting the two lines to change.
   it('declines an entry that no longer carries the literal', () => {
-    expect(rewriteEntryPort('await app.start({ port: Number(x) });', 'P', './p.ts'))
-      .toBeUndefined();
+    expect(
+      rewriteEntryPort('await app.start({ port: Number(x) });', 'P', './p.ts'),
+    ).toBeUndefined();
   });
 });
 
@@ -450,7 +454,8 @@ describe('runAdoptCommand', () => {
   it('reports the two lines to change when the entry cannot be rewritten', async () => {
     const h = harness({
       ...PROJECT,
-      '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
+      '/work/svc/main.ts':
+        `import { createApp } from './setu.config.ts';\n` +
         `const app = await createApp();\nawait app.start({ port: Number(Deno.args[0]) });\n`,
     });
     expect(await h.run([])).toBe(0);

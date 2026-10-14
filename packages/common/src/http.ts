@@ -643,9 +643,7 @@ export function isWebSocketUpgradeRequest(headers: Headers): boolean {
     return false;
   }
 
-  return connection
-    .split(',')
-    .some((token) => token.trim().toLowerCase() === 'upgrade');
+  return connection.split(',').some((token) => token.trim().toLowerCase() === 'upgrade');
 }
 
 /**
@@ -738,8 +736,11 @@ export function securityMetadataOf(
  * symbol is treated as absent rather than trusted.
  */
 function isRouteSecurityMetadata(value: unknown): value is RouteSecurityMetadata {
-  return typeof value === 'object' && value !== null &&
-    typeof (value as { authenticated?: unknown }).authenticated === 'boolean';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { authenticated?: unknown }).authenticated === 'boolean'
+  );
 }
 
 /**
@@ -862,8 +863,13 @@ function isRouteValidationMetadata(value: unknown): value is RouteValidationMeta
   // actually derived.
   if (!('schema' in value)) return false;
   const target = (value as { target?: unknown }).target;
-  return target === 'body' || target === 'query' || target === 'params' ||
-    target === 'headers' || target === 'cookies';
+  return (
+    target === 'body' ||
+    target === 'query' ||
+    target === 'params' ||
+    target === 'headers' ||
+    target === 'cookies'
+  );
 }
 
 /**
@@ -964,9 +970,7 @@ export function withResponseMetadata<T extends RouteHandler>(
  *
  * @since 0.7.0
  */
-export function responseMetadataOf(
-  handler: RouteHandler,
-): RouteResponseMetadata | undefined {
+export function responseMetadataOf(handler: RouteHandler): RouteResponseMetadata | undefined {
   const carrier = handler as RouteHandler & {
     readonly [RESPONSE_METADATA]?: unknown;
   };
@@ -986,8 +990,7 @@ export function responseMetadataOf(
 function isRouteResponseMetadata(value: unknown): value is RouteResponseMetadata {
   if (typeof value !== 'object' || value === null) return false;
   const status = (value as { status?: unknown }).status;
-  return typeof status === 'number' && Number.isInteger(status) &&
-    status >= 200 && status <= 599;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 200 && status <= 599;
 }
 
 /**
@@ -1014,31 +1017,31 @@ export interface RouteDefinition {
  */
 export type ResponseSnapshot =
   | {
-    readonly streaming: false;
-    readonly status: number;
-    readonly headers: Headers;
-    readonly body: Uint8Array | string | null;
-    /**
-     * Snapshot-local header input the runtime may pass to a native response
-     * before it reads the lazy {@linkcode headers} view.
-     *
-     * @internal
-     */
-    readonly responseInit?: ResponseSnapshotInit | undefined;
-  }
+      readonly streaming: false;
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: Uint8Array | string | null;
+      /**
+       * Snapshot-local header input the runtime may pass to a native response
+       * before it reads the lazy {@linkcode headers} view.
+       *
+       * @internal
+       */
+      readonly responseInit?: ResponseSnapshotInit | undefined;
+    }
   | {
-    readonly streaming: true;
-    readonly status: number;
-    readonly headers: Headers;
-    readonly body: ReadableStream<Uint8Array>;
-    /**
-     * Snapshot-local header input the runtime may pass to a native response
-     * before it reads the lazy {@linkcode headers} view.
-     *
-     * @internal
-     */
-    readonly responseInit?: ResponseSnapshotInit | undefined;
-  };
+      readonly streaming: true;
+      readonly status: number;
+      readonly headers: Headers;
+      readonly body: ReadableStream<Uint8Array>;
+      /**
+       * Snapshot-local header input the runtime may pass to a native response
+       * before it reads the lazy {@linkcode headers} view.
+       *
+       * @internal
+       */
+      readonly responseInit?: ResponseSnapshotInit | undefined;
+    };
 
 /**
  * Native-response initialization data attached to a snapshot by the kernel

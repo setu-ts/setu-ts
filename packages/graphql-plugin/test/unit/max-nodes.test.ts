@@ -139,10 +139,12 @@ describe('countResolvedFields', () => {
     // cannot produce this input.
     const handBuilt: GraphqlDocumentNodeLike = {
       kind: 'Document',
-      definitions: [{
-        kind: 'OperationDefinition',
-        selectionSet: { selections: [{ kind: 'FragmentSpread' }] },
-      }],
+      definitions: [
+        {
+          kind: 'OperationDefinition',
+          selectionSet: { selections: [{ kind: 'FragmentSpread' }] },
+        },
+      ],
     };
     expect(countResolvedFields(handBuilt)).toBe(0);
   });

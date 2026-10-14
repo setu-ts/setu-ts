@@ -34,11 +34,9 @@ describe('onIntegrationEvent overloads', () => {
   });
 
   it('types an inbox call as a RegistryFactory, inline or through a variable', () => {
-    const inline: RegistryFactory<SubscriptionDefinition> = onIntegrationEvent(
-      hired,
-      () => {},
-      { inbox: { consumer: 'payroll' } },
-    );
+    const inline: RegistryFactory<SubscriptionDefinition> = onIntegrationEvent(hired, () => {}, {
+      inbox: { consumer: 'payroll' },
+    });
     const variable = { queue: 'p', inbox: { consumer: 'p' } };
     const viaVariable: RegistryFactory<SubscriptionDefinition> = onIntegrationEvent(
       hired,
@@ -53,8 +51,9 @@ describe('onIntegrationEvent overloads', () => {
     );
     // @ts-expect-error — an inbox call is never a SubscriptionDefinition.
     const wrong: SubscriptionDefinition = onIntegrationEvent(hired, () => {}, variable);
-    expect([inline, viaVariable, viaDeclared, wrong].every((f) => typeof f === 'function'))
-      .toBe(true);
+    expect([inline, viaVariable, viaDeclared, wrong].every((f) => typeof f === 'function')).toBe(
+      true,
+    );
   });
 
   it('infers the unit-of-work type from the handler annotation', () => {

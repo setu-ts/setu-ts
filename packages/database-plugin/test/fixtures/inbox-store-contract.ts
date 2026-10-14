@@ -65,8 +65,9 @@ export function describeInboxStoreContract(
     it('a second run for the same marker rejects and leaves the first', async () => {
       const store = await make();
       await store.run(marker('c'), () => Promise.resolve());
-      await expect(store.run(marker('c', { updatedAt: 2_000 }), () => Promise.resolve()))
-        .rejects.toThrow();
+      await expect(
+        store.run(marker('c', { updatedAt: 2_000 }), () => Promise.resolve()),
+      ).rejects.toThrow();
       expect((await store.find(idsFor('c').marker))?.updatedAt).toBe(1_000);
     });
 

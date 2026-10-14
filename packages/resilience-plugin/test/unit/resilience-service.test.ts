@@ -38,10 +38,13 @@ describe('ResilienceService.wrap', () => {
   it('treats explicit false the same as absent (no layer)', async () => {
     const service = new ResilienceService(new FakeRuntime());
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return Promise.resolve('x');
-    }, { circuitBreaker: false, retry: false, bulkhead: false });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return Promise.resolve('x');
+      },
+      { circuitBreaker: false, retry: false, bulkhead: false },
+    );
     expect(await guarded()).toBe('x');
     expect(calls).toBe(1);
   });
@@ -49,10 +52,13 @@ describe('ResilienceService.wrap', () => {
   it('shares one circuit breaker across invocations (state persists)', async () => {
     const service = new ResilienceService(new FakeRuntime());
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return boom();
-    }, { circuitBreaker: CB });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return boom();
+      },
+      { circuitBreaker: CB },
+    );
 
     // Three failing calls trip the shared breaker.
     for (let i = 0; i < 3; i++) await expectReject(guarded());
@@ -67,10 +73,13 @@ describe('ResilienceService.wrap', () => {
   it('resolves circuitBreaker: true from defaultCircuitBreaker', async () => {
     const service = new ResilienceService(new FakeRuntime(), { defaultCircuitBreaker: CB });
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return boom();
-    }, { circuitBreaker: true });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return boom();
+      },
+      { circuitBreaker: true },
+    );
     for (let i = 0; i < 3; i++) await expectReject(guarded());
     const err = await expectReject(guarded());
     expect(err instanceof CircuitOpenError).toBe(true);
@@ -83,10 +92,13 @@ describe('ResilienceService.wrap', () => {
       defaultRetry: { limit: 3, delay: 10, backoff: 'fixed' },
     });
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return calls < 3 ? boom() : Promise.resolve('ok');
-    }, { retry: true });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return calls < 3 ? boom() : Promise.resolve('ok');
+      },
+      { retry: true },
+    );
     expect(await guarded()).toBe('ok');
     expect(calls).toBe(3);
     expect(runtime.armedDelays).toEqual([10, 10]);
@@ -98,10 +110,13 @@ describe('ResilienceService.wrap', () => {
     });
     const d1 = deferred<string>();
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return d1.promise;
-    }, { bulkhead: true });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return d1.promise;
+      },
+      { bulkhead: true },
+    );
 
     const p1 = guarded();
     const err = await expectReject(guarded());
@@ -120,9 +135,7 @@ describe('ResilienceService.wrap', () => {
 
   it('throws when retry: true has no defaultRetry', () => {
     const service = new ResilienceService(new FakeRuntime());
-    expect(() => service.wrap(boom, { retry: true })).toThrow(
-      'retry: true requires defaultRetry',
-    );
+    expect(() => service.wrap(boom, { retry: true })).toThrow('retry: true requires defaultRetry');
   });
 
   it('throws when bulkhead: true has no defaultBulkhead', () => {
@@ -135,14 +148,17 @@ describe('ResilienceService.wrap', () => {
   it('short-circuits: an open breaker stops retry and fn (call-count frozen)', async () => {
     const service = new ResilienceService(new FakeRuntime());
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return boom();
-    }, {
-      circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 },
-      retry: { limit: 3, delay: 1, backoff: 'fixed' },
-      timeout: 50,
-    });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return boom();
+      },
+      {
+        circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 },
+        retry: { limit: 3, delay: 1, backoff: 'fixed' },
+        timeout: 50,
+      },
+    );
 
     // First invocation: retry runs 3 attempts, the whole retry counts as ONE
     // breaker failure, tripping the threshold-1 breaker open.
@@ -159,13 +175,16 @@ describe('ResilienceService.wrap', () => {
     const service = new ResilienceService(new FakeRuntime());
     const d1 = deferred<string>();
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return d1.promise;
-    }, {
-      bulkhead: { maxConcurrent: 1, maxQueue: 0 },
-      circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 },
-    });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return d1.promise;
+      },
+      {
+        bulkhead: { maxConcurrent: 1, maxQueue: 0 },
+        circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 },
+      },
+    );
 
     const p1 = guarded(); // occupies the only slot; fn entered (calls === 1)
     const err = await expectReject(guarded()); // shed before breaker/fn
@@ -179,14 +198,17 @@ describe('ResilienceService.wrap', () => {
   it('gives each retry attempt its own timeout, so a slow attempt is retried', async () => {
     const service = new ResilienceService(new FakeRuntime());
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      // First attempt hangs (times out); second resolves promptly.
-      return calls === 1 ? new Promise<string>(() => {}) : Promise.resolve('recovered');
-    }, {
-      retry: { limit: 2, delay: 1, backoff: 'fixed' },
-      timeout: 5,
-    });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        // First attempt hangs (times out); second resolves promptly.
+        return calls === 1 ? new Promise<string>(() => {}) : Promise.resolve('recovered');
+      },
+      {
+        retry: { limit: 2, delay: 1, backoff: 'fixed' },
+        timeout: 5,
+      },
+    );
     expect(await guarded()).toBe('recovered');
     expect(calls).toBe(2);
   });
@@ -210,10 +232,13 @@ describe('ResilienceService cancellation', () => {
   it('aborts the protected call signal when the timeout deadline elapses', async () => {
     const service = new ResilienceService(new FakeRuntime());
     let observed: AbortSignal | undefined;
-    const guarded = service.wrap((signal) => {
-      observed = signal;
-      return new Promise<string>(() => {});
-    }, { timeout: 5 });
+    const guarded = service.wrap(
+      (signal) => {
+        observed = signal;
+        return new Promise<string>(() => {});
+      },
+      { timeout: 5 },
+    );
 
     await expect(guarded()).rejects.toBeInstanceOf(TimeoutError);
     expect(observed?.aborted).toBe(true);
@@ -225,12 +250,15 @@ describe('ResilienceService cancellation', () => {
     const controller = new AbortController();
     let observed: AbortSignal | undefined;
 
-    const guarded = service.wrap((signal) => {
-      observed = signal;
-      return new Promise<string>((_resolve, reject) => {
-        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-      });
-    }, { timeout: 10_000 });
+    const guarded = service.wrap(
+      (signal) => {
+        observed = signal;
+        return new Promise<string>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+      { timeout: 10_000 },
+    );
 
     const pending = guarded(controller.signal);
     const reason = new Error('caller cancelled');
@@ -260,15 +288,18 @@ describe('ResilienceService cancellation', () => {
     controller.abort(new Error('cancelled up front'));
 
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return Promise.resolve('never');
-    }, {
-      bulkhead: true,
-      circuitBreaker: CB,
-      retry: { limit: 3, delay: 10, backoff: 'fixed' },
-      timeout: 1000,
-    });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return Promise.resolve('never');
+      },
+      {
+        bulkhead: true,
+        circuitBreaker: CB,
+        retry: { limit: 3, delay: 10, backoff: 'fixed' },
+        timeout: 1000,
+      },
+    );
 
     // The bulkhead is outermost, so an already-aborted signal is refused there
     // and no inner layer — and certainly not the call — ever runs.
@@ -284,12 +315,15 @@ describe('ResilienceService refuses an already-aborted signal', () => {
     ['retry only', { retry: { limit: 3, delay: 1, backoff: 'fixed' } }],
     ['bulkhead only', { bulkhead: { maxConcurrent: 1, maxQueue: 1 } }],
     ['circuitBreaker only', { circuitBreaker: CB }],
-    ['every layer', {
-      timeout: 1000,
-      retry: { limit: 3, delay: 1, backoff: 'fixed' },
-      bulkhead: { maxConcurrent: 1, maxQueue: 1 },
-      circuitBreaker: CB,
-    }],
+    [
+      'every layer',
+      {
+        timeout: 1000,
+        retry: { limit: 3, delay: 1, backoff: 'fixed' },
+        bulkhead: { maxConcurrent: 1, maxQueue: 1 },
+        circuitBreaker: CB,
+      },
+    ],
   ];
 
   for (const [label, options] of CONFIGS) {

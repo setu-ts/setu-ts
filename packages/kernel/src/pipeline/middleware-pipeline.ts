@@ -71,9 +71,7 @@ export class MiddlewarePipeline implements IMiddlewareApi {
     if (this.#compiled !== null) {
       return this.#compiled;
     }
-    const sorted = [...this.#entries].sort(
-      (a, b) => a.priority - b.priority || a.index - b.index,
-    );
+    const sorted = [...this.#entries].sort((a, b) => a.priority - b.priority || a.index - b.index);
     this.#compiled = sorted.map((entry) => entry.fn);
     this.#compiledNames = sorted.map((entry) => entry.name);
     this.#compiledDescriptors = sorted.map((entry, position) => ({

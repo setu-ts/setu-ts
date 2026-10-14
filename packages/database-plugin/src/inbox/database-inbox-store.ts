@@ -236,17 +236,22 @@ export class DatabaseInboxStore implements IInboxStore {
     const repo = this.#repo();
     for (let round = 0; round < 5; round += 1) {
       const valid = typeof row.attempts === 'number' && Number.isSafeInteger(row.attempts);
-      const current = valid ? row.attempts as number : 0;
+      const current = valid ? (row.attempts as number) : 0;
       const attempts = current + 1;
       const data = { ...changes, attempts };
       if (!valid) {
         await repo.update(id, data);
         return attempts;
       }
-      const result = await conditionalUpdate(repo, id, {
-        kind: INBOX_RECORD_KIND,
-        attempts: current,
-      }, data);
+      const result = await conditionalUpdate(
+        repo,
+        id,
+        {
+          kind: INBOX_RECORD_KIND,
+          attempts: current,
+        },
+        data,
+      );
       if (result.outcome === 'applied') return attempts;
       if (result.outcome === 'unsupported') {
         await repo.update(id, data);
@@ -301,9 +306,10 @@ export class DatabaseInboxStore implements IInboxStore {
     const repo = this.#repo();
     const where = { kind: INBOX_RECORD_KIND, status: 'parked' };
     const changes = { status: 'discarded', envelope: null, updatedAt: now };
-    const result = action === 'retry'
-      ? await conditionalDelete(repo, ids.marker, where)
-      : await conditionalUpdate(repo, ids.marker, where, changes);
+    const result =
+      action === 'retry'
+        ? await conditionalDelete(repo, ids.marker, where)
+        : await conditionalUpdate(repo, ids.marker, where, changes);
     if (result.outcome === 'not-matched') {
       const latest = await this.#find(ids.marker);
       if (latest === null) return { outcome: 'missing' };
@@ -383,7 +389,7 @@ export class DatabaseInboxStore implements IInboxStore {
             status: 'attempting',
             attempts: 0,
             updatedAt: 0,
-          })
+          }),
         ),
         rollback,
       );
@@ -441,15 +447,14 @@ export function createDatabaseInboxStore(
     throw new TypeError('createDatabaseInboxStore: entity must be a non-empty string');
   }
   const database = options?.database;
-  const token = database === undefined || database === 'default'
-    ? CAPABILITIES.DATABASE
-    : createCapabilityToken(`database.${database}`);
+  const token =
+    database === undefined || database === 'default'
+      ? CAPABILITIES.DATABASE
+      : createCapabilityToken(`database.${database}`);
   return (services: IServiceRegistry): IInboxStore => {
     const runtime = services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    return new DatabaseInboxStore(
-      services.get<IDatabaseService>(token),
-      entity,
-      () => runtime.uuid(),
+    return new DatabaseInboxStore(services.get<IDatabaseService>(token), entity, () =>
+      runtime.uuid(),
     );
   };
 }

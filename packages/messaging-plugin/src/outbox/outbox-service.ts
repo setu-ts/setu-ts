@@ -173,8 +173,8 @@ export class OutboxService implements IOutbox {
     return {
       blockedKeyCap,
       storeWriteFailing: this.#lastSweep?.endedBy === 'store-failure',
-      relayOverlap: at !== undefined &&
-        this.#deps.runtime.hrtime() - at <= this.#deps.options.overlapWindowMs,
+      relayOverlap:
+        at !== undefined && this.#deps.runtime.hrtime() - at <= this.#deps.options.overlapWindowMs,
       ...(this.#lastSweep !== undefined ? { lastSweep: this.#lastSweep } : {}),
     };
   }
@@ -270,12 +270,8 @@ export class OutboxService implements IOutbox {
     const budget = new SweepBudget(runtime, options.sweepDeadlineMs);
     let deleted = 0;
     for (const store of this.#list(stores)) {
-      deleted += await boundedCall(
-        runtime,
-        budget,
-        options.sweepDeadlineMs,
-        'purge',
-        () => store.purge(before, options.purgeBatch),
+      deleted += await boundedCall(runtime, budget, options.sweepDeadlineMs, 'purge', () =>
+        store.purge(before, options.purgeBatch),
       );
     }
     return deleted;

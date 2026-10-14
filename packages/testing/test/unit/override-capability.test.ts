@@ -123,9 +123,7 @@ describe('overrideCapability', () => {
       ],
     });
 
-    await expect(app.start()).rejects.toThrow(
-      /Capability 'database' is already registered/,
-    );
+    await expect(app.start()).rejects.toThrow(/Capability 'database' is already registered/);
   });
 
   it('refuses a token nothing provides, naming it', async () => {
@@ -133,11 +131,7 @@ describe('overrideCapability', () => {
     // the double registers under a nonsense token, the real service keeps
     // serving, and the test passes against the real dependency.
     const app = createApplication({
-      plugins: [
-        runtimePlugin(),
-        realDatabase(),
-        overrideCapability('databse', { who: 'MOCK' }),
-      ],
+      plugins: [runtimePlugin(), realDatabase(), overrideCapability('databse', { who: 'MOCK' })],
     });
 
     await expect(app.start()).rejects.toThrow(

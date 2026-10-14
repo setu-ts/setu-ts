@@ -31,22 +31,23 @@ export default function IndexRoute() {
         <code>react-router-plugin</code>, composed with <code>createFullStackAppFromConfig</code>.
       </p>
       <p>
-        {signedInAs === null ? <>You are not signed in.</> : (
+        {signedInAs === null ? (
+          <>You are not signed in.</>
+        ) : (
           <>
-            Signed in as <strong>{signedInAs}</strong>{' '}
-            — the session is server-authoritative and the cookie is HttpOnly.
+            Signed in as <strong>{signedInAs}</strong> — the session is server-authoritative and the
+            cookie is HttpOnly.
           </>
         )}
       </p>
       <ul>
         <li>
-          <Link to='/products'>Products</Link>{' '}
-          — rows written through the database capability and read back by a loader, so the page is
-          evidence the load-context bridge works.
+          <Link to="/products">Products</Link> — rows written through the database capability and
+          read back by a loader, so the page is evidence the load-context bridge works.
         </li>
         <li>
-          <Link to='/login'>Sign in</Link>{' '}
-          — a progressive-enhancement form guarded by the session's synchronizer CSRF token.
+          <Link to="/login">Sign in</Link> — a progressive-enhancement form guarded by the session's
+          synchronizer CSRF token.
         </li>
       </ul>
     </section>

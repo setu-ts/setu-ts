@@ -63,23 +63,25 @@ export default createApplication({
     WebSocketPlugin({
       heartbeatMs: 30_000,
       idleTimeoutMs: 90_000,
-      routes: [{
-        path: '/ws/chat',
-        handlers: {
-          onOpen: (conn, { query }) => {
-            conn.data.set('room', query.room ?? 'lobby');
+      routes: [
+        {
+          path: '/ws/chat',
+          handlers: {
+            onOpen: (conn, { query }) => {
+              conn.data.set('room', query.room ?? 'lobby');
+            },
+            onMessage: (conn, data) => {
+              const room = conn.data.get('room');
+              if (typeof room === 'string') {
+                // Resolve the service from a factory entry when you need it here.
+                conn.send(data);
+              }
+            },
           },
-          onMessage: (conn, data) => {
-            const room = conn.data.get('room');
-            if (typeof room === 'string') {
-              // Resolve the service from a factory entry when you need it here.
-              conn.send(data);
-            }
-          },
+          // Refuse the upgrade before the handshake, for this route only.
+          options: { guards: [({ headers }) => headers.has('authorization') || { status: 401 }] },
         },
-        // Refuse the upgrade before the handshake, for this route only.
-        options: { guards: [({ headers }) => headers.has('authorization') || { status: 401 }] },
-      }],
+      ],
     }),
   ],
 });
@@ -150,10 +152,7 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 }),
-  ],
+  plugins: [RuntimePlugin(), WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 })],
 });
 await app.start({ port: 3000 });
 
@@ -302,6 +301,7 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
     return ctx.response.json({ present: ws.peek(`board:${board}`)?.size ?? 0 });
   });
   ```
+
 - **Rooms are in-process by default.** `broadcast` skips closed members and drops them, and a room
   that empties is discarded, so a churning connection set does not grow memory. Behind more than one
   replica, register a backplane — see [Scaling beyond one replica](#scaling-beyond-one-replica).

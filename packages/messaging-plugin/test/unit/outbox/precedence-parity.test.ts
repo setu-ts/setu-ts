@@ -45,7 +45,7 @@ async function bothPaths(input: OutboxWriteInput) {
   );
   const h = await outboxHarness({ clock: outboxClock() });
   await h.db.transaction((uow) =>
-    h.service.write(uow, shipped, { shipmentId: 's-1', region: 'eu' }, input)
+    h.service.write(uow, shipped, { shipmentId: 's-1', region: 'eu' }, input),
   );
   await h.sweep();
   return { direct: direct.published, outbox: h.broker.published };

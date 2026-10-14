@@ -128,9 +128,12 @@ export class PipelinedBroker implements MessageBrokerAdapter {
     // Clear the gate once settled so later deliveries take the direct path.
     // A REJECTED gate is deliberately left in place (see the field JSDoc for
     // the two refusing cases and why neither clears it).
-    void chainReady?.then(() => {
-      this.#chainReady = undefined;
-    }, () => {});
+    void chainReady?.then(
+      () => {
+        this.#chainReady = undefined;
+      },
+      () => {},
+    );
   }
 
   connect(): Promise<void> {
@@ -196,8 +199,8 @@ export class PipelinedBroker implements MessageBrokerAdapter {
     // subscription's `queue` when given — a competing-consumer group shared
     // across replicas — otherwise a per-process id unique to this subscription,
     // so two subscribers on one topic never share an idempotency record.
-    const consumer = options?.queue ??
-      `subscription:${this.#subscriptionIdPrefix}:${++this.#subscriptions}`;
+    const consumer =
+      options?.queue ?? `subscription:${this.#subscriptionIdPrefix}:${++this.#subscriptions}`;
 
     const dispatch = (message: unknown, metadata: MessageMetadata): void | Promise<void> => {
       if (this.#behaviors.length === 0) {
@@ -211,10 +214,8 @@ export class PipelinedBroker implements MessageBrokerAdapter {
         consumer,
         ...(metadata.headers !== undefined ? { headers: metadata.headers } : {}),
       };
-      return composeBehaviorChain<IngressContext, void>(
-        envelope,
-        this.#behaviors,
-        () => Promise.resolve(handler(message as T, metadata)),
+      return composeBehaviorChain<IngressContext, void>(envelope, this.#behaviors, () =>
+        Promise.resolve(handler(message as T, metadata)),
       );
     };
 

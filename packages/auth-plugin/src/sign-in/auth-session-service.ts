@@ -133,8 +133,9 @@ export function parseAuthSessionRecord(raw: unknown): AuthSessionRecord | null {
   }
   // Unknown method values are dropped rather than trusted: a bogus `amr` would
   // otherwise reach an authorization decision that checks for, say, `'pwd'`.
-  const methods = (candidate.methods as readonly unknown[]).filter((method): method is AuthMethod =>
-    typeof method === 'string' && AUTH_METHODS.includes(method as AuthMethod)
+  const methods = (candidate.methods as readonly unknown[]).filter(
+    (method): method is AuthMethod =>
+      typeof method === 'string' && AUTH_METHODS.includes(method as AuthMethod),
   );
   if (typeof candidate.at !== 'number' || !Number.isFinite(candidate.at)) {
     return null;
@@ -168,8 +169,9 @@ export function parsePendingMfaRecord(raw: unknown): PendingSignIn | null {
   if (!Array.isArray(candidate.methods)) {
     return null;
   }
-  const methods = (candidate.methods as readonly unknown[]).filter((method): method is AuthMethod =>
-    typeof method === 'string' && AUTH_METHODS.includes(method as AuthMethod)
+  const methods = (candidate.methods as readonly unknown[]).filter(
+    (method): method is AuthMethod =>
+      typeof method === 'string' && AUTH_METHODS.includes(method as AuthMethod),
   );
   if (typeof candidate.at !== 'number' || !Number.isFinite(candidate.at)) {
     return null;
@@ -267,9 +269,8 @@ export class AuthSessionService implements IAuthSessionService {
     // Scoped grants are resolved before ANY write, for both outcomes below, so
     // a resolution failure records nothing and a second factor completed later
     // (through the synchronous `promotePending`) still arrives with them.
-    const grants = this.#scopedGrants === undefined
-      ? undefined
-      : await this.#scopedGrants.resolveAll(principal);
+    const grants =
+      this.#scopedGrants === undefined ? undefined : await this.#scopedGrants.resolveAll(principal);
 
     // Check the MFA policy: when it answers `true` and the methods hold no
     // second factor, hold the principal back in a pending record.
@@ -322,9 +323,7 @@ export class AuthSessionService implements IAuthSessionService {
    * @throws {Error} If the session middleware did not run for this request
    */
   current(ctx: IRequestContext): IPrincipal | null {
-    const record = parseAuthSessionRecord(
-      this.#sessionService.from(ctx).get(AUTH_SESSION_KEY),
-    );
+    const record = parseAuthSessionRecord(this.#sessionService.from(ctx).get(AUTH_SESSION_KEY));
     return record?.principal ?? null;
   }
 
@@ -339,9 +338,7 @@ export class AuthSessionService implements IAuthSessionService {
    * @throws {Error} If the session middleware did not run for this request
    */
   currentMethods(ctx: IRequestContext): readonly AuthMethod[] | null {
-    const record = parseAuthSessionRecord(
-      this.#sessionService.from(ctx).get(AUTH_SESSION_KEY),
-    );
+    const record = parseAuthSessionRecord(this.#sessionService.from(ctx).get(AUTH_SESSION_KEY));
     return record === null ? null : record.methods;
   }
 
@@ -520,9 +517,7 @@ export interface PendingPromotion {
  * @param service - The service resolved from `CAPABILITIES.AUTH_SESSION`
  * @returns The promotion seam, or `null` when the service has none
  */
-export function asPendingPromotion(
-  service: IAuthSessionService,
-): PendingPromotion | null {
+export function asPendingPromotion(service: IAuthSessionService): PendingPromotion | null {
   // The two interfaces share no members, so the narrowing goes through
   // `unknown` with the check done at runtime rather than trusting the type.
   const candidate: unknown = service;

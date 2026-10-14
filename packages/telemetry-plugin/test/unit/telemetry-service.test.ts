@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await
+/* eslint-disable require-await */
 /**
  * Tests for the telemetry service implementations.
  *
@@ -55,10 +55,14 @@ describe('NoopTelemetryService', () => {
   it('should ignore span options', async () => {
     const service = new NoopTelemetryService();
     const opts: SpanOptions = { kind: 'server', attributes: { foo: 'bar' } };
-    const result = await service.withSpan('test', async (span) => {
-      span.setAttribute('ignored', true);
-      return 'ok';
-    }, opts);
+    const result = await service.withSpan(
+      'test',
+      async (span) => {
+        span.setAttribute('ignored', true);
+        return 'ok';
+      },
+      opts,
+    );
     expect(result).toBe('ok');
   });
 
@@ -222,11 +226,9 @@ describe('TelemetryService', () => {
     const fakeHost = createFakeTracerHost();
     const service = new TelemetryService(fakeHost);
 
-    await service.withSpan(
-      'attrs-span',
-      () => Promise.resolve(),
-      { attributes: { 'http.method': 'GET', 'custom.tag': 'value' } },
-    );
+    await service.withSpan('attrs-span', () => Promise.resolve(), {
+      attributes: { 'http.method': 'GET', 'custom.tag': 'value' },
+    });
 
     expect(fakeHost.recordedCalls).toHaveLength(1);
     const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
@@ -239,18 +241,14 @@ describe('TelemetryService', () => {
     const fakeHost = createFakeTracerHost();
     const service = new TelemetryService(fakeHost);
 
-    await service.withSpan(
-      'direct-parent-context',
-      () => Promise.resolve(),
-      {
-        parentContext: {
-          _opaque: TELEMETRY_CONTEXT_OPAQUE,
-          traceId: 'abc123',
-          spanId: 'def456',
-          traceFlags: '01',
-        },
+    await service.withSpan('direct-parent-context', () => Promise.resolve(), {
+      parentContext: {
+        _opaque: TELEMETRY_CONTEXT_OPAQUE,
+        traceId: 'abc123',
+        spanId: 'def456',
+        traceFlags: '01',
       },
-    );
+    });
 
     // parentContext should be passed directly to startSpan (includes _opaque).
     expect(fakeHost.recordedCalls).toHaveLength(1);

@@ -68,8 +68,6 @@ describe('PushChannel', () => {
       body: 'Push body',
     };
 
-    await expect(channel.send(notification)).rejects.toThrow(
-      'Push channel requires "to.token"',
-    );
+    await expect(channel.send(notification)).rejects.toThrow('Push channel requires "to.token"');
   });
 });

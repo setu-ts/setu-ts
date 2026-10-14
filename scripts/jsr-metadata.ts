@@ -82,25 +82,25 @@ const NO_EDGE: RuntimeCompat = {
  */
 export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
   // ── Core ──────────────────────────────────────────────────────────────────
-  'common': {
+  common: {
     description:
       'Shared contracts, capability tokens, and pure codecs every Setu-TS package builds on',
     runtimeCompat: UNIVERSAL,
   },
-  'kernel': {
+  kernel: {
     description: 'Capability-token plugin kernel: service registry, middleware pipeline, router',
     runtimeCompat: PORTABLE,
   },
-  'runtime': {
+  runtime: {
     description:
       'Runtime services and HTTP adapters for Node.js, Deno, Bun, and Cloudflare Workers',
     runtimeCompat: PORTABLE,
   },
-  'exceptions': {
+  exceptions: {
     description: 'Exception hierarchy, RFC 9457 Problem Details, and the error-handler middleware',
     runtimeCompat: PORTABLE,
   },
-  'testing': {
+  testing: {
     description: 'Test app factory, mock plugins, and request injection for Setu-TS',
     runtimeCompat: PORTABLE,
   },
@@ -319,15 +319,15 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
   },
 
   // ── Tooling ───────────────────────────────────────────────────────────────
-  'cli': {
+  cli: {
     description: 'setu — project scaffolding and plugin-aware code generation',
     runtimeCompat: SERVER_ONLY,
   },
-  'create': {
+  create: {
     description: 'npm create @setu-ts — scaffolds a Setu-TS project with setu new',
     runtimeCompat: SERVER_ONLY,
   },
-  'sdk': {
+  sdk: {
     description:
       'Portable HTTP client with retry, circuit breaker, rate limiting, and OpenAPI codegen',
     runtimeCompat: UNIVERSAL,

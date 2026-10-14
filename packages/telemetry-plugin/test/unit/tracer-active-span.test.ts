@@ -61,20 +61,18 @@ function host(contextActivation = true) {
 
 /** Installs a fake `@opentelemetry/api` reporting one active span. */
 function installApi(activeSpan: { spanContext(): unknown } | undefined): void {
-  setOtelApi(
-    {
-      trace: {
-        wrapSpanContext: () => ({}),
-        setSpan: () => ({}),
-        getActiveSpan: () => activeSpan,
-      },
-      context: {
-        active: () => ({}),
-        with: <T>(_c: unknown, fn: () => Promise<T>) => fn(),
-        setGlobalContextManager: () => true,
-      },
-    } as never,
-  );
+  setOtelApi({
+    trace: {
+      wrapSpanContext: () => ({}),
+      setSpan: () => ({}),
+      getActiveSpan: () => activeSpan,
+    },
+    context: {
+      active: () => ({}),
+      with: <T>(_c: unknown, fn: () => Promise<T>) => fn(),
+      setGlobalContextManager: () => true,
+    },
+  } as never);
 }
 
 afterEach(() => {
@@ -172,9 +170,9 @@ describe('TracerHost.activeSpanContext', () => {
     installApi({ spanContext: () => context });
     const read = host().activeSpanContext?.();
     expect(read).toEqual(context);
-    expect(
-      contextToTraceparent({ _opaque: TELEMETRY_CONTEXT_OPAQUE, ...read! }),
-    ).toBe('00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01');
+    expect(contextToTraceparent({ _opaque: TELEMETRY_CONTEXT_OPAQUE, ...read! })).toBe(
+      '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    );
   });
 
   it('defaults unreadable traceFlags to "00" rather than dropping the span', () => {
@@ -209,7 +207,7 @@ describe('OtelSpan.setAttributes fallback', () => {
     };
     const service = new TelemetryService({
       startSpan: () => span,
-      extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') } as never),
+      extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') }) as never,
       injectContext: () => ({}),
       shutdown: () => Promise.resolve(),
       forceFlush: () => Promise.resolve(),
@@ -220,6 +218,9 @@ describe('OtelSpan.setAttributes fallback', () => {
       return Promise.resolve();
     });
 
-    expect(written).toEqual([['a.one', 1], ['a.two', 'two']]);
+    expect(written).toEqual([
+      ['a.one', 1],
+      ['a.two', 'two'],
+    ]);
   });
 });

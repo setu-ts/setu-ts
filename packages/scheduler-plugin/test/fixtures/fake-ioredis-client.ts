@@ -54,7 +54,7 @@ export class FakeRedisClient implements IRedisLockClient {
     }
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async set(
     key: string,
     value: string,
@@ -79,13 +79,13 @@ export class FakeRedisClient implements IRedisLockClient {
     return 'OK';
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async get(key: string): Promise<string | null> {
     this.#calls.push({ method: 'get', args: [key] });
     return this.#store.get(key) ?? null;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async del(key: string): Promise<number> {
     this.#calls.push({ method: 'del', args: [key] });
     if (this.#store.has(key)) {
@@ -95,13 +95,13 @@ export class FakeRedisClient implements IRedisLockClient {
     return 0;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async quit(): Promise<void> {
     this.#calls.push({ method: 'quit', args: [] });
     this.#stopTTLChecker();
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async eval(
     script: string,
     numkeys: number,

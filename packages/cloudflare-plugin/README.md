@@ -124,9 +124,13 @@ app.router.get('/catalog', {
 await app.start();
 
 const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
-queue.process<{ to: string }>('send-welcome', async (job) => {
-  await mailer.send(job.data);
-}, { concurrency: 5 });
+queue.process<{ to: string }>(
+  'send-welcome',
+  async (job) => {
+    await mailer.send(job.data);
+  },
+  { concurrency: 5 },
+);
 
 // The expression must match wrangler.toml `[triggers] crons` exactly.
 // Pass a logger: an unmatched trigger is reported ONLY through it, so without
@@ -161,13 +165,17 @@ crons = ["0 3 * * *"]
 `CAPABILITIES.MESSAGING` over Cloudflare Queues, with request/reply through a Durable Object.
 
 ```typescript
-app.register(CloudflarePlugin({
-  env,
-  messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },
-}));
+app.register(
+  CloudflarePlugin({
+    env,
+    messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },
+  }),
+);
 
 const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-await broker.subscribe<{ id: string }>('user.created', async (user) => {/* … */});
+await broker.subscribe<{ id: string }>('user.created', async (user) => {
+  /* … */
+});
 await broker.respond<number, number>('double', (n) => n * 2);
 
 // Consuming is a MODULE export. Combine with a job queue by routing on the

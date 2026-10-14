@@ -48,10 +48,12 @@ describe('update — patch path', () => {
     const { source, fake } = makeSource(seeded);
     const updated = await source.update({ id: 'o1', tenantId: 't1' }, { total: 9, note: 'x' });
     expect(updated).toEqual({ id: 'o1', tenantId: 't1', total: 9, keep: 'yes', note: 'x' });
-    expect(fake.recorder.patches).toEqual([[
-      { op: 'set', path: '/total', value: 9 },
-      { op: 'set', path: '/note', value: 'x' },
-    ]]);
+    expect(fake.recorder.patches).toEqual([
+      [
+        { op: 'set', path: '/total', value: 9 },
+        { op: 'set', path: '/note', value: 'x' },
+      ],
+    ]);
     expect(fake.recorder.replaces).toEqual([]);
   });
 
@@ -87,8 +89,9 @@ describe('update — patch path', () => {
     const { source } = makeSource({
       containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
     });
-    await expect(source.update({ id: 'ghost', tenantId: 't1' }, { total: 1 }))
-      .rejects.toThrow(/no Order row with id/);
+    await expect(source.update({ id: 'ghost', tenantId: 't1' }, { total: 1 })).rejects.toThrow(
+      /no Order row with id/,
+    );
   });
 
   it('throws when the cross-partition lookup addresses nothing', async () => {
@@ -135,8 +138,9 @@ describe('update — replace path', () => {
     });
     const payload: Record<string, unknown> = {};
     for (let i = 0; i <= MAX_PATCH_OPERATIONS; i++) payload[`f${i}`] = i;
-    await expect(source.update({ id: 'o1', tenantId: 't1' }, payload))
-      .rejects.toThrow(CosmosConcurrentModificationError);
+    await expect(source.update({ id: 'o1', tenantId: 't1' }, payload)).rejects.toThrow(
+      CosmosConcurrentModificationError,
+    );
   });
 
   it('sends no access condition when the document carries no etag', async () => {
@@ -161,35 +165,42 @@ describe('update — replace path', () => {
 describe('update — partition-key refusal', () => {
   it('refuses a payload that would move the row to another partition', async () => {
     const { source, fake } = makeSource(seeded);
-    await expect(source.update({ id: 'o1', tenantId: 't1' }, { tenantId: 't2' }))
-      .rejects.toThrow(/would change the partition key \/tenantId.*cannot move an item/s);
+    await expect(source.update({ id: 'o1', tenantId: 't1' }, { tenantId: 't2' })).rejects.toThrow(
+      /would change the partition key \/tenantId.*cannot move an item/s,
+    );
     expect(fake.recorder.patches).toEqual([]);
     expect(fake.recorder.replaces).toEqual([]);
   });
 
   it('refuses a hierarchical partition-key change by the offending path', async () => {
-    const { source } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId', '/region'],
-          documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId', '/region'],
+            documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+          },
         },
       },
-    }, { Order: { container: 'Order', partitionKey: [['tenantId'], ['region']] } });
+      { Order: { container: 'Order', partitionKey: [['tenantId'], ['region']] } },
+    );
     await expect(
       source.update({ id: 'o1', tenantId: 't1', region: 'in' }, { region: 'us' }),
     ).rejects.toThrow(/change the partition key \/region/);
   });
 
   it('keeps a nested partition-key parent in the payload when its value is unchanged', async () => {
-    const { source, fake } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/address/city'],
-          documents: { 'Kolkata|o1': { id: 'o1', address: { city: 'Kolkata' } } },
+    const { source, fake } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/address/city'],
+            documents: { 'Kolkata|o1': { id: 'o1', address: { city: 'Kolkata' } } },
+          },
         },
       },
-    }, { Order: { container: 'Order', partitionKey: ['address', 'city'] } });
+      { Order: { container: 'Order', partitionKey: ['address', 'city'] } },
+    );
     await source.update(
       { id: 'o1', 'address.city': 'Kolkata' },
       { address: { city: 'Kolkata', zip: '700001' } },
@@ -209,19 +220,26 @@ describe('update — the row disappears mid-operation', () => {
   // write is built. Each reports the contract's missing-row error rather than
   // a bare 404 from the driver.
   it('reports a missing row when the payload carries only the key', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/id'] } },
-    }, byId);
-    await expect(source.update('gone', { id: 'gone' }))
-      .rejects.toThrow(/no Order row with id "gone"/);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/id'] } },
+      },
+      byId,
+    );
+    await expect(source.update('gone', { id: 'gone' })).rejects.toThrow(
+      /no Order row with id "gone"/,
+    );
   });
 
   it('reports a missing row for a payload too wide for one patch', async () => {
     const wide: Record<string, unknown> = {};
     for (let i = 0; i <= MAX_PATCH_OPERATIONS; i++) wide[`f${i}`] = i;
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/id'] } },
-    }, byId);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/id'] } },
+      },
+      byId,
+    );
     await expect(source.update('gone', wide)).rejects.toThrow(/no Order row with id "gone"/);
   });
 
@@ -233,17 +251,20 @@ describe('update — the row disappears mid-operation', () => {
     // The hook is supplied at construction, so it reads the store through a
     // holder the constructed fake fills in afterwards.
     const holder: { store?: Map<string, Record<string, unknown>> } = {};
-    const built = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/id'],
-          documents: { 'o1|o1': { id: 'o1', total: 1 } },
+    const built = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/id'],
+            documents: { 'o1|o1': { id: 'o1', total: 1 } },
+          },
+        },
+        afterPointRead: () => {
+          holder.store?.clear();
         },
       },
-      afterPointRead: () => {
-        holder.store?.clear();
-      },
-    }, byId);
+      byId,
+    );
     holder.store = built.fake.documents;
     await expect(built.source.update('o1', wide)).rejects.toThrow(/no Order row with id "o1"/);
   });
@@ -257,14 +278,17 @@ describe('update — a field name a patch path cannot express', () => {
   // escaping would trade a loud refusal for a silent write to the wrong key;
   // such a payload takes the whole-document replace path instead.
   it('routes a slash-carrying field through replace rather than patch', async () => {
-    const { source, fake } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/id'],
-          documents: { 'o1|o1': { id: 'o1', keep: 'yes' } },
+    const { source, fake } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/id'],
+            documents: { 'o1|o1': { id: 'o1', keep: 'yes' } },
+          },
         },
       },
-    }, byId);
+      byId,
+    );
     const row = await source.update('o1', { 'a/b': 'written' });
     expect(fake.recorder.patches).toEqual([]);
     expect(fake.recorder.replaces).toHaveLength(1);
@@ -276,22 +300,28 @@ describe('update — a field name a patch path cannot express', () => {
     // service reads a literal `~` as the start of an escape while the emulator
     // writes it literally. Emitting either form is right on one backend and
     // wrong or unknown on the other, so the replace path settles it.
-    const { source, fake } = makeSource({
-      containers: {
-        Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1' } } },
+    const { source, fake } = makeSource(
+      {
+        containers: {
+          Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1' } } },
+        },
       },
-    }, byId);
+      byId,
+    );
     await source.update('o1', { 'c~d': 1 });
     expect(fake.recorder.patches).toEqual([]);
     expect(fake.recorder.replaces).toHaveLength(1);
   });
 
   it('still patches a payload whose field names carry neither', async () => {
-    const { source, fake } = makeSource({
-      containers: {
-        Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1' } } },
+    const { source, fake } = makeSource(
+      {
+        containers: {
+          Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1' } } },
+        },
       },
-    }, byId);
+      byId,
+    );
     await source.update('o1', { plain: 1 });
     expect(fake.recorder.patches).toEqual([[{ op: 'set', path: '/plain', value: 1 }]]);
     expect(fake.recorder.replaces).toEqual([]);

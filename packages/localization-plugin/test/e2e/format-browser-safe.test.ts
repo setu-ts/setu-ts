@@ -87,8 +87,9 @@ describe('the /format subpath runtime graph', () => {
         await nodeFs.copyFile(new URL(file, FORMAT_DIR), `${scratch}/${file}`);
       }
       const formatFile = `${scratch}/format.ts`;
-      const planted = "import { CAPABILITIES } from '@setu-ts/common';\nvoid CAPABILITIES;\n" +
-        await nodeFs.readFile(formatFile, 'utf8');
+      const planted =
+        "import { CAPABILITIES } from '@setu-ts/common';\nvoid CAPABILITIES;\n" +
+        (await nodeFs.readFile(formatFile, 'utf8'));
       await nodeFs.writeFile(formatFile, planted);
       const graph = await runtimeGraph(new URL(`file://${scratch}/index.ts`));
       const outside = graph.filter((specifier) => !specifier.startsWith(`file://${scratch}/`));
@@ -112,9 +113,9 @@ describe('the /format subpath without the Deno namespace', () => {
       '  keys: Object.keys(m).sort(),',
       "  text: m.format('Hi {name}, {n}', { name: 'Ada', n: 1234.5 }, 'de-DE'),",
       "  plural: m.format({ one: '{count} item', other: '{count} items' }, { count: 2 }, 'en'),",
-      `  date: m.format('{d}', { d: new Date(${
-        JSON.stringify(date)
-      }) }, 'en-GB', { timeZone: 'UTC' }),`,
+      `  date: m.format('{d}', { d: new Date(${JSON.stringify(
+        date,
+      )}) }, 'en-GB', { timeZone: 'UTC' }),`,
       "  locale: m.negotiateLocale(m.parseAcceptLanguage('en;q=0, *').preferred, ['en', 'fr'],",
       "    m.parseAcceptLanguage('en;q=0, *').excluded),",
       '};',

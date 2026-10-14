@@ -44,54 +44,57 @@ describe('resolveBigtableTarget', () => {
   });
 
   it('refuses a blank table, column family or key field by name', () => {
-    for (
-      const mapping of [
-        { User: { table: '  ' } },
-        { User: { columnFamily: '' } },
-        { User: { rowKey: { fields: [' '] } } },
-      ]
-    ) {
+    for (const mapping of [
+      { User: { table: '  ' } },
+      { User: { columnFamily: '' } },
+      { User: { rowKey: { fields: [' '] } } },
+    ]) {
       expect(() => resolveBigtableTarget('User', mapping)).toThrow(UnsupportedQueryFeatureError);
     }
   });
 
   it('refuses an empty rowKey.fields', () => {
-    expect(() => resolveBigtableTarget('User', { User: { rowKey: { fields: [] } } }))
-      .toThrow(/composed from at least one field/);
+    expect(() => resolveBigtableTarget('User', { User: { rowKey: { fields: [] } } })).toThrow(
+      /composed from at least one field/,
+    );
   });
 
   it('refuses a multi-field key with an empty separator', () => {
     expect(() =>
       resolveBigtableTarget('User', {
         User: { rowKey: { fields: ['a', 'b'], separator: '' } },
-      })
+      }),
     ).toThrow(/indistinguishable/);
   });
 
   it('refuses a row-key field whose name cannot be a column qualifier', () => {
     // A key field is always written as a cell, so a name the projection filter
     // cannot address would resolve here and fail at the first write.
-    expect(() => resolveBigtableTarget('User', { User: { rowKey: { fields: ['a b'] } } }))
-      .toThrow(/not a usable column identifier/);
+    expect(() => resolveBigtableTarget('User', { User: { rowKey: { fields: ['a b'] } } })).toThrow(
+      /not a usable column identifier/,
+    );
   });
 
   it('refuses a family or qualifier carrying a regex metacharacter', () => {
-    expect(() => resolveBigtableTarget('User', { User: { columnFamily: 'c.*f' } }))
-      .toThrow(/not a usable column identifier/);
-    expect(() => resolveBigtableTarget('User', { User: { columns: { a: 'cf:a|b' } } }))
-      .toThrow(/not a usable column identifier/);
+    expect(() => resolveBigtableTarget('User', { User: { columnFamily: 'c.*f' } })).toThrow(
+      /not a usable column identifier/,
+    );
+    expect(() => resolveBigtableTarget('User', { User: { columns: { a: 'cf:a|b' } } })).toThrow(
+      /not a usable column identifier/,
+    );
   });
 
   it('refuses a column spec carrying more than one colon', () => {
-    expect(() => resolveBigtableTarget('User', { User: { columns: { a: 'cf:x:y' } } }))
-      .toThrow(/more than one/);
+    expect(() => resolveBigtableTarget('User', { User: { columns: { a: 'cf:x:y' } } })).toThrow(
+      /more than one/,
+    );
   });
 
   it('refuses two declared fields sharing one qualifier', () => {
     expect(() =>
       resolveBigtableTarget('User', {
         User: { columns: { first: 'a:name', second: 'b:name' } },
-      })
+      }),
     ).toThrow(/cannot be told apart/);
   });
 });
@@ -113,8 +116,7 @@ describe('columnAddress', () => {
 
   it('refuses an unmapped field whose own name is not a usable qualifier', () => {
     const target = resolveBigtableTarget('User', undefined);
-    expect(() => columnAddress(target, 'not a field'))
-      .toThrow(/not a usable column identifier/);
+    expect(() => columnAddress(target, 'not a field')).toThrow(/not a usable column identifier/);
   });
 });
 

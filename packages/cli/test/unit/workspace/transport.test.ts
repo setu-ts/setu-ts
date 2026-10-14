@@ -67,9 +67,7 @@ describe('the transport registry', () => {
       expect(transportSpec('rabbitmq').messagingArgs?.('CONN')).toBe(
         "{ broker: 'rabbitmq', url: CONN }",
       );
-      expect(transportSpec('nats').messagingArgs?.('CONN')).toBe(
-        "{ broker: 'nats', url: CONN }",
-      );
+      expect(transportSpec('nats').messagingArgs?.('CONN')).toBe("{ broker: 'nats', url: CONN }");
       expect(transportSpec('pubsub').messagingArgs?.('CONN')).toContain("broker: 'pubsub'");
       expect(transportSpec('pubsub').messagingArgs?.('CONN')).toContain('projectId: CONN');
       expect(transportSpec('service-bus').messagingArgs?.('CONN')).toContain(
@@ -112,14 +110,12 @@ describe('the transport registry', () => {
       );
       // `--transport-url` replaces the FALLBACK, not the variable: an override
       // still has to lose to the environment inside a deployed stack.
-      expect(renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'))
-        .toContain(
-          `Deno.env.get('REDIS_URL')`,
-        );
-      expect(renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'))
-        .toContain(
-          'redis://elsewhere:6379',
-        );
+      expect(
+        renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'),
+      ).toContain(`Deno.env.get('REDIS_URL')`);
+      expect(
+        renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'),
+      ).toContain('redis://elsewhere:6379');
     });
 
     // A GCP project id is a name and a Service Bus connection string carries a

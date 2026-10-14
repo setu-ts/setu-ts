@@ -63,10 +63,7 @@ describe('a rendered route with no view provider', () => {
 
   it('a controller carrying no @Render starts clean with no view plugin', async () => {
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        DecoratorPlugin({ controllers: [PlainController] }),
-      ],
+      plugins: [RuntimePlugin(), DecoratorPlugin({ controllers: [PlainController] })],
     });
 
     const response = await app.inject({ method: 'GET', url: '/plain/health-check' });

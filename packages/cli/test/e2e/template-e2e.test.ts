@@ -222,9 +222,7 @@ describe('template scaffolding — end to end', () => {
     const project = `${root}/msvc`;
 
     const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
-    expect(config).toContain(
-      "ServiceDiscoveryPlugin({ provider: 'static', services: {} })",
-    );
+    expect(config).toContain("ServiceDiscoveryPlugin({ provider: 'static', services: {} })");
 
     const sources = [`${project}/main.ts`, `${project}/setu.config.ts`];
     await useWorkspacePackages(project);
@@ -555,10 +553,9 @@ describe('template scaffolding — end to end', () => {
     for (const target of ['deno', 'node', 'bun', 'cloudflare-workers']) {
       out = [];
       err = [];
-      expect(await run(['new', `svc-${target}`, '--template', 'class-based', '--runtime', target]))
-        .toBe(
-          0,
-        );
+      expect(
+        await run(['new', `svc-${target}`, '--template', 'class-based', '--runtime', target]),
+      ).toBe(0);
     }
   });
 
@@ -742,13 +739,11 @@ describe('setu generate module, end to end', () => {
   // Checked with a real `deno check` of the emitted TEST file, not a manifest
   // assertion — a manifest assertion is what the unit gate does, and it cannot
   // see whether Deno actually resolves the specifier from the project.
-  for (
-    const [label, argv] of [
-      ['no template', ['new', '--runtime', 'deno', 'bare']],
-      ['--template rest', ['new', '--runtime', 'deno', 'bare', '--template', 'rest']],
-      ['--template full-stack', ['new', '--runtime', 'deno', 'bare', '--template', 'full-stack']],
-    ] as const
-  ) {
+  for (const [label, argv] of [
+    ['no template', ['new', '--runtime', 'deno', 'bare']],
+    ['--template rest', ['new', '--runtime', 'deno', 'bare', '--template', 'rest']],
+    ['--template full-stack', ['new', '--runtime', 'deno', 'bare', '--template', 'full-stack']],
+  ] as const) {
     it(`type-checks the module test it generates into a ${label} project`, async () => {
       expect(await run(argv)).toBe(0);
       const project = `${root}/bare`;

@@ -61,7 +61,7 @@ export class SseConnection implements IConn {
     // Build ReadableStream with byte-length backpressure strategy, capturing
     // controller via underlying source start/cancel handlers.
     let captured: ReadableStreamDefaultController<Uint8Array> | null = null;
-    // deno-lint-ignore no-this-alias -- required for ReadableStream cancel() callback binding
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- required for ReadableStream cancel() callback binding
     const cancelBound = this;
     const stream = new ReadableStream<Uint8Array>(
       {

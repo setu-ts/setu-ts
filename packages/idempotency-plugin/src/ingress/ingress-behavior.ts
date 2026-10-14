@@ -28,8 +28,7 @@ function jobId(payload: unknown): string | undefined {
 
 /** A key extraction result, distinguishing missing from invalid. */
 type IngressKeyExtraction =
-  | { readonly state: 'value'; readonly value: string }
-  | { readonly state: 'missing' };
+  { readonly state: 'value'; readonly value: string } | { readonly state: 'missing' };
 
 /** Reads the key from the resolved source (step 3). */
 function ingressKey(
@@ -87,7 +86,7 @@ export function createIngressBehavior(
 ): IIngressBehavior {
   const releaseSafe = async (key: string, token: string, ctx: IngressContext): Promise<void> => {
     try {
-      if (await deps.store.release(key, token) === 'lost') {
+      if ((await deps.store.release(key, token)) === 'lost') {
         safeLog(
           deps.logger,
           'warn',
@@ -104,7 +103,7 @@ export function createIngressBehavior(
   };
   const completeSafe = async (key: string, token: string, ctx: IngressContext): Promise<void> => {
     try {
-      if (await deps.store.complete(key, token, '', resolved.ttlMs) === 'lost') {
+      if ((await deps.store.complete(key, token, '', resolved.ttlMs)) === 'lost') {
         safeLog(
           deps.logger,
           'warn',

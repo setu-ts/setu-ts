@@ -58,12 +58,15 @@ async function buildApp(): Promise<ReturnType<typeof createApplication>> {
     const file = form.getAll('doc').find((value) => typeof value !== 'string');
     return ctx.response.json({
       note: form.get('note'),
-      file: file === undefined ? null : {
-        filename: file.filename,
-        mimeType: file.mimeType,
-        size: file.data.length,
-        head: new TextDecoder().decode(file.data.slice(0, 8)),
-      },
+      file:
+        file === undefined
+          ? null
+          : {
+              filename: file.filename,
+              mimeType: file.mimeType,
+              size: file.data.length,
+              head: new TextDecoder().decode(file.data.slice(0, 8)),
+            },
     });
   });
 

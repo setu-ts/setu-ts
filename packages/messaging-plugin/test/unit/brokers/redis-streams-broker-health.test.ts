@@ -51,9 +51,11 @@ describe('RedisStreamsBroker health (M70c)', () => {
   });
 
   it('reports down when ping rejects', async () => {
-    const broker = makeBroker(makeRedisClient(() => {
-      return Promise.reject(new Error('connection lost'));
-    }));
+    const broker = makeBroker(
+      makeRedisClient(() => {
+        return Promise.reject(new Error('connection lost'));
+      }),
+    );
     await broker.connect();
     expect(broker.isReady()).toBe(true);
     expect(await broker.reachability()).toBe(false);

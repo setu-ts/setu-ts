@@ -136,8 +136,7 @@ function fakeContext(
         hrtime: () => clock.hrtime(),
         subtle: crypto.subtle,
         setTimeout: timers?.setTimeout ?? ((fn: () => void, ms: number) => setTimeout(fn, ms)),
-        clearTimeout: timers?.clearTimeout ??
-          ((handle: unknown) => clearTimeout(handle as number)),
+        clearTimeout: timers?.clearTimeout ?? ((handle: unknown) => clearTimeout(handle as number)),
       } as unknown as IPluginContext['runtime'],
       app: { diagnostics } as unknown as IPluginContext['app'],
       ...(logger === undefined ? {} : { logger }),
@@ -169,13 +168,7 @@ async function fakeStatusRequest(key: CryptoKey, sequence: number): Promise<IReq
 }
 
 async function fakeRenewRequest(key: CryptoKey, sequence: number): Promise<IRequest> {
-  const mac = await signRequest(
-    crypto.subtle,
-    key,
-    '/v1/renew',
-    sequence,
-    TEST_INSTANCE_ID,
-  );
+  const mac = await signRequest(crypto.subtle, key, '/v1/renew', sequence, TEST_INSTANCE_ID);
   return fakeRequest({
     url: `http://127.0.0.1:${OPTIONS.port}/v1/renew`,
     headers: {
@@ -242,14 +235,10 @@ describe('Plugin — metadata and validation', () => {
     // through `as`, not for a type-correct TypeScript one, who cannot write
     // it at all (see the compile-time assertions below).
     expect(() =>
-      DiagnosticsPlugin({ ...OPTIONS, enabled: false } as unknown as DiagnosticsPluginOptions)
-    ).toThrow(
-      PLUGIN_ERRORS.notEnabled,
-    );
+      DiagnosticsPlugin({ ...OPTIONS, enabled: false } as unknown as DiagnosticsPluginOptions),
+    ).toThrow(PLUGIN_ERRORS.notEnabled);
     expect(() => DiagnosticsPlugin({ ...OPTIONS, port: 80 })).toThrow(PLUGIN_ERRORS.invalidPort);
-    expect(() => DiagnosticsPlugin({ ...OPTIONS, port: 65536 })).toThrow(
-      PLUGIN_ERRORS.invalidPort,
-    );
+    expect(() => DiagnosticsPlugin({ ...OPTIONS, port: 65536 })).toThrow(PLUGIN_ERRORS.invalidPort);
     expect(() => DiagnosticsPlugin({ ...OPTIONS, port: 4919.5 })).toThrow(
       PLUGIN_ERRORS.invalidPort,
     );
@@ -269,7 +258,7 @@ describe('Plugin — metadata and validation', () => {
           ...OPTIONS,
           ttlMs: 1_000,
           maxSessionLifetimeMs,
-        })
+        }),
       ).toThrow(PLUGIN_ERRORS.invalidMaxSessionLifetime);
     }
     expect(() =>
@@ -277,7 +266,7 @@ describe('Plugin — metadata and validation', () => {
         ...OPTIONS,
         ttlMs: 1_000,
         maxSessionLifetimeMs: 43_200_000,
-      })
+      }),
     ).not.toThrow();
   });
 
@@ -551,12 +540,9 @@ describe('DiagnosticsPlugin — startup announcement', () => {
     // With a logger: a labelled line that names the devtool, through the
     // application's own logger rather than a raw write.
     const lines: string[] = [];
-    const logged = fakeContext(
-      listener,
-      { snapshot: () => undefined },
-      undefined,
-      { info: (message: string) => lines.push(message) },
-    );
+    const logged = fakeContext(listener, { snapshot: () => undefined }, undefined, {
+      info: (message: string) => lines.push(message),
+    });
     DiagnosticsPlugin(OPTIONS).register!(logged.ctx);
     await logged.hooks.bootstrap[0]!();
     const announce = logged.listened[0].onListen;

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { StaticPlugin } from '@setu-ts/static-plugin';

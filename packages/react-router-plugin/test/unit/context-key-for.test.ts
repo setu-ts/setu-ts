@@ -59,7 +59,7 @@ describe('contextKeyFor | the bundling scenario it exists for', () => {
         values.set(key, value);
       },
       get<T>(key: { defaultValue?: T }): T {
-        return values.has(key) ? values.get(key) as T : key.defaultValue as T;
+        return values.has(key) ? (values.get(key) as T) : (key.defaultValue as T);
       },
     };
   }

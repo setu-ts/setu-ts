@@ -83,12 +83,10 @@ export interface ${names.pascal}View {
 }
 
 /** The ${names.pascal} query. */
-${
-    renderDeclarationHeader(
-      `export interface ${names.pascal}Query`,
-      `extends CqrsQuery<${names.pascal}Criteria>`,
-    )
-  }
+${renderDeclarationHeader(
+  `export interface ${names.pascal}Query`,
+  `extends CqrsQuery<${names.pascal}Criteria>`,
+)}
   readonly type: typeof ${names.screaming}_QUERY;
 }
 
@@ -101,25 +99,17 @@ ${
  * The barrel references the factory below by name, so the factory is the single
  * construction site.
  */
-${
-    renderDeclarationHeader(
-      `export class ${names.pascal}QueryHandler`,
-      `implements IQueryHandler<${names.pascal}Query, ${names.pascal}View>`,
-    )
-  }
+${renderDeclarationHeader(
+  `export class ${names.pascal}QueryHandler`,
+  `implements IQueryHandler<${names.pascal}Query, ${names.pascal}View>`,
+)}
   /**
    * Executes the query.
    *
    * @param query - The query to handle
    * @returns The projected view
    */
-${
-    renderMethodSignature(
-      'handle',
-      [`query: ${names.pascal}Query`],
-      `Promise<${names.pascal}View>`,
-    )
-  }
+${renderMethodSignature('handle', [`query: ${names.pascal}Query`], `Promise<${names.pascal}View>`)}
     // Replace with the real read. Queries must not mutate state.
     return Promise.resolve({ id: query.data.id });
   }

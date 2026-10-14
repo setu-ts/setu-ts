@@ -231,19 +231,22 @@ export function createDatabaseGrantSource(
           throw new TypeError(`${factory}: a principal id must be a non-empty string`);
         }
         const bySubject = eq(subject, principal.id);
-        const filter: FilterExpression = query.kind === 'all' ? bySubject : {
-          type: 'and',
-          filters: [
-            bySubject,
-            {
-              type: 'or',
-              filters: [
-                globalClause,
-                ...query.scopes.map((scope) => scopeClause(scopeType, scopeId, scope)),
-              ],
-            },
-          ],
-        };
+        const filter: FilterExpression =
+          query.kind === 'all'
+            ? bySubject
+            : {
+                type: 'and',
+                filters: [
+                  bySubject,
+                  {
+                    type: 'or',
+                    filters: [
+                      globalClause,
+                      ...query.scopes.map((scope) => scopeClause(scopeType, scopeId, scope)),
+                    ],
+                  },
+                ],
+              };
         const rows = await boundedRows(
           service.getRepository<Record<string, unknown>>(entity).findAll({
             filter,
@@ -325,8 +328,11 @@ export function createDatabaseRoleSource(
             continue;
           }
           const key = JSON.stringify([type, id, roleName]);
-          const entry = grouped.get(key) ??
-            { scope: { type, id }, role: roleName, permissions: [] };
+          const entry = grouped.get(key) ?? {
+            scope: { type, id },
+            role: roleName,
+            permissions: [],
+          };
           entry.permissions.push(granted);
           grouped.set(key, entry);
         }

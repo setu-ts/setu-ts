@@ -27,22 +27,15 @@ describe('server-build', () => {
       headers: { 'Content-Type': 'text/html' },
     });
 
-    const createRequestHandler = (
-      build: unknown,
-      mode?: string,
-    ): SsrRequestHandler => {
+    const createRequestHandler = (build: unknown, mode?: string): SsrRequestHandler => {
       factoryCalled = true;
       capturedBuild = build;
       capturedMode = mode;
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async (_request, _context) => fakeRRResponse;
     };
 
-    const handler = assembleHandler(
-      fakeBuild,
-      createRequestHandler,
-      'production',
-    );
+    const handler = assembleHandler(fakeBuild, createRequestHandler, 'production');
 
     // assembleHandler calls createRequestHandler immediately, so factoryCalled is true.
     expect(factoryCalled).toBe(true);
@@ -62,7 +55,7 @@ describe('server-build', () => {
     let receivedContext: unknown = null;
 
     const createRequestHandler = () => {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async (request: Request, context: unknown) => {
         receivedRequest = request;
         receivedContext = context;
@@ -134,9 +127,7 @@ describe('server-build', () => {
   });
 
   it('createLoadContextFactory throws when RouterContextProvider is missing', () => {
-    expect(() => createLoadContextFactory({})).toThrow(
-      "exposes no 'RouterContextProvider' export",
-    );
+    expect(() => createLoadContextFactory({})).toThrow("exposes no 'RouterContextProvider' export");
   });
 
   it('createLoadContextFactory throws when RouterContextProvider is not callable', () => {
@@ -147,7 +138,7 @@ describe('server-build', () => {
 
   it('assertSsrRuntime returns the runtime when both members are functions', () => {
     const runtime = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       handler: async () => new Response('ok'),
       createLoadContext: createFakeLoadContextFactory(),
     };
@@ -156,7 +147,7 @@ describe('server-build', () => {
   });
 
   it('assertSsrRuntime rejects a bare handler and names the pre-0.2.0 shape', () => {
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const legacy = async () => new Response('ok');
 
     expect(() => assertSsrRuntime(legacy)).toThrow(
@@ -165,9 +156,7 @@ describe('server-build', () => {
   });
 
   it('assertSsrRuntime rejects an object missing createLoadContext and lists its keys', () => {
-    expect(() => assertSsrRuntime({ handler: () => {} })).toThrow(
-      'an object with keys [handler]',
-    );
+    expect(() => assertSsrRuntime({ handler: () => {} })).toThrow('an object with keys [handler]');
   });
 
   it('assertSsrRuntime rejects a runtime whose handler is not a function', () => {
@@ -204,8 +193,8 @@ describe('server-build', () => {
 
   it('loadRequestHandler rejects when server build path does not exist', async () => {
     const nonExistentPath = './__non_existent_build_path_for_test__';
-    await expect(
-      loadRequestHandler(nonExistentPath, 'production'),
-    ).rejects.toThrow('Failed to load React Router server build');
+    await expect(loadRequestHandler(nonExistentPath, 'production')).rejects.toThrow(
+      'Failed to load React Router server build',
+    );
   });
 });

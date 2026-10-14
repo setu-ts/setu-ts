@@ -87,13 +87,7 @@ class FrameworkRequest implements IRequest {
   #headers: Headers | undefined;
   readonly #maxBodyBytes: number | undefined;
 
-  constructor(
-    raw: Request,
-    method: HttpMethod,
-    url: string,
-    path: string,
-    maxBodyBytes?: number,
-  ) {
+  constructor(raw: Request, method: HttpMethod, url: string, path: string, maxBodyBytes?: number) {
     this.#raw = raw;
     this.method = method;
     this.url = url;
@@ -156,7 +150,7 @@ class FrameworkRequest implements IRequest {
    * first caller saw.
    */
   bytes(): Promise<Uint8Array> {
-    return this.#body ??= this.#readBody();
+    return (this.#body ??= this.#readBody());
   }
 
   /** Reads the body as UTF-8 text. Idempotent. */
@@ -197,9 +191,9 @@ class FrameworkRequest implements IRequest {
    * paid only by a request that actually reads a form.
    */
   formData(): Promise<FormBody> {
-    return this.#form ??= this.bytes().then((body) =>
-      parseFormBody(body, this.headers.get('content-type'))
-    );
+    return (this.#form ??= this.bytes().then((body) =>
+      parseFormBody(body, this.headers.get('content-type')),
+    ));
   }
 
   /**
@@ -217,7 +211,8 @@ class FrameworkRequest implements IRequest {
     // Read the framing headers off the NATIVE request, never `this.headers`:
     // the latter would take the lazy copy on every request and undo it.
     const native = this.#raw.headers;
-    const bodyless = (this.method === 'GET' || this.method === 'HEAD') &&
+    const bodyless =
+      (this.method === 'GET' || this.method === 'HEAD') &&
       native.get('content-length') === null &&
       native.get('transfer-encoding') === null;
     if (bodyless) return Promise.resolve(EMPTY_BODY);
@@ -364,10 +359,7 @@ export function extractPath(url: string): string {
     }
   }
   const path = url.slice(start, end);
-  if (
-    path.includes('/.') || path.includes('\\') ||
-    path.includes('%2e') || path.includes('%2E')
-  ) {
+  if (path.includes('/.') || path.includes('\\') || path.includes('%2e') || path.includes('%2E')) {
     return new URL(url).pathname;
   }
   return path;
@@ -390,10 +382,7 @@ export function extractPath(url: string): string {
  *   here.
  * @returns The framework request
  */
-export function mapWebRequestToFrameworkRequest(
-  request: Request,
-  maxBodyBytes?: number,
-): IRequest {
+export function mapWebRequestToFrameworkRequest(request: Request, maxBodyBytes?: number): IRequest {
   return new FrameworkRequest(
     request,
     request.method.toUpperCase() as HttpMethod,
@@ -439,9 +428,7 @@ const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
  * @param snapshot - The response snapshot
  * @returns A web-standard `Response`
  */
-export function mapSnapshotToWebResponse(
-  snapshot: ResponseSnapshot,
-): Response {
+export function mapSnapshotToWebResponse(snapshot: ResponseSnapshot): Response {
   const { status, body, streaming } = snapshot;
   // Consult the kernel's typed init protocol before public `headers`: reading
   // that live view materializes a framework Headers object, while the common
@@ -471,9 +458,8 @@ export function mapSnapshotToWebResponse(
   // Buffered path — unchanged from M23.
   // Uint8Array can be passed directly to Response constructor (A1 — no slice needed).
   // Cast to BlobPart (which Response accepts) to satisfy Deno's stricter ArrayBufferView type.
-  const bodyPart: string | BlobPart | null = body === null
-    ? null
-    : (typeof body === 'string' ? body : body as unknown as BlobPart);
+  const bodyPart: string | BlobPart | null =
+    body === null ? null : typeof body === 'string' ? body : (body as unknown as BlobPart);
 
   // Pass the Headers object directly — preserves multi-valued Set-Cookie headers (C2)
   return new Response(bodyPart, {

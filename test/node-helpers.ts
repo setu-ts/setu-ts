@@ -16,7 +16,7 @@ export async function unusedPort(): Promise<number> {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Expected a TCP address');
   await new Promise<void>((accept, reject) =>
-    server.close((error) => error ? reject(error) : accept())
+    server.close((error) => (error ? reject(error) : accept())),
   );
   return address.port;
 }
@@ -57,7 +57,9 @@ export function denoBinary(path = process.env.PATH ?? '', self = runningDeno()):
     try {
       accessSync(candidate, constants.X_OK);
       return candidate;
-    } catch { /* try next PATH entry */ }
+    } catch {
+      /* try next PATH entry */
+    }
   }
   throw new Error('deno is required on PATH for generated-project tests');
 }
@@ -92,18 +94,17 @@ export function spawnProcess(command: string, options: RunOptions = {}) {
   const status = new Promise<{ code: number; success: boolean; signal: NodeJS.Signals | null }>(
     (accept, reject) => {
       child.once('error', reject);
-      child.once(
-        'close',
-        (code, signal) => accept({ code: code ?? 1, success: code === 0, signal }),
+      child.once('close', (code, signal) =>
+        accept({ code: code ?? 1, success: code === 0, signal }),
       );
     },
   );
   return {
     pid: child.pid,
     status,
-    stdout: child.stdout ? Readable.toWeb(child.stdout) as ReadableStream<Uint8Array> : null,
-    stderr: child.stderr ? Readable.toWeb(child.stderr) as ReadableStream<Uint8Array> : null,
-    stdin: child.stdin ? Writable.toWeb(child.stdin) as WritableStream<Uint8Array> : null,
+    stdout: child.stdout ? (Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>) : null,
+    stderr: child.stderr ? (Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>) : null,
+    stdin: child.stdin ? (Writable.toWeb(child.stdin) as WritableStream<Uint8Array>) : null,
     kill(signal: NodeJS.Signals = 'SIGTERM') {
       child.kill(signal);
     },
@@ -182,7 +183,7 @@ export async function connect(options: { hostname?: string; port: number }) {
     },
     async write(buffer: Uint8Array): Promise<number> {
       await new Promise<void>((accept, reject) =>
-        socket.write(buffer, (error) => error ? reject(error) : accept())
+        socket.write(buffer, (error) => (error ? reject(error) : accept())),
       );
       return buffer.length;
     },
@@ -199,18 +200,21 @@ export async function serveHttp(
 ) {
   const { serve } = await import('@hono/node-server');
   const { promise, resolve: ready } = Promise.withResolvers<{ port: number }>();
-  const server = serve({
-    fetch: handler,
-    port: options.port ?? 0,
-    hostname: options.hostname ?? '127.0.0.1',
-  }, (address) => ready({ port: address.port }));
+  const server = serve(
+    {
+      fetch: handler,
+      port: options.port ?? 0,
+      hostname: options.hostname ?? '127.0.0.1',
+    },
+    (address) => ready({ port: address.port }),
+  );
   const addr = await promise;
   options.onListen?.(addr);
   return {
     addr,
     async shutdown() {
       await new Promise<void>((accept, reject) =>
-        server.close((error) => error ? reject(error) : accept())
+        server.close((error) => (error ? reject(error) : accept())),
       );
     },
   };

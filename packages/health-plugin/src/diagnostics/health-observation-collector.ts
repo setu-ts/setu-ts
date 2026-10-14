@@ -380,11 +380,7 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
    * @param outcome - The framework-owned outcome primitives
    * @param origin - Whether the check was a normal or a scheduled one
    */
-  report(
-    sourceName: string,
-    outcome: IndicatorOutcome,
-    origin: 'application' | 'scheduled',
-  ): void {
+  report(sourceName: string, outcome: IndicatorOutcome, origin: 'application' | 'scheduled'): void {
     if (this.#closed) {
       return;
     }
@@ -400,8 +396,8 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
       outcome.state !== 'reported'
         ? { ...base, state: outcome.state }
         : isHealthStatus(status)
-        ? { ...base, state: 'reported', status }
-        : { ...base, state: 'failed' },
+          ? { ...base, state: 'reported', status }
+          : { ...base, state: 'failed' },
     );
   }
 
@@ -523,7 +519,9 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
       let next = 0;
       const worker = async (): Promise<void> => {
         while (
-          !this.#closed && next < order.length && this.#inFlight.size < scheduled.concurrency
+          !this.#closed &&
+          next < order.length &&
+          this.#inFlight.size < scheduled.concurrency
         ) {
           const name = order[next];
           next += 1;
@@ -576,9 +574,10 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
     raw.then(release, release);
     return this.#raceWithDeadline(raw, timeoutMs).then((race) => {
       const latencyMs = this.#clock.hrtime() - startedAtMs;
-      const outcome: IndicatorOutcome = race.kind === 'reported'
-        ? { state: 'reported', status: race.status, latencyMs }
-        : { state: race.kind, latencyMs };
+      const outcome: IndicatorOutcome =
+        race.kind === 'reported'
+          ? { state: 'reported', status: race.status, latencyMs }
+          : { state: race.kind, latencyMs };
       this.report(name, outcome, 'scheduled');
     });
   }

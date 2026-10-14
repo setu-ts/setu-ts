@@ -24,9 +24,7 @@ describe('DI_WIRING', () => {
 
 describe('class-based composition', () => {
   it('installs DI exactly once with the decorator plugin', () => {
-    expect(CLASS_BASED_PLUGINS.filter((wiring) => wiring.pkg === 'di-plugin')).toEqual([
-      DI_WIRING,
-    ]);
+    expect(CLASS_BASED_PLUGINS.filter((wiring) => wiring.pkg === 'di-plugin')).toEqual([DI_WIRING]);
     expect(CLASS_BASED_PLUGINS.some((wiring) => wiring.pkg === 'decorator-plugin')).toBe(true);
   });
 });

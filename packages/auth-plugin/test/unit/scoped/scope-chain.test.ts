@@ -66,12 +66,13 @@ describe('walkScopeChain', () => {
         plain,
       ),
     ).toEqual({ ok: false, reason: 'scope-cycle', scopeType: 'project' });
-    expect(await walkScopeChain(PROJECT, config(graph({ 'project/p1': [PROJECT] })), plain))
-      .toEqual({
-        ok: false,
-        reason: 'scope-cycle',
-        scopeType: 'project',
-      });
+    expect(
+      await walkScopeChain(PROJECT, config(graph({ 'project/p1': [PROJECT] })), plain),
+    ).toEqual({
+      ok: false,
+      reason: 'scope-cycle',
+      scopeType: 'project',
+    });
   });
 
   it('denies a walk deeper than maxScopeDepth, and allows one exactly at it', async () => {
@@ -102,13 +103,19 @@ describe('walkScopeChain', () => {
       PROJECT,
       config((scope) =>
         scope.type === 'project'
-          ? [{ type: 'Bad', id: 'x' }, { type: 'team', id: '' }, TEAM] as never
-          : []
+          ? ([{ type: 'Bad', id: 'x' }, { type: 'team', id: '' }, TEAM] as never)
+          : [],
       ),
       plain,
     );
     expect(outcome).toEqual({ ok: true, chain: [PROJECT, TEAM] });
-    expect(await walkScopeChain(PROJECT, config(() => 'nope' as never), plain)).toEqual({
+    expect(
+      await walkScopeChain(
+        PROJECT,
+        config(() => 'nope' as never),
+        plain,
+      ),
+    ).toEqual({
       ok: true,
       chain: [PROJECT],
     });
@@ -173,10 +180,9 @@ describe('tenantMismatch', () => {
   });
 
   it('compares only the configured tenant scope type', () => {
-    expect(tenantMismatch(ref('organisation', 'x'), requestContext({ tenant: 't1' }), 'tenant'))
-      .toBe(
-        false,
-      );
+    expect(
+      tenantMismatch(ref('organisation', 'x'), requestContext({ tenant: 't1' }), 'tenant'),
+    ).toBe(false);
     expect(tenantMismatch(ref('account', 'a2'), requestContext({ tenant: 'a1' }), 'account')).toBe(
       true,
     );

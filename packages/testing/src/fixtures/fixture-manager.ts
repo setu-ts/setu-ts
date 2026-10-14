@@ -43,11 +43,7 @@ export class FixtureManager {
    * @param options - Optional `provides` token and priority
    * @returns `this` for chaining
    */
-  mock(
-    name: string,
-    service: object,
-    options?: { provides?: string; priority?: number },
-  ): this {
+  mock(name: string, service: object, options?: { provides?: string; priority?: number }): this {
     this.#list.push(createMockPlugin({ name, service, ...options }));
     return this;
   }

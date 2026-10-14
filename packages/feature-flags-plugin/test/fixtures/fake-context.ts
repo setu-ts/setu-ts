@@ -37,10 +37,7 @@ export function createFakeContext(
   fs?: IFileSystem,
 ): FakeFlagContext {
   const registered = new Map<string, unknown>();
-  const healthIndicators = new Map<
-    string,
-    () => Promise<{ status: string; data?: unknown }>
-  >();
+  const healthIndicators = new Map<string, () => Promise<{ status: string; data?: unknown }>>();
   const onCloseHandlers: Array<() => Promise<void> | void> = [];
   const logs: LogCall[] = [];
 

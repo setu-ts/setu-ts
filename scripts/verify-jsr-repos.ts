@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Verifies that every release package exists on JSR and is linked to this repository.
  *
@@ -42,7 +42,7 @@ for (const path of PUBLISHED_PACKAGES) {
     continue;
   }
 
-  const pkg = await response.json() as IJsrPackage;
+  const pkg = (await response.json()) as IJsrPackage;
   const linked = pkg.githubRepository;
   if (linked === undefined || linked === null) {
     console.log('UNLINKED', name);

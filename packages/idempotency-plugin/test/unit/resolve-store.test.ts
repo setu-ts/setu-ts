@@ -44,8 +44,9 @@ describe('resolveStore (M109a §3.14)', () => {
       complete: () => Promise.resolve('settled'),
       release: () => Promise.resolve('lost'),
     };
-    expect(await resolveStore({ type: 'custom', store: custom }, noopReporter, () => undefined))
-      .toBe(custom);
+    expect(
+      await resolveStore({ type: 'custom', store: custom }, noopReporter, () => undefined),
+    ).toBe(custom);
   });
 
   it('builds an injected Redis store without connecting it', async () => {
@@ -65,11 +66,7 @@ describe('resolveStore (M109a §3.14)', () => {
       ...injectedClient(),
       on: (event: string): void => void events.push(event),
     };
-    await resolveStore(
-      { type: 'redis', namespace: 'shop', client },
-      noopReporter,
-      () => undefined,
-    );
+    await resolveStore({ type: 'redis', namespace: 'shop', client }, noopReporter, () => undefined);
     // The caller owns that client's event handling; adding a listener here
     // would silence it (plan §3.5).
     expect(events).toEqual([]);
@@ -92,18 +89,16 @@ describe('resolveStore (M109a §3.14)', () => {
 });
 
 it('loads the real lazy Redis client without opening a connection, and can disconnect it', async () => {
-  for (
-    const config of [
-      { type: 'redis' as const, namespace: 'default', url: 'redis://127.0.0.1:1' },
-      {
-        type: 'redis' as const,
-        namespace: 'explicit',
-        url: 'redis://127.0.0.1:1',
-        keyPrefix: 'custom:',
-        commandTimeoutMs: 0,
-      },
-    ]
-  ) {
+  for (const config of [
+    { type: 'redis' as const, namespace: 'default', url: 'redis://127.0.0.1:1' },
+    {
+      type: 'redis' as const,
+      namespace: 'explicit',
+      url: 'redis://127.0.0.1:1',
+      keyPrefix: 'custom:',
+      commandTimeoutMs: 0,
+    },
+  ]) {
     const store = await resolveStore(config, undefined, () => undefined);
     expect(store.name).toBe('redis');
     await store.disconnect?.();

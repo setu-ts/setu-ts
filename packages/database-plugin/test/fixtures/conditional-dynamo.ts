@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- fake native commands reject asynchronously.
+/* eslint-disable require-await -- fake native commands reject asynchronously. */
 import type {
   DynamoAttributeMap,
   DynamoConditionExpression,
@@ -25,8 +25,10 @@ export function dynamoFixture() {
       // `constructor` attribute is a missing attribute and fails the check.
       const name = names[attribute!]!;
       const actual = Object.prototype.hasOwnProperty.call(item, name) ? item[name] : undefined;
-      return actual !== undefined &&
-        unmarshalDynamoValue(actual) === unmarshalDynamoValue(values[value!]!);
+      return (
+        actual !== undefined &&
+        unmarshalDynamoValue(actual) === unmarshalDynamoValue(values[value!]!)
+      );
     });
   };
   const checkFailure = (): void => {
@@ -50,8 +52,8 @@ export function dynamoFixture() {
       const updated = { ...stored };
       for (const assignment of input.UpdateExpression.slice(4).split(', ')) {
         const [field, value] = assignment.split(' = ');
-        updated[input.ExpressionAttributeNames![field!]!] = input
-          .ExpressionAttributeValues![value!]!;
+        updated[input.ExpressionAttributeNames![field!]!] =
+          input.ExpressionAttributeValues![value!]!;
       }
       rows.set(key(input.Key), updated);
       return omitAttributes ? {} : { Attributes: updated };

@@ -1,0 +1,34 @@
+# Prettier also reads .gitignore. These are the formatter-specific exclusions.
+
+# Carried from deno.json `fmt.exclude` (M111e1 §3.1).
+pnpm-lock.yaml
+docs/api/
+.verify/
+.verify-milestone/
+k8s/chart/templates/
+k8s/manifests/
+website/
+
+# Carried from deno.json global `exclude`. Not carried: scripts/codemods, which
+# Deno excludes because it cannot resolve that Node code; Prettier can.
+apps/full-stack/build/
+
+# Generator output whose exact bytes another gate owns (M111e1 §3.1).
+# - The SDK client fixtures: byte-compared by openapi-codegen.test.ts and
+#   written to `deno fmt`'s output; `deno task fmt:check` keeps checking them.
+packages/sdk/test/fixtures/*-client.ts
+# - The CLI's devtool-source fixture, compared against the generator's own output.
+packages/cli/test/fixtures/devtool-source-shapes.ts
+# - Everything scripts/node-manifests.ts writes; its --check compares bytes.
+/package.json
+/tsconfig.json
+/tsconfig.base.json
+/pnpm-workspace.yaml
+packages/*/package.json
+packages/*/tsconfig.json
+packages/*/deno.json
+packages/starters/*/package.json
+packages/starters/*/tsconfig.json
+packages/starters/*/deno.json
+# - The workflows: 111e3 rewrites them, and nine root tests pin their text.
+.github/workflows/

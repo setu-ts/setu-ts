@@ -90,10 +90,7 @@ export interface InstrumentationLoaders {
 }
 
 /** Platform check — all five instrumentations target Node internals. */
-export function isInstrumentationSupported(
-  _kind: InstrumentationKind,
-  platform: string,
-): boolean {
+export function isInstrumentationSupported(_kind: InstrumentationKind, platform: string): boolean {
   return platform === 'node';
 }
 
@@ -163,10 +160,7 @@ export async function buildInstrumentationRegistry(
   }> = [];
 
   // Sync helper: enable an instrumentation with an injected instance.
-  function enableInjected(
-    kind: InstrumentationKind,
-    instance: unknown,
-  ): void {
+  function enableInjected(kind: InstrumentationKind, instance: unknown): void {
     // Attach to provider per-instance (NOT global singleton).
     try {
       if (

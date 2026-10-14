@@ -80,9 +80,8 @@ describe('DatabasePlugin', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(
-            createFakeDrizzleInstance(),
-            (database, work) => database.transaction(work),
+          drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
+            database.transaction(work),
           ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },

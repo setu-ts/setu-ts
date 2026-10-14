@@ -190,8 +190,8 @@ export class SessionService implements ISessionService {
     // every request exactly as `rolling` does. It does NOT extend absolute
     // expiry; only `rolling` does that (see below).
     const refreshesIdleWindow = rolling || this.#config.idleTimeoutMs !== undefined;
-    const shouldCommit = session.isDirty || session.wasRegenerated ||
-      (refreshesIdleWindow && !session.isNew);
+    const shouldCommit =
+      session.isDirty || session.wasRegenerated || (refreshesIdleWindow && !session.isNew);
     if (!shouldCommit) {
       return;
     }
@@ -213,9 +213,10 @@ export class SessionService implements ISessionService {
 
     // On the store strategy the payload goes server-side and the cookie carries
     // only the id, which is why the same envelope stays well under any limit.
-    const payload = this.#store === undefined
-      ? snapshot
-      : { id: snapshot.id, data: {}, exp: snapshot.exp, seen: snapshot.seen };
+    const payload =
+      this.#store === undefined
+        ? snapshot
+        : { id: snapshot.id, data: {}, exp: snapshot.exp, seen: snapshot.seen };
 
     const sealed = await seal(
       this.#deps.subtle,
@@ -296,12 +297,7 @@ export class SessionService implements ISessionService {
       data = stored;
     }
 
-    return restoreSession(
-      { ...snapshot, data },
-      now,
-      this.#deps.uuid,
-      this.#config.idleTimeoutMs,
-    );
+    return restoreSession({ ...snapshot, data }, now, this.#deps.uuid, this.#config.idleTimeoutMs);
   }
 
   /**

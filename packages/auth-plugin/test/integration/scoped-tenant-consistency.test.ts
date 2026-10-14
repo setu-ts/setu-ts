@@ -54,31 +54,37 @@ async function start(logger = recordingLogger()): Promise<IKernelApplication> {
     logger,
     auth: {
       scopedRbac: {
-        sources: [{
-          kind: 'static',
-          grants: [
-            { subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } },
-            { subject: 'eve', role: 'approver', scope: { type: 'tenant', id: 'globex' } },
-          ],
-        }],
-        inheritsFrom: (scope) => scope.id === 'acme-eu' ? [{ type: 'tenant', id: 'acme' }] : [],
+        sources: [
+          {
+            kind: 'static',
+            grants: [
+              { subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } },
+              { subject: 'eve', role: 'approver', scope: { type: 'tenant', id: 'globex' } },
+            ],
+          },
+        ],
+        inheritsFrom: (scope) => (scope.id === 'acme-eu' ? [{ type: 'tenant', id: 'acme' }] : []),
       },
     },
-    routes: [{
-      method: 'post',
-      path: '/tenants/:tenantId/approve',
-      guard: requireScopedPermission('invoices:approve', {
-        scope: scopeFromParam('tenantId', 'tenant'),
-      }),
-    }, {
-      method: 'get',
-      path: '/with-context/:tenantId',
-      guard: imperative(true),
-    }, {
-      method: 'get',
-      path: '/without-context/:tenantId',
-      guard: imperative(false),
-    }],
+    routes: [
+      {
+        method: 'post',
+        path: '/tenants/:tenantId/approve',
+        guard: requireScopedPermission('invoices:approve', {
+          scope: scopeFromParam('tenantId', 'tenant'),
+        }),
+      },
+      {
+        method: 'get',
+        path: '/with-context/:tenantId',
+        guard: imperative(true),
+      },
+      {
+        method: 'get',
+        path: '/without-context/:tenantId',
+        guard: imperative(false),
+      },
+    ],
   });
 }
 
@@ -147,7 +153,8 @@ describe('tenant consistency', () => {
     expect(await status(app, '/with-context/globex', eveInAcme)).toBe(403);
     // The documented consequence of leaving context out: grants alone decide.
     expect(await status(app, '/without-context/globex', eveInAcme)).toBe(200);
-    expect(await status(app, '/with-context/globex', { 'x-user': 'eve', 'x-tenant-id': 'globex' }))
-      .toBe(200);
+    expect(
+      await status(app, '/with-context/globex', { 'x-user': 'eve', 'x-tenant-id': 'globex' }),
+    ).toBe(200);
   });
 });

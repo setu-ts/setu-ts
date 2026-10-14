@@ -8,12 +8,7 @@ describe('rest-starter / barrel exports', () => {
   it('exports exactly createRestApp and buildRestPlugins', () => {
     const exportedNames = Object.keys(restStarter);
     // Use set comparison regardless of order
-    expect(new Set(exportedNames)).toEqual(
-      new Set([
-        'createRestApp',
-        'buildRestPlugins',
-      ]),
-    );
+    expect(new Set(exportedNames)).toEqual(new Set(['createRestApp', 'buildRestPlugins']));
   });
 
   it('createsRestApp is a function', () => {

@@ -56,10 +56,7 @@ function listAt(version: string): { text: string } {
 
 describe('watchKubernetesService', () => {
   it('LISTs first, fires the listener, then opens a watch at that version', async () => {
-    const http = createFakeHttp([
-      listAt('100'),
-      { chunks: [] },
-    ]);
+    const http = createFakeHttp([listAt('100'), { chunks: [] }]);
     let fired = 0;
     const unsubscribe = await start(http, () => fired++).unsubscribe;
     await flush();
@@ -194,11 +191,7 @@ describe('watchKubernetesService', () => {
   });
 
   it('treats a non-2xx LIST as a failure', async () => {
-    const http = createFakeHttp([
-      { status: 500, text: 'boom' },
-      listAt('100'),
-      { chunks: [] },
-    ]);
+    const http = createFakeHttp([{ status: 500, text: 'boom' }, listAt('100'), { chunks: [] }]);
     const started = start(http);
     const unsubscribe = await started.unsubscribe;
     await flush();
@@ -300,9 +293,7 @@ describe('watchKubernetesService — resource hygiene', () => {
     let removed = 0;
     const originalAdd = AbortSignal.prototype.addEventListener;
     const originalRemove = AbortSignal.prototype.removeEventListener;
-    AbortSignal.prototype.addEventListener = function (
-      ...args: Parameters<typeof originalAdd>
-    ) {
+    AbortSignal.prototype.addEventListener = function (...args: Parameters<typeof originalAdd>) {
       if (args[0] === 'abort') added++;
       return originalAdd.apply(this, args);
     };

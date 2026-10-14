@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- async facade fakes model IDynamoClient promises.
+/* eslint-disable require-await -- async facade fakes model IDynamoClient promises. */
 import { describe, expect, it } from 'vitest';
 import type {
   DynamoQueryCommandInput,
@@ -81,9 +81,9 @@ describe('DynamoDB cursor pages', () => {
         calls += 1;
         return calls < 3
           ? {
-            Items: [{ pk: { S: 'p' }, value: { N: String(calls) } }],
-            LastEvaluatedKey: { pk: { S: `p${calls}` } },
-          }
+              Items: [{ pk: { S: 'p' }, value: { N: String(calls) } }],
+              LastEvaluatedKey: { pk: { S: `p${calls}` } },
+            }
           : { Items: [{ pk: { S: 'p' }, value: { N: '3' } }] };
       },
       scan: async () => ({}),
@@ -111,19 +111,21 @@ describe('DynamoDB cursor pages', () => {
         calls += 1;
         return calls === 1
           ? {
-            Items: [{
-              gpk: { S: 'customer' },
-              gsk: { S: 'created' },
-              pk: { S: 'tenant' },
-              sk: { S: 'order' },
-            }],
-            LastEvaluatedKey: {
-              gpk: { S: 'customer' },
-              gsk: { S: 'created' },
-              pk: { S: 'tenant' },
-              sk: { S: 'order' },
-            },
-          }
+              Items: [
+                {
+                  gpk: { S: 'customer' },
+                  gsk: { S: 'created' },
+                  pk: { S: 'tenant' },
+                  sk: { S: 'order' },
+                },
+              ],
+              LastEvaluatedKey: {
+                gpk: { S: 'customer' },
+                gsk: { S: 'created' },
+                pk: { S: 'tenant' },
+                sk: { S: 'order' },
+              },
+            }
           : { Items: [] };
       },
       scan: async () => ({}),
@@ -186,10 +188,12 @@ describe('DynamoDB cursor pages', () => {
     };
     const mapping = { Item: { partitionKey: 'pk', sortKey: 'sk' } };
 
-    const primary = await createDynamoDataSource(primaryClient, 'Item', mapping)
-      .findPage!(query({ limit: 1 }));
-    const scan = await createDynamoDataSource(scanClient, 'Item', mapping)
-      .findPage!(query({ where: {}, limit: 1 }));
+    const primary = await createDynamoDataSource(primaryClient, 'Item', mapping).findPage!(
+      query({ limit: 1 }),
+    );
+    const scan = await createDynamoDataSource(scanClient, 'Item', mapping).findPage!(
+      query({ where: {}, limit: 1 }),
+    );
 
     expect(decodeCursor(primary.nextCursor ?? '')?.keyValues).toEqual(['S:p', 'S:s']);
     expect(decodeCursor(scan.nextCursor ?? '')?.keyValues).toEqual(['S:p', 'S:s']);

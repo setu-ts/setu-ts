@@ -151,7 +151,8 @@ export function fromDriverDocument(
   const rawId = row[DRIVER_ID_FIELD];
   if (rawId !== undefined) {
     if (
-      target.idType === 'compound' && Array.isArray(target.primaryKey) &&
+      target.idType === 'compound' &&
+      Array.isArray(target.primaryKey) &&
       target.primaryKey.length > 1
     ) {
       // A compound-_id subdocument stores one field per column. Read them out
@@ -236,7 +237,9 @@ export function toDriverDocument(
 ): Record<string, unknown> {
   const document: Record<string, unknown> = { ...row };
   if (
-    target.idType === 'compound' && Array.isArray(target.primaryKey) && target.primaryKey.length > 1
+    target.idType === 'compound' &&
+    Array.isArray(target.primaryKey) &&
+    target.primaryKey.length > 1
   ) {
     // A compound-_id collection stores the composite key as a subdocument
     // _id in the mapping's declared column order (P5). Every named column is
@@ -337,9 +340,7 @@ export function toDriverId(
       throw new Error('MongoAdapter needs the driver ObjectId to map objectId ids');
     }
     if (!isObjectIdHex(value, objectIdCtor)) {
-      throw new Error(
-        `Cannot map id '${String(value)}' to ObjectId: it is not a valid 24-hex id`,
-      );
+      throw new Error(`Cannot map id '${String(value)}' to ObjectId: it is not a valid 24-hex id`);
     }
     return new objectIdCtor(value);
   }

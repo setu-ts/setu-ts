@@ -90,6 +90,7 @@ export function validateCacheControl(cacheControl: unknown): string {
       `localization-plugin: exposeCatalogues.cacheControl is not a valid header value (${
         (error as Error).message
       }).`,
+      { cause: error },
     );
   }
 }
@@ -133,15 +134,17 @@ export function registerCatalogueRoute(
     bodies.set(tag, Object.freeze({ locale: tag, messages: merged }));
   }
   const route: RouteDefinition = {
-    middleware: [async (ctx, next) => {
-      const tag = ctx.params.locale;
-      if (!bodies.has(tag)) {
-        respondWithError(ctx, { status: 404, title: 'Not Found', detail: 'Unknown locale' });
-        return;
-      }
-      ctx.state.set(LOCALE_STATE_KEY, tag);
-      await next();
-    }],
+    middleware: [
+      async (ctx, next) => {
+        const tag = ctx.params.locale;
+        if (!bodies.has(tag)) {
+          respondWithError(ctx, { status: 404, title: 'Not Found', detail: 'Unknown locale' });
+          return;
+        }
+        ctx.state.set(LOCALE_STATE_KEY, tag);
+        await next();
+      },
+    ],
     handler: (ctx) => {
       const tag = ctx.state.get(LOCALE_STATE_KEY) as string;
       return ctx.response

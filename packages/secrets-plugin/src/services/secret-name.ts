@@ -13,7 +13,7 @@
  */
 
 /** C0 and C1 control characters, DEL, and U+2028/U+2029. */
-// deno-lint-ignore no-control-regex
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
 
 /**

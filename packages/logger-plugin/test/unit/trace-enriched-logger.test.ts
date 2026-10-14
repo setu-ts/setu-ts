@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- the sink under test IS `console.log`:
+/* eslint-disable no-console -- the sink under test IS `console.log`: */
 // ConsoleLogger writes there (AI_GUIDELINES §11.6), so capturing it is how the
 // emitted record is read.
 /**
@@ -103,7 +103,9 @@ describe('TraceEnrichedLogger', () => {
     // trace_id from precisely the records X34-2 most wants joined.
     const captured = captureConsole();
     try {
-      subject(() => reporting(SPAN)).child({ requestId: 'r-1' }).info('m');
+      subject(() => reporting(SPAN))
+        .child({ requestId: 'r-1' })
+        .info('m');
     } finally {
       captured.restore();
     }

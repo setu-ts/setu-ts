@@ -1,11 +1,10 @@
-// deno-lint-ignore-file no-console -- gate diagnostics belong on the command line.
+/* eslint-disable no-console -- gate diagnostics belong on the command line. */
 /** Dedicated browser prerequisite gate. Ordinary tests never launch Chromium. */
 
 /** Pin shared with CI's browser installation step. */
 export const PLAYWRIGHT_VERSION = '1.63.0';
 /** Install only Chromium; Deno runs the npm CLI without a separate Node installation. */
-export const BROWSER_INSTALL_COMMAND =
-  `deno run -A npm:playwright@${PLAYWRIGHT_VERSION} install chromium`;
+export const BROWSER_INSTALL_COMMAND = `deno run -A npm:playwright@${PLAYWRIGHT_VERSION} install chromium`;
 
 /** Missing browsers may skip locally, but are failures in CI regardless of ALLOW_SKIP. */
 export function browserAvailabilityCode(present: boolean, ci: boolean): 0 | 1 | 77 {
@@ -41,7 +40,7 @@ export function browserCacheDir(executable: string): string {
   const separator = executable.includes('\\') && !executable.includes('/') ? '\\' : '/';
   const segments = executable.split(separator);
   const install = segments.findLastIndex((segment) =>
-    /^chromium(?:_headless_shell)?-\d+$/.test(segment)
+    /^chromium(?:_headless_shell)?-\d+$/.test(segment),
   );
   if (install <= 0) {
     throw new Error(`Cannot locate the Playwright browser cache in '${executable}'.`);
@@ -51,10 +50,12 @@ export function browserCacheDir(executable: string): string {
 
 /** The diagnostic for an installed-or-not browser the gate is not permitted to inspect. */
 export function unreadableCacheMessage(cache: string): string {
-  return `The Playwright browser cache '${cache}' is outside this gate's read permission, so ` +
+  return (
+    `The Playwright browser cache '${cache}' is outside this gate's read permission, so ` +
     `Chromium's presence cannot be decided. Run the harness with --allow-read=.,${cache},` +
     `/etc/os-release,/etc/lsb-release (the deno.json task grants only the Linux and macOS ` +
-    `default caches).`;
+    `default caches).`
+  );
 }
 
 if (import.meta.main) {
@@ -76,17 +77,13 @@ if (import.meta.main) {
     console.error(unreadableCacheMessage(cache));
     Deno.exit(1);
   }
-  const code = await browserGateCode(
-    executable,
-    Deno.env.get('CI') === 'true',
-    async (path) => {
-      try {
-        return (await Deno.stat(path)).isFile;
-      } catch {
-        return false;
-      }
-    },
-  );
+  const code = await browserGateCode(executable, Deno.env.get('CI') === 'true', async (path) => {
+    try {
+      return (await Deno.stat(path)).isFile;
+    } catch {
+      return false;
+    }
+  });
   if (code !== 0) {
     console.error(`Chromium is unavailable. Install it with: ${BROWSER_INSTALL_COMMAND}`);
     Deno.exit(code);

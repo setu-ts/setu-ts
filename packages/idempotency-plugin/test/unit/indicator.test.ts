@@ -93,6 +93,7 @@ describe('createIdempotencyIndicator (M109a §3.14)', () => {
     const original = store.isHealthy;
     if (original === undefined) throw new Error('fixture error: no probe');
     store.isHealthy = function (this: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- records the receiver under test
       thisArg = this;
       return original.call(this);
     };

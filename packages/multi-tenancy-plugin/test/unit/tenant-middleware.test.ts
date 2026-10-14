@@ -28,15 +28,10 @@ function toITenantResolver(fake: FakeResolver): ITenantResolver {
 
 // -- Helpers ---------------------------------------------------------------
 
-function makeContext(opts?: {
-  state?: Map<string, unknown>;
-  tenant?: unknown;
-  path?: string;
-}) {
+function makeContext(opts?: { state?: Map<string, unknown>; tenant?: unknown; path?: string }) {
   const state = opts?.state ?? new Map();
   let storedTenant: { id: string; name?: string } | undefined = opts?.tenant as
-    | { id: string; name?: string }
-    | undefined;
+    { id: string; name?: string } | undefined;
   const request = {
     method: 'GET',
     url: 'https://acme.example.com/',
@@ -190,13 +185,10 @@ describe('tenant middleware', () => {
       resolvers: [toITenantResolver(noneResolver)],
       options: { required: true, rejectionStatus: 422 },
     });
-    await mw(
-      ctx,
-      (() => {
-        nextCalled = true;
-        return Promise.resolve();
-      }) as never,
-    );
+    await mw(ctx, (() => {
+      nextCalled = true;
+      return Promise.resolve();
+    }) as never);
     expect(!nextCalled).toBeTruthy();
     expect(capturedStatus).toEqual(422);
     expect(typeof capturedBody === 'object' && capturedBody != null).toBeTruthy();
@@ -462,9 +454,11 @@ describe('tenant middleware', () => {
     it('resolves a tenant onto a sealed request', async () => {
       const mw = tenantMiddleware({
         service: makeService(),
-        resolvers: [toITenantResolver({
-          resolve: () => Promise.resolve({ present: true, value: { id: 'acme' } }),
-        })],
+        resolvers: [
+          toITenantResolver({
+            resolve: () => Promise.resolve({ present: true, value: { id: 'acme' } }),
+          }),
+        ],
         options: {},
       });
       const made = sealedContext();
@@ -479,12 +473,14 @@ describe('tenant middleware', () => {
       let n = 0;
       const mw = tenantMiddleware({
         service: makeService(),
-        resolvers: [toITenantResolver({
-          resolve: () => {
-            n += 1;
-            return Promise.resolve({ present: true, value: { id: `tenant-${n}` } });
-          },
-        })],
+        resolvers: [
+          toITenantResolver({
+            resolve: () => {
+              n += 1;
+              return Promise.resolve({ present: true, value: { id: `tenant-${n}` } });
+            },
+          }),
+        ],
         options: {},
       });
       const made = sealedContext();

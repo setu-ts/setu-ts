@@ -75,24 +75,35 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
   // Each arm is paired with its token in one value, so a later `undefined`
   // check narrows both at once — carrying them separately would leave a second
   // check that can never fail.
-  const cacheArm = options.cache === undefined
-    ? undefined
-    : { options: options.cache, token: instanceToken(CAPABILITIES.CACHE, options.cache.name) };
-  const storageArm = options.storage === undefined ? undefined : {
-    options: options.storage,
-    token: instanceToken(CAPABILITIES.STORAGE, options.storage.name),
-  };
-  const queueArm = options.queue === undefined
-    ? undefined
-    : { options: options.queue, token: instanceToken(CAPABILITIES.QUEUE, options.queue.name) };
-  const messagingArm = options.messaging === undefined ? undefined : {
-    options: options.messaging,
-    token: instanceToken(CAPABILITIES.MESSAGING, options.messaging.name),
-  };
-  const durableObjectArm = options.durableObject === undefined ? undefined : {
-    options: options.durableObject,
-    token: instanceToken(CAPABILITIES.REALTIME_BACKPLANE, options.durableObject.name),
-  };
+  const cacheArm =
+    options.cache === undefined
+      ? undefined
+      : { options: options.cache, token: instanceToken(CAPABILITIES.CACHE, options.cache.name) };
+  const storageArm =
+    options.storage === undefined
+      ? undefined
+      : {
+          options: options.storage,
+          token: instanceToken(CAPABILITIES.STORAGE, options.storage.name),
+        };
+  const queueArm =
+    options.queue === undefined
+      ? undefined
+      : { options: options.queue, token: instanceToken(CAPABILITIES.QUEUE, options.queue.name) };
+  const messagingArm =
+    options.messaging === undefined
+      ? undefined
+      : {
+          options: options.messaging,
+          token: instanceToken(CAPABILITIES.MESSAGING, options.messaging.name),
+        };
+  const durableObjectArm =
+    options.durableObject === undefined
+      ? undefined
+      : {
+          options: options.durableObject,
+          token: instanceToken(CAPABILITIES.REALTIME_BACKPLANE, options.durableObject.name),
+        };
 
   // Computed from the options rather than declared statically, so the kernel's
   // duplicate-provider index sees exactly what this instance registers.
@@ -183,15 +194,17 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           {
             // A thunk, matching the waitUntil and queue seams above.
             logger: () => ctx.logger,
-            ...(rpc === undefined ? {} : {
-              replyInbox: {
-                namespace: registry.durableObject(rpc.binding),
-                binding: rpc.binding,
-                ...(rpc.defaultTimeoutMs === undefined
-                  ? {}
-                  : { defaultTimeoutMs: rpc.defaultTimeoutMs }),
-              },
-            }),
+            ...(rpc === undefined
+              ? {}
+              : {
+                  replyInbox: {
+                    namespace: registry.durableObject(rpc.binding),
+                    binding: rpc.binding,
+                    ...(rpc.defaultTimeoutMs === undefined
+                      ? {}
+                      : { defaultTimeoutMs: rpc.defaultTimeoutMs }),
+                  },
+                }),
           },
         );
         ctx.services.register<IMessageBroker>(messagingArm.token, broker);

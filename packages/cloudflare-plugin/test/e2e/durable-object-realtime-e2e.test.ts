@@ -131,9 +131,10 @@ describe('Durable Object backplane end to end, through websocket-plugin', () => 
     await beta.start();
 
     const onBeta: (string | Uint8Array)[] = [];
-    beta.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET).room('lobby').add(
-      fakeConnection('conn-beta', onBeta),
-    );
+    beta.services
+      .get<IWebSocketService>(CAPABILITIES.WEBSOCKET)
+      .room('lobby')
+      .add(fakeConnection('conn-beta', onBeta));
     await settle();
     alpha.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET).room('lobby').broadcast('hi');
     await settle();

@@ -192,10 +192,7 @@ describe('WebSocketPlugin({ routes }) registration arms', () => {
 
   it('rejects onInit naming the DECLARED index when a mixed routes array has a throwing factory', async () => {
     const { harness, router } = await boot({
-      routes: [
-        { path: '/ws/instance', handlers: {} },
-        routeFactoryThatThrows,
-      ],
+      routes: [{ path: '/ws/instance', handlers: {} }, routeFactoryThatThrows],
     });
 
     // Index 0 is an instance and registered before the failure.

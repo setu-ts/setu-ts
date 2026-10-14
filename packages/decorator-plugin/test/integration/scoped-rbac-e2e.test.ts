@@ -69,16 +69,18 @@ const GRANTS: Record<string, readonly ScopedGrant[]> = {
 };
 
 const scopedRbac: NonNullable<AuthPluginOptions['scopedRbac']> = {
-  sources: [{
-    kind: 'custom',
-    source: {
-      name: 'test',
-      grantsFor: (principal) => {
-        calls.push(principal.id);
-        return Promise.resolve(GRANTS[principal.id] ?? []);
+  sources: [
+    {
+      kind: 'custom',
+      source: {
+        name: 'test',
+        grantsFor: (principal) => {
+          calls.push(principal.id);
+          return Promise.resolve(GRANTS[principal.id] ?? []);
+        },
       },
     },
-  }],
+  ],
 };
 
 @Controller('/c')
@@ -227,10 +229,10 @@ describe('@ScopedRoles / @ScopedPermissions — enforcement', () => {
     await start([PublicController]);
     const routes = app!.router.listRoutes();
     const security = (path: string) =>
-      (routes.find((route) => route.path === path)?.definition.schema as
-        | { security?: unknown }
-        | undefined)
-        ?.security;
+      (
+        routes.find((route) => route.path === path)?.definition.schema as
+          { security?: unknown } | undefined
+      )?.security;
     expect(security('/p/scoped')).toBeUndefined();
     expect(security('/p/plain')).toEqual([]);
   });

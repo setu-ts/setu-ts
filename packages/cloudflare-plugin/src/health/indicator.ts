@@ -70,11 +70,11 @@ export function createCloudflareIndicator(input: CloudflareHealthInput): HealthI
       waitUntil: input.waitUntil ? 'injected' : 'absent',
       ...(offPlatform
         ? {
-          detail:
-            `CloudflarePlugin is registered on '${input.platform}', not cloudflare-workers. ` +
-            'Bindings passed through `env` will still be used, but anything the platform ' +
-            'itself provides is absent.',
-        }
+            detail:
+              `CloudflarePlugin is registered on '${input.platform}', not cloudflare-workers. ` +
+              'Bindings passed through `env` will still be used, but anything the platform ' +
+              'itself provides is absent.',
+          }
         : {}),
     },
   };

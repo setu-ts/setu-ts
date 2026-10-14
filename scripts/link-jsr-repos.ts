@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Links every release package on JSR to this GitHub repository, which is what
  * lets the tag-triggered workflow publish without a token.
@@ -67,10 +67,10 @@ function packageName(dir: string): string {
 /** The repository a package is currently linked to, or undefined when unlinked. */
 async function currentLink(name: string): Promise<string | undefined> {
   const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) return undefined;
-  const pkg = await response.json() as {
+  const pkg = (await response.json()) as {
     githubRepository?: { owner?: string; name?: string } | null;
   };
   const repo = pkg.githubRepository;
@@ -95,7 +95,7 @@ for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
     continue;
   }
 
-  if (await currentLink(name) === `${OWNER}/${REPO}`) {
+  if ((await currentLink(name)) === `${OWNER}/${REPO}`) {
     console.log(`${position} linked   @${SCOPE}/${name}`);
     already.push(name);
     continue;
@@ -104,7 +104,7 @@ for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
   const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
     method: 'PATCH',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ githubRepository: { owner: OWNER, name: REPO } }),

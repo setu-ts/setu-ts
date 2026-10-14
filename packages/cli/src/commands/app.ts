@@ -127,9 +127,7 @@ function printUsage(log: (message: string) => void): void {
   }
   log('  --style <name>      Code style for a styleable template: functional | class-based');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
-  log(
-    '  --devtool           Enable the local diagnostics connector for this member (Deno only)',
-  );
+  log('  --devtool           Enable the local diagnostics connector for this member (Deno only)');
   log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
   log('  --env-file <path>   Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
@@ -159,19 +157,18 @@ function reportNoWorkspace(
   }
   if (problem.kind === 'unsupported-version') {
     error(
-      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} declares version ${
-        escapeName(String(problem.version))
-      }, ` +
-        `and this CLI understands version ${WORKSPACE_VERSION}.`,
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} declares version ${escapeName(
+        String(problem.version),
+      )}, ` + `and this CLI understands version ${WORKSPACE_VERSION}.`,
     );
     error('Upgrade the CLI, or check the file into version control and roll it back.');
     return EXIT_ERROR;
   }
   if (problem.kind === 'invalid-port') {
     error(
-      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} gives ${
-        escapeName(problem.field)
-      } the port ${escapeName(String(problem.port))}, ` +
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} gives ${escapeName(
+        problem.field,
+      )} the port ${escapeName(String(problem.port))}, ` +
         `which no service can bind: it must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
     );
     error(
@@ -182,10 +179,9 @@ function reportNoWorkspace(
   }
   if (problem.kind === 'unknown-transport') {
     error(
-      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the transport "${
-        escapeName(String(problem.transport))
-      }", ` +
-        `which this CLI does not know. Expected one of: ${TRANSPORTS.join(', ')}.`,
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the transport "${escapeName(
+        String(problem.transport),
+      )}", ` + `which this CLI does not know. Expected one of: ${TRANSPORTS.join(', ')}.`,
     );
     error(
       'Refused rather than defaulted: quietly moving every member off the bus this workspace ' +
@@ -221,10 +217,12 @@ function planMember(
   rootManifest: string,
   rootGitignore: string,
   devtoolPort?: number,
-): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
-  readonly ok: false;
-  readonly message: string;
-} {
+):
+  | { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    } {
   const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
   const envFile = readEnvFilePath(args.flags);
@@ -241,22 +239,24 @@ function planMember(
     // are registered after the factory returns — gRPC uses that path — but an
     // argument rewrite would otherwise be silently dropped and leave the member
     // connected to the template default instead of its workspace transport.
-    const rewritesStarterPlugin = transport.messagingArgs !== undefined ||
-      transport.queueArgs !== undefined;
+    const rewritesStarterPlugin =
+      transport.messagingArgs !== undefined || transport.queueArgs !== undefined;
     if (choice.template.appFactory !== undefined && rewritesStarterPlugin) {
       // The advice is narrowed per what each transport actually delivers: for a
       // BROKER the standalone escape now restores the choice (`--broker`
       // exists), but a standalone full-stack project still cannot take one, so
       // pointing there would suggest an equivalence that does not hold.
-      const advice = transport.messagingArgs !== undefined
-        ? `Add it to a workspace on --transport http or memory, or scaffold a broker-connected ` +
-          `service with \`${PROGRAM_NAME} new <name> --template microservice --broker ` +
-          `${transport.name}\`.`
-        : `Add it to a workspace on --transport http or memory, or scaffold it standalone with ` +
-          `\`${PROGRAM_NAME} new <name> --template ${choice.template.name}\`.`;
+      const advice =
+        transport.messagingArgs !== undefined
+          ? `Add it to a workspace on --transport http or memory, or scaffold a broker-connected ` +
+            `service with \`${PROGRAM_NAME} new <name> --template microservice --broker ` +
+            `${transport.name}\`.`
+          : `Add it to a workspace on --transport http or memory, or scaffold it standalone with ` +
+            `\`${PROGRAM_NAME} new <name> --template ${choice.template.name}\`.`;
       return {
         ok: false,
-        message: `The "${choice.template.name}" template composes its whole plugin set through ` +
+        message:
+          `The "${choice.template.name}" template composes its whole plugin set through ` +
           `${choice.template.appFactory.symbol}, so this workspace's "${transport.name}" ` +
           `transport cannot reach it — the plugin it contributes would be dropped and the member ` +
           `would look connected while talking to nobody. ${advice}`,
@@ -293,7 +293,8 @@ function planMember(
       // workspace refuses `--runtime cloudflare-workers` at creation and
       // `readWorkspaceManifest` refuses a manifest naming it, so a Workers
       // member cannot exist and a branch for one would be unreachable.
-      message: '--env-file requires a template that registers ConfigPlugin ' +
+      message:
+        '--env-file requires a template that registers ConfigPlugin ' +
         '(rest, microservice, class-based, or full-stack).',
     };
   }
@@ -304,7 +305,7 @@ function planMember(
     profile,
     // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
     // on, and the parameter is optional.
-    ...(next.transportUrl === undefined ? [] : [next.transportUrl]) as [string?],
+    ...((next.transportUrl === undefined ? [] : [next.transportUrl]) as [string?]),
   );
   // A starter factory owns its construction, and kernel diagnostics reach the
   // constructor only — refused here, before anything is planned, because the
@@ -316,9 +317,10 @@ function planMember(
 
   const memberRoot = joinPath(MEMBERS_DIR, name);
 
-  const devHost = devtoolPort === undefined
-    ? host
-    : withDevtool(host, devtoolPort, { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER });
+  const devHost =
+    devtoolPort === undefined
+      ? host
+      : withDevtool(host, devtoolPort, { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER });
 
   const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
     symbol: SERVICE_PORT_EXPORT,
@@ -366,10 +368,7 @@ function planMember(
  * @param deps - Filesystem, workspace root, and output sinks
  * @returns `0` on success, `1` on a runtime error, `2` on a usage error
  */
-export async function runAppCommand(
-  args: ParsedArgs,
-  deps: AppDependencies,
-): Promise<number> {
+export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Promise<number> {
   if (args.flags['help'] === true || args.flags['h'] === true) {
     printUsage(deps.log);
     return EXIT_OK;
@@ -425,9 +424,7 @@ export async function runAppCommand(
   if (!isIdentifierSafe(names)) {
     // Quoting the name back as typed, so through `escapeName`: a control
     // character here would forge a standalone line in the rendered message.
-    deps.error(
-      `Invalid name "${escapeName(rawName)}": ${IDENTIFIER_NAME_RULE}`,
-    );
+    deps.error(`Invalid name "${escapeName(rawName)}": ${IDENTIFIER_NAME_RULE}`);
     return EXIT_USAGE;
   }
 
@@ -449,9 +446,9 @@ export async function runAppCommand(
     // names a real runtime: an unvalidated value copied into a command the
     // developer is told to run would carry whatever else the argument held.
     deps.error(
-      `This is a ${read.manifest.runtime} workspace, so --runtime ${
-        escapeName(runtimeFlag)
-      } cannot apply to one of its members: they share a root manifest and a lockfile, and ` +
+      `This is a ${read.manifest.runtime} workspace, so --runtime ${escapeName(
+        runtimeFlag,
+      )} cannot apply to one of its members: they share a root manifest and a lockfile, and ` +
         `the root is what installs them.`,
     );
     const suggested = isTargetRuntime(runtimeFlag) ? runtimeFlag : `<${TARGET_RUNTIMES.join('|')}>`;
@@ -464,9 +461,7 @@ export async function runAppCommand(
 
   const name = names.kebab;
   if (read.manifest.members.some((member) => member.name === name)) {
-    deps.error(
-      `Workspace member "${name}" already exists in ${joinPath(MEMBERS_DIR, name)}.`,
-    );
+    deps.error(`Workspace member "${name}" already exists in ${joinPath(MEMBERS_DIR, name)}.`);
     deps.error('Choose a different name, or remove that member from the workspace first.');
     return EXIT_ERROR;
   }
@@ -516,9 +511,10 @@ export async function runAppCommand(
   // Guarded on the flag being present: an absent flag reads as `undefined`,
   // and `undefined === undefined` would match every member carrying no
   // devtool port at all.
-  const taken = read.manifest.members.find((member) =>
-    member.port === requested.port ||
-    (requested.port !== undefined && member.devtoolPort === requested.port)
+  const taken = read.manifest.members.find(
+    (member) =>
+      member.port === requested.port ||
+      (requested.port !== undefined && member.devtoolPort === requested.port),
   );
   if (taken !== undefined) {
     const devtoolHeld = taken.devtoolPort === requested.port && taken.port !== requested.port;
@@ -589,12 +585,14 @@ export async function runAppCommand(
     }
     if (existingRunner === undefined) devtoolRunnerFile = runner;
     if (devtoolPortFlag.port !== undefined) {
-      const devtoolTaken = read.manifest.members.find((member) =>
-        member.port === devtoolPortFlag.port ||
-        (devtoolPortFlag.port !== undefined && member.devtoolPort === devtoolPortFlag.port)
+      const devtoolTaken = read.manifest.members.find(
+        (member) =>
+          member.port === devtoolPortFlag.port ||
+          (devtoolPortFlag.port !== undefined && member.devtoolPort === devtoolPortFlag.port),
       );
       if (devtoolTaken !== undefined) {
-        const devtoolHeld = devtoolTaken.devtoolPort === devtoolPortFlag.port &&
+        const devtoolHeld =
+          devtoolTaken.devtoolPort === devtoolPortFlag.port &&
           devtoolTaken.port !== devtoolPortFlag.port;
         deps.error(
           `Port ${devtoolPortFlag.port} is already ` +
@@ -652,10 +650,14 @@ export async function runAppCommand(
 
   const next: WorkspaceManifest = {
     ...read.manifest,
-    ...(devtoolPort === undefined ? {} : {
-      devtoolBasePort: read.manifest.devtoolBasePort ?? devtoolPortFlag.port ??
-        devtoolRangeStart(read.manifest),
-    }),
+    ...(devtoolPort === undefined
+      ? {}
+      : {
+          devtoolBasePort:
+            read.manifest.devtoolBasePort ??
+            devtoolPortFlag.port ??
+            devtoolRangeStart(read.manifest),
+        }),
     members: [
       ...read.manifest.members,
       {
@@ -711,7 +713,7 @@ export async function runAppCommand(
     profile,
     rootManifest,
     rootGitignore,
-    ...(devtoolPort === undefined ? [] as const : [devtoolPort] as const),
+    ...(devtoolPort === undefined ? ([] as const) : ([devtoolPort] as const)),
   );
   if (!plan.ok) {
     deps.error(plan.message);
@@ -739,9 +741,9 @@ export async function runAppCommand(
       deps.log(
         outcome.outcome === 'unchanged'
           ? `unchanged ${escapeName(outcome.path)}`
-          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${
-            escapeName(outcome.path)
-          }`,
+          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${escapeName(
+              outcome.path,
+            )}`,
       );
     }
     return EXIT_OK;

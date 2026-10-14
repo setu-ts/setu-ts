@@ -79,13 +79,13 @@ function harness(
     // root is `package.json`, and seeding a `deno.json` there would reproduce that
     // same wrong-reason pass in the other direction.
     const profile = workspaceProfile(runtime);
-    seed[`/ws/${profile.rootManifestFile}`] = root ?? `${
-      JSON.stringify(
+    seed[`/ws/${profile.rootManifestFile}`] =
+      root ??
+      `${JSON.stringify(
         { [profile.globKey]: [profile.memberGlob('apps')], ...tasksFor(profile) },
         null,
         2,
-      )
-    }\n`;
+      )}\n`;
     for (const member of members) {
       seed[`/ws/apps/${member.name}/.setu-member`] = '';
     }
@@ -306,7 +306,8 @@ describe('runAppCommand', () => {
       expect(root['workspace']).toEqual(['./apps/*']);
       expect(root['tasks']).toEqual({
         // Scoped to the three devtool names the runner forwards (M98c).
-        dev: 'deno run --allow-read --allow-run --allow-net ' +
+        dev:
+          'deno run --allow-read --allow-run --allow-net ' +
           '--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER ' +
           'scripts/dev.ts',
       });
@@ -395,9 +396,7 @@ describe('runAppCommand', () => {
       expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
         'export const SERVICE_PORT = 4444;',
       );
-      expect(h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`)).toContain(
-        'port: 4444,',
-      );
+      expect(h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`)).toContain('port: 4444,');
     });
 
     // Two members on one port cannot both start, and every sibling's map names
@@ -433,13 +432,8 @@ describe('runAppCommand', () => {
     });
 
     it('skips ports another local process already holds', async () => {
-      const h = harness(
-        [],
-        3000,
-        'http',
-        undefined,
-        'deno',
-        (port) => Promise.resolve(port !== 3000),
+      const h = harness([], 3000, 'http', undefined, 'deno', (port) =>
+        Promise.resolve(port !== 3000),
       );
       expect(await h.run(['app', 'billing'])).toBe(0);
       expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
@@ -622,12 +616,14 @@ describe('runAppCommand', () => {
         // /live, /ready and /metrics, which the Kubernetes renderer has no
         // other way to know (X2-7, X10-6). False here: no `--template`, so no
         // HealthPlugin and no MetricsPlugin.
-        members: [{
-          name: 'orders',
-          port: 3000,
-          healthProbes: false,
-          metricsEndpoint: false,
-        }],
+        members: [
+          {
+            name: 'orders',
+            port: 3000,
+            healthProbes: false,
+            metricsEndpoint: false,
+          },
+        ],
       });
     });
 
@@ -655,16 +651,12 @@ describe('runAppCommand', () => {
 
   describe('--depends-on', () => {
     it('records each existing prerequisite in the member manifest entry', async () => {
-      const h = harness([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]);
+      const h = harness([
+        { name: 'orders', port: 3000 },
+        { name: 'billing', port: 3001 },
+      ]);
       expect(
-        await h.run([
-          'app',
-          'shipping',
-          '--depends-on',
-          'orders',
-          '--depends-on',
-          'billing',
-        ]),
+        await h.run(['app', 'shipping', '--depends-on', 'orders', '--depends-on', 'billing']),
       ).toBe(0);
       const manifest = JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
         members: WorkspaceMember[];
@@ -686,14 +678,7 @@ describe('runAppCommand', () => {
 
       const duplicate = harness([{ name: 'orders', port: 3000 }]);
       expect(
-        await duplicate.run([
-          'app',
-          'billing',
-          '--depends-on',
-          'orders',
-          '--depends-on',
-          'orders',
-        ]),
+        await duplicate.run(['app', 'billing', '--depends-on', 'orders', '--depends-on', 'orders']),
       ).toBe(2);
       expect(duplicate.err.text()).toContain('only once');
       expect(duplicate.fs.writes).toEqual([]);
@@ -719,9 +704,7 @@ describe('runAppCommand', () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
       const config = h.fs.read('/ws/apps/orders/setu.config.ts');
-      expect(config).toContain(
-        `import { SERVICE_ENDPOINTS } from './${DISCOVERY_MODULE}';`,
-      );
+      expect(config).toContain(`import { SERVICE_ENDPOINTS } from './${DISCOVERY_MODULE}';`);
       expect(config).toContain(
         `ServiceDiscoveryPlugin({ provider: 'static', services: SERVICE_ENDPOINTS })`,
       );
@@ -743,9 +726,7 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
       expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
       const config = h.fs.read('/ws/apps/web/setu.config.ts');
-      expect(config).toContain(
-        `import { SERVICE_ENDPOINTS } from './${DISCOVERY_MODULE}';`,
-      );
+      expect(config).toContain(`import { SERVICE_ENDPOINTS } from './${DISCOVERY_MODULE}';`);
       expect(config).toContain(
         "serviceDiscovery: { provider: 'static', services: SERVICE_ENDPOINTS }",
       );
@@ -806,7 +787,10 @@ describe('runAppCommand', () => {
     it('records both members in the manifest', async () => {
       const h = await twoMembers();
       expect(JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`))).toMatchObject({
-        members: [{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }],
+        members: [
+          { name: 'orders', port: 3000 },
+          { name: 'billing', port: 3001 },
+        ],
       });
     });
   });

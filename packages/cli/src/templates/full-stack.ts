@@ -61,12 +61,13 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
  */
 function fullStackArgs(context: AppFactoryRenderContext): string {
   const { runtime, serviceEndpoints, grpcBasePath } = context;
-  const assets = runtime === 'cloudflare-workers'
-    // Assets are served by the platform binding, not the framework.
-    ? ''
-    // In development (`dev.ts`) Vite serves the client modules and there is no
-    // client build to read, so the development SSR runtime replaces assetsDir.
-    : `\n      ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),`;
+  const assets =
+    runtime === 'cloudflare-workers'
+      ? // Assets are served by the platform binding, not the framework.
+        ''
+      : // In development (`dev.ts`) Vite serves the client modules and there is no
+        // client build to read, so the development SSR runtime replaces assetsDir.
+        `\n      ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),`;
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
@@ -75,12 +76,14 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   // parameter is undefined and the factory reads the platform environment as
   // usual; on Workers it is the per-request bindings object, which is the only
   // place configuration exists there.
-  const discovery = serviceEndpoints === undefined
-    ? ''
-    : `\n    serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
-  const config = runtime === 'cloudflare-workers'
-    ? ''
-    : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
+  const discovery =
+    serviceEndpoints === undefined
+      ? ''
+      : `\n    serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
+  const config =
+    runtime === 'cloudflare-workers'
+      ? ''
+      : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
   // `new RegExp('…')` rather than a regex literal: a generated configuration must
   // stay inside the language the CLI's own config reader classifies (no regex
   // literal, no backslash), or `setu add` and `setu devtool enable` would treat
@@ -89,9 +92,8 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   if (grpcBasePath !== undefined && !/^\/[A-Za-z0-9_-]+$/.test(grpcBasePath)) {
     throw new Error(`gRPC base path ${grpcBasePath} must be a single plain path segment.`);
   }
-  const csrf = grpcBasePath === undefined
-    ? '{}'
-    : `{ exclude: [new RegExp('^${grpcBasePath}(?:/|$)')] }`;
+  const csrf =
+    grpcBasePath === undefined ? '{}' : `{ exclude: [new RegExp('^${grpcBasePath}(?:/|$)')] }`;
 
   // The RETURN TYPE annotation is X5-2's whole fix, and it is load-bearing
   // rather than decorative. TypeScript does NOT apply excess-property checking
@@ -211,21 +213,20 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   localImports: [...FULL_STACK_LOCAL_IMPORTS, ...seamLocalImports(FULL_STACK_SEAMS)],
   // Statements rather than plugin-array entries: this host composes through a
   // starter, so `plugins` must stay empty and there is nothing to spread into.
-  setupCalls: [
-    ...seamSetupCalls(FULL_STACK_SEAMS),
-    ...seamPluginRegistrations(FULL_STACK_SEAMS),
-  ],
+  setupCalls: [...seamSetupCalls(FULL_STACK_SEAMS), ...seamPluginRegistrations(FULL_STACK_SEAMS)],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
     readmeSection: FULL_STACK_README_SECTION,
     envFilePath: '.env',
     // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
     // without this the template scaffolds a project that throws at startup.
-    envVariables: [{
-      name: 'SESSION_SECRET',
-      description: 'Signs and encrypts session cookies. Use a long random value in production.',
-      develop: 'dev-only-insecure-session-secret-change-me',
-    }],
+    envVariables: [
+      {
+        name: 'SESSION_SECRET',
+        description: 'Signs and encrypts session cookies. Use a long random value in production.',
+        develop: 'dev-only-insecure-session-secret-change-me',
+      },
+    ],
     // The one template with a real frontend build, and the only one that should
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuild: {

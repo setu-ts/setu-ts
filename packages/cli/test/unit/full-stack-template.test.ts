@@ -53,8 +53,7 @@ describe('full-stack template | registration', () => {
     expect(FULL_STACK_TEMPLATE.middleware).toEqual([]);
   });
 
-  it('refuses no runtime target', () => {
-  });
+  it('refuses no runtime target', () => {});
 });
 
 describe('full-stack template | the layering it emits', () => {
@@ -184,11 +183,9 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     for (const file of FULL_STACK_APP_FILES) {
       if (file.path.endsWith('.server.ts')) continue;
 
-      for (
-        const match of file.contents.matchAll(
-          /^import\s+(?!type\b)[^;]*?from\s+'(@setu-ts\/[^']+)'/gm,
-        )
-      ) {
+      for (const match of file.contents.matchAll(
+        /^import\s+(?!type\b)[^;]*?from\s+'(@setu-ts\/[^']+)'/gm,
+      )) {
         throw new Error(
           `${file.path} value-imports ${match[1]}; only .server.ts modules may do that`,
         );
@@ -292,8 +289,8 @@ describe('full-stack template | the runtime-dependent argument', () => {
   it('imports every identifier its argument string names', () => {
     const args = argsFor('deno');
     const localSymbols = (FULL_STACK_TEMPLATE.localImports ?? []).flatMap((i) => i.symbols);
-    const packageSymbols = (FULL_STACK_TEMPLATE.packageImports ?? []).flatMap((i) =>
-      i.symbols ?? []
+    const packageSymbols = (FULL_STACK_TEMPLATE.packageImports ?? []).flatMap(
+      (i) => i.symbols ?? [],
     );
     const inScope = new Set([...localSymbols, ...packageSymbols]);
 
@@ -423,14 +420,11 @@ describe('full-stack vite.config.ts | executed', () => {
       const app = `${root}/apps/web`;
       await nodeFs.mkdir(app, { recursive: true });
       await nodeFs.writeFile(`${app}/vite.config.ts`, contentsOf('vite.config.ts'));
-      await nodeFs.writeFile(
-        `${app}/vite.ts`,
-        'export const defineConfig = (c: unknown) => c;\n',
-      );
+      await nodeFs.writeFile(`${app}/vite.ts`, 'export const defineConfig = (c: unknown) => c;\n');
       await nodeFs.writeFile(`${app}/rr.ts`, 'export const reactRouter = () => ({});\n');
       await nodeFs.writeFile(
         `${app}/deno.json`,
-        JSON.stringify({ imports: { 'vite': './vite.ts', '@react-router/dev/vite': './rr.ts' } }),
+        JSON.stringify({ imports: { vite: './vite.ts', '@react-router/dev/vite': './rr.ts' } }),
       );
       const library = async (name: string, file: string, text: string) => {
         await nodeFs.mkdir(`${root}/libs/${name}`, { recursive: true });
@@ -491,9 +485,9 @@ describe('full-stack vite.config.ts | executed', () => {
 
 describe('full-stack app files | module-level shape', () => {
   it('marks every server-only module with the .server convention', () => {
-    const serverModules = FULL_STACK_APP_FILES
-      .filter((file) => file.contents.includes('@setu-ts/common'))
-      .map((file) => file.path);
+    const serverModules = FULL_STACK_APP_FILES.filter((file) =>
+      file.contents.includes('@setu-ts/common'),
+    ).map((file) => file.path);
 
     // context-keys.ts is the one exception: it is a type-only import of a key
     // shape, imported by both server and client code.
@@ -525,8 +519,9 @@ describe('full-stack gRPC csrf exclusion', () => {
 
   it('refuses a base path that is not a single plain segment', () => {
     for (const grpcBasePath of ['/a.b', '/a/b', 'grpc', '/']) {
-      expect(() => FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath }))
-        .toThrow('must be a single plain path segment');
+      expect(() =>
+        FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath }),
+      ).toThrow('must be a single plain path segment');
     }
   });
 });

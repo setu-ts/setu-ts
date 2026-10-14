@@ -34,14 +34,18 @@ describe('W3C trace context codec', () => {
   it('returns an opaque context for absent, malformed, and unsupported headers', () => {
     expect(parseTraceparentToContext(null)).toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
     expect(parseTraceparentToContext('broken')).toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
-    expect(parseTraceparentToContext('01-0123456789abcdef0123456789abcdef-0123456789abcdef-01'))
-      .toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
-    expect(parseTraceparentToContext('00-00000000000000000000000000000000-0123456789abcdef-01'))
-      .toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
-    expect(parseTraceparentToContext('00-0123456789abcdef0123456789abcdef-0000000000000000-01'))
-      .toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
-    expect(parseTraceparentToContext('00-ABCDEFABCDEFABCDEFABCDEFABCDEFAB-0123456789abcdef-01'))
-      .toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
+    expect(
+      parseTraceparentToContext('01-0123456789abcdef0123456789abcdef-0123456789abcdef-01'),
+    ).toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
+    expect(
+      parseTraceparentToContext('00-00000000000000000000000000000000-0123456789abcdef-01'),
+    ).toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
+    expect(
+      parseTraceparentToContext('00-0123456789abcdef0123456789abcdef-0000000000000000-01'),
+    ).toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
+    expect(
+      parseTraceparentToContext('00-ABCDEFABCDEFABCDEFABCDEFABCDEFAB-0123456789abcdef-01'),
+    ).toEqual({ _opaque: TELEMETRY_CONTEXT_OPAQUE });
   });
 
   it('extracts tracestate and does not format incomplete contexts', () => {
@@ -51,15 +55,19 @@ describe('W3C trace context codec', () => {
     });
     expect(extractContextFromHeaders(headers).tracestate).toBe('vendor=value');
     expect(contextToTraceparent({ _opaque: TELEMETRY_CONTEXT_OPAQUE })).toBeNull();
-    expect(contextToTraceparent({
-      _opaque: TELEMETRY_CONTEXT_OPAQUE,
-      traceId: '00000000000000000000000000000000',
-      spanId: '0123456789abcdef',
-    })).toBeNull();
-    expect(contextToTraceparent({
-      _opaque: TELEMETRY_CONTEXT_OPAQUE,
-      traceId: 'ABCDEFABCDEFABCDEFABCDEFABCDEFAB',
-      spanId: '0123456789abcdef',
-    })).toBeNull();
+    expect(
+      contextToTraceparent({
+        _opaque: TELEMETRY_CONTEXT_OPAQUE,
+        traceId: '00000000000000000000000000000000',
+        spanId: '0123456789abcdef',
+      }),
+    ).toBeNull();
+    expect(
+      contextToTraceparent({
+        _opaque: TELEMETRY_CONTEXT_OPAQUE,
+        traceId: 'ABCDEFABCDEFABCDEFABCDEFABCDEFAB',
+        spanId: '0123456789abcdef',
+      }),
+    ).toBeNull();
   });
 });

@@ -86,9 +86,7 @@ export function defineConfigSection<T>(definition: ConfigSection<T>): ConfigSect
 export function getConfigSection<T>(config: IConfig, definition: ConfigSection<T>): T {
   const entry = sectionCache.get(config)?.get(definition);
   if (entry === undefined || !isEntryForDefinition(entry, definition)) {
-    throw new Error(
-      `Configuration section "${definition.prefix}" was not validated at startup.`,
-    );
+    throw new Error(`Configuration section "${definition.prefix}" was not validated at startup.`);
   }
 
   // The cache is populated only with this definition's schema.parse() output.

@@ -81,9 +81,14 @@ async function outcomeAfterBound(
   advanceMs: number,
 ): Promise<string> {
   let done = false;
-  const outcome = call.then(() => 'resolved', (e: Error) => e.message).finally(() => {
-    done = true;
-  });
+  const outcome = call
+    .then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    )
+    .finally(() => {
+      done = true;
+    });
   await settle();
   expect(done).toBe(false);
   await runtime.advanceMs(advanceMs);
@@ -305,8 +310,9 @@ describe('RabbitMqQueue durability', () => {
     expect(resolvePublishTimeoutMs(0)).toBe(0);
     for (const bad of [Number.NaN, -1, Number.POSITIVE_INFINITY, 2_147_483_648]) {
       expect(() => resolvePublishTimeoutMs(bad)).toThrow(RangeError);
-      expect(() => new RabbitMqQueue(new FakeRuntimeServices(), { publishTimeoutMs: bad }))
-        .toThrow('publishTimeoutMs');
+      expect(() => new RabbitMqQueue(new FakeRuntimeServices(), { publishTimeoutMs: bad })).toThrow(
+        'publishTimeoutMs',
+      );
     }
   });
 
@@ -361,8 +367,9 @@ describe('QueuePlugin RabbitMQ durability options', () => {
   });
 
   it('refuses a non-boolean persistentMessages when QueuePlugin(...) is called', () => {
-    expect(() => QueuePlugin({ adapter: 'rabbitmq', persistentMessages: 1 as unknown as boolean }))
-      .toThrow(TypeError);
+    expect(() =>
+      QueuePlugin({ adapter: 'rabbitmq', persistentMessages: 1 as unknown as boolean }),
+    ).toThrow(TypeError);
   });
 
   it('does not validate RabbitMQ options for another adapter', () => {

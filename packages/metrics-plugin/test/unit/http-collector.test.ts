@@ -145,9 +145,8 @@ describe('HttpCollector', () => {
 
   it('never labels any series by path (only method + status)', async () => {
     const { collector, requests, duration } = setup();
-    await collector.middleware(
-      createFakeContext({ method: 'GET', status: 200 }),
-      () => Promise.resolve(),
+    await collector.middleware(createFakeContext({ method: 'GET', status: 200 }), () =>
+      Promise.resolve(),
     );
 
     // The one recorded request series is keyed by method+status only.

@@ -22,16 +22,13 @@ const OPTIONS = { queues: { jobs: 'https://sqs/jobs' } };
 describe('SqsQueue health (M70c)', () => {
   it('delegates to the transport isHealthy when present (true)', async () => {
     let calls = 0;
-    const queue = new SqsQueue(
-      new FakeRuntimeServices(),
-      {
-        ...OPTIONS,
-        client: makeTransport(() => {
-          calls++;
-          return Promise.resolve(true);
-        }),
-      },
-    );
+    const queue = new SqsQueue(new FakeRuntimeServices(), {
+      ...OPTIONS,
+      client: makeTransport(() => {
+        calls++;
+        return Promise.resolve(true);
+      }),
+    });
     await queue.connect();
     const probe = queue.isHealthy;
     expect(typeof probe).toBe('function');
@@ -42,10 +39,10 @@ describe('SqsQueue health (M70c)', () => {
   });
 
   it('delegates to the transport isHealthy when present (false)', async () => {
-    const queue = new SqsQueue(
-      new FakeRuntimeServices(),
-      { ...OPTIONS, client: makeTransport(() => Promise.resolve(false)) },
-    );
+    const queue = new SqsQueue(new FakeRuntimeServices(), {
+      ...OPTIONS,
+      client: makeTransport(() => Promise.resolve(false)),
+    });
     await queue.connect();
     const probe = queue.isHealthy;
     expect(typeof probe).toBe('function');
@@ -63,10 +60,10 @@ describe('SqsQueue health (M70c)', () => {
   });
 
   it('reports unknown after disconnect', async () => {
-    const queue = new SqsQueue(
-      new FakeRuntimeServices(),
-      { ...OPTIONS, client: makeTransport(() => Promise.resolve(true)) },
-    );
+    const queue = new SqsQueue(new FakeRuntimeServices(), {
+      ...OPTIONS,
+      client: makeTransport(() => Promise.resolve(true)),
+    });
     await queue.connect();
     expect(typeof queue.isHealthy).toBe('function');
     await queue.disconnect();

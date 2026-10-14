@@ -165,16 +165,11 @@ describe('Queue zero-configuration dispatch is unchanged (M86 §3.9)', () => {
   it('a synchronous processor failure is caught in the same synchronous execution — no chain interposed', async () => {
     const adapter = createRecordingAdapter();
     let ran = false;
-    const outcome = runJob(
-      new FakeRuntimeServices(),
-      adapter,
-      storedJob(),
-      (job) => {
-        expect(job.id).toBe('job-1');
-        ran = true;
-        throw new Error('sync boom');
-      },
-    );
+    const outcome = runJob(new FakeRuntimeServices(), adapter, storedJob(), (job) => {
+      expect(job.id).toBe('job-1');
+      ran = true;
+      throw new Error('sync boom');
+    });
 
     // Ran AND settled the retry BEFORE the next statement: the failure path
     // is reachable synchronously, exactly as before the chain existed. A

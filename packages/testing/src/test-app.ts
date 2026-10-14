@@ -153,9 +153,7 @@ export type TestAppOptions = TestAppFromPlugins | TestAppFromApp;
  * @throws {Error} If `without` names a plugin the supplied `app` does not hold
  * @since 0.1.0
  */
-export async function createTestApp(
-  options?: TestAppOptions,
-): Promise<IKernelApplication> {
+export async function createTestApp(options?: TestAppOptions): Promise<IKernelApplication> {
   const autoStart = options?.autoStart ?? true;
   const app = options?.app ?? createApplication({ plugins: options?.plugins ?? [] });
 

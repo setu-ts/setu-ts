@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 // ConsoleLogger is the sanctioned logger implementation (AI_GUIDELINES §11.6).
 /**
  * Console-backed structured logger — runtime-independent JSON or pretty
@@ -251,9 +251,10 @@ export class ConsoleLogger implements ILogger {
 
   #prettyPrint(level: LogLevel, message: string, metadata: Record<string, unknown>): void {
     const ts = new Date(this.#runtime.now()).toISOString();
-    const meta = Object.keys(metadata).length > 0
-      ? ` ${safeStringify(metadata) ?? UNSERIALIZABLE_METADATA}`
-      : '';
+    const meta =
+      Object.keys(metadata).length > 0
+        ? ` ${safeStringify(metadata) ?? UNSERIALIZABLE_METADATA}`
+        : '';
     console.log(`${ts} [${level.toUpperCase()}] ${message}${meta}`);
   }
 }

@@ -37,10 +37,7 @@ const prismaClient = new PrismaClient({
 });
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
-  ],
+  plugins: [RuntimePlugin(), DatabasePlugin({ type: 'prisma', options: { prismaClient } })],
 });
 await app.start({ port: 3000 });
 
@@ -66,9 +63,12 @@ await db.transaction(async (uow) => {
 Pass an isolation level when a read-modify-write needs an explicit concurrency guarantee:
 
 ```typescript
-await db.transaction(async (uow) => {
-  // Read and update through transaction-scoped repositories.
-}, { isolation: 'serializable' });
+await db.transaction(
+  async (uow) => {
+    // Read and update through transaction-scoped repositories.
+  },
+  { isolation: 'serializable' },
+);
 ```
 
 Omitting the option preserves each adapter's current default. A requested level is never silently
@@ -371,8 +371,7 @@ prerequisites are easy to miss, and none of them is this package's to supply:
    with no argument does not compile — install the adapter for your connector (`@prisma/adapter-pg`,
    `@prisma/adapter-mariadb`, …) and pass it as `adapter`.
 2. **`schema.prisma` may no longer carry `url`.** Prisma 7 answers
-   `P1012: The datasource property
-   'url' is no longer supported in schema files`; the connection
+   `P1012: The datasource property 'url' is no longer supported in schema files`; the connection
    string moves to a `prisma.config.ts`.
 3. **A non-`public` PostgreSQL schema must be named on the adapter.** `?schema=…` in the URL is read
    by Prisma Migrate only, so the driver adapter needs
@@ -386,10 +385,7 @@ supplied to repository `where`, `orderBy`, or `select` must be a real column on 
 adapter can return the actual persisted row instead of guessing:
 
 ```typescript
-const drizzleDatabase = createDrizzleDatabase(
-  db,
-  (database, work) => database.transaction(work),
-);
+const drizzleDatabase = createDrizzleDatabase(db, (database, work) => database.transaction(work));
 
 DatabasePlugin({
   type: 'drizzle',
@@ -469,9 +465,8 @@ import {
   getDrizzleTransaction,
 } from '@setu-ts/database-plugin';
 
-const drizzleDatabase = createDrizzleDatabase(
-  drizzleDb,
-  (database, work) => database.transaction(work),
+const drizzleDatabase = createDrizzleDatabase(drizzleDb, (database, work) =>
+  database.transaction(work),
 );
 const outer = getDrizzleDatabase(db, drizzleDatabase);
 const allUsers = await outer.select().from(users);
@@ -506,13 +501,15 @@ six `IDataSource` methods and translates all six `NormalizedQuery` members nativ
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'mongodb',
-  options: {
-    url: 'mongodb://127.0.0.1:27017/app',
-    collections: { User: { collection: 'users', primaryKey: 'user_id' } },
-  },
-}));
+app.register(
+  DatabasePlugin({
+    type: 'mongodb',
+    options: {
+      url: 'mongodb://127.0.0.1:27017/app',
+      collections: { User: { collection: 'users', primaryKey: 'user_id' } },
+    },
+  }),
+);
 ```
 
 | `options` field | Type                                 | Default            | Read by                                                                                                             |
@@ -572,15 +569,17 @@ Azure Cosmos for MongoDB account offers server versions above that floor, so the
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'cosmos',
-  options: {
-    endpoint: 'https://my-account.documents.azure.com:443/',
-    key: cosmosKey,
-    database: 'app',
-    containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
-  },
-}));
+app.register(
+  DatabasePlugin({
+    type: 'cosmos',
+    options: {
+      endpoint: 'https://my-account.documents.azure.com:443/',
+      key: cosmosKey,
+      database: 'app',
+      containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+    },
+  }),
+);
 ```
 
 | `options` field | Type                                  | Default | Read by                                                                                                                               |
@@ -706,21 +705,23 @@ a scan, and `orderBy` is row-key order or nothing.
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'bigtable',
-  options: {
-    projectId: 'my-project',
-    instance: 'app-instance',
-    tables: {
-      Order: {
-        table: 'orders',
-        rowKey: { fields: ['tenantId', 'orderId'], separator: '#' },
-        columnFamily: 'o',
-        columns: { total: 'metrics:amount' },
+app.register(
+  DatabasePlugin({
+    type: 'bigtable',
+    options: {
+      projectId: 'my-project',
+      instance: 'app-instance',
+      tables: {
+        Order: {
+          table: 'orders',
+          rowKey: { fields: ['tenantId', 'orderId'], separator: '#' },
+          columnFamily: 'o',
+          columns: { total: 'metrics:amount' },
+        },
       },
     },
-  },
-}));
+  }),
+);
 ```
 
 | `options` field  | Type                                    | Default | Read by                                                                                                                             |
@@ -1003,8 +1004,7 @@ by two kinds of refusal: a caller-caused query shape, and a **configuration** re
 former is answered `501`; the latter keeps the masked `500` that is correct for an internal fault.
 Branding the constructor unconditionally made a blank `columnFamily` — a value the developer wrote —
 answer every request
-`501 "Query feature 'mapping' is not supported by the 'bigtable' database
-adapter."`, which is a lie
+`501 "Query feature 'mapping' is not supported by the 'bigtable' database adapter."`, which is a lie
 twice over. The split is an allowlist of `feature` values (`attribute-value`, `composite-key`,
 `cursor-pagination`, `key`, `nested-path`, `offset`, `order-by`/`orderBy`, `row-key`, `update`);
 `mapping`, `endpoint`, `date-encoding` and `transaction` are excluded, and **an unclassified value

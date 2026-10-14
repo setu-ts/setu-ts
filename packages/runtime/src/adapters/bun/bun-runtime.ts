@@ -120,9 +120,7 @@ export function createBunRuntimeServices(
     realPath: (path: string) => {
       const resolved = host.realPath(path);
       if (resolved === null) {
-        return Promise.reject(
-          new Error(`ENOENT: no such file or directory, realpath '${path}'`),
-        );
+        return Promise.reject(new Error(`ENOENT: no such file or directory, realpath '${path}'`));
       }
       return Promise.resolve(resolved);
     },
@@ -153,9 +151,7 @@ export function createBunRuntimeServices(
     readdir: (path: string) => {
       const entries = host.readdir(path);
       if (entries === null) {
-        return Promise.reject(
-          new Error(`ENOENT: no such file or directory, readdir '${path}'`),
-        );
+        return Promise.reject(new Error(`ENOENT: no such file or directory, readdir '${path}'`));
       }
       return Promise.resolve(entries);
     },

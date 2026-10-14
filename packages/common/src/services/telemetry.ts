@@ -30,10 +30,7 @@ export type SpanKind = 'internal' | 'server' | 'client' | 'producer' | 'consumer
  * @since 0.2.0
  */
 export type SpanAttributeValue =
-  | string
-  | number
-  | boolean
-  | ReadonlyArray<string | number | boolean>;
+  string | number | boolean | ReadonlyArray<string | number | boolean>;
 
 /**
  * Options for span creation.
@@ -75,9 +72,7 @@ export interface SpanOptions {
  *
  * @since 0.2.0
  */
-export const TELEMETRY_CONTEXT_OPAQUE: unique symbol = Symbol.for(
-  'he.telemetry.context',
-);
+export const TELEMETRY_CONTEXT_OPAQUE: unique symbol = Symbol.for('he.telemetry.context');
 
 /**
  * Opaque handle representing the parent context for span creation.
@@ -201,11 +196,7 @@ export interface ITelemetryService {
    * });
    * ```
    */
-  withSpan<T>(
-    name: string,
-    fn: (span: ISpan) => Promise<T>,
-    options?: SpanOptions,
-  ): Promise<T>;
+  withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>;
 
   /**
    * Reports the identifiers of the span that is active RIGHT NOW, so a signal

@@ -97,20 +97,26 @@ export function createProvider(
     }
 
     case 'gcs':
-      return new GcsProvider({
-        projectId: config.options.projectId,
-        bucket: config.options.bucket,
-        client: config.options.client,
-      }, now);
+      return new GcsProvider(
+        {
+          projectId: config.options.projectId,
+          bucket: config.options.bucket,
+          client: config.options.client,
+        },
+        now,
+      );
 
     case 'azure':
-      return new AzureBlobProvider({
-        connectionString: config.options.connectionString,
-        accountName: config.options.accountName,
-        accountKey: config.options.accountKey,
-        containerName: config.options.containerName,
-        client: config.options.client,
-      }, now);
+      return new AzureBlobProvider(
+        {
+          connectionString: config.options.connectionString,
+          accountName: config.options.accountName,
+          accountKey: config.options.accountKey,
+          containerName: config.options.containerName,
+          client: config.options.client,
+        },
+        now,
+      );
 
     default: {
       // Unreachable through the typed surface; reached only when a JavaScript
@@ -147,9 +153,8 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
   const config: StoragePluginOptions = options ?? {};
   const providerType = config.provider ?? DEFAULT_PROVIDER;
   // M98m: validated here, before any application exists.
-  const diagnosticsAlias = config.diagnostics === undefined
-    ? null
-    : compileStorageDiagnosticsAlias(config.diagnostics);
+  const diagnosticsAlias =
+    config.diagnostics === undefined ? null : compileStorageDiagnosticsAlias(config.diagnostics);
 
   return {
     name: PLUGIN_NAME,
@@ -170,10 +175,10 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
       // instances never collide). It describes THIS service only — a later
       // replacement of the storage token is outside its coverage. Opted out,
       // the source is inert and nothing is attached to the service.
-      const collector = diagnosticsAlias === null ? null : new StorageObservationCollector(
-        diagnosticsAlias,
-        ctx.runtime.hrtime.bind(ctx.runtime),
-      );
+      const collector =
+        diagnosticsAlias === null
+          ? null
+          : new StorageObservationCollector(diagnosticsAlias, ctx.runtime.hrtime.bind(ctx.runtime));
       if (collector !== null) {
         attachStorageCollector(service, collector);
       }

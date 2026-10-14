@@ -66,10 +66,7 @@ describe('createMessagingHandler', () => {
     const handler = createMessagingHandler(app, { name: 'orders' });
     services.set(
       'messaging.orders',
-      new WorkersBroker(
-        new FakeQueueProducer(),
-        new FakeBrokerRuntime(),
-      ),
+      new WorkersBroker(new FakeQueueProducer(), new FakeBrokerRuntime()),
     );
 
     await handler(new FakeQueueBatch('messages', []));

@@ -22,12 +22,7 @@ type ErrorHook = (error: Error, ctx: IRequestContext) => void | Promise<void>;
  * @since 0.8.0
  */
 export type LifecycleHookPhase =
-  | 'register-hook'
-  | 'init'
-  | 'bootstrap'
-  | 'stopping'
-  | 'shutdown'
-  | 'close';
+  'register-hook' | 'init' | 'bootstrap' | 'stopping' | 'shutdown' | 'close';
 
 /**
  * One hook invocation observed with its fixed phase plus execution ordinal —

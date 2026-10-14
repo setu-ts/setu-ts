@@ -15,10 +15,7 @@ export class FakeAuditDbClient implements IAuditDbClient {
     return Promise.resolve();
   }
 
-  select(
-    table: string,
-    criteria?: Record<string, unknown>,
-  ): Promise<Record<string, unknown>[]> {
+  select(table: string, criteria?: Record<string, unknown>): Promise<Record<string, unknown>[]> {
     if (criteria) {
       this.selects.push({ table, criteria });
     } else {

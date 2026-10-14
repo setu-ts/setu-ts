@@ -19,13 +19,7 @@ import type { PutObjectOptions } from '@setu-ts/common';
 // ── Provider type discriminant ────────────────────────────────────────────
 
 /** Supported storage back-ends. */
-export type StorageProviderType =
-  | 'memory'
-  | 'local'
-  | 's3'
-  | 'gcs'
-  | 'azure'
-  | 'b2';
+export type StorageProviderType = 'memory' | 'local' | 's3' | 'gcs' | 'azure' | 'b2';
 
 // ── Plugin / provider options ─────────────────────────────────────────────
 
@@ -153,10 +147,7 @@ export interface StorageDiagnosticsOptions {
  * @since 0.1.0
  */
 export type StorageProviderOptions =
-  | LocalStorageProviderOptions
-  | S3ProviderOptions
-  | GcsProviderOptions
-  | AzureBlobProviderOptions;
+  LocalStorageProviderOptions | S3ProviderOptions | GcsProviderOptions | AzureBlobProviderOptions;
 
 /** Options for {@linkcode LocalStorageProvider}. */
 export interface LocalStorageProviderOptions {

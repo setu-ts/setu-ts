@@ -26,7 +26,10 @@ class FakeAzureClient implements IAzureSecretsClient {
 function fakeAzureModule(store: Map<string, string>, error?: unknown): AzureSdkModule {
   class Credential {}
   class Client {
-    constructor(readonly url: string, readonly cred: object) {}
+    constructor(
+      readonly url: string,
+      readonly cred: object,
+    ) {}
     getSecret(name: string): Promise<{ value?: string | undefined }> {
       if (error !== undefined) {
         return Promise.reject(error);

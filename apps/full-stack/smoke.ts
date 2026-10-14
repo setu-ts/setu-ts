@@ -38,8 +38,7 @@ function readCsrfToken(html: string): string {
 
 /** Collects the cookies a response set, as a single request header value. */
 function readCookies(response: Response): string {
-  const cookies = response.headers.getSetCookie()
-    .map((cookie) => cookie.split(';', 1)[0]);
+  const cookies = response.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0]);
   return cookies.length > 0 ? cookies.join('; ') : fail('No session cookie was set.');
 }
 
@@ -47,17 +46,13 @@ const app = await createApp();
 await app.start();
 try {
   // 1 — write through the capability.
-  const seeded = await seedProducts(
-    app.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
-  );
+  const seeded = await seedProducts(app.services.get<IDatabaseService>(CAPABILITIES.DATABASE));
   if (seeded.length === 0) fail('Seeding produced no products.');
 
   // 2 — read it back through server-side rendering.
   const rendered = await app.fetch(new Request(`${ORIGIN}/products`));
   if (rendered.status !== 200) {
-    fail(
-      `Expected the SSR products route to answer 200, received ${rendered.status}.`,
-    );
+    fail(`Expected the SSR products route to answer 200, received ${rendered.status}.`);
   }
   const html = await rendered.text();
   // Every seeded row, name and formatted price. Asserting the whole set rather
@@ -65,10 +60,7 @@ try {
   // markers (`Products (<!-- -->2<!-- -->)`), so a rendered number is not a
   // literal substring — and the set is the stronger claim anyway.
   for (const seededProduct of seeded) {
-    if (
-      !html.includes(seededProduct.name) ||
-      !html.includes(formatPrice(seededProduct))
-    ) {
+    if (!html.includes(seededProduct.name) || !html.includes(formatPrice(seededProduct))) {
       fail(
         `The SSR page did not render the seeded product "${seededProduct.name}" at ` +
           `${formatPrice(seededProduct)} — the load-context bridge is not delivering the ` +
@@ -122,7 +114,7 @@ try {
         `"${spec.headers.get('content-type')}" — an HTML body here is the SSR 404 page.`,
     );
   }
-  const document = await spec.json() as { openapi?: string };
+  const document = (await spec.json()) as { openapi?: string };
   if (typeof document.openapi !== 'string') {
     fail('The /openapi.json body carried no `openapi` version field.');
   }
@@ -150,9 +142,7 @@ try {
   // 3 — the session and its form CSRF token, through the same SSR path.
   const loginPage = await app.fetch(new Request(`${ORIGIN}/login`));
   if (loginPage.status !== 200) {
-    fail(
-      `Expected the login route to answer 200, received ${loginPage.status}.`,
-    );
+    fail(`Expected the login route to answer 200, received ${loginPage.status}.`);
   }
   const csrfToken = readCsrfToken(await loginPage.text());
   const cookies = readCookies(loginPage);
@@ -178,9 +168,7 @@ try {
     );
   }
   if (submitted.headers.get('location') !== '/products') {
-    fail(
-      `Expected a redirect to /products, received ${submitted.headers.get('location')}.`,
-    );
+    fail(`Expected a redirect to /products, received ${submitted.headers.get('location')}.`);
   }
 } finally {
   await app.stop();

@@ -25,13 +25,16 @@ import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
 
 /** The document shape these tests read. */
 interface Spec {
-  paths: Record<string, {
-    post?: {
-      requestBody?: { content: { 'application/json': { schema: SchemaLike } } };
-      responses: Record<string, { content?: { 'application/json'?: { schema: SchemaLike } } }>;
-    };
-    get?: { parameters?: { name: string; required?: boolean; schema?: SchemaLike }[] };
-  }>;
+  paths: Record<
+    string,
+    {
+      post?: {
+        requestBody?: { content: { 'application/json': { schema: SchemaLike } } };
+        responses: Record<string, { content?: { 'application/json'?: { schema: SchemaLike } } }>;
+      };
+      get?: { parameters?: { name: string; required?: boolean; schema?: SchemaLike }[] };
+    }
+  >;
   components?: { schemas?: Record<string, SchemaLike> };
 }
 
@@ -97,8 +100,8 @@ describe('A10-1 — request bodies are documented in the input view', () => {
     // The RESPONSE keeps the output view: after parsing, `plan` is always
     // present and unknown keys are gone, which is what a client reading a
     // response can rely on.
-    const response = spec.paths['/signup']?.post?.responses['201']?.content?.['application/json']
-      ?.schema;
+    const response =
+      spec.paths['/signup']?.post?.responses['201']?.content?.['application/json']?.schema;
     expect(response?.required).toEqual(['name', 'plan']);
     expect(response?.additionalProperties).toBe(false);
     await app.stop();
@@ -112,8 +115,8 @@ describe('A10-1 — request bodies are documented in the input view', () => {
     app.router.post('/posts', { handler: (ctx) => ctx.response.json({}), schema: { body: Body } });
     await app.start();
 
-    const body = (await specOf(app)).paths['/posts']?.post?.requestBody
-      ?.content['application/json'].schema;
+    const body = (await specOf(app)).paths['/posts']?.post?.requestBody?.content['application/json']
+      .schema;
     // THE DEFECT: this was `{}` — the output of a transform is unrepresentable
     // in JSON Schema, so the output view documented nothing at all, silently.
     expect(body?.properties?.slug).toEqual({ type: 'string' });
@@ -128,8 +131,9 @@ describe('A10-1 — request bodies are documented in the input view', () => {
     app.router.post('/strict', { handler: (ctx) => ctx.response.json({}), schema: { body: Body } });
     await app.start();
 
-    const body = (await specOf(app)).paths['/strict']?.post?.requestBody
-      ?.content['application/json'].schema;
+    const body = (await specOf(app)).paths['/strict']?.post?.requestBody?.content[
+      'application/json'
+    ].schema;
     // `z4.strictObject` REJECTS an unknown key, so the marker is correct here
     // and survives the input view — the fix removes it only where the server
     // does not enforce it.
@@ -156,24 +160,21 @@ describe('A10-1 — request bodies are documented in the input view', () => {
     await app.stop();
   });
 
-  it(
-    'leaves zod v3 documents unchanged, which is what closes the majors disagreement',
-    async () => {
-      const Signup = z3.object({ name: z3.string(), plan: z3.string().default('free') });
-      const app = createApplication({
-        plugins: [RuntimePlugin(), OpenApiPlugin({ title: 'T', version: '1' })],
-      });
-      app.router.post('/v3', { handler: (ctx) => ctx.response.json({}), schema: { body: Signup } });
-      await app.start();
+  it('leaves zod v3 documents unchanged, which is what closes the majors disagreement', async () => {
+    const Signup = z3.object({ name: z3.string(), plan: z3.string().default('free') });
+    const app = createApplication({
+      plugins: [RuntimePlugin(), OpenApiPlugin({ title: 'T', version: '1' })],
+    });
+    app.router.post('/v3', { handler: (ctx) => ctx.response.json({}), schema: { body: Signup } });
+    await app.start();
 
-      const body = (await specOf(app)).paths['/v3']?.post?.requestBody
-        ?.content['application/json'].schema;
-      // v3 hand-walks `_def` and has no `io` concept: what it emits is already
-      // the input view, and always was. So after the fix the two majors agree
-      // on a request body, which is the half A10-1 named.
-      expect(body?.required).toEqual(['name']);
-      expect(body).not.toHaveProperty('additionalProperties');
-      await app.stop();
-    },
-  );
+    const body = (await specOf(app)).paths['/v3']?.post?.requestBody?.content['application/json']
+      .schema;
+    // v3 hand-walks `_def` and has no `io` concept: what it emits is already
+    // the input view, and always was. So after the fix the two majors agree
+    // on a request body, which is the half A10-1 named.
+    expect(body?.required).toEqual(['name']);
+    expect(body).not.toHaveProperty('additionalProperties');
+    await app.stop();
+  });
 });

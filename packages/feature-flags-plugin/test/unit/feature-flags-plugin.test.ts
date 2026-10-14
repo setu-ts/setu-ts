@@ -44,10 +44,7 @@ describe('FeatureFlagsPlugin', () => {
         Readonly<Record<string, import('../../src/interfaces/index.ts').FlagDefinition>>
       > => Promise.resolve({}),
     };
-    const provider = createProvider(
-      { provider: 'database', options: { store } },
-      ctx.ctx,
-    );
+    const provider = createProvider({ provider: 'database', options: { store } }, ctx.ctx);
     expect(provider).toBeInstanceOf(DatabaseProvider);
   });
 
@@ -71,8 +68,9 @@ describe('FeatureFlagsPlugin', () => {
     // Cast the full discriminated union through a narrow object that violates the discriminant
     const bogusOptions = Object.freeze({ provider: 'nonexistent', options: {} });
     // We only need to call createProvider with invalid options to trigger the throw
-    expect(() => createProvider(bogusOptions as unknown as FeatureFlagsPluginOptions, ctx.ctx))
-      .toThrow('Unrecognized feature flags provider');
+    expect(() =>
+      createProvider(bogusOptions as unknown as FeatureFlagsPluginOptions, ctx.ctx),
+    ).toThrow('Unrecognized feature flags provider');
   });
 
   it('register awaits service.start() and registers under FEATURE_FLAGS', async () => {
@@ -211,10 +209,13 @@ describe('FeatureFlagsPlugin', () => {
 describe('createProvider — launchdarkly arm', () => {
   it('returns a LaunchDarklyProvider for the "launchdarkly" arm', () => {
     const ctx = createFakeContext();
-    const provider = createProvider({
-      provider: 'launchdarkly',
-      options: { client: new FakeLaunchDarklyClient() },
-    }, ctx.ctx);
+    const provider = createProvider(
+      {
+        provider: 'launchdarkly',
+        options: { client: new FakeLaunchDarklyClient() },
+      },
+      ctx.ctx,
+    );
     expect(provider).toBeInstanceOf(LaunchDarklyProvider);
     expect(provider.type).toBe('launchdarkly');
   });

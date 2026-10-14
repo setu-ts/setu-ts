@@ -153,7 +153,8 @@ export function findNameConflict(
       return {
         claimedBy: `the installed plugin @setu-ts/${claimant}`,
         resource: `the health-indicator name '${kebab}'`,
-        consequence: 'the health service refuses a duplicate indicator name, so the application ' +
+        consequence:
+          'the health service refuses a duplicate indicator name, so the application ' +
           'would type-check and then throw at app.start()',
         remedy: `remove @setu-ts/${claimant} from the project`,
       };
@@ -167,7 +168,7 @@ export function findNameConflict(
       if (other === schematic) continue;
       // Modules are scanned separately from the flat families, because a module is a
       // directory that must hold two specific files rather than one suffixed file.
-      const present = other === 'module' ? modules : artifacts[other] ?? [];
+      const present = other === 'module' ? modules : (artifacts[other] ?? []);
       if (present.includes(kebab)) {
         return {
           claimedBy: `the ${other} of the same name`,

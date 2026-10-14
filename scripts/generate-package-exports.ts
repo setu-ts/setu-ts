@@ -9,7 +9,7 @@
  * not follow.
  */
 
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 import {
   collectPackageExports,
@@ -43,9 +43,10 @@ for (const pkgPath of PUBLISHED_PACKAGES) {
     // Insert before the trailing "Full API" pointer when there is one, so the
     // README reads: what you get, then where the details live.
     const fullApi = before.indexOf('\n## Full API\n');
-    after = fullApi === -1
-      ? `${before.trimEnd()}\n\n${section}\n`
-      : `${before.slice(0, fullApi + 1)}${section}\n\n${before.slice(fullApi + 1)}`;
+    after =
+      fullApi === -1
+        ? `${before.trimEnd()}\n\n${section}\n`
+        : `${before.slice(0, fullApi + 1)}${section}\n\n${before.slice(fullApi + 1)}`;
   }
 
   if (after !== before) {

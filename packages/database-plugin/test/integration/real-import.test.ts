@@ -53,9 +53,7 @@ describe('Real ORM imports (guarded)', () => {
     // the seam's own construction — not merely the specifier — is exercised.
     // Constructing a `CosmosClient` opens no connection, so this needs no
     // emulator and no network beyond resolving the package.
-    const { createLazyClientLoader } = await import(
-      '../../src/adapters/cosmos/cosmos-client.ts'
-    );
+    const { createLazyClientLoader } = await import('../../src/adapters/cosmos/cosmos-client.ts');
     let loader: Awaited<ReturnType<typeof createLazyClientLoader>> | undefined;
     let error: Error | null = null;
     try {
@@ -75,37 +73,41 @@ describe('Real ORM imports (guarded)', () => {
     }
   });
 
-  it('the Bigtable lazy loader performs the real npm import and reaches the emulator', {
-    skip: bigtableEndpoint === undefined,
-  }, async () => {
-    // Drives `createLazyBigtableLoader` itself rather than a bare `import()`,
-    // so the seam's own adaptation — not merely the specifier — is exercised,
-    // and then issues ONE real read so the adapted facade is proven end to end.
-    const loader = createLazyBigtableLoader({
-      projectId: 'setu-m82',
-      apiEndpoint: bigtableEndpoint as string,
-    });
-    expect(loader.owned).toBe(true);
-    const client = await loader.load();
-    try {
-      const rows = await client.instance('setu-m82-instance').table(
-        `import_probe_${crypto.randomUUID().replaceAll('-', '').slice(0, 8)}`,
-      ).readRows({ limit: 1 });
-      // The table does not exist, so the service must say so by name rather
-      // than answering an empty result.
-      expect(rows).toEqual([]);
-    } catch (error) {
-      expect(String((error as Error).message)).toMatch(/NOT_FOUND|not found/i);
-    } finally {
-      await client.close();
-    }
-  });
+  it(
+    'the Bigtable lazy loader performs the real npm import and reaches the emulator',
+    {
+      skip: bigtableEndpoint === undefined,
+    },
+    async () => {
+      // Drives `createLazyBigtableLoader` itself rather than a bare `import()`,
+      // so the seam's own adaptation — not merely the specifier — is exercised,
+      // and then issues ONE real read so the adapted facade is proven end to end.
+      const loader = createLazyBigtableLoader({
+        projectId: 'setu-m82',
+        apiEndpoint: bigtableEndpoint as string,
+      });
+      expect(loader.owned).toBe(true);
+      const client = await loader.load();
+      try {
+        const rows = await client
+          .instance('setu-m82-instance')
+          .table(`import_probe_${crypto.randomUUID().replaceAll('-', '').slice(0, 8)}`)
+          .readRows({ limit: 1 });
+        // The table does not exist, so the service must say so by name rather
+        // than answering an empty result.
+        expect(rows).toEqual([]);
+      } catch (error) {
+        expect(String((error as Error).message)).toMatch(/NOT_FOUND|not found/i);
+      } finally {
+        await client.close();
+      }
+    },
+  );
 
   it('drizzle-orm import either succeeds or throws descriptive error', async () => {
     let imported: unknown = undefined;
     let error: Error | null = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       imported = await import('drizzle-orm');
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
@@ -121,11 +123,9 @@ describe('Real ORM imports (guarded)', () => {
       // Import failed — error must be descriptive (not a silent failure).
       expect(error).not.toBeNull();
       const msg = error!.message.toLowerCase();
-      expect(
-        msg.includes('drizzle') ||
-          msg.includes('not found') ||
-          msg.includes('npm'),
-      ).toBe(true);
+      expect(msg.includes('drizzle') || msg.includes('not found') || msg.includes('npm')).toBe(
+        true,
+      );
     }
   });
 

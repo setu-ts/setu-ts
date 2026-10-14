@@ -313,11 +313,13 @@ export class QueueObservationMerger implements IQueueMerger {
 export function fitFrameBudget(batch: QueueDiagnosticsBatch): QueueDiagnosticsBatch {
   const encoder = new TextEncoder();
   const withDepths = (count: number): QueueDiagnosticsBatch =>
-    count === batch.depths.length ? batch : {
-      ...batch,
-      depths: batch.depths.slice(0, count),
-      truncatedDepths: batch.truncatedDepths + batch.depths.length - count,
-    };
+    count === batch.depths.length
+      ? batch
+      : {
+          ...batch,
+          depths: batch.depths.slice(0, count),
+          truncatedDepths: batch.truncatedDepths + batch.depths.length - count,
+        };
   const fits = (count: number): boolean =>
     encoder.encode(JSON.stringify(withDepths(count))).length <= MAX_FRAME_BYTES;
   if (fits(batch.depths.length)) {

@@ -168,15 +168,18 @@ function processFor(
 function writer(calls: string[], fail: () => boolean = () => false) {
   return async (payload: Hired, _e: unknown, _m: unknown, uow: IUnitOfWork) => {
     calls.push(payload.personId);
-    await uow.getRepository<Record<string, unknown>>('Person')
+    await uow
+      .getRepository<Record<string, unknown>>('Person')
       .create({ id: payload.personId, name: 'Ada' });
     if (fail()) throw new Error('handler failed after its write');
   };
 }
 
 function rows(app: IKernelApplication, entity: string): Promise<Record<string, unknown>[]> {
-  return app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
-    .getRepository<Record<string, unknown>>(entity).findAll();
+  return app.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>>(entity)
+    .findAll();
 }
 
 function publish(app: IKernelApplication, topic: string, envelope: unknown): Promise<void> {
@@ -184,199 +187,231 @@ function publish(app: IKernelApplication, topic: string, envelope: unknown): Pro
 }
 
 for (const transport of transports) {
-  describe(`consumer inbox over real PostgreSQL ← ${transport.name}`, {
-    skip: transport.ignore,
-  }, () => {
-    const label = transport.name.replaceAll(' ', '-').toLowerCase();
+  describe(
+    `consumer inbox over real PostgreSQL ← ${transport.name}`,
+    {
+      skip: transport.ignore,
+    },
+    () => {
+      const label = transport.name.replaceAll(' ', '-').toLowerCase();
 
-    it('acknowledges a duplicate delivery without running the handler', async () => {
-      const pg = await postgresInboxSchema(postgresUrl!);
-      const definition = definitionFor(label);
-      const calls: string[] = [];
-      const app = processFor(pg, transport, [
-        onIntegrationEvent(definition, writer(calls), {
-          inbox: { consumer: consumerName('dup') },
-        }),
-      ]);
-      await app.start();
-      try {
-        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
-        await waitFor(() => calls.length === 1, 'first delivery');
-        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
-        await settle();
-        expect(calls).toEqual(['p-1']);
-        expect(await rows(app, 'Person')).toHaveLength(1);
-        expect((await rows(app, 'Inbox')).map((row) => row.status)).toEqual(['processed']);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
-
-    it('a handler failure rolls back both rows, and the redelivery succeeds', async () => {
-      const pg = await postgresInboxSchema(postgresUrl!);
-      const definition = definitionFor(label);
-      const calls: string[] = [];
-      let failures = 1;
-      const app = processFor(pg, transport, [
-        onIntegrationEvent(definition, writer(calls, () => failures-- > 0), {
-          inbox: { consumer: consumerName('retry') },
-        }),
-      ]);
-      await app.start();
-      try {
-        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
-        // The broker redelivers on its own — no second publish.
-        await waitFor(() => calls.length === 2, 'the broker redelivery');
-        await waitFor(async () => (await rows(app, 'Inbox')).length === 1, 'the marker');
-        expect(await rows(app, 'Person')).toHaveLength(1);
-        await settle();
-        expect(calls).toEqual(['p-1', 'p-1']);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
-
-    it('two consumer names each process the same event once', async () => {
-      const pg = await postgresInboxSchema(postgresUrl!);
-      const definition = definitionFor(label);
-      const payroll: string[] = [];
-      const audit: string[] = [];
-      const app = processFor(pg, transport, [
-        onIntegrationEvent(definition, (p) => {
-          payroll.push(p.personId);
-        }, { inbox: { consumer: consumerName('payroll') } }),
-        onIntegrationEvent(definition, (p) => {
-          audit.push(p.personId);
-        }, { inbox: { consumer: consumerName('audit') } }),
-      ]);
-      await app.start();
-      try {
-        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
-        await waitFor(() => payroll.length === 1 && audit.length === 1, 'both consumers');
-        await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
-        await settle();
-        expect([payroll, audit]).toEqual([['p-1'], ['p-1']]);
-        expect(await rows(app, 'Inbox')).toHaveLength(2);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
-
-    it('one consumer on two topics: each handler gets all of its topic, ids never cross', async () => {
-      const pg = await postgresInboxSchema(postgresUrl!);
-      const hiredDef = definitionFor(label);
-      // A distinct type, as two real topics carry: a message delivered to the
-      // other topic's handler is then rejected rather than silently handled.
-      const leftDef = definitionFor(label, 'people.left');
-      const consumer = consumerName('two-topics');
-      const hiredCalls: string[] = [];
-      const leftCalls: string[] = [];
-      const app = processFor(pg, transport, [
-        onIntegrationEvent(hiredDef, (p) => {
-          hiredCalls.push(p.personId);
-        }, { inbox: { consumer } }),
-        onIntegrationEvent(leftDef, (p) => {
-          leftCalls.push(p.personId);
-        }, { inbox: { consumer } }),
-      ]);
-      await app.start();
-      try {
-        // The same ids on both topics: keyed without the topic, the second
-        // topic's events would be skipped as duplicates. Published one topic
-        // at a time — alternating would match a shared queue's round-robin
-        // across its two consumers and hide the collision.
-        for (let i = 0; i < 5; i++) {
-          await publish(app, hiredDef.topic, envelopeOf(`e-${i}`, `h-${i}`));
+      it('acknowledges a duplicate delivery without running the handler', async () => {
+        const pg = await postgresInboxSchema(postgresUrl!);
+        const definition = definitionFor(label);
+        const calls: string[] = [];
+        const app = processFor(pg, transport, [
+          onIntegrationEvent(definition, writer(calls), {
+            inbox: { consumer: consumerName('dup') },
+          }),
+        ]);
+        await app.start();
+        try {
+          await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+          await waitFor(() => calls.length === 1, 'first delivery');
+          await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+          await settle();
+          expect(calls).toEqual(['p-1']);
+          expect(await rows(app, 'Person')).toHaveLength(1);
+          expect((await rows(app, 'Inbox')).map((row) => row.status)).toEqual(['processed']);
+        } finally {
+          await app.stop();
+          await pg.dispose();
         }
-        for (let i = 0; i < 5; i++) {
-          await publish(app, leftDef.topic, envelopeOf(`e-${i}`, `l-${i}`, 'people.left'));
-        }
-        await waitFor(
-          () => hiredCalls.length === 5 && leftCalls.length === 5,
-          'every event on both topics',
-        );
-        await settle();
-        expect(hiredCalls.toSorted()).toEqual(['h-0', 'h-1', 'h-2', 'h-3', 'h-4']);
-        expect(leftCalls.toSorted()).toEqual(['l-0', 'l-1', 'l-2', 'l-3', 'l-4']);
-        expect(await rows(app, 'Inbox')).toHaveLength(10);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
+      });
 
-    it('pairs whose dotted names join alike get distinct default queues', async () => {
-      const pg = await postgresInboxSchema(postgresUrl!);
-      const tag = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
-      // `<consumer>.<topic>` would be `m108.left.${tag}.people.v1` for both.
-      const first = definitionFor(label, 'people.hired', `${tag}.people.v1`);
-      const second = definitionFor(label, 'people.left', `left.${tag}.people.v1`);
-      const firstCalls: string[] = [];
-      const secondCalls: string[] = [];
-      const app = processFor(pg, transport, [
-        onIntegrationEvent(first, (p) => {
-          firstCalls.push(p.personId);
-        }, { inbox: { consumer: 'm108.left' } }),
-        onIntegrationEvent(second, (p) => {
-          secondCalls.push(p.personId);
-        }, { inbox: { consumer: 'm108' } }),
-      ]);
-      await app.start();
-      try {
-        for (let i = 0; i < 4; i++) {
-          await publish(app, first.topic, envelopeOf(`${tag}-${i}`, `f-${i}`));
+      it('a handler failure rolls back both rows, and the redelivery succeeds', async () => {
+        const pg = await postgresInboxSchema(postgresUrl!);
+        const definition = definitionFor(label);
+        const calls: string[] = [];
+        let failures = 1;
+        const app = processFor(pg, transport, [
+          onIntegrationEvent(
+            definition,
+            writer(calls, () => failures-- > 0),
+            {
+              inbox: { consumer: consumerName('retry') },
+            },
+          ),
+        ]);
+        await app.start();
+        try {
+          await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+          // The broker redelivers on its own — no second publish.
+          await waitFor(() => calls.length === 2, 'the broker redelivery');
+          await waitFor(async () => (await rows(app, 'Inbox')).length === 1, 'the marker');
+          expect(await rows(app, 'Person')).toHaveLength(1);
+          await settle();
+          expect(calls).toEqual(['p-1', 'p-1']);
+        } finally {
+          await app.stop();
+          await pg.dispose();
         }
-        for (let i = 0; i < 4; i++) {
-          await publish(app, second.topic, envelopeOf(`${tag}-${i}`, `s-${i}`, 'people.left'));
+      });
+
+      it('two consumer names each process the same event once', async () => {
+        const pg = await postgresInboxSchema(postgresUrl!);
+        const definition = definitionFor(label);
+        const payroll: string[] = [];
+        const audit: string[] = [];
+        const app = processFor(pg, transport, [
+          onIntegrationEvent(
+            definition,
+            (p) => {
+              payroll.push(p.personId);
+            },
+            { inbox: { consumer: consumerName('payroll') } },
+          ),
+          onIntegrationEvent(
+            definition,
+            (p) => {
+              audit.push(p.personId);
+            },
+            { inbox: { consumer: consumerName('audit') } },
+          ),
+        ]);
+        await app.start();
+        try {
+          await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+          await waitFor(() => payroll.length === 1 && audit.length === 1, 'both consumers');
+          await publish(app, definition.topic, envelopeOf('e-1', 'p-1'));
+          await settle();
+          expect([payroll, audit]).toEqual([['p-1'], ['p-1']]);
+          expect(await rows(app, 'Inbox')).toHaveLength(2);
+        } finally {
+          await app.stop();
+          await pg.dispose();
         }
-        await waitFor(
-          () => firstCalls.length === 4 && secondCalls.length === 4,
-          'every event on both topics',
-        );
-        await settle();
-        expect(firstCalls.toSorted()).toEqual(['f-0', 'f-1', 'f-2', 'f-3']);
-        expect(secondCalls.toSorted()).toEqual(['s-0', 's-1', 's-2', 's-3']);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
+      });
 
-    it('end to end with the outbox: a row relayed twice is handled once', async () => {
-      const pg = await postgresInboxSchema(postgresUrl!);
-      const definition = definitionFor(label);
-      const calls: string[] = [];
-      const app = processFor(pg, transport, [
-        onIntegrationEvent(definition, writer(calls), {
-          inbox: { consumer: consumerName('e2e') },
-        }),
-      ]);
-      await app.start();
-      try {
-        const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-        const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
-        await db.transaction((uow) => outbox.write(uow, definition, { personId: 'p-1' }));
-        expect((await outbox.sweep()).published).toBe(1);
-        await waitFor(() => calls.length === 1, 'the first relay');
+      it('one consumer on two topics: each handler gets all of its topic, ids never cross', async () => {
+        const pg = await postgresInboxSchema(postgresUrl!);
+        const hiredDef = definitionFor(label);
+        // A distinct type, as two real topics carry: a message delivered to the
+        // other topic's handler is then rejected rather than silently handled.
+        const leftDef = definitionFor(label, 'people.left');
+        const consumer = consumerName('two-topics');
+        const hiredCalls: string[] = [];
+        const leftCalls: string[] = [];
+        const app = processFor(pg, transport, [
+          onIntegrationEvent(
+            hiredDef,
+            (p) => {
+              hiredCalls.push(p.personId);
+            },
+            { inbox: { consumer } },
+          ),
+          onIntegrationEvent(
+            leftDef,
+            (p) => {
+              leftCalls.push(p.personId);
+            },
+            { inbox: { consumer } },
+          ),
+        ]);
+        await app.start();
+        try {
+          // The same ids on both topics: keyed without the topic, the second
+          // topic's events would be skipped as duplicates. Published one topic
+          // at a time — alternating would match a shared queue's round-robin
+          // across its two consumers and hide the collision.
+          for (let i = 0; i < 5; i++) {
+            await publish(app, hiredDef.topic, envelopeOf(`e-${i}`, `h-${i}`));
+          }
+          for (let i = 0; i < 5; i++) {
+            await publish(app, leftDef.topic, envelopeOf(`e-${i}`, `l-${i}`, 'people.left'));
+          }
+          await waitFor(
+            () => hiredCalls.length === 5 && leftCalls.length === 5,
+            'every event on both topics',
+          );
+          await settle();
+          expect(hiredCalls.toSorted()).toEqual(['h-0', 'h-1', 'h-2', 'h-3', 'h-4']);
+          expect(leftCalls.toSorted()).toEqual(['l-0', 'l-1', 'l-2', 'l-3', 'l-4']);
+          expect(await rows(app, 'Inbox')).toHaveLength(10);
+        } finally {
+          await app.stop();
+          await pg.dispose();
+        }
+      });
 
-        // The §3.13 crash shape: the relay published, and its `markSent` never
-        // landed, so the row is still pending and the next sweep sends it again.
-        await pg.pool.query(
-          "UPDATE setu_outbox SET status = 'pending', settled_at = NULL, sent_by = NULL, lease_until = 0",
-        );
-        expect((await outbox.sweep()).published).toBe(1);
-        await settle();
-        expect(calls).toEqual(['p-1']);
-        expect(await rows(app, 'Person')).toHaveLength(1);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
-  });
+      it('pairs whose dotted names join alike get distinct default queues', async () => {
+        const pg = await postgresInboxSchema(postgresUrl!);
+        const tag = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
+        // `<consumer>.<topic>` would be `m108.left.${tag}.people.v1` for both.
+        const first = definitionFor(label, 'people.hired', `${tag}.people.v1`);
+        const second = definitionFor(label, 'people.left', `left.${tag}.people.v1`);
+        const firstCalls: string[] = [];
+        const secondCalls: string[] = [];
+        const app = processFor(pg, transport, [
+          onIntegrationEvent(
+            first,
+            (p) => {
+              firstCalls.push(p.personId);
+            },
+            { inbox: { consumer: 'm108.left' } },
+          ),
+          onIntegrationEvent(
+            second,
+            (p) => {
+              secondCalls.push(p.personId);
+            },
+            { inbox: { consumer: 'm108' } },
+          ),
+        ]);
+        await app.start();
+        try {
+          for (let i = 0; i < 4; i++) {
+            await publish(app, first.topic, envelopeOf(`${tag}-${i}`, `f-${i}`));
+          }
+          for (let i = 0; i < 4; i++) {
+            await publish(app, second.topic, envelopeOf(`${tag}-${i}`, `s-${i}`, 'people.left'));
+          }
+          await waitFor(
+            () => firstCalls.length === 4 && secondCalls.length === 4,
+            'every event on both topics',
+          );
+          await settle();
+          expect(firstCalls.toSorted()).toEqual(['f-0', 'f-1', 'f-2', 'f-3']);
+          expect(secondCalls.toSorted()).toEqual(['s-0', 's-1', 's-2', 's-3']);
+        } finally {
+          await app.stop();
+          await pg.dispose();
+        }
+      });
+
+      it('end to end with the outbox: a row relayed twice is handled once', async () => {
+        const pg = await postgresInboxSchema(postgresUrl!);
+        const definition = definitionFor(label);
+        const calls: string[] = [];
+        const app = processFor(pg, transport, [
+          onIntegrationEvent(definition, writer(calls), {
+            inbox: { consumer: consumerName('e2e') },
+          }),
+        ]);
+        await app.start();
+        try {
+          const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+          const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+          await db.transaction((uow) => outbox.write(uow, definition, { personId: 'p-1' }));
+          expect((await outbox.sweep()).published).toBe(1);
+          await waitFor(() => calls.length === 1, 'the first relay');
+
+          // The §3.13 crash shape: the relay published, and its `markSent` never
+          // landed, so the row is still pending and the next sweep sends it again.
+          await pg.pool.query(
+            "UPDATE setu_outbox SET status = 'pending', settled_at = NULL, sent_by = NULL, lease_until = 0",
+          );
+          expect((await outbox.sweep()).published).toBe(1);
+          await settle();
+          expect(calls).toEqual(['p-1']);
+          expect(await rows(app, 'Person')).toHaveLength(1);
+        } finally {
+          await app.stop();
+          await pg.dispose();
+        }
+      });
+    },
+  );
 }
 
 describe(
@@ -400,9 +435,13 @@ describe(
             projectId: pubsubProject,
             inbox: { store: createDatabaseInboxStore(), purge: { schedule: false } },
             subscriptions: [
-              onIntegrationEvent(definition, (p) => {
-                calls.push(p.personId);
-              }, { inbox: { consumer: 'm108-pubsub' } }),
+              onIntegrationEvent(
+                definition,
+                (p) => {
+                  calls.push(p.personId);
+                },
+                { inbox: { consumer: 'm108-pubsub' } },
+              ),
             ],
           } as MessagingPluginOptions),
         ],

@@ -45,9 +45,9 @@ const contextWithUser: WebSocketConnectionContext = {
 // assignable to the widened signature — a lower-arity function remains
 // assignable when the added parameter is optional.
 type RouteUpgrade = NonNullable<IWebSocketService['routeUpgrade']>;
-const singleParamRouteUpgrade: RouteUpgrade = (_request: Request): Promise<
-  WebSocketUpgradeDecision | null
-> => Promise.resolve(null);
+const singleParamRouteUpgrade: RouteUpgrade = (
+  _request: Request,
+): Promise<WebSocketUpgradeDecision | null> => Promise.resolve(null);
 
 // `fromHeaders` is a REQUIRED member of `ISessionService`: an implementation
 // that omits it is a compile error. The directive is self-validating — if the

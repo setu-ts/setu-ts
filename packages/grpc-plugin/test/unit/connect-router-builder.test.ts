@@ -32,9 +32,7 @@ function runtimeWith(appServices: ReturnType<typeof fakeService>[] = []): FakeCo
       fakeService(
         REFLECTION,
         ['ServerReflectionInfo'],
-        fakeFile(
-          'grpc/reflection/v1/reflection.proto',
-        ),
+        fakeFile('grpc/reflection/v1/reflection.proto'),
       ),
       ...appServices,
     ],
@@ -119,8 +117,9 @@ describe('buildConnectRouter — service registration', () => {
   it('throws rather than silently overwriting a duplicate typeName', () => {
     const echo = fakeService('example.Echo', ['Echo'], fakeFile('example/echo.proto'));
     const runtime = runtimeWith([echo]);
-    expect(() => build(runtime, { services: [{ definition: echo }, { definition: echo }] }))
-      .toThrow(/already been registered/);
+    expect(() =>
+      build(runtime, { services: [{ definition: echo }, { definition: echo }] }),
+    ).toThrow(/already been registered/);
   });
 
   it('throws GrpcDescriptorError when an embedded set lacks its service', () => {
@@ -196,9 +195,9 @@ describe('buildConnectRouter — health and reflection wiring', () => {
     const runtime = runtimeWith([echo]);
     build(runtime, { services: [{ definition: echo }] });
 
-    const check = implOf(runtime, HEALTH).check as (
-      r: { service: string },
-    ) => Promise<{ status: number }>;
+    const check = implOf(runtime, HEALTH).check as (r: {
+      service: string;
+    }) => Promise<{ status: number }>;
 
     // A registered app service is known...
     expect((await check({ service: 'example.Echo' })).status).toBe(1);
@@ -230,12 +229,14 @@ describe('buildConnectRouter — health and reflection wiring', () => {
 
   it('reflects an application service file and its transitive dependencies', async () => {
     const shared = fakeFile('example/shared.proto', {
-      messages: [{
-        typeName: 'example.Shared',
-        nestedMessages: [],
-        nestedEnums: [],
-        nestedExtensions: [],
-      }],
+      messages: [
+        {
+          typeName: 'example.Shared',
+          nestedMessages: [],
+          nestedEnums: [],
+          nestedExtensions: [],
+        },
+      ],
     });
     const echoFile = fakeFile('example/echo.proto', { dependencies: [shared] });
     const echo = fakeService('example.Echo', ['Echo'], echoFile);

@@ -67,13 +67,15 @@ function renderMetricsBarrel(artifacts: SeamArtifacts): string {
   const imports = [
     `import type { NamedMetricConfig } from '@setu-ts/metrics-plugin';`,
     renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.metric.ts`),
-  ].filter((line) => line !== '').join('\n\n');
+  ]
+    .filter((line) => line !== '')
+    .join('\n\n');
 
   const entries = names.map((name) => metricConfigExport(deriveNames(name).screaming));
 
   return assembleSeamBarrel(header, imports, [
     `/** Every generated metric definition, for \`MetricsPlugin({ customMetrics })\`. */\n` +
-    renderExportedArray(CUSTOM_METRICS_EXPORT, 'NamedMetricConfig', entries),
+      renderExportedArray(CUSTOM_METRICS_EXPORT, 'NamedMetricConfig', entries),
   ]);
 }
 

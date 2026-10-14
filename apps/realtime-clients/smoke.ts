@@ -35,8 +35,7 @@ async function run(command: string, args: readonly string[]): Promise<void> {
     args: [...args],
     stdout: 'inherit',
     stderr: 'inherit',
-  })
-    .output();
+  }).output();
   if (!outcome.success) throw new Error(`${command} realtime driver failed.`);
 }
 
@@ -69,23 +68,12 @@ try {
 
   const workerdPort = freePort();
   const worker = new Deno.Command('npx', {
-    args: [
-      'wrangler',
-      'dev',
-      'worker.ts',
-      '--port',
-      String(workerdPort),
-      '--log-level',
-      'error',
-    ],
+    args: ['wrangler', 'dev', 'worker.ts', '--port', String(workerdPort), '--log-level', 'error'],
     stdout: 'null',
     stderr: 'inherit',
   }).spawn();
   try {
-    await waitForServer(
-      `http://127.0.0.1:${workerdPort}`,
-      'workerd client host',
-    );
+    await waitForServer(`http://127.0.0.1:${workerdPort}`, 'workerd client host');
     const response = await fetch(
       `http://127.0.0.1:${workerdPort}/?baseUrl=${encodeURIComponent(baseUrl)}`,
     );

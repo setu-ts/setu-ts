@@ -122,15 +122,13 @@ describe('translateFilter — and/or and nested comparisons', () => {
 });
 
 describe('translateComparison — every operator maps', () => {
-  const comparison = (
-    operator: FilterComparison['operator'],
-    value: unknown,
-  ): FilterComparison => ({
-    type: 'comparison',
-    field: 'x',
-    operator,
-    value,
-  } as FilterComparison);
+  const comparison = (operator: FilterComparison['operator'], value: unknown): FilterComparison =>
+    ({
+      type: 'comparison',
+      field: 'x',
+      operator,
+      value,
+    }) as FilterComparison;
 
   it('eq maps to $eq so a filter-only equality remains a predicate', () => {
     expect(translateComparison(comparison('eq', 1))).toEqual({ $eq: 1 });
@@ -177,10 +175,12 @@ describe('translateCountFilter — where + optional filter', () => {
   });
 
   it('keeps where and an equality filter on the same field conjunctive', () => {
-    expect(translateCountFilter(
-      { score: 10 },
-      { type: 'comparison', field: 'score', operator: 'gt', value: 5 },
-    )).toEqual({ $and: [{ score: 10 }, { score: { $gt: 5 } }] });
+    expect(
+      translateCountFilter(
+        { score: 10 },
+        { type: 'comparison', field: 'score', operator: 'gt', value: 5 },
+      ),
+    ).toEqual({ $and: [{ score: 10 }, { score: { $gt: 5 } }] });
   });
 
   it('returns just where when no filter is supplied', () => {

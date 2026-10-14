@@ -44,13 +44,11 @@ describe('grpc-plugin barrel', () => {
     // The M70i plan names them internal on purpose: publishing a default value
     // or a refusal helper would commit the package to an implementation detail.
     const names = Object.keys(barrel);
-    for (
-      const internal of [
-        'DEFAULT_BASE_PATH',
-        'isNativeGrpcContentType',
-        'trailersOnlyUnimplemented',
-      ]
-    ) {
+    for (const internal of [
+      'DEFAULT_BASE_PATH',
+      'isNativeGrpcContentType',
+      'trailersOnlyUnimplemented',
+    ]) {
       expect(names).not.toContain(internal);
     }
   });

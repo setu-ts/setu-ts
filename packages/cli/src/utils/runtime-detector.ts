@@ -83,13 +83,15 @@ const WRANGLER_CONFIGS = ['wrangler.toml', 'wrangler.json', 'wrangler.jsonc'] as
 
 /** Whether a Deno manifest sits in the directory. */
 async function hasDenoManifest(fs: IFileSystem, dir: string): Promise<boolean> {
-  return await markerPresent(fs, joinPath(dir, 'deno.json')) ||
-    await markerPresent(fs, joinPath(dir, 'deno.jsonc'));
+  return (
+    (await markerPresent(fs, joinPath(dir, 'deno.json'))) ||
+    (await markerPresent(fs, joinPath(dir, 'deno.jsonc')))
+  );
 }
 
 /** The answer when no `package.json` decides: Deno when its manifest is present, else Node. */
 async function denoOrNode(fs: IFileSystem, dir: string): Promise<TargetRuntime> {
-  return await hasDenoManifest(fs, dir) ? 'deno' : 'node';
+  return (await hasDenoManifest(fs, dir)) ? 'deno' : 'node';
 }
 
 /**
@@ -108,10 +110,7 @@ async function denoOrNode(fs: IFileSystem, dir: string): Promise<TargetRuntime> 
  * @throws {RuntimeMarkerUnreadableError} When a marker exists but cannot be
  *   read
  */
-export async function detectTargetRuntime(
-  fs: IFileSystem,
-  dir: string,
-): Promise<TargetRuntime> {
+export async function detectTargetRuntime(fs: IFileSystem, dir: string): Promise<TargetRuntime> {
   for (const config of WRANGLER_CONFIGS) {
     if (await markerPresent(fs, joinPath(dir, config))) return 'cloudflare-workers';
   }
@@ -124,15 +123,16 @@ export async function detectTargetRuntime(
   // that reads but does not parse takes the same fallback: the plugin detector
   // reports a malformed manifest, and this must not throw on the way there.
   const packagePath = joinPath(dir, 'package.json');
-  if (!await markerPresent(fs, packagePath)) return await denoOrNode(fs, dir);
+  if (!(await markerPresent(fs, packagePath))) return await denoOrNode(fs, dir);
   const packageJson = await readJsonManifest(fs, packagePath);
   if (packageJson.kind !== 'ok') return await denoOrNode(fs, dir);
 
   // The `start` script is the marker, because it is what the two targets
   // genuinely differ on: Bun runs TypeScript directly, Node needs a loader.
-  const parsed = typeof packageJson.value === 'object' && packageJson.value !== null
-    ? packageJson.value as { scripts?: Record<string, string> }
-    : {};
+  const parsed =
+    typeof packageJson.value === 'object' && packageJson.value !== null
+      ? (packageJson.value as { scripts?: Record<string, string> })
+      : {};
   const start = parsed.scripts?.['start'] ?? '';
 
   if (start.startsWith('bun')) return 'bun';

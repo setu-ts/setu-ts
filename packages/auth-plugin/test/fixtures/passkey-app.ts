@@ -64,11 +64,7 @@ export class CookieJar {
   }
 
   /** Sends a request with the jar's cookie and records the answer. */
-  async fetch(
-    app: IKernelApplication,
-    path: string,
-    init: RequestInit = {},
-  ): Promise<Response> {
+  async fetch(app: IKernelApplication, path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (this.cookie !== undefined) {
       headers.set('cookie', this.cookie);
@@ -105,9 +101,8 @@ export class CookieJar {
  */
 export async function buildPasskeyApp(options: BuildPasskeyOptions = {}): Promise<PasskeyHarness> {
   const store = options.passkeys?.store ?? new MemoryPasskeyStore();
-  const principal = options.principal === undefined
-    ? { id: 'alice', roles: ['user'] }
-    : options.principal;
+  const principal =
+    options.principal === undefined ? { id: 'alice', roles: ['user'] } : options.principal;
   const passkeys: PasskeyOptions = {
     rpId: RP_ID,
     rpName: 'Setu Test',
@@ -154,7 +149,7 @@ export async function buildPasskeyApp(options: BuildPasskeyOptions = {}): Promis
   app.router.post('/password-login', async (ctx) => {
     const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
     // `{ id }` selects another principal; absent, the session signs in as alice.
-    const body = await ctx.request.json<{ id?: string }>().catch(() => ({} as { id?: string }));
+    const body = await ctx.request.json<{ id?: string }>().catch(() => ({}) as { id?: string });
     const id = typeof body.id === 'string' ? body.id : 'alice';
     const outcome = await auth.signIn(ctx, { id, roles: ['user'] }, { methods: ['pwd'] });
     return ctx.response.json({ ok: true, outcome: outcome.status });

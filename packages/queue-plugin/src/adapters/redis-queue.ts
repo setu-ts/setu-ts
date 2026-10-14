@@ -69,7 +69,9 @@ const MAX_REDIS_COMMAND_TIMEOUT_MS = 2_147_483_647;
 export function resolveCommandTimeoutMs(value: number | undefined): number {
   const resolved = value ?? DEFAULT_REDIS_COMMAND_TIMEOUT_MS;
   if (
-    typeof resolved !== 'number' || !Number.isFinite(resolved) || resolved < 0 ||
+    typeof resolved !== 'number' ||
+    !Number.isFinite(resolved) ||
+    resolved < 0 ||
     resolved > MAX_REDIS_COMMAND_TIMEOUT_MS
   ) {
     throw new RangeError(
@@ -100,9 +102,10 @@ export function createLazyRedisClient(
   url: string,
   commandTimeoutMs: number = DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
 ): IRedisQueueClient {
-  const options: LazyRedisClientOptions = commandTimeoutMs === 0
-    ? { lazyConnect: true }
-    : { lazyConnect: true, commandTimeout: commandTimeoutMs };
+  const options: LazyRedisClientOptions =
+    commandTimeoutMs === 0
+      ? { lazyConnect: true }
+      : { lazyConnect: true, commandTimeout: commandTimeoutMs };
   return new RedisCtor(url, options) as IRedisQueueClient;
 }
 
@@ -302,7 +305,7 @@ export class RedisQueue implements QueueAdapter {
 
     const atomic = this.#atomic([readyKey, processingKey, jobsKey], [nowMs, limit]);
     if (atomic !== null) {
-      const raws = await atomic(RESERVE_SCRIPT) as readonly string[];
+      const raws = (await atomic(RESERVE_SCRIPT)) as readonly string[];
       return raws.map((raw) => JSON.parse(raw) as StoredJob<T>);
     }
 

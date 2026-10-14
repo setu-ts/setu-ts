@@ -36,40 +36,42 @@ import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication();
 
-app.register(HttpSecurityPlugin({
-  // CORS — opt-in via presence of `cors` block
-  cors: {
-    origin: 'https://example.com',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    // Omit `allowedHeaders` and an allowed origin's preflight echoes whatever
-    // the browser asked for. List them here to allow only those.
-    allowedHeaders: ['content-type', 'authorization'],
-    maxAge: 86400,
-  },
-  // Security headers — ON by default; customize here
-  headers: {
-    strictTransportSecurity: {
-      maxAge: 63072000,
-      includeSubDomains: true,
-      preload: true,
+app.register(
+  HttpSecurityPlugin({
+    // CORS — opt-in via presence of `cors` block
+    cors: {
+      origin: 'https://example.com',
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+      // Omit `allowedHeaders` and an allowed origin's preflight echoes whatever
+      // the browser asked for. List them here to allow only those.
+      allowedHeaders: ['content-type', 'authorization'],
+      maxAge: 86400,
     },
-  },
-  // CSRF — opt-in
-  csrf: {
-    trustedOrigins: ['https://example.com'],
-    customHeader: 'X-CSRF-Token',
-  },
-  // Request size — opt-in
-  requestSize: {
-    maxBodySize: 2_097_152, // 2 MiB
-  },
-  // IP security — opt-in
-  ipSecurity: {
-    trustProxy: true,
-    ipHeader: 'X-Forwarded-For',
-  },
-}));
+    // Security headers — ON by default; customize here
+    headers: {
+      strictTransportSecurity: {
+        maxAge: 63072000,
+        includeSubDomains: true,
+        preload: true,
+      },
+    },
+    // CSRF — opt-in
+    csrf: {
+      trustedOrigins: ['https://example.com'],
+      customHeader: 'X-CSRF-Token',
+    },
+    // Request size — opt-in
+    requestSize: {
+      maxBodySize: 2_097_152, // 2 MiB
+    },
+    // IP security — opt-in
+    ipSecurity: {
+      trustProxy: true,
+      ipHeader: 'X-Forwarded-For',
+    },
+  }),
+);
 ```
 
 ### Per-Route Middleware

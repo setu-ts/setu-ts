@@ -62,11 +62,11 @@ export function createContext(
       captured.body = body;
       return { __handlerResult: true } as unknown as HandlerResult;
     },
-    text: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    html: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    send: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    redirect: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    stream: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
+    text: (): HandlerResult => ({ __handlerResult: true }) as unknown as HandlerResult,
+    html: (): HandlerResult => ({ __handlerResult: true }) as unknown as HandlerResult,
+    send: (): HandlerResult => ({ __handlerResult: true }) as unknown as HandlerResult,
+    redirect: (): HandlerResult => ({ __handlerResult: true }) as unknown as HandlerResult,
+    stream: (): HandlerResult => ({ __handlerResult: true }) as unknown as HandlerResult,
     snapshot: () => ({
       streaming: false,
       status: captured.status,

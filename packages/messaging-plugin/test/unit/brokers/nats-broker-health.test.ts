@@ -14,11 +14,13 @@ interface FakeNats {
  * Minimal NATS facade satisfying `validateClient` (jetstream/jetstreamManager/
  * close) plus a configurable liveness surface and an event emitter.
  */
-function makeNats(opts: {
-  isClosed?: () => boolean;
-  rtt?: () => Promise<number>;
-  events?: boolean;
-} = {}): FakeNats {
+function makeNats(
+  opts: {
+    isClosed?: () => boolean;
+    rtt?: () => Promise<number>;
+    events?: boolean;
+  } = {},
+): FakeNats {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
   const client: Record<string, unknown> = {
     jetstream: () => ({}),

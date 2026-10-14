@@ -30,7 +30,9 @@
  * release note. The release's own PR (`release/v<version>`) is exempt too: its
  * `src/` changes are the version bump, the section it would have to name itself
  * in is the release, and on the tag — the only place it is merged — nothing can
- * edit that section any more.
+ * edit that section any more. So is the `main` → `develop` back-merge that follows
+ * every release: it carries only commits already represented in the section they
+ * were released in, and its `src/` changes are that release's version bump.
  *
  * **Misfiling** is checked for milestone PRs only, because that is the shape
  * that has actually happened and the only one with an identifier that can be
@@ -153,9 +155,10 @@ export function shippingSection(
 ): { readonly heading: string; readonly version: string; readonly body: string } {
   const sections = splitSections(changelog);
   const unreleased = sections.find((section) => section.version === 'Unreleased');
-  const shipping = unreleased !== undefined && unreleased.body.trim() !== ''
-    ? unreleased
-    : sections.find((section) => section.version === version);
+  const shipping =
+    unreleased !== undefined && unreleased.body.trim() !== ''
+      ? unreleased
+      : sections.find((section) => section.version === version);
   if (shipping === undefined) {
     throw new Error(
       `CHANGELOG.md has neither a non-empty '## [Unreleased]' section nor a '## [${version}]' ` +
@@ -171,12 +174,13 @@ export function shippingSection(
  *
  * @param pr - The merged pull request
  * @param version - The version being verified; its own release PR
- *   (`release/v<version>`) needs no entry
+ *   (`release/v<version>`) needs no entry, and neither does a back-merge from `main`
  * @returns `M<id>` for a milestone branch, `#<n>` for any other branch that
  *   changed a published `src/` tree, `null` otherwise
  */
 export function requiredToken(pr: MergedPullRequest, version?: string): string | null {
   if (version !== undefined && pr.branch === `release/v${version}`) return null;
+  if (pr.branch === 'main') return null;
   const milestone = MILESTONE_BRANCH.exec(pr.branch);
   if (milestone !== null) return `M${milestone[1]}`;
   return pr.changedPaths.some((path) => PUBLISHED_SOURCE.test(path)) ? `#${pr.number}` : null;
@@ -209,8 +213,8 @@ export function checkChangelogPrs(
   const sections = splitSections(changelog);
   const shipping = shippingSection(changelog, version);
   // By version, not identity: `shippingSection` parses its own copy.
-  const published = sections.filter((section) =>
-    section.version !== shipping.version && section.version !== 'Unreleased'
+  const published = sections.filter(
+    (section) => section.version !== shipping.version && section.version !== 'Unreleased',
   );
 
   const findings: ChangelogPrFinding[] = [];
@@ -253,8 +257,7 @@ export async function runGit(args: readonly string[]): Promise<string> {
     args: [...args],
     stdout: 'piped',
     stderr: 'piped',
-  })
-    .output();
+  }).output();
   if (!output.success) {
     throw new Error(
       `git ${args.join(' ')} failed: ${new TextDecoder().decode(output.stderr).trim()}`,
@@ -283,13 +286,15 @@ export async function mergedPullRequests(
       .split('\n')
       .filter((tag) => tag.trim() !== '');
     const describeFrom = tagsAtHead.length === 0 ? 'HEAD' : 'HEAD^';
-    previousTag = (await git(['describe', '--tags', '--abbrev=0', '--match', 'v*', describeFrom]))
-      .trim();
+    previousTag = (
+      await git(['describe', '--tags', '--abbrev=0', '--match', 'v*', describeFrom])
+    ).trim();
   } catch (error: unknown) {
     throw new Error(
       'No release tag is reachable from HEAD, so merged pull requests cannot be listed. ' +
         'In CI this means a shallow checkout: set `fetch-depth: 0` on the job. ' +
         `(${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
     );
   }
   const log = await git(['log', '--merges', '--format=%H%x1f%s', `${previousTag}..HEAD`]);
@@ -318,11 +323,15 @@ export function describeFindings(result: ChangelogPrResult): readonly string[] {
   return result.findings.map((finding) => {
     const pr = `PR #${finding.pr.number} (${finding.pr.branch})`;
     if (finding.kind === 'missing') {
-      return `${pr} merged since the previous tag but ${result.shippingSection} names no entry ` +
+      return (
+        `${pr} merged since the previous tag but ${result.shippingSection} names no entry ` +
         `carrying \`${finding.expectedToken}\` — add one, or name the PR as \`${finding.expectedToken}\`` +
-        ` in the entry that already covers it.`;
+        ` in the entry that already covers it.`
+      );
     }
-    return `${pr} has an entry filed under \`${finding.foundIn}\`, which was published before this ` +
-      `PR merged — move it into ${result.shippingSection}.`;
+    return (
+      `${pr} has an entry filed under \`${finding.foundIn}\`, which was published before this ` +
+      `PR merged — move it into ${result.shippingSection}.`
+    );
   });
 }

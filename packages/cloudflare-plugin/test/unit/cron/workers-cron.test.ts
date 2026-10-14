@@ -209,9 +209,7 @@ describe('WorkersCron.dispatch', () => {
       ran = true;
     });
 
-    await expect(cron.dispatch(firing('0  *  *  *  *'))).rejects.toThrow(
-      /no handler registered/,
-    );
+    await expect(cron.dispatch(firing('0  *  *  *  *'))).rejects.toThrow(/no handler registered/);
     expect(ran).toBe(false);
   });
 

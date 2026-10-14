@@ -461,21 +461,18 @@ describe('QueuePlugin logger propagation', () => {
     const ctx = new FakeContext();
     // Register a logger capability
     const loggerMessages: Array<{ message: string; metadata?: unknown }> = [];
-    ctx.services.register(
-      CAPABILITIES.LOGGER,
-      {
-        level: 'info',
-        fatal: () => {},
-        trace: () => {},
-        child: () => ({}) as ILogger,
-        debug: () => {},
-        info: () => {},
-        warn: (_m: string) => {},
-        error: (message: string, metadata?: unknown) => {
-          loggerMessages.push({ message, metadata });
-        },
-      } as ILogger,
-    );
+    ctx.services.register(CAPABILITIES.LOGGER, {
+      level: 'info',
+      fatal: () => {},
+      trace: () => {},
+      child: () => ({}) as ILogger,
+      debug: () => {},
+      info: () => {},
+      warn: (_m: string) => {},
+      error: (message: string, metadata?: unknown) => {
+        loggerMessages.push({ message, metadata });
+      },
+    } as ILogger);
 
     const plugin = QueuePlugin({ adapter: 'memory' });
     await plugin.register(ctx as never);
@@ -503,21 +500,18 @@ describe('QueuePlugin logger propagation', () => {
     const ctx = new FakeContext();
     const logEntries: string[] = [];
 
-    ctx.services.register(
-      CAPABILITIES.LOGGER,
-      {
-        level: 'info',
-        fatal: () => {},
-        trace: () => {},
-        child: () => ({}) as ILogger,
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: (message: string) => {
-          logEntries.push(message);
-        },
-      } as ILogger,
-    );
+    ctx.services.register(CAPABILITIES.LOGGER, {
+      level: 'info',
+      fatal: () => {},
+      trace: () => {},
+      child: () => ({}) as ILogger,
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: (message: string) => {
+        logEntries.push(message);
+      },
+    } as ILogger);
 
     // Same resolveLogger pattern QueuePlugin uses
     const iLogger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
@@ -533,10 +527,14 @@ describe('QueuePlugin logger propagation', () => {
       close: () => Promise.resolve(),
     };
 
-    const sqsQueue = new SqsQueue(new FakeRuntime() as unknown as IRuntimeServices, {
-      queues: { jobs: 'http://localhost:9324/jobs' },
-      client: transport,
-    }, adapterLogger);
+    const sqsQueue = new SqsQueue(
+      new FakeRuntime() as unknown as IRuntimeServices,
+      {
+        queues: { jobs: 'http://localhost:9324/jobs' },
+        client: transport,
+      },
+      adapterLogger,
+    );
     await sqsQueue.connect();
 
     // Trigger diagnostic: ack unknown id → logs "unknown or expired receipt"

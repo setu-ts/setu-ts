@@ -8,7 +8,7 @@ export default function AppLayout() {
   const { pathname } = useLocation();
 
   return (
-    <div className='app-shell'>
+    <div className="app-shell">
       <nav>
         {APP_NAV.map((item) => (
           <NavLink

@@ -181,9 +181,8 @@ describe('localeMiddleware — headers', () => {
 
   it('writes no Content-Language when next() rejects, and propagates', async () => {
     const ctx = context({ acceptLanguage: 'de' });
-    const failing = localeMiddleware({ supportedLocales: SUPPORTED })(
-      ctx,
-      () => Promise.reject(new Error('handler failed')),
+    const failing = localeMiddleware({ supportedLocales: SUPPORTED })(ctx, () =>
+      Promise.reject(new Error('handler failed')),
     );
     await expect(failing).rejects.toThrow('handler failed');
     expect(ctx.response.snapshot().headers.has('content-language')).toBe(false);
@@ -209,8 +208,9 @@ describe('localeMiddleware — excluded paths', () => {
   });
 
   it('accepts a custom list, and [] disables exclusion', async () => {
-    expect((await run({ path: '/private' }, { exclude: ['/private'] })).request.locale)
-      .toBeUndefined();
+    expect(
+      (await run({ path: '/private' }, { exclude: ['/private'] })).request.locale,
+    ).toBeUndefined();
     expect((await run({ path: '/health' }, { exclude: [] })).request.locale).toBe('en');
   });
 
@@ -236,9 +236,12 @@ describe('localeMiddleware — tenant callback', () => {
   });
 
   it('ignores an unsupported tenant default', async () => {
-    const ctx = await run({ tenant: { id: 't', metadata: { locale: 'tlh' } } }, {
-      tenantLocale,
-    });
+    const ctx = await run(
+      { tenant: { id: 't', metadata: { locale: 'tlh' } } },
+      {
+        tenantLocale,
+      },
+    );
     expect(ctx.request.locale).toBe('en');
   });
 });

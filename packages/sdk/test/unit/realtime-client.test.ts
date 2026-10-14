@@ -209,23 +209,21 @@ describe('createRealtimeClient', () => {
   });
 
   it('validates reconnect policies and closes after the final close', async () => {
-    for (
-      const reconnect of [
-        { maxAttempts: -1 },
-        { maxAttempts: 0.5 },
-        { delayMs: -1 },
-        { maxDelayMs: -1 },
-        { delayMs: Number.NaN },
-        { delayMs: Infinity },
-        { maxDelayMs: -Infinity },
-      ]
-    ) {
+    for (const reconnect of [
+      { maxAttempts: -1 },
+      { maxAttempts: 0.5 },
+      { delayMs: -1 },
+      { maxDelayMs: -1 },
+      { delayMs: Number.NaN },
+      { delayMs: Infinity },
+      { maxDelayMs: -Infinity },
+    ]) {
       expect(() =>
         createRealtimeClient({
           url: 'wss://example.test/live',
           reconnect,
           onMessage: () => {},
-        })
+        }),
       ).toThrow();
     }
 
@@ -296,10 +294,14 @@ describe('createRealtimeClient', () => {
             reject(new Error('aborted'));
             return;
           }
-          signal?.addEventListener('abort', () => {
-            sleepRejected = true;
-            reject(new Error('aborted'));
-          }, { once: true });
+          signal?.addEventListener(
+            'abort',
+            () => {
+              sleepRejected = true;
+              reject(new Error('aborted'));
+            },
+            { once: true },
+          );
         });
       },
     };

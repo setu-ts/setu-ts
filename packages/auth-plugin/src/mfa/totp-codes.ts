@@ -69,7 +69,8 @@ export async function computeTotpCode(
   const hmac = new Uint8Array(await subtle.sign('HMAC', key, counterBytes));
   // Dynamic truncation (RFC 4226 §5.4).
   const offset = hmac[hmac.length - 1] & 0x0f;
-  const binary = ((hmac[offset] & 0x7f) << 24) |
+  const binary =
+    ((hmac[offset] & 0x7f) << 24) |
     ((hmac[offset + 1] & 0xff) << 16) |
     ((hmac[offset + 2] & 0xff) << 8) |
     (hmac[offset + 3] & 0xff);

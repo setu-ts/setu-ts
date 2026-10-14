@@ -141,8 +141,11 @@ export class TaskPool {
 
   /** Whether another slot could serve queued work under this pool's size. */
   needsWorker(): boolean {
-    return !this.closed && this.slots.length < this.config.size &&
-      this.pending.length > this.slots.filter((slot) => !slot.ready).length;
+    return (
+      !this.closed &&
+      this.slots.length < this.config.size &&
+      this.pending.length > this.slots.filter((slot) => !slot.ready).length
+    );
   }
 
   /** The budget invokes this only from a reserved promise continuation. */
@@ -184,9 +187,7 @@ export class TaskPool {
       // Counted as a REJECTION, not a failure: no `Task` exists yet, so this
       // never reaches `rejectTask` and `stats().failed` cannot see it either.
       this.collector?.taskRejected(this.config.specifier, 'queue_full');
-      return Promise.reject(
-        new WorkerQueueFullError(this.config.specifier, this.config.maxQueue),
-      );
+      return Promise.reject(new WorkerQueueFullError(this.config.specifier, this.config.maxQueue));
     }
     return new Promise<unknown>((resolve, reject) => {
       const task: Task = {
@@ -390,11 +391,7 @@ export class TaskPool {
       slot.handle.postMessage(request);
     } catch (error) {
       slot.task = null;
-      this.rejectTask(
-        task,
-        error instanceof Error ? error : new Error(String(error)),
-        'clone',
-      );
+      this.rejectTask(task, error instanceof Error ? error : new Error(String(error)), 'clone');
     }
   }
 

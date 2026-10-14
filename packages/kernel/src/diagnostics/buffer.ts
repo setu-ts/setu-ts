@@ -59,19 +59,21 @@ const EVENT_SKELETON_BYTES = 220;
  * @returns `true` when the encoded event is within {@linkcode MAX_EVENT_BYTES}
  * @since 0.8.0
  */
-export function eventWithinByteCap(
-  fieldLengths: {
-    readonly operationId: number;
-    readonly parentOperationId: number;
-    readonly nodeId: number;
-    readonly traceId: number;
-    readonly spanId: number;
-    readonly statusCode: boolean;
-  },
-): boolean {
-  const bounded = EVENT_SKELETON_BYTES +
-    fieldLengths.operationId + fieldLengths.parentOperationId + fieldLengths.nodeId +
-    fieldLengths.traceId + fieldLengths.spanId +
+export function eventWithinByteCap(fieldLengths: {
+  readonly operationId: number;
+  readonly parentOperationId: number;
+  readonly nodeId: number;
+  readonly traceId: number;
+  readonly spanId: number;
+  readonly statusCode: boolean;
+}): boolean {
+  const bounded =
+    EVENT_SKELETON_BYTES +
+    fieldLengths.operationId +
+    fieldLengths.parentOperationId +
+    fieldLengths.nodeId +
+    fieldLengths.traceId +
+    fieldLengths.spanId +
     (fieldLengths.statusCode ? 21 : 0);
   return bounded <= MAX_EVENT_BYTES;
 }
@@ -111,15 +113,15 @@ export function validateReadCursor(
   limit: number | undefined,
   lastSequence: number,
 ): { after: number; limit: number } {
-  if (
-    typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0
-  ) {
+  if (typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0) {
     throw new RangeError('Invalid diagnostics cursor: expected a non-negative safe integer.');
   }
   const effectiveLimit = limit ?? MAX_READ_LIMIT;
   if (
-    typeof effectiveLimit !== 'number' || !Number.isSafeInteger(effectiveLimit) ||
-    effectiveLimit < 1 || effectiveLimit > MAX_READ_LIMIT
+    typeof effectiveLimit !== 'number' ||
+    !Number.isSafeInteger(effectiveLimit) ||
+    effectiveLimit < 1 ||
+    effectiveLimit > MAX_READ_LIMIT
   ) {
     throw new RangeError(
       `Invalid diagnostics read limit: expected an integer from 1 to ${MAX_READ_LIMIT}.`,

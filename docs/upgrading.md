@@ -437,8 +437,7 @@ Three defects were in generated output, so a project scaffolded before `0.9.0` k
 copy the fix from a fresh scaffold:
 
 - **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
-  `setu new --runtime
-  cloudflare-workers` project does (the old pair fails `npm install` with
+  `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
   `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
   new entry carries, so a bindings-only deploy is picked up.
 - **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
@@ -773,8 +772,7 @@ const client: IRedisClient = {
 
 `ioredis` already has it, so an application passing a real client needs no change. The probe treats
 a rejection as unreachability rather than an error, so a double that rejects reports
-`reachable:
-false` on `/health` and nothing else.
+`reachable: false` on `/health` and nothing else.
 
 ### Add `rotate` and `revokeFamily` to a custom `RefreshTokenStore`
 

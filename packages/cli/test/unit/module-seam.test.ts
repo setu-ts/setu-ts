@@ -14,8 +14,9 @@ describe('module generation styles', () => {
       symbols: ['MODULES'],
       from: './src/modules/index.ts',
     });
-    expect(template.plugins.find((plugin) => plugin.pkg === 'decorator-plugin')?.args)
-      .toContain('...MODULES');
+    expect(template.plugins.find((plugin) => plugin.pkg === 'decorator-plugin')?.args).toContain(
+      '...MODULES',
+    );
   });
 
   it('keeps functional templates free of class module wiring', () => {

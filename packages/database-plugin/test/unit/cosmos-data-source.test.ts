@@ -62,34 +62,46 @@ const withTenant = { Order: { container: 'Order', partitionKey: 'tenantId' } };
 
 describe('findAll', () => {
   it('maps every returned document out of the driver shape', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-      queryResults: [[{ id: 'o1', total: 1, _etag: 'e', _ts: 2 }]],
-    }, withTenant);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+        queryResults: [[{ id: 'o1', total: 1, _etag: 'e', _ts: 2 }]],
+      },
+      withTenant,
+    );
     expect(await source.findAll(query())).toEqual([{ id: 'o1', total: 1 }]);
   });
 });
 
 describe('findById', () => {
   it('point-reads when the composite key carries the partition key', async () => {
-    const { source, fake } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId'],
-          documents: { 't1|o1': { id: 'o1', tenantId: 't1', total: 4 } },
+    const { source, fake } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId'],
+            documents: { 't1|o1': { id: 'o1', tenantId: 't1', total: 4 } },
+          },
         },
       },
-    }, withTenant);
-    expect(await source.findById({ id: 'o1', tenantId: 't1' }))
-      .toEqual({ id: 'o1', tenantId: 't1', total: 4 });
+      withTenant,
+    );
+    expect(await source.findById({ id: 'o1', tenantId: 't1' })).toEqual({
+      id: 'o1',
+      tenantId: 't1',
+      total: 4,
+    });
     // A point read issues no query at all.
     expect(fake.recorder.queries).toEqual([]);
   });
 
   it('reports null for a point read that answers 404', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-    }, withTenant);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+      },
+      withTenant,
+    );
     expect(await source.findById({ id: 'missing', tenantId: 't1' })).toBeNull();
   });
 
@@ -102,51 +114,71 @@ describe('findById', () => {
   });
 
   it('falls back to a cross-partition query for a scalar key on another partition field', async () => {
-    const { source, fake } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId'],
-          documents: { 't1|o1': { id: 'o1', tenantId: 't1' } },
+    const { source, fake } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId'],
+            documents: { 't1|o1': { id: 'o1', tenantId: 't1' } },
+          },
         },
+        queryResults: [[{ id: 'o1', tenantId: 't1' }]],
       },
-      queryResults: [[{ id: 'o1', tenantId: 't1' }]],
-    }, withTenant);
+      withTenant,
+    );
     expect(await source.findById('o1')).toEqual({ id: 'o1', tenantId: 't1' });
     expect(fake.recorder.queries[0]?.query).toContain('LIMIT 2');
   });
 
   it('reports null when the cross-partition lookup finds nothing', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-      queryResults: [[]],
-    }, withTenant);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+        queryResults: [[]],
+      },
+      withTenant,
+    );
     expect(await source.findById('nope')).toBeNull();
   });
 
   it('refuses an id that matches two documents rather than picking one', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-      queryResults: [[{ id: 'dup', tenantId: 'a' }, { id: 'dup', tenantId: 'b' }]],
-    }, withTenant);
-    await expect(source.findById('dup'))
-      .rejects.toThrow(
-        /matches more than one document.*composite key carrying 'id' and \/tenantId/s,
-      );
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+        queryResults: [
+          [
+            { id: 'dup', tenantId: 'a' },
+            { id: 'dup', tenantId: 'b' },
+          ],
+        ],
+      },
+      withTenant,
+    );
+    await expect(source.findById('dup')).rejects.toThrow(
+      /matches more than one document.*composite key carrying 'id' and \/tenantId/s,
+    );
   });
 
   it('refuses a composite key missing the primary-key column', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-    }, withTenant);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+      },
+      withTenant,
+    );
     await expect(source.findById({ tenantId: 't1' })).rejects.toThrow(/must carry 'id'/);
   });
 
   it('refuses a composite key missing the partition-key column', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-    }, withTenant);
-    await expect(source.findById({ id: 'o1', other: 'x' }))
-      .rejects.toThrow(/must carry the partition key \/tenantId/);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+      },
+      withTenant,
+    );
+    await expect(source.findById({ id: 'o1', other: 'x' })).rejects.toThrow(
+      /must carry the partition key \/tenantId/,
+    );
   });
 
   it('refuses a non-string id, naming the service rule', async () => {
@@ -157,16 +189,22 @@ describe('findById', () => {
   });
 
   it('reads a hierarchical partition key as an ordered array', async () => {
-    const { source } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId', '/region'],
-          documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId', '/region'],
+            documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+          },
         },
       },
-    }, { Order: { partitionKey: [['tenantId'], ['region']] } });
-    expect(await source.findById({ id: 'o1', tenantId: 't1', region: 'in' }))
-      .toEqual({ id: 'o1', tenantId: 't1', region: 'in' });
+      { Order: { partitionKey: [['tenantId'], ['region']] } },
+    );
+    expect(await source.findById({ id: 'o1', tenantId: 't1', region: 'in' })).toEqual({
+      id: 'o1',
+      tenantId: 't1',
+      region: 'in',
+    });
   });
 
   it('creates into a hierarchical container and reads the row back', async () => {
@@ -174,23 +212,36 @@ describe('findById', () => {
     // a hierarchical row was written under a scalar while every read addressed
     // it by array — the row existed and was unreachable. Nothing failed,
     // because no test created into that shape.
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId', '/region'] } },
-    }, { Order: { partitionKey: [['tenantId'], ['region']] } });
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId', '/region'] } },
+      },
+      { Order: { partitionKey: [['tenantId'], ['region']] } },
+    );
     await source.create({ id: 'o1', tenantId: 't1', region: 'in', total: 3 });
-    expect(await source.findById({ id: 'o1', tenantId: 't1', region: 'in' }))
-      .toEqual({ id: 'o1', tenantId: 't1', region: 'in', total: 3 });
+    expect(await source.findById({ id: 'o1', tenantId: 't1', region: 'in' })).toEqual({
+      id: 'o1',
+      tenantId: 't1',
+      region: 'in',
+      total: 3,
+    });
   });
 
   it('creates into a container partitioned by a NESTED path and reads the row back', async () => {
     // The same defect read `body['address/city']`, which is `undefined`, so the
     // row landed under a null key.
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/address/city'] } },
-    }, { Order: { partitionKey: ['address', 'city'] } });
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/address/city'] } },
+      },
+      { Order: { partitionKey: ['address', 'city'] } },
+    );
     await source.create({ id: 'o1', address: { city: 'pune' }, total: 1 });
-    expect(await source.findById({ id: 'o1', 'address.city': 'pune' }))
-      .toEqual({ id: 'o1', address: { city: 'pune' }, total: 1 });
+    expect(await source.findById({ id: 'o1', 'address.city': 'pune' })).toEqual({
+      id: 'o1',
+      address: { city: 'pune' },
+      total: 1,
+    });
   });
 
   it('accepts a composite key for a MAPPED primary key on an /id-partitioned container', async () => {
@@ -198,11 +249,14 @@ describe('findById', () => {
     // partition-key path names the document field (`/id`). The scalar path
     // already treated the two as equivalent through `partitionsByPrimaryKey`,
     // so the same key was accepted as a scalar and refused as a composite.
-    const { source } = makeSource({
-      containers: {
-        Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1', total: 5 } } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1', total: 5 } } },
+        },
       },
-    }, { Order: { container: 'Order', primaryKey: 'orderId' } });
+      { Order: { container: 'Order', primaryKey: 'orderId' } },
+    );
     expect(await source.findById('o1')).toEqual({ orderId: 'o1', total: 5 });
     expect(await source.findById({ orderId: 'o1' })).toEqual({ orderId: 'o1', total: 5 });
   });
@@ -213,12 +267,15 @@ describe('findById', () => {
     // request goes to the wrong partition — `delete` then answered `false` for
     // a row that exists. The dotted spelling belongs to the flat KEY record.
     const decoy = { id: 'o1', address: { city: 'pune' }, 'address.city': 'DECOY', n: 1 };
-    const { source } = makeSource({
-      containers: {
-        Order: { partitionKeyPaths: ['/address/city'], documents: { 'pune|o1': decoy } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: { partitionKeyPaths: ['/address/city'], documents: { 'pune|o1': decoy } },
+        },
+        queryResults: [[decoy]],
       },
-      queryResults: [[decoy]],
-    }, { Order: { container: 'Order' } });
+      { Order: { container: 'Order' } },
+    );
     expect(await source.delete('o1')).toBe(true);
   });
 
@@ -226,73 +283,92 @@ describe('findById', () => {
     // A hierarchical key reads as an array, so a missing segment leaves a hole
     // inside it rather than making the whole value undefined — which the
     // service answers with a 404, reporting "not found" for a row that exists.
-    const { source } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId', '/region'],
-          documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId', '/region'],
+            documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+          },
         },
       },
-    }, { Order: { partitionKey: [['tenantId'], ['region']] } });
-    await expect(source.findById({ id: 'o1', tenantId: 't1' }))
-      .rejects.toThrow(/must carry the partition key \/tenantId, \/region, but \/region is absent/);
+      { Order: { partitionKey: [['tenantId'], ['region']] } },
+    );
+    await expect(source.findById({ id: 'o1', tenantId: 't1' })).rejects.toThrow(
+      /must carry the partition key \/tenantId, \/region, but \/region is absent/,
+    );
   });
 
   it('refuses a partial hierarchical key on delete too, rather than answering false', async () => {
-    const { source } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId', '/region'],
-          documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId', '/region'],
+            documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+          },
         },
       },
-    }, { Order: { partitionKey: [['tenantId'], ['region']] } });
-    await expect(source.delete({ id: 'o1', tenantId: 't1' }))
-      .rejects.toThrow(/\/region is absent/);
+      { Order: { partitionKey: [['tenantId'], ['region']] } },
+    );
+    await expect(source.delete({ id: 'o1', tenantId: 't1' })).rejects.toThrow(/\/region is absent/);
   });
 
   it('accepts a partition-key value that is explicitly null', async () => {
     // `undefined` is ABSENT and `null` is a value Cosmos stores, so the
     // refusal must tell them apart rather than collapsing both.
-    const { source } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId'],
-          documents: { 'null|o1': { id: 'o1', tenantId: null } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId'],
+            documents: { 'null|o1': { id: 'o1', tenantId: null } },
+          },
         },
       },
-    }, withTenant);
-    expect(await source.findById({ id: 'o1', tenantId: null } as never))
-      .toEqual({ id: 'o1', tenantId: null });
+      withTenant,
+    );
+    expect(await source.findById({ id: 'o1', tenantId: null } as never)).toEqual({
+      id: 'o1',
+      tenantId: null,
+    });
   });
 
   it('reads a nested partition key from a composite key by its dotted join', async () => {
-    const { source } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/address/city'],
-          documents: { 'Kolkata|o1': { id: 'o1' } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/address/city'],
+            documents: { 'Kolkata|o1': { id: 'o1' } },
+          },
         },
       },
-    }, { Order: { partitionKey: ['address', 'city'] } });
+      { Order: { partitionKey: ['address', 'city'] } },
+    );
     expect(await source.findById({ id: 'o1', 'address.city': 'Kolkata' })).toEqual({ id: 'o1' });
   });
 });
 
 describe('create', () => {
   it('inserts the document and returns the persisted row', async () => {
-    const { source, fake } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-    }, withTenant);
-    expect(await source.create({ id: 'o1', tenantId: 't1' }))
-      .toEqual({ id: 'o1', tenantId: 't1' });
+    const { source, fake } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+      },
+      withTenant,
+    );
+    expect(await source.create({ id: 'o1', tenantId: 't1' })).toEqual({ id: 'o1', tenantId: 't1' });
     expect(fake.documents.size).toBe(1);
   });
 
   it('renames the mapped primary key onto the document id', async () => {
-    const { source, fake } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/id'] } },
-    }, { Order: { primaryKey: 'orderId' } });
+    const { source, fake } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/id'] } },
+      },
+      { Order: { primaryKey: 'orderId' } },
+    );
     expect(await source.create({ orderId: 'o1' })).toEqual({ orderId: 'o1' });
     expect([...fake.documents.values()][0]?.['id']).toBe('o1');
   });
@@ -329,52 +405,67 @@ describe('create', () => {
   });
 
   it('lets a duplicate id surface as the service 409', async () => {
-    const { source } = makeSource({
-      containers: {
-        Order: { partitionKeyPaths: ['/tenantId'], documents: { 't1|o1': { id: 'o1' } } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: { partitionKeyPaths: ['/tenantId'], documents: { 't1|o1': { id: 'o1' } } },
+        },
       },
-    }, withTenant);
+      withTenant,
+    );
     await expect(source.create({ id: 'o1', tenantId: 't1' })).rejects.toThrow(/already exists/);
   });
 });
 
 describe('delete', () => {
   it('reports true for a deleted row and false for a missing one', async () => {
-    const { source } = makeSource({
-      containers: {
-        Order: {
-          partitionKeyPaths: ['/tenantId'],
-          documents: { 't1|o1': { id: 'o1', tenantId: 't1' } },
+    const { source } = makeSource(
+      {
+        containers: {
+          Order: {
+            partitionKeyPaths: ['/tenantId'],
+            documents: { 't1|o1': { id: 'o1', tenantId: 't1' } },
+          },
         },
       },
-    }, withTenant);
+      withTenant,
+    );
     expect(await source.delete({ id: 'o1', tenantId: 't1' })).toBe(true);
     expect(await source.delete({ id: 'o1', tenantId: 't1' })).toBe(false);
   });
 
   it('reports false when the cross-partition lookup finds no row to address', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-      queryResults: [[]],
-    }, withTenant);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+        queryResults: [[]],
+      },
+      withTenant,
+    );
     expect(await source.delete('gone')).toBe(false);
   });
 });
 
 describe('count', () => {
   it('reads the single aggregate row the service returns', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-      queryResults: [[7 as unknown as Record<string, unknown>]],
-    }, withTenant);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+        queryResults: [[7 as unknown as Record<string, unknown>]],
+      },
+      withTenant,
+    );
     expect(await source.count({})).toBe(7);
   });
 
   it('reports zero when the aggregate row is missing', async () => {
-    const { source } = makeSource({
-      containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
-      queryResults: [[]],
-    }, withTenant);
+    const { source } = makeSource(
+      {
+        containers: { Order: { partitionKeyPaths: ['/tenantId'] } },
+        queryResults: [[]],
+      },
+      withTenant,
+    );
     expect(await source.count({})).toBe(0);
   });
 });
@@ -423,20 +514,23 @@ describe('error propagation', () => {
   }
 
   it('propagates a non-404 failure from delete rather than reporting "not found"', async () => {
-    await expect(withFailingMember('delete', 503).delete({ id: 'o1', tenantId: 't1' }))
-      .rejects.toThrow(/boom 503/);
+    await expect(
+      withFailingMember('delete', 503).delete({ id: 'o1', tenantId: 't1' }),
+    ).rejects.toThrow(/boom 503/);
   });
 
   it('propagates a non-404 failure from a patch update', async () => {
-    await expect(withFailingMember('patch', 429).update({ id: 'o1', tenantId: 't1' }, { total: 2 }))
-      .rejects.toThrow(/boom 429/);
+    await expect(
+      withFailingMember('patch', 429).update({ id: 'o1', tenantId: 't1' }, { total: 2 }),
+    ).rejects.toThrow(/boom 429/);
   });
 
   it('propagates a non-404, non-412 failure from a replace update', async () => {
     const payload: Record<string, unknown> = {};
     for (let i = 0; i < 11; i++) payload[`f${i}`] = i;
-    await expect(withFailingMember('replace', 500).update({ id: 'o1', tenantId: 't1' }, payload))
-      .rejects.toThrow(/boom 500/);
+    await expect(
+      withFailingMember('replace', 500).update({ id: 'o1', tenantId: 't1' }, payload),
+    ).rejects.toThrow(/boom 500/);
   });
 
   it('propagates a THROWN read failure rather than translating it to a missing row', async () => {
@@ -447,8 +541,7 @@ describe('error propagation', () => {
     const source = withFailingMember('read', 404);
     const payload: Record<string, unknown> = {};
     for (let i = 0; i < 11; i++) payload[`f${i}`] = i;
-    await expect(source.update({ id: 'o1', tenantId: 't1' }, payload))
-      .rejects.toThrow(/boom 404/);
+    await expect(source.update({ id: 'o1', tenantId: 't1' }, payload)).rejects.toThrow(/boom 404/);
   });
 });
 
@@ -478,7 +571,8 @@ describe('pure helpers', () => {
   });
 
   it('missingRow names the container and the key', () => {
-    expect(missingRow(resolveCosmosTarget('Order', undefined), 'o1').message)
-      .toContain('no Order row with id "o1"');
+    expect(missingRow(resolveCosmosTarget('Order', undefined), 'o1').message).toContain(
+      'no Order row with id "o1"',
+    );
   });
 });

@@ -316,9 +316,7 @@ describe('QueueService', () => {
     });
 
     it('throws on invalid cron', async () => {
-      await expect(
-        service.addRecurring('test', {}, { cron: 'bad' }),
-      ).rejects.toThrow();
+      await expect(service.addRecurring('test', {}, { cron: 'bad' })).rejects.toThrow();
     });
   });
 

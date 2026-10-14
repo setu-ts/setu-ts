@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
+/* eslint-disable require-await -- test fixtures use sync methods matching async interface signatures */
 import { describe, expect, it } from 'vitest';
 
 import { ipSecurityMiddleware } from '../../src/middleware/ip-security-middleware.ts';

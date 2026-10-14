@@ -135,9 +135,7 @@ describe('Event observations e2e (M98j canary)', () => {
         timing: { setTimeout, clearTimeout },
       });
       const response = await client.events();
-      const sources = app.services.getAll<IEventDiagnosticsSource>(
-        CAPABILITIES.EVENTS_DIAGNOSTICS,
-      );
+      const sources = app.services.getAll<IEventDiagnosticsSource>(CAPABILITIES.EVENTS_DIAGNOSTICS);
       const sourceSnapshots = sources.map((source) => source.snapshot());
       client.close();
 
@@ -336,11 +334,12 @@ describe('Event observations e2e — M98b refusals for /v1/event', () => {
       // A non-canonical query alias of the snapshot operation.
       const query = '/v1/event?after=0';
       expect(
-        (await rawRequest(
-          port,
-          request(6, instance, await sign(6, instance, query), '', 'GET', query),
-        ))
-          .status,
+        (
+          await rawRequest(
+            port,
+            request(6, instance, await sign(6, instance, query), '', 'GET', query),
+          )
+        ).status,
       ).toBe(400);
       // An honest read is served; replaying its exact bytes is refused.
       const honest = request(7, instance, await sign(7, instance));

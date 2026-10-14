@@ -91,17 +91,22 @@ function writingHandler(calls: string[], fail?: () => boolean) {
 }
 
 function people(app: IKernelApplication): Promise<Record<string, unknown>[]> {
-  return app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
-    .getRepository<Record<string, unknown>>('Person').findAll();
+  return app.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>>('Person')
+    .findAll();
 }
 
 function inboxRows(app: IKernelApplication): Promise<Record<string, unknown>[]> {
-  return app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
-    .getRepository<Record<string, unknown>>('Inbox').findAll();
+  return app.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>>('Inbox')
+    .findAll();
 }
 
 function publish(app: IKernelApplication, id: string, data?: unknown): Promise<void> {
-  return app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING)
+  return app.services
+    .get<IMessageBroker>(CAPABILITIES.MESSAGING)
     .publish(hired.topic, envelope(id, data));
 }
 
@@ -137,12 +142,20 @@ describe('inbox through a real kernel app', () => {
     const audit: string[] = [];
     const app = buildApp({
       subscriptions: [
-        onIntegrationEvent(hired, (p) => {
-          payroll.push(p.personId);
-        }, { inbox: { consumer: 'payroll' } }),
-        onIntegrationEvent(hired, (p) => {
-          audit.push(p.personId);
-        }, { inbox: { consumer: 'audit' } }),
+        onIntegrationEvent(
+          hired,
+          (p) => {
+            payroll.push(p.personId);
+          },
+          { inbox: { consumer: 'payroll' } },
+        ),
+        onIntegrationEvent(
+          hired,
+          (p) => {
+            audit.push(p.personId);
+          },
+          { inbox: { consumer: 'audit' } },
+        ),
       ],
     });
     await app.start();
@@ -161,9 +174,13 @@ describe('inbox through a real kernel app', () => {
     let failures = 1;
     const app = buildApp({
       subscriptions: [
-        onIntegrationEvent(hired, writingHandler(calls, () => failures-- > 0), {
-          inbox: { consumer: 'payroll' },
-        }),
+        onIntegrationEvent(
+          hired,
+          writingHandler(calls, () => failures-- > 0),
+          {
+            inbox: { consumer: 'payroll' },
+          },
+        ),
       ],
     });
     await app.start();
@@ -188,9 +205,13 @@ describe('inbox through a real kernel app', () => {
     const app = buildApp({
       inbox: { maxAttempts: 2 },
       subscriptions: [
-        onIntegrationEvent(hired, writingHandler(calls, () => fail), {
-          inbox: { consumer: 'payroll' },
-        }),
+        onIntegrationEvent(
+          hired,
+          writingHandler(calls, () => fail),
+          {
+            inbox: { consumer: 'payroll' },
+          },
+        ),
       ],
     });
     await app.start();
@@ -212,7 +233,8 @@ describe('inbox through a real kernel app', () => {
     fail = false;
     const released = await inbox.release(parked!.rowId, 'retry');
     expect(released).toEqual({ topic: hired.topic, envelope: envelope('e-1') });
-    await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING)
+    await app.services
+      .get<IMessageBroker>(CAPABILITIES.MESSAGING)
       .publish(released.topic, released.envelope);
     await waitFor(() => calls.length === 3, 'retried delivery');
     await settle();
@@ -223,7 +245,8 @@ describe('inbox through a real kernel app', () => {
   it('the scheduled purge removes markers older than retainMs, parked ones included', async () => {
     const app = buildApp({ inbox: { retainMs: 60_000, purge: { intervalMs: 20 } } });
     await app.start();
-    const repo = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+    const repo = app.services
+      .get<IDatabaseService>(CAPABILITIES.DATABASE)
       .getRepository<Record<string, unknown>>('Inbox');
     const row = (id: string, status: string, updatedAt: number) => ({
       id,
@@ -304,9 +327,13 @@ describe('inbox through a real kernel app', () => {
         },
       },
       subscriptions: [
-        onIntegrationEvent(hired, (p) => {
-          calls.push(p.personId);
-        }, { inbox: { consumer: 'payroll' } }),
+        onIntegrationEvent(
+          hired,
+          (p) => {
+            calls.push(p.personId);
+          },
+          { inbox: { consumer: 'payroll' } },
+        ),
       ],
     });
     await app.start();

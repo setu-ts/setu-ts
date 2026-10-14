@@ -18,15 +18,17 @@ function getOnly(get: Required<IAuthHttp>['get']): IAuthHttp {
 }
 
 function issuer(overrides: Partial<TrustedIssuer> = {}): ReturnType<typeof compileIssuers>[number] {
-  return compileIssuers([{
-    name: 'idp',
-    issuer: 'https://idp.test',
-    audience: 'api',
-    keys: { jwksUri: JWKS },
-    keySet: { ttlMs: 1000, minRefreshIntervalMs: 100, maxStaleMs: 5000 },
-    toPrincipal: () => null,
-    ...overrides,
-  }])[0];
+  return compileIssuers([
+    {
+      name: 'idp',
+      issuer: 'https://idp.test',
+      audience: 'api',
+      keys: { jwksUri: JWKS },
+      keySet: { ttlMs: 1000, minRefreshIntervalMs: 100, maxStaleMs: 5000 },
+      toPrincipal: () => null,
+      ...overrides,
+    },
+  ])[0];
 }
 
 function setup(body: unknown = { keys: [KEY] }, overrides: Partial<TrustedIssuer> = {}) {

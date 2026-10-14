@@ -67,10 +67,7 @@ export function encodeEnvelope(kid: string, first: Uint8Array, second: Uint8Arra
  * @returns The decoded envelope, or `null` when it is unusable
  * @since 0.2.0
  */
-export function decodeEnvelope(
-  raw: string,
-  expectIvLength?: number,
-): DecodedEnvelope | null {
+export function decodeEnvelope(raw: string, expectIvLength?: number): DecodedEnvelope | null {
   const parts = raw.split('.');
   if (parts.length !== SEGMENT_COUNT) {
     return null;

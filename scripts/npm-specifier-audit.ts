@@ -100,9 +100,10 @@ function scanSource(source: string): readonly ScanHit[] {
     if (argOffset >= code.length) continue;
 
     const argChar = code[argOffset];
-    const isComputed = argChar !== "'" && argChar !== '"' && argChar !== '`'
-      ? true
-      : !isBareStringArgument(source, code, argOffset, parenOffset);
+    const isComputed =
+      argChar !== "'" && argChar !== '"' && argChar !== '`'
+        ? true
+        : !isBareStringArgument(source, code, argOffset, parenOffset);
     if (!isComputed) continue;
 
     const line = offsetToLine[start];
@@ -429,10 +430,7 @@ function firstArgumentEnd(code: string, parenOffset: number): number {
  * interpolation (an interpolated template is computed). `end` is `-1` when
  * the literal is unterminated or interpolated.
  */
-export function readStringLiteral(
-  source: string,
-  offset: number,
-): { end: number; clean: boolean } {
+export function readStringLiteral(source: string, offset: number): { end: number; clean: boolean } {
   const quote = source[offset];
   const n = source.length;
   let i = offset + 1;
@@ -614,10 +612,7 @@ function classifyLiteral(
 }
 
 /** The identifier ending just before `from`, as `{ text, start }`, or null. */
-function wordBefore(
-  code: string,
-  from: number,
-): { text: string; start: number } | null {
+function wordBefore(code: string, from: number): { text: string; start: number } | null {
   let end = from;
   while (end > 0 && /\s/.test(code[end - 1])) end -= 1;
   let start = end;

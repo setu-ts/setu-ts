@@ -159,7 +159,7 @@ describe('SSE Integration (real plugin end-to-end)', () => {
           const { done, value } = await Promise.race([
             reader.read(),
             new Promise<{ done: true; value?: never }>((r) =>
-              setTimeout(() => r({ done: true }), 250)
+              setTimeout(() => r({ done: true }), 250),
             ),
           ]);
           if (done) break;

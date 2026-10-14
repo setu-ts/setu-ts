@@ -77,9 +77,7 @@ describe('generated imports match the formatter the project ships with', () => {
     const files = projectFiles('shop', 'deno', resolved);
     const config = files.find((f) => f.path === 'setu.config.ts')!;
 
-    expect(config.contents).toContain(
-      `import { $dollar, _under, alpha, Zeta } from './x.ts';`,
-    );
+    expect(config.contents).toContain(`import { $dollar, _under, alpha, Zeta } from './x.ts';`);
   });
 });
 

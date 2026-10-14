@@ -54,9 +54,13 @@ function defaultPathParamSchema(): OpenApiSchemaObject {
  * @returns `true` when the schema earns a `components/schemas` entry
  */
 function isStructuralShape(schema: OpenApiSchemaObject): boolean {
-  return schema.type === 'object' || schema.type === 'array' ||
-    schema.anyOf !== undefined || schema.allOf !== undefined ||
-    schema.enum !== undefined;
+  return (
+    schema.type === 'object' ||
+    schema.type === 'array' ||
+    schema.anyOf !== undefined ||
+    schema.allOf !== undefined ||
+    schema.enum !== undefined
+  );
 }
 
 /**
@@ -98,15 +102,18 @@ export interface OpenApiDocument {
     readonly description?: string;
   }[];
   /** API paths. */
-  readonly paths: Record<string, {
-    readonly get?: OpenApiOperation;
-    readonly post?: OpenApiOperation;
-    readonly put?: OpenApiOperation;
-    readonly patch?: OpenApiOperation;
-    readonly delete?: OpenApiOperation;
-    readonly head?: OpenApiOperation;
-    readonly options?: OpenApiOperation;
-  }>;
+  readonly paths: Record<
+    string,
+    {
+      readonly get?: OpenApiOperation;
+      readonly post?: OpenApiOperation;
+      readonly put?: OpenApiOperation;
+      readonly patch?: OpenApiOperation;
+      readonly delete?: OpenApiOperation;
+      readonly head?: OpenApiOperation;
+      readonly options?: OpenApiOperation;
+    }
+  >;
   /**
    * Document-level security requirements, applied to every operation that
    * does not declare its own. An operation opts out with `security: []`.
@@ -621,15 +628,18 @@ export class OpenApiGenerator {
       }
       this.#pass = 'emit';
 
-      const paths: Record<string, {
-        get?: OpenApiOperation;
-        post?: OpenApiOperation;
-        put?: OpenApiOperation;
-        patch?: OpenApiOperation;
-        delete?: OpenApiOperation;
-        head?: OpenApiOperation;
-        options?: OpenApiOperation;
-      }> = {};
+      const paths: Record<
+        string,
+        {
+          get?: OpenApiOperation;
+          post?: OpenApiOperation;
+          put?: OpenApiOperation;
+          patch?: OpenApiOperation;
+          delete?: OpenApiOperation;
+          head?: OpenApiOperation;
+          options?: OpenApiOperation;
+        }
+      > = {};
 
       // Group routes by path
       for (const route of routes) {
@@ -654,10 +664,7 @@ export class OpenApiGenerator {
       if (this.#componentSchemas.size > 0) {
         components.schemas = Object.fromEntries(this.#componentSchemas);
       }
-      if (
-        this.#options.securitySchemes &&
-        Object.keys(this.#options.securitySchemes).length > 0
-      ) {
+      if (this.#options.securitySchemes && Object.keys(this.#options.securitySchemes).length > 0) {
         components.securitySchemes = this.#options.securitySchemes;
       }
 
@@ -723,13 +730,13 @@ export class OpenApiGenerator {
     // Build request body from body schema
     const requestBody = schema?.body
       ? {
-        required: true,
-        content: {
-          'application/json': {
-            schema: this.#resolveSchema(schema.body, `${operationId}Body`, 'input'),
+          required: true,
+          content: {
+            'application/json': {
+              schema: this.#resolveSchema(schema.body, `${operationId}Body`, 'input'),
+            },
           },
-        },
-      }
+        }
       : undefined;
 
     // Build responses from response schema. A route whose request shape was
@@ -797,9 +804,7 @@ export class OpenApiGenerator {
    * @param route - The route being documented
    * @returns The effective schema and whether any field came from a brand
    */
-  #effectiveSchema(
-    route: RouteInfo,
-  ): { schema: RouteSchema | undefined; derived: boolean } {
+  #effectiveSchema(route: RouteInfo): { schema: RouteSchema | undefined; derived: boolean } {
     const declared = route.definition.schema;
     if (this.#options.deriveRequestSchemas === false) {
       return { schema: declared, derived: false };
@@ -969,9 +974,10 @@ export class OpenApiGenerator {
     // a string, so an untyped parameter renders as `any` in Swagger UI and
     // generates an `unknown` argument in client codegen for no reason.
     for (const paramName of pathParams) {
-      const paramSchema = paramsTransformed && paramName in paramsTransformed
-        ? paramsTransformed[paramName]
-        : defaultPathParamSchema();
+      const paramSchema =
+        paramsTransformed && paramName in paramsTransformed
+          ? paramsTransformed[paramName]
+          : defaultPathParamSchema();
 
       parameters.push({
         name: paramName,
@@ -1054,16 +1060,16 @@ export class OpenApiGenerator {
           description,
           ...(schema !== undefined
             ? {
-              content: {
-                'application/json': {
-                  schema: this.#resolveSchema(
-                    schema,
-                    `${operationId}Response${statusCode}`,
-                    'output',
-                  ),
+                content: {
+                  'application/json': {
+                    schema: this.#resolveSchema(
+                      schema,
+                      `${operationId}Response${statusCode}`,
+                      'output',
+                    ),
+                  },
                 },
-              },
-            }
+              }
             : {}),
         };
       }
@@ -1091,10 +1097,7 @@ export class OpenApiGenerator {
    * @param statusCode - The HTTP status code (for the default description)
    * @returns The inner schema (if any) and the resolved description
    */
-  #normalizeResponse(
-    value: unknown,
-    statusCode: number,
-  ): { schema: unknown; description: string } {
+  #normalizeResponse(value: unknown, statusCode: number): { schema: unknown; description: string } {
     const fallback = this.#getStatusDescription(statusCode);
 
     if (value === null || typeof value !== 'object') {
@@ -1333,7 +1336,8 @@ export class OpenApiGenerator {
   #viewsDiffer(schema: unknown): boolean {
     const cached = this.#viewsDifferCache.get(schema);
     if (cached !== undefined) return cached;
-    const differs = JSON.stringify(this.#viewProbe.transform(schema, 'input')) !==
+    const differs =
+      JSON.stringify(this.#viewProbe.transform(schema, 'input')) !==
       JSON.stringify(this.#viewProbe.transform(schema, 'output'));
     this.#viewsDifferCache.set(schema, differs);
     return differs;
@@ -1425,7 +1429,7 @@ export class OpenApiGenerator {
     };
     const base = preferred ?? toPascalCase(this.#nameHint);
     if (!taken(base)) return reserve(base);
-    for (let n = 2;; n++) {
+    for (let n = 2; ; n++) {
       const candidate = `${base}${n}`;
       if (!taken(candidate)) return reserve(candidate);
     }

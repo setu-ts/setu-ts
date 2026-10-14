@@ -24,9 +24,7 @@ describe('renderModuleBarrel', () => {
   it('imports and lists a module class per module', () => {
     const source = renderModuleBarrel(['user']);
 
-    expect(source).toContain(
-      "import { UserModule } from './user/user.module.ts';",
-    );
+    expect(source).toContain("import { UserModule } from './user/user.module.ts';");
     expect(source).toContain(`export const ${MODULES_EXPORT}: readonly Constructor[] = [`);
     expect(source).toContain('UserModule');
   });
@@ -48,9 +46,7 @@ describe('renderModuleBarrel', () => {
     const reversed = renderModuleBarrel(['billing', 'user', 'order']);
 
     expect(forward).toBe(reversed);
-    expect(forward.indexOf('BillingModule')).toBeLessThan(
-      forward.indexOf('OrderModule'),
-    );
+    expect(forward.indexOf('BillingModule')).toBeLessThan(forward.indexOf('OrderModule'));
     expect(forward.indexOf('OrderModule')).toBeLessThan(forward.indexOf('UserModule'));
   });
 
@@ -96,9 +92,7 @@ describe('renderModuleBarrel', () => {
     expect(source).toContain(
       `export const ${LEGACY_CONTROLLERS_EXPORT}: readonly Constructor[] = [`,
     );
-    expect(source).toContain(
-      `export const ${LEGACY_SERVICES_EXPORT}: readonly Constructor[] = [`,
-    );
+    expect(source).toContain(`export const ${LEGACY_SERVICES_EXPORT}: readonly Constructor[] = [`);
     expect(source).toContain('UsersController');
     expect(source).toContain('OrdersController');
     expect(source).toContain('UsersService');

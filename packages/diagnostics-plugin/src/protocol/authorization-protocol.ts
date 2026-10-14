@@ -146,9 +146,11 @@ function isConsistentStepCount(
   if (operation === 'role' || operation === 'permission') {
     return ruleCount === 1 && stepCount === 1 && stepsEvaluated === 1 && !stepsTruncated;
   }
-  return (ruleCount > 0 || stepsEvaluated === 0) &&
+  return (
+    (ruleCount > 0 || stepsEvaluated === 0) &&
     stepCount === Math.min(stepsEvaluated, MAX_AUTHORIZATION_STEPS) &&
-    stepsTruncated === (stepsEvaluated > MAX_AUTHORIZATION_STEPS);
+    stepsTruncated === stepsEvaluated > MAX_AUTHORIZATION_STEPS
+  );
 }
 
 /** Membership in a fixed vocabulary. */
@@ -239,7 +241,8 @@ function readStep(value: unknown): ValidatedAuthorizationStep | null {
   const reason = value.reason;
   const viaRoleAlias = value.viaRoleAlias;
   if (
-    !isDisplayAlias(ruleAlias) || !isOneOf(reason, REASONS) ||
+    !isDisplayAlias(ruleAlias) ||
+    !isOneOf(reason, REASONS) ||
     (hasVia && !isDisplayAlias(viaRoleAlias))
   ) {
     return null;
@@ -273,10 +276,7 @@ function readDecision(value: unknown): ValidatedAuthorizationDecision | null {
   const operation = value.operation;
   const reason = value.reason;
   const result = value.result;
-  if (
-    !isOneOf(operation, OPERATIONS) || !isOneOf(reason, REASONS) ||
-    typeof result !== 'boolean'
-  ) {
+  if (!isOneOf(operation, OPERATIONS) || !isOneOf(reason, REASONS) || typeof result !== 'boolean') {
     return null;
   }
   const rawRuleAliases = copyBounded(value.ruleAliases, MAX_AUTHORIZATION_RULE_ALIASES);
@@ -288,10 +288,7 @@ function readDecision(value: unknown): ValidatedAuthorizationDecision | null {
     return null;
   }
   const rawSteps = copyBounded(value.steps, MAX_AUTHORIZATION_STEPS);
-  if (
-    rawSteps === null ||
-    rawSteps.length > MAX_AUTHORIZATION_STEPS
-  ) {
+  if (rawSteps === null || rawSteps.length > MAX_AUTHORIZATION_STEPS) {
     return null;
   }
   const steps: ValidatedAuthorizationStep[] = [];
@@ -302,19 +299,17 @@ function readDecision(value: unknown): ValidatedAuthorizationDecision | null {
     }
     steps.push(step);
   }
-  const {
-    sequence,
-    id,
-    stepsEvaluated,
-    stepsTruncated,
-    ageMs,
-  } = value;
+  const { sequence, id, stepsEvaluated, stepsTruncated, ageMs } = value;
   const viaRoleAlias = value.viaRoleAlias;
   const policyRevision = value.policyRevision;
   if (
-    !isCount(sequence) || sequence < 1 || !isDecisionId(id) ||
-    !isCount(stepsEvaluated) || typeof stepsTruncated !== 'boolean' ||
-    !isMs(ageMs) || (hasVia && !isDisplayAlias(viaRoleAlias)) ||
+    !isCount(sequence) ||
+    sequence < 1 ||
+    !isDecisionId(id) ||
+    !isCount(stepsEvaluated) ||
+    typeof stepsTruncated !== 'boolean' ||
+    !isMs(ageMs) ||
+    (hasVia && !isDisplayAlias(viaRoleAlias)) ||
     (hasRevision && !isDisplayAlias(policyRevision))
   ) {
     return null;
@@ -400,8 +395,11 @@ export function readAuthorizationSourceBatch(
     const { next, lost, closed, droppedUnapproved } = value;
     const rawDecisions = copyBounded(value.decisions, limit);
     if (
-      rawDecisions === null || rawDecisions.length > limit ||
-      !isCount(next) || !isCount(lost) || typeof closed !== 'boolean' ||
+      rawDecisions === null ||
+      rawDecisions.length > limit ||
+      !isCount(next) ||
+      !isCount(lost) ||
+      typeof closed !== 'boolean' ||
       !isCount(droppedUnapproved)
     ) {
       return null;
@@ -409,9 +407,7 @@ export function readAuthorizationSourceBatch(
     // A source that observes nothing retains nothing: `disabled` and
     // `unsupported` observe by definition, and a closed source has cleared
     // its ring.
-    if (
-      (state === 'disabled' || state === 'unsupported' || closed) && rawDecisions.length > 0
-    ) {
+    if ((state === 'disabled' || state === 'unsupported' || closed) && rawDecisions.length > 0) {
       return null;
     }
     const decisions: ValidatedAuthorizationDecision[] = [];
@@ -534,12 +530,15 @@ function isStepProjection(value: unknown): boolean {
     return false;
   }
   const hasVia = Object.hasOwn(value, 'viaRoleAlias');
-  return hasExactKeys(
-    value,
-    hasVia ? [...PROJECTION_STEP_KEYS, 'viaRoleAlias'] : PROJECTION_STEP_KEYS,
-  ) &&
-    isDisplayAlias(value.ruleAlias) && isOneOf(value.reason, REASONS) &&
-    (!hasVia || isDisplayAlias(value.viaRoleAlias));
+  return (
+    hasExactKeys(
+      value,
+      hasVia ? [...PROJECTION_STEP_KEYS, 'viaRoleAlias'] : PROJECTION_STEP_KEYS,
+    ) &&
+    isDisplayAlias(value.ruleAlias) &&
+    isOneOf(value.reason, REASONS) &&
+    (!hasVia || isDisplayAlias(value.viaRoleAlias))
+  );
 }
 
 /** Validates one projected decision against the exact M98h DTO. */
@@ -560,8 +559,10 @@ function isDecisionProjection(value: unknown): boolean {
   const operation = value.operation;
   const reason = value.reason;
   if (
-    !isOneOf(operation, OPERATIONS) || !isOneOf(reason, REASONS) ||
-    typeof value.result !== 'boolean' || !isDecisionId(value.id)
+    !isOneOf(operation, OPERATIONS) ||
+    !isOneOf(reason, REASONS) ||
+    typeof value.result !== 'boolean' ||
+    !isDecisionId(value.id)
   ) {
     return false;
   }
@@ -575,7 +576,8 @@ function isDecisionProjection(value: unknown): boolean {
   }
   const steps = value.steps;
   if (
-    !Array.isArray(steps) || steps.length > MAX_AUTHORIZATION_STEPS ||
+    !Array.isArray(steps) ||
+    steps.length > MAX_AUTHORIZATION_STEPS ||
     !steps.every(isStepProjection)
   ) {
     return false;
@@ -584,9 +586,13 @@ function isDecisionProjection(value: unknown): boolean {
   const viaRoleAlias = value.viaRoleAlias;
   const policyRevision = value.policyRevision;
   if (
-    !isCount(sequence) || sequence < 1 || !isCount(stepsEvaluated) ||
-    typeof stepsTruncated !== 'boolean' || !isMs(ageMs) ||
-    (hasVia && !isDisplayAlias(viaRoleAlias)) || (hasRevision && !isDisplayAlias(policyRevision))
+    !isCount(sequence) ||
+    sequence < 1 ||
+    !isCount(stepsEvaluated) ||
+    typeof stepsTruncated !== 'boolean' ||
+    !isMs(ageMs) ||
+    (hasVia && !isDisplayAlias(viaRoleAlias)) ||
+    (hasRevision && !isDisplayAlias(policyRevision))
   ) {
     return false;
   }
@@ -626,14 +632,18 @@ export function isAuthorizationBatchProjection(
   const projectionKeys = hasCoverage ? [...PROJECTION_KEYS, 'coverage'] : PROJECTION_KEYS;
   if (
     !hasExactKeys(value, projectionKeys) ||
-    value.version !== 1 || typeof value.instanceId !== 'string' ||
+    value.version !== 1 ||
+    typeof value.instanceId !== 'string' ||
     value.instanceId.length === 0 ||
     !isOneOf(state, SOURCE_STATES) ||
     (state === 'unsupported') !== hasCoverage ||
     (hasCoverage && !isOneOf(value.coverage, COVERAGE)) ||
-    !Array.isArray(decisions) || decisions.length > MAX_AUTHORIZATION_DECISIONS ||
-    !isCount(value.next) || !isCount(value.lost) ||
-    typeof value.closed !== 'boolean' || !isCount(value.droppedUnapproved)
+    !Array.isArray(decisions) ||
+    decisions.length > MAX_AUTHORIZATION_DECISIONS ||
+    !isCount(value.next) ||
+    !isCount(value.lost) ||
+    typeof value.closed !== 'boolean' ||
+    !isCount(value.droppedUnapproved)
   ) {
     return false;
   }
@@ -643,7 +653,7 @@ export function isAuthorizationBatchProjection(
   for (let index = 1; index < decisions.length; index++) {
     if (
       (decisions[index] as { sequence: number }).sequence <=
-        (decisions[index - 1] as { sequence: number }).sequence
+      (decisions[index - 1] as { sequence: number }).sequence
     ) {
       return false;
     }

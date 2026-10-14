@@ -108,9 +108,7 @@ describe('REAL Redis cache outage (M101a V8-5)', { skip: redisUrl === undefined 
       expect(refused.statusCode).toBe(500);
       expect(elapsed).toBeLessThan(BOUND_MS * 3);
 
-      const [source] = app.services.getAll<ICacheDiagnosticsSource>(
-        CAPABILITIES.CACHE_DIAGNOSTICS,
-      );
+      const [source] = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS);
       const get = source.snapshot().records.find((record) => record.operation === 'get');
       expect(get).toMatchObject({ count: 2, succeeded: 1, failed: 1 });
 

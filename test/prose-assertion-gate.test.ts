@@ -38,8 +38,7 @@ describe('prose assertion gate — marker and grammar', () => {
         findClaimBlocks(
           `${marker}\n\n| Expression | Value |\n| - | - |\n| \`1 === 1\` | \`true\` |`,
         ).length,
-      )
-        .toBe(1);
+      ).toBe(1);
     }
   });
 
@@ -48,8 +47,7 @@ describe('prose assertion gate — marker and grammar', () => {
   });
 
   it('does not mistake prose mentioning the marker for an assertion', () => {
-    const source =
-      `${MARKER} is a marker.\n\n| Expression | Value |\n| - | - |\n| \`1 === 1\` | \`true\` |`;
+    const source = `${MARKER} is a marker.\n\n| Expression | Value |\n| - | - |\n| \`1 === 1\` | \`true\` |`;
 
     expect(findClaimBlocks(source)).toEqual([]);
   });
@@ -135,12 +133,14 @@ describe('prose assertion gate — evaluator', () => {
     if (block === undefined) throw new Error('Expected a marked block');
     const results = await evaluateClaims(parseClaimTable(block));
 
-    expect(results).toEqual([{ ok: true, value: true }, { ok: true, value: false }]);
+    expect(results).toEqual([
+      { ok: true, value: true },
+      { ok: true, value: false },
+    ]);
   });
 
   it('denies filesystem access to an expression from the document', async () => {
-    const source =
-      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.readTextFileSync('/etc/hostname')\` | \`"unreachable"\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.readTextFileSync('/etc/hostname')\` | \`"unreachable"\` |`;
     const findings = await checkDocument('sandbox.md', source);
 
     expect(findings.length).toBe(1);
@@ -148,8 +148,7 @@ describe('prose assertion gate — evaluator', () => {
   });
 
   it('fails closed when a claim exits before every result is emitted', async () => {
-    const source =
-      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
     const findings = await checkDocument('exit.md', source);
 
     expect(findings.length).toBe(2);
@@ -177,8 +176,7 @@ describe('prose assertion gate — evaluator', () => {
   });
 
   it('fails closed when a document batch exceeds its timeout', async () => {
-    const source =
-      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(() => { while (true) {} })()\` | \`null\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(() => { while (true) {} })()\` | \`null\` |`;
     const findings = await checkDocument('timeout.md', source, 20);
 
     expect(findings.length).toBe(1);

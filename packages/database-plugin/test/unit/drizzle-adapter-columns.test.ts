@@ -36,11 +36,15 @@ const events = pgTable('events', {
 });
 
 /** The shape X4-9 was reported against: `primary key (tenant_id, flag)`. */
-const tenantFlags = pgTable('tenant_flags', {
-  tenantId: text('tenant_id').notNull(),
-  flag: text('flag').notNull(),
-  value: text('value').notNull(),
-}, (table) => [primaryKey({ columns: [table.tenantId, table.flag] })]);
+const tenantFlags = pgTable(
+  'tenant_flags',
+  {
+    tenantId: text('tenant_id').notNull(),
+    flag: text('flag').notNull(),
+    value: text('value').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.tenantId, table.flag] })],
+);
 
 // ---------------------------------------------------------------------------
 // A faithful in-memory evaluator over the REAL Drizzle SQL tree.
@@ -65,8 +69,8 @@ function stringOf(chunk: Chunk | undefined): string | undefined {
 }
 
 function chunksOf(sql: unknown): Chunk[] {
-  const chunks = (sql as { queryChunks?: ReadonlyArray<unknown> } | null | undefined)
-    ?.queryChunks ?? [];
+  const chunks =
+    (sql as { queryChunks?: ReadonlyArray<unknown> } | null | undefined)?.queryChunks ?? [];
   return chunks as unknown as Chunk[];
 }
 
@@ -244,9 +248,8 @@ function makeEvaluatorAdapter(
   rows: Record<string, unknown>[],
   extra?: Partial<DrizzleAdapterOptions>,
 ) {
-  const instance = createDrizzleDatabase(
-    makeEvaluator(seed(rows)),
-    (instance, work) => instance.transaction(work),
+  const instance = createDrizzleDatabase(makeEvaluator(seed(rows)), (instance, work) =>
+    instance.transaction(work),
   );
   const adapter = new DrizzleAdapter({
     drizzleInstance: instance,
@@ -267,9 +270,8 @@ describe('DrizzleAdapter table registry', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
@@ -285,9 +287,8 @@ describe('DrizzleAdapter table registry', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
@@ -296,8 +297,9 @@ describe('DrizzleAdapter table registry', () => {
     await adapter.connect();
     // Default primaryKey is ['id']; the composite object is handed to keyValues
     // which names the missing required column instead of columnFor throwing.
-    await expect(adapter.createDataSource('TenantFlag').findById({ tenantId: 't1', flag: 'x' }))
-      .rejects.toThrow(/missing required column 'id'/);
+    await expect(
+      adapter.createDataSource('TenantFlag').findById({ tenantId: 't1', flag: 'x' }),
+    ).rejects.toThrow(/missing required column 'id'/);
   });
 
   it('still serves a repository for the single-key table beside it', async () => {
@@ -306,9 +308,8 @@ describe('DrizzleAdapter table registry', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
@@ -326,9 +327,8 @@ describe('DrizzleAdapter table registry', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
@@ -345,9 +345,8 @@ describe('DrizzleAdapter table registry', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
@@ -366,9 +365,8 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const extra: Partial<DrizzleAdapterOptions> = {
       entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } },
@@ -392,9 +390,8 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const extra: Partial<DrizzleAdapterOptions> = {
       entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } },
@@ -405,8 +402,9 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       ...extra,
     });
     await adapter.connect();
-    await expect(adapter.createDataSource('TenantFlag').findById('scalar-wrong'))
-      .rejects.toThrow(/entity key must be a composite record for multi-column target/);
+    await expect(adapter.createDataSource('TenantFlag').findById('scalar-wrong')).rejects.toThrow(
+      /entity key must be a composite record for multi-column target/,
+    );
   });
 
   it('rejects a composite record missing a required column, by name and via Promise', async () => {
@@ -415,9 +413,8 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const extra: Partial<DrizzleAdapterOptions> = {
       entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } },
@@ -430,8 +427,7 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
     await adapter.connect();
     await expect(
       adapter.createDataSource('TenantFlag').findById({ tenantId: 't1' as unknown as string }),
-    )
-      .rejects.toThrow(/composite key is missing required column 'flag'/);
+    ).rejects.toThrow(/composite key is missing required column 'flag'/);
   });
 
   it('keeps the default ["id"] for an unconfigured entity', async () => {
@@ -440,9 +436,8 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
@@ -461,19 +456,17 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
       drizzleTables: { Tenant: tenants, TenantFlag: tenantFlags },
     });
     await adapter.connect();
-    await expect(adapter.createDataSource('TenantFlag').findById('t1'))
-      .rejects.toThrow(
-        "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
-      );
+    await expect(adapter.createDataSource('TenantFlag').findById('t1')).rejects.toThrow(
+      "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
+    );
   });
 
   it('builds a compound WHERE for update using the configured key', async () => {
@@ -482,9 +475,8 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const extra: Partial<DrizzleAdapterOptions> = {
       entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } },
@@ -512,9 +504,8 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const extra: Partial<DrizzleAdapterOptions> = {
       entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } },
@@ -547,9 +538,8 @@ describe('DrizzleAdapter findPage — keyset predicate in emitted SQL', () => {
       seen.push(sql);
       return Promise.resolve({ rows: [] });
     });
-    const configured = createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    const configured = createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: configured,
@@ -585,12 +575,7 @@ describe('DrizzleAdapter findPage — keyset predicate in emitted SQL', () => {
   });
 
   it('asserts the keyset predicate against keysetPredicate itself', () => {
-    const predicate = keysetPredicate(
-      ['first'],
-      ['i1'],
-      { created_at: 'desc' },
-      ['id'],
-    );
+    const predicate = keysetPredicate(['first'], ['i1'], { created_at: 'desc' }, ['id']);
     // The predicate is the plan §3.8 tree: or(lt(created_at), and(eq(created_at), gt(id))).
     expect(predicate.type).toBe('or');
     if (predicate.type !== 'or') return;
@@ -758,9 +743,8 @@ describe('DrizzleAdapter reachability probe (M95b §3.5)', () => {
       return respond(sql);
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (instance, work) => instance.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (instance, work) =>
+        instance.transaction(work),
       ),
       drizzleTables: { Tenant: tenants },
     });

@@ -142,9 +142,10 @@ export class SqliteD1 implements ID1Database {
    * @returns Every row, as plain objects
    */
   dump(table: string): Record<string, unknown>[] {
-    return this.#db.prepare(`SELECT * FROM "${table}"`).all().map(
-      (r) => toPlainRow(r as Record<string, unknown>),
-    );
+    return this.#db
+      .prepare(`SELECT * FROM "${table}"`)
+      .all()
+      .map((r) => toPlainRow(r as Record<string, unknown>));
   }
 }
 

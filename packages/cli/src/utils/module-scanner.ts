@@ -77,10 +77,7 @@ async function isFile(fs: IFileSystem, path: string): Promise<boolean> {
  * @param dir - The project's root directory (absolute)
  * @returns Valid module directory names and legacy generated module diagnostics
  */
-export async function scanModules(
-  fs: IFileSystem,
-  dir: string,
-): Promise<ModuleScan> {
+export async function scanModules(fs: IFileSystem, dir: string): Promise<ModuleScan> {
   const root = joinPath(dir, MODULES_DIR);
 
   let entries: readonly string[];
@@ -125,9 +122,6 @@ export async function scanModules(
  * @param dir - The project's root directory
  * @returns Valid module directory names, sorted
  */
-export async function readModuleNames(
-  fs: IFileSystem,
-  dir: string,
-): Promise<readonly string[]> {
+export async function readModuleNames(fs: IFileSystem, dir: string): Promise<readonly string[]> {
   return (await scanModules(fs, dir)).names;
 }

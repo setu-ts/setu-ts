@@ -193,16 +193,23 @@ export async function buildSignInApp(options: BuildOptions = {}): Promise<SignIn
   app.router.post('/_age-pending', (ctx) => {
     const session = getSession(ctx);
     const pending = session.get<Record<string, unknown>[]>(PENDING_SESSION_KEY) ?? [];
-    session.set(PENDING_SESSION_KEY, pending.map((entry) => ({ ...entry, createdAt: 0 })));
+    session.set(
+      PENDING_SESSION_KEY,
+      pending.map((entry) => ({ ...entry, createdAt: 0 })),
+    );
     return ctx.response.json({ ok: true });
   });
   app.router.get('/_csrf', async (ctx) => ctx.response.json({ token: await getCsrfToken(ctx) }));
   // A password login through the one contract every sign-in method writes.
   app.router.post('/password-login', async (ctx) => {
     const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
-    await auth.signIn(ctx, { id: 'alice', roles: ['user'], claims: { amr: ['hwk'] } }, {
-      methods: ['pwd'],
-    });
+    await auth.signIn(
+      ctx,
+      { id: 'alice', roles: ['user'], claims: { amr: ['hwk'] } },
+      {
+        methods: ['pwd'],
+      },
+    );
     return ctx.response.json({ ok: true });
   });
 
@@ -247,11 +254,7 @@ export class CookieJar {
   }
 
   /** Sends a request with the jar's cookie and records the answer. */
-  async fetch(
-    app: IKernelApplication,
-    path: string,
-    init: RequestInit = {},
-  ): Promise<Response> {
+  async fetch(app: IKernelApplication, path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (this.cookie !== undefined) {
       headers.set('cookie', this.cookie);
@@ -312,5 +315,5 @@ export async function pendingEntry(
 
 /** Reads a response body as JSON. */
 export async function json(response: Response): Promise<Record<string, unknown>> {
-  return await response.json() as Record<string, unknown>;
+  return (await response.json()) as Record<string, unknown>;
 }

@@ -68,47 +68,44 @@ export function workspaceRootFiles(
   // npm's — so there are two shapes here, not three. The command that runs every
   // member differs per toolchain even where the shape does not, which is why it
   // comes from the profile rather than from this branch.
-  const rootManifest = profile.manifestKind === 'deno'
-    ? {
-      path: 'deno.json',
-      contents: `${
-        JSON.stringify(
-          {
-            workspace: globs,
-            tasks: { dev: profile.runAll },
-            // Root-only, and inherited by every member: a member declaring them
-            // is redundant at best and refused at worst.
-            ...rootManifestSettings(),
-            // So the Node `setu` CLI can import a member's `setu.config.ts`:
-            // `deno install` links every member's npm packages, and each
-            // library declaring a `package.json`, into this `node_modules`
-            // (M111d §3.4).
-            nodeModulesDir: 'auto',
-          },
-          null,
-          2,
-        )
-      }\n`,
-    }
-    : {
-      path: 'package.json',
-      contents: `${
-        JSON.stringify(
-          {
-            name,
-            // A root that is never published and never installed as a package:
-            // npm refuses to treat a manifest as a workspace root without it.
-            private: true,
-            // Globs relative to the root, without the `./` Deno's take — npm
-            // matches them as written.
-            workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
-            scripts: { dev: profile.runAll },
-          },
-          null,
-          2,
-        )
-      }\n`,
-    };
+  const rootManifest =
+    profile.manifestKind === 'deno'
+      ? {
+          path: 'deno.json',
+          contents: `${JSON.stringify(
+            {
+              workspace: globs,
+              tasks: { dev: profile.runAll },
+              // Root-only, and inherited by every member: a member declaring them
+              // is redundant at best and refused at worst.
+              ...rootManifestSettings(),
+              // So the Node `setu` CLI can import a member's `setu.config.ts`:
+              // `deno install` links every member's npm packages, and each
+              // library declaring a `package.json`, into this `node_modules`
+              // (M111d §3.4).
+              nodeModulesDir: 'auto',
+            },
+            null,
+            2,
+          )}\n`,
+        }
+      : {
+          path: 'package.json',
+          contents: `${JSON.stringify(
+            {
+              name,
+              // A root that is never published and never installed as a package:
+              // npm refuses to treat a manifest as a workspace root without it.
+              private: true,
+              // Globs relative to the root, without the `./` Deno's take — npm
+              // matches them as written.
+              workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
+              scripts: { dev: profile.runAll },
+            },
+            null,
+            2,
+          )}\n`,
+        };
 
   const readme = `# ${name}
 
@@ -155,19 +152,21 @@ service still running holds its own port and is moved off it.
 ## Transport
 
 Services talk over **${transport.name}** — ${transport.description}.${
-    transport.connection === undefined ? '' : `
+    transport.connection === undefined
+      ? ''
+      : `
 
-${
-      wrapProse(
-        `Every member reads its connection value from \`${transport.connection.variable}\`, ` +
-          `falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that ` +
-          `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
-          `the local address, and the generated Compose stack overrides the variable with the ` +
-          `broker's service name, because two containers do not share a loopback interface.`,
-      )
-    }${transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`}`
+${wrapProse(
+  `Every member reads its connection value from \`${transport.connection.variable}\`, ` +
+    `falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that ` +
+    `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
+    `the local address, and the generated Compose stack overrides the variable with the ` +
+    `broker's service name, because two containers do not share a loopback interface.`,
+)}${transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`}`
   }${
-    transport.compose === undefined ? '' : `
+    transport.compose === undefined
+      ? ''
+      : `
 
 ## Run the stack
 
@@ -202,11 +201,12 @@ members can only meet on a bus they share. Every service added later inherits it
     { path: 'README.md', contents: readme },
     {
       path: '.gitignore',
-      contents: profile.manifestKind === 'deno'
-        ? 'node_modules/\ncoverage/\n'
-        // Both locations: Bun installs into each MEMBER's node_modules as well as
-        // the root, measured — an ignore listing only the root would commit them.
-        : 'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n',
+      contents:
+        profile.manifestKind === 'deno'
+          ? 'node_modules/\ncoverage/\n'
+          : // Both locations: Bun installs into each MEMBER's node_modules as well as
+            // the root, measured — an ignore listing only the root would commit them.
+            'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n',
     },
   ];
 }

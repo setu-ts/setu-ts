@@ -19,9 +19,11 @@ import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
 import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
 import { CAPABILITIES, type IResilienceService } from '@setu-ts/common';
 
-app.register(ResiliencePlugin({
-  defaultRetry: { limit: 3, delay: 100, backoff: 'exponential' },
-}));
+app.register(
+  ResiliencePlugin({
+    defaultRetry: { limit: 3, delay: 100, backoff: 'exponential' },
+  }),
+);
 
 const resilience = app.services.get<IResilienceService>(CAPABILITIES.RESILIENCE);
 

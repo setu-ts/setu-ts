@@ -108,9 +108,7 @@ function createContext(adapter: IHttpAdapter, withLogger = false): Harness {
     // A getter, not a snapshot: the harness is built before `register()` runs,
     // so an eagerly filtered array would always be empty.
     get infoLogs(): string[] {
-      return fake.entries
-        .filter((entry) => entry.level === 'info')
-        .map((entry) => entry.message);
+      return fake.entries.filter((entry) => entry.level === 'info').map((entry) => entry.message);
     },
   };
 }
@@ -311,14 +309,12 @@ describe('WebSocketPlugin with a realtime backplane', () => {
 
     const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
     const received: unknown[] = [];
-    service.room('lobby').add(
-      {
-        isOpen: true,
-        send: (payload: string | Uint8Array): void => {
-          received.push(payload);
-        },
-      } as never,
-    );
+    service.room('lobby').add({
+      isOpen: true,
+      send: (payload: string | Uint8Array): void => {
+        received.push(payload);
+      },
+    } as never);
 
     // A frame arriving on the backplane reaches the local room member.
     backplane.handlers[0]?.({
@@ -356,14 +352,12 @@ describe('WebSocketPlugin with a realtime backplane', () => {
     const service = harness.registered.get(CAPABILITIES.WEBSOCKET) as IWebSocketService;
     // Rooms still work; they simply never leave the process.
     const received: unknown[] = [];
-    service.room('lobby').add(
-      {
-        isOpen: true,
-        send: (payload: string | Uint8Array): void => {
-          received.push(payload);
-        },
-      } as never,
-    );
+    service.room('lobby').add({
+      isOpen: true,
+      send: (payload: string | Uint8Array): void => {
+        received.push(payload);
+      },
+    } as never);
     service.room('lobby').broadcast('local');
     expect(received).toEqual(['local']);
   });

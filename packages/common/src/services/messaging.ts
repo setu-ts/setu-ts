@@ -134,13 +134,7 @@ export const RESERVED_HEADER_PREFIXES: readonly string[] = Object.freeze([
  */
 export function publishHeaderNameProblem(
   name: unknown,
-):
-  | 'not-a-string'
-  | 'empty'
-  | 'not-visible-ascii'
-  | 'too-long'
-  | 'reserved'
-  | null {
+): 'not-a-string' | 'empty' | 'not-visible-ascii' | 'too-long' | 'reserved' | null {
   if (typeof name !== 'string') return 'not-a-string';
   if (name.length === 0) return 'empty';
   for (let index = 0; index < name.length; index++) {
@@ -164,13 +158,7 @@ export function publishHeaderNameProblem(
  */
 export function publishHeaderValueProblem(
   value: unknown,
-):
-  | 'not-a-string'
-  | 'not-well-formed'
-  | 'whitespace'
-  | 'forbidden-characters'
-  | 'too-long'
-  | null {
+): 'not-a-string' | 'not-well-formed' | 'whitespace' | 'forbidden-characters' | 'too-long' | null {
   if (typeof value !== 'string') return 'not-a-string';
   if (!value.isWellFormed()) return 'not-well-formed';
   if (value !== value.trim()) return 'whitespace';
@@ -264,9 +252,9 @@ function isPlainObject(value: unknown, what: string): value is Record<string, un
 
 const ID_PROBLEM_TEXT: Readonly<Record<string, string>> = {
   'not-a-string': 'must be a non-empty string',
-  'empty': 'must be a non-empty string',
+  empty: 'must be a non-empty string',
   'not-well-formed': 'must be a well-formed string',
-  'whitespace': 'must not have leading or trailing whitespace',
+  whitespace: 'must not have leading or trailing whitespace',
   'forbidden-characters': 'must not contain control or format characters',
   'too-long': `must be at most ${MAX_PUBLISH_ID_BYTES} UTF-8 bytes`,
 };
@@ -274,7 +262,7 @@ const ID_PROBLEM_TEXT: Readonly<Record<string, string>> = {
 const HEADER_VALUE_PROBLEM_TEXT: Readonly<Record<string, string>> = {
   'not-a-string': 'must be a string',
   'not-well-formed': 'must be a well-formed string',
-  'whitespace': 'must not have leading or trailing whitespace',
+  whitespace: 'must not have leading or trailing whitespace',
   'forbidden-characters': 'must not contain control or format characters',
   'too-long': `must be at most ${MAX_PUBLISH_HEADER_VALUE_BYTES} UTF-8 bytes`,
 };

@@ -133,21 +133,25 @@ describe('setu runs a plugin-contributed command', () => {
     expect(poisoned.stderr + poisoned.stdout).toContain('INSTALLED-KERNEL-LOADED');
   });
 
-  it('from a Deno project once deno install has linked node_modules', {
-    timeout: INSTALL_TIMEOUT_MS,
-  }, async () => {
-    const project = await projectWithCommand('deno');
+  it(
+    'from a Deno project once deno install has linked node_modules',
+    {
+      timeout: INSTALL_TIMEOUT_MS,
+    },
+    async () => {
+      const project = await projectWithCommand('deno');
 
-    // Not installed: the CLI cannot import the config from Node, and says how
-    // to fix it instead of failing inside a resolver.
-    const refused = await setu(project, ['greet:hello']);
-    expect(refused.code).not.toBe(0);
-    expect(refused.stderr).toContain('deno install');
+      // Not installed: the CLI cannot import the config from Node, and says how
+      // to fix it instead of failing inside a resolver.
+      const refused = await setu(project, ['greet:hello']);
+      expect(refused.code).not.toBe(0);
+      expect(refused.stderr).toContain('deno install');
 
-    const install = await runIn(project, denoBinary(), ['install'], overlay);
-    expect(install.code, install.output).toBe(0);
-    const ran = await setu(project, ['greet:hello']);
-    expect(ran.code, ran.stderr).toBe(0);
-    expect(ran.stdout).toContain('HELLO-FROM-PLUGIN');
-  });
+      const install = await runIn(project, denoBinary(), ['install'], overlay);
+      expect(install.code, install.output).toBe(0);
+      const ran = await setu(project, ['greet:hello']);
+      expect(ran.code, ran.stderr).toBe(0);
+      expect(ran.stdout).toContain('HELLO-FROM-PLUGIN');
+    },
+  );
 });

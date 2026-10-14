@@ -84,9 +84,7 @@ describe('subdomain resolver', () => {
 
     it('returns none for the apex domain itself — it carries no tenant', async () => {
       const resolver = new SubdomainResolver({ baseDomain: 'example.com' });
-      const result = await resolver.resolve(
-        createFakeRequest({ url: 'https://example.com/path' }),
-      );
+      const result = await resolver.resolve(createFakeRequest({ url: 'https://example.com/path' }));
       expect(result.present).toBe(false);
     });
 
@@ -104,9 +102,7 @@ describe('subdomain resolver', () => {
       // `notexample.com`.endsWith('example.com') is true — the leading dot in
       // the comparison is what stops this from resolving tenant `notexample`.
       const resolver = new SubdomainResolver({ baseDomain: 'example.com' });
-      const result = await resolver.resolve(
-        createFakeRequest({ url: 'https://notexample.com/x' }),
-      );
+      const result = await resolver.resolve(createFakeRequest({ url: 'https://notexample.com/x' }));
       expect(result.present).toBe(false);
     });
   });

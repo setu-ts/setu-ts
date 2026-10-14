@@ -12,13 +12,17 @@ describe('tenant conditional write race', () => {
       await source.delete('key');
       await source.create({ id: 'key', tenant_id: 'b', name: 'secret' });
       let reads = 0;
-      const service = new DatabaseService(adapter, () => ({
-        ...source,
-        findById: (id) => {
-          reads++;
-          return source.findById(id);
-        },
-      }), 'memory');
+      const service = new DatabaseService(
+        adapter,
+        () => ({
+          ...source,
+          findById: (id) => {
+            reads++;
+            return source.findById(id);
+          },
+        }),
+        'memory',
+      );
       const store = new DatabaseTenantDataStore(service);
       expect(
         operation === 'update'
@@ -36,18 +40,22 @@ describe('tenant conditional write race', () => {
       delete legacy.updateWhere;
       delete legacy.deleteWhere;
       let swapped = false;
-      const service = new DatabaseService(adapter, () => ({
-        ...legacy,
-        findById: async (id) => {
-          const captured = await source.findById(id);
-          if (!swapped) {
-            swapped = true;
-            await source.delete(id);
-            await source.create({ id: 'key', tenant_id: 'b', name: 'secret' });
-          }
-          return captured;
-        },
-      }), 'memory');
+      const service = new DatabaseService(
+        adapter,
+        () => ({
+          ...legacy,
+          findById: async (id) => {
+            const captured = await source.findById(id);
+            if (!swapped) {
+              swapped = true;
+              await source.delete(id);
+              await source.create({ id: 'key', tenant_id: 'b', name: 'secret' });
+            }
+            return captured;
+          },
+        }),
+        'memory',
+      );
       const store = new DatabaseTenantDataStore(service);
       if (operation === 'update') {
         await expect(store.update('a', 'Row', 'key', { name: 'bad' })).rejects.toThrow(
@@ -72,7 +80,8 @@ describe('tenant conditional write race', () => {
       }),
       'memory',
     );
-    await expect(new DatabaseTenantDataStore(service).update('a', 'Row', 'key', { name: 'new' }))
-      .rejects.toThrow(/changed tenant/);
+    await expect(
+      new DatabaseTenantDataStore(service).update('a', 'Row', 'key', { name: 'new' }),
+    ).rejects.toThrow(/changed tenant/);
   });
 });

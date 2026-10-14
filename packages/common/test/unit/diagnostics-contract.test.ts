@@ -179,9 +179,13 @@ describe('health diagnostics type contracts (M98d)', () => {
       ageMs: 5,
       origin: 'application',
     };
-    expect(Object.keys(observation).sort()).toEqual(
-      ['ageMs', 'indicatorAlias', 'latencyMs', 'origin', 'state'],
-    );
+    expect(Object.keys(observation).sort()).toEqual([
+      'ageMs',
+      'indicatorAlias',
+      'latencyMs',
+      'origin',
+      'state',
+    ]);
     // `status` is present only for a reported observation.
     expect('status' in observation).toBe(false);
   });

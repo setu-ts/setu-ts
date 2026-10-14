@@ -19,7 +19,10 @@ class FakeRepo {
 }
 
 class FakeService {
-  constructor(readonly logger: unknown, readonly repo: unknown) {}
+  constructor(
+    readonly logger: unknown,
+    readonly repo: unknown,
+  ) {}
 }
 
 /** Resolves the container from the fake service map. */

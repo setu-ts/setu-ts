@@ -167,9 +167,7 @@ describe('RefreshTokenService', () => {
       expect(oldJti).not.toBe(newJti);
 
       // The re-minted access token carries the snapshot principal's claims
-      const accessPayload = await jwt.verify<{ sub: string; roles: string[] }>(
-        pair2!.accessToken,
-      );
+      const accessPayload = await jwt.verify<{ sub: string; roles: string[] }>(pair2!.accessToken);
       expect(accessPayload.sub).toBe('user-123');
       expect(accessPayload.roles).toEqual(['user']);
     });
@@ -338,13 +336,14 @@ describe('RefreshTokenService', () => {
       const runtime = createFakeRuntime();
       const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
 
-      expect(() =>
-        new RefreshTokenService({
-          jwt,
-          store: new MemoryRefreshTokenStore(runtime),
-          runtime,
-          accessTokenRevocationStore: new MemoryAccessTokenRevocationStore(runtime),
-        })
+      expect(
+        () =>
+          new RefreshTokenService({
+            jwt,
+            store: new MemoryRefreshTokenStore(runtime),
+            runtime,
+            accessTokenRevocationStore: new MemoryAccessTokenRevocationStore(runtime),
+          }),
       ).toThrow('accessToken.expiresIn');
     });
 

@@ -143,9 +143,9 @@ describe('KafkaBroker', () => {
     const broker = new KafkaBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.publish('test', { data: 'test' }),
-    ).rejects.toThrow('KafkaBroker is not connected');
+    await expect(broker.publish('test', { data: 'test' })).rejects.toThrow(
+      'KafkaBroker is not connected',
+    );
   });
 
   it('subscribe throws when not connected', async () => {
@@ -154,9 +154,9 @@ describe('KafkaBroker', () => {
     const broker = new KafkaBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.subscribe('test', async () => {}),
-    ).rejects.toThrow('KafkaBroker is not connected');
+    await expect(broker.subscribe('test', async () => {})).rejects.toThrow(
+      'KafkaBroker is not connected',
+    );
   });
 
   it('derives a per-topic consumer group when no queue is supplied (M90d)', async () => {
@@ -406,33 +406,35 @@ describe('KafkaBroker', () => {
     const serializer = new JsonSerializer();
     const encode = (text: string) => new TextEncoder().encode(text);
     const fakeFactory = new FakeKafkaFactory({
-      seededMessages: [{
-        topic: 'arms',
-        value: JSON.stringify({ x: 1 }),
-        partition: 0,
-        offset: '1',
-        timestamp: String(Date.now()),
-        headers: {
-          // Encoded by the fake, as real kafkajs delivers a Buffer.
-          fromString: 'plain',
-          // Already bytes.
-          fromBytes: encode('bytes'),
-          // A value real kafkajs hands over as a raw string.
-          rawString: 'raw' as unknown as Uint8Array,
-          // A repeated header: first value wins, like `Headers.get`.
-          repeated: [encode('first'), encode('second')],
-          repeatedStrings: ['one', 'two'],
-          // Absent and empty arms contribute no key at all.
-          absent: undefined,
-          emptyArray: [],
-          // A shape kafkajs's types forbid but a hostile/foreign producer could
-          // still surface. It must be DROPPED: `TextDecoder.decode` throws on a
-          // non-BufferSource, and this runs inside `eachMessage`, where a throw
-          // blocks the offset commit and the record is redelivered forever.
-          malformed: { not: 'a header' } as unknown as Uint8Array,
-          malformedInArray: [{ nested: true }] as unknown as Uint8Array[],
+      seededMessages: [
+        {
+          topic: 'arms',
+          value: JSON.stringify({ x: 1 }),
+          partition: 0,
+          offset: '1',
+          timestamp: String(Date.now()),
+          headers: {
+            // Encoded by the fake, as real kafkajs delivers a Buffer.
+            fromString: 'plain',
+            // Already bytes.
+            fromBytes: encode('bytes'),
+            // A value real kafkajs hands over as a raw string.
+            rawString: 'raw' as unknown as Uint8Array,
+            // A repeated header: first value wins, like `Headers.get`.
+            repeated: [encode('first'), encode('second')],
+            repeatedStrings: ['one', 'two'],
+            // Absent and empty arms contribute no key at all.
+            absent: undefined,
+            emptyArray: [],
+            // A shape kafkajs's types forbid but a hostile/foreign producer could
+            // still surface. It must be DROPPED: `TextDecoder.decode` throws on a
+            // non-BufferSource, and this runs inside `eachMessage`, where a throw
+            // blocks the offset commit and the record is redelivered forever.
+            malformed: { not: 'a header' } as unknown as Uint8Array,
+            malformedInArray: [{ nested: true }] as unknown as Uint8Array[],
+          },
         },
-      }],
+      ],
     });
     const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
 
@@ -576,10 +578,14 @@ describe('KafkaBroker', () => {
     await broker.connect();
 
     let handlerInvoked = false;
-    await broker.subscribe('test.topic', () => {
-      handlerInvoked = true;
-      throw new Error('handler failure');
-    }, { queue: 'g-fail' });
+    await broker.subscribe(
+      'test.topic',
+      () => {
+        handlerInvoked = true;
+        throw new Error('handler failure');
+      },
+      { queue: 'g-fail' },
+    );
 
     await fakeFactory.deliverAll();
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -612,9 +618,13 @@ describe('KafkaBroker', () => {
     await broker.connect();
 
     let handlerInvoked = false;
-    await broker.subscribe('test.topic', () => {
-      handlerInvoked = true;
-    }, { queue: 'g-ok' });
+    await broker.subscribe(
+      'test.topic',
+      () => {
+        handlerInvoked = true;
+      },
+      { queue: 'g-ok' },
+    );
 
     await fakeFactory.deliverAll();
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -646,14 +656,12 @@ describe('KafkaBroker request-reply', () => {
     const factory = new FakeKafkaFactory();
     const broker = await connected(factory);
 
-    await broker.respond<{ n: number }, { doubled: number }>(
-      'math.double',
-      (req) => ({ doubled: req.n * 2 }),
-    );
-    const reply = await broker.request<{ n: number }, { doubled: number }>(
-      'math.double',
-      { n: 21 },
-    );
+    await broker.respond<{ n: number }, { doubled: number }>('math.double', (req) => ({
+      doubled: req.n * 2,
+    }));
+    const reply = await broker.request<{ n: number }, { doubled: number }>('math.double', {
+      n: 21,
+    });
 
     expect(reply).toEqual({ doubled: 42 });
     await broker.disconnect();
@@ -692,8 +700,9 @@ describe('KafkaBroker request-reply', () => {
     await customBroker.respond('t', () => 'ok');
     await customBroker.request('t', {});
 
-    const customTopics = customFactory.producer().calls
-      .filter((c) => c.method === 'send')
+    const customTopics = customFactory
+      .producer()
+      .calls.filter((c) => c.method === 'send')
       .map((c) => (c.args[0] as { topic: string }).topic);
     expect(customTopics).toContain('svc.replies');
     expect(customTopics).not.toContain('messaging.replies');
@@ -707,8 +716,9 @@ describe('KafkaBroker request-reply', () => {
     await broker.respond('user.lookup', () => 'ok');
     await broker.request('user.lookup', {});
 
-    const sentTopics = factory.producer().calls
-      .filter((c) => c.method === 'send')
+    const sentTopics = factory
+      .producer()
+      .calls.filter((c) => c.method === 'send')
       .map((c) => (c.args[0] as { topic: string }).topic);
     expect(sentTopics).toContain('rr.req.user.lookup');
     expect(sentTopics).not.toContain('user.lookup');
@@ -779,7 +789,10 @@ describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () =>
   const FAST = { retries: 2, initialRetryTime: 1 } as const;
 
   async function rejection(promise: Promise<unknown>): Promise<unknown> {
-    return await promise.then(() => null, (e: unknown) => e);
+    return await promise.then(
+      () => null,
+      (e: unknown) => e,
+    );
   }
 
   function subscribeCalls(factory: FakeKafkaFactory, groupId: string): number {
@@ -819,8 +832,9 @@ describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () =>
     });
     await broker.connect();
 
-    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'g1' })))
-      .toBeInstanceOf(KafkaTopicUnavailableError);
+    expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'g1' }))).toBeInstanceOf(
+      KafkaTopicUnavailableError,
+    );
     expect(subscribeCalls(factory, 'g1')).toBe(1);
     await broker.disconnect();
   });
@@ -960,11 +974,12 @@ describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () =>
       [{ factor: 1.5 }, 'factor'],
     ];
     for (const [retry, field] of cases) {
-      expect(() =>
-        new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
-          client: new FakeKafkaFactory(),
-          retry,
-        })
+      expect(
+        () =>
+          new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+            client: new FakeKafkaFactory(),
+            retry,
+          }),
       ).toThrow(`KafkaOptions.retry.${field}`);
     }
   });
@@ -992,13 +1007,14 @@ describe('KafkaBroker unknown topics and consumer crashes (M101b, V8-26)', () =>
 
   it('contains a run() rejection with no logger, or a logger that throws', async () => {
     // Either would otherwise be an unhandled rejection, which fails this test.
-    for (
-      const logger of [undefined, {
+    for (const logger of [
+      undefined,
+      {
         error: () => {
           throw new Error('logger down');
         },
-      }]
-    ) {
+      },
+    ]) {
       const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeKafkaFactory({ runRejection: new Error('crash') }),
         ...(logger !== undefined ? { logger } : {}),
@@ -1064,10 +1080,12 @@ describe('KafkaBroker disconnect during a subscribe (M101b security audit O1)', 
     const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
     await broker.connect();
 
-    const pending = broker.subscribe('orders', () => {}).then(
-      () => 'resolved',
-      (e: Error) => e.message,
-    );
+    const pending = broker
+      .subscribe('orders', () => {})
+      .then(
+        () => 'resolved',
+        (e: Error) => e.message,
+      );
     await new Promise((resolve) => setTimeout(resolve, 5));
     await broker.disconnect();
     release();
@@ -1258,8 +1276,8 @@ describe('KafkaBroker owns crash restarts (M101b security audit N2, O5)', () => 
   // The LAST consumer() call for the group: a test may pre-create the
   // consumer itself to instrument it, before the broker passes its options.
   function retryFor(factory: FakeKafkaFactory, groupId: string): RetryOptions {
-    const call = factory.calls.findLast((c) =>
-      c.method === 'consumer' && (c.args[0] as { groupId: string }).groupId === groupId
+    const call = factory.calls.findLast(
+      (c) => c.method === 'consumer' && (c.args[0] as { groupId: string }).groupId === groupId,
     );
     const options = call?.args[0] as { retry?: RetryOptions } | undefined;
     if (!options?.retry) throw new Error('no retry was passed');
@@ -1268,9 +1286,11 @@ describe('KafkaBroker owns crash restarts (M101b security audit N2, O5)', () => 
   function crash(retryTime?: number): Error {
     return Object.assign(
       new Error('connection closed'),
-      retryTime === undefined ? {} : {
-        retryTime,
-      },
+      retryTime === undefined
+        ? {}
+        : {
+            retryTime,
+          },
     );
   }
   function runs(factory: FakeKafkaFactory, groupId: string): number {

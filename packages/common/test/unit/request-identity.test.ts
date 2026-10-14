@@ -134,7 +134,10 @@ describe('request locale (M103)', () => {
     expect(Object.keys(req).join()).not.toContain('setu.request');
     expect(JSON.parse(JSON.stringify(req)).locale).toBe('de');
     expect(JSON.stringify(req)).not.toContain('setu.request.locale');
-    expect(Object.getOwnPropertySymbols(req).map(String).filter((s) => s.includes('locale')))
-      .toHaveLength(2);
+    expect(
+      Object.getOwnPropertySymbols(req)
+        .map(String)
+        .filter((s) => s.includes('locale')),
+    ).toHaveLength(2);
   });
 });

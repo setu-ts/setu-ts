@@ -346,16 +346,18 @@ describe('OpenApiService', () => {
     const routedApp = {
       ...(app as unknown as Record<string, unknown>),
       router: {
-        listRoutes: () => [{
-          method: 'GET' as const,
-          path: '/widgets',
-          definition: {
-            handler: () => {
-              throw new Error('not used');
+        listRoutes: () => [
+          {
+            method: 'GET' as const,
+            path: '/widgets',
+            definition: {
+              handler: () => {
+                throw new Error('not used');
+              },
+              schema: { response: { 200: routeResponseSchema } },
             },
-            schema: { response: { 200: routeResponseSchema } },
           },
-        }],
+        ],
       },
     } as unknown as IApplication;
 

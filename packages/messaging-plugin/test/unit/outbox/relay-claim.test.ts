@@ -6,21 +6,19 @@ import { MAX_CLAIM_HORIZON_MS } from '../../../src/outbox/record-codec.ts';
 const relay = { publishTimeoutMs: 10, storeTimeoutMs: 10, claimLeaseMs: 100, maxClockSkewMs: 5 };
 
 describe('relay claims and fencing', () => {
-  for (
-    const change of [
-      { claimVersion: 'secret-canary' },
-      { claimVersion: -1 },
-      { claimVersion: 1.5 },
-      { claimVersion: Number.NaN },
-      { claimVersion: Number.POSITIVE_INFINITY },
-      { claimVersion: Number.MAX_SAFE_INTEGER },
-      { claimVersion: Number.MAX_SAFE_INTEGER + 1 },
-      { leaseUntil: -1 },
-      { leaseUntil: 1.5 },
-      { leaseUntil: 'secret-canary' },
-      { leaseUntil: WALL_START + MAX_CLAIM_HORIZON_MS + 1 },
-    ]
-  ) {
+  for (const change of [
+    { claimVersion: 'secret-canary' },
+    { claimVersion: -1 },
+    { claimVersion: 1.5 },
+    { claimVersion: Number.NaN },
+    { claimVersion: Number.POSITIVE_INFINITY },
+    { claimVersion: Number.MAX_SAFE_INTEGER },
+    { claimVersion: Number.MAX_SAFE_INTEGER + 1 },
+    { leaseUntil: -1 },
+    { leaseUntil: 1.5 },
+    { leaseUntil: 'secret-canary' },
+    { leaseUntil: WALL_START + MAX_CLAIM_HORIZON_MS + 1 },
+  ]) {
     it(`poisons invalid claim fields ${JSON.stringify(change)} without claiming or publishing`, async () => {
       const h = await outboxHarness({ options: { relay } });
       const id = await h.write({ key: 'K', n: 1 });
@@ -117,11 +115,13 @@ describe('relay claims and fencing', () => {
         delete h.store.faults.claim;
         if (outcome === 'missing') {
           await h.db.getRepository<Record<string, unknown>, EntityKey>('Outbox').delete(id);
-        } else {await edit(
+        } else {
+          await edit(
             h.db,
             id,
             outcome === 'claim-lost' ? { claimVersion: 1 } : { status: outcome },
-          );}
+          );
+        }
       };
       await h.sweep();
       expect(h.broker.sequence()).toEqual(

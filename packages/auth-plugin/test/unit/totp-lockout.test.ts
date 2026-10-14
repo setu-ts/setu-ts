@@ -32,8 +32,9 @@ async function currentCode(ctx: TestContext, principalId: string): Promise<strin
   const enrolment = await ctx.store.getEnrolment(principalId);
   if (enrolment === null) throw new Error('not enrolled');
   const secret = decodeBase32(enrolment.secret);
-  return (await computeTotpCode(ctx.runtime.subtle, secret, totpCounter(ctx.runtime.now())))
-    .slice(-6);
+  return (await computeTotpCode(ctx.runtime.subtle, secret, totpCounter(ctx.runtime.now()))).slice(
+    -6,
+  );
 }
 
 /** Enrols and confirms, so `verify` answers as a real factor does. */

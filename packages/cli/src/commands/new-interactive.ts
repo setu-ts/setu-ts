@@ -59,8 +59,7 @@ export async function resolveNewChoices(
   prompter: Prompter | undefined,
   log: (message: string) => void,
 ): Promise<
-  | { readonly kind: 'resolved'; readonly args: ParsedArgs }
-  | { readonly kind: 'cancelled' }
+  { readonly kind: 'resolved'; readonly args: ParsedArgs } | { readonly kind: 'cancelled' }
 > {
   // The PRIMARY non-interactive guarantee lives at the call site (`ask` is
   // optional and no gate passes it); this guard is the same promise restated
@@ -100,22 +99,26 @@ export async function resolveNewChoices(
   // to hold for the FIRST question or a workspace session dead-ends after
   // answering every one of them.
   if (
-    !await ask(
+    !(await ask(
       'runtime',
       'Runtime?',
-      TARGET_RUNTIMES.filter((name) => !workspace || isWorkspaceRuntime(name))
-        .map((name) => ({ value: name, label: `Target ${name}` })),
-    )
-  ) return { kind: 'cancelled' };
+      TARGET_RUNTIMES.filter((name) => !workspace || isWorkspaceRuntime(name)).map((name) => ({
+        value: name,
+        label: `Target ${name}`,
+      })),
+    ))
+  )
+    return { kind: 'cancelled' };
 
   if (workspace) {
     if (
-      !await ask(
+      !(await ask(
         'transport',
         'How should the workspace members reach each other?',
         listTransports().map((spec) => ({ value: spec.name, label: spec.description })),
-      )
-    ) return { kind: 'cancelled' };
+      ))
+    )
+      return { kind: 'cancelled' };
     return { kind: 'resolved', args: { positionals: args.positionals, flags } };
   }
 
@@ -151,20 +154,18 @@ export async function resolveNewChoices(
   // styled already. `--yes` skips it, as it skips every prompt, and the
   // pipeline then applies the template's own (functional) style.
   const rawTemplate = flags['template'];
-  const styleableTemplate = typeof rawTemplate === 'string'
-    ? (getTemplate(rawTemplate)?.classBased ?? undefined)
-    : undefined;
+  const styleableTemplate =
+    typeof rawTemplate === 'string'
+      ? (getTemplate(rawTemplate)?.classBased ?? undefined)
+      : undefined;
   if (styleableTemplate !== undefined && flags['style'] === undefined) {
     if (
-      !await ask(
-        'style',
-        'Code style?',
-        [
-          { value: 'functional', label: 'Functional — plain functions and factories' },
-          { value: 'class-based', label: 'Class-based — decorators and constructor injection' },
-        ],
-      )
-    ) return { kind: 'cancelled' };
+      !(await ask('style', 'Code style?', [
+        { value: 'functional', label: 'Functional — plain functions and factories' },
+        { value: 'class-based', label: 'Class-based — decorators and constructor injection' },
+      ]))
+    )
+      return { kind: 'cancelled' };
   }
 
   // The broker and queue questions fire only when the collected answers make
@@ -172,9 +173,8 @@ export async function resolveNewChoices(
   // prompt whose answer would be refused cannot be asked. An unknown template
   // name skips them here; the pipeline refuses it below with its own message.
   const rawRuntime = flags['runtime'];
-  const runtime = typeof rawRuntime === 'string' && isTargetRuntime(rawRuntime)
-    ? rawRuntime
-    : 'node';
+  const runtime =
+    typeof rawRuntime === 'string' && isTargetRuntime(rawRuntime) ? rawRuntime : 'node';
   // Resolved through the SAME resolver the command uses, so the broker and
   // queue questions run against the styled host — not a second lookup that
   // could disagree with what the pipeline renders.
@@ -186,27 +186,29 @@ export async function resolveNewChoices(
   if (host !== undefined) {
     if (standaloneOverlayRefusal('broker', runtime, host) === undefined) {
       if (
-        !await ask(
+        !(await ask(
           'broker',
           'Message broker?',
           listBrokers().map((name) => ({
             value: name,
             label: getTransport(name)?.description ?? name,
           })),
-        )
-      ) return { kind: 'cancelled' };
+        ))
+      )
+        return { kind: 'cancelled' };
     }
     if (standaloneOverlayRefusal('queue', runtime, host) === undefined) {
       if (
-        !await ask(
+        !(await ask(
           'queue',
           'Job queue?',
           listQueues().map((name) => ({
             value: name,
             label: getTransport(name)?.description ?? name,
           })),
-        )
-      ) return { kind: 'cancelled' };
+        ))
+      )
+        return { kind: 'cancelled' };
     }
   }
 

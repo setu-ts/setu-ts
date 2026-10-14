@@ -74,9 +74,11 @@ describe('detectTargetRuntime', () => {
         ...fs,
         readFile: (path: string) =>
           path === denied
-            ? Promise.reject(Object.assign(new Error('EACCES: permission denied'), {
-              code: 'EACCES',
-            }))
+            ? Promise.reject(
+                Object.assign(new Error('EACCES: permission denied'), {
+                  code: 'EACCES',
+                }),
+              )
             : fs.readFile(path),
       };
     }
@@ -105,10 +107,7 @@ describe('detectTargetRuntime', () => {
 
     it('refuses an unreadable deno.json or bun lockfile', async () => {
       for (const denied of ['/app/deno.json', '/app/bun.lock']) {
-        const fs = denying(
-          { '/app/package.json': '{}', [denied]: '{}' },
-          denied,
-        );
+        const fs = denying({ '/app/package.json': '{}', [denied]: '{}' }, denied);
         await expect(detectTargetRuntime(fs, '/app')).rejects.toBeInstanceOf(
           RuntimeMarkerUnreadableError,
         );

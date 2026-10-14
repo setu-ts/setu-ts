@@ -103,10 +103,7 @@ export function listSeamSpecs(): readonly SeamSpec[] {
  * @param mode - The target's generator mode
  * @returns The specs, with each family in that mode's shape
  */
-function withHostShapes(
-  specs: readonly SeamSpec[],
-  mode: GeneratorMode,
-): readonly SeamSpec[] {
+function withHostShapes(specs: readonly SeamSpec[], mode: GeneratorMode): readonly SeamSpec[] {
   if (mode === 'class-based') return specs;
   const functional = new Map<string, SeamSpec>([
     [FUNCTIONAL_CONTROLLERS_SEAM.schematic, FUNCTIONAL_CONTROLLERS_SEAM],
@@ -116,9 +113,9 @@ function withHostShapes(
     // scaffold time, not only when an artifact is admitted (A2).
     [FUNCTIONAL_HEALTH_SEAM.schematic, FUNCTIONAL_HEALTH_SEAM],
   ]);
-  return specs.filter((spec) => spec !== INGRESS_SEAM).map((spec) =>
-    functional.get(spec.schematic) ?? spec
-  );
+  return specs
+    .filter((spec) => spec !== INGRESS_SEAM)
+    .map((spec) => functional.get(spec.schematic) ?? spec);
 }
 
 /**
@@ -140,7 +137,7 @@ export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec
   const withHost = withHostShapes(listSeamSpecs(), mode);
   if (mode === 'class-based') return withHost;
   return withHost.map((spec) =>
-    spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec
+    spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec,
   );
 }
 
@@ -169,9 +166,14 @@ export function hostSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec
   // dead surface no class-based schematic writes — and any handler placed there
   // would be registered twice (`seams/ingress.ts`). This is the mirror of
   // `withHostShapes` dropping `INGRESS_SEAM` in functional mode.
-  const classBasedIngress = mode === 'class-based'
-    ? new Set([COMMAND_HANDLER_SEAM.schematic, QUERY_HANDLER_SEAM.schematic, EVENTS_SEAM.schematic])
-    : new Set<string>();
+  const classBasedIngress =
+    mode === 'class-based'
+      ? new Set([
+          COMMAND_HANDLER_SEAM.schematic,
+          QUERY_HANDLER_SEAM.schematic,
+          EVENTS_SEAM.schematic,
+        ])
+      : new Set<string>();
   return shaped
     .filter((spec) => !classBasedIngress.has(spec.schematic))
     .filter((spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin));

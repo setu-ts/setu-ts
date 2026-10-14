@@ -367,12 +367,14 @@ function memberService(
     .join('\n');
 
   const dependsOn = backing?.dependsOn ?? [];
-  const dependsBlock = dependsOn.length === 0 ? '' : `
+  const dependsBlock =
+    dependsOn.length === 0
+      ? ''
+      : `
     depends_on:
-${
-    dependsOn.map((service) => `      ${service}:\n        condition: ${backing?.condition}`)
-      .join('\n')
-  }`;
+${dependsOn
+  .map((service) => `      ${service}:\n        condition: ${backing?.condition}`)
+  .join('\n')}`;
 
   return `  ${name}:
     build:
@@ -430,7 +432,7 @@ export function workspaceContainerFiles(
         member.port,
         members.filter((other) => other.name !== member.name),
         transport,
-      )
+      ),
     )
     .join('\n');
 

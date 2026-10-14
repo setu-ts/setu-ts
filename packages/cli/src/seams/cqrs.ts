@@ -89,14 +89,12 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
     // project is formatted at, so the wrapped form fails that project's own
     // `deno fmt --check` on a file the CLI just wrote.
     `import type { CommandHandlerRegistration, QueryHandlerRegistration } ` +
-    `from '@setu-ts/cqrs-plugin';`,
-    renderSeamImports(
-      commands,
-      commandImportSymbols,
-      (kebab) => `./${kebab}.command-handler.ts`,
-    ),
+      `from '@setu-ts/cqrs-plugin';`,
+    renderSeamImports(commands, commandImportSymbols, (kebab) => `./${kebab}.command-handler.ts`),
     renderSeamImports(queries, queryImportSymbols, (kebab) => `./${kebab}.query-handler.ts`),
-  ].filter((line) => line !== '').join('\n\n');
+  ]
+    .filter((line) => line !== '')
+    .join('\n\n');
 
   // The type constant travels with the handler because the bus routes on it and the
   // emitted module already declares it — deriving a type name from the class here
@@ -123,9 +121,9 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
 
   return assembleSeamBarrel(header, imports, [
     `/** Every generated command handler, for \`CqrsPlugin({ commandHandlers })\`. */\n` +
-    renderExportedArray(COMMAND_HANDLERS_EXPORT, 'CommandHandlerRegistration', commandEntries),
+      renderExportedArray(COMMAND_HANDLERS_EXPORT, 'CommandHandlerRegistration', commandEntries),
     `/** Every generated query handler, for \`CqrsPlugin({ queryHandlers })\`. */\n` +
-    renderExportedArray(QUERY_HANDLERS_EXPORT, 'QueryHandlerRegistration', queryEntries),
+      renderExportedArray(QUERY_HANDLERS_EXPORT, 'QueryHandlerRegistration', queryEntries),
   ]);
 }
 

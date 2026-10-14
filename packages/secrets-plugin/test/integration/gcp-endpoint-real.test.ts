@@ -64,9 +64,13 @@ describe('GcpSecretManagerProvider endpoint against the real SDK (M99d)', () => 
     );
   });
 
-  it('addresses `host:port` at that port, not `host:port:443`', {
-    skip: sdk === undefined,
-  }, () => {
-    expect(resolvedAddress(sdk!, 'localhost:8085')).toBe('localhost:8085');
-  });
+  it(
+    'addresses `host:port` at that port, not `host:port:443`',
+    {
+      skip: sdk === undefined,
+    },
+    () => {
+      expect(resolvedAddress(sdk!, 'localhost:8085')).toBe('localhost:8085');
+    },
+  );
 });

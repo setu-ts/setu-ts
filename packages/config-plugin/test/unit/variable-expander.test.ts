@@ -22,9 +22,7 @@ describe('expandVariables', () => {
   });
 
   it('detects cycles and reports the involved keys', () => {
-    expect(() => expandVariables({ A: '${B}', B: '${C}', C: '${A}' })).toThrow(
-      /A -> B -> C -> A/,
-    );
+    expect(() => expandVariables({ A: '${B}', B: '${C}', C: '${A}' })).toThrow(/A -> B -> C -> A/);
   });
 
   it('throws for a missing reference', () => {
@@ -70,23 +68,29 @@ describe('expandVariables | grammar observer (M98e provenance)', () => {
 
   it('reports nothing when expansion is a pure copy without the grammar', () => {
     let fired = 0;
-    expandVariables({ A: 'plain', B: 'also-plain' }, {
-      keys: new Set(['A', 'B']),
-      onExpanded: () => {
-        fired += 1;
+    expandVariables(
+      { A: 'plain', B: 'also-plain' },
+      {
+        keys: new Set(['A', 'B']),
+        onExpanded: () => {
+          fired += 1;
+        },
       },
-    });
+    );
     expect(fired).toEqual(0);
   });
 
   it('still throws for a missing reference before any record can matter', () => {
     expect(() =>
-      expandVariables({ A: '${MISSING}' }, {
-        keys: new Set(['A']),
-        onExpanded: () => {
-          throw new Error('observer must not be consulted on a failed load');
+      expandVariables(
+        { A: '${MISSING}' },
+        {
+          keys: new Set(['A']),
+          onExpanded: () => {
+            throw new Error('observer must not be consulted on a failed load');
+          },
         },
-      })
+      ),
     ).toThrow(/is not defined/);
   });
 

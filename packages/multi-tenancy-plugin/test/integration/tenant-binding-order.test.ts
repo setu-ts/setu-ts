@@ -81,7 +81,7 @@ function principalMiddleware(): MiddlewareFunction {
  * tenant AFTER the session middleware (260) has loaded and parked the session.
  */
 const userResolver: ITenantResolver = {
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async resolve(request) {
     const claim = request.user?.claims?.tenant;
     return typeof claim === 'string' ? some({ id: claim }) : none();
@@ -161,7 +161,7 @@ describe('tenant binding — the compare runs on whichever side sees the tenant 
     // load-time compare fires. This is the shipped path: the refusal is
     // byte-identical and the handler never runs.
     const headerResolver: ITenantResolver = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       async resolve(request) {
         const header = request.headers.get('x-tenant-id');
         return header !== null ? some({ id: header }) : none();

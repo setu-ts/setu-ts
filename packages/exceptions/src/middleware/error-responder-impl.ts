@@ -88,9 +88,8 @@ export function buildErrorFromInit(init: ErrorResponseInit): HttpError {
   // through unchanged. Carrying it this way — rather than in `error.message` —
   // keeps the title verbatim, which a site's (non-)disclosure decision depends
   // on.
-  const details = init.detail !== undefined
-    ? { ...init.details, detail: init.detail }
-    : init.details;
+  const details =
+    init.detail !== undefined ? { ...init.details, detail: init.detail } : init.details;
   const error = new HttpError(init.status, init.title, details);
   // Mark the error as responder-built and carry the disclosure on a
   // module-private symbol, which is what `buildProblemDetails` promotes to the
@@ -169,10 +168,7 @@ export function createErrorResponder(
         body = { ...body, instance: target.request.path };
       }
       const bytes = new TextEncoder().encode(JSON.stringify(body));
-      target.response
-        .status(status)
-        .header('content-type', contentType)
-        .send(bytes);
+      target.response.status(status).header('content-type', contentType).send(bytes);
     },
   };
 }

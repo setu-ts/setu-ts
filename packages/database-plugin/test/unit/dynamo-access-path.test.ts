@@ -91,11 +91,7 @@ describe('resolveDynamoAccessPath', () => {
   });
 
   it('selects Scan without a mapped partition equality and leaves the predicate as a filter', () => {
-    const path = resolveDynamoAccessPath(
-      'Order',
-      target(),
-      query({ where: { status: 'open' } }),
-    );
+    const path = resolveDynamoAccessPath('Order', target(), query({ where: { status: 'open' } }));
 
     expect(path.commandType).toBe('Scan');
     expect(path.logPath).toBe('Scan');
@@ -183,12 +179,10 @@ describe('resolveDynamoAccessPath', () => {
   });
 
   it('folds each supported ordered comparison and leaves unsupported sort predicates as filters', () => {
-    for (
-      const [operator, keyCondition] of [
-        ['gt', '#n0 = :v0 AND #n1 > :v1'],
-        ['lte', '#n0 = :v0 AND #n1 <= :v1'],
-      ] as const
-    ) {
+    for (const [operator, keyCondition] of [
+      ['gt', '#n0 = :v0 AND #n1 > :v1'],
+      ['lte', '#n0 = :v0 AND #n1 <= :v1'],
+    ] as const) {
       const path = resolveDynamoAccessPath(
         'Order',
         target(),
@@ -242,11 +236,7 @@ describe('resolveDynamoAccessPath select push-down', () => {
   });
 
   it('omits ProjectionExpression entirely for an empty select', () => {
-    const path = resolveDynamoAccessPath(
-      'Order',
-      target(),
-      query({ where: { tenantId: 't1' } }),
-    );
+    const path = resolveDynamoAccessPath('Order', target(), query({ where: { tenantId: 't1' } }));
     expect(path.command.ProjectionExpression).toBeUndefined();
   });
 

@@ -73,7 +73,8 @@ export function trailersOnlyUnimplemented(): Response {
     headers: {
       'content-type': 'application/grpc',
       'grpc-status': '12',
-      'grpc-message': 'native gRPC (application/grpc) is not supported by this server; ' +
+      'grpc-message':
+        'native gRPC (application/grpc) is not supported by this server; ' +
         'use Connect (application/connect+json or application/connect+proto) ' +
         'or gRPC-Web (application/grpc-web+json or application/grpc-web+proto)',
     },

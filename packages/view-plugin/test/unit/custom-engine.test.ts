@@ -50,10 +50,7 @@ describe("the 'custom' engine arm", () => {
 
   it('a plain-function engine renders through the identical path', async () => {
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        ViewPlugin({ engine: 'custom', view: CustomTemplateEngine }),
-      ],
+      plugins: [RuntimePlugin(), ViewPlugin({ engine: 'custom', view: CustomTemplateEngine })],
     });
     app.router.get('/greet', (ctx) => renderView(ctx, greetingTemplate, { name: 'ada' }));
 

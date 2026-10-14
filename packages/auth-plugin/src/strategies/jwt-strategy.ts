@@ -63,7 +63,7 @@ export class JwtStrategy implements IAuthStrategy {
         payload.type === 'access' &&
         typeof payload.jti === 'string' &&
         this.accessTokenRevocationStore !== undefined &&
-        await this.accessTokenRevocationStore.isRevoked(payload.jti)
+        (await this.accessTokenRevocationStore.isRevoked(payload.jti))
       ) {
         return null;
       }

@@ -32,7 +32,7 @@ async function sourceFiles(directory: string): Promise<string[]> {
   for await (const entry of Deno.readDir(directory)) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory) {
-      result.push(...await sourceFiles(path));
+      result.push(...(await sourceFiles(path)));
     } else if (entry.isFile && path.endsWith('.ts')) {
       result.push(path);
     }

@@ -42,9 +42,12 @@ describe('adaptPubSubModule', () => {
             string,
             {
               onMessage:
-                | ((
-                  msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-                ) => void)
+                | ((msg: {
+                    ack: () => void;
+                    nack: () => void;
+                    data: Uint8Array;
+                    id: string;
+                  }) => void)
                 | null;
             }
           >;
@@ -129,9 +132,12 @@ describe('adaptPubSubModule', () => {
         return {
           on(
             event: 'message' | 'error',
-            handler: (
-              msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-            ) => void,
+            handler: (msg: {
+              ack: () => void;
+              nack: () => void;
+              data: Uint8Array;
+              id: string;
+            }) => void,
           ) {
             if (event === 'message') {
               // Find the topic that has this subscription
@@ -378,8 +384,11 @@ describe('adaptPubSubModule', () => {
     expect(plain.subscriptionOptions.get('sub-plain')?.enableMessageOrdering).toBeUndefined();
 
     const ordered = createFakeSdkModule();
-    await adaptPubSubModule(ordered, { projectId: 'demo', enableMessageOrdering: true })
-      .open('t', 'sub-ordered', () => {});
+    await adaptPubSubModule(ordered, { projectId: 'demo', enableMessageOrdering: true }).open(
+      't',
+      'sub-ordered',
+      () => {},
+    );
     expect(ordered.subscriptionOptions.get('sub-ordered')?.enableMessageOrdering).toBe(true);
   });
 
@@ -512,18 +521,18 @@ describe('adaptPubSubModule', () => {
     let rawAckCalled = false;
     // Monkey-patch the subscription's onMessage callback to capture raw ack
     const origSubscription = sdk.PubSub.prototype.subscription;
-    sdk.PubSub.prototype.subscription = function (
-      _topicName: string,
-      _subName: string,
-    ) {
+    sdk.PubSub.prototype.subscription = function (_topicName: string, _subName: string) {
       const sub = origSubscription.call(this, _topicName, _subName);
       return {
         ...sub,
         on: (
           event: 'message' | 'error',
-          handler: (
-            msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-          ) => void,
+          handler: (msg: {
+            ack: () => void;
+            nack: () => void;
+            data: Uint8Array;
+            id: string;
+          }) => void,
         ) => {
           if (event === 'message') {
             sub.on(event, (raw: Parameters<typeof handler>[0]) => {
@@ -568,18 +577,18 @@ describe('adaptPubSubModule', () => {
     const sdk = createFakeSdkModule();
     let rawNackCalled = false;
     const origSubscription = sdk.PubSub.prototype.subscription;
-    sdk.PubSub.prototype.subscription = function (
-      _topicName: string,
-      _subName: string,
-    ) {
+    sdk.PubSub.prototype.subscription = function (_topicName: string, _subName: string) {
       const sub = origSubscription.call(this, _topicName, _subName);
       return {
         ...sub,
         on: (
           event: 'message' | 'error',
-          handler: (
-            msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-          ) => void,
+          handler: (msg: {
+            ack: () => void;
+            nack: () => void;
+            data: Uint8Array;
+            id: string;
+          }) => void,
         ) => {
           if (event === 'message') {
             sub.on(event, (raw: Parameters<typeof handler>[0]) => {
@@ -699,10 +708,12 @@ describe('adaptPubSubModule', () => {
       // Topic A owns the name, as `messaging-consumers` did before M101b.
       await transport.createSubscription('orders', 'shared');
 
-      const err = await transport.open('payments', 'shared', () => {}).then(
-        () => null,
-        (e: unknown) => e,
-      );
+      const err = await transport
+        .open('payments', 'shared', () => {})
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
       expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
       const named = err as PubSubSubscriptionBoundElsewhereError;
       expect(named.subscription).toBe('shared');
@@ -750,10 +761,12 @@ describe('adaptPubSubModule', () => {
       } as unknown as PubSubSdkModule;
       const transport = adaptPubSubModule(mod, { projectId: 'demo' });
 
-      const err = await transport.open('orders', 'sub', () => {}).then(
-        () => null,
-        (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
-      );
+      const err = await transport
+        .open('orders', 'sub', () => {})
+        .then(
+          () => null,
+          (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
+        );
       expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
       expect(err?.boundTopic).toBe('projects/other/topics/orders');
     });
@@ -779,10 +792,12 @@ describe('adaptPubSubModule', () => {
       } as unknown as PubSubSdkModule;
       const transport = adaptPubSubModule(mod, { projectId: 'demo' });
 
-      const err = await transport.open('orders', 'sub', () => {}).then(
-        () => null,
-        (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
-      );
+      const err = await transport
+        .open('orders', 'sub', () => {})
+        .then(
+          () => null,
+          (e: unknown) => e as PubSubSubscriptionBoundElsewhereError,
+        );
       expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);
       expect(err?.boundTopic).toBe('(unknown)');
     });

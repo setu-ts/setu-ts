@@ -26,10 +26,9 @@ function harness() {
     instrumentation: () => [],
     sampler: { kind: 'always-on' as const },
   };
-  const collector = new SpanObservationCollector(
-    availability,
-    { hrtime: () => 0 } as unknown as Pick<IRuntimeServices, 'hrtime'>,
-  );
+  const collector = new SpanObservationCollector(availability, {
+    hrtime: () => 0,
+  } as unknown as Pick<IRuntimeServices, 'hrtime'>);
   const processor = new DiagnosticSpanProcessor(policy, collector);
   return { processor, collector };
 }
@@ -151,9 +150,11 @@ describe('DiagnosticSpanProcessor — minimization', () => {
 
   it('drops an invalid span context', () => {
     const { processor, collector } = harness();
-    processor.onEnd(readableSpan({
-      spanContext: () => ({ traceId: '0'.repeat(32), spanId: SPAN }),
-    }));
+    processor.onEnd(
+      readableSpan({
+        spanContext: () => ({ traceId: '0'.repeat(32), spanId: SPAN }),
+      }),
+    );
     processor.onEnd(readableSpan({ spanContext: () => ({ traceId: 'zz', spanId: SPAN }) }));
     expect(collector.read('i', 0).droppedSpans).toBe(2);
   });
@@ -174,10 +175,12 @@ describe('DiagnosticSpanProcessor — parents and links', () => {
   it('reports a root span and a valid unobserved parent', () => {
     const { processor, collector } = harness();
     processor.onEnd(readableSpan());
-    processor.onEnd(readableSpan({
-      spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
-      parentSpanContext: { traceId: TRACE, spanId: PARENT, isRemote: true },
-    }));
+    processor.onEnd(
+      readableSpan({
+        spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
+        parentSpanContext: { traceId: TRACE, spanId: PARENT, isRemote: true },
+      }),
+    );
     const records = collector.read('i', 0).records;
     expect(records[0]!.parentVisibility).toBe('root');
     expect(records[1]!.parentVisibility).toBe('remote-or-unobserved');
@@ -186,14 +189,18 @@ describe('DiagnosticSpanProcessor — parents and links', () => {
 
   it('reports observed exactly when the collector retains the parent', () => {
     const { processor, collector } = harness();
-    processor.onEnd(readableSpan({
-      kind: 1,
-      spanContext: () => ({ traceId: TRACE, spanId: PARENT }),
-    }));
-    processor.onEnd(readableSpan({
-      spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
-      parentSpanContext: { traceId: TRACE, spanId: PARENT },
-    }));
+    processor.onEnd(
+      readableSpan({
+        kind: 1,
+        spanContext: () => ({ traceId: TRACE, spanId: PARENT }),
+      }),
+    );
+    processor.onEnd(
+      readableSpan({
+        spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
+        parentSpanContext: { traceId: TRACE, spanId: PARENT },
+      }),
+    );
     const records = collector.read('i', 0).records;
     expect(records[1]!.parentVisibility).toBe('observed');
     expect(records[1]!.parentSpanId).toBe(PARENT);
@@ -201,14 +208,18 @@ describe('DiagnosticSpanProcessor — parents and links', () => {
 
   it('reports unknown for an invalid or cross-trace parent', () => {
     const { processor, collector } = harness();
-    processor.onEnd(readableSpan({
-      spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
-      parentSpanContext: { traceId: TRACE, spanId: '0'.repeat(16) },
-    }));
-    processor.onEnd(readableSpan({
-      spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
-      parentSpanContext: { traceId: 'f'.repeat(32), spanId: PARENT },
-    }));
+    processor.onEnd(
+      readableSpan({
+        spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
+        parentSpanContext: { traceId: TRACE, spanId: '0'.repeat(16) },
+      }),
+    );
+    processor.onEnd(
+      readableSpan({
+        spanContext: () => ({ traceId: TRACE, spanId: SPAN }),
+        parentSpanContext: { traceId: 'f'.repeat(32), spanId: PARENT },
+      }),
+    );
     const records = collector.read('i', 0).records;
     for (const record of records) {
       expect(record.parentVisibility).toBe('unknown');

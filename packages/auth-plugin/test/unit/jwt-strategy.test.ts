@@ -102,15 +102,17 @@ describe('JwtStrategy', () => {
     const token = await jwt.sign({ sub: 'user123', type: 'access', jti: 'access-1' });
     await store.revoke('access-1', runtime.now() + 1000);
 
-    expect(await revokingStrategy.authenticate(createRequest({ authorization: `Bearer ${token}` })))
-      .toBeNull();
+    expect(
+      await revokingStrategy.authenticate(createRequest({ authorization: `Bearer ${token}` })),
+    ).toBeNull();
   });
 
   it('keeps direct JWT access tokens compatible when they have no type claim', async () => {
     const token = await jwt.sign({ sub: 'user123' });
 
-    expect(await strategy.authenticate(createRequest({ authorization: `Bearer ${token}` }))).not
-      .toBeNull();
+    expect(
+      await strategy.authenticate(createRequest({ authorization: `Bearer ${token}` })),
+    ).not.toBeNull();
   });
 
   it('returns null when scheme is missing', async () => {

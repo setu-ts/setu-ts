@@ -101,11 +101,7 @@ function renderKeySegment(
  * @throws {UnsupportedQueryFeatureError} When the key cannot compose one
  * @since 0.2.0
  */
-export function composeRowKey(
-  target: BigtableTarget,
-  id: EntityKey,
-  operation: string,
-): string {
+export function composeRowKey(target: BigtableTarget, id: EntityKey, operation: string): string {
   if (typeof id === 'string' || typeof id === 'number') {
     if (target.keyFields.length !== 1) {
       throw new UnsupportedQueryFeatureError(
@@ -138,7 +134,7 @@ export function composeRowKeyFromFields(
   operation: string,
 ): string {
   const segments = target.keyFields.map((field) =>
-    renderKeySegment(target, field, fields[field], operation)
+    renderKeySegment(target, field, fields[field], operation),
   );
   return target.prefix + segments.join(target.separator);
 }
@@ -161,10 +157,7 @@ export function composeRowKeyFromFields(
  * @returns The recovered key fields, or `{}` when the key does not fit
  * @since 0.2.0
  */
-export function parseRowKey(
-  target: BigtableTarget,
-  rowKey: string,
-): Record<string, string> {
+export function parseRowKey(target: BigtableTarget, rowKey: string): Record<string, string> {
   if (!rowKey.startsWith(target.prefix)) return {};
   const body = rowKey.slice(target.prefix.length);
   if (target.keyFields.length === 1) return { [target.keyFields[0]]: body };

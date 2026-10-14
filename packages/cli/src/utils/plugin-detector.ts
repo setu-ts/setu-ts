@@ -23,7 +23,7 @@ async function readManifest(
 ): Promise<Record<string, unknown> | undefined> {
   const read = await readJsonManifest(fs, path);
   return read.kind === 'ok' && typeof read.value === 'object' && read.value !== null
-    ? read.value as Record<string, unknown>
+    ? (read.value as Record<string, unknown>)
     : undefined;
 }
 
@@ -58,14 +58,12 @@ function collectScoped(source: unknown, into: Set<string>): void {
  * @param dir - The project directory to scan
  * @returns The bare package names found (e.g. `auth-plugin`, `cqrs-plugin`)
  */
-export async function detectPlugins(
-  fs: IFileSystem,
-  dir: string,
-): Promise<ReadonlySet<string>> {
+export async function detectPlugins(fs: IFileSystem, dir: string): Promise<ReadonlySet<string>> {
   const plugins = new Set<string>();
 
-  const denoJson = await readManifest(fs, joinPath(dir, 'deno.json')) ??
-    await readManifest(fs, joinPath(dir, 'deno.jsonc'));
+  const denoJson =
+    (await readManifest(fs, joinPath(dir, 'deno.json'))) ??
+    (await readManifest(fs, joinPath(dir, 'deno.jsonc')));
   if (denoJson !== undefined) {
     collectScoped(denoJson['imports'], plugins);
     if (plugins.size > 0) return plugins;

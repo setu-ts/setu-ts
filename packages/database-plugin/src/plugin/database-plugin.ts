@@ -98,14 +98,14 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
   const adapterOptions = buildAdapterOptions(options?.options);
 
   // Determine the registration token using dot-notation (colon forbidden by createCapabilityToken).
-  const token = connectionName === 'default'
-    ? CAPABILITIES.DATABASE
-    : createCapabilityToken(`database.${connectionName}`);
+  const token =
+    connectionName === 'default'
+      ? CAPABILITIES.DATABASE
+      : createCapabilityToken(`database.${connectionName}`);
 
   // Plugin name: default stays 'database-plugin'; named gets 'database-plugin.<name>'.
-  const pluginName = connectionName === 'default'
-    ? PLUGIN_NAME
-    : `database-plugin.${connectionName}`;
+  const pluginName =
+    connectionName === 'default' ? PLUGIN_NAME : `database-plugin.${connectionName}`;
 
   return {
     name: pluginName,
@@ -259,7 +259,8 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           progress.observe(completed, now);
           const current = readPoolCapacity(adapter);
           if (
-            current !== undefined && isSaturated(current) &&
+            current !== undefined &&
+            isSaturated(current) &&
             (completed === QUERY_PROGRESS_UNOBSERVABLE || progress.progressedWithin(now))
           ) {
             return { status: 'up', data: { ...data, reachable: 'unknown' } };

@@ -78,11 +78,7 @@ describe('tenant repository', () => {
       findById: () => null,
       find<E>(_tenantId: string, _entity: string, filter: Record<string, unknown>) {
         capturedFilter = { ...filter };
-        return Promise.resolve(
-          [
-            { id: 'u1', role: 'admin' },
-          ] as unknown as readonly E[],
-        );
+        return Promise.resolve([{ id: 'u1', role: 'admin' }] as unknown as readonly E[]);
       },
       create: () => ({}),
       update: () => null,
@@ -257,7 +253,7 @@ describe('tenant repository', () => {
           { id: 'u2', role: 'user' },
         ];
         const filtered = records.filter((r) =>
-          Object.entries(filter).every(([k, v]) => (r as Record<string, unknown>)[k] === v)
+          Object.entries(filter).every(([k, v]) => (r as Record<string, unknown>)[k] === v),
         );
         return Promise.resolve(filtered as unknown as readonly E[]);
       },
@@ -293,7 +289,7 @@ describe('tenant repository', () => {
     const repo = new TenantRepository(fakeStore, 'tenant-x', 'Product');
     const created = await repo.create({ name: 'Widget' });
     expect((created as Record<string, unknown>).name).toEqual('Widget');
-    const found = await repo.findById('prod-1') as Record<string, unknown> | null;
+    const found = (await repo.findById('prod-1')) as Record<string, unknown> | null;
     expect(found != null).toBeTruthy();
     expect(capturedId).toEqual('prod-1');
   });

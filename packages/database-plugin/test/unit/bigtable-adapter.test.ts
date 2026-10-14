@@ -21,36 +21,44 @@ function setup(): { store: FakeBigtableStore; adapter: BigtableAdapter } {
 
 describe('construction guards', () => {
   it('refuses neither a client nor a projectId', () => {
-    expect(() => new BigtableAdapter({ instance: 'app' } as never))
-      .toThrow(/options.client or options.projectId/);
-    expect(() => new BigtableAdapter({ projectId: '   ', instance: 'app' }))
-      .toThrow(/options.client or options.projectId/);
+    expect(() => new BigtableAdapter({ instance: 'app' } as never)).toThrow(
+      /options.client or options.projectId/,
+    );
+    expect(() => new BigtableAdapter({ projectId: '   ', instance: 'app' })).toThrow(
+      /options.client or options.projectId/,
+    );
   });
 
   it('refuses a missing or blank instance, naming why a project is not enough', () => {
     const store = new FakeBigtableStore();
-    expect(() => new BigtableAdapter({ client: createFakeBigtableClient(store), instance: '' }))
-      .toThrow(/project\/instance\/table/);
-    expect(() => new BigtableAdapter({ projectId: 'p', instance: '  ' }))
-      .toThrow(/requires options.instance/);
+    expect(
+      () => new BigtableAdapter({ client: createFakeBigtableClient(store), instance: '' }),
+    ).toThrow(/project\/instance\/table/);
+    expect(() => new BigtableAdapter({ projectId: 'p', instance: '  ' })).toThrow(
+      /requires options.instance/,
+    );
   });
 
   it('refuses a maxPageFetches that would disable the page loop', () => {
     const store = new FakeBigtableStore();
     for (const maxPageFetches of [0, -1, Number.NaN, 1.5]) {
-      expect(() =>
+      expect(
+        () =>
+          new BigtableAdapter({
+            client: createFakeBigtableClient(store),
+            instance: 'app',
+            maxPageFetches,
+          }),
+        `maxPageFetches=${String(maxPageFetches)}`,
+      ).toThrow(/positive integer/);
+    }
+    expect(
+      () =>
         new BigtableAdapter({
           client: createFakeBigtableClient(store),
           instance: 'app',
-          maxPageFetches,
-        }), `maxPageFetches=${String(maxPageFetches)}`).toThrow(/positive integer/);
-    }
-    expect(() =>
-      new BigtableAdapter({
-        client: createFakeBigtableClient(store),
-        instance: 'app',
-        maxPageFetches: 1,
-      })
+          maxPageFetches: 1,
+        }),
     ).not.toThrow();
   });
 
@@ -86,10 +94,13 @@ describe('lifecycle', () => {
 
   it("closes a client it CREATED, through the loader's owned flag", async () => {
     const store = new FakeBigtableStore();
-    const adapter = new BigtableAdapter({ projectId: 'p', instance: 'i' }, {
-      owned: true,
-      load: () => Promise.resolve(createFakeBigtableClient(store)),
-    });
+    const adapter = new BigtableAdapter(
+      { projectId: 'p', instance: 'i' },
+      {
+        owned: true,
+        load: () => Promise.resolve(createFakeBigtableClient(store)),
+      },
+    );
     await adapter.connect();
     await adapter.disconnect();
     expect(store.closes).toBe(1);
@@ -101,13 +112,16 @@ describe('lifecycle', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const adapter = new BigtableAdapter({ projectId: 'p', instance: 'i' }, {
-      owned: true,
-      load: async () => {
-        await gate;
-        return createFakeBigtableClient(store);
+    const adapter = new BigtableAdapter(
+      { projectId: 'p', instance: 'i' },
+      {
+        owned: true,
+        load: async () => {
+          await gate;
+          return createFakeBigtableClient(store);
+        },
       },
-    });
+    );
     const connecting = adapter.connect();
     // The disconnect lands while the attempt is still in flight, so the
     // attempt's own result must be discarded rather than resurrecting a closed
@@ -122,13 +136,16 @@ describe('lifecycle', () => {
   it('starts a FRESH attempt after a disconnect rather than sharing the stale one', async () => {
     const store = new FakeBigtableStore();
     let loads = 0;
-    const adapter = new BigtableAdapter({ projectId: 'p', instance: 'i' }, {
-      owned: false,
-      load: () => {
-        loads += 1;
-        return Promise.resolve(createFakeBigtableClient(store));
+    const adapter = new BigtableAdapter(
+      { projectId: 'p', instance: 'i' },
+      {
+        owned: false,
+        load: () => {
+          loads += 1;
+          return Promise.resolve(createFakeBigtableClient(store));
+        },
       },
-    });
+    );
     await adapter.connect();
     await adapter.disconnect();
     await adapter.connect();
@@ -198,8 +215,11 @@ describe('contract', () => {
 
 it('refuses an absent instance from untyped input and accepts an explicit transaction page budget', async () => {
   const client = createFakeBigtableClient(new FakeBigtableStore());
-  expect(() =>
-    new BigtableAdapter({ client } as unknown as ConstructorParameters<typeof BigtableAdapter>[0])
+  expect(
+    () =>
+      new BigtableAdapter({ client } as unknown as ConstructorParameters<
+        typeof BigtableAdapter
+      >[0]),
   ).toThrow(/requires options.instance/);
   const adapter = new BigtableAdapter({ client, instance: 'i', maxPageFetches: 2 });
   await adapter.connect();

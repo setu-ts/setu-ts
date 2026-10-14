@@ -80,7 +80,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     this.#hashes.clear();
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async connect(): Promise<void> {
     this.#record('connect', []);
 
@@ -91,13 +91,13 @@ export class FakeRedisClient implements IRedisQueueClient {
     this.#connected = true;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async quit(): Promise<void> {
     this.#record('quit', []);
     this.#connected = false;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zadd(key: string, score: number, member: string): Promise<number> {
     this.#record('zadd', [key, score, member]);
 
@@ -118,7 +118,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return isNew ? 1 : 0;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zrangebyscore(
     key: string,
     min: number | string,
@@ -163,7 +163,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return sliced.map((m) => m.member);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zrem(key: string, ...members: string[]): Promise<number> {
     this.#record('zrem', [key, ...members]);
 
@@ -187,7 +187,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return removed;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async hset(key: string, field: string, value: string): Promise<number> {
     this.#record('hset', [key, field, value]);
 
@@ -207,7 +207,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return isNew ? 1 : 0;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async hget(key: string, field: string): Promise<string | null> {
     this.#record('hget', [key, field]);
 
@@ -223,7 +223,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return hash.get(field) ?? null;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async hdel(key: string, ...fields: string[]): Promise<number> {
     this.#record('hdel', [key, ...fields]);
 
@@ -247,7 +247,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return deleted;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async del(...keys: string[]): Promise<number> {
     this.#record('del', keys);
 
@@ -275,7 +275,7 @@ export class FakeRedisClient implements IRedisQueueClient {
    * is zero rather than an error — Redis's own behaviour, and the distinction
    * matters because the health indicator must be able to report an empty queue.
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zcard(key: string): Promise<number> {
     this.#record('zcard', [key]);
 
@@ -293,7 +293,7 @@ export class FakeRedisClient implements IRedisQueueClient {
    *
    * @returns `1` when the key exists, `0` otherwise, matching Redis
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async expire(key: string, seconds: number): Promise<number> {
     this.#record('expire', [key, seconds]);
 

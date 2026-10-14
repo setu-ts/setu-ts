@@ -73,9 +73,9 @@ describe('resolveServingStatus', () => {
   });
 
   it('answers service-unknown for a name the server does not serve', async () => {
-    expect(
-      await resolveServingStatus(healthServiceReporting('up'), SERVICE_NAMES, 'no.Such'),
-    ).toBe('service-unknown');
+    expect(await resolveServingStatus(healthServiceReporting('up'), SERVICE_NAMES, 'no.Such')).toBe(
+      'service-unknown',
+    );
   });
 
   it('answers service-unknown even when the server is otherwise down', async () => {
@@ -86,9 +86,7 @@ describe('resolveServingStatus', () => {
   });
 
   it('answers service-unknown for an unknown name with no health capability', async () => {
-    expect(await resolveServingStatus(undefined, SERVICE_NAMES, 'no.Such')).toBe(
-      'service-unknown',
-    );
+    expect(await resolveServingStatus(undefined, SERVICE_NAMES, 'no.Such')).toBe('service-unknown');
   });
 
   it('resolves a named service the server does serve through the health report', async () => {

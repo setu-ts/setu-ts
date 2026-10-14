@@ -71,8 +71,9 @@ describe('rest-starter / buildRestPlugins', () => {
   it('includes service discovery only when its provider arm is supplied', () => {
     expect(buildRestPlugins().map((p) => p.name)).not.toContain('service-discovery-plugin');
     expect(
-      buildRestPlugins({ serviceDiscovery: { provider: 'static', services: {} } })
-        .map((p) => p.name),
+      buildRestPlugins({ serviceDiscovery: { provider: 'static', services: {} } }).map(
+        (p) => p.name,
+      ),
     ).toContain('service-discovery-plugin');
   });
 

@@ -103,11 +103,7 @@ function createApp() {
   return app;
 }
 
-const post = (
-  app: ReturnType<typeof createApp>,
-  body: unknown,
-  accept = 'application/json',
-) =>
+const post = (app: ReturnType<typeof createApp>, body: unknown, accept = 'application/json') =>
   app.inject({
     method: 'POST',
     url: '/graphql',
@@ -177,14 +173,16 @@ describe('GraphQL schema-first E2E', () => {
       query: 'mutation { addNote(authorId: "u1", title: "second") { id title } }',
     });
     expect(written.statusCode).toBe(200);
-    const writeBody = await written.json() as { data: { addNote: { id: string; title: string } } };
+    const writeBody = (await written.json()) as {
+      data: { addNote: { id: string; title: string } };
+    };
     expect(writeBody.data.addNote.title).toBe('second');
 
     // Read it back through the ordinary query path.
     const readBack = await post(app, {
       query: '{ user(id: "u1") { notes { id title } } }',
     });
-    const readBody = await readBack.json() as {
+    const readBody = (await readBack.json()) as {
       data: { user: { notes: Array<{ id: string; title: string }> } };
     };
     expect(readBody.data.user.notes.map((n) => n.title)).toEqual(['first', 'second']);
@@ -209,7 +207,7 @@ describe('GraphQL schema-first E2E', () => {
     // A 405 must advertise what is allowed; a client cannot retry correctly
     // without it.
     expect(res.headers.get('allow')).toBe('POST');
-    const body = await res.json() as { errors: Array<{ extensions?: { code?: string } }> };
+    const body = (await res.json()) as { errors: Array<{ extensions?: { code?: string } }> };
     expect(body.errors[0]?.extensions?.code).toBe('METHOD_NOT_ALLOWED');
 
     await app.stop();
@@ -264,7 +262,7 @@ describe('GraphQL schema-first E2E', () => {
     expect(res.status).toBe(405);
     expect(res.headers.get('allow')).toBe('POST');
     // ...and the hook really did strip the code, so the assertion is not vacuous.
-    const body = await res.json() as { errors: Array<{ extensions?: unknown }> };
+    const body = (await res.json()) as { errors: Array<{ extensions?: unknown }> };
     expect(body.errors[0]?.extensions).toBeUndefined();
 
     await app.stop();
@@ -279,7 +277,7 @@ describe('GraphQL schema-first E2E', () => {
     // The operation ran; a field error nulling `data` is not a request error, so
     // this must not be a 400 even under strict negotiation.
     expect(res.statusCode).toBe(200);
-    const body = await res.json() as { data: unknown; errors: Array<{ message: string }> };
+    const body = (await res.json()) as { data: unknown; errors: Array<{ message: string }> };
     expect(body.data).toBeNull();
     expect(body.errors.length).toBe(1);
 
@@ -341,8 +339,10 @@ describe('GraphQL schema-first E2E', () => {
     const viaPost = await post(app, { query, variables: [] }, 'application/graphql-response+json');
     const viaGet = await app.fetch(
       new Request(
-        'http://localhost/graphql?query=' + encodeURIComponent(query) +
-          '&variables=' + encodeURIComponent('[]'),
+        'http://localhost/graphql?query=' +
+          encodeURIComponent(query) +
+          '&variables=' +
+          encodeURIComponent('[]'),
         { headers: { accept: 'application/graphql-response+json' } },
       ),
     );
@@ -351,7 +351,9 @@ describe('GraphQL schema-first E2E', () => {
     // execute as the variable map while GET rejected the same input.
     expect(viaPost.statusCode).toBe(400);
     expect(viaGet.status).toBe(400);
-    const postBody = await viaPost.json() as { errors: Array<{ extensions?: { code?: string } }> };
+    const postBody = (await viaPost.json()) as {
+      errors: Array<{ extensions?: { code?: string } }>;
+    };
     expect(postBody.errors[0]?.extensions?.code).toBe('INVALID_VARIABLES');
 
     // `null` remains valid — the spec allows it and it means "no variables".
@@ -372,7 +374,7 @@ describe('GraphQL schema-first E2E', () => {
     );
 
     expect(res.statusCode).toBe(400);
-    const body = await res.json() as { errors: Array<{ extensions?: { code?: string } }> };
+    const body = (await res.json()) as { errors: Array<{ extensions?: { code?: string } }> };
     expect(body.errors[0]?.extensions?.code).toBe('OPERATION_RESOLUTION_FAILED');
 
     // Naming the operation resolves it.

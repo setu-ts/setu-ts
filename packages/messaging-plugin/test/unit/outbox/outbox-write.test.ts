@@ -29,10 +29,13 @@ const TRACE = { traceId: 'a'.repeat(32), spanId: 'b'.repeat(16), traceFlags: '01
 describe('IOutbox.write', () => {
   it('stores one pending row whose id, key and options are the effective ones', async () => {
     const h = await outboxHarness();
-    const id = await h.write({ key: 'order-1', n: 1 }, {
-      metadata: { aggregateId: 'order-1', aggregateVersion: 3 },
-      options: { headers: { 'x-source': 'test' } },
-    });
+    const id = await h.write(
+      { key: 'order-1', n: 1 },
+      {
+        metadata: { aggregateId: 'order-1', aggregateVersion: 3 },
+        options: { headers: { 'x-source': 'test' } },
+      },
+    );
     const stored = await row(h.db, id);
     expect(stored).not.toBeNull();
     expect(stored!.kind).toBe(OUTBOX_RECORD_KIND);
@@ -75,9 +78,12 @@ describe('IOutbox.write', () => {
 
   it('refuses an oversized envelope before append, rolling the transaction back', async () => {
     const h = await outboxHarness({ options: { maxEnvelopeBytes: 300 } });
-    const rejection = h.write({ n: 1, key: 'x'.repeat(100) }, {
-      metadata: { correlationId: 'c'.repeat(400) },
-    });
+    const rejection = h.write(
+      { n: 1, key: 'x'.repeat(100) },
+      {
+        metadata: { correlationId: 'c'.repeat(400) },
+      },
+    );
     await expect(rejection).rejects.toBeInstanceOf(OutboxEnvelopeTooLargeError);
     expect(h.store.count('append')).toBe(0);
     expect(await rows(h.db)).toEqual([]);
@@ -130,8 +136,9 @@ describe('IOutbox.write', () => {
       expect(promise).toBeInstanceOf(Promise);
       return promise;
     };
-    await expect(call(() => h.write({ n: 1 }, { options: { headers: { traceparent: 'x' } } })))
-      .rejects.toThrow(RangeError);
+    await expect(
+      call(() => h.write({ n: 1 }, { options: { headers: { traceparent: 'x' } } })),
+    ).rejects.toThrow(RangeError);
     await expect(
       call(() => h.db.transaction((uow) => h.service.write(uow, orderPlaced, undefined as never))),
     ).rejects.toThrow(TypeError);

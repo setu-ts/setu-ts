@@ -211,15 +211,13 @@ describe('Protocol — status body and fixed errors', () => {
     const manifest = currentInspectorsManifest();
     const base = { version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: 1 };
     expect(parseStatusBody({ ...base, renewal: { maxRemainingMs: 2 } })).toBe(null);
-    expect(
-      parseStatusBody({ ...base, inspectors: manifest, renewal: { maxRemainingMs: 0 } }),
-    ).toBe(null);
+    expect(parseStatusBody({ ...base, inspectors: manifest, renewal: { maxRemainingMs: 0 } })).toBe(
+      null,
+    );
     expect(
       parseStatusBody({ ...base, inspectors: manifest, renewal: { maxRemainingMs: 2.5 } }),
     ).toBe(null);
-    expect(
-      parseStatusBody({ ...base, expiresInMs: 0.5, inspectors: manifest }),
-    ).not.toBeNull();
+    expect(parseStatusBody({ ...base, expiresInMs: 0.5, inspectors: manifest })).not.toBeNull();
     expect(
       parseStatusBody({
         ...base,
@@ -318,20 +316,18 @@ describe('Protocol — client-side validators', () => {
 
   it('rejects status-body key drift, bad scalars, and malformed manifests', () => {
     // Missing / extra keys
-    expect(
-      parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID }),
-    ).toBe(null);
+    expect(parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID })).toBe(null);
     expect(
       parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: 5, x: 1 }),
     ).toBe(null);
     // Bad scalars
-    expect(
-      parseStatusBody({ version: 2, instanceId: TEST_INSTANCE_ID, expiresInMs: 5 }),
-    ).toBe(null);
+    expect(parseStatusBody({ version: 2, instanceId: TEST_INSTANCE_ID, expiresInMs: 5 })).toBe(
+      null,
+    );
     expect(parseStatusBody({ version: 1, instanceId: '', expiresInMs: 5 })).toBe(null);
-    expect(
-      parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: -1 }),
-    ).toBe(null);
+    expect(parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: -1 })).toBe(
+      null,
+    );
     // Non-objects
     expect(parseStatusBody(null)).toBe(null);
     expect(parseStatusBody('status')).toBe(null);
@@ -480,9 +476,7 @@ describe('Protocol — health projection and validator (M98d)', () => {
     expect(isHealthSnapshotProjection({ ...snapshot, droppedObservations: -1 })).toBe(false);
     expect(isHealthSnapshotProjection({ ...snapshot, droppedObservations: 0.5 })).toBe(false);
     const many = Array.from({ length: 65 }, (_, i) => ({ ...reported, indicatorAlias: `a${i}` }));
-    expect(isHealthSnapshotProjection({ ...snapshot, observations: many.slice(0, 64) })).toBe(
-      true,
-    );
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: many.slice(0, 64) })).toBe(true);
     expect(isHealthSnapshotProjection({ ...snapshot, observations: many })).toBe(false);
   });
 });
@@ -494,9 +488,7 @@ describe('Protocol — status-body release skew, BOTH directions (M98d gate)', (
   it('a NEW client pairs against an OLD server and reads every inspector as false', () => {
     const parsed = parseStatusBody(legacy);
     expect(parsed).not.toBeNull();
-    expect(Object.values(parsed!.inspectors).every((supported) => supported === false)).toBe(
-      true,
-    );
+    expect(Object.values(parsed!.inspectors).every((supported) => supported === false)).toBe(true);
   });
 
   it('an OLD (shipped M98b) client REJECTS the new four-field body — why the gate exists', () => {
@@ -672,12 +664,12 @@ describe('Protocol — configuration target and projection (M98e)', () => {
       expect([position, isConfigSnapshotProjection(projected)]).toEqual([position, false]);
     }
     // C1 (U+0085) and DEL are refused too; a non-control code point is not.
-    for (
-      const [alias, accepted] of [['a\u202eb', false], ['a\u0085b', false], ['a\u007fb', false], [
-        'a\u00a0b',
-        true,
-      ]]
-    ) {
+    for (const [alias, accepted] of [
+      ['a\u202eb', false],
+      ['a\u0085b', false],
+      ['a\u007fb', false],
+      ['a\u00a0b', true],
+    ]) {
       const projected = projectConfigSnapshot({
         ...readySnapshot(),
         entries: [{ ...entry, keyAlias: alias as string }],

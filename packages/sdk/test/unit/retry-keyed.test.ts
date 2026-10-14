@@ -49,8 +49,7 @@ describe('runWithRetry keyed gate (M109b §3.9)', () => {
     const { fn, calls } = scripted([500, 500, 200]);
     expect(
       await runWithRetry(fn, { limit: 3, delay: 5, backoff: 'fixed' }, 'POST', t, undefined, true),
-    )
-      .toBe('ok');
+    ).toBe('ok');
     expect(calls()).toBe(3);
     expect(sleeps).toEqual([5, 5]);
   });
@@ -67,8 +66,7 @@ describe('runWithRetry keyed gate (M109b §3.9)', () => {
         undefined,
         true,
       ),
-    )
-      .toBe('done');
+    ).toBe('done');
 
     const second = timing();
     const unkeyed = scripted([409, 200]);

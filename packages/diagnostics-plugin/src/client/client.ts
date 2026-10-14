@@ -296,7 +296,10 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
   let tail: Promise<unknown> = Promise.resolve();
   const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
     const run = tail.then(task, task);
-    tail = run.then(() => undefined, () => undefined);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
     return run;
   };
 
@@ -313,7 +316,9 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     }
   };
 
-  const exchange = async (target: string): Promise<{
+  const exchange = async (
+    target: string,
+  ): Promise<{
     status: number;
     bodyBytes: Uint8Array;
     bodyText: string;
@@ -339,10 +344,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     // AND body. Clearing either at header time would let a stalled endpoint
     // hold the body read open indefinitely (the 256 KiB cap bounds volume,
     // not time) and would make close() unable to abort an in-flight read.
-    const deadline = options.timing.setTimeout(
-      () => controller.abort(),
-      REQUEST_DEADLINE_MS,
-    );
+    const deadline = options.timing.setTimeout(() => controller.abort(), REQUEST_DEADLINE_MS);
     try {
       let response: Response;
       try {
@@ -387,8 +389,9 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         String(response.status),
         bodyHex,
       );
-      const verified = parseMac(responseMac) !== null &&
-        await verifyFields(options.subtle, key, responseMac, responseFields);
+      const verified =
+        parseMac(responseMac) !== null &&
+        (await verifyFields(options.subtle, key, responseMac, responseFields));
       if (!verified) {
         throw new Error(CLIENT_ERRORS.connection);
       }
@@ -462,7 +465,8 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     }
     const status = parseStatusBody(parsed);
     if (
-      status === null || status.instanceId !== result.responseInstance ||
+      status === null ||
+      status.instanceId !== result.responseInstance ||
       (!initial && status.instanceId !== instanceId) ||
       (!initial && renewalSupported !== (status.renewal !== null))
     ) {
@@ -546,12 +550,13 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // `traces()` check it: an empty page echoes the cursor, and a returned
         // page starts past it with `lost` counting exactly the gap.
         if (
-          !isBatchProjection(parsed) || parsed.instanceId !== instanceId ||
+          !isBatchProjection(parsed) ||
+          parsed.instanceId !== instanceId ||
           parsed.events.length > effectiveLimit ||
-          (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
-            parsed.events[0].sequence <= after ||
-            parsed.lost !== parsed.events[0].sequence - after - 1
-          ))
+          (parsed.events.length === 0
+            ? parsed.next !== after || parsed.lost !== 0
+            : parsed.events[0].sequence <= after ||
+              parsed.lost !== parsed.events[0].sequence - after - 1)
         ) {
           throw new Error(CLIENT_ERRORS.connection);
         }
@@ -846,12 +851,13 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // cursor contract relative to THIS request: an empty page echoes the
         // cursor, and a returned page starts past it.
         if (
-          !isQueueBatchProjection(parsed) || parsed.instanceId !== bound ||
+          !isQueueBatchProjection(parsed) ||
+          parsed.instanceId !== bound ||
           parsed.events.length > effectiveLimit ||
-          (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
-            parsed.events[0].sequence <= after ||
-            parsed.lost !== parsed.events[0].sequence - after - 1
-          ))
+          (parsed.events.length === 0
+            ? parsed.next !== after || parsed.lost !== 0
+            : parsed.events[0].sequence <= after ||
+              parsed.lost !== parsed.events[0].sequence - after - 1)
         ) {
           throw new Error(CLIENT_ERRORS.connection);
         }
@@ -896,12 +902,13 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // cursor contract relative to THIS request: an empty page echoes the
         // cursor, and a returned page starts past it.
         if (
-          !isTraceBatchProjection(parsed) || parsed.instanceId !== bound ||
+          !isTraceBatchProjection(parsed) ||
+          parsed.instanceId !== bound ||
           parsed.records.length > effectiveLimit ||
-          (parsed.records.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
-            parsed.records[0].sequence <= after ||
-            parsed.lost !== parsed.records[0].sequence - after - 1
-          ))
+          (parsed.records.length === 0
+            ? parsed.next !== after || parsed.lost !== 0
+            : parsed.records[0].sequence <= after ||
+              parsed.lost !== parsed.records[0].sequence - after - 1)
         ) {
           throw new Error(CLIENT_ERRORS.connection);
         }
@@ -986,12 +993,13 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // cursor contract relative to THIS request: an empty page echoes the
         // cursor, and a returned page starts past it.
         if (
-          !isAuthorizationBatchProjection(parsed) || parsed.instanceId !== bound ||
+          !isAuthorizationBatchProjection(parsed) ||
+          parsed.instanceId !== bound ||
           parsed.decisions.length > effectiveLimit ||
-          (parsed.decisions.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
-            parsed.decisions[0].sequence <= after ||
-            parsed.lost !== parsed.decisions[0].sequence - after - 1
-          ))
+          (parsed.decisions.length === 0
+            ? parsed.next !== after || parsed.lost !== 0
+            : parsed.decisions[0].sequence <= after ||
+              parsed.lost !== parsed.decisions[0].sequence - after - 1)
         ) {
           throw new Error(CLIENT_ERRORS.connection);
         }

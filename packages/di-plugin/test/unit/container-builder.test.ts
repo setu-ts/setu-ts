@@ -62,9 +62,7 @@ describe('ContainerBuilder', () => {
     });
 
     it('includes value providers', () => {
-      const c = new ContainerBuilder()
-        .register('val', { useValue: 123 })
-        .build();
+      const c = new ContainerBuilder().register('val', { useValue: 123 }).build();
 
       expect(c.resolve<number>('val')).toBe(123);
     });
@@ -89,10 +87,7 @@ describe('ContainerBuilder', () => {
   describe('autoRegister', () => {
     it('enables external resolver fallback in the built container', () => {
       const external = makeResolver({ ext: { v: 1 } });
-      const c = new ContainerBuilder()
-        .setAutoRegister(true)
-        .setExternalResolver(external)
-        .build();
+      const c = new ContainerBuilder().setAutoRegister(true).setExternalResolver(external).build();
 
       expect(c.has('ext')).toBe(true);
       expect(c.resolve<{ v: number }>('ext').v).toBe(1);
@@ -100,9 +95,7 @@ describe('ContainerBuilder', () => {
 
     it('disables fallback by default', () => {
       const external = makeResolver({ ext: 1 });
-      const c = new ContainerBuilder()
-        .setExternalResolver(external)
-        .build();
+      const c = new ContainerBuilder().setExternalResolver(external).build();
 
       expect(c.has('ext')).toBe(false);
     });

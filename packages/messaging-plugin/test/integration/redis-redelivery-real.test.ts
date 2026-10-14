@@ -54,10 +54,10 @@ describe('REAL Redis Streams redelivery', () => {
         await app.start();
         // Sweep threshold 200 ms precedes the first reclaim tier 1000 ms.
         await wait(300);
-        const consumers = await redis.xinfo('CONSUMERS', topic, 'g') as unknown[][];
+        const consumers = (await redis.xinfo('CONSUMERS', topic, 'g')) as unknown[][];
         expect(consumers.some((c) => c[1] === 'empty')).toBe(false);
         expect(consumers.some((c) => c[1] === 'pending')).toBe(true);
-        const pending = await redis.xpending(topic, 'g', '-', '+', 10) as Array<
+        const pending = (await redis.xpending(topic, 'g', '-', '+', 10)) as Array<
           [string, string, number, number]
         >;
         expect(pending.map((p) => [p[0], p[1], p[3]])).toEqual([[id, 'pending', 1]]);
@@ -143,7 +143,7 @@ describe('REAL Redis Streams redelivery', () => {
       try {
         await app.start();
         const id = await redis.xadd(topic, '*', 'payload', '{"m":"m1"}', 'traceparent', 'tp');
-        expect(await until(async () => await redis.xlen(`${topic}.dead.g`) === 1)).toBe(true);
+        expect(await until(async () => (await redis.xlen(`${topic}.dead.g`)) === 1)).toBe(true);
         expect(attempts).toBe(3);
         const entries = await redis.xrange(`${topic}.dead.g`, '-', '+');
         expect(entries[0][1]).toEqual([
@@ -176,7 +176,7 @@ describe('REAL Redis Streams redelivery', () => {
       await app.start();
       await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING).publish(topic, 'm1');
       expect(await until(() => delivered)).toBe(true);
-      expect((await redis.xinfo('CONSUMERS', topic, 'g') as unknown[]).length).toBe(1);
+      expect(((await redis.xinfo('CONSUMERS', topic, 'g')) as unknown[]).length).toBe(1);
       await app.stop();
       expect(await redis.xinfo('CONSUMERS', topic, 'g')).toEqual([]);
     } finally {

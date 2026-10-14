@@ -101,9 +101,9 @@ export function defineIntegrationEvent<T>(options: {
   }
   if (!Number.isSafeInteger(version) || version < 1) {
     throw new TypeError(
-      `defineIntegrationEvent: "version" must be a positive safe integer; received ${
-        String(version)
-      }`,
+      `defineIntegrationEvent: "version" must be a positive safe integer; received ${String(
+        version,
+      )}`,
     );
   }
   if (typeof parse !== 'function') {

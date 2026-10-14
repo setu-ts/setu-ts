@@ -34,11 +34,13 @@ describe('GraphqlService', () => {
       // resolves the kind off the AST the parse produced.
       parse: (_src: string) => ({
         kind: 'Document',
-        definitions: [{
-          kind: 'OperationDefinition',
-          operation: 'query',
-          selectionSet: { kind: 'SelectionSet', selections: [] },
-        }],
+        definitions: [
+          {
+            kind: 'OperationDefinition',
+            operation: 'query',
+            selectionSet: { kind: 'SelectionSet', selections: [] },
+          },
+        ],
       }),
       validate: (_schema: unknown, _document: unknown, rules: unknown[]) => {
         const errors: Array<{ message: string }> = [];
@@ -384,20 +386,23 @@ describe('GraphqlService', () => {
           if (opts.parseThrows) throw new Error('syntax error');
           return {
             kind: 'Document',
-            definitions: [{
-              kind: 'OperationDefinition',
-              operation: opts.operation ?? 'query',
-              selectionSet: { kind: 'SelectionSet', selections: [] },
-            }],
+            definitions: [
+              {
+                kind: 'OperationDefinition',
+                operation: opts.operation ?? 'query',
+                selectionSet: { kind: 'SelectionSet', selections: [] },
+              },
+            ],
           };
         },
         validate: () => [],
         execute: () => Promise.resolve({ data: { hello: 'world' } }),
         subscribe: () =>
           Promise.resolve(
-            opts.subscribeStream ?? (async function* () {
-              yield { data: { tick: 0 } };
-            })(),
+            opts.subscribeStream ??
+              (async function* () {
+                yield { data: { tick: 0 } };
+              })(),
           ),
         buildSchema: (_src: string) =>
           ({
@@ -471,16 +476,16 @@ describe('GraphqlService', () => {
 
     it('builds WS-shaped context: services from the registry, user/tenant from conn.data', async () => {
       let captured: { services?: unknown; user?: unknown; tenant?: unknown } = {};
-      const service = makeService(
-        createSubscribeRuntime({ operation: 'subscription' }),
-        {
-          buildContext: (input) => {
-            captured = input as typeof captured;
-            return { marker: 'ctx' };
-          },
+      const service = makeService(createSubscribeRuntime({ operation: 'subscription' }), {
+        buildContext: (input) => {
+          captured = input as typeof captured;
+          return { marker: 'ctx' };
         },
-      );
-      const data = new Map<string, unknown>([['user', 'alice'], ['tenant', 't1']]);
+      });
+      const data = new Map<string, unknown>([
+        ['user', 'alice'],
+        ['tenant', 't1'],
+      ]);
       const connection: GraphqlConnectionInfo = {
         id: 'c1',
         headers: new Headers(),
@@ -505,9 +510,11 @@ describe('GraphqlService', () => {
       ) => {
         const ctx = args as { contextValue?: unknown };
         subscribedContext = ctx.contextValue;
-        return Promise.resolve((async function* () {
-          yield { data: { tick: 0 } };
-        })());
+        return Promise.resolve(
+          (async function* () {
+            yield { data: { tick: 0 } };
+          })(),
+        );
       };
       const service = makeService(runtime);
       const principal = { id: 'bob' };
@@ -573,9 +580,11 @@ describe('GraphqlService', () => {
       ) => {
         const ctx = args as { contextValue?: unknown };
         subscribedContext = ctx.contextValue;
-        return Promise.resolve((async function* () {
-          yield { data: { tick: 0 } };
-        })());
+        return Promise.resolve(
+          (async function* () {
+            yield { data: { tick: 0 } };
+          })(),
+        );
       };
       const service = makeService(runtime);
       const connection: GraphqlConnectionInfo = {
@@ -584,7 +593,10 @@ describe('GraphqlService', () => {
         query: {},
         // An onConnect hook that stored a raw token string, not a principal:
         // the context must not carry it on a member typed IPrincipal.
-        data: new Map<string, unknown>([['user', 'raw-token'], ['tenant', 42]]),
+        data: new Map<string, unknown>([
+          ['user', 'raw-token'],
+          ['tenant', 42],
+        ]),
       };
 
       await service.subscribe({ query: 'subscription { tick }' }, { connection });
@@ -609,9 +621,11 @@ describe('GraphqlService', () => {
       ) => {
         const ctx = args as { contextValue?: unknown };
         subscribedContext = ctx.contextValue;
-        return Promise.resolve((async function* () {
-          yield { data: { tick: 0 } };
-        })());
+        return Promise.resolve(
+          (async function* () {
+            yield { data: { tick: 0 } };
+          })(),
+        );
       };
       const service = makeService(runtime);
       const principal = { id: 'carol' };
@@ -620,7 +634,10 @@ describe('GraphqlService', () => {
         id: 'c1',
         headers: new Headers(),
         query: {},
-        data: new Map<string, unknown>([['user', principal], ['tenant', tenant]]),
+        data: new Map<string, unknown>([
+          ['user', principal],
+          ['tenant', tenant],
+        ]),
       };
 
       await service.subscribe({ query: 'subscription { tick }' }, { connection });

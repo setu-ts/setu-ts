@@ -139,9 +139,10 @@ export interface IAuthService {
    * @param credentials - The credentials to verify
    * @returns The authenticated principal, or `null` if invalid
    */
-  verifyCredentials(
-    credentials: { readonly identifier: string; readonly secret: string },
-  ): Promise<IPrincipal | null>;
+  verifyCredentials(credentials: {
+    readonly identifier: string;
+    readonly secret: string;
+  }): Promise<IPrincipal | null>;
 }
 
 /**

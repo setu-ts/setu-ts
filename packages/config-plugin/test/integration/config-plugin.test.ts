@@ -375,9 +375,7 @@ describe('ConfigPlugin — validation', () => {
 describe('ConfigPlugin | provenance source registration (M98e)', () => {
   it('registers the source under the eager token, disabled without diagnostics', async () => {
     const plugin = ConfigPlugin();
-    const { ctx, registeredServices } = createFakeContext(
-      createRuntime({ env: { PORT: '3000' } }),
-    );
+    const { ctx, registeredServices } = createFakeContext(createRuntime({ env: { PORT: '3000' } }));
     await plugin.register!(ctx);
     expect(registeredServices.has(CAPABILITIES.CONFIG_DIAGNOSTICS)).toBe(true);
     const source = registeredServices.get(CAPABILITIES.CONFIG_DIAGNOSTICS) as {

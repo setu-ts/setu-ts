@@ -22,8 +22,7 @@ export function renderConfigOptions(envFilePath: string): string {
 
 /** A parsed environment-file path. */
 export type EnvFilePathResult =
-  | { readonly ok: true; readonly path?: string }
-  | { readonly ok: false; readonly message: string };
+  { readonly ok: true; readonly path?: string } | { readonly ok: false; readonly message: string };
 
 /** Reads a relative environment-file path without permitting a project escape. */
 export function readEnvFilePath(
@@ -36,9 +35,11 @@ export function readEnvFilePath(
   }
   if (
     value.startsWith('/') ||
-    value.split('/').some((part) =>
-      part === '' || part === '.' || part === '..' || !/^[A-Za-z0-9._-]+$/.test(part)
-    )
+    value
+      .split('/')
+      .some(
+        (part) => part === '' || part === '.' || part === '..' || !/^[A-Za-z0-9._-]+$/.test(part),
+      )
   ) {
     return {
       ok: false,

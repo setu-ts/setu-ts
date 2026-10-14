@@ -307,13 +307,18 @@ export class StorageService implements IStorage {
       return await this.#readBufferedStream(path);
     }
     if (streamFn !== undefined) {
-      return await observeStorageCall(collector, 'getStream', async () => {
-        const stream = await streamFn.call(this.#provider, path);
-        if (stream === null) {
-          throw new Error(`Storage object not found: ${path}`);
-        }
-        return stream;
-      }, null);
+      return await observeStorageCall(
+        collector,
+        'getStream',
+        async () => {
+          const stream = await streamFn.call(this.#provider, path);
+          if (stream === null) {
+            throw new Error(`Storage object not found: ${path}`);
+          }
+          return stream;
+        },
+        null,
+      );
     }
     // Buffered fallback: the UNOBSERVED read is shared with `get`, so exactly
     // ONE `getStream` observation exists per public call and a concurrent

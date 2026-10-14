@@ -6,8 +6,7 @@
 
 /** The diagnostic each reason states, after the entity name. */
 const REASON_TEXT: Readonly<Record<OutboxStoreUnavailableError['reason'], string>> = {
-  'bigtable':
-    'Bigtable cannot serve an outbox (no secondary index); use a change-data-capture relay',
+  bigtable: 'Bigtable cannot serve an outbox (no secondary index); use a change-data-capture relay',
   'dynamodb-index':
     "DynamoDB needs a GSI { partitionKey: 'status', sortKey: 'position' } (projection ALL) " +
     'configured for the outbox entity',

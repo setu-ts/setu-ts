@@ -368,10 +368,7 @@ class RealtimeObservationCollector implements IRealtimeObservationCollector {
     now: number,
   ): void {
     let record = this.#records.get(operation);
-    if (
-      record === undefined ||
-      now - record.lastAt > REALTIME_COLLECTOR_LIMITS.retentionMs
-    ) {
+    if (record === undefined || now - record.lastAt > REALTIME_COLLECTOR_LIMITS.retentionMs) {
       record = {
         count: 0,
         succeeded: 0,
@@ -449,29 +446,31 @@ class RealtimeObservationCollector implements IRealtimeObservationCollector {
         continue;
       }
       freshest = Math.min(freshest, age);
-      records.push(Object.freeze({
-        alias: this.#alias,
-        operation,
-        count: record.count,
-        lastDurationMs: operation === 'backplane-publish' ? record.lastDurationMs : null,
-        ageMs: clampMs(age),
-        succeeded: record.succeeded,
-        failed: record.failed,
-        backpressureCloses: this.#kind === 'sse' && operation === 'close'
-          ? record.backpressureCloses
-          : null,
-      }));
+      records.push(
+        Object.freeze({
+          alias: this.#alias,
+          operation,
+          count: record.count,
+          lastDurationMs: operation === 'backplane-publish' ? record.lastDurationMs : null,
+          ageMs: clampMs(age),
+          succeeded: record.succeeded,
+          failed: record.failed,
+          backpressureCloses:
+            this.#kind === 'sse' && operation === 'close' ? record.backpressureCloses : null,
+        }),
+      );
     }
     // A websocket or sse source is ready whenever its gauges were read — the
     // gauges are current even when no operation happened in 60 seconds. A
     // backplane has no gauges, so its readiness comes from record age alone.
     let state: DiagnosticsInspectorState = 'ready';
     if (this.#kind === 'backplane') {
-      state = records.length === 0
-        ? 'no-data'
-        : freshest > REALTIME_COLLECTOR_LIMITS.staleMs
-        ? 'stale'
-        : 'ready';
+      state =
+        records.length === 0
+          ? 'no-data'
+          : freshest > REALTIME_COLLECTOR_LIMITS.staleMs
+            ? 'stale'
+            : 'ready';
     }
     return this.#frozen(state, this.#alias, gauges, records);
   }

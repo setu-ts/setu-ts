@@ -143,8 +143,8 @@ async function runMiddlewareChain(
   const handlerRan = [false];
 
   // Sort by priority (lower first)
-  const sorted = [...middlewareList].sort((a, b) =>
-    (a.options.priority ?? 500) - (b.options.priority ?? 500)
+  const sorted = [...middlewareList].sort(
+    (a, b) => (a.options.priority ?? 500) - (b.options.priority ?? 500),
   );
 
   let index = 0;
@@ -235,8 +235,9 @@ describe('HttpSecurityPlugin — integration', () => {
 
       expect(result.handlerRan).toBe(false);
       expect(result.response.statuses).toContain(204);
-      expect(result.response.headers.get('access-control-allow-origin'))
-        .toBe('https://app.example.com');
+      expect(result.response.headers.get('access-control-allow-origin')).toBe(
+        'https://app.example.com',
+      );
     });
   });
 
@@ -273,8 +274,9 @@ describe('HttpSecurityPlugin — integration', () => {
       );
 
       // CORS headers present
-      expect(result.response.headers.get('access-control-allow-origin'))
-        .toBe('https://app.example.com');
+      expect(result.response.headers.get('access-control-allow-origin')).toBe(
+        'https://app.example.com',
+      );
 
       // IP resolved
       expect(result.ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('203.0.113.50');

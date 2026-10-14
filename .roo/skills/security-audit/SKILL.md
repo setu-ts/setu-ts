@@ -1,6 +1,12 @@
 ---
 name: security-audit
-description: Security-audit a milestone's COMMITTED tree against its plan's design security review — drive the plan's audit obligations as probes with positive controls, sweep this framework's recurring security defect classes, prove each new control with a negative control, and produce the audit record the plan requires in the PR. Use when a plan names a committed-tree security audit, when a change crosses a trust boundary (network input, credentials, authorization, tenancy, diagnostics, anything leaving the process), or when asked to security-review or audit a milestone.
+description:
+  Security-audit a milestone's COMMITTED tree against its plan's design security review — drive the
+  plan's audit obligations as probes with positive controls, sweep this framework's recurring
+  security defect classes, prove each new control with a negative control, and produce the audit
+  record the plan requires in the PR. Use when a plan names a committed-tree security audit, when a
+  change crosses a trust boundary (network input, credentials, authorization, tenancy, diagnostics,
+  anything leaving the process), or when asked to security-review or audit a milestone.
 ---
 
 # Security Audit

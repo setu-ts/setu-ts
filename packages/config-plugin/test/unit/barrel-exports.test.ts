@@ -5,13 +5,11 @@ import type { IConfig } from '@setu-ts/common';
 import { defineConfigSection, getConfigSection } from '../../src/index.ts';
 import type { ConfigDiagnosticsOptions, ConfigSection } from '../../src/index.ts';
 
-type IsEqual<Actual, Expected> = (<T>() => T extends Actual ? 1 : 2) extends
-  (<T>() => T extends Expected ? 1 : 2) ? true : false;
+type IsEqual<Actual, Expected> =
+  (<T>() => T extends Actual ? 1 : 2) extends <T>() => T extends Expected ? 1 : 2 ? true : false;
 
-const configContractHasExactlyFourMembers: IsEqual<
-  keyof IConfig,
-  'get' | 'getOrThrow' | 'has'
-> = true;
+const configContractHasExactlyFourMembers: IsEqual<keyof IConfig, 'get' | 'getOrThrow' | 'has'> =
+  true;
 
 describe('config-plugin barrel exports', () => {
   it('exports typed configuration-section definitions and accessors', async () => {

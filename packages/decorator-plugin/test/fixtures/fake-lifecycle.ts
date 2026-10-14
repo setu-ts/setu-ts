@@ -14,9 +14,9 @@ export type LifecycleHook =
   | { readonly phase: 'onRequest'; readonly fn: (ctx: IRequestContext) => void | Promise<void> }
   | { readonly phase: 'onResponse'; readonly fn: (ctx: IRequestContext) => void | Promise<void> }
   | {
-    readonly phase: 'onError';
-    readonly fn: (error: Error, ctx: IRequestContext) => void | Promise<void>;
-  }
+      readonly phase: 'onError';
+      readonly fn: (error: Error, ctx: IRequestContext) => void | Promise<void>;
+    }
   | { readonly phase: 'onStopping'; readonly fn: () => void | Promise<void> }
   | { readonly phase: 'onShutdown'; readonly fn: () => void | Promise<void> }
   | { readonly phase: 'onClose'; readonly fn: () => void | Promise<void> };

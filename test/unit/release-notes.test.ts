@@ -25,13 +25,11 @@ const CHANGELOG = [
 
 describe('extractReleaseNotes', () => {
   it('returns the section bounded by the next version heading', () => {
-    expect(extractReleaseNotes(CHANGELOG, '0.1.0-alpha.9'))
-      .toBe('### Added\n\n- A thing.');
+    expect(extractReleaseNotes(CHANGELOG, '0.1.0-alpha.9')).toBe('### Added\n\n- A thing.');
   });
 
   it('reads a section that runs to the end of the file', () => {
-    expect(extractReleaseNotes(CHANGELOG, '0.1.0-alpha.8'))
-      .toBe('### Fixed\n\n- An older thing.');
+    expect(extractReleaseNotes(CHANGELOG, '0.1.0-alpha.8')).toBe('### Fixed\n\n- An older thing.');
   });
 
   it('returns null for a version the changelog does not carry', () => {
@@ -289,9 +287,7 @@ describe('release workflow wiring', () => {
     // Asserted as real `run:` lines inside their jobs, since a bare
     // `toContain` is satisfied by a commented-out line.
     const ci = await Deno.readTextFile('.github/workflows/ci.yml');
-    expect(jobBlock(ci, 'publish-dry-run')).toMatch(
-      /^ +run: deno task check:versions$/m,
-    );
+    expect(jobBlock(ci, 'publish-dry-run')).toMatch(/^ +run: deno task check:versions$/m);
 
     const release = await Deno.readTextFile('.github/workflows/release.yml');
     expect(release).toMatch(
@@ -310,8 +306,10 @@ describe('release workflow wiring', () => {
     expect(jobBlock(ci, 'deno')).toMatch(depth);
     for (const consumer of SUITE_CONSUMERS) {
       const workflow = await Deno.readTextFile(consumer.workflow);
-      expect({ workflow: consumer.workflow, depth: depth.test(jobBlock(workflow, consumer.job)) })
-        .toEqual({ workflow: consumer.workflow, depth: true });
+      expect({
+        workflow: consumer.workflow,
+        depth: depth.test(jobBlock(workflow, consumer.job)),
+      }).toEqual({ workflow: consumer.workflow, depth: true });
     }
   });
 

@@ -238,11 +238,18 @@ describe('job outcome sink (X8-4)', () => {
     const adapter = makeAdapter();
     const reported: string[] = [];
 
-    await runJob(runtime, adapter, job(1), () => {}, (message) => reported.push(message), {
-      onProcessorOutcome: () => {
-        throw new Error('metrics backend refused');
+    await runJob(
+      runtime,
+      adapter,
+      job(1),
+      () => {},
+      (message) => reported.push(message),
+      {
+        onProcessorOutcome: () => {
+          throw new Error('metrics backend refused');
+        },
       },
-    });
+    );
 
     expect(adapter.calls.ack).toBe(1);
     expect(reported).toContain('queue outcome sink threw');

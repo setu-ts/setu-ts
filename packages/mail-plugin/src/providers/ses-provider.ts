@@ -72,7 +72,7 @@ export function adaptSesModule(mod: SesSdkModule, options: SesProviderOptions): 
  * @throws {Error} If `@aws-sdk/client-sesv2` cannot be resolved
  */
 export async function loadSesModule(): Promise<SesSdkModule> {
-  return await import('@aws-sdk/client-sesv2') as unknown as SesSdkModule;
+  return (await import('@aws-sdk/client-sesv2')) as unknown as SesSdkModule;
 }
 
 /** Maps an {@linkcode OutgoingMail} to a `SendEmailCommand` input. */

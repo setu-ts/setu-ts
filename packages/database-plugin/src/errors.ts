@@ -52,12 +52,14 @@ export class UnsupportedIsolationLevelError extends Error {
   override readonly name = 'UnsupportedIsolationLevelError';
 
   /** Creates a named, caller-safe isolation refusal. */
-  constructor(readonly adapter: string, readonly level: string) {
+  constructor(
+    readonly adapter: string,
+    readonly level: string,
+  ) {
     super(`The '${adapter}' database adapter does not support '${level}' transaction isolation.`);
     withHttpStatusHint(this, {
       ...NOT_IMPLEMENTED,
-      detail:
-        `Transaction isolation '${level}' is not supported by the '${adapter}' database adapter.`,
+      detail: `Transaction isolation '${level}' is not supported by the '${adapter}' database adapter.`,
     });
   }
 }
@@ -172,9 +174,10 @@ export class UnsupportedFilterOperatorError extends Error {
     this.connector = connector;
     withHttpStatusHint(this, {
       ...NOT_IMPLEMENTED,
-      detail: connector === undefined
-        ? `Filter operator '${operator}' is not supported by the active database connector.`
-        : `Filter operator '${operator}' is not supported on the '${connector}' connector.`,
+      detail:
+        connector === undefined
+          ? `Filter operator '${operator}' is not supported by the active database connector.`
+          : `Filter operator '${operator}' is not supported on the '${connector}' connector.`,
     });
   }
 }

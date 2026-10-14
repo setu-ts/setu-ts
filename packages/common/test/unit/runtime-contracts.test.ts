@@ -56,7 +56,7 @@ describe('IWorkerHandle.onExit and IWorkerHost.reportsExit are optional', () => 
       onExit: (listener) => listener(3),
       terminate: () => Promise.resolve(),
     };
-    handle.onExit?.((code) => received = code);
+    handle.onExit?.((code) => (received = code));
     expect(received).toBe(3);
   });
 
@@ -71,7 +71,7 @@ describe('IWorkerHandle.onExit and IWorkerHost.reportsExit are optional', () => 
       onExit: (listener) => listener(null),
       terminate: () => Promise.resolve(),
     };
-    handle.onExit?.((code) => received = code);
+    handle.onExit?.((code) => (received = code));
     expect(received).toBeNull();
   });
 

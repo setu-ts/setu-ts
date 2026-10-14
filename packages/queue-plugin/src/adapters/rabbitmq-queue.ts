@@ -124,9 +124,12 @@ interface CloseObservable {
  * @returns `true` when both members are functions
  */
 function isCloseObservable(channel: unknown): channel is CloseObservable {
-  return typeof channel === 'object' && channel !== null &&
+  return (
+    typeof channel === 'object' &&
+    channel !== null &&
     typeof (channel as { on?: unknown }).on === 'function' &&
-    typeof (channel as { off?: unknown }).off === 'function';
+    typeof (channel as { off?: unknown }).off === 'function'
+  );
 }
 
 /**
@@ -273,9 +276,7 @@ export class RabbitMqQueue implements QueueAdapter {
       );
     }
     this.#persistentMessages = options?.persistentMessages ?? true;
-    this.#publishTimeoutMs = resolvePublishTimeoutMs(
-      options?.publishTimeoutMs,
-    );
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#reportWarning = options?.reportWarning;
     this.#processing = new Map();
     this.#recurringJobs = new Map();
@@ -317,7 +318,7 @@ export class RabbitMqQueue implements QueueAdapter {
    */
   jobNameProblem(name: string): string | null {
     return fitsAmqpShortString(this.#readyQueue(name)) &&
-        fitsAmqpShortString(this.#delayQueue(name))
+      fitsAmqpShortString(this.#delayQueue(name))
       ? null
       : "RabbitMqQueue cannot use the job name: its queue names exceed AMQP's 255 UTF-8 byte limit";
   }
@@ -595,7 +596,7 @@ export class RabbitMqQueue implements QueueAdapter {
     return result as readonly StoredJob<T>[];
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async ack(name: string, id: string, _claimToken?: string): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -685,7 +686,7 @@ export class RabbitMqQueue implements QueueAdapter {
     processing.delete(id);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async storeRecurring(rec: StoredRecurring): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -694,7 +695,7 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#recurringJobs.set(rec.id, { ...rec });
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -709,7 +710,7 @@ export class RabbitMqQueue implements QueueAdapter {
     return due as readonly StoredRecurring[];
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');

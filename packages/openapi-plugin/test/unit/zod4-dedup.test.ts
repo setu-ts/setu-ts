@@ -29,10 +29,7 @@ function route(
 
 const generator = () => new OpenApiGenerator({ title: 'T', version: '1' });
 
-function bodySchema(
-  doc: ReturnType<OpenApiGenerator['generate']>,
-  path: string,
-): unknown {
+function bodySchema(doc: ReturnType<OpenApiGenerator['generate']>, path: string): unknown {
   return doc.paths[path]?.post?.requestBody?.content['application/json'].schema;
 }
 
@@ -239,11 +236,12 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
     };
     expect(responseComponent.additionalProperties).toBe(false);
     // The body side carries the input view, whether it was hoisted or inlined.
-    const bodyShape = body.$ref === undefined
-      ? body
-      : doc.components?.schemas?.[body.$ref.split('/').pop()!] as {
-        additionalProperties?: unknown;
-      };
+    const bodyShape =
+      body.$ref === undefined
+        ? body
+        : (doc.components?.schemas?.[body.$ref.split('/').pop()!] as {
+            additionalProperties?: unknown;
+          });
     expect(bodyShape).not.toHaveProperty('additionalProperties');
   });
 
@@ -259,8 +257,11 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
       route('POST', '/c', { body: shared }),
     ]);
 
-    const responseRef = (doc.paths['/a']?.get?.responses['200']?.content?.['application/json']
-      ?.schema as { $ref?: string }).$ref;
+    const responseRef = (
+      doc.paths['/a']?.get?.responses['200']?.content?.['application/json']?.schema as {
+        $ref?: string;
+      }
+    ).$ref;
     expect(responseRef).toMatch(/^#\/components\/schemas\//);
 
     const body = bodySchema(doc, '/c') as { $ref?: string; additionalProperties?: unknown };
@@ -287,8 +288,7 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
     expect(Object.keys(doc.components?.schemas ?? {}).sort()).toEqual(['Address', 'AddressInput']);
     // The registered component keeps the OUTPUT shape it was registered with.
     expect(
-      (doc.components?.schemas?.Address as { additionalProperties?: unknown })
-        .additionalProperties,
+      (doc.components?.schemas?.Address as { additionalProperties?: unknown }).additionalProperties,
     ).toBe(false);
     expect(doc.components?.schemas?.AddressInput).not.toHaveProperty('additionalProperties');
   });
@@ -306,10 +306,11 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
       route('POST', '/d', { body: shared }),
     ]);
 
-    const responseRef =
-      (doc.paths['/a']?.get?.responses['200']?.content?.['application/json']?.schema as {
+    const responseRef = (
+      doc.paths['/a']?.get?.responses['200']?.content?.['application/json']?.schema as {
         $ref?: string;
-      }).$ref;
+      }
+    ).$ref;
     const cRef = (bodySchema(doc, '/c') as { $ref?: string }).$ref;
     const dRef = (bodySchema(doc, '/d') as { $ref?: string }).$ref;
 
@@ -452,9 +453,7 @@ describe('OpenApiGenerator — zod v4 parameter sites (review round 2)', () => {
     return refs;
   }
 
-  function assertEveryRefResolves(
-    doc: ReturnType<OpenApiGenerator['generate']>,
-  ): void {
+  function assertEveryRefResolves(doc: ReturnType<OpenApiGenerator['generate']>): void {
     for (const ref of refsOf(doc)) {
       expect(ref.startsWith('#/components/schemas/')).toBe(true);
       expect(doc.components?.schemas?.[ref.slice('#/components/schemas/'.length)]).toBeDefined();
@@ -503,7 +502,7 @@ describe('OpenApiGenerator — zod v4 parameter sites (review round 2)', () => {
       children: Node[];
     }
     const Tree: z4.ZodType<Node> = z4.lazy(() =>
-      z4.object({ value: z4.number(), children: z4.array(Tree) })
+      z4.object({ value: z4.number(), children: z4.array(Tree) }),
     );
     const doc = generator().generate([
       route('GET', '/walk', { query: z4.object({ root: Tree }) }),
@@ -533,7 +532,7 @@ describe('OpenApiGenerator — zod v4 parameter sites (review round 2)', () => {
       children: Node[];
     }
     const Tree: z4.ZodType<Node> = z4.lazy(() =>
-      z4.object({ value: z4.number(), children: z4.array(Tree) })
+      z4.object({ value: z4.number(), children: z4.array(Tree) }),
     );
     const doc = generator().generate([
       route('GET', '/t1', { response: { 200: Tree } }),
@@ -639,7 +638,9 @@ describe('OpenApiGenerator — per-document component reset', () => {
           properties?: Record<string, { $ref?: string }>;
         }
       ).properties?.home?.$ref ?? ''
-    ).split('/').pop();
+    )
+      .split('/')
+      .pop();
     expect(homeRef).toBeTruthy();
     expect(first.components?.schemas?.[homeRef as string]).toBeDefined();
 

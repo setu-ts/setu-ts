@@ -40,9 +40,9 @@ export function publicationHoldRefusal(
   const lines = active.map((hold) => `  - ${hold.packageDir}: ${hold.reason}`);
   return [
     `Refusing to publish: ${active.length} package(s) are on publication hold, ` +
-    'which blocks the whole release.',
+      'which blocks the whole release.',
     ...lines,
     'Lift a hold by finishing the work it names, or remove it on purpose from ' +
-    'PUBLICATION_HOLDS in scripts/release-packages.ts.',
+      'PUBLICATION_HOLDS in scripts/release-packages.ts.',
   ].join('\n');
 }

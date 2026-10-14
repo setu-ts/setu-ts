@@ -52,12 +52,14 @@ describe('Drizzle isolation bridge', () => {
     });
     await adapter.connect();
 
-    await expect(adapter.beginTransaction({ isolation: 'read-committed' }))
-      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    await expect(adapter.beginTransaction({ isolation: 'read-committed' })).rejects.toBeInstanceOf(
+      UnsupportedIsolationLevelError,
+    );
     expect(opened).toBe(false);
   });
 
   it('keeps two-parameter application bridges source-compatible', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`
     const database = createFakeDrizzleInstance();
     const bridge: DrizzleTransactionBridge<typeof database> = (outer, work) =>
       outer.transaction(work);

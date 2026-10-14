@@ -157,8 +157,7 @@ describe('DecoratorPlugin internal paths', () => {
     // Sabotage: remove the method from the prototype so createHandler throws.
     delete (C.prototype as { list?: () => unknown }).list;
     const { ctx } = createFakeContext();
-    await expect(DecoratorPlugin({ controllers: [C] }).register(ctx))
-      .rejects.toThrow();
+    await expect(DecoratorPlugin({ controllers: [C] }).register(ctx)).rejects.toThrow();
   });
 
   it('serializes a handler return value as JSON', async () => {
@@ -252,16 +251,14 @@ describe('DecoratorPlugin internal paths', () => {
     await DecoratorPlugin({ controllers: [C] }).register(ctx);
     const def = routeDef(routes[0].route);
     const calls: unknown[] = [];
-    await def.handler(
-      {
-        // `state` is a required IRequestContext field the resolver now reads;
-        // an empty Map means no validated value exists and body resolution
-        // falls back to the raw request JSON.
-        state: new Map(),
-        response: { json: (b: unknown) => (calls.push(b), null) },
-        request: { json: () => Promise.resolve({ name: 'Alice' }) },
-      } as unknown as Parameters<typeof def.handler>[0],
-    );
+    await def.handler({
+      // `state` is a required IRequestContext field the resolver now reads;
+      // an empty Map means no validated value exists and body resolution
+      // falls back to the raw request JSON.
+      state: new Map(),
+      response: { json: (b: unknown) => (calls.push(b), null) },
+      request: { json: () => Promise.resolve({ name: 'Alice' }) },
+    } as unknown as Parameters<typeof def.handler>[0]);
     expect(calls).toEqual([{ name: 'Alice' }]);
   });
 
@@ -291,9 +288,13 @@ describe('DecoratorPlugin internal paths', () => {
     }
     const { ctx, routes } = createFakeContext();
     await DecoratorPlugin({ controllers: [C] }).register(ctx);
-    expect(routes.map((r) => r.method).sort()).toEqual(
-      ['DELETE', 'HEAD', 'OPTIONS', 'PATCH', 'PUT'],
-    );
+    expect(routes.map((r) => r.method).sort()).toEqual([
+      'DELETE',
+      'HEAD',
+      'OPTIONS',
+      'PATCH',
+      'PUT',
+    ]);
   });
 
   it('replays a class-level custom decorator (no propertyKey)', async () => {

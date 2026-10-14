@@ -172,7 +172,8 @@ describe('WorkerPoolPlugin — optional metrics wiring', () => {
     await expect(promise).resolves.toBe('done');
 
     expect(
-      metrics.require(WORKER_POOL_METRICS.COMPLETED)
+      metrics
+        .require(WORKER_POOL_METRICS.COMPLETED)
         .valueFor({ [TASK_MODULE_LABEL]: 'file:///t.ts' }),
     ).toBe(1);
   });

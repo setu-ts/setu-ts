@@ -89,7 +89,7 @@ export class FakeRequest {
     params?: Record<string, string>;
     body?: unknown;
   }) {
-    this.method = options?.method ?? 'GET' as HttpMethod;
+    this.method = options?.method ?? ('GET' as HttpMethod);
     this.path = options?.path ?? '/';
     this.headers = new Headers(options?.headers);
     this.query = options?.query ?? {};
@@ -122,7 +122,7 @@ export function createFakeContext(options?: {
   status?: number;
 }): IRequestContext {
   const request = new FakeRequest({
-    method: options?.method ?? 'GET' as HttpMethod,
+    method: options?.method ?? ('GET' as HttpMethod),
     path: options?.path ?? '/',
   });
 

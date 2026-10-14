@@ -55,7 +55,7 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
     async findById(id: string | number) {
       await Promise.resolve();
       const found = records.find((r) => r.id === id);
-      return found ? { ...found } as unknown as Record<string, unknown> : null;
+      return found ? ({ ...found } as unknown as Record<string, unknown>) : null;
     },
     async create(data) {
       await Promise.resolve();
@@ -275,9 +275,11 @@ describe('BaseRepository', () => {
     it('forwards findPage when the data source exposes it', async () => {
       const dsWithFindPage = createTestDataSource();
       // Add findPage to the test data source.
-      (dsWithFindPage as unknown as DataSource & {
-        findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
-      }).findPage = () =>
+      (
+        dsWithFindPage as unknown as DataSource & {
+          findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+        }
+      ).findPage = () =>
         Promise.resolve({
           rows: [{ id: '1', name: 'Page1', active: true }],
           nextCursor: null,
@@ -296,12 +298,14 @@ describe('BaseRepository', () => {
       // caller cannot distinguish a broken walk from an empty table.
       const dsWithFindPage = createTestDataSource();
       const seen: unknown[] = [];
-      (dsWithFindPage as unknown as DataSource & {
-        findPage?: (query: unknown) => Promise<{
-          rows: Record<string, unknown>[];
-          nextCursor: string | null;
-        }>;
-      }).findPage = (query: unknown) => {
+      (
+        dsWithFindPage as unknown as DataSource & {
+          findPage?: (query: unknown) => Promise<{
+            rows: Record<string, unknown>[];
+            nextCursor: string | null;
+          }>;
+        }
+      ).findPage = (query: unknown) => {
         seen.push(query);
         return Promise.resolve({ rows: [], nextCursor: null });
       };
@@ -316,19 +320,21 @@ describe('BaseRepository', () => {
       // positions. The refusal rejects (§3.12), and the adapter is never called.
       const dsWithFindPage = createTestDataSource();
       let reached = false;
-      (dsWithFindPage as unknown as DataSource & {
-        findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
-      }).findPage = () => {
+      (
+        dsWithFindPage as unknown as DataSource & {
+          findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+        }
+      ).findPage = () => {
         reached = true;
         return Promise.resolve({ rows: [], nextCursor: null });
       };
       const repoWithFindPage = new TestRepository(dsWithFindPage);
-      await expect(
-        repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' }),
-      ).rejects.toThrow(PageNormalizationError);
-      await expect(
-        repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' }),
-      ).rejects.toThrow('conflicts with cursor');
+      await expect(repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' })).rejects.toThrow(
+        PageNormalizationError,
+      );
+      await expect(repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' })).rejects.toThrow(
+        'conflicts with cursor',
+      );
       expect(reached).toBe(false);
     });
   });
@@ -340,8 +346,10 @@ describe('BaseRepository', () => {
       name: string;
     }
 
-    class CompositeRepo
-      extends BaseRepository<CompositeEntity, { tenantId: string; userId: string }> {
+    class CompositeRepo extends BaseRepository<
+      CompositeEntity,
+      { tenantId: string; userId: string }
+    > {
       constructor(dataSource: DataSource) {
         super(dataSource);
       }
@@ -389,8 +397,10 @@ describe('BaseRepository', () => {
           await Promise.resolve();
           const index = records.findIndex((r) => {
             if (typeof id === 'string' || typeof id === 'number') return r.id === id;
-            return (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
-              (r as Record<string, unknown>)['userId'] === id['userId'];
+            return (
+              (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId']
+            );
           });
           if (index === -1) throw new Error('not found');
           records[index] = { ...records[index], ...data };
@@ -400,8 +410,10 @@ describe('BaseRepository', () => {
           await Promise.resolve();
           const index = records.findIndex((r) => {
             if (typeof id === 'string' || typeof id === 'number') return r.id === id;
-            return (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
-              (r as Record<string, unknown>)['userId'] === id['userId'];
+            return (
+              (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId']
+            );
           });
           if (index === -1) return false;
           records.splice(index, 1);

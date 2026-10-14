@@ -37,8 +37,9 @@ const factories: Readonly<Record<string, () => IPlugin>> = {
 describe('zero-configuration add wiring', () => {
   for (const [name, factory] of Object.entries(factories)) {
     it(`registers, boots and stops ${name} with no options`, async () => {
-      const config = projectFiles('probe', 'deno', resolveHost(MINIMAL_HOST, 'deno'))
-        .find((file) => file.path === 'setu.config.ts')!.contents;
+      const config = projectFiles('probe', 'deno', resolveHost(MINIMAL_HOST, 'deno')).find(
+        (file) => file.path === 'setu.config.ts',
+      )!.contents;
       expect(withPluginWiring(config, name)).toContain(`${factory.name}(),`);
       const app = createApplication({ plugins: [RuntimePlugin(), factory()] });
       try {

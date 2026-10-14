@@ -22,9 +22,9 @@ describe('findComputedImports — literal arguments are accepted', () => {
   });
 
   it('accepts a bare npm: literal (the @connectrpc/connect shape)', () => {
-    expect(
-      findComputedImports("const m = await import('npm:@connectrpc/connect');"),
-    ).toHaveLength(0);
+    expect(findComputedImports("const m = await import('npm:@connectrpc/connect');")).toHaveLength(
+      0,
+    );
   });
 
   it('accepts a double-quoted literal', () => {
@@ -261,8 +261,9 @@ describe('findPrefixedSpecifiers — npm:/jsr: import specifiers are refused (M1
   });
 
   it('accepts the bare form every rewritten site now uses', () => {
-    expect(findPrefixedSpecifiers("const m = await import('pino');\nimport { Hono } from 'hono';"))
-      .toEqual([]);
+    expect(
+      findPrefixedSpecifiers("const m = await import('pino');\nimport { Hono } from 'hono';"),
+    ).toEqual([]);
   });
 
   it('exempts template text emitted into a generated project', () => {
@@ -324,9 +325,7 @@ describe('scanImportEdges — import positions and modes', () => {
     // The shape that made service-bus-broker.ts lose its import(): a template
     // literal followed by a real import must still yield that import.
     const source = "const t = `x`;\nconst m = await import('@azure/service-bus');";
-    expect(scanImportEdges(source, 'f.ts').map((e) => e.specifier)).toEqual([
-      '@azure/service-bus',
-    ]);
+    expect(scanImportEdges(source, 'f.ts').map((e) => e.specifier)).toEqual(['@azure/service-bus']);
   });
 
   it('yields no edge for an interpolated template specifier', () => {

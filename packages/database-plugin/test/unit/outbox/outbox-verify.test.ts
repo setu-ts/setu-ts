@@ -27,9 +27,7 @@ import { ENTITY, memoryService, record, recordingService } from '../../fixtures/
  * `codeName: 'IllegalOperation'`.
  */
 function mongoStandaloneError(): Error {
-  const error = new Error(
-    'Transaction numbers are only allowed on a replica set member or mongos',
-  );
+  const error = new Error('Transaction numbers are only allowed on a replica set member or mongos');
   error.name = 'MongoServerError';
   Object.assign(error, { code: 20, codeName: 'IllegalOperation' });
   return error;
@@ -80,12 +78,10 @@ describe('DatabaseOutboxStore.verify', () => {
     const error = await refusalOf(service);
     expect(error.reason).toBe('conditional-writes-unsupported');
     const store = new DatabaseOutboxStore(service, ENTITY);
-    for (
-      const transition of [
-        store.claim('nope', { claimVersion: 0, leaseUntil: 1 }),
-        store.markSent('nope', { claimVersion: 0, settledAt: 1, sentBy: 'r', deleteNow: true }),
-      ]
-    ) {
+    for (const transition of [
+      store.claim('nope', { claimVersion: 0, leaseUntil: 1 }),
+      store.markSent('nope', { claimVersion: 0, settledAt: 1, sentBy: 'r', deleteNow: true }),
+    ]) {
       await expect(transition).rejects.toMatchObject({ reason: 'conditional-writes-unsupported' });
     }
   });
@@ -112,7 +108,7 @@ describe('DatabaseOutboxStore.verify', () => {
     const service = await memoryService();
     const store = new DatabaseOutboxStore(service, ENTITY);
     await service.transaction((uow) =>
-      store.append(uow, record(1, { id: 'setu-outbox-claim-probe' }))
+      store.append(uow, record(1, { id: 'setu-outbox-claim-probe' })),
     );
     const before = await service.getRepository(ENTITY).findAll();
     await store.verify();
@@ -142,11 +138,13 @@ describe('DatabaseOutboxStore.verify', () => {
     expect(calls).toEqual([
       {
         method: 'findAll',
-        args: [{
-          where: { kind: OUTBOX_RECORD_KIND, status: 'pending' },
-          orderBy: { position: 'asc' },
-          limit: 1,
-        }],
+        args: [
+          {
+            where: { kind: OUTBOX_RECORD_KIND, status: 'pending' },
+            orderBy: { position: 'asc' },
+            limit: 1,
+          },
+        ],
       },
       { method: 'transaction', args: [] },
       {
@@ -155,19 +153,26 @@ describe('DatabaseOutboxStore.verify', () => {
       },
       {
         method: 'updateWhere',
-        args: ['setu-outbox-claim-probe', {
-          kind: OUTBOX_RECORD_KIND,
-          status: 'pending',
-          claimVersion: -1,
-        }, { claimVersion: 0 }],
+        args: [
+          'setu-outbox-claim-probe',
+          {
+            kind: OUTBOX_RECORD_KIND,
+            status: 'pending',
+            claimVersion: -1,
+          },
+          { claimVersion: 0 },
+        ],
       },
       {
         method: 'deleteWhere',
-        args: ['setu-outbox-claim-probe', {
-          kind: OUTBOX_RECORD_KIND,
-          status: 'pending',
-          claimVersion: -1,
-        }],
+        args: [
+          'setu-outbox-claim-probe',
+          {
+            kind: OUTBOX_RECORD_KIND,
+            status: 'pending',
+            claimVersion: -1,
+          },
+        ],
       },
     ]);
   });
@@ -239,7 +244,10 @@ describe('DatabaseOutboxStore.verify', () => {
 
 describe('createDatabaseOutboxStore', () => {
   /** A registry answering one token; any other read throws, as the kernel's does. */
-  function registry(token: string, service: IDatabaseService): IServiceRegistry & {
+  function registry(
+    token: string,
+    service: IDatabaseService,
+  ): IServiceRegistry & {
     asked: string[];
   } {
     const asked: string[] = [];

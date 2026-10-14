@@ -159,12 +159,7 @@ describe('SchedulerService', () => {
   it('handler receives job data', async () => {
     const { service } = createService();
     await service.connect();
-    await service.delay(
-      'job1',
-      100,
-      (_job: ScheduledJob<string>) => {},
-      { data: 'hello' },
-    );
+    await service.delay('job1', 100, (_job: ScheduledJob<string>) => {}, { data: 'hello' });
     // Data is stored - verify via getNextRun not throwing
     await service.getNextRun('job1');
     await service.remove('job1');
@@ -252,7 +247,7 @@ describe('SchedulerService', () => {
     // Simulate a lock that always fails to acquire.
     const runtime = new FakeRuntime();
     const lock = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       acquire: async () => null,
       release: async () => {},
     };
@@ -502,9 +497,14 @@ describe('SchedulerService', () => {
   it('every job with data option stores data', async () => {
     const { service } = createService();
     await service.connect();
-    await service.every('data-job', 1000, (_job) => {
-      // Data is stored and passed to handler
-    }, { data: 'test-data' });
+    await service.every(
+      'data-job',
+      1000,
+      (_job) => {
+        // Data is stored and passed to handler
+      },
+      { data: 'test-data' },
+    );
     await service.getNextRun('data-job');
   });
 

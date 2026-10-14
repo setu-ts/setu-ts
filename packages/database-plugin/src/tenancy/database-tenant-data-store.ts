@@ -97,7 +97,9 @@ function assertEqualityFilter(filter: Readonly<Record<string, unknown>>): void {
         "DatabaseTenantDataStore.find: a filter key may not start with '$' (equality only)",
       );
     }
-    const scalar = value === null || value instanceof Date ||
+    const scalar =
+      value === null ||
+      value instanceof Date ||
       ['string', 'number', 'boolean', 'bigint'].includes(typeof value);
     if (!scalar) {
       throw new TypeError(
@@ -207,13 +209,9 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     return row;
   }
 
-  async findById<E, Id>(
-    tenantId: string,
-    entity: string,
-    id: Id,
-  ): Promise<E | null> {
+  async findById<E, Id>(tenantId: string, entity: string, id: Id): Promise<E | null> {
     const row = await this.#ownedRow(tenantId, entity, id as EntityKey);
-    return row as unknown as (E | null);
+    return row as unknown as E | null;
   }
 
   async find<E>(
@@ -256,7 +254,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     // Nothing left to write: answer the owned row unchanged, as the reference
     // memory store does, rather than sending a write with an empty payload.
     if (Object.keys(stripped).length === 0) {
-      return await this.#ownedRow(tenantId, entity, id as EntityKey) as unknown as (E | null);
+      return (await this.#ownedRow(tenantId, entity, id as EntityKey)) as unknown as E | null;
     }
     const result = await conditionalUpdate(repo, id as EntityKey, { [col]: tenantId }, stripped);
     if (result.outcome === 'not-matched') return null;

@@ -51,7 +51,8 @@ function validateOptions(options: DurableObjectIdempotencyStoreOptions): void {
   }
   if (options.keyPrefix !== undefined) {
     if (
-      typeof options.keyPrefix !== 'string' || options.keyPrefix.length < 1 ||
+      typeof options.keyPrefix !== 'string' ||
+      options.keyPrefix.length < 1 ||
       options.keyPrefix.length > 64
     ) {
       throw new RangeError('keyPrefix must be 1 to 64 characters');
@@ -62,7 +63,8 @@ function validateOptions(options: DurableObjectIdempotencyStoreOptions): void {
   }
   if (options.timeoutMs !== undefined) {
     if (
-      !Number.isInteger(options.timeoutMs) || options.timeoutMs < 0 ||
+      !Number.isInteger(options.timeoutMs) ||
+      options.timeoutMs < 0 ||
       options.timeoutMs > 2_147_483_647
     ) {
       throw new RangeError('timeoutMs must be an integer between 0 and 2147483647');

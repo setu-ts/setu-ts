@@ -84,7 +84,6 @@ describe('JobExecutor.run', () => {
 
   it('warns on retry attempt failure', async () => {
     const runtime = new FakeRuntime();
-    let attempts = 0;
     const logWarns: string[] = [];
     const logger: ILogger = {
       level: 'error' as const,
@@ -99,7 +98,6 @@ describe('JobExecutor.run', () => {
       child: () => logger,
     };
     const handler: SchedulerJobHandler = () => {
-      attempts++;
       throw new Error('fail');
     };
     const retry: RetryOptions = { limit: 2, delay: 100, backoff: 'fixed' };

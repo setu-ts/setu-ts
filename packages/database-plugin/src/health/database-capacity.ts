@@ -49,12 +49,18 @@ export function isDatabasePoolCapacity(value: unknown): value is DatabasePoolCap
     return false;
   }
   const candidate = value as Record<string, unknown>;
-  return typeof candidate.total === 'number' && Number.isFinite(candidate.total) &&
+  return (
+    typeof candidate.total === 'number' &&
+    Number.isFinite(candidate.total) &&
     candidate.total >= 0 &&
-    typeof candidate.idle === 'number' && Number.isFinite(candidate.idle) &&
-    candidate.idle >= 0 && candidate.idle <= candidate.total &&
-    typeof candidate.waiting === 'number' && Number.isFinite(candidate.waiting) &&
-    candidate.waiting >= 0;
+    typeof candidate.idle === 'number' &&
+    Number.isFinite(candidate.idle) &&
+    candidate.idle >= 0 &&
+    candidate.idle <= candidate.total &&
+    typeof candidate.waiting === 'number' &&
+    Number.isFinite(candidate.waiting) &&
+    candidate.waiting >= 0
+  );
 }
 
 /**
@@ -202,7 +208,8 @@ export class QueryProgressTracker {
    * @returns `false` when no progress has ever been observed
    */
   progressedWithin(nowMs: number): boolean {
-    return this.#lastProgressAt !== undefined &&
-      nowMs - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS;
+    return (
+      this.#lastProgressAt !== undefined && nowMs - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS
+    );
   }
 }

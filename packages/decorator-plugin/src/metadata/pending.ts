@@ -64,9 +64,7 @@ const PENDING_KEY: symbol = Symbol.for('@setu-ts/decorator-plugin:pending-writes
  * registered symbol the downlevel transform uses
  * @since 0.2.0
  */
-export function resolveMetadataSymbol(
-  symbolCtor: { readonly metadata?: symbol },
-): symbol {
+export function resolveMetadataSymbol(symbolCtor: { readonly metadata?: symbol }): symbol {
   return symbolCtor.metadata ?? Symbol.for('Symbol.metadata');
 }
 
@@ -99,7 +97,7 @@ function ownPending(carrier: MetadataCarrier): PendingWrite[] | null {
     return null;
   }
   const pending = carrier[PENDING_KEY];
-  return Array.isArray(pending) ? pending as PendingWrite[] : null;
+  return Array.isArray(pending) ? (pending as PendingWrite[]) : null;
 }
 
 /**

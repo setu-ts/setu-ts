@@ -32,17 +32,15 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { DatabasePlugin } from '../../src/index.ts';
 
-const mongoUrl = process.env['MONGODB_URL'] ?? process.env['MONGO_URL'] ??
-  process.env['MONGODB_URI'];
+const mongoUrl =
+  process.env['MONGODB_URL'] ?? process.env['MONGO_URL'] ?? process.env['MONGODB_URI'];
 const skipReal = mongoUrl === undefined;
 const url = mongoUrl ?? '';
 
 async function docker(args: string[]): Promise<string> {
   const out = await runProcess('docker', { args });
   if (!out.success) {
-    throw new Error(
-      `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
-    );
+    throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
   return new TextDecoder().decode(out.stdout);
 }
@@ -75,71 +73,76 @@ async function waitUntil(
   throw new Error(`timeout waiting for ${label}: last status ${last}`);
 }
 
-describe('REAL MongoDB outage (M95b §3.5 / X51-1)', {
-  skip: skipReal,
-}, () => {
-  it('ready 200 → (docker stop) ready 503 and the indicator not up → (docker start) ready 200', async () => {
-    const parsed = new URL(url.replace(/localhost/, '127.0.0.1'));
-    const port = parsed.port === '' ? 27017 : Number(parsed.port);
-    const containerId = await containerIdForPort(port);
+describe(
+  'REAL MongoDB outage (M95b §3.5 / X51-1)',
+  {
+    skip: skipReal,
+  },
+  () => {
+    it('ready 200 → (docker stop) ready 503 and the indicator not up → (docker start) ready 200', async () => {
+      const parsed = new URL(url.replace(/localhost/, '127.0.0.1'));
+      const port = parsed.port === '' ? 27017 : Number(parsed.port);
+      const containerId = await containerIdForPort(port);
 
-    const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        DatabasePlugin({
-          type: 'mongodb',
-          options: { url: url.replace(/localhost/, '127.0.0.1'), database: 'setu_m95b' },
-        }),
-        HealthPlugin(),
-      ],
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          DatabasePlugin({
+            type: 'mongodb',
+            options: { url: url.replace(/localhost/, '127.0.0.1'), database: 'setu_m95b' },
+          }),
+          HealthPlugin(),
+        ],
+      });
+      await app.start();
+
+      // The suite owns the container's lifecycle across ALL exits: a failed
+      // assertion after `docker stop` must not leave the backend down for
+      // everything else that shares it.
+      let stopped = false;
+      try {
+        const readyStatus = async (): Promise<number> =>
+          (await app.inject({ method: 'GET', url: 'http://localhost/ready' })).statusCode;
+        const healthBody = async (): Promise<{
+          status: string;
+          checks?: Record<string, { status: string }>;
+        }> => (await app.inject({ method: 'GET', url: 'http://localhost/health' })).json();
+
+        // (up) baseline — a healthy database passes readiness.
+        await waitUntil(readyStatus, 200, 'baseline ready 200');
+        expect((await healthBody()).status).toBe('up');
+
+        // (stop) X51-1's reproduction: with the container stopped, the
+        // lifecycle read `isReady()` still answered true — the old indicator
+        // reported `up` and `/ready` stayed 200. Now `/ready` MUST fail.
+        await docker(['stop', containerId]);
+        stopped = true;
+        await waitUntil(readyStatus, 503, 'stopped ready 503', 60_000);
+        const stoppedHealth = await healthBody();
+        expect(stoppedHealth.status).not.toBe('up');
+        // The database check reports WHY: either the probe answered false
+        // (refused) or it could not answer inside the bound (unknown).
+        const dbCheck = stoppedHealth.checks?.database ?? stoppedHealth.checks?.['database'];
+        if (dbCheck !== undefined) {
+          expect(['down', 'degraded']).toContain(dbCheck.status);
+        }
+
+        // (restart) the backend returns and readiness recovers. The flag is
+        // cleared only HERE — after the container is actually back — so every
+        // assertion above exits through the `finally` with it still set. It
+        // used to be cleared the moment the 503 arrived, which left the three
+        // assertions in between able to strand the container for everything
+        // else that shares it, contradicting the comment above.
+        await docker(['start', containerId]);
+        stopped = false;
+        await waitUntil(readyStatus, 200, 'recovered ready 200', 60_000);
+        expect((await healthBody()).status).toBe('up');
+      } finally {
+        if (stopped) {
+          await docker(['start', containerId]).catch(() => {});
+        }
+        await app.stop().catch(() => {});
+      }
     });
-    await app.start();
-
-    // The suite owns the container's lifecycle across ALL exits: a failed
-    // assertion after `docker stop` must not leave the backend down for
-    // everything else that shares it.
-    let stopped = false;
-    try {
-      const readyStatus = async (): Promise<number> =>
-        (await app.inject({ method: 'GET', url: 'http://localhost/ready' })).statusCode;
-      const healthBody = async (): Promise<
-        { status: string; checks?: Record<string, { status: string }> }
-      > => (await app.inject({ method: 'GET', url: 'http://localhost/health' })).json();
-
-      // (up) baseline — a healthy database passes readiness.
-      await waitUntil(readyStatus, 200, 'baseline ready 200');
-      expect((await healthBody()).status).toBe('up');
-
-      // (stop) X51-1's reproduction: with the container stopped, the
-      // lifecycle read `isReady()` still answered true — the old indicator
-      // reported `up` and `/ready` stayed 200. Now `/ready` MUST fail.
-      await docker(['stop', containerId]);
-      stopped = true;
-      await waitUntil(readyStatus, 503, 'stopped ready 503', 60_000);
-      const stoppedHealth = await healthBody();
-      expect(stoppedHealth.status).not.toBe('up');
-      // The database check reports WHY: either the probe answered false
-      // (refused) or it could not answer inside the bound (unknown).
-      const dbCheck = stoppedHealth.checks?.database ?? stoppedHealth.checks?.['database'];
-      if (dbCheck !== undefined) {
-        expect(['down', 'degraded']).toContain(dbCheck.status);
-      }
-
-      // (restart) the backend returns and readiness recovers. The flag is
-      // cleared only HERE — after the container is actually back — so every
-      // assertion above exits through the `finally` with it still set. It
-      // used to be cleared the moment the 503 arrived, which left the three
-      // assertions in between able to strand the container for everything
-      // else that shares it, contradicting the comment above.
-      await docker(['start', containerId]);
-      stopped = false;
-      await waitUntil(readyStatus, 200, 'recovered ready 200', 60_000);
-      expect((await healthBody()).status).toBe('up');
-    } finally {
-      if (stopped) {
-        await docker(['start', containerId]).catch(() => {});
-      }
-      await app.stop().catch(() => {});
-    }
-  });
-});
+  },
+);

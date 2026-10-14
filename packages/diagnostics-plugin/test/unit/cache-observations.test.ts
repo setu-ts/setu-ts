@@ -140,29 +140,41 @@ describe('cache protocol — source reading', () => {
     ['an array', () => []],
     ['a class instance', () => Object.assign(new (class Snapshot {})(), ready())],
     ['an extra key', () => ({ ...ready(), key: 'canary' })],
-    ['a missing key', () => {
-      const { dropped: _dropped, ...rest } = ready();
-      void _dropped;
-      return rest;
-    }],
-    ['a getter', () => {
-      const value = { ...ready() };
-      Object.defineProperty(value, 'alias', { get: () => 'primary', enumerable: true });
-      return value;
-    }],
+    [
+      'a missing key',
+      () => {
+        const { dropped: _dropped, ...rest } = ready();
+        void _dropped;
+        return rest;
+      },
+    ],
+    [
+      'a getter',
+      () => {
+        const value = { ...ready() };
+        Object.defineProperty(value, 'alias', { get: () => 'primary', enumerable: true });
+        return value;
+      },
+    ],
     ['a non-array records', () => ({ ...ready(), records: { length: 1 } })],
-    ['a record getter', () => {
-      const r = record();
-      Object.defineProperty(r, 'count', { get: () => 1, enumerable: true });
-      return ready('primary', [r]);
-    }],
+    [
+      'a record getter',
+      () => {
+        const r = record();
+        Object.defineProperty(r, 'count', { get: () => 1, enumerable: true });
+        return ready('primary', [r]);
+      },
+    ],
     ['a sparse record list', () => ready('primary', new Array(1) as never)],
     ['a record with an extra key', () => ready('primary', [{ ...record(), value: 'x' }])],
-    ['more than 64 records', () =>
-      ready(
-        'primary',
-        Array.from({ length: 65 }, () => record()),
-      )],
+    [
+      'more than 64 records',
+      () =>
+        ready(
+          'primary',
+          Array.from({ length: 65 }, () => record()),
+        ),
+    ],
     ['an unknown state', () => ({ ...ready(), state: 'unsupported' })],
     ['a wrong coverage', () => ({ ...ready(), coverage: 'all' })],
     ['a fractional dropped', () => ({ ...ready(), dropped: 0.5 })],
@@ -177,12 +189,15 @@ describe('cache protocol — source reading', () => {
     ['a negative counter', () => ready('primary', [{ ...record(), failed: -1 }])],
     ['a non-finite counter', () => ready('primary', [{ ...record(), ageMs: Infinity }])],
     ['a fractional duration', () => ready('primary', [{ ...record(), lastDurationMs: 1.5 }])],
-    ['a throwing proxy', () =>
-      new Proxy(ready(), {
-        ownKeys: () => {
-          throw new Error('trap-canary');
-        },
-      })],
+    [
+      'a throwing proxy',
+      () =>
+        new Proxy(ready(), {
+          ownKeys: () => {
+            throw new Error('trap-canary');
+          },
+        }),
+    ],
   ];
   for (const [name, make] of invalid) {
     it(`isolates ${name} as a value-free collection-failed snapshot`, () => {
@@ -269,7 +284,12 @@ describe('cache protocol — aggregate response', () => {
     const make = (count: number) =>
       Array.from({ length: count }, (_, i) => {
         const alias = `source-${i}`;
-        return source(ready(alias, ops.map((op) => record(alias, op))));
+        return source(
+          ready(
+            alias,
+            ops.map((op) => record(alias, op)),
+          ),
+        );
       });
     // Positive control: sixteen full sources are far under the budget.
     expect(buildCacheResponse(TEST_INSTANCE_ID, make(16)).state).toBe('ready');
@@ -303,10 +323,10 @@ describe('cache protocol — aggregate response', () => {
       { ...good, state: 'disabled' },
       {
         ...good,
-        sources: Array.from(
-          { length: 17 },
-          (_, i) => ({ sourceId: `s${i + 1}`, snapshot: DISABLED }),
-        ),
+        sources: Array.from({ length: 17 }, (_, i) => ({
+          sourceId: `s${i + 1}`,
+          snapshot: DISABLED,
+        })),
       },
       { ...good, sources: [{ sourceId: 's1', snapshot: DISABLED }], state: 'unsupported' },
     ];
@@ -318,9 +338,11 @@ describe('cache protocol — aggregate response', () => {
 });
 
 /** Decodes a handler response. */
-function inspect(
-  response: IResponse,
-): { status: number; body: Record<string, unknown>; text: string } {
+function inspect(response: IResponse): {
+  status: number;
+  body: Record<string, unknown>;
+  text: string;
+} {
   const snapshot = response.snapshot();
   const text = new TextDecoder().decode(snapshot.body as Uint8Array);
   return { status: snapshot.status, body: JSON.parse(text), text };
@@ -371,19 +393,20 @@ async function request(
 ): Promise<IResponse> {
   const sequence = parts.sequence ?? 1;
   const instance = parts.instance ?? TEST_INSTANCE_ID;
-  const mac = parts.mac ??
-    await signRequest(crypto.subtle, key, '/v1/cache', sequence, instance);
-  return await handler(fakeRequest({
-    ...(parts.method !== undefined ? { method: parts.method } : {}),
-    url: `http://${HOST}/v1/cache`,
-    headers: {
-      host: HOST,
-      'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
-      'x-setu-sequence': String(sequence),
-      'x-setu-instance': instance,
-      'x-setu-mac': mac,
-    },
-  }));
+  const mac = parts.mac ?? (await signRequest(crypto.subtle, key, '/v1/cache', sequence, instance));
+  return await handler(
+    fakeRequest({
+      ...(parts.method !== undefined ? { method: parts.method } : {}),
+      url: `http://${HOST}/v1/cache`,
+      headers: {
+        host: HOST,
+        'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
+        'x-setu-sequence': String(sequence),
+        'x-setu-instance': instance,
+        'x-setu-mac': mac,
+      },
+    }),
+  );
 }
 
 describe('connector — GET /v1/cache', () => {

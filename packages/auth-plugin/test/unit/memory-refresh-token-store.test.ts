@@ -134,10 +134,10 @@ describe('MemoryRefreshTokenStore', () => {
     await store.save({ ...makeRecord(runtime, 'parent'), familyId: 'family-1' });
 
     await store.revokeFamily('parent');
-    const result = await store.rotate(
-      'parent',
-      { ...makeRecord(runtime, 'child'), familyId: 'family-1' },
-    );
+    const result = await store.rotate('parent', {
+      ...makeRecord(runtime, 'child'),
+      familyId: 'family-1',
+    });
 
     expect(result.rotated).toBe(false);
     expect(await store.get('child')).toBeNull();

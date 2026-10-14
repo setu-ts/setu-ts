@@ -44,13 +44,13 @@ describe('@Inject', () => {
     @Injectable()
     @Inject('database', 'logger', 'cache')
     class Repository {
-      constructor(readonly db: unknown, readonly logger: unknown, readonly cache: unknown) {}
+      constructor(
+        readonly db: unknown,
+        readonly logger: unknown,
+        readonly cache: unknown,
+      ) {}
     }
-    expect(metadataStore.getService(Repository)?.inject).toEqual([
-      'database',
-      'logger',
-      'cache',
-    ]);
+    expect(metadataStore.getService(Repository)?.inject).toEqual(['database', 'logger', 'cache']);
   });
 
   it('records a token list on a class carrying no @Injectable', () => {
@@ -73,7 +73,11 @@ describe('@Inject', () => {
     @Injectable()
     @Inject('database', Optional('cache'), 'logger')
     class Mixed {
-      constructor(readonly db: unknown, readonly cache: unknown, readonly logger: unknown) {}
+      constructor(
+        readonly db: unknown,
+        readonly cache: unknown,
+        readonly logger: unknown,
+      ) {}
     }
     // The optional marker contributes its token to the list like any other …
     expect(metadataStore.getService(Mixed)?.inject).toEqual(['database', 'cache', 'logger']);
@@ -85,7 +89,10 @@ describe('@Inject', () => {
     @Injectable()
     @Inject('database', 'logger')
     class Required {
-      constructor(readonly db: unknown, readonly logger: unknown) {}
+      constructor(
+        readonly db: unknown,
+        readonly logger: unknown,
+      ) {}
     }
     expect([...metadataStore.ctorOptional(Required)]).toEqual([]);
   });

@@ -22,10 +22,8 @@ export function adaptGraphqlModule(module: GraphqlModuleLike): GraphqlRuntime {
     validateSchema: module.validateSchema as unknown as GraphqlRuntime['validateSchema'],
     getOperationAST: module.getOperationAST as unknown as GraphqlRuntime['getOperationAST'],
     GraphQLError: module.GraphQLError as unknown as GraphqlRuntime['GraphQLError'],
-    NoSchemaIntrospectionCustomRule: module
-      .NoSchemaIntrospectionCustomRule as unknown as GraphqlRuntime[
-        'NoSchemaIntrospectionCustomRule'
-      ],
+    NoSchemaIntrospectionCustomRule:
+      module.NoSchemaIntrospectionCustomRule as unknown as GraphqlRuntime['NoSchemaIntrospectionCustomRule'],
     specifiedRules: module.specifiedRules as unknown as GraphqlRuntime['specifiedRules'],
   };
 }
@@ -44,10 +42,8 @@ const defaultImporter = async (): Promise<GraphqlModuleLike> => {
     validateSchema: mod.validateSchema as unknown as GraphqlModuleLike['validateSchema'],
     getOperationAST: mod.getOperationAST as unknown as GraphqlModuleLike['getOperationAST'],
     GraphQLError: mod.GraphQLError as unknown as GraphqlModuleLike['GraphQLError'],
-    NoSchemaIntrospectionCustomRule: mod
-      .NoSchemaIntrospectionCustomRule as unknown as GraphqlModuleLike[
-        'NoSchemaIntrospectionCustomRule'
-      ],
+    NoSchemaIntrospectionCustomRule:
+      mod.NoSchemaIntrospectionCustomRule as unknown as GraphqlModuleLike['NoSchemaIntrospectionCustomRule'],
     specifiedRules: mod.specifiedRules as unknown as GraphqlModuleLike['specifiedRules'],
   };
 };

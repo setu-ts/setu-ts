@@ -32,9 +32,11 @@ function fakeHost(answers: {
 
 describe('createDenoDnsResolver — resolveSrv', () => {
   it("maps Deno's `target` field onto `host`", async () => {
-    const resolver = createDenoDnsResolver(fakeHost({
-      SRV: [{ target: 'a.internal', port: 8080, priority: 10, weight: 5 }],
-    }));
+    const resolver = createDenoDnsResolver(
+      fakeHost({
+        SRV: [{ target: 'a.internal', port: 8080, priority: 10, weight: 5 }],
+      }),
+    );
 
     expect(await resolver.resolveSrv('billing.service.consul')).toEqual([
       { host: 'a.internal', port: 8080, priority: 10, weight: 5 },
@@ -43,9 +45,11 @@ describe('createDenoDnsResolver — resolveSrv', () => {
 
   it("queries with the 'SRV' record type", async () => {
     const seen: string[] = [];
-    const resolver = createDenoDnsResolver(fakeHost({
-      onQuery: (query, type) => seen.push(`${type} ${query}`),
-    }));
+    const resolver = createDenoDnsResolver(
+      fakeHost({
+        onQuery: (query, type) => seen.push(`${type} ${query}`),
+      }),
+    );
 
     await resolver.resolveSrv('_http._tcp.billing');
     expect(seen).toEqual(['SRV _http._tcp.billing']);
@@ -59,35 +63,43 @@ describe('createDenoDnsResolver — resolveSrv', () => {
 
 describe('createDenoDnsResolver — resolveHost', () => {
   it('concatenates A and AAAA results', async () => {
-    const resolver = createDenoDnsResolver(fakeHost({
-      A: ['10.0.0.1'],
-      AAAA: ['2001:db8::1'],
-    }));
+    const resolver = createDenoDnsResolver(
+      fakeHost({
+        A: ['10.0.0.1'],
+        AAAA: ['2001:db8::1'],
+      }),
+    );
     expect(await resolver.resolveHost('svc')).toEqual(['10.0.0.1', '2001:db8::1']);
   });
 
   it('tolerates a missing AAAA record when A succeeds', async () => {
-    const resolver = createDenoDnsResolver(fakeHost({
-      A: ['10.0.0.1'],
-      AAAA: new Error('NXDOMAIN'),
-    }));
+    const resolver = createDenoDnsResolver(
+      fakeHost({
+        A: ['10.0.0.1'],
+        AAAA: new Error('NXDOMAIN'),
+      }),
+    );
     expect(await resolver.resolveHost('svc')).toEqual(['10.0.0.1']);
   });
 
   it('tolerates a missing A record when AAAA succeeds', async () => {
-    const resolver = createDenoDnsResolver(fakeHost({
-      A: new Error('NXDOMAIN'),
-      AAAA: ['2001:db8::1'],
-    }));
+    const resolver = createDenoDnsResolver(
+      fakeHost({
+        A: new Error('NXDOMAIN'),
+        AAAA: ['2001:db8::1'],
+      }),
+    );
     expect(await resolver.resolveHost('svc')).toEqual(['2001:db8::1']);
   });
 
   it('rejects only when both families fail, carrying the first as cause', async () => {
     const first = new Error('NXDOMAIN v4');
-    const resolver = createDenoDnsResolver(fakeHost({
-      A: first,
-      AAAA: new Error('NXDOMAIN v6'),
-    }));
+    const resolver = createDenoDnsResolver(
+      fakeHost({
+        A: first,
+        AAAA: new Error('NXDOMAIN v6'),
+      }),
+    );
 
     await expect(resolver.resolveHost('missing')).rejects.toThrow('DNS lookup failed for missing');
     try {

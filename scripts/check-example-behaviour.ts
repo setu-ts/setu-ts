@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate must print actionable findings.
+/* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * Executable behaviour gate for documented view components.
  *
@@ -553,10 +553,7 @@ export function collectComponents(file: string, markdown: string): readonly DocC
  * @param markdown - Its contents
  * @returns One entry per unrenderable definition whose data path the probe cannot check
  */
-export function collectUnrenderedBlindSpots(
-  file: string,
-  markdown: string,
-): readonly BlindSpot[] {
+export function collectUnrenderedBlindSpots(file: string, markdown: string): readonly BlindSpot[] {
   const found: BlindSpot[] = [];
   if (!RENDERS_VIEWS.test(markdown)) return found;
 
@@ -594,7 +591,8 @@ export function blindSpotFindings(spots: readonly BlindSpot[]): readonly Finding
     .map((spot) => ({
       file: spot.file,
       line: spot.line,
-      message: `${spot.name} is UNCHECKED: it is not a props component, so the probe never ` +
+      message:
+        `${spot.name} is UNCHECKED: it is not a props component, so the probe never ` +
         `renders it, and its source routes a value through raw() or an element spread — ` +
         `the gate cannot see what reaches the page. Carry an ` +
         `// ${UNCHECKED_EXEMPT_MARKERS[0]}: <reason> comment above it, or reshape it into ` +
@@ -621,8 +619,10 @@ export function buildProbe(components: readonly DocComponent[]): string {
   // called `UserList`, and the extracted source is emitted VERBATIM — it is
   // what is under test, so renaming it to dodge the collision would mean
   // checking something the reader will not copy.
-  const body = components.map((c, index) =>
-    `{
+  const body = components
+    .map(
+      (c, index) =>
+        `{
 ${c.dependencies.join('\n')}
 ${c.source}
 try {
@@ -658,8 +658,9 @@ try {
 } catch (error) {
   console.log(JSON.stringify({ index: ${index}, ok: false, error: String(error) }));
 }
-}`
-  ).join('\n\n');
+}`,
+    )
+    .join('\n\n');
 
   return `/** @jsxImportSource @hono/hono/jsx */
 import { renderComponent } from '../../packages/view-plugin/src/render/normalize.ts';
@@ -756,15 +757,15 @@ ${body}
 /** One component's rendered outcome, as reported by the probe. */
 export type ProbeResult =
   | {
-    readonly index: number;
-    readonly ok: true;
-    readonly escaped: boolean;
-    readonly scheme: boolean;
-    /** A payload reached the output under at least one string-delivery mode. */
-    readonly delivered: boolean;
-    /** The unbounded reach proxy got a payload into the output. */
-    readonly reached: boolean;
-  }
+      readonly index: number;
+      readonly ok: true;
+      readonly escaped: boolean;
+      readonly scheme: boolean;
+      /** A payload reached the output under at least one string-delivery mode. */
+      readonly delivered: boolean;
+      /** The unbounded reach proxy got a payload into the output. */
+      readonly reached: boolean;
+    }
   | { readonly index: number; readonly ok: false; readonly error: string };
 
 /**
@@ -878,7 +879,8 @@ export function compare(
       findings.push({
         file: component.file,
         line: component.line,
-        message: `${component.name} is UNCHECKED: its own source routes a value through ` +
+        message:
+          `${component.name} is UNCHECKED: its own source routes a value through ` +
           `${unchecked.join(' and ')}, which the probe stubs out — neither payload provably ` +
           `reached its output, so a clean render here means nothing. Remove the indirection, ` +
           `or carry an // ${UNCHECKED_EXEMPT_MARKERS[0]}: <reason> comment above the component.`,
@@ -895,7 +897,8 @@ export function compare(
       findings.push({
         file: component.file,
         line: component.line,
-        message: `${component.name} is labelled a counter-example by its own comment, but it ` +
+        message:
+          `${component.name} is labelled a counter-example by its own comment, but it ` +
           `ESCAPES its input. The document warns against a shape that is no longer unsafe — ` +
           `update the warning, or drop the entry.`,
       });
@@ -905,7 +908,8 @@ export function compare(
       findings.push({
         file: component.file,
         line: component.line,
-        message: `${component.name} renders ${JSON.stringify(URL_PAYLOAD)} into a URL ` +
+        message:
+          `${component.name} renders ${JSON.stringify(URL_PAYLOAD)} into a URL ` +
           `attribute (href, src or action). Escaping protects HTML structure, not URL ` +
           `schemes — a metacharacter-free payload survives it intact, and clicking the ` +
           `link executes. Validate the scheme of a user-supplied URL before it reaches ` +
@@ -917,9 +921,9 @@ export function compare(
         file: component.file,
         line: component.line,
         message:
-          `${component.name} renders ${
-            JSON.stringify(HOSTILE)
-          } UNESCAPED. A documented component ` +
+          `${component.name} renders ${JSON.stringify(
+            HOSTILE,
+          )} UNESCAPED. A documented component ` +
           `must escape its input: write it with JSX or hono's \`html\` tag, never a plain ` +
           `template literal, which is a \`string\` the engine returns unchanged.`,
       });
@@ -1016,7 +1020,9 @@ export async function run(
       timer = setTimeout(() => {
         try {
           child.kill();
-        } catch { /* already gone */ }
+        } catch {
+          /* already gone */
+        }
         resolve(null);
       }, timeoutMs);
     }),
@@ -1037,11 +1043,13 @@ export async function run(
   const results = parseProbe(stdout, rendered.length);
   if (results === null) {
     const stderr = new TextDecoder().decode(outcome.stderr).trim();
-    return [{
-      file: PROBE,
-      line: 1,
-      message: `the render probe did not report ${rendered.length} result(s).\n${stderr}`,
-    }];
+    return [
+      {
+        file: PROBE,
+        line: 1,
+        message: `the render probe did not report ${rendered.length} result(s).\n${stderr}`,
+      },
+    ];
   }
   return [...compare(rendered, results), ...blindSpotFindings(blindSpots)];
 }

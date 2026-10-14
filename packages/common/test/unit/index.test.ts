@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await
+/* eslint-disable require-await */
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, none, ok, PLUGIN_PRIORITY, some } from '../../src/index.ts';
 import type {
@@ -141,8 +141,10 @@ describe('@setu-ts/common barrel', () => {
     // satisfies the contract even though a zero-argument CALLER still does
     // (asserted below).
     const _service: IResilienceService = {
-      wrap: <T>(fn: ResilientCall<T>): HardenedCall<T> => (signal?: AbortSignal) =>
-        fn(signal ?? new AbortController().signal),
+      wrap:
+        <T>(fn: ResilientCall<T>): HardenedCall<T> =>
+        (signal?: AbortSignal) =>
+          fn(signal ?? new AbortController().signal),
     };
     const _state: CircuitState = 'half-open';
     const _breaker: ICircuitBreaker = {

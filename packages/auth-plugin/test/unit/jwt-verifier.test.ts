@@ -190,7 +190,9 @@ describe('JwtVerifier', () => {
     const head = rawToken({ alg: 'RS256', kid: 'k1' }, { x: 1 }).split('.')[0];
     // A JSON array is valid base64url JSON but not an object. Named reason, and
     // reachable without a valid signature because the payload is decoded up front.
-    const arrayPayload = btoa(JSON.stringify([1, 2])).replace(/\+/g, '-').replace(/\//g, '_')
+    const arrayPayload = btoa(JSON.stringify([1, 2]))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
       .replace(/=+$/, '');
     expect(await verifier(keySet([key.jwk])).verify(`${head}.${arrayPayload}.AA`)).toEqual({
       ok: false,

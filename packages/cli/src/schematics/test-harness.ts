@@ -78,11 +78,7 @@ export function testHarnessFor(runtime: TargetRuntime): TestHarness {
  * @param expected - The expected value, in source form
  * @returns The assertion statement
  */
-export function renderEquals(
-  runtime: TargetRuntime,
-  actual: string,
-  expected: string,
-): string {
+export function renderEquals(runtime: TargetRuntime, actual: string, expected: string): string {
   if (runtime === 'node') return `assert.deepStrictEqual(${actual}, ${expected});`;
   return `expect(${actual}).toEqual(${expected});`;
 }

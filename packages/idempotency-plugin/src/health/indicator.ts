@@ -34,12 +34,15 @@ export function createIdempotencyIndicator(
   lifecycle: () => IdempotencyLifecycleState,
 ): HealthIndicatorFn {
   const isHealthy = store.isHealthy;
-  const probe = isHealthy === undefined ? undefined : createCachedProbe({
-    probe: () => isHealthy.call(store),
-    ttlMs: 5_000,
-    timeoutMs: 2_000,
-    ...resolveProbeTiming(runtime),
-  });
+  const probe =
+    isHealthy === undefined
+      ? undefined
+      : createCachedProbe({
+          probe: () => isHealthy.call(store),
+          ttlMs: 5_000,
+          timeoutMs: 2_000,
+          ...resolveProbeTiming(runtime),
+        });
 
   return async (): Promise<HealthCheckResult> => {
     const state = lifecycle();

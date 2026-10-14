@@ -18,10 +18,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createClient } from '../../src/sdk.ts';
 
 /** A `fetch` that records calls and enforces the WebIDL receiver rule. */
-function makeReceiverStrictFetch(calls: unknown[]): (
-  input: RequestInfo,
-  init?: RequestInit,
-) => Promise<Response> {
+function makeReceiverStrictFetch(
+  calls: unknown[],
+): (input: RequestInfo, init?: RequestInit) => Promise<Response> {
   return function (this: unknown, input: RequestInfo, init?: RequestInit): Promise<Response> {
     // The browser throws when the receiver is neither `undefined` nor the
     // global object. A bare `fetch` stored on an instance and called as

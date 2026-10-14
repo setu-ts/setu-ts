@@ -163,12 +163,10 @@ describe('PipelinedBroker bounded chain-gate wait (M89c §3.2)', () => {
     const clock = createManualClock();
     const { promise: neverOpen } = Promise.withResolvers<void>();
     const { adapter, wrapped, metadata } = createCapturingAdapter();
-    const piped = new PipelinedBroker(
-      adapter,
-      [],
-      neverOpen,
-      { runtime: clock.runtime, timeoutMs: 25 },
-    );
+    const piped = new PipelinedBroker(adapter, [], neverOpen, {
+      runtime: clock.runtime,
+      timeoutMs: 25,
+    });
     await piped.subscribe('orders', () => {});
 
     const held = wrapped.handler!({ id: 1 }, metadata);
@@ -203,12 +201,10 @@ describe('PipelinedBroker bounded chain-gate wait (M89c §3.2)', () => {
     const { promise: chainReady, resolve: open } = Promise.withResolvers<void>();
     const { adapter, wrapped, metadata } = createCapturingAdapter();
     const handlerSeen: unknown[] = [];
-    const piped = new PipelinedBroker(
-      adapter,
-      [],
-      chainReady,
-      { runtime: clock.runtime, timeoutMs: 60_000 },
-    );
+    const piped = new PipelinedBroker(adapter, [], chainReady, {
+      runtime: clock.runtime,
+      timeoutMs: 60_000,
+    });
     await piped.subscribe('orders', (message) => {
       handlerSeen.push(message);
     });
@@ -228,12 +224,10 @@ describe('PipelinedBroker bounded chain-gate wait (M89c §3.2)', () => {
     const clock = createManualClock();
     const { promise: chainReady, reject: fail } = Promise.withResolvers<void>();
     const { adapter, wrapped, metadata } = createCapturingAdapter();
-    const piped = new PipelinedBroker(
-      adapter,
-      [],
-      chainReady,
-      { runtime: clock.runtime, timeoutMs: 25 },
-    );
+    const piped = new PipelinedBroker(adapter, [], chainReady, {
+      runtime: clock.runtime,
+      timeoutMs: 25,
+    });
     await piped.subscribe('orders', () => {});
 
     const held1 = wrapped.handler!({ n: 1 }, metadata);
@@ -256,12 +250,10 @@ describe('PipelinedBroker bounded chain-gate wait (M89c §3.2)', () => {
     const { promise: chainReady, resolve: open } = Promise.withResolvers<void>();
     const { adapter, wrapped, metadata } = createCapturingAdapter();
     const handlerSeen: unknown[] = [];
-    const piped = new PipelinedBroker(
-      adapter,
-      [],
-      chainReady,
-      { runtime: clock.runtime, timeoutMs: 0 },
-    );
+    const piped = new PipelinedBroker(adapter, [], chainReady, {
+      runtime: clock.runtime,
+      timeoutMs: 0,
+    });
     await piped.subscribe('orders', (message) => {
       handlerSeen.push(message);
     });

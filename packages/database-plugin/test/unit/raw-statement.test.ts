@@ -234,7 +234,7 @@ describe('bindRawStatement', () => {
       // token count disagrees with the parameter list and the statement is
       // refused, so no value is ever bound into an operator's position.
       expect(() =>
-        bindRawStatement("select * from t where data ?| array['a'] and id = ?", ['id1'], tag)
+        bindRawStatement("select * from t where data ?| array['a'] and id = ?", ['id1'], tag),
       ).toThrow("Raw query has 2 '?' placeholder(s) but received 1 parameter(s)");
     });
 
@@ -242,8 +242,9 @@ describe('bindRawStatement', () => {
       // The recommended form for such a statement is `$N` throughout; reaching
       // for it halfway is refused by the mixed-style rule, so the two spellings
       // can never silently combine.
-      expect(() => bindRawStatement("select * from t where data ? 'k' and id = $1", ['id1'], tag))
-        .toThrow("Raw query mixes '?' and '$N' placeholders in one statement");
+      expect(() =>
+        bindRawStatement("select * from t where data ? 'k' and id = $1", ['id1'], tag),
+      ).toThrow("Raw query mixes '?' and '$N' placeholders in one statement");
     });
 
     it('never puts a parameter value into a refusal message', () => {

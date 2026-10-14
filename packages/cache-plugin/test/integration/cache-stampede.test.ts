@@ -36,9 +36,8 @@ describe('cache middleware stampede protection', () => {
     await app.start();
 
     const responses = await Promise.all(
-      Array.from(
-        { length: 100 },
-        () => app.inject({ method: 'GET', url: 'http://localhost/expensive' }),
+      Array.from({ length: 100 }, () =>
+        app.inject({ method: 'GET', url: 'http://localhost/expensive' }),
       ),
     );
 
@@ -46,8 +45,9 @@ describe('cache middleware stampede protection', () => {
     expect(responses.filter((response) => response.headers.get('x-cache') === 'MISS')).toHaveLength(
       1,
     );
-    expect(responses.filter((response) => response.headers.get('x-cache') === 'COALESCED'))
-      .toHaveLength(99);
+    expect(
+      responses.filter((response) => response.headers.get('x-cache') === 'COALESCED'),
+    ).toHaveLength(99);
     expect(new Set(responses.map((response) => response.body))).toEqual(new Set(['{"calls":1}']));
     await app.stop();
   });
@@ -63,9 +63,8 @@ function createCacheApp(origin: () => number | Promise<number>) {
         version: '1.0.0',
         register(ctx: IPluginContext): void {
           ctx.middleware.add(cacheMiddleware({ ttlSeconds: 60 }));
-          ctx.router.get(
-            '/expensive',
-            async (request: IRequestContext) => request.response.json({ calls: await origin() }),
+          ctx.router.get('/expensive', async (request: IRequestContext) =>
+            request.response.json({ calls: await origin() }),
           );
         },
       },

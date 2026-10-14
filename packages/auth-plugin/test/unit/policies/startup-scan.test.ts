@@ -43,19 +43,23 @@ describe('scanPolicyGuards', () => {
   it('passes registered guards, routes without middleware, and ordinary middleware', () => {
     const ordinary: MiddlewareFunction = (_ctx, next) => next();
     expect(() =>
-      scanPolicyGuards([
-        route('/a', [ordinary, requirePolicy(docPolicy, 'edit')]),
-        route('/b'),
-        route('/c', [requirePolicy(docPolicy, 'view')]),
-      ], registry(docPolicy))
+      scanPolicyGuards(
+        [
+          route('/a', [ordinary, requirePolicy(docPolicy, 'edit')]),
+          route('/b'),
+          route('/c', [requirePolicy(docPolicy, 'view')]),
+        ],
+        registry(docPolicy),
+      ),
     ).not.toThrow();
   });
 
   it('refuses a guard whose policy was never registered, naming the route and names', () => {
-    expect(() => scanPolicyGuards([route('/docs', [requirePolicy(docPolicy, 'edit')])], registry()))
-      .toThrow(
-        'route GET /docs uses requirePolicy("doc", "edit"), but no such policy ability is registered',
-      );
+    expect(() =>
+      scanPolicyGuards([route('/docs', [requirePolicy(docPolicy, 'edit')])], registry()),
+    ).toThrow(
+      'route GET /docs uses requirePolicy("doc", "edit"), but no such policy ability is registered',
+    );
   });
 
   it('refuses a same-named policy that disagrees on anonymous', () => {
@@ -64,18 +68,20 @@ describe('scanPolicyGuards', () => {
       abilities: { edit: () => true, view: () => true },
     });
     expect(() =>
-      scanPolicyGuards([route('/docs', [requirePolicy(docPolicy, 'view')])], registry(impostor))
-    )
-      .toThrow(/a different policy is registered under the same name/);
+      scanPolicyGuards([route('/docs', [requirePolicy(docPolicy, 'view')])], registry(impostor)),
+    ).toThrow(/a different policy is registered under the same name/);
   });
 
   it('reports every problem in one AuthPluginConfigurationError', () => {
     let thrown: unknown;
     try {
-      scanPolicyGuards([
-        route('/one', [requirePolicy(docPolicy, 'edit')]),
-        route('/two', [requirePolicy(docPolicy, 'view')]),
-      ], registry());
+      scanPolicyGuards(
+        [
+          route('/one', [requirePolicy(docPolicy, 'edit')]),
+          route('/two', [requirePolicy(docPolicy, 'view')]),
+        ],
+        registry(),
+      );
     } catch (error) {
       thrown = error;
     }
@@ -96,19 +102,15 @@ describe('scanPolicyGuards — multi-ability brands (M110b)', () => {
 
   it('checks every ability a brand lists, refusing the one that is unregistered', () => {
     expect(() =>
-      scanPolicyGuards(
-        [route('/docs', [branded('doc', ['edit', 'delete'])])],
-        registry(docPolicy),
-      )
+      scanPolicyGuards([route('/docs', [branded('doc', ['edit', 'delete'])])], registry(docPolicy)),
     ).toThrow('uses requirePolicy("doc", "delete"), but no such policy ability is registered');
   });
 
   it('passes a brand whose every ability is registered', () => {
     const both = definePolicy({ name: 'doc', abilities: { edit: () => true, delete: () => true } });
     expect(() =>
-      scanPolicyGuards([route('/docs', [branded('doc', ['edit', 'delete'])])], registry(both))
-    )
-      .not.toThrow();
+      scanPolicyGuards([route('/docs', [branded('doc', ['edit', 'delete'])])], registry(both)),
+    ).not.toThrow();
   });
 
   it('names scopedRbac, not AuthPlugin({ policies }), for an unknown scoped ability', () => {
@@ -129,8 +131,7 @@ describe('scanPolicyGuards — multi-ability brands (M110b)', () => {
   it('passes a scoped brand whose abilities the built-in policy declares', () => {
     const scoped = definePolicy({ name: SCOPED_RBAC_POLICY, abilities: { 'perm:a': () => true } });
     expect(() =>
-      scanPolicyGuards([route('/a', [branded(SCOPED_RBAC_POLICY, ['perm:a'])])], registry(scoped))
-    )
-      .not.toThrow();
+      scanPolicyGuards([route('/a', [branded(SCOPED_RBAC_POLICY, ['perm:a'])])], registry(scoped)),
+    ).not.toThrow();
   });
 });

@@ -53,7 +53,7 @@ describe('per-field redaction through LoggerPlugin', () => {
       await app.start();
       const logger = app.services.get<ILogger>(CAPABILITIES.LOGGER);
       const output = captureConsole(() =>
-        logger.info('signup', { user: { email: 'jane@example.com', name: 'Jane' } })
+        logger.info('signup', { user: { email: 'jane@example.com', name: 'Jane' } }),
       );
       record = JSON.parse(output[0] ?? '{}') as Record<string, unknown>;
     } finally {

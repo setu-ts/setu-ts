@@ -73,7 +73,8 @@ export class WorkerBudget {
 
   private reserve(): void {
     while (
-      !this.closed && this.workers + this.reservations.size < this.limit &&
+      !this.closed &&
+      this.workers + this.reservations.size < this.limit &&
       this.waiters.length > 0
     ) {
       const starved = this.waiters.findIndex((pool) => pool.isStarved());

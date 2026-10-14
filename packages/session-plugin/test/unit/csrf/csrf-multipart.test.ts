@@ -118,9 +118,7 @@ describe('verifyCsrfToken — multipart (M94b)', () => {
   });
 
   it('refuses a token submitted as a FILE part', async () => {
-    const body = multipartBody([
-      { name: '_csrf', value: 'PENDING', filename: 'token.txt' },
-    ]);
+    const body = multipartBody([{ name: '_csrf', value: 'PENDING', filename: 'token.txt' }]);
     const harness = await sessionWithToken(body, MULTIPART);
     const ctx = withFormAccessor(harness);
 

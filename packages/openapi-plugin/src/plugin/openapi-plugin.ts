@@ -94,11 +94,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
   // they are always excluded — a spec that lists `/openapi.json` and `/docs`
   // as operations describes its own delivery mechanism, and those entries flow
   // into every generated client. Caller exclusions are added on top.
-  const excludedPaths = [
-    specEndpoint,
-    ...(swagger ? [endpoint] : []),
-    ...(exclude ?? []),
-  ];
+  const excludedPaths = [specEndpoint, ...(swagger ? [endpoint] : []), ...(exclude ?? [])];
 
   return {
     name: 'openapi-plugin',
@@ -168,10 +164,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
       // Register the spec endpoint
       ctx.router.get(specEndpoint, (ctx) => {
         const spec = openApiService.getSpec();
-        return ctx.response
-          .status(200)
-          .header('Content-Type', 'application/json')
-          .json(spec);
+        return ctx.response.status(200).header('Content-Type', 'application/json').json(spec);
       });
 
       // Register the Swagger UI endpoint
@@ -182,9 +175,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
         });
 
         ctx.router.get(endpoint, (ctx) => {
-          const result = ctx.response
-            .status(200)
-            .text(uiHtml);
+          const result = ctx.response.status(200).text(uiHtml);
           // Override content-type to HTML after text() sets it to text/plain
           ctx.response.header('Content-Type', 'text/html; charset=utf-8');
           return result;

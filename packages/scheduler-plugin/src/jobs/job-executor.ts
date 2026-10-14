@@ -239,18 +239,16 @@ export async function run<T = unknown>(
     } catch (error) {
       if (attempt < limit) {
         const backoffMs = retry !== undefined ? computeBackoffMs(attempt, retry) : 1000;
-        logger?.warn(
-          `Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`,
-          { error: error instanceof Error ? error.message : String(error) },
-        );
+        logger?.warn(`Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
         await new Promise<void>((resolve) => {
           runtime.setTimeout(resolve, backoffMs);
         });
       } else {
-        logger?.error(
-          `Job '${jobName}' failed after ${attempt} attempt(s)`,
-          { error: error instanceof Error ? error.message : String(error) },
-        );
+        logger?.error(`Job '${jobName}' failed after ${attempt} attempt(s)`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       }
     }
@@ -300,9 +298,12 @@ export function withIngressBehaviors<T>(
   // Clear the gate once open so the steady state costs nothing. A REJECTED
   // gate is deliberately left in place: startup failed, the chain is never
   // completed, and running through a partial chain is what this prevents.
-  void chainReady?.then(() => {
-    gate = undefined;
-  }, () => {});
+  void chainReady?.then(
+    () => {
+      gate = undefined;
+    },
+    () => {},
+  );
 
   const dispatch = (job: ScheduledJob<T>): void | Promise<void> => {
     if (behaviors.length === 0) {

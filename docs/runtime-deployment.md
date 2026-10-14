@@ -460,10 +460,7 @@ import { env, waitUntil } from 'cloudflare:workers';
 // CloudflareWorkersHttpAdapter; `env` populates `runtime.env`.
 function createApp(): IKernelApplication {
   const app = createApplication({
-    plugins: [
-      RuntimePlugin({ env }),
-      CloudflarePlugin({ env, waitUntil }),
-    ],
+    plugins: [RuntimePlugin({ env }), CloudflarePlugin({ env, waitUntil })],
   });
 
   app.router.get('/', async (ctx) => {
@@ -639,10 +636,7 @@ declare const env: WorkerEnv;
 declare const waitUntil: (promise: Promise<unknown>) => void;
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin({ env }),
-    CloudflarePlugin({ env, waitUntil }),
-  ],
+  plugins: [RuntimePlugin({ env }), CloudflarePlugin({ env, waitUntil })],
 });
 
 async function reportUsage(_value: string | null): Promise<void> {
@@ -720,8 +714,8 @@ app.router.get('/notice', async (ctx) => {
   const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
   const content = runtime.fs
     ? await runtime.fs.readFile('notice.txt')
-    // Workers has no file system: read from a store instead
-    : await ctx.services.get<ICacheStore>(CAPABILITIES.CACHE).get<string>('notice');
+    : // Workers has no file system: read from a store instead
+      await ctx.services.get<ICacheStore>(CAPABILITIES.CACHE).get<string>('notice');
   return ctx.response.json({ content });
 });
 ```

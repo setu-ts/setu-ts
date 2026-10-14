@@ -36,15 +36,8 @@ describe('readWorkspaceMembers', () => {
 
 describe('resolveMembers', () => {
   it('resolves a member path, a short name and a scoped name', () => {
-    const resolved = resolveMembers(
-      ['packages/common', 'kernel', '@setu-ts/exceptions'],
-      MEMBERS,
-    );
-    expect(resolved.members).toEqual([
-      'packages/common',
-      'packages/kernel',
-      'packages/exceptions',
-    ]);
+    const resolved = resolveMembers(['packages/common', 'kernel', '@setu-ts/exceptions'], MEMBERS);
+    expect(resolved.members).toEqual(['packages/common', 'packages/kernel', 'packages/exceptions']);
     expect(resolved.unmatched).toEqual([]);
   });
 
@@ -57,10 +50,7 @@ describe('resolveMembers', () => {
   });
 
   it('prefers the longest member so a two-segment starter is not mangled', () => {
-    const resolved = resolveMembers(
-      ['packages/starters/rest-starter/src/index.ts'],
-      MEMBERS,
-    );
+    const resolved = resolveMembers(['packages/starters/rest-starter/src/index.ts'], MEMBERS);
     expect(resolved.members).toEqual(['packages/starters/rest-starter']);
   });
 
@@ -237,8 +227,9 @@ describe('parseChangedPaths', () => {
   });
 
   it('takes the destination of a rename', () => {
-    expect(parseChangedPaths('', 'R  packages/a/src/old.ts -> packages/a/src/new.ts\n'))
-      .toEqual(['packages/a/src/new.ts']);
+    expect(parseChangedPaths('', 'R  packages/a/src/old.ts -> packages/a/src/new.ts\n')).toEqual([
+      'packages/a/src/new.ts',
+    ]);
   });
 
   it('drops blank lines from both sources', () => {
@@ -248,16 +239,14 @@ describe('parseChangedPaths', () => {
 
 describe('renderProbeModule', () => {
   it('derives the ../ depth from the probe directory so specifiers resolve', () => {
-    const module = renderProbeModule(
-      ['packages/exceptions/src/zz.ts'],
-      '.coverage/targeted',
-    );
+    const module = renderProbeModule(['packages/exceptions/src/zz.ts'], '.coverage/targeted');
     expect(module).toContain("await import('../../packages/exceptions/src/zz.ts');");
   });
 
   it('reflects a different probe depth rather than hardcoding two levels', () => {
-    expect(renderProbeModule(['packages/a/src/b.ts'], 'tmp'))
-      .toContain("await import('../packages/a/src/b.ts');");
+    expect(renderProbeModule(['packages/a/src/b.ts'], 'tmp')).toContain(
+      "await import('../packages/a/src/b.ts');",
+    );
   });
 
   it('declares a test, without which deno test reports the module as failed', () => {

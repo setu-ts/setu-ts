@@ -110,14 +110,17 @@ describe('bodyRefusalOf', () => {
   });
 
   it('classifies a proxy whose traps throw, rather than throwing itself', () => {
-    const hostile = new Proxy({}, {
-      get(): never {
-        throw new Error('trap exploded');
+    const hostile = new Proxy(
+      {},
+      {
+        get(): never {
+          throw new Error('trap exploded');
+        },
+        getPrototypeOf(): never {
+          throw new Error('trap exploded');
+        },
       },
-      getPrototypeOf(): never {
-        throw new Error('trap exploded');
-      },
-    });
+    );
     expect(bodyRefusalOf(hostile)).toBeNull();
   });
 });

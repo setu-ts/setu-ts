@@ -70,9 +70,8 @@ export function codedError(message: string, code: string): GraphqlGraphQLErrorLi
  */
 export function toParseError(thrown: unknown): GraphqlGraphQLErrorLike {
   const err = thrown as Partial<GraphqlGraphQLErrorLike> & { message?: string };
-  const message = typeof err?.message === 'string' && err.message.length > 0
-    ? err.message
-    : 'Parse error';
+  const message =
+    typeof err?.message === 'string' && err.message.length > 0 ? err.message : 'Parse error';
   const locations = err?.locations;
   return {
     message,
@@ -93,8 +92,7 @@ export type GraphqlOperationKind = 'query' | 'mutation' | 'subscription';
  * `subscribe` without a second `getOperationAST` walk.
  */
 export type OperationCheck =
-  | { refused: ExecutionPhaseOutcome }
-  | { refused: null; operation: GraphqlOperationKind };
+  { refused: ExecutionPhaseOutcome } | { refused: null; operation: GraphqlOperationKind };
 
 /**
  * Guard the resolved operation: refuse an unresolvable operation, and — on the
@@ -116,9 +114,8 @@ export function checkOperation(
     transport: 'http' | 'stream';
   },
 ): OperationCheck {
-  const name = options.operationName && options.operationName.length > 0
-    ? options.operationName
-    : undefined;
+  const name =
+    options.operationName && options.operationName.length > 0 ? options.operationName : undefined;
   const ast = runtime.getOperationAST(document, name);
 
   if (!ast) {

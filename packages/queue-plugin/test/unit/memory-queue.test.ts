@@ -128,9 +128,9 @@ describe('MemoryQueue', () => {
 
     it('throws when acking while not connected', async () => {
       const notConnectedQueue = new MemoryQueue();
-      await expect(
-        notConnectedQueue.ack('test', '1'),
-      ).rejects.toThrow('MemoryQueue is not connected');
+      await expect(notConnectedQueue.ack('test', '1')).rejects.toThrow(
+        'MemoryQueue is not connected',
+      );
     });
 
     it('ack removes job from processing', async () => {
@@ -300,39 +300,39 @@ describe('MemoryQueue', () => {
 
     it('throws when fetchRecurringDue while not connected', async () => {
       const notConnectedQueue = new MemoryQueue();
-      await expect(
-        notConnectedQueue.fetchRecurringDue(Date.now()),
-      ).rejects.toThrow('MemoryQueue is not connected');
+      await expect(notConnectedQueue.fetchRecurringDue(Date.now())).rejects.toThrow(
+        'MemoryQueue is not connected',
+      );
     });
 
     it('throws when advanceRecurring while not connected', async () => {
       const notConnectedQueue = new MemoryQueue();
-      await expect(
-        notConnectedQueue.advanceRecurring('r1', Date.now()),
-      ).rejects.toThrow('MemoryQueue is not connected');
+      await expect(notConnectedQueue.advanceRecurring('r1', Date.now())).rejects.toThrow(
+        'MemoryQueue is not connected',
+      );
     });
   });
 
   describe('storage primitives reject while not connected', () => {
     it('throws when reserving while not connected', async () => {
       const notConnectedQueue = new MemoryQueue();
-      await expect(
-        notConnectedQueue.reserve('test', 1, 0),
-      ).rejects.toThrow('MemoryQueue is not connected');
+      await expect(notConnectedQueue.reserve('test', 1, 0)).rejects.toThrow(
+        'MemoryQueue is not connected',
+      );
     });
 
     it('throws when requeueing while not connected', async () => {
       const notConnectedQueue = new MemoryQueue();
-      await expect(
-        notConnectedQueue.requeue('test', 'job-1', 0, 2),
-      ).rejects.toThrow('MemoryQueue is not connected');
+      await expect(notConnectedQueue.requeue('test', 'job-1', 0, 2)).rejects.toThrow(
+        'MemoryQueue is not connected',
+      );
     });
 
     it('throws when dead-lettering while not connected', async () => {
       const notConnectedQueue = new MemoryQueue();
-      await expect(
-        notConnectedQueue.deadLetter('test', 'job-1', 0),
-      ).rejects.toThrow('MemoryQueue is not connected');
+      await expect(notConnectedQueue.deadLetter('test', 'job-1', 0)).rejects.toThrow(
+        'MemoryQueue is not connected',
+      );
     });
 
     it('throws when reading dead letters while not connected', () => {
@@ -346,9 +346,7 @@ describe('MemoryQueue', () => {
       const queue = new MemoryQueue();
       await queue.connect();
       await queue.disconnect();
-      await expect(queue.reserve('test', 1, 0)).rejects.toThrow(
-        'MemoryQueue is not connected',
-      );
+      await expect(queue.reserve('test', 1, 0)).rejects.toThrow('MemoryQueue is not connected');
     });
   });
 });

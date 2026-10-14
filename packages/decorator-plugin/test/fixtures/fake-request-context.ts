@@ -91,7 +91,9 @@ export function createFakeRequestContext(options: FakeRequestOptions = {}): IReq
   if (options.cookies !== undefined) {
     headers.set(
       'cookie',
-      Object.entries(options.cookies).map(([k, v]) => `${k}=${v}`).join('; '),
+      Object.entries(options.cookies)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; '),
     );
   }
   const url = options.url ?? 'http://localhost/test';

@@ -159,8 +159,12 @@ function assertTransportSecurity(configuration: DynamoClientConfiguration): void
   }
   if (url.protocol !== 'http:') return;
   const host = url.hostname;
-  const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
-    host === '[::1]' || host.endsWith('.localhost');
+  const loopback =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host.endsWith('.localhost');
   if (loopback) return;
   throw new UnsupportedQueryFeatureError(
     'endpoint',
@@ -189,7 +193,7 @@ export function createLazyDynamoLoader(
   assertTransportSecurity(configuration);
   return {
     load: async (): Promise<IDynamoClient> => {
-      const module = await import('@aws-sdk/client-dynamodb') as unknown as DynamoSdkModule;
+      const module = (await import('@aws-sdk/client-dynamodb')) as unknown as DynamoSdkModule;
       return adaptDynamoSdkModule(module, configuration);
     },
   };

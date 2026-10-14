@@ -67,10 +67,7 @@ export interface DenoServeHost {
    * @param options - Handshake options; `protocol` echoes a negotiated subprotocol
    * @returns The server-side socket and the 101 response to return
    */
-  upgradeWebSocket?(
-    request: Request,
-    options?: { protocol?: string },
-  ): DenoWebSocketUpgrade;
+  upgradeWebSocket?(request: Request, options?: { protocol?: string }): DenoWebSocketUpgrade;
 }
 
 /**
@@ -107,9 +104,10 @@ export const defaultDenoServeHost: DenoServeHost = {
     return server as unknown as DenoServer;
   },
   upgradeWebSocket: (request, options) => {
-    const result = options?.protocol !== undefined
-      ? Deno.upgradeWebSocket(request, { protocol: options.protocol })
-      : Deno.upgradeWebSocket(request);
+    const result =
+      options?.protocol !== undefined
+        ? Deno.upgradeWebSocket(request, { protocol: options.protocol })
+        : Deno.upgradeWebSocket(request);
     return result as unknown as DenoWebSocketUpgrade;
   },
 };
@@ -217,10 +215,7 @@ export class DenoHttpServerHandle {
    * Performs the WebSocket handshake using the stored raw Request and the
    * upgrade intent written by the kernel terminal handler.
    */
-  #performUpgrade(
-    request: Request,
-    intent: WebSocketUpgradeIntent,
-  ): Response {
+  #performUpgrade(request: Request, intent: WebSocketUpgradeIntent): Response {
     const upgradeWebSocket = this.#host.upgradeWebSocket;
     if (upgradeWebSocket === undefined) {
       intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
@@ -290,7 +285,7 @@ export class DenoHttpAdapter implements IHttpAdapter {
     return this.#handle.createFetchHandler()(request);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async listen(port: number, hostname?: string): Promise<ServerHandle> {
     const fetchHandler = this.#handle.createFetchHandler();
     const server = this.#host.serve({

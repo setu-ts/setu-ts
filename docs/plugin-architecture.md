@@ -134,13 +134,10 @@ async function addMiddleware(ctx: IPluginContext) {
 
   // Add middleware with specific priority
   const middlewareOptions: MiddlewareOptions = { priority: 15 };
-  ctx.middleware.add(
-    async (requestCtx, next) => {
-      // Middleware logic
-      await next();
-    },
-    middlewareOptions,
-  );
+  ctx.middleware.add(async (requestCtx, next) => {
+    // Middleware logic
+    await next();
+  }, middlewareOptions);
 }
 ```
 

@@ -71,7 +71,7 @@ export function adaptNodemailerModule(
  * @throws {Error} If `nodemailer` cannot be resolved
  */
 export async function loadNodemailerModule(): Promise<NodemailerModule> {
-  return await import('nodemailer') as unknown as NodemailerModule;
+  return (await import('nodemailer')) as unknown as NodemailerModule;
 }
 
 /** Builds a transport config without assigning `undefined` to optional fields. */
@@ -115,7 +115,7 @@ export function toNodemailerMessage(
 
 /** Joins one-or-many addresses into a comma-separated header value. */
 function joinAddresses(to: string | readonly string[]): string {
-  return Array.isArray(to) ? to.join(', ') : to as string;
+  return Array.isArray(to) ? to.join(', ') : (to as string);
 }
 
 /**

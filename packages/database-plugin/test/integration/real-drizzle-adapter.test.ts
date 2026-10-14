@@ -165,26 +165,25 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: sql.includes('count(*)') ? [['4']] : [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (configured, work) => configured.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+        configured.transaction(work),
       ),
       drizzleTables: { User: users },
     });
     await adapter.connect();
     const source = adapter.createDataSource('User');
 
-    let counted = 0;
-
     await source.findById('u1');
-    await source.findAll(query({
-      where: { role: 'admin' },
-      orderBy: { name: 'desc' },
-      limit: 2,
-      offset: 1,
-      select: ['name'],
-    }));
-    counted = await source.count({ role: 'admin' });
+    await source.findAll(
+      query({
+        where: { role: 'admin' },
+        orderBy: { name: 'desc' },
+        limit: 2,
+        offset: 1,
+        select: ['name'],
+      }),
+    );
+    const counted = await source.count({ role: 'admin' });
     await expect(source.create({ id: 'u1', name: 'Ada', role: 'admin' })).rejects.toThrow(
       'returned no row',
     );
@@ -220,22 +219,23 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (configured, work) => configured.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+        configured.transaction(work),
       ),
       drizzleTables: { User: users },
     });
     await adapter.connect();
 
-    await adapter.createDataSource('User').findAll(query({
-      filter: {
-        type: 'comparison',
-        field: 'name',
-        operator: 'contains',
-        value: '50%_off\\now',
-      },
-    }));
+    await adapter.createDataSource('User').findAll(
+      query({
+        filter: {
+          type: 'comparison',
+          field: 'name',
+          operator: 'contains',
+          value: '50%_off\\now',
+        },
+      }),
+    );
 
     expect(calls[0]?.sql).toContain("like $1 escape '\\'");
     expect(calls[0]?.params).toEqual(['%50\\%\\_off\\\\now%']);
@@ -294,10 +294,12 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       } as unknown as Parameters<typeof createDrizzleDataSource>[3],
     );
 
-    const found = await source.findAll(query({
-      select: ['id'],
-      filter: { type: 'comparison', field: 'name', operator: 'contains', value: '50%_off' },
-    }));
+    const found = await source.findAll(
+      query({
+        select: ['id'],
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: '50%_off' },
+      }),
+    );
 
     // `50XYoff now` is the negative control: it is exactly what an unescaped
     // `%_` wildcard pattern would also return.
@@ -349,11 +351,13 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       } as unknown as Parameters<typeof createDrizzleDataSource>[3],
     );
 
-    const found = await source.findAll(query({
-      select: ['id'],
-      filter: { type: 'comparison', field: 'name', operator: 'eq', value: null },
-      orderBy: { id: 'asc' },
-    }));
+    const found = await source.findAll(
+      query({
+        select: ['id'],
+        filter: { type: 'comparison', field: 'name', operator: 'eq', value: null },
+        orderBy: { id: 'asc' },
+      }),
+    );
 
     expect(found.map((row) => row.id)).toEqual(['u2', 'u3']);
     // The emitted SQL is pinned too, so a future change that happens to
@@ -374,9 +378,8 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: [{ id: 'u1', name: 'Ada' }] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (configured, work) => configured.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+        configured.transaction(work),
       ),
       drizzleTables: { User: users },
     });
@@ -402,9 +405,8 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (configured, work) => configured.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+        configured.transaction(work),
       ),
       drizzleTables: { User: users },
     });
@@ -421,9 +423,8 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (configured, work) => configured.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+        configured.transaction(work),
       ),
       drizzleTables: { User: users },
     });
@@ -461,9 +462,8 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       entities: { Enrollment: { primaryKey: ['tenantId', 'userId'] } },
     };
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (configured, work) => configured.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+        configured.transaction(work),
       ),
       drizzleTables: { Enrollment: enrollments },
       ...extra,
@@ -481,9 +481,12 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     expect(found).toEqual({ tenantId: 'acme', userId: 'u2', course: 'biology' });
 
     // update returns the updated row; delete reports true — both executed.
-    const updated = await source.update({ tenantId: 'acme', userId: 'u2' }, {
-      course: 'chemistry',
-    });
+    const updated = await source.update(
+      { tenantId: 'acme', userId: 'u2' },
+      {
+        course: 'chemistry',
+      },
+    );
     expect(updated).toEqual({ tenantId: 'acme', userId: 'u2', course: 'chemistry' });
     expect(await source.delete({ tenantId: 'acme', userId: 'u1' })).toBe(true);
     expect(await source.findById({ tenantId: 'acme', userId: 'u1' })).toBeNull();
@@ -506,9 +509,8 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return executeSqlite(engine, statement, params, method);
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        database,
-        (configured, work) => configured.transaction(work),
+      drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+        configured.transaction(work),
       ),
       drizzleTables: { Event: events },
     });
@@ -519,12 +521,14 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     let cursor: string | null = null;
     let pages = 0;
     for (let page = 0; page < 10; page++) {
-      const result = await source.findPage!(query({
-        where: { run },
-        orderBy: { score: 'desc' },
-        limit: 2,
-        ...(cursor === null ? {} : { cursor }),
-      }));
+      const result = await source.findPage!(
+        query({
+          where: { run },
+          orderBy: { score: 'desc' },
+          limit: 2,
+          ...(cursor === null ? {} : { cursor }),
+        }),
+      );
       pages += 1;
       seen.push(...result.rows.map((row) => String(row.id)));
       if (result.nextCursor === null) break;
@@ -551,13 +555,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     expect(calls[1]?.params[0]).toBe(run);
     // The trailing 3 is the one-extra-row probe LIMIT — the SQLite dialect
     // binds `limit ?` where the PG dialect inlines it.
-    expect(calls[1]?.params).toEqual([
-      run,
-      30,
-      30,
-      `r2-${suffix}`,
-      3,
-    ]);
+    expect(calls[1]?.params).toEqual([run, 30, 30, `r2-${suffix}`, 3]);
   });
   it('translates a nested JSON path per dialect and executes it on real SQLite', async () => {
     // A JSON path below a real column reaches a different function on every
@@ -590,9 +588,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       operatorsFor('sqlite'),
     );
 
-    const idsFor = async (
-      filter: NonNullable<NormalizedQuery['filter']>,
-    ): Promise<string[]> => {
+    const idsFor = async (filter: NonNullable<NormalizedQuery['filter']>): Promise<string[]> => {
       const rows = await sqliteSource.findAll(query({ where: { run }, filter }));
       return rows.map((row) => String(row.id).split('-')[0] as string).sort();
     };
@@ -686,17 +682,21 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       { JsonRow: pgJsonRows },
       operatorsFor('postgresql'),
     );
-    await pgSource.findAll(query({
-      filter: {
-        type: 'comparison',
-        field: ['profile', 'city'],
-        operator: 'eq',
-        value: 'Kolkata',
-      },
-    }));
-    await pgSource.findAll(query({
-      filter: { type: 'comparison', field: ['profile', 'age'], operator: 'gt', value: 9 },
-    }));
+    await pgSource.findAll(
+      query({
+        filter: {
+          type: 'comparison',
+          field: ['profile', 'city'],
+          operator: 'eq',
+          value: 'Kolkata',
+        },
+      }),
+    );
+    await pgSource.findAll(
+      query({
+        filter: { type: 'comparison', field: ['profile', 'age'], operator: 'gt', value: 9 },
+      }),
+    );
     expect(pgCalls[0]?.sql).toContain('("json_rows"."profile" #>> $1) = $2');
     expect(pgCalls[0]?.params).toContain('{city}');
     expect(pgCalls[1]?.sql).toContain('("json_rows"."profile" #>> $1)::numeric > $2');
@@ -712,17 +712,21 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       { JsonRow: mysqlJsonRows },
       operatorsFor('mysql'),
     );
-    await mysqlSource.findAll(query({
-      filter: {
-        type: 'comparison',
-        field: ['profile', 'city'],
-        operator: 'eq',
-        value: 'Kolkata',
-      },
-    }));
-    await mysqlSource.findAll(query({
-      filter: { type: 'comparison', field: ['profile', 'age'], operator: 'gt', value: 9 },
-    }));
+    await mysqlSource.findAll(
+      query({
+        filter: {
+          type: 'comparison',
+          field: ['profile', 'city'],
+          operator: 'eq',
+          value: 'Kolkata',
+        },
+      }),
+    );
+    await mysqlSource.findAll(
+      query({
+        filter: { type: 'comparison', field: ['profile', 'age'], operator: 'gt', value: 9 },
+      }),
+    );
     expect(mysqlCalls[0]?.sql).toContain(
       'JSON_UNQUOTE(JSON_EXTRACT(`json_rows`.`profile`, ?)) = ?',
     );
@@ -742,14 +746,16 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       operatorsFor(undefined),
     );
     await expect(
-      source.findAll(query({
-        filter: {
-          type: 'comparison',
-          field: ['profile', 'city'],
-          operator: 'eq',
-          value: 'x',
-        },
-      })),
+      source.findAll(
+        query({
+          filter: {
+            type: 'comparison',
+            field: ['profile', 'city'],
+            operator: 'eq',
+            value: 'x',
+          },
+        }),
+      ),
     ).rejects.toThrow(/could not be determined/);
 
     // A Date has no JSON representation, so it is refused rather than
@@ -763,27 +769,31 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       operatorsFor('sqlite'),
     );
     await expect(
-      dated.findAll(query({
-        filter: {
-          type: 'comparison',
-          field: ['profile', 'at'],
-          operator: 'gt',
-          value: new Date('2024-01-01T00:00:00Z'),
-        },
-      })),
+      dated.findAll(
+        query({
+          filter: {
+            type: 'comparison',
+            field: ['profile', 'at'],
+            operator: 'gt',
+            value: new Date('2024-01-01T00:00:00Z'),
+          },
+        }),
+      ),
     ).rejects.toThrow(/cannot compare a Date/);
 
     // A path segment carrying a path metacharacter is refused rather than
     // escaped — a wrong escape reads a DIFFERENT field instead of failing.
     await expect(
-      dated.findAll(query({
-        filter: {
-          type: 'comparison',
-          field: ['profile', 'city"]. $.other'],
-          operator: 'eq',
-          value: 'x',
-        },
-      })),
+      dated.findAll(
+        query({
+          filter: {
+            type: 'comparison',
+            field: ['profile', 'city"]. $.other'],
+            operator: 'eq',
+            value: 'x',
+          },
+        }),
+      ),
     ).rejects.toThrow(/not a plain JSON key/);
   });
 });
@@ -829,9 +839,8 @@ describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
       });
       const pool = new Pool({ connectionString: livePgUrl! });
       const adapter = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          nodePostgresDrizzle(pool),
-          (db, work) => db.transaction(work),
+        drizzleInstance: createDrizzleDatabase(nodePostgresDrizzle(pool), (db, work) =>
+          db.transaction(work),
         ),
         drizzleTables: { Row: table },
       });
@@ -868,128 +877,135 @@ describe('DrizzleAdapter over live PostgreSQL — duplicate keys', () => {
       }
     },
   );
-  it('a duplicate primary key or unique column reaches the caller as DuplicateKeyError', {
-    skip: skipLivePg,
-  }, async () => {
-    const pool = new Pool({ connectionString: livePgUrl!, max: 2 });
-    const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        nodePostgresDrizzle(pool),
-        (database, work) => database.transaction(work),
-      ),
-      drizzleTables: { Member: pgMembers },
-    });
-    await adapter.connect();
-    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
-    // No IF NOT EXISTS and no DELETE: the name is fresh, so creating it fails
-    // loudly rather than adopting someone else's table.
-    await pool.query(
-      `CREATE TABLE "${pgMembersTable}" (id text primary key, email text not null unique)`,
-    );
-    try {
-      const repo = service.getRepository('Member');
-      await repo.create({ id: 'm1', email: 'ada@example.com' });
+  it(
+    'a duplicate primary key or unique column reaches the caller as DuplicateKeyError',
+    {
+      skip: skipLivePg,
+    },
+    async () => {
+      const pool = new Pool({ connectionString: livePgUrl!, max: 2 });
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(nodePostgresDrizzle(pool), (database, work) =>
+          database.transaction(work),
+        ),
+        drizzleTables: { Member: pgMembers },
+      });
+      await adapter.connect();
+      const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
+      // No IF NOT EXISTS and no DELETE: the name is fresh, so creating it fails
+      // loudly rather than adopting someone else's table.
+      await pool.query(
+        `CREATE TABLE "${pgMembersTable}" (id text primary key, email text not null unique)`,
+      );
+      try {
+        const repo = service.getRepository('Member');
+        await repo.create({ id: 'm1', email: 'ada@example.com' });
 
-      for (
-        const duplicate of [{ id: 'm1', email: 'eve@example.com' }, {
-          id: 'm2',
-          email: 'ada@example.com',
-        }]
-      ) {
-        const refusal = await repo.create(duplicate).catch((e: unknown) => e);
-        expect(refusal).toBeInstanceOf(DuplicateKeyError);
-        expect((refusal as DuplicateKeyError).entity).toBe('Member');
-        // SQLSTATE 23505 stays reachable through `cause` for the log.
-        let cursor: unknown = (refusal as Error).cause;
-        let sawUniqueViolation = false;
-        for (let depth = 0; depth < 6 && cursor !== undefined && cursor !== null; depth++) {
-          if ((cursor as { code?: unknown }).code === '23505') sawUniqueViolation = true;
-          cursor = (cursor as { cause?: unknown }).cause;
+        for (const duplicate of [
+          { id: 'm1', email: 'eve@example.com' },
+          {
+            id: 'm2',
+            email: 'ada@example.com',
+          },
+        ]) {
+          const refusal = await repo.create(duplicate).catch((e: unknown) => e);
+          expect(refusal).toBeInstanceOf(DuplicateKeyError);
+          expect((refusal as DuplicateKeyError).entity).toBe('Member');
+          // SQLSTATE 23505 stays reachable through `cause` for the log.
+          let cursor: unknown = (refusal as Error).cause;
+          let sawUniqueViolation = false;
+          for (let depth = 0; depth < 6 && cursor !== undefined && cursor !== null; depth++) {
+            if ((cursor as { code?: unknown }).code === '23505') sawUniqueViolation = true;
+            cursor = (cursor as { cause?: unknown }).cause;
+          }
+          expect(sawUniqueViolation).toBe(true);
         }
-        expect(sawUniqueViolation).toBe(true);
+        expect(await repo.count()).toBe(1);
+      } finally {
+        await pool.query(`DROP TABLE IF EXISTS "${pgMembersTable}"`);
+        await pool.end();
+        await adapter.disconnect();
       }
-      expect(await repo.count()).toBe(1);
-    } finally {
-      await pool.query(`DROP TABLE IF EXISTS "${pgMembersTable}"`);
-      await pool.end();
-      await adapter.disconnect();
-    }
-  });
+    },
+  );
 });
 
 describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35-2)', () => {
-  it('a real SERIALIZABLE conflict reaches the caller as SerializationConflictError', {
-    skip: skipLivePg,
-  }, async () => {
-    const pool = new Pool({ connectionString: livePgUrl!, max: 5 });
-    const db = nodePostgresDrizzle(pool);
-    const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        db,
-        (database, work) => database.transaction(work, { isolationLevel: 'serializable' }),
-      ),
-      drizzleTables: { Account: pgAccounts },
-    });
-    await adapter.connect();
-    const service = new DatabaseService(
-      adapter,
-      (entity) => adapter.createDataSource(entity),
-      'drizzle',
-    );
-    await pool.query(
-      'CREATE TABLE IF NOT EXISTS x90f_classified_accounts (id text primary key, balance integer not null)',
-    );
-    await pool.query('DELETE FROM x90f_classified_accounts');
-    await pool.query("INSERT INTO x90f_classified_accounts (id, balance) VALUES ('a1', 100)");
+  it(
+    'a real SERIALIZABLE conflict reaches the caller as SerializationConflictError',
+    {
+      skip: skipLivePg,
+    },
+    async () => {
+      const pool = new Pool({ connectionString: livePgUrl!, max: 5 });
+      const db = nodePostgresDrizzle(pool);
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(db, (database, work) =>
+          database.transaction(work, { isolationLevel: 'serializable' }),
+        ),
+        drizzleTables: { Account: pgAccounts },
+      });
+      await adapter.connect();
+      const service = new DatabaseService(
+        adapter,
+        (entity) => adapter.createDataSource(entity),
+        'drizzle',
+      );
+      await pool.query(
+        'CREATE TABLE IF NOT EXISTS x90f_classified_accounts (id text primary key, balance integer not null)',
+      );
+      await pool.query('DELETE FROM x90f_classified_accounts');
+      await pool.query("INSERT INTO x90f_classified_accounts (id, balance) VALUES ('a1', 100)");
 
-    try {
-      // Both transactions READ the row before either WRITES, so under
-      // SERIALIZABLE the second write answers SQLSTATE 40001 — the canonical
-      // machine-readable "this did not happen, run it again".
-      const firstRead = Promise.withResolvers<void>();
-      const secondRead = Promise.withResolvers<void>();
-      const releaseWrites = Promise.withResolvers<void>();
-      let readers = 0;
-      const conflict = (): Promise<unknown> =>
-        service.transaction(async (uow) => {
-          const repo = uow.getRepository('Account');
-          const row = await repo.findById('a1');
-          readers += 1;
-          if (readers === 1) firstRead.resolve();
-          if (readers === 2) secondRead.resolve();
-          await releaseWrites.promise;
-          await repo.update('a1', { balance: (row as { balance: number }).balance - 1 });
-        });
+      try {
+        // Both transactions READ the row before either WRITES, so under
+        // SERIALIZABLE the second write answers SQLSTATE 40001 — the canonical
+        // machine-readable "this did not happen, run it again".
+        const firstRead = Promise.withResolvers<void>();
+        const secondRead = Promise.withResolvers<void>();
+        const releaseWrites = Promise.withResolvers<void>();
+        let readers = 0;
+        const conflict = (): Promise<unknown> =>
+          service.transaction(async (uow) => {
+            const repo = uow.getRepository('Account');
+            const row = await repo.findById('a1');
+            readers += 1;
+            if (readers === 1) firstRead.resolve();
+            if (readers === 2) secondRead.resolve();
+            await releaseWrites.promise;
+            await repo.update('a1', { balance: (row as { balance: number }).balance - 1 });
+          });
 
-      const first = conflict();
-      await firstRead.promise;
-      const second = conflict();
-      await secondRead.promise;
-      releaseWrites.resolve();
-      const results = await Promise.allSettled([first, second]);
+        const first = conflict();
+        await firstRead.promise;
+        const second = conflict();
+        await secondRead.promise;
+        releaseWrites.resolve();
+        const results = await Promise.allSettled([first, second]);
 
-      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      expect(rejected.length).toBe(1);
-      const error = rejected[0].reason;
-      expect(error).toBeInstanceOf(SerializationConflictError);
-      expect((error as Error).name).toBe('SerializationConflictError');
+        const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+        expect(rejected.length).toBe(1);
+        const error = rejected[0].reason;
+        expect(error).toBeInstanceOf(SerializationConflictError);
+        expect((error as Error).name).toBe('SerializationConflictError');
 
-      // The driver diagnostic survives the wrap — M90j's operator-facing work
-      // depends on the SQLSTATE staying reachable through `cause`.
-      let cursor: unknown = (error as { cause?: unknown }).cause;
-      let sawSqlstate40 = false;
-      for (let depth = 0; depth < 6 && cursor !== undefined && cursor !== null; depth++) {
-        const code = (cursor as { code?: unknown }).code;
-        if (code === '40001' || code === '40P01') sawSqlstate40 = true;
-        cursor = (cursor as { cause?: unknown }).cause;
+        // The driver diagnostic survives the wrap — M90j's operator-facing work
+        // depends on the SQLSTATE staying reachable through `cause`.
+        let cursor: unknown = (error as { cause?: unknown }).cause;
+        let sawSqlstate40 = false;
+        for (let depth = 0; depth < 6 && cursor !== undefined && cursor !== null; depth++) {
+          const code = (cursor as { code?: unknown }).code;
+          if (code === '40001' || code === '40P01') sawSqlstate40 = true;
+          cursor = (cursor as { cause?: unknown }).cause;
+        }
+        expect(sawSqlstate40).toBe(true);
+      } finally {
+        await pool.query('DROP TABLE IF EXISTS x90f_classified_accounts');
+        await pool.end();
+        await adapter.disconnect();
       }
-      expect(sawSqlstate40).toBe(true);
-    } finally {
-      await pool.query('DROP TABLE IF EXISTS x90f_classified_accounts');
-      await pool.end();
-      await adapter.disconnect();
-    }
-  });
+    },
+  );
 
   it('an exhausted pool answers DatabaseUnavailableError', { skip: skipLivePg }, async () => {
     // X35-2: the application owns the pool, so the case is produced by a
@@ -1015,8 +1031,13 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
         'drizzle',
       );
 
-      const error = await service.getRepository('Account').findAll({})
-        .then(() => null, (e: unknown) => e);
+      const error = await service
+        .getRepository('Account')
+        .findAll({})
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
       expect(error).toBeInstanceOf(DatabaseUnavailableError);
       expect((error as Error).name).toBe('DatabaseUnavailableError');
       // The pool's own timeout text reaches the log (the cause), never the
@@ -1042,9 +1063,8 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
         DatabasePlugin({
           type: 'drizzle',
           options: {
-            drizzleInstance: createDrizzleDatabase(
-              nodePostgresDrizzle(pool),
-              (database, work) => database.transaction(work),
+            drizzleInstance: createDrizzleDatabase(nodePostgresDrizzle(pool), (database, work) =>
+              database.transaction(work),
             ),
             drizzleTables: { Account: pgAccounts },
             poolStats: () => ({
@@ -1067,10 +1087,11 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
       app,
       pool,
       async read() {
-        const health = (await app.inject({ method: 'GET', url: 'http://localhost/health' }))
-          .json() as {
-            checks?: Record<string, { status: string; data?: { reachable?: unknown } }>;
-          };
+        const health = (
+          await app.inject({ method: 'GET', url: 'http://localhost/health' })
+        ).json() as {
+          checks?: Record<string, { status: string; data?: { reachable?: unknown } }>;
+        };
         const ready = (await app.inject({ method: 'GET', url: 'http://localhost/ready' }))
           .statusCode;
         return { database: health.checks?.['database'], ready };
@@ -1084,36 +1105,44 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
     };
   }
 
-  it('a saturated real pool still completing queries keeps /ready at 200 (M101a V8-3)', {
-    skip: skipLivePg,
-  }, async () => {
-    // Every connection held and a caller queued behind them: the shape that
-    // used to queue the probe too, time it out at the 2 s bound and fail
-    // `/ready` on a replica that was merely busy.
-    const booted = await saturatedPoolApp(true);
-    try {
-      expect(booted.pool.waitingCount).toBeGreaterThan(0);
-      const { database, ready } = await booted.read();
-      expect(database?.status).toBe('up');
-      expect(database?.data?.reachable).toBe('unknown');
-      expect(ready).toBe(200);
-    } finally {
-      await booted.stop();
-    }
-  });
+  it(
+    'a saturated real pool still completing queries keeps /ready at 200 (M101a V8-3)',
+    {
+      skip: skipLivePg,
+    },
+    async () => {
+      // Every connection held and a caller queued behind them: the shape that
+      // used to queue the probe too, time it out at the 2 s bound and fail
+      // `/ready` on a replica that was merely busy.
+      const booted = await saturatedPoolApp(true);
+      try {
+        expect(booted.pool.waitingCount).toBeGreaterThan(0);
+        const { database, ready } = await booted.read();
+        expect(database?.status).toBe('up');
+        expect(database?.data?.reachable).toBe('unknown');
+        expect(ready).toBe(200);
+      } finally {
+        await booted.stop();
+      }
+    },
+  );
 
-  it('a full real pool that has completed no query reads degraded (M101a V8-3)', {
-    skip: skipLivePg,
-  }, async () => {
-    // The same capacity snapshot a hung database presents: nothing finishes,
-    // so the indicator must not call it saturation.
-    const booted = await saturatedPoolApp(false);
-    try {
-      const { database, ready } = await booted.read();
-      expect(database?.status).toBe('degraded');
-      expect(ready).toBe(503);
-    } finally {
-      await booted.stop();
-    }
-  });
+  it(
+    'a full real pool that has completed no query reads degraded (M101a V8-3)',
+    {
+      skip: skipLivePg,
+    },
+    async () => {
+      // The same capacity snapshot a hung database presents: nothing finishes,
+      // so the indicator must not call it saturation.
+      const booted = await saturatedPoolApp(false);
+      try {
+        const { database, ready } = await booted.read();
+        expect(database?.status).toBe('degraded');
+        expect(ready).toBe(503);
+      } finally {
+        await booted.stop();
+      }
+    },
+  );
 });

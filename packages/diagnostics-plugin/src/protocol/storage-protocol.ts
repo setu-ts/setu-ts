@@ -59,10 +59,7 @@ const OPERATIONS: ReadonlySet<string> = new Set<StorageDiagnosticsOperation>([
 const DURATIONLESS_OPERATION: StorageDiagnosticsOperation = 'getSignedUrl';
 
 /** The operations whose records may carry a byte count — and only on success. */
-const BYTE_OPERATIONS: ReadonlySet<string> = new Set<StorageDiagnosticsOperation>([
-  'put',
-  'get',
-]);
+const BYTE_OPERATIONS: ReadonlySet<string> = new Set<StorageDiagnosticsOperation>(['put', 'get']);
 
 /** States a SOURCE may report about itself (`unsupported` is connector-side only). */
 const SOURCE_STATES: ReadonlySet<string> = new Set<DiagnosticsInspectorState>([

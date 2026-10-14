@@ -9,13 +9,15 @@ import type { GeneratedFile } from '../../src/utils/file-writer.ts';
 
 describe('customSchematicUrl', () => {
   it('resolves under .setu-ts/schematics', () => {
-    expect(customSchematicUrl('/app', 'my-gen'))
-      .toBe(`file:///app/${CUSTOM_SCHEMATIC_DIR}/my-gen.ts`);
+    expect(customSchematicUrl('/app', 'my-gen')).toBe(
+      `file:///app/${CUSTOM_SCHEMATIC_DIR}/my-gen.ts`,
+    );
   });
 
   it('produces an absolute file URL from a relative directory', () => {
-    expect(customSchematicUrl('project', 'gen'))
-      .toBe(`file:///project/${CUSTOM_SCHEMATIC_DIR}/gen.ts`);
+    expect(customSchematicUrl('project', 'gen')).toBe(
+      `file:///project/${CUSTOM_SCHEMATIC_DIR}/gen.ts`,
+    );
   });
 });
 
@@ -63,20 +65,16 @@ describe('loadCustomSchematic', () => {
   });
 
   it('falls back to the default export', async () => {
-    const loaded = await loadCustomSchematic(
-      '/app',
-      'ok',
-      () => Promise.resolve({ default: schematic }),
+    const loaded = await loadCustomSchematic('/app', 'ok', () =>
+      Promise.resolve({ default: schematic }),
     );
     expect(loaded).toBe(schematic);
   });
 
   it('prefers the named export over the default', async () => {
     const other = () => [];
-    const loaded = await loadCustomSchematic(
-      '/app',
-      'ok',
-      () => Promise.resolve({ schematic, default: other }),
+    const loaded = await loadCustomSchematic('/app', 'ok', () =>
+      Promise.resolve({ schematic, default: other }),
     );
     expect(loaded).toBe(schematic);
   });
@@ -110,9 +108,9 @@ describe('loadCustomSchematic', () => {
   });
 
   it('throws naming the expected export when the module has none', async () => {
-    await expect(
-      loadCustomSchematic('/app', 'bad', () => Promise.resolve({})),
-    ).rejects.toThrow("must export a 'schematic' function");
+    await expect(loadCustomSchematic('/app', 'bad', () => Promise.resolve({}))).rejects.toThrow(
+      "must export a 'schematic' function",
+    );
   });
 
   it('throws when the export is not a function', async () => {

@@ -98,8 +98,8 @@ async function normalizeWebRequest(request: Request): Promise<InjectRequest> {
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
 
-  const carriesBody = !['GET', 'HEAD'].includes(request.method.toUpperCase()) &&
-    request.body !== null;
+  const carriesBody =
+    !['GET', 'HEAD'].includes(request.method.toUpperCase()) && request.body !== null;
   if (!carriesBody) {
     return base;
   }

@@ -277,9 +277,10 @@ function printWiringNote(
   }
   const registration = registrationLine(bare);
   const factory = registration?.slice(0, registration.indexOf('('));
-  const binding = source === undefined || factory === undefined
-    ? undefined
-    : providerBinding(source, bare, factory);
+  const binding =
+    source === undefined || factory === undefined
+      ? undefined
+      : providerBinding(source, bare, factory);
   // Guidance is suppressed only by a real call in code. Inserting refuses on any
   // possible use (fail closed); guidance must not ALSO go quiet then, or a mention
   // in a string would leave the plugin unregistered with nothing said (audit 4).
@@ -288,7 +289,8 @@ function printWiringNote(
   // module scope therefore still gets the line — guidance fails open.
   const scope = source === undefined ? undefined : factoryScope(source);
   if (
-    binding !== undefined && scope !== undefined &&
+    binding !== undefined &&
+    scope !== undefined &&
     callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
   ) {
     return;
@@ -361,8 +363,11 @@ export function pinnedInOtherNpmSection(
   try {
     const parsed = JSON.parse(source) as Record<string, unknown>;
     const map = parsed[other];
-    return map !== null && typeof map === 'object' &&
-      (map as Record<string, unknown>)[specifier] === range;
+    return (
+      map !== null &&
+      typeof map === 'object' &&
+      (map as Record<string, unknown>)[specifier] === range
+    );
   } catch {
     return false;
   }
@@ -392,9 +397,10 @@ export function withDependency(
 ): string | undefined {
   const parsed = JSON.parse(source) as Record<string, unknown>;
   const existing = parsed[section];
-  const map = existing !== null && typeof existing === 'object'
-    ? { ...existing as Record<string, string> }
-    : {};
+  const map =
+    existing !== null && typeof existing === 'object'
+      ? { ...(existing as Record<string, string>) }
+      : {};
 
   if (map[specifier] === range) return undefined;
 
@@ -410,8 +416,12 @@ export function withDependency(
   const afterScope = scope === '' ? -1 : keys.findLastIndex((key) => key.startsWith(scope));
   const sortedIndex = keys.findIndex((key) => key > specifier);
   const insertion = sorted
-    ? (sortedIndex < 0 ? entries.length : sortedIndex)
-    : (afterScope < 0 ? entries.length : afterScope + 1);
+    ? sortedIndex < 0
+      ? entries.length
+      : sortedIndex
+    : afterScope < 0
+      ? entries.length
+      : afterScope + 1;
   entries.splice(insertion, 0, [specifier, range]);
   return `${JSON.stringify({ ...parsed, [section]: Object.fromEntries(entries) }, null, 2)}\n`;
 }
@@ -469,14 +479,12 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   // CLI's Deno rendering) or inline (Prettier's rendering of a short array, which
   // is what an npm-target scaffold carries). Exactly one, so the insertion point
   // is never a guess.
-  const anchors = code === undefined
-    ? []
-    : [...code.matchAll(/\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g)];
+  const anchors =
+    code === undefined
+      ? []
+      : [...code.matchAll(/\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g)];
   const anchorMatch = anchors.length === 1 ? anchors[0]! : null;
-  if (
-    code === undefined || anchorMatch === null ||
-    code.split(anchor).length !== 2
-  ) {
+  if (code === undefined || anchorMatch === null || code.split(anchor).length !== 2) {
     return undefined;
   }
   const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
@@ -508,7 +516,9 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   }
 
   const withImport = importedBinding === undefined ? `${providerImport}\n${source}` : source;
-  const insertion = anchorMatch.index + scope!.start +
+  const insertion =
+    anchorMatch.index +
+    scope!.start +
     (importedBinding === undefined ? providerImport.length + 1 : 0);
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
   const before = withImport.slice(lineStart, insertion);
@@ -572,9 +582,9 @@ export async function runAddCommand(
   const workspaceMarker = await findWorkspaceMarker(deps.fs, dir);
   if (workspaceMarker !== undefined) {
     deps.error(
-      `${escapeName(dir)} is a workspace root (${
-        escapeName(workspaceMarker)
-      }); framework packages are pinned in each ` +
+      `${escapeName(dir)} is a workspace root (${escapeName(
+        workspaceMarker,
+      )}); framework packages are pinned in each ` +
         `member, because \`${PROGRAM_NAME} generate\` reads the member's manifest to decide what ` +
         `is installed.`,
     );
@@ -609,9 +619,10 @@ export async function runAddCommand(
     { file: 'deno.jsonc', section: 'imports', range: frameworkSpecifier(bare, 'deno') },
     {
       file: 'package.json',
-      section: [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.section === 'dev'
-        ? 'devDependencies'
-        : 'dependencies',
+      section:
+        [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.section === 'dev'
+          ? 'devDependencies'
+          : 'dependencies',
       range: frameworkSpecifier(bare, 'npm'),
     },
   ];
@@ -643,9 +654,9 @@ export async function runAddCommand(
       const read = await readJsonManifest(deps.fs, path);
       if (read.kind === 'ok' && read.format === 'jsonc') {
         deps.error(
-          `${
-            escapeName(path)
-          } is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+          `${escapeName(
+            path,
+          )} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
             `Add this line under "${target.section}" yourself: ` +
             `"${specifier}": "${target.range}"`,
         );
@@ -673,7 +684,7 @@ export async function runAddCommand(
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
-    const wired = await frameworkImportsRetargeted(deps.fs, dir)
+    const wired = (await frameworkImportsRetargeted(deps.fs, dir))
       ? undefined
       : withPluginWiring(config, bare);
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
@@ -755,9 +766,9 @@ export async function runAddCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to update the manifest: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      `Failed to update the manifest: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
     );
     return EXIT_ERROR;
   }
@@ -821,13 +832,15 @@ function installCommand(runtime: TargetRuntime): string {
  * security regression traded for an ergonomics one. The generated task's
  * contract is that it stays least-privilege.
  */
-const PERMISSION_NOTES: ReadonlyMap<string, readonly string[]> = new Map([[
-  '@setu-ts/storage-plugin',
+const PERMISSION_NOTES: ReadonlyMap<string, readonly string[]> = new Map([
   [
-    "  The 'local' provider writes files, so a Deno project needs --allow-write",
-    '  in its start task. Cloud providers (s3/gcs/azure/b2) do not.',
+    '@setu-ts/storage-plugin',
+    [
+      "  The 'local' provider writes files, so a Deno project needs --allow-write",
+      '  in its start task. Cloud providers (s3/gcs/azure/b2) do not.',
+    ],
   ],
-]]);
+]);
 
 /**
  * Prints the permission note for a package that needs one.

@@ -34,10 +34,7 @@ function manifestOf(
  * @param path - The path to read
  * @returns Its contents
  */
-function contentsOf(
-  files: readonly { path: string; contents: string }[],
-  path: string,
-): string {
+function contentsOf(files: readonly { path: string; contents: string }[], path: string): string {
   const file = files.find((candidate) => candidate.path === path);
   expect(file).toBeDefined();
   return file?.contents ?? '';
@@ -201,7 +198,10 @@ describe('workspaceContainerFiles', () => {
     it('publishes each member on the port the manifest allocated it', () => {
       const compose = contentsOf(
         workspaceContainerFiles(
-          manifestOf([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]),
+          manifestOf([
+            { name: 'orders', port: 3000 },
+            { name: 'billing', port: 3001 },
+          ]),
           transportSpec('http'),
         ),
         COMPOSE_FILE,
@@ -242,7 +242,10 @@ describe('workspaceContainerFiles', () => {
     it('sorts services by name', () => {
       const compose = contentsOf(
         workspaceContainerFiles(
-          manifestOf([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]),
+          manifestOf([
+            { name: 'orders', port: 3000 },
+            { name: 'billing', port: 3001 },
+          ]),
           transportSpec('http'),
         ),
         COMPOSE_FILE,

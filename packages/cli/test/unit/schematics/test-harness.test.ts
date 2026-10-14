@@ -69,14 +69,16 @@ function harnessNames(runtime: (typeof TARGET_RUNTIMES)[number]): string {
 
 describe('renderEquals', () => {
   it('uses assert on Node, which has no expect', () => {
-    expect(renderEquals('node', 'listWidget()', '[]'))
-      .toBe('assert.deepStrictEqual(listWidget(), []);');
+    expect(renderEquals('node', 'listWidget()', '[]')).toBe(
+      'assert.deepStrictEqual(listWidget(), []);',
+    );
   });
 
   it('uses expect everywhere else', () => {
     for (const runtime of ['deno', 'bun', 'cloudflare-workers'] as const) {
-      expect(renderEquals(runtime, 'listWidget()', '[]'), runtime)
-        .toBe('expect(listWidget()).toEqual([]);');
+      expect(renderEquals(runtime, 'listWidget()', '[]'), runtime).toBe(
+        'expect(listWidget()).toEqual([]);',
+      );
     }
   });
 

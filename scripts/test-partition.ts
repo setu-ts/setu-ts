@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Runs the test suite in two phases: isolated suites alone, then the rest in
  * parallel.
@@ -92,8 +92,8 @@ if (import.meta.main) {
   // A bare positional is refused, though: this script owns the file list, so a
   // path here would be a mistake, and silently running the whole suite is what
   // happened when an unhandled `--help` was ignored during development.
-  const passthrough = Deno.args.filter((argument) =>
-    argument !== '--coverage' && argument !== '--root-only'
+  const passthrough = Deno.args.filter(
+    (argument) => argument !== '--coverage' && argument !== '--root-only',
   );
   const positional = passthrough.filter((argument) => !argument.startsWith('-'));
   if (positional.length > 0) {
@@ -111,10 +111,12 @@ if (import.meta.main) {
   const coverageFlags = coverage ? ['--coverage=coverage', '--coverage-raw-data-only'] : [];
   const rootOnly = Deno.args.includes('--root-only');
   const files = rootOnly
-    ? (await discoverTestFiles()).filter((path) =>
-      path.startsWith('test/') && !path.startsWith('test/node/') &&
-      !path.startsWith('test/deno-lane/')
-    )
+    ? (await discoverTestFiles()).filter(
+        (path) =>
+          path.startsWith('test/') &&
+          !path.startsWith('test/node/') &&
+          !path.startsWith('test/deno-lane/'),
+      )
     : undefined;
   const { isolated, hermetic, reasons } = await partitionTests(files);
 
@@ -157,16 +159,13 @@ if (import.meta.main) {
   // `--ignore` plus the roots rather than 1033 positional paths: Deno enumerates
   // the remainder itself, and the argument list stays the size of the isolated
   // set.
-  const hermeticCode = await runPhase(
-    `phase 2 — ${hermetic.length} hermetic suites, in parallel`,
-    [
-      '--parallel',
-      `--ignore=${[...isolated, ...(rootOnly ? ['test/node/', 'test/deno-lane/'] : [])].join(',')}`,
-      ...(rootOnly ? ['test'] : ROOTS),
-      ...coverageFlags,
-      ...passthrough,
-    ],
-  );
+  const hermeticCode = await runPhase(`phase 2 — ${hermetic.length} hermetic suites, in parallel`, [
+    '--parallel',
+    `--ignore=${[...isolated, ...(rootOnly ? ['test/node/', 'test/deno-lane/'] : [])].join(',')}`,
+    ...(rootOnly ? ['test'] : ROOTS),
+    ...coverageFlags,
+    ...passthrough,
+  ]);
 
   // Both phases run even when the first fails, so one red phase does not hide
   // the other's result.

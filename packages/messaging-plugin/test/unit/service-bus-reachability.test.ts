@@ -181,15 +181,19 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
   it('a rejection thrown BEFORE the transport is never recorded as evidence', async () => {
     // Narrowed by origin: a serialization bug says nothing about the network
     // and must never mark the broker down.
-    const broker = new ServiceBusBroker(createFakeRuntime(), {
-      serialize: (_message: unknown): string => {
-        throw new Error('serialization bug');
+    const broker = new ServiceBusBroker(
+      createFakeRuntime(),
+      {
+        serialize: (_message: unknown): string => {
+          throw new Error('serialization bug');
+        },
+        deserialize: (payload: string) => JSON.parse(payload),
       },
-      deserialize: (payload: string) => JSON.parse(payload),
-    }, {
-      connectionString: 'Endpoint=sb://test/',
-      client: makeTransport({ isHealthy: () => Promise.resolve(undefined) }),
-    });
+      {
+        connectionString: 'Endpoint=sb://test/',
+        client: makeTransport({ isHealthy: () => Promise.resolve(undefined) }),
+      },
+    );
     await broker.connect();
     await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('serialization bug');
     expect(await broker.reachability()).toBeUndefined();

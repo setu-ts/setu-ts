@@ -70,14 +70,17 @@ describe('the process boundary of packages/cli/src', () => {
       portAvailable: () => Promise.resolve(true),
     };
     expect(
-      await runMain({
-        fs,
-        now: () => 0,
-        onSignal: (signal, handler) => {
-          registered = signal;
-          handler();
+      await runMain(
+        {
+          fs,
+          now: () => 0,
+          onSignal: (signal, handler) => {
+            registered = signal;
+            handler();
+          },
         },
-      }, process),
+        process,
+      ),
     ).toBe(130);
     expect(registered).toBe('SIGINT');
     expect(fs.writes).toEqual([]);

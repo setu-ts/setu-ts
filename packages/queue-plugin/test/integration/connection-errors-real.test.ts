@@ -23,49 +23,57 @@ import {
 } from '../../../common/test/fixtures/redis-connection-errors.ts';
 
 describe('REAL Redis queue adapter: connection errors', () => {
-  it('route to the logger, de-duplicated, and never to the console', {
-    skip: REDIS_URL === undefined,
-  }, async () => {
-    const logger = new RecordingLogger();
-    let app: IKernelApplication | undefined;
-    await expectOutageRoutedToLogger({
-      logger,
-      source: 'queue-plugin: redis adapter',
-      start: async () => {
-        app = createApplication({
-          plugins: [
-            RuntimePlugin(),
-            loggerPlugin(logger),
-            QueuePlugin({ adapter: 'redis', url: redisUrl() }),
-          ],
-        });
-        await app.start();
-      },
-      stop: async () => {
-        await app?.stop();
-      },
-    });
-  });
+  it(
+    'route to the logger, de-duplicated, and never to the console',
+    {
+      skip: REDIS_URL === undefined,
+    },
+    async () => {
+      const logger = new RecordingLogger();
+      let app: IKernelApplication | undefined;
+      await expectOutageRoutedToLogger({
+        logger,
+        source: 'queue-plugin: redis adapter',
+        start: async () => {
+          app = createApplication({
+            plugins: [
+              RuntimePlugin(),
+              loggerPlugin(logger),
+              QueuePlugin({ adapter: 'redis', url: redisUrl() }),
+            ],
+          });
+          await app.start();
+        },
+        stop: async () => {
+          await app?.stop();
+        },
+      });
+    },
+  );
 
-  it('attaches no listener to an injected client', {
-    skip: REDIS_URL === undefined,
-  }, async () => {
-    const client = new Redis(redisUrl(), { lazyConnect: true });
-    const injected = client as unknown as NonNullable<QueuePluginOptions['client']>;
-    const before = client.listenerCount('error');
-    const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        loggerPlugin(new RecordingLogger()),
-        QueuePlugin({ adapter: 'redis', client: injected }),
-      ],
-    });
-    try {
-      await app.start();
-      expect(client.listenerCount('error')).toBe(before);
-    } finally {
-      await app.stop();
-      client.disconnect();
-    }
-  });
+  it(
+    'attaches no listener to an injected client',
+    {
+      skip: REDIS_URL === undefined,
+    },
+    async () => {
+      const client = new Redis(redisUrl(), { lazyConnect: true });
+      const injected = client as unknown as NonNullable<QueuePluginOptions['client']>;
+      const before = client.listenerCount('error');
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          loggerPlugin(new RecordingLogger()),
+          QueuePlugin({ adapter: 'redis', client: injected }),
+        ],
+      });
+      try {
+        await app.start();
+        expect(client.listenerCount('error')).toBe(before);
+      } finally {
+        await app.stop();
+        client.disconnect();
+      }
+    },
+  );
 });

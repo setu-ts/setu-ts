@@ -24,9 +24,7 @@ const app = createApplication({
     RuntimePlugin(),
     HealthPlugin({
       endpoints: { health: '/health', live: '/live', ready: '/ready' },
-      indicators: [
-        createHttpIndicator('external-api', { url: 'https://api.example.com/health' }),
-      ],
+      indicators: [createHttpIndicator('external-api', { url: 'https://api.example.com/health' })],
     }),
   ],
 });

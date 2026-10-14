@@ -212,10 +212,13 @@ describe('createScopedRbacMiddleware', () => {
     const { ctx } = context(service, ANN);
     const scope = (c: IRequestContext) => ORG(c.params.orgId ?? '');
     expect(await run(createScopedRbacMiddleware(PERMS, 'all', scope), ctx)).toBe(true);
-    expect(targets).toEqual([{ scope: ORG('o1'), context: ctx }, {
-      scope: ORG('o1'),
-      context: ctx,
-    }]);
+    expect(targets).toEqual([
+      { scope: ORG('o1'), context: ctx },
+      {
+        scope: ORG('o1'),
+        context: ctx,
+      },
+    ]);
   });
 
   it('denies any-of when no role is granted', async () => {
@@ -242,13 +245,15 @@ describe('createScopedRbacMiddleware', () => {
     const open = { [ROLES[0]!]: { anonymous: true } };
     const deny = fakeService(() => false, open);
     const anonymous = context(deny);
-    expect(await run(createScopedRbacMiddleware([ROLES[0]!], 'any', ORG('o1')), anonymous.ctx))
-      .toBe(false);
+    expect(
+      await run(createScopedRbacMiddleware([ROLES[0]!], 'any', ORG('o1')), anonymous.ctx),
+    ).toBe(false);
     expect(anonymous.recorded.status).toBe(401);
     expect(deny.calls).toEqual([ROLES[0]]);
     const allow = fakeService(() => true, open);
-    expect(await run(createScopedRbacMiddleware([ROLES[0]!], 'any', ORG('o1')), context(allow).ctx))
-      .toBe(true);
+    expect(
+      await run(createScopedRbacMiddleware([ROLES[0]!], 'any', ORG('o1')), context(allow).ctx),
+    ).toBe(true);
   });
 
   it('propagates a throwing scope source', async () => {
@@ -279,9 +284,14 @@ describe('appendScopedRbacMiddleware', () => {
   it('appends roles then permissions, inheriting class defaults', () => {
     const middleware: MiddlewareFunction[] = [];
     expect(
-      appendScopedRbacMiddleware(label, ctrl, inherit, middleware, fakeService(() => true, KNOWN)),
-    )
-      .toBe(true);
+      appendScopedRbacMiddleware(
+        label,
+        ctrl,
+        inherit,
+        middleware,
+        fakeService(() => true, KNOWN),
+      ),
+    ).toBe(true);
     expect(middleware.length).toBe(2);
   });
 
@@ -301,7 +311,13 @@ describe('appendScopedRbacMiddleware', () => {
 
   it('refuses a name outside the catalogue — the method override is what is checked', () => {
     expect(() =>
-      appendScopedRbacMiddleware(label, ctrl, override, [], fakeService(() => true, KNOWN))
+      appendScopedRbacMiddleware(
+        label,
+        ctrl,
+        override,
+        [],
+        fakeService(() => true, KNOWN),
+      ),
     ).toThrow(`${label} is decorated with @ScopedRoles("admin"), which is not in the scoped RBAC`);
   });
 });

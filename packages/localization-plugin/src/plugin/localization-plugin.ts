@@ -97,9 +97,10 @@ export function LocalizationPlugin(options: LocalizationPluginOptions): IPlugin 
   if (!Number.isInteger(priority)) {
     throw new TypeError('localization-plugin: middleware.priority must be an integer.');
   }
-  const basePath = options.exposeCatalogues === undefined
-    ? undefined
-    : validateBasePath(options.exposeCatalogues.basePath);
+  const basePath =
+    options.exposeCatalogues === undefined
+      ? undefined
+      : validateBasePath(options.exposeCatalogues.basePath);
   const cacheControl = validateCacheControl(options.exposeCatalogues?.cacheControl);
 
   return {
@@ -143,16 +144,18 @@ export function LocalizationPlugin(options: LocalizationPluginOptions): IPlugin 
       if (basePath !== undefined) {
         registerCatalogueRoute(ctx.router, basePath, store, cacheControl);
       }
-      const source = options.source === undefined
-        ? 'static'
-        : `injected${options.source.name === undefined ? '' : `:${options.source.name}`}`;
+      const source =
+        options.source === undefined
+          ? 'static'
+          : `injected${options.source.name === undefined ? '' : `:${options.source.name}`}`;
       // No backend remains after `register()`, so `up` is the honest status and
       // the live `data` carries the real facts (the M92 `view` precedent).
       ctx.health.register('localization', () =>
         Promise.resolve({
           status: 'up' as const,
           data: { locales: supported.length, default: supported[0], source },
-        }));
+        }),
+      );
     },
   };
 }

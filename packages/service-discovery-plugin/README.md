@@ -113,19 +113,22 @@ means refusing healthy instances because unhealthy ones failed. Ejection removes
 while the call site stays open. They compose by re-picking inside the wrapped call:
 
 ```typescript
-const call = resilience.wrap(async () => {
-  const instance = await discovery.pick('billing');
-  if (instance === null) throw new Error('no billing instance');
-  try {
-    const response = await fetch(`http://${instance.host}:${instance.port}/invoices`);
-    discovery.report(instance, response.ok ? 'success' : 'failure');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } catch (error) {
-    discovery.report(instance, 'failure');
-    throw error;
-  }
-}, { retry: { maxAttempts: 3 } });
+const call = resilience.wrap(
+  async () => {
+    const instance = await discovery.pick('billing');
+    if (instance === null) throw new Error('no billing instance');
+    try {
+      const response = await fetch(`http://${instance.host}:${instance.port}/invoices`);
+      discovery.report(instance, response.ok ? 'success' : 'failure');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      discovery.report(instance, 'failure');
+      throw error;
+    }
+  },
+  { retry: { maxAttempts: 3 } },
+);
 ```
 
 `wrap` re-enters the function on every attempt, so each retry picks again and lands on a different

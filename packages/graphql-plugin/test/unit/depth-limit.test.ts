@@ -68,9 +68,7 @@ describe('createDepthLimitRule', () => {
     const reported = runAtDepth(5, 6);
 
     expect(reported.length).toBe(1);
-    expect(reported[0]).toBe(
-      'Query is too deep. Maximum depth is 5, but query has depth of 6',
-    );
+    expect(reported[0]).toBe('Query is too deep. Maximum depth is 5, but query has depth of 6');
   });
 
   it('reports only the first offending field, not one error per field', () => {

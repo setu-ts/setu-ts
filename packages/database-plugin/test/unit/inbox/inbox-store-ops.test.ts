@@ -213,8 +213,7 @@ describe('DatabaseInboxStore operations', () => {
     };
     expect(
       await new DatabaseInboxStore(service, ENTITY, () => 'x').release(idsFor('a'), 'retry', 1),
-    )
-      .toEqual({ outcome: 'missing' });
+    ).toEqual({ outcome: 'missing' });
   });
 
   it('purge deletes rows of every status older than the bound, parked included', async () => {

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Creates the release's packages on JSR, so that `deno publish` has somewhere
  * to publish to.
@@ -69,7 +69,7 @@ for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
   const response = await fetch(`${API}/scopes/${SCOPE}/packages`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ package: name }),

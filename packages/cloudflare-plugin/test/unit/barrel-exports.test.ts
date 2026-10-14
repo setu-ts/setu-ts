@@ -75,32 +75,30 @@ describe('cloudflare-plugin barrel', () => {
 
   it('does not export the internal registry or the envelope codec', () => {
     const names = Object.keys(barrel);
-    for (
-      const internal of [
-        'BindingRegistry',
-        'encodeEnvelope',
-        'decodeEnvelope',
-        'encodeJobEnvelope',
-        'isJobEnvelope',
-        'runBounded',
-        'resolveCacheApi',
-        // The frame helpers are a deliberate local copy of
-        // realtime-backplane-plugin's; copying them is sanctioned, exporting a
-        // second public definition of them is not.
-        'isRealtimeFrame',
-        'dispatchFrame',
-        // The messaging wire shape and its routing internals: one in-package
-        // caller each, and no application ever names one.
-        'encodePublishEnvelope',
-        'encodeRequestEnvelope',
-        'encodeReplyEnvelope',
-        'isQueueEnvelope',
-        'SubscriptionTable',
-        'RequestCorrelation',
-        'openReplyInbox',
-        'deliverReply',
-      ]
-    ) {
+    for (const internal of [
+      'BindingRegistry',
+      'encodeEnvelope',
+      'decodeEnvelope',
+      'encodeJobEnvelope',
+      'isJobEnvelope',
+      'runBounded',
+      'resolveCacheApi',
+      // The frame helpers are a deliberate local copy of
+      // realtime-backplane-plugin's; copying them is sanctioned, exporting a
+      // second public definition of them is not.
+      'isRealtimeFrame',
+      'dispatchFrame',
+      // The messaging wire shape and its routing internals: one in-package
+      // caller each, and no application ever names one.
+      'encodePublishEnvelope',
+      'encodeRequestEnvelope',
+      'encodeReplyEnvelope',
+      'isQueueEnvelope',
+      'SubscriptionTable',
+      'RequestCorrelation',
+      'openReplyInbox',
+      'deliverReply',
+    ]) {
       expect(names).not.toContain(internal);
     }
   });

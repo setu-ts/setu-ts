@@ -29,12 +29,7 @@ import type { ISerializer } from '../serializers/serializer.ts';
  */
 export interface IRedisStreamsClient {
   /** Add a message to a stream. */
-  xadd(
-    name: string,
-    id: string,
-    data: string | Array<string>,
-    ...args: string[]
-  ): Promise<string>;
+  xadd(name: string, id: string, data: string | Array<string>, ...args: string[]): Promise<string>;
   /** Create or manage consumer groups. */
   xgroup(
     command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
@@ -215,14 +210,7 @@ export interface IKafkaEventEmitter {
  * @since 0.1.0
  */
 export type MessagingBrokerType =
-  | 'memory'
-  | 'redis-streams'
-  | 'rabbitmq'
-  | 'nats'
-  | 'kafka'
-  | 'pubsub'
-  | 'service-bus'
-  | 'custom';
+  'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka' | 'pubsub' | 'service-bus' | 'custom';
 
 /**
  * Shared options present on every {@linkcode MessagingPluginOptions} arm.
@@ -384,10 +372,7 @@ export interface InMemoryBrokerOptions {
    * `MessagingPlugin` always supplies one backed by the application's logger,
    * so the absent case is reachable only by constructing the broker directly.
    */
-  readonly onDispatchError?: (
-    error: unknown,
-    metadata: MessageMetadata,
-  ) => void | Promise<void>;
+  readonly onDispatchError?: (error: unknown, metadata: MessageMetadata) => void | Promise<void>;
 }
 
 /**
@@ -413,9 +398,7 @@ export interface SubscriptionDefinition {
  *
  * @since 0.3.0
  */
-export type SubscriptionEntry =
-  | SubscriptionDefinition
-  | RegistryFactory<SubscriptionDefinition>;
+export type SubscriptionEntry = SubscriptionDefinition | RegistryFactory<SubscriptionDefinition>;
 
 // ─── Arms of the discriminated union ───────────────────────────────────────────
 
@@ -658,8 +641,7 @@ export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions
  * @since 0.1.0
  */
 export type PubSubMessagingOptions =
-  | PubSubMessagingOptionsInjected
-  | PubSubMessagingOptionsProduction;
+  PubSubMessagingOptionsInjected | PubSubMessagingOptionsProduction;
 
 /**
  * Azure Service Bus SDK retry budget for the data client (M90b / X28-6).
@@ -745,8 +727,7 @@ export interface ServiceBusMessagingOptionsProduction extends MessagingCommonOpt
  * @since 0.1.0
  */
 export type ServiceBusMessagingOptions =
-  | ServiceBusMessagingOptionsInjected
-  | ServiceBusMessagingOptionsProduction;
+  ServiceBusMessagingOptionsInjected | ServiceBusMessagingOptionsProduction;
 
 /**
  * Custom (inject-any-broker) arm.
@@ -1106,19 +1087,18 @@ export interface OutboxCommonOptions {
  *
  * @since 0.9.0
  */
-export type OutboxOptions =
-  & OutboxCommonOptions
-  & (
+export type OutboxOptions = OutboxCommonOptions &
+  (
     | {
-      /** The one store every write and the relay use. */
-      readonly store: OutboxStoreEntry;
-      readonly stores?: never;
-    }
+        /** The one store every write and the relay use. */
+        readonly store: OutboxStoreEntry;
+        readonly stores?: never;
+      }
     | {
-      /** A store per tenant id, selected by the `tenantId` a call names. */
-      readonly stores: Readonly<Record<string, OutboxStoreEntry>>;
-      readonly store?: never;
-    }
+        /** A store per tenant id, selected by the `tenantId` a call names. */
+        readonly stores: Readonly<Record<string, OutboxStoreEntry>>;
+        readonly store?: never;
+      }
   );
 
 /**
@@ -1164,12 +1144,7 @@ export interface OutboxSweepResult {
    * closing.
    */
   readonly endedBy:
-    | 'complete'
-    | 'scan-limit'
-    | 'publish-limit'
-    | 'deadline'
-    | 'store-failure'
-    | 'closing';
+    'complete' | 'scan-limit' | 'publish-limit' | 'deadline' | 'store-failure' | 'closing';
 }
 
 /**

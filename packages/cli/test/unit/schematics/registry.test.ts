@@ -74,7 +74,7 @@ describe('schematic registry', () => {
       getSchematic(name)!
         .factory(deriveNames('order-item'), options())
         .filter((f) => f.managed !== true)
-        .map((f) => f.path)
+        .map((f) => f.path),
     );
     expect(new Set(paths).size).toBeLessThan(paths.length);
     expect(paths.filter((path) => path === 'src/controllers/order-item.routes.ts')).toHaveLength(2);

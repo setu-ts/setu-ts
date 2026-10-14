@@ -29,9 +29,9 @@ import {
 /** A well-formed coverage row for a target, at the given percentages. */
 function row(file: string, branch: number, fn: number, line: number): string {
   const basename = file.split('/').pop() as string;
-  return `| ${basename.padEnd(28)} | ${branch.toFixed(1).padStart(8)} | ${
-    fn.toFixed(1).padStart(10)
-  } | ${line.toFixed(1).padStart(6)} |`;
+  return `| ${basename.padEnd(28)} | ${branch.toFixed(1).padStart(8)} | ${fn
+    .toFixed(1)
+    .padStart(10)} | ${line.toFixed(1).padStart(6)} |`;
 }
 
 /** The two-line header `deno coverage` prints before the table rows. */
@@ -56,12 +56,12 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
   const rows = SCRIPT_TARGETS.map((target) =>
     overrides[target] === true
       ? row(
-        target,
-        FAILING_COVERAGE.branchPct,
-        FAILING_COVERAGE.functionPct,
-        FAILING_COVERAGE.linePct,
-      )
-      : row(target, 95, 96, 94)
+          target,
+          FAILING_COVERAGE.branchPct,
+          FAILING_COVERAGE.functionPct,
+          FAILING_COVERAGE.linePct,
+        )
+      : row(target, 95, 96, 94),
   );
   return [HEADER, ...rows].join('\n');
 }
@@ -128,8 +128,7 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('rejects only one target row (a target silently dropped)', () => {
-    const stdout = HEADER + '\n' +
-      row('scripts/check-docs.ts', 95, 96, 94);
+    const stdout = HEADER + '\n' + row('scripts/check-docs.ts', 95, 96, 94);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
     expect(parsed.byTarget.size).toBe(1);
@@ -139,14 +138,23 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('rejects duplicate rows (a target appearing twice)', () => {
-    const stdout = HEADER + '\n' +
-      row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
-      row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
-      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
-      row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
-      row('scripts/version-sweep.ts', 94, 100, 96) + '\n' +
+    const stdout =
+      HEADER +
+      '\n' +
+      row('scripts/check-docs.ts', 95, 96, 94) +
+      '\n' +
+      row('scripts/check-docs.ts', 95, 96, 94) +
+      '\n' +
+      row('scripts/check-prose-assertions.ts', 98, 97, 96) +
+      '\n' +
+      row('scripts/generate-api-docs.ts', 93, 95, 93) +
+      '\n' +
+      row('scripts/package-exports.ts', 97, 98, 96) +
+      '\n' +
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95) +
+      '\n' +
+      row('scripts/version-sweep.ts', 94, 100, 96) +
+      '\n' +
       row('scripts/package-exports.ts', 97, 98, 96);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
@@ -155,13 +163,21 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('rejects an unknown/extra row (a non-target script)', () => {
-    const stdout = HEADER + '\n' +
-      row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
-      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
-      row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
-      row('scripts/version-sweep.ts', 94, 100, 96) + '\n' +
+    const stdout =
+      HEADER +
+      '\n' +
+      row('scripts/check-docs.ts', 95, 96, 94) +
+      '\n' +
+      row('scripts/check-prose-assertions.ts', 98, 97, 96) +
+      '\n' +
+      row('scripts/generate-api-docs.ts', 93, 95, 93) +
+      '\n' +
+      row('scripts/package-exports.ts', 97, 98, 96) +
+      '\n' +
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95) +
+      '\n' +
+      row('scripts/version-sweep.ts', 94, 100, 96) +
+      '\n' +
       row('scripts/some-other-script.ts', 99, 99, 99);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
@@ -188,10 +204,12 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('flags two targets below threshold', () => {
-    const parsed = parseCoverageTable(fullTable({
-      'scripts/check-docs.ts': true,
-      'scripts/generate-api-docs.ts': true,
-    }));
+    const parsed = parseCoverageTable(
+      fullTable({
+        'scripts/check-docs.ts': true,
+        'scripts/generate-api-docs.ts': true,
+      }),
+    );
     expect(validateTargetSet(parsed)).toEqual([]);
     expect(belowThreshold(parsed).length).toBe(2);
   });
@@ -199,7 +217,9 @@ describe('script-coverage target-set completeness', () => {
   it('parses ANSI-stripped rows correctly (no false OK from color codes)', () => {
     // A `[33m` prefix once turned 75.9 into a false "OK" under naive parsing.
     const ansi = String.fromCharCode(0x1b) + '[33m';
-    const stdout = HEADER + '\n' +
+    const stdout =
+      HEADER +
+      '\n' +
       `| ${ansi}check-docs.ts${String.fromCharCode(0x1b)}[0m` +
       '          |    75.9 |      80.0 |   67.0 |';
     const parsed = parseCoverageTable(stdout);
@@ -211,8 +231,11 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('rejects a failed child before parsing two plausible 99% rows', () => {
-    const stdout = HEADER + '\n' +
-      row('scripts/check-docs.ts', 99, 99, 99) + '\n' +
+    const stdout =
+      HEADER +
+      '\n' +
+      row('scripts/check-docs.ts', 99, 99, 99) +
+      '\n' +
       row('scripts/generate-api-docs.ts', 99, 99, 99);
     expect(() =>
       parseSuccessfulCoverageChild({
@@ -220,7 +243,7 @@ describe('script-coverage target-set completeness', () => {
         code: 1,
         stdout,
         stderr: 'coverage profile is incomplete',
-      })
+      }),
     ).toThrow('deno coverage exited with code 1');
   });
 });

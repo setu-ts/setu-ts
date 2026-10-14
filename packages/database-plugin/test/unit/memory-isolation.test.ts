@@ -54,11 +54,11 @@ describe('MemoryAdapter transaction isolation', () => {
 
     const initialDefault = await adapter.beginTransaction();
     let serializable: Awaited<ReturnType<typeof adapter.beginTransaction>> | undefined;
-    const waitingSerializable = adapter.beginTransaction({ isolation: 'serializable' }).then(
-      (tx) => {
+    const waitingSerializable = adapter
+      .beginTransaction({ isolation: 'serializable' })
+      .then((tx) => {
         serializable = tx;
-      },
-    );
+      });
     let laterDefaultStarted = false;
     const waitingDefault = adapter.beginTransaction().then((tx) => {
       laterDefaultStarted = true;
@@ -100,7 +100,8 @@ describe('MemoryAdapter transaction isolation', () => {
     const adapter = new MemoryAdapter();
     await adapter.connect();
 
-    await expect(adapter.beginTransaction({ isolation: 'read-committed' }))
-      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    await expect(adapter.beginTransaction({ isolation: 'read-committed' })).rejects.toBeInstanceOf(
+      UnsupportedIsolationLevelError,
+    );
   });
 });

@@ -67,9 +67,10 @@ export interface RecordedCall {
  * Wraps a database service so every repository call (outside or inside a
  * transaction) is recorded, then forwarded to the real repository.
  */
-export function recordingService(
-  inner: IDatabaseService,
-): { service: IDatabaseService; calls: RecordedCall[] } {
+export function recordingService(inner: IDatabaseService): {
+  service: IDatabaseService;
+  calls: RecordedCall[];
+} {
   const calls: RecordedCall[] = [];
   const wrap = <E, Id extends EntityKey>(repo: IRepository<E, Id>): IRepository<E, Id> =>
     new Proxy(repo, {
@@ -91,7 +92,7 @@ export function recordingService(
         work({
           getRepository: <E, Id extends EntityKey = string>(e: string) =>
             wrap(uow.getRepository<E, Id>(e)),
-        })
+        }),
       );
     },
     query: (sql, params) => inner.query(sql, params),

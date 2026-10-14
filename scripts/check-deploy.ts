@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
+/* eslint-disable no-console -- this CI script reports progress, drift and skips. */
 import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
 import { startRegistryOverlay } from './registry-overlay.ts';
 
@@ -221,9 +221,7 @@ export function parseModes(args: readonly string[]): ModeSet {
     throw new Error('--write modifies --render; it selects no check on its own');
   }
 
-  const unknown = args.filter(
-    (arg) => !(ALL_MODE_FLAGS as readonly string[]).includes(arg),
-  );
+  const unknown = args.filter((arg) => !(ALL_MODE_FLAGS as readonly string[]).includes(arg));
   if (unknown.length > 0) {
     throw new Error(
       `Unknown flag(s): ${unknown.join(', ')}. Known flags: ${ALL_MODE_FLAGS.join(', ')}`,
@@ -280,11 +278,7 @@ export function renderDrift(
 
 /** True when the report records no difference at all. */
 export function isClean(report: DriftReport): boolean {
-  return (
-    report.added.length === 0 &&
-    report.removed.length === 0 &&
-    report.changed.length === 0
-  );
+  return report.added.length === 0 && report.removed.length === 0 && report.changed.length === 0;
 }
 
 /**
@@ -294,10 +288,7 @@ export function isClean(report: DriftReport): boolean {
  * @param present - Tool names found on PATH
  * @returns The missing names, so a skip message can say which
  */
-export function missingTools(
-  required: readonly string[],
-  present: readonly string[],
-): string[] {
+export function missingTools(required: readonly string[], present: readonly string[]): string[] {
   return required.filter((tool) => !present.includes(tool));
 }
 
@@ -381,21 +372,24 @@ async function checkRender(write: boolean): Promise<CheckOutcome> {
 
   const temporary = await Deno.makeTempDir({ prefix: 'setu-render-' });
   try {
-    const rendered = await run([
-      'helm',
-      'template',
-      'setu',
-      'k8s/chart',
-      '-f',
-      'k8s/render-values.yaml',
-      // Pinned, and it must match NAMESPACE below. `helm template` defaults Release.Namespace to
-      // "default", which silently produced a RoleBinding whose ServiceAccount subject named the
-      // wrong namespace — the objects applied fine and the app simply had no permission.
-      '--namespace',
-      NAMESPACE,
-      '--output-dir',
-      temporary,
-    ], { quiet: true });
+    const rendered = await run(
+      [
+        'helm',
+        'template',
+        'setu',
+        'k8s/chart',
+        '-f',
+        'k8s/render-values.yaml',
+        // Pinned, and it must match NAMESPACE below. `helm template` defaults Release.Namespace to
+        // "default", which silently produced a RoleBinding whose ServiceAccount subject named the
+        // wrong namespace — the objects applied fine and the app simply had no permission.
+        '--namespace',
+        NAMESPACE,
+        '--output-dir',
+        temporary,
+      ],
+      { quiet: true },
+    );
     if (!rendered.success) {
       console.error('  helm template failed');
       return 'failed';
@@ -454,18 +448,21 @@ async function checkBuild(): Promise<CheckOutcome> {
 
   let ok = true;
   for (const target of BUILD_MATRIX) {
-    const built = await run([
-      'docker',
-      'build',
-      '--quiet',
-      '-f',
-      target.dockerfile,
-      '--build-arg',
-      `APP=${target.app}`,
-      '-t',
-      target.tag,
-      '.',
-    ], { quiet: true });
+    const built = await run(
+      [
+        'docker',
+        'build',
+        '--quiet',
+        '-f',
+        target.dockerfile,
+        '--build-arg',
+        `APP=${target.app}`,
+        '-t',
+        target.tag,
+        '.',
+      ],
+      { quiet: true },
+    );
     console.log(`  ${built.success ? '✓' : '✗'} ${target.app} → ${target.tag}`);
     if (!built.success) ok = false;
   }
@@ -481,12 +478,10 @@ async function checkCompose(): Promise<CheckOutcome> {
   }
 
   let ok = true;
-  for (
-    const args of [
-      ['docker', 'compose', '-f', 'docker/compose.yaml', 'config'],
-      ['docker', 'compose', '-f', 'docker/compose.yaml', '--profile', 'telemetry', 'config'],
-    ]
-  ) {
+  for (const args of [
+    ['docker', 'compose', '-f', 'docker/compose.yaml', 'config'],
+    ['docker', 'compose', '-f', 'docker/compose.yaml', '--profile', 'telemetry', 'config'],
+  ]) {
     const result = await run(args, { quiet: true });
     const label = args.includes('telemetry') ? 'telemetry profile' : 'default profile';
     console.log(`  ${result.success ? '✓' : '✗'} ${label} resolves`);
@@ -637,32 +632,33 @@ export async function buildGeneratedImage(
   const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root, env });
   if (!installed.success) return installed;
 
-  const cached = await execute([
-    Deno.execPath(),
-    'cache',
-    '--lock=deno.lock',
-    `apps/${GENERATED_MEMBER}/main.ts`,
-  ], { quiet: true, cwd: root, env });
+  const cached = await execute(
+    [Deno.execPath(), 'cache', '--lock=deno.lock', `apps/${GENERATED_MEMBER}/main.ts`],
+    { quiet: true, cwd: root, env },
+  );
   if (!cached.success) return cached;
 
   // The image's own install step resolves the framework from the same registry, reached on the
   // host's loopback — hence the host network for the BUILD only; the container runs with none.
-  return await execute([
-    'docker',
-    'build',
-    '--quiet',
-    '--network',
-    'host',
-    '-f',
-    `${root}/docker/Dockerfile`,
-    '--build-arg',
-    `MEMBER=${GENERATED_MEMBER}`,
-    '--build-arg',
-    `NPM_CONFIG_REGISTRY=${registry}`,
-    '-t',
-    image,
-    root,
-  ], { quiet: true });
+  return await execute(
+    [
+      'docker',
+      'build',
+      '--quiet',
+      '--network',
+      'host',
+      '-f',
+      `${root}/docker/Dockerfile`,
+      '--build-arg',
+      `MEMBER=${GENERATED_MEMBER}`,
+      '--build-arg',
+      `NPM_CONFIG_REGISTRY=${registry}`,
+      '-t',
+      image,
+      root,
+    ],
+    { quiet: true },
+  );
 }
 
 /**
@@ -771,19 +767,22 @@ async function checkGenerated(): Promise<CheckOutcome> {
         console.error(built.stderr);
         return 'failed';
       }
-      const connectorCache = await run([
-        'docker',
-        'run',
-        '--rm',
-        '--read-only',
-        '--network',
-        'none',
-        '--entrypoint',
-        'sh',
-        resources.image,
-        '-c',
-        PRODUCTION_DEVTOOL_PROBE,
-      ], { quiet: true });
+      const connectorCache = await run(
+        [
+          'docker',
+          'run',
+          '--rm',
+          '--read-only',
+          '--network',
+          'none',
+          '--entrypoint',
+          'sh',
+          resources.image,
+          '-c',
+          PRODUCTION_DEVTOOL_PROBE,
+        ],
+        { quiet: true },
+      );
       if (!connectorCache.success) {
         console.error(`  ✗ production carries a devtool entry or cached connector (${layout})`);
         // The probe's grep prints every matching path, which is what says WHERE.
@@ -797,29 +796,19 @@ async function checkGenerated(): Promise<CheckOutcome> {
     // even with --no-lock after install. Redis loads the ioredis driver and its
     // transitive npm modules. Redis and the app share a network-none namespace:
     // loopback reaches the broker, while npm/jsr remain unreachable.
-    const broker = await run([
-      'docker',
-      'run',
-      '-d',
-      '--name',
-      resources.broker,
-      '--network',
-      'none',
-      'redis:7',
-    ], { quiet: true });
+    const broker = await run(
+      ['docker', 'run', '-d', '--name', resources.broker, '--network', 'none', 'redis:7'],
+      { quiet: true },
+    );
     if (!broker.success) {
       console.error(broker.stderr);
       return 'failed';
     }
     let brokerReady = false;
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      const ready = await run([
-        'docker',
-        'exec',
-        resources.broker,
-        'redis-cli',
-        'ping',
-      ], { quiet: true });
+      const ready = await run(['docker', 'exec', resources.broker, 'redis-cli', 'ping'], {
+        quiet: true,
+      });
       if (ready.success) {
         brokerReady = true;
         break;
@@ -836,19 +825,22 @@ async function checkGenerated(): Promise<CheckOutcome> {
     // gate exists to catch, and its logs — the only record of which specifier Deno tried to
     // record — must survive until they are read below. `resources.container` is unique to this
     // invocation, so cleanup can never remove a concurrent check's container.
-    const started = await run([
-      'docker',
-      'run',
-      '-d',
-      '--name',
-      resources.container,
-      '--read-only',
-      '--network',
-      `container:${resources.broker}`,
-      '--tmpfs',
-      '/tmp',
-      resources.image,
-    ], { quiet: true });
+    const started = await run(
+      [
+        'docker',
+        'run',
+        '-d',
+        '--name',
+        resources.container,
+        '--read-only',
+        '--network',
+        `container:${resources.broker}`,
+        '--tmpfs',
+        '/tmp',
+        resources.image,
+      ],
+      { quiet: true },
+    );
     if (!started.success) {
       console.error('  ✗ the image did not start');
       console.error(started.stderr);
@@ -857,16 +849,19 @@ async function checkGenerated(): Promise<CheckOutcome> {
 
     let served = false;
     for (let attempt = 0; attempt < GENERATED_PROBE_ATTEMPTS; attempt += 1) {
-      const probe = await run([
-        'docker',
-        'exec',
-        resources.container,
-        'wget',
-        '-q',
-        '-O',
-        '/dev/null',
-        `http://127.0.0.1:${GENERATED_PORT}/health`,
-      ], { quiet: true });
+      const probe = await run(
+        [
+          'docker',
+          'exec',
+          resources.container,
+          'wget',
+          '-q',
+          '-O',
+          '/dev/null',
+          `http://127.0.0.1:${GENERATED_PORT}/health`,
+        ],
+        { quiet: true },
+      );
       if (probe.success) {
         served = true;
         break;
@@ -941,18 +936,21 @@ async function checkCluster(): Promise<CheckOutcome> {
     const image = 'setu/rest-api:m39';
     if (!(await run(['docker', 'image', 'inspect', image], { quiet: true })).success) {
       console.log(`  building ${image} first …`);
-      const built = await run([
-        'docker',
-        'build',
-        '--quiet',
-        '-f',
-        'docker/Dockerfile',
-        '--build-arg',
-        'APP=rest-api',
-        '-t',
-        image,
-        '.',
-      ], { quiet: true });
+      const built = await run(
+        [
+          'docker',
+          'build',
+          '--quiet',
+          '-f',
+          'docker/Dockerfile',
+          '--build-arg',
+          'APP=rest-api',
+          '-t',
+          image,
+          '.',
+        ],
+        { quiet: true },
+      );
       if (!built.success) {
         console.error(`  ✗ could not build ${image}`);
         return 'failed';
@@ -960,9 +958,7 @@ async function checkCluster(): Promise<CheckOutcome> {
     }
 
     console.log(`  loading ${image} into the cluster …`);
-    if (
-      !(await run(['kind', 'load', 'docker-image', image, '--name', CLUSTER_NAME])).success
-    ) {
+    if (!(await run(['kind', 'load', 'docker-image', image, '--name', CLUSTER_NAME])).success) {
       console.error('  ✗ kind load failed');
       return 'failed';
     }
@@ -970,10 +966,9 @@ async function checkCluster(): Promise<CheckOutcome> {
     await run(kubectl('create', 'namespace', NAMESPACE), { quiet: true });
 
     console.log('  applying the COMMITTED manifests …');
-    const applied = await run(
-      kubectl('apply', '-n', NAMESPACE, '-f', 'k8s/manifests/'),
-      { quiet: true },
-    );
+    const applied = await run(kubectl('apply', '-n', NAMESPACE, '-f', 'k8s/manifests/'), {
+      quiet: true,
+    });
     if (!applied.success) {
       console.error('  ✗ kubectl apply failed');
       await run(kubectl('apply', '-n', NAMESPACE, '-f', 'k8s/manifests/'));

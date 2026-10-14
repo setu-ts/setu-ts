@@ -40,11 +40,7 @@ async function withApp(
 describe('gRPC ↔ HTTP health agreement (M70c X7-8)', () => {
   it('a degraded process is NOT_SERVING over gRPC and 503 over /ready', async () => {
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        HealthPlugin({ indicators: [degradedIndicator()] }),
-        GrpcPlugin(),
-      ],
+      plugins: [RuntimePlugin(), HealthPlugin({ indicators: [degradedIndicator()] }), GrpcPlugin()],
     });
 
     await withApp(app, async (running) => {

@@ -105,12 +105,15 @@ export function withQueueArgs(
 export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] {
   const connection = spec.connection;
   if (connection === undefined) return [];
-  return [{
-    name: connection.variable,
-    description: `Where the ${spec.name} transport connects. The default is this project's local ` +
-      `development value; deployments set the real endpoint here.`,
-    develop: connection.localDefault,
-  }];
+  return [
+    {
+      name: connection.variable,
+      description:
+        `Where the ${spec.name} transport connects. The default is this project's local ` +
+        `development value; deployments set the real endpoint here.`,
+      develop: connection.localDefault,
+    },
+  ];
 }
 
 /**
@@ -126,20 +129,21 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
  * @param specs - The selected transports, in flag order
  * @returns The compose file plus any backing-service config files
  */
-export function brokerComposeFiles(
-  specs: readonly TransportSpec[],
-): readonly GeneratedFile[] {
+export function brokerComposeFiles(specs: readonly TransportSpec[]): readonly GeneratedFile[] {
   // One arm can serve both flags (`--broker redis --queue redis`); its service
   // block must appear once, not twice.
-  const backing = [...new Map(
-    specs.filter((spec) => spec.compose !== undefined).map((spec) => [spec.name, spec]),
-  ).values()];
+  const backing = [
+    ...new Map(
+      specs.filter((spec) => spec.compose !== undefined).map((spec) => [spec.name, spec]),
+    ).values(),
+  ];
 
   if (backing.length === 0) return [];
 
-  const files: GeneratedFile[] = [{
-    path: BROKER_COMPOSE_FILE,
-    contents: `# Local development backing services for this project.
+  const files: GeneratedFile[] = [
+    {
+      path: BROKER_COMPOSE_FILE,
+      contents: `# Local development backing services for this project.
 #
 #   docker compose -f ${BROKER_COMPOSE_FILE} up -d
 #
@@ -149,7 +153,8 @@ export function brokerComposeFiles(
 services:
 ${backing.map((spec) => (spec.compose?.services ?? '').replace(/\n$/, '')).join('\n')}
 `,
-  }];
+    },
+  ];
 
   for (const spec of backing) {
     for (const file of spec.compose?.files ?? []) files.push(file);
@@ -175,22 +180,28 @@ export function standaloneOverlayRefusal(
   host: ResolvedHost,
 ): string | undefined {
   if (runtime === 'cloudflare-workers') {
-    return `--${flag} cannot apply on Cloudflare Workers: the Workers build replaces ` +
+    return (
+      `--${flag} cannot apply on Cloudflare Workers: the Workers build replaces ` +
       `${MESSAGING_PACKAGE} and ${QUEUE_PACKAGE} with the platform's own queues and a Durable ` +
       `Object, so there is no wiring left for the flag to rewrite and it would report success ` +
-      `while the project talked to Cloudflare. Scaffold for deno, node or bun to select one.`;
+      `while the project talked to Cloudflare. Scaffold for deno, node or bun to select one.`
+    );
   }
   if (host.appFactory !== undefined) {
-    return `--${flag} cannot apply to a starter-composed template: the whole plugin set is ` +
+    return (
+      `--${flag} cannot apply to a starter-composed template: the whole plugin set is ` +
       `rendered through the starter factory, so a plugin-list rewrite would be dropped and the ` +
       `project would look connected while talking to nobody. Use --template microservice to ` +
-      `select a ${flag}.`;
+      `select a ${flag}.`
+    );
   }
   const pkg = flag === 'broker' ? MESSAGING_PACKAGE : QUEUE_PACKAGE;
   if (!host.plugins.some((wiring) => wiring.pkg === pkg)) {
-    return `--${flag} has nothing to configure: this template registers no ${pkg} wiring, so the ` +
+    return (
+      `--${flag} has nothing to configure: this template registers no ${pkg} wiring, so the ` +
       `flag would be accepted and silently do nothing. Use --template microservice to select ` +
-      `a ${flag} (add --style class-based for decorators).`;
+      `a ${flag} (add --style class-based for decorators).`
+    );
   }
   return undefined;
 }

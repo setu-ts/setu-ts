@@ -50,9 +50,7 @@ const DEFAULT_SLOW_THRESHOLD = 5000;
  * @returns The middleware function
  * @since 0.1.0
  */
-export function createRequestLoggerMiddleware(
-  options?: RequestLoggerOptions,
-): MiddlewareFunction {
+export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): MiddlewareFunction {
   const threshold = options?.slowRequestThreshold ?? DEFAULT_SLOW_THRESHOLD;
   // Partitioned once at registration. For an all-string list — which is every
   // list this option has ever been given — the matcher is the same `Set.has`

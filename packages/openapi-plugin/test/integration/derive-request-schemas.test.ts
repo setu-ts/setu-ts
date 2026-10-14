@@ -44,7 +44,7 @@ async function specFrom(
   await app.start();
   try {
     const res = await app.fetch(new Request('http://localhost/openapi.json'));
-    return await res.json() as OpenApiDocument;
+    return (await res.json()) as OpenApiDocument;
   } finally {
     await app.stop();
   }

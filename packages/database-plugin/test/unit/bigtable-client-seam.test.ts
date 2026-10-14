@@ -50,9 +50,10 @@ function fakeModule(log: SdkLog, rows: { id: string; data?: unknown }[] = []): B
               // that once is the whole point of this seam.
               getRows: (options: unknown) => {
                 log.reads.push(options);
-                return Promise.resolve(
-                  [rows as { id: string }[]] as [readonly { id: string }[], ...unknown[]],
-                );
+                return Promise.resolve([rows as { id: string }[]] as [
+                  readonly { id: string }[],
+                  ...unknown[],
+                ]);
               },
               row: (key: string) => ({
                 filter: (test: readonly unknown[], branches: unknown) => {
@@ -110,36 +111,45 @@ describe('adaptBigtableSdkModule', () => {
   it('unwraps the SDK read tuple and normalises the row shape', async () => {
     const log = newLog();
     const client = adaptBigtableSdkModule(
-      fakeModule(log, [{
-        id: 'u1',
-        data: { cf: { name: [{ value: 'ada', timestamp: '9' }, { value: 'old' }] } },
-      }]),
+      fakeModule(log, [
+        {
+          id: 'u1',
+          data: { cf: { name: [{ value: 'ada', timestamp: '9' }, { value: 'old' }] } },
+        },
+      ]),
       { projectId: 'p' },
     );
-    const rows = await client.instance('i').table('t').readRows({ keys: ['u1'] });
+    const rows = await client
+      .instance('i')
+      .table('t')
+      .readRows({ keys: ['u1'] });
     // The SDK's per-cell timestamp is DROPPED: cell versioning has no
     // counterpart in the portable contract, so carrying it would be a value
     // nothing reads.
-    expect(rows).toEqual([{
-      key: 'u1',
-      data: { cf: { name: [{ value: 'ada' }, { value: 'old' }] } },
-    }]);
+    expect(rows).toEqual([
+      {
+        key: 'u1',
+        data: { cf: { name: [{ value: 'ada' }, { value: 'old' }] } },
+      },
+    ]);
   });
 
   it('decodes a byte-valued cell a foreign writer stored', async () => {
     const log = newLog();
     const client = adaptBigtableSdkModule(
-      fakeModule(log, [{
-        id: 'u1',
-        data: {
-          cf: {
-            raw: [{ value: new TextEncoder().encode('bytes') }],
-            odd: [{ value: 7, timestamp: 5 }],
-            none: [{ value: null }],
-            bad: ['not-a-cell'],
+      fakeModule(log, [
+        {
+          id: 'u1',
+          data: {
+            cf: {
+              raw: [{ value: new TextEncoder().encode('bytes') }],
+              odd: [{ value: 7, timestamp: 5 }],
+              none: [{ value: null }],
+              bad: ['not-a-cell'],
+            },
           },
         },
-      }]),
+      ]),
       { projectId: 'p' },
     );
     const rows = await client.instance('i').table('t').readRows({});
@@ -171,17 +181,26 @@ describe('adaptBigtableSdkModule', () => {
         { condition: { test: [{ value: { strip: true } }] } },
       ],
     };
-    await client.instance('i').table('t').readRows({
-      ranges: [{ start: { value: 'a', inclusive: true } }, {
-        end: { value: 'z', inclusive: false },
-      }],
-      filter,
-      limit: 4,
-    });
+    await client
+      .instance('i')
+      .table('t')
+      .readRows({
+        ranges: [
+          { start: { value: 'a', inclusive: true } },
+          {
+            end: { value: 'z', inclusive: false },
+          },
+        ],
+        filter,
+        limit: 4,
+      });
     expect(log.reads[0]).toEqual({
-      ranges: [{ start: { value: 'a', inclusive: true } }, {
-        end: { value: 'z', inclusive: false },
-      }],
+      ranges: [
+        { start: { value: 'a', inclusive: true } },
+        {
+          end: { value: 'z', inclusive: false },
+        },
+      ],
       limit: 4,
       filter: [
         { family: 'cf' },
@@ -199,13 +218,14 @@ describe('adaptBigtableSdkModule', () => {
   it('forwards both CheckAndMutateRow branches and reports the match flag', async () => {
     const log = newLog();
     const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
-    const matched = await client.instance('i').table('t').row('u1').conditionalMutate(
-      [{ all: true }],
-      {
+    const matched = await client
+      .instance('i')
+      .table('t')
+      .row('u1')
+      .conditionalMutate([{ all: true }], {
         onMatch: [{ method: 'delete' }, { method: 'insert', data: { cf: { a: '1' } } }],
         onNoMatch: [{ method: 'insert', data: { cf: { a: '2' } } }],
-      },
-    );
+      });
     expect(matched).toBe(true);
     expect(log.branches[0]).toEqual({
       onMatch: [{ method: 'delete' }, { method: 'insert', data: { cf: { a: '1' } } }],
@@ -216,7 +236,11 @@ describe('adaptBigtableSdkModule', () => {
   it('omits a branch the caller did not supply', async () => {
     const log = newLog();
     const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
-    await client.instance('i').table('t').row('u1').conditionalMutate([{ all: true }], {});
+    await client
+      .instance('i')
+      .table('t')
+      .row('u1')
+      .conditionalMutate([{ all: true }], {});
     expect(log.branches[0]).toEqual({});
   });
 
@@ -237,8 +261,11 @@ it('loads and closes the installed Bigtable SDK without making a remote call', a
 it('preserves both interleaved filter arms on the SDK read wire', async () => {
   const log = newLog();
   const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
-  await client.instance('i').table('t').readRows({
-    filter: { interleave: [[{ all: true }], [{ family: 'cf' }]] },
-  });
+  await client
+    .instance('i')
+    .table('t')
+    .readRows({
+      filter: { interleave: [[{ all: true }], [{ family: 'cf' }]] },
+    });
   expect(log.reads).toEqual([{ filter: { interleave: [[{ all: true }], [{ family: 'cf' }]] } }]);
 });

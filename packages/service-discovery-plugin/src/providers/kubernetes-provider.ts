@@ -78,11 +78,7 @@ export class KubernetesProvider implements DiscoveryProvider {
    * @param http - The HTTP seam
    * @param runtime - Supplies the monotonic clock, timers, and `fs`
    */
-  constructor(
-    options: KubernetesProviderOptions,
-    http: IDiscoveryHttp,
-    runtime: IRuntimeServices,
-  ) {
+  constructor(options: KubernetesProviderOptions, http: IDiscoveryHttp, runtime: IRuntimeServices) {
     this.#options = options;
     this.#http = http;
     this.#runtime = runtime;
@@ -100,8 +96,10 @@ export class KubernetesProvider implements DiscoveryProvider {
       labelSelector: `kubernetes.io/service-name=${serviceName}`,
       ...extra,
     });
-    return `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
-      `${encodeURIComponent(this.#options.namespace)}/endpointslices?${params}`;
+    return (
+      `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
+      `${encodeURIComponent(this.#options.namespace)}/endpointslices?${params}`
+    );
   }
 
   /**
@@ -194,7 +192,8 @@ export class KubernetesProvider implements DiscoveryProvider {
    */
   async isHealthy(): Promise<boolean> {
     try {
-      const url = `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
+      const url =
+        `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
         `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
       const response = await this.#http.request(url, {
         headers: { Authorization: await this.authHeader() },
@@ -228,8 +227,8 @@ export class KubernetesProvider implements DiscoveryProvider {
    * @throws {DiscoveryUnavailableError} If several exist and none was named
    */
   #selectPort(ports: readonly SlicePort[], serviceName: string): number | null {
-    const declared = ports.filter((entry): entry is SlicePort & { port: number } =>
-      entry.port !== undefined
+    const declared = ports.filter(
+      (entry): entry is SlicePort & { port: number } => entry.port !== undefined,
     );
     if (declared.length === 0) {
       return null;

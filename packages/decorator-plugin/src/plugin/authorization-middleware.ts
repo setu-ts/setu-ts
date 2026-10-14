@@ -91,6 +91,6 @@ export function createRolesMiddleware(roles: readonly string[]): MiddlewareFunct
  */
 export function createPermissionsMiddleware(permissions: readonly string[]): MiddlewareFunction {
   return authorizationMiddleware((authorization, user) =>
-    permissions.some((p) => authorization.hasPermission(user, p))
+    permissions.some((p) => authorization.hasPermission(user, p)),
   );
 }

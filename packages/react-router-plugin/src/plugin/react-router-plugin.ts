@@ -33,15 +33,7 @@ const DEFAULT_BASENAME = '/';
 const DEFAULT_MODE = 'production';
 
 /** All HTTP verbs for the catch-all. */
-const ALL_VERBS = [
-  'GET',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-  'HEAD',
-  'OPTIONS',
-] as const;
+const ALL_VERBS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 
 /**
  * Joins a prefix with `/*`, handling trailing slashes safely.
@@ -136,8 +128,7 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       // Resolve the RR handler and its context-provider factory via the
       // injectable seam. Both come from one `react-router` module object.
       const mode = options.mode ?? DEFAULT_MODE;
-      const getLoadRequestHandler = options.loadRequestHandler ??
-        loadRequestHandler;
+      const getLoadRequestHandler = options.loadRequestHandler ?? loadRequestHandler;
       // Validated at registration: a seam returning the pre-0.2.0 bare handler
       // would otherwise register cleanly and 500 on every request instead.
       const { handler, createLoadContext } = assertSsrRuntime(
@@ -145,11 +136,7 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       );
 
       // Build and register the SSR service.
-      const ssrService = new SsrService(
-        handler,
-        createLoadContext,
-        options.populateLoadContext,
-      );
+      const ssrService = new SsrService(handler, createLoadContext, options.populateLoadContext);
       ctx.services.register<ISsrService>(CAPABILITIES.SSR, ssrService);
 
       // Register the SSR catch-all route for all 7 verbs. The route handler is
@@ -166,10 +153,7 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       // caching (those files are not content-hashed); every miss falls through
       // to SSR unchanged.
       let getRoute = renderRoute;
-      if (
-        options.publicFiles !== false && options.assetsDir != null &&
-        runtime.fs != null
-      ) {
+      if (options.publicFiles !== false && options.assetsDir != null && runtime.fs != null) {
         // Probe the client-build ROOT, not the assets subdir — `public/`
         // copies land beside `assets/`, not inside them. A root that cannot be
         // derived without widening past the build directory is REFUSED: the
@@ -226,8 +210,7 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
 
       // Register static-asset route (only when assetsDir is provided).
       if (options.assetsDir != null) {
-        const assetUrlPrefix = options.assetUrlPrefix ??
-          DEFAULT_ASSET_URL_PREFIX;
+        const assetUrlPrefix = options.assetUrlPrefix ?? DEFAULT_ASSET_URL_PREFIX;
 
         if (runtime.fs != null) {
           const assetRoutePattern = joinWildcard(assetUrlPrefix);
@@ -242,16 +225,14 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       }
 
       // Register health indicator (§3.8).
-      ctx.health.register(
-        'react-router',
-        (): Promise<HealthCheckResult> =>
-          Promise.resolve({
-            status: 'up',
-            data: {
-              mode,
-              serverBuildPath: options.serverBuildPath,
-            },
-          }),
+      ctx.health.register('react-router', (): Promise<HealthCheckResult> =>
+        Promise.resolve({
+          status: 'up',
+          data: {
+            mode,
+            serverBuildPath: options.serverBuildPath,
+          },
+        }),
       );
 
       // NO onClose hook — the handler is stateless (no socket, pool, timer, or subscription).

@@ -61,17 +61,13 @@ describe('Activation', () => {
       ],
       // NO diagnostics option: M98a was not enabled.
     });
-    await expect(app.start()).rejects.toThrow(
-      /not created with kernel diagnostics enabled/,
-    );
+    await expect(app.start()).rejects.toThrow(/not created with kernel diagnostics enabled/);
   });
 
   it('refuses listen before any bind on a non-Deno runtime', async () => {
     const factory = await (async () => {
       const app = createApplication({
-        plugins: [
-          RuntimePlugin({ platform: 'node' }),
-        ],
+        plugins: [RuntimePlugin({ platform: 'node' })],
       });
       await app.start();
       const factory = app.services.get<ILocalDiagnosticsListenerFactory>(
@@ -80,8 +76,9 @@ describe('Activation', () => {
       await app.stop();
       return factory;
     })();
-    await expect(factory.listen({ port: 4919, handler: () => undefined as never }))
-      .rejects.toThrow(/no supported local transport/);
+    await expect(factory.listen({ port: 4919, handler: () => undefined as never })).rejects.toThrow(
+      /no supported local transport/,
+    );
   });
 
   it('activates on an honest composition and answers a real signed read', async () => {

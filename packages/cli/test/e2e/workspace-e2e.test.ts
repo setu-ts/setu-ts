@@ -113,8 +113,9 @@ describe('workspace scaffolding — end to end', () => {
    * @returns The workspace root directory
    */
   async function twoMembers(): Promise<string> {
-    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]))
-      .toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]),
+    ).toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
     expect(await run(['g', 'app', 'billing', '--template', 'microservice', '--dir', ws])).toBe(0);
@@ -122,8 +123,9 @@ describe('workspace scaffolding — end to end', () => {
   }
 
   it('builds and serves a custom-scoped workspace library through SSR, and ignores node_modules', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]))
-      .toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]),
+    ).toBe(0);
     const ws = `${root}/shop`;
     // Exercise the upgrade of a root created before node_modules was ignored.
     await nodeFs.writeFile(`${ws}/.gitignore`, 'coverage/\n');
@@ -139,10 +141,8 @@ describe('workspace scaffolding — end to end', () => {
     const route = await nodeFs.readFile(routePath, 'utf8');
     await nodeFs.writeFile(
       routePath,
-      "import { shared } from '~/lib/workspace.server.ts';\n" + route.replace(
-        "session.get<string>('userEmail') ?? null",
-        "shared('served-from-library')",
-      ),
+      "import { shared } from '~/lib/workspace.server.ts';\n" +
+        route.replace("session.get<string>('userEmail') ?? null", "shared('served-from-library')"),
     );
 
     const build = async () => {
@@ -169,11 +169,15 @@ describe('workspace scaffolding — end to end', () => {
     const built = await build();
     expect(built.code, built.output).toBe(0);
     expect(await serverBundle()).toMatch(/from ["']@custom\/shared["']/);
-    await withGeneratedServer(project, async (origin) => {
-      const response = await fetch(origin);
-      expect(response.status).toBe(200);
-      expect(await response.text()).toContain('shared: served-from-library');
-    }, base);
+    await withGeneratedServer(
+      project,
+      async (origin) => {
+        const response = await fetch(origin);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain('shared: served-from-library');
+      },
+      base,
+    );
     const git = async (args: string[]) =>
       await runProcess('git', {
         args,
@@ -236,9 +240,9 @@ describe('workspace scaffolding — end to end', () => {
     expect(scaffolded.code, scaffolded.output).toBe(0);
 
     // The generate half: the CQRS barrel rendered its array on one long line.
-    expect(
-      await run(['g', 'command-handler', 'place-order', '--dir', `${ws}/apps/orders`]),
-    ).toBe(0);
+    expect(await run(['g', 'command-handler', 'place-order', '--dir', `${ws}/apps/orders`])).toBe(
+      0,
+    );
     const generated = await check(['fmt', '--check']);
     expect(generated.code, generated.output).toBe(0);
 
@@ -311,9 +315,9 @@ describe('workspace scaffolding — end to end', () => {
     // Belt and braces on the property itself, so a future `fmt` default that
     // tolerated a long line could not silently retire this check.
     for (const family of ['plugins', 'services', 'metrics', 'health', 'cqrs', 'events']) {
-      const barrel = await nodeFs.readFile(`${project}/src/${family}/index.ts`, 'utf8').catch(() =>
-        ''
-      );
+      const barrel = await nodeFs
+        .readFile(`${project}/src/${family}/index.ts`, 'utf8')
+        .catch(() => '');
       for (const line of barrel.split('\n')) {
         expect(line.length, `${family}/index.ts: ${line}`).toBeLessThanOrEqual(100);
       }
@@ -346,9 +350,7 @@ describe('workspace scaffolding — end to end', () => {
     await nodeFs.rm(`${ws}/apps/billing`, { recursive: true });
     const manifestBefore = await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8');
 
-    expect(
-      await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws]),
-    ).toBe(1);
+    expect(await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws])).toBe(1);
     await expect(nodeFs.stat(`${ws}/apps/billing`)).rejects.toThrow();
     await expect(nodeFs.stat(`${ws}/apps/shipping`)).rejects.toThrow();
     expect(await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8')).toBe(manifestBefore);
@@ -427,15 +429,14 @@ describe('workspace scaffolding — end to end', () => {
     // The file is emitted `managed`, so regeneration re-renders it — an
     // existing workspace picks the change up on its next `generate app` with
     // no migration step.
-    expect(await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws])).toBe(
-      0,
-    );
+    expect(await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws])).toBe(0);
     expect(await nodeFs.readFile(dockerfilePath, 'utf8')).toContain('"run", "--frozen"');
   });
 
   it('does not start a dependent until its prerequisite answers /ready', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]))
-      .toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--port', String(base)]),
+    ).toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
     expect(
@@ -558,8 +559,7 @@ describe('workspace scaffolding — end to end', () => {
         '--port',
         String(base),
       ]),
-    )
-      .toBe(0);
+    ).toBe(0);
     const ws = `${root}/acme`;
     expect(
       await run([
@@ -620,8 +620,9 @@ describe('workspace scaffolding — end to end', () => {
   // exactly the shape no unit test can check — the two-member case above never
   // exercises it, because by then both maps have an entry.
   it('type-checks a lone member, whose map is empty', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'solo', '--workspace', '--port', String(base)]))
-      .toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'solo', '--workspace', '--port', String(base)]),
+    ).toBe(0);
     const ws = `${root}/solo`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
 
@@ -649,8 +650,9 @@ describe('workspace scaffolding — end to end', () => {
   // What it CAN check is everything up to the build: the member exists, the root
   // gained exactly one field, and the server-side modules type-check.
   it('adds a full-stack member and enables node_modules at the root', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]))
-      .toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]),
+    ).toBe(0);
     const ws = `${root}/shop`;
     expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
 
@@ -686,8 +688,9 @@ describe('workspace scaffolding — end to end', () => {
   });
 
   it('type-checks a full-stack member in a grpc workspace', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--transport', 'grpc']))
-      .toBe(0);
+    expect(
+      await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--transport', 'grpc']),
+    ).toBe(0);
     const ws = `${root}/shop`;
     expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
 
@@ -812,7 +815,8 @@ describe('workspace scaffolding — end to end', () => {
       let sibling = "  (sibling 'billing' output unavailable — its teardown failed)";
       try {
         const { out, err } = await shutdown();
-        sibling = `--- sibling 'billing' (expected on port ${base + 1}) stdout ---\n${out}\n` +
+        sibling =
+          `--- sibling 'billing' (expected on port ${base + 1}) stdout ---\n${out}\n` +
           `--- sibling 'billing' stderr ---\n${err}`;
       } catch (teardown) {
         sibling += `\n  teardown: ${(teardown as Error).message}`;

@@ -323,13 +323,7 @@ export class NodeHttpServerHandle {
 
     // Upgrade intent found — perform the handshake.
     try {
-      await this.#coordinator.handshake(
-        incoming,
-        socket,
-        head,
-        intent.sink,
-        intent.protocol,
-      );
+      await this.#coordinator.handshake(incoming, socket, head, intent.sink, intent.protocol);
     } catch (cause) {
       // The kernel already accepted, so release whatever the consumer reserved
       // for this socket before refusing on the wire.
@@ -387,7 +381,7 @@ export class NodeHttpServerHandle {
       const frameworkResponse = this.#handler(frameworkRequest);
       if (isPromiseLike(frameworkResponse)) {
         return Promise.resolve(frameworkResponse).then((resolved) =>
-          this.#finishFetch(request, frameworkRequest, resolved, env)
+          this.#finishFetch(request, frameworkRequest, resolved, env),
         );
       }
       return this.#finishFetch(request, frameworkRequest, frameworkResponse, env);
@@ -460,11 +454,7 @@ export class NodeHttpAdapter implements IHttpAdapter {
   #host: NodeServeHost;
   #handle: NodeHttpServerHandle;
 
-  constructor(
-    host?: NodeServeHost,
-    wsModule?: WsModuleLike,
-    options?: HttpAdapterOptions,
-  ) {
+  constructor(host?: NodeServeHost, wsModule?: WsModuleLike, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultNodeServeHost;
     this.#handle = new NodeHttpServerHandle(wsModule, options?.maxBodyBytes);
   }

@@ -148,8 +148,8 @@ function runner(runtime: TargetRuntime): string {
   const run = onDeno
     ? 'deno run -A src/migrations/run.ts'
     : runtime === 'bun'
-    ? 'bun run src/migrations/run.ts'
-    : 'npx tsx src/migrations/run.ts';
+      ? 'bun run src/migrations/run.ts'
+      : 'npx tsx src/migrations/run.ts';
   // Deno has `import.meta.main`; Node gained it only in 24.2 and the floor is 22,
   // so an npm target compares its own URL with the script Node was asked to run.
   const entry = onDeno

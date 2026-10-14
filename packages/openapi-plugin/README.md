@@ -204,7 +204,9 @@ available without writing a schema:
 class AuthController {
   @Public()
   @Post('/login')
-  login() {/* ... */}
+  login() {
+    /* ... */
+  }
 }
 ```
 

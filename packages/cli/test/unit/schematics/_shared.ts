@@ -68,10 +68,7 @@ export function gateOf(name: string): string | undefined {
  * @param schematic - The schematic name, for its seam's barrel path
  * @returns The single non-barrel file
  */
-export function artifactOf(
-  files: readonly GeneratedFile[],
-  schematic: string,
-): GeneratedFile {
+export function artifactOf(files: readonly GeneratedFile[], schematic: string): GeneratedFile {
   const barrel = seamSpecFor(schematic)?.barrel;
   const artifacts = files.filter((file) => file.path !== barrel);
   expect(artifacts.length).toBe(1);
@@ -85,10 +82,7 @@ export function artifactOf(
  * @param schematic - The schematic name, for its seam's barrel path
  * @returns The barrel file
  */
-export function barrelOf(
-  files: readonly GeneratedFile[],
-  schematic: string,
-): GeneratedFile {
+export function barrelOf(files: readonly GeneratedFile[], schematic: string): GeneratedFile {
   const barrel = seamSpecFor(schematic)!.barrel;
   const found = files.find((file) => file.path === barrel);
   expect(found).toBeDefined();
@@ -139,14 +133,9 @@ export function assertSeamContract(
     names,
     options(plugins, [], { [schematic]: [...existing, names.kebab] }),
   );
-  expect(barrelOf(withDuplicate, schematic).contents).toBe(
-    barrelOf(files, schematic).contents,
-  );
+  expect(barrelOf(withDuplicate, schematic).contents).toBe(barrelOf(files, schematic).contents);
 
   // Byte-identical across reordered input: the barrel sorts before rendering.
-  const reversed = factory(
-    names,
-    options(plugins, [], { [schematic]: [...existing].reverse() }),
-  );
+  const reversed = factory(names, options(plugins, [], { [schematic]: [...existing].reverse() }));
   expect(barrelOf(reversed, schematic).contents).toBe(barrelOf(files, schematic).contents);
 }

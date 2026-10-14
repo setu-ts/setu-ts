@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Integration tests for Deno HTTP adapter — REAL round-trip with Deno.serve.
  *
@@ -17,7 +17,7 @@ describe('deno-http-adapter integration', () => {
 
     const adapter = new DenoHttpAdapter();
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -42,7 +42,7 @@ describe('deno-http-adapter integration', () => {
 
     // After close, the socket should be released — try re-binding
     const adapter2 = new DenoHttpAdapter();
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter2.setHandler(async (_request) => {
       return {
         snapshot: () => ({

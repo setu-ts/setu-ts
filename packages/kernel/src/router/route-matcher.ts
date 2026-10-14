@@ -53,18 +53,21 @@ export function parsePattern(pattern: string): readonly Segment[] {
   if (normalized === '/') {
     return [{ type: 'static', value: '' }];
   }
-  return normalized.slice(1).split('/').map((part) => {
-    if (part.startsWith(':')) {
-      return { type: 'param', name: part.slice(1) };
-    }
-    // Exactly `*`, never a segment merely CONTAINING one: `/a*` is not a pattern
-    // any first-party plugin registers, and treating it as a wildcard would lower
-    // the specificity of a path that matches literally.
-    if (part === '*') {
-      return { type: 'wildcard' };
-    }
-    return { type: 'static', value: part };
-  });
+  return normalized
+    .slice(1)
+    .split('/')
+    .map((part) => {
+      if (part.startsWith(':')) {
+        return { type: 'param', name: part.slice(1) };
+      }
+      // Exactly `*`, never a segment merely CONTAINING one: `/a*` is not a pattern
+      // any first-party plugin registers, and treating it as a wildcard would lower
+      // the specificity of a path that matches literally.
+      if (part === '*') {
+        return { type: 'wildcard' };
+      }
+      return { type: 'static', value: part };
+    });
 }
 
 /**

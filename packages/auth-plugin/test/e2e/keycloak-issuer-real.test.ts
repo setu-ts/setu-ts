@@ -54,14 +54,16 @@ async function buildApp(): Promise<IKernelApplication> {
     plugins: [
       RuntimePlugin(),
       AuthPlugin({
-        issuers: [{
-          name: 'keycloak',
-          issuer: REALM,
-          audience: 'setu-api',
-          keys: { discovery: true },
-          keySet: { minRefreshIntervalMs: 1 },
-          toPrincipal: (claims) => ({ id: String(claims.azp) }),
-        }],
+        issuers: [
+          {
+            name: 'keycloak',
+            issuer: REALM,
+            audience: 'setu-api',
+            keys: { discovery: true },
+            keySet: { minRefreshIntervalMs: 1 },
+            toPrincipal: (claims) => ({ id: String(claims.azp) }),
+          },
+        ],
       }),
     ],
   });
@@ -110,7 +112,7 @@ describe('Keycloak issuer (real)', { skip: BASE === undefined }, () => {
     const app = await buildApp();
     try {
       const real = await clientToken('setu-api-client', 'setu-api-client-secret');
-      const jwks = await (await fetch(`${REALM}/protocol/openid-connect/certs`)).json() as {
+      const jwks = (await (await fetch(`${REALM}/protocol/openid-connect/certs`)).json()) as {
         keys: Array<Record<string, unknown>>;
       };
       const signing = jwks.keys.find((key) => key.kid === kidOf(real))!;
@@ -146,7 +148,7 @@ describe('Keycloak issuer (real)', { skip: BASE === undefined }, () => {
       const before = await clientToken('setu-api-client', 'setu-api-client-secret');
       expect((await me(app, before)).statusCode).toBe(200);
 
-      const realm = await (await fetch(`${BASE}/admin/realms/setu`, { headers })).json() as {
+      const realm = (await (await fetch(`${BASE}/admin/realms/setu`, { headers })).json()) as {
         id: string;
       };
       const created = await fetch(`${BASE}/admin/realms/setu/components`, {

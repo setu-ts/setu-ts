@@ -35,11 +35,11 @@ export type TokenExchangeFailure =
 export type TokenExchangeOutcome =
   | { readonly ok: true; readonly tokens: ProviderTokens }
   | {
-    readonly ok: false;
-    readonly reason: TokenExchangeFailure;
-    /** The provider's own `error` code, sanitised; absent when it sent none. */
-    readonly errorCode?: string;
-  };
+      readonly ok: false;
+      readonly reason: TokenExchangeFailure;
+      /** The provider's own `error` code, sanitised; absent when it sent none. */
+      readonly errorCode?: string;
+    };
 
 /** Parameters of {@linkcode exchangeCode}. */
 export interface ExchangeCodeInput {
@@ -108,10 +108,7 @@ function sanitizeErrorCode(value: unknown): string | undefined {
  * @param body - The response body
  * @returns The tokens, or the reason the response is unusable
  */
-export function parseTokenResponse(
-  status: number,
-  body: string,
-): TokenExchangeOutcome {
+export function parseTokenResponse(status: number, body: string): TokenExchangeOutcome {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -135,9 +132,10 @@ export function parseTokenResponse(
   const scope = typeof record.scope === 'string' ? record.scope : undefined;
   const refreshToken = typeof record.refresh_token === 'string' ? record.refresh_token : undefined;
   const idToken = typeof record.id_token === 'string' ? record.id_token : undefined;
-  const expiresIn = typeof record.expires_in === 'number' && Number.isFinite(record.expires_in)
-    ? record.expires_in
-    : undefined;
+  const expiresIn =
+    typeof record.expires_in === 'number' && Number.isFinite(record.expires_in)
+      ? record.expires_in
+      : undefined;
   return {
     ok: true,
     tokens: {
@@ -181,9 +179,9 @@ export async function exchangeCode(
       return { ok: false, reason: 'invalid-response' };
     }
     // RFC 6749 §2.3.1: both halves are form-encoded before being joined with ':'.
-    headers.authorization = `Basic ${
-      base64Utf8(`${formEncode(input.clientId)}:${formEncode(input.clientSecret)}`)
-    }`;
+    headers.authorization = `Basic ${base64Utf8(
+      `${formEncode(input.clientId)}:${formEncode(input.clientSecret)}`,
+    )}`;
   } else if (input.auth === 'client_secret_post') {
     if (typeof input.clientSecret !== 'string' || input.clientSecret.length === 0) {
       return { ok: false, reason: 'invalid-response' };
@@ -216,10 +214,11 @@ export async function fetchUserInfo(
     readonly signal: AbortSignal;
   },
 ): Promise<
-  { readonly ok: true; readonly claims: Readonly<Record<string, unknown>> } | {
-    readonly ok: false;
-    readonly reason: TokenExchangeFailure;
-  }
+  | { readonly ok: true; readonly claims: Readonly<Record<string, unknown>> }
+  | {
+      readonly ok: false;
+      readonly reason: TokenExchangeFailure;
+    }
 > {
   // RFC 6750 §2.1: the access token rides the Authorization header. Without it
   // every provider answers 401, so no oauth2 sign-in could ever succeed.

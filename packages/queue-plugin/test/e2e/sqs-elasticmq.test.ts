@@ -27,7 +27,7 @@ function createRuntime(): IRuntimeServices {
     now: () => Date.now(),
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms) as ReturnType<typeof setTimeout>,
     clearTimeout: (h: ReturnType<typeof setTimeout>) => clearTimeout(h),
-    setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
     clearInterval: () => {},
     randomBytes: () => new Uint8Array(16),
     subtle: undefined,
@@ -96,7 +96,7 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
     }) as unknown as typeof sqsClient;
 
     for (const name of Object.values(NAMES)) {
-      const result = await sqsClient!.send(createQueue(name)) as { QueueUrl?: string };
+      const result = (await sqsClient!.send(createQueue(name))) as { QueueUrl?: string };
       expect(result.QueueUrl).toBeDefined();
       urls[name] = result.QueueUrl!;
     }
@@ -251,9 +251,9 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
 
     // The body must actually arrive on the DLQ — the previous version of this
     // test only checked that `deadLetter` did not throw.
-    const received = await sqsClient!.send(
-      receiveFromDlq(urls[NAMES.dlqTarget]!),
-    ) as { Messages?: { Body?: string }[] };
+    const received = (await sqsClient!.send(receiveFromDlq(urls[NAMES.dlqTarget]!))) as {
+      Messages?: { Body?: string }[];
+    };
 
     expect(received.Messages?.length).toBe(1);
     const envelope = JSON.parse(received.Messages![0]!.Body!) as {

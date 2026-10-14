@@ -88,8 +88,9 @@ describe('toPolicyDefinition', () => {
     };
     expect(view.anonymous).toBe(true);
     expect(view.check(null, undefined)).toBe(true);
-    expect(await definition.before?.({ id: 'x', roles: ['admin'] }, 'edit', undefined as never))
-      .toBe(true);
+    expect(
+      await definition.before?.({ id: 'x', roles: ['admin'] }, 'edit', undefined as never),
+    ).toBe(true);
   });
 
   it('omits before when the class has none', () => {
@@ -129,8 +130,9 @@ describe('registerPolicyClasses', () => {
   });
 
   it('refuses listed classes when no policy service is registered', () => {
-    expect(() => registerPolicyClasses(metadataStore, [DocPolicy], undefined, () => ({})))
-      .toThrow(/policies lists DocPolicy, but no CAPABILITIES.AUTHORIZATION_POLICIES provider/);
+    expect(() => registerPolicyClasses(metadataStore, [DocPolicy], undefined, () => ({}))).toThrow(
+      /policies lists DocPolicy, but no CAPABILITIES.AUTHORIZATION_POLICIES provider/,
+    );
   });
 
   it('constructs each class through the given constructor and defines it', () => {
@@ -165,7 +167,7 @@ describe('appendPolicyMiddleware', () => {
         [{ policy: DocPolicy, ability: 'edit' }],
         [],
         undefined,
-      )
+      ),
     ).toThrow(
       'Route GET /x (C.m) is decorated with @RequirePolicy, but no CAPABILITIES.AUTHORIZATION_POLICIES',
     );
@@ -211,12 +213,15 @@ describe('appendPolicyMiddleware', () => {
       appendPolicyMiddleware(
         metadataStore,
         'Route',
-        [{ policy: DocPolicy, ability: 'view' }, {
-          // A definition referenced by @RequirePolicy must DECLARE the ability it names,
-          // matching the registered one on `anonymous` (audit F4).
-          policy: { name: 'doc', abilities: { edit: () => true } } as unknown as PolicyDefinition,
-          ability: 'edit',
-        }],
+        [
+          { policy: DocPolicy, ability: 'view' },
+          {
+            // A definition referenced by @RequirePolicy must DECLARE the ability it names,
+            // matching the registered one on `anonymous` (audit F4).
+            policy: { name: 'doc', abilities: { edit: () => true } } as unknown as PolicyDefinition,
+            ability: 'edit',
+          },
+        ],
         both,
         service,
       ),
@@ -297,26 +302,42 @@ describe('createPolicyMiddleware', () => {
       return true;
     });
     const fixed = context(service, { id: 'ann' });
-    expect(await run(createPolicyMiddleware('doc', 'edit', { owner: 'ann' }, false), fixed.ctx))
-      .toBe(
-        true,
-      );
+    expect(
+      await run(createPolicyMiddleware('doc', 'edit', { owner: 'ann' }, false), fixed.ctx),
+    ).toBe(true);
     const extracted = context(service, { id: 'ann' });
     const extractor = (ctx: IRequestContext) => Promise.resolve({ owner: ctx.params.id });
     expect(await run(createPolicyMiddleware('doc', 'edit', extractor, false), extracted.ctx)).toBe(
       true,
     );
-    expect(seen).toEqual(['ann', 'doc', 'edit', { owner: 'ann' }, 'ann', 'doc', 'edit', {
-      owner: 'p1',
-    }]);
+    expect(seen).toEqual([
+      'ann',
+      'doc',
+      'edit',
+      { owner: 'ann' },
+      'ann',
+      'doc',
+      'edit',
+      {
+        owner: 'p1',
+      },
+    ]);
   });
 
   it('propagates an extractor throw without continuing', async () => {
-    const { ctx } = context(fakeService(() => true), { id: 'ann' });
+    const { ctx } = context(
+      fakeService(() => true),
+      { id: 'ann' },
+    );
     const outage = new Error('db');
     let ran = false;
     const thrown = await Promise.resolve(
-      createPolicyMiddleware('doc', 'edit', () => Promise.reject(outage), false)(ctx, () => {
+      createPolicyMiddleware(
+        'doc',
+        'edit',
+        () => Promise.reject(outage),
+        false,
+      )(ctx, () => {
         ran = true;
         return Promise.resolve();
       }),
@@ -350,7 +371,12 @@ describe('audit F1: @RequirePolicy refuses anonymous before running the extracto
       return Promise.reject(new Error('not found'));
     };
     let ran = false;
-    await createPolicyMiddleware('doc', 'edit', extractor, false)(ctx, () => {
+    await createPolicyMiddleware(
+      'doc',
+      'edit',
+      extractor,
+      false,
+    )(ctx, () => {
       ran = true;
       return Promise.resolve();
     });
@@ -374,9 +400,7 @@ describe('audit F4: @RequirePolicy refuses a policy that disagrees with the regi
       name: 'doc',
       abilities: { view: () => true },
     } as unknown as PolicyDefinition;
-    expect(call(impostor, 'view')).toThrow(
-      'a different policy is registered under the same name',
-    );
+    expect(call(impostor, 'view')).toThrow('a different policy is registered under the same name');
   });
 
   it('refuses a same-named definition that does not declare the ability', () => {

@@ -26,12 +26,16 @@ async function start(options: { cacheControl?: string; expose?: boolean } = {}) 
         // messages too, as the server's `t()` does.
         catalogues: { en: EN, 'de-AT': { title: 'Warenkorb' } },
         allowPartialCatalogues: true,
-        ...(options.expose === false ? {} : {
-          exposeCatalogues: {
-            basePath: '/i18n',
-            ...(options.cacheControl === undefined ? {} : { cacheControl: options.cacheControl }),
-          },
-        }),
+        ...(options.expose === false
+          ? {}
+          : {
+              exposeCatalogues: {
+                basePath: '/i18n',
+                ...(options.cacheControl === undefined
+                  ? {}
+                  : { cacheControl: options.cacheControl }),
+              },
+            }),
       }),
     ],
   });
@@ -66,7 +70,7 @@ describe('the catalogue route', () => {
     const response = await get('/i18n/%3Cscript%3E');
     expect(response.status).toBe(404);
     expect(response.headers.get('content-type')).toBe('application/problem+json');
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body.type).toBe('about:blank');
     expect(body.title).toBe('Not Found');
     expect(body.status).toBe(404);

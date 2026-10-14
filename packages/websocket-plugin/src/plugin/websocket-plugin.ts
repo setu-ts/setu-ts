@@ -74,9 +74,10 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
   // not at the first upgrade.
   const resolved = resolveOptions(options);
   // M98l: validated here too, before any application exists.
-  const diagnosticsAlias = options?.diagnostics === undefined
-    ? null
-    : compileRealtimeDiagnosticsAlias(options.diagnostics);
+  const diagnosticsAlias =
+    options?.diagnostics === undefined
+      ? null
+      : compileRealtimeDiagnosticsAlias(options.diagnostics);
 
   // The registration arms are split ONCE, here at plugin construction, so
   // `register` and the `onInit` hook each read a single list (the M70d arm
@@ -90,21 +91,23 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
   const routes: readonly WebSocketRouteEntry[] = options?.routes ?? [];
   const behaviors: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[] =
     options?.behaviors ?? [];
-  const routeInstances = routes.filter((entry): entry is WebSocketRouteDefinition =>
-    typeof entry !== 'function'
+  const routeInstances = routes.filter(
+    (entry): entry is WebSocketRouteDefinition => typeof entry !== 'function',
   );
   const routeFactories = routes
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: RegistryFactory<WebSocketRouteDefinition>; index: number } =>
-      typeof slot.entry === 'function'
+    .filter(
+      (slot): slot is { entry: RegistryFactory<WebSocketRouteDefinition>; index: number } =>
+        typeof slot.entry === 'function',
     );
-  const behaviorInstances = behaviors.filter((entry): entry is IIngressBehavior =>
-    typeof entry !== 'function'
+  const behaviorInstances = behaviors.filter(
+    (entry): entry is IIngressBehavior => typeof entry !== 'function',
   );
   const behaviorFactories = behaviors
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
-      typeof slot.entry === 'function'
+    .filter(
+      (slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
+        typeof slot.entry === 'function',
     );
 
   return {
@@ -187,25 +190,24 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
         adapter.setUpgradeRouter?.(service.createUpgradeRouter());
       }
 
-      ctx.health.register(
-        'websocket',
-        (): Promise<HealthCheckResult> =>
-          Promise.resolve({
-            status: 'up',
-            data: {
-              available: service.available,
-              connections: service.connectionCount,
-              rooms: service.roomCount,
-              routes: service.routeCount,
-            },
-          }),
+      ctx.health.register('websocket', (): Promise<HealthCheckResult> =>
+        Promise.resolve({
+          status: 'up',
+          data: {
+            available: service.available,
+            connections: service.connectionCount,
+            rooms: service.roomCount,
+            routes: service.routeCount,
+          },
+        }),
       );
 
-      const unsubscribe = backplane === undefined
-        ? undefined
-        : await backplane.subscribe((frame) => {
-          service.deliverRemoteFrame(frame);
-        });
+      const unsubscribe =
+        backplane === undefined
+          ? undefined
+          : await backplane.subscribe((frame) => {
+              service.deliverRemoteFrame(frame);
+            });
 
       ctx.lifecycle.onClose(() => {
         // Unsubscribed before closing connections so a frame arriving during
@@ -240,11 +242,11 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
             behaviors.map((entry, index) =>
               typeof entry === 'function'
                 ? resolveRegistryEntry(
-                  entry,
-                  ctx.services,
-                  `WebSocketPlugin({ behaviors })[${index}]`,
-                )
-                : entry
+                    entry,
+                    ctx.services,
+                    `WebSocketPlugin({ behaviors })[${index}]`,
+                  )
+                : entry,
             ),
           );
         });

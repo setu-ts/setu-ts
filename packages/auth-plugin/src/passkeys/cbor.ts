@@ -20,11 +20,7 @@ export const MAX_CBOR_BYTES = 4096;
 
 /** A decoded CBOR value: an integer, byte string, text string, array, or map. */
 export type CborValue =
-  | number
-  | Uint8Array
-  | string
-  | readonly CborValue[]
-  | ReadonlyMap<CborValue, CborValue>;
+  number | Uint8Array | string | readonly CborValue[] | ReadonlyMap<CborValue, CborValue>;
 
 /** One decoded item plus the number of bytes it consumed. */
 export interface DecodedCbor {
@@ -114,11 +110,7 @@ function argumentLength(info: number): number {
  * @param depth - The current nesting depth
  * @returns The item and the bytes it consumed, or why it was refused
  */
-export function decodeCborItem(
-  bytes: Uint8Array,
-  offset: number,
-  depth: number,
-): CborOutcome {
+export function decodeCborItem(bytes: Uint8Array, offset: number, depth: number): CborOutcome {
   if (bytes.length > MAX_CBOR_BYTES) {
     return { ok: false, reason: 'too-large' };
   }
@@ -142,9 +134,10 @@ export function decodeCborItem(
   }
   // For additional info 0–23 the argument IS the info itself; only 24–27 read
   // following bytes.
-  const arg = info < 24
-    ? { ok: true as const, value: info, consumed: 0 }
-    : readUint(bytes, offset + 1, argumentLength(info));
+  const arg =
+    info < 24
+      ? { ok: true as const, value: info, consumed: 0 }
+      : readUint(bytes, offset + 1, argumentLength(info));
   if (arg.ok === false) {
     return arg;
   }

@@ -42,9 +42,12 @@ function recordingLogger(): { logger: ILogger; errors: Logged[] } {
 describe('resolveWaitUntil', () => {
   it('hands the promise to the injected host', async () => {
     const seen: Promise<unknown>[] = [];
-    const waitUntil = resolveWaitUntil((p) => {
-      seen.push(p);
-    }, () => undefined);
+    const waitUntil = resolveWaitUntil(
+      (p) => {
+        seen.push(p);
+      },
+      () => undefined,
+    );
 
     waitUntil(Promise.resolve('done'));
 
@@ -55,9 +58,12 @@ describe('resolveWaitUntil', () => {
   it('reports a rejection through the logger instead of leaving it unhandled', async () => {
     const { logger, errors } = recordingLogger();
     const settled: Promise<unknown>[] = [];
-    const waitUntil = resolveWaitUntil((p) => {
-      settled.push(p);
-    }, () => logger);
+    const waitUntil = resolveWaitUntil(
+      (p) => {
+        settled.push(p);
+      },
+      () => logger,
+    );
 
     waitUntil(Promise.reject(new Error('shipping analytics failed')));
     await Promise.all(settled);
@@ -70,9 +76,12 @@ describe('resolveWaitUntil', () => {
   it('stringifies a non-Error rejection value', async () => {
     const { logger, errors } = recordingLogger();
     const settled: Promise<unknown>[] = [];
-    const waitUntil = resolveWaitUntil((p) => {
-      settled.push(p);
-    }, () => logger);
+    const waitUntil = resolveWaitUntil(
+      (p) => {
+        settled.push(p);
+      },
+      () => logger,
+    );
 
     waitUntil(Promise.reject('a bare string'));
     await Promise.all(settled);
@@ -82,9 +91,12 @@ describe('resolveWaitUntil', () => {
 
   it('hands the host a promise that never rejects, so waitUntil is not aborted', async () => {
     const settled: Promise<unknown>[] = [];
-    const waitUntil = resolveWaitUntil((p) => {
-      settled.push(p);
-    }, () => undefined);
+    const waitUntil = resolveWaitUntil(
+      (p) => {
+        settled.push(p);
+      },
+      () => undefined,
+    );
 
     waitUntil(Promise.reject(new Error('boom')));
 
@@ -100,9 +112,12 @@ describe('resolveWaitUntil', () => {
     const { logger, errors } = recordingLogger();
     const settled: Promise<unknown>[] = [];
     let source: ILogger | undefined = undefined;
-    const waitUntil = resolveWaitUntil((p) => {
-      settled.push(p);
-    }, () => source);
+    const waitUntil = resolveWaitUntil(
+      (p) => {
+        settled.push(p);
+      },
+      () => source,
+    );
 
     // Nothing resolvable yet: this failure has nowhere to go, and must not throw.
     waitUntil(Promise.reject(new Error('too early')));

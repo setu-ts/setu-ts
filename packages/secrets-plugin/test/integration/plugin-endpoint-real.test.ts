@@ -35,41 +35,44 @@ async function startStub(): Promise<{ url: string; close: () => Promise<void> }>
   // Loopback only: the package's test `net` grant is scoped to `127.0.0.1`
   // (any port, since this stub's is ephemeral), so no test can reach a real
   // cloud endpoint by accident.
-  const server = await serveHttp({
-    hostname: '127.0.0.1',
-    port: 0,
-    onListen: (l) => {
-      port = l.port;
-    },
-  }, async (req) => {
-    const target = req.headers.get('x-amz-target') ?? '';
-    if (target === 'secretsmanager.GetSecretValue') {
-      const { SecretId } = JSON.parse(await req.text()) as { SecretId: string };
-      const value = SECRETS.get(SecretId);
-      if (value === undefined) {
-        return Response.json(
-          {
-            __type: 'ResourceNotFoundException',
-            Message: "Secrets Manager can't find the specified secret.",
-          },
-          { status: 400 },
-        );
-      }
-      return Response.json({
-        ARN: `arn:aws:secretsmanager:local:1:secret:${value}`,
-        Name: value,
-        SecretString: value,
-        VersionId: 'v1',
-      });
-    }
-    return Response.json(
-      {
-        __type: 'UnknownOperation',
-        Message: `stub saw an operation it does not answer: ${target}`,
+  const server = await serveHttp(
+    {
+      hostname: '127.0.0.1',
+      port: 0,
+      onListen: (l) => {
+        port = l.port;
       },
-      { status: 400 },
-    );
-  });
+    },
+    async (req) => {
+      const target = req.headers.get('x-amz-target') ?? '';
+      if (target === 'secretsmanager.GetSecretValue') {
+        const { SecretId } = JSON.parse(await req.text()) as { SecretId: string };
+        const value = SECRETS.get(SecretId);
+        if (value === undefined) {
+          return Response.json(
+            {
+              __type: 'ResourceNotFoundException',
+              Message: "Secrets Manager can't find the specified secret.",
+            },
+            { status: 400 },
+          );
+        }
+        return Response.json({
+          ARN: `arn:aws:secretsmanager:local:1:secret:${value}`,
+          Name: value,
+          SecretString: value,
+          VersionId: 'v1',
+        });
+      }
+      return Response.json(
+        {
+          __type: 'UnknownOperation',
+          Message: `stub saw an operation it does not answer: ${target}`,
+        },
+        { status: 400 },
+      );
+    },
+  );
   return {
     url: `http://127.0.0.1:${port}`,
     // shutdown() closes the SDK's idle keep-alive connections; awaiting
@@ -108,9 +111,7 @@ describe('SecretsPlugin endpoint option (M99d review fix)', () => {
       // the service (provider `null`), not a credentials failure.
       // The exact message: a bare `toThrow()` would also pass on the credentials
       // or network failure this assertion exists to rule out.
-      await expect(secrets.get('absent/secret')).rejects.toThrow(
-        'Secret not found: absent/secret',
-      );
+      await expect(secrets.get('absent/secret')).rejects.toThrow('Secret not found: absent/secret');
       expect(await secrets.has('absent/secret')).toBe(false);
     } finally {
       await app.stop();

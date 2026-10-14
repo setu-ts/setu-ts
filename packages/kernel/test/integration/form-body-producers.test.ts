@@ -45,14 +45,22 @@ const EXPECTED_URLENCODED = {
   getAllTag: ['one', 'two'],
   getMissing: undefined,
   file: [] as unknown[],
-  entries: [['tag', 'one'], ['note', ''], ['tag', 'two']],
+  entries: [
+    ['tag', 'one'],
+    ['note', ''],
+    ['tag', 'two'],
+  ],
 };
 const EXPECTED_MULTIPART = {
   getTag: 'one',
   getAllTag: ['one', 'two'],
   getMissing: undefined,
   file: [{ filename: 'a.txt', mimeType: 'text/plain', bytes: DATA_BYTES }],
-  entries: [['tag', 'one'], ['file', DATA_BYTES], ['tag', 'two']],
+  entries: [
+    ['tag', 'one'],
+    ['file', DATA_BYTES],
+    ['tag', 'two'],
+  ],
 };
 
 /** Normalizes a `FormBody` to a JSON-able snapshot the three compare by. */
@@ -61,11 +69,13 @@ function snapshot(form: FormBody): unknown {
     getTag: form.get('tag'),
     getAllTag: form.getAll('tag'),
     getMissing: form.get('missing'),
-    file: form.getAll('file').map((value) =>
-      typeof value === 'string'
-        ? { text: value }
-        : { filename: value.filename, mimeType: value.mimeType, bytes: Array.from(value.data) }
-    ),
+    file: form
+      .getAll('file')
+      .map((value) =>
+        typeof value === 'string'
+          ? { text: value }
+          : { filename: value.filename, mimeType: value.mimeType, bytes: Array.from(value.data) },
+      ),
     entries: Array.from(form.entries()).map(([name, value]) => [
       name,
       typeof value === 'string' ? value : Array.from(value.data),

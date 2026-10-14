@@ -152,7 +152,7 @@ function adapterFor(row: Row): IDatabaseAdapter {
   }
   if (row.completed !== undefined) {
     // Each read consumes the next count; the last one repeats.
-    adapter[DATABASE_QUERY_PROGRESS] = () => counts.length > 1 ? counts.shift()! : counts[0]!;
+    adapter[DATABASE_QUERY_PROGRESS] = () => (counts.length > 1 ? counts.shift()! : counts[0]!);
   }
   return adapter;
 }

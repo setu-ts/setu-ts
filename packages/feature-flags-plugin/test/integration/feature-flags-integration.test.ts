@@ -132,7 +132,7 @@ describe('feature-flags-integration', () => {
     const flagPlugin = FeatureFlagsPlugin({
       provider: 'config',
       options: {
-        flags: { 'test': { enabled: true } },
+        flags: { test: { enabled: true } },
       },
     });
 

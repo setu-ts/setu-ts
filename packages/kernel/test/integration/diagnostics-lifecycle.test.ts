@@ -8,9 +8,7 @@ import { runtimePlugin } from '../fixtures/runtime-plugin.ts';
 describe('diagnostics lifecycle integration', () => {
   it('a startup failure before the runtime reports null timings and the failure code', async () => {
     const app = createApplication({
-      plugins: [
-        { name: 'lonely', version: '1.0.0', register() {} },
-      ],
+      plugins: [{ name: 'lonely', version: '1.0.0', register() {} }],
       diagnostics: {},
     });
     await expect(app.start()).rejects.toThrow(/mandatory 'runtime' capability/);
@@ -120,8 +118,9 @@ describe('diagnostics lifecycle integration', () => {
             // LIFO: the FIRST-registered shutdown hook runs LAST, after the
             // other one has completed — its record is already in the ring.
             ctx.lifecycle.onShutdown(() => {
-              midShutdown = app.diagnostics!.read(0, 128).events
-                .filter((event) => event.kind === 'lifecycle')
+              midShutdown = app
+                .diagnostics!.read(0, 128)
+                .events.filter((event) => event.kind === 'lifecycle')
                 .map((event) => ({ stage: event.stage, ordinal: event.sequence }));
             });
             ctx.lifecycle.onShutdown(() => {
@@ -134,17 +133,11 @@ describe('diagnostics lifecycle integration', () => {
     });
     await app.start();
     // Captured BEFORE stop: startup-phase records only.
-    const events = app.diagnostics!.read(0, 128).events.filter((event) =>
-      event.kind === 'lifecycle'
-    );
+    const events = app
+      .diagnostics!.read(0, 128)
+      .events.filter((event) => event.kind === 'lifecycle');
     await app.stop();
-    expect(order).toEqual([
-      'register-hook',
-      'init-1',
-      'init-2',
-      'stopping',
-      'shutdown',
-    ]);
+    expect(order).toEqual(['register-hook', 'init-1', 'init-2', 'stopping', 'shutdown']);
     const stages = events.map((event) => event.stage);
     expect(stages.indexOf('resolve')).toBeGreaterThanOrEqual(0);
     const registerIndex = stages.indexOf('register');
@@ -247,13 +240,16 @@ it('preserves a registration failure after initializing the diagnostics runtime'
   const error = new Error('register refused');
   const app = createApplication({
     diagnostics: {},
-    plugins: [runtimePlugin(), {
-      name: 'refuses-register',
-      version: '1.0.0',
-      register() {
-        throw error;
+    plugins: [
+      runtimePlugin(),
+      {
+        name: 'refuses-register',
+        version: '1.0.0',
+        register() {
+          throw error;
+        },
       },
-    }],
+    ],
   });
   await expect(app.start()).rejects.toBe(error);
   expect(app.diagnostics!.snapshot().failureCode).toBe('startup-failed');
@@ -266,15 +262,17 @@ it('observes successful and refused HTTP listen operations without changing thei
     if (fail) fake.adapter.listen = () => Promise.reject(error);
     const app = createApplication({
       diagnostics: {},
-      plugins: [{
-        name: 'server',
-        version: '1.0.0',
-        provides: [CAPABILITIES.RUNTIME, CAPABILITIES.HTTP_ADAPTER],
-        register(ctx) {
-          ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
-          ctx.services.register(CAPABILITIES.HTTP_ADAPTER, fake.adapter);
+      plugins: [
+        {
+          name: 'server',
+          version: '1.0.0',
+          provides: [CAPABILITIES.RUNTIME, CAPABILITIES.HTTP_ADAPTER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
+            ctx.services.register(CAPABILITIES.HTTP_ADAPTER, fake.adapter);
+          },
         },
-      }],
+      ],
     });
     if (fail) {
       await expect(app.start({ port: 3333 })).rejects.toBe(error);

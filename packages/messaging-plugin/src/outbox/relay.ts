@@ -43,12 +43,7 @@ const MAX_LAST_ERROR = 1024;
  * @internal
  */
 export type StoreSweepEnd =
-  | 'lap-complete'
-  | 'scan-limit'
-  | 'publish-limit'
-  | 'deadline'
-  | 'store-failure'
-  | 'closing';
+  'lap-complete' | 'scan-limit' | 'publish-limit' | 'deadline' | 'store-failure' | 'closing';
 
 /**
  * What a sweep reports as it goes — the hooks the outbox service records for
@@ -260,9 +255,8 @@ async function examine(
   record: OutboxRecord,
 ): Promise<StoreSweepEnd | undefined> {
   const { options, budget, runtime } = ctx;
-  const key = record.orderingKey !== undefined
-    ? blockKey(record.tenantId, record.orderingKey)
-    : undefined;
+  const key =
+    record.orderingKey !== undefined ? blockKey(record.tenantId, record.orderingKey) : undefined;
   if (key !== undefined) {
     if (lap.isBlocked(key)) return undefined;
     if (lap.capReached) {
@@ -283,19 +277,17 @@ async function examine(
     if (key !== undefined) lap.block(key);
     return undefined;
   }
-  const decoded = claim === undefined
-    ? { ok: false as const }
-    : decodeOutboxRecord(record, options.maxEnvelopeBytes);
+  const decoded =
+    claim === undefined
+      ? { ok: false as const }
+      : decodeOutboxRecord(record, options.maxEnvelopeBytes);
   if (claim === undefined || !decoded.ok) {
     budget.attempted += 1;
     if (key !== undefined) lap.block(key);
     let transition: OutboxTransition;
     try {
-      transition = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'markInvalid',
-        () => store.markInvalid(record.id, now),
+      transition = await bounded(ctx, options.storeTimeoutMs, 'markInvalid', () =>
+        store.markInvalid(record.id, now),
       );
     } catch {
       return 'store-failure';
@@ -310,11 +302,8 @@ async function examine(
   const leaseUntil = runtime.now() + options.claimLeaseMs;
   let acquired: OutboxTransition;
   try {
-    acquired = await bounded(
-      ctx,
-      options.storeTimeoutMs,
-      'claim',
-      () => store.claim(record.id, { claimVersion: claim.claimVersion, leaseUntil }),
+    acquired = await bounded(ctx, options.storeTimeoutMs, 'claim', () =>
+      store.claim(record.id, { claimVersion: claim.claimVersion, leaseUntil }),
     );
   } catch {
     if (key !== undefined) lap.block(key);
@@ -322,16 +311,18 @@ async function examine(
   }
   if (acquired.outcome !== 'applied') {
     if (
-      key !== undefined && (acquired.outcome === 'claim-lost' ||
+      key !== undefined &&
+      (acquired.outcome === 'claim-lost' ||
         (acquired.outcome === 'not-pending' && acquired.status === 'failed'))
-    ) lap.block(key);
+    )
+      lap.block(key);
     return undefined;
   }
   const claimVersion = claim.claimVersion + 1;
   budget.attempted += 1;
   if (
     runtime.now() + options.publishTimeoutMs + options.storeTimeoutMs + options.maxClockSkewMs >
-      leaseUntil
+    leaseUntil
   ) {
     if (key !== undefined) lap.block(key);
     ctx.observer.overlap('fenced');
@@ -341,11 +332,8 @@ async function examine(
   const { topic } = decoded.row;
   let failure: { readonly error: unknown } | undefined;
   try {
-    await bounded(
-      ctx,
-      options.publishTimeoutMs,
-      'publish',
-      () => publish(ctx, record, decoded.row),
+    await bounded(ctx, options.publishTimeoutMs, 'publish', () =>
+      publish(ctx, record, decoded.row),
     );
   } catch (error) {
     failure = { error };
@@ -356,17 +344,13 @@ async function examine(
     ctx.observer.published(topic);
     let transition: OutboxTransition;
     try {
-      transition = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'markSent',
-        () =>
-          store.markSent(record.id, {
-            claimVersion,
-            settledAt: runtime.now(),
-            sentBy: `${ctx.instanceId}/${ctx.origin}`,
-            deleteNow: options.retainSentMs === 0,
-          }),
+      transition = await bounded(ctx, options.storeTimeoutMs, 'markSent', () =>
+        store.markSent(record.id, {
+          claimVersion,
+          settledAt: runtime.now(),
+          sentBy: `${ctx.instanceId}/${ctx.origin}`,
+          deleteNow: options.retainSentMs === 0,
+        }),
       );
     } catch {
       // Published but not marked: block the key so no later row of it is
@@ -388,18 +372,14 @@ async function examine(
   const backoff = Math.min(options.baseBackoffMs * 2 ** (attempts - 1), options.maxBackoffMs);
   let transition: OutboxTransition;
   try {
-    transition = await bounded(
-      ctx,
-      options.storeTimeoutMs,
-      'markFailure',
-      () =>
-        store.markFailure(record.id, {
-          claimVersion,
-          attempts,
-          lastError: lastErrorOf(failure.error),
-          availableAt: now + backoff,
-          status,
-        }),
+    transition = await bounded(ctx, options.storeTimeoutMs, 'markFailure', () =>
+      store.markFailure(record.id, {
+        claimVersion,
+        attempts,
+        lastError: lastErrorOf(failure.error),
+        availableAt: now + backoff,
+        status,
+      }),
     );
   } catch {
     return 'store-failure';
@@ -435,11 +415,8 @@ export async function sweepStore(
     if (stop !== undefined) return stop;
     let failed;
     try {
-      failed = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'failedKeys',
-        () => store.failedKeys(options.maxFailedScan),
+      failed = await bounded(ctx, options.storeTimeoutMs, 'failedKeys', () =>
+        store.failedKeys(options.maxFailedScan),
       );
     } catch {
       return 'store-failure';
@@ -454,11 +431,8 @@ export async function sweepStore(
     let page: readonly OutboxRecord[];
     const after = lap.cursor;
     try {
-      page = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'scanPending',
-        () => store.scanPending(after, limit),
+      page = await bounded(ctx, options.storeTimeoutMs, 'scanPending', () =>
+        store.scanPending(after, limit),
       );
     } catch {
       return 'store-failure';

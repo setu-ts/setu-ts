@@ -29,7 +29,7 @@ export async function exerciseRealtimeClients(baseUrl: string): Promise<void> {
   if (received.some((event) => event.id === undefined)) {
     throw new Error('SSE heartbeat comment leaked as an event.');
   }
-  const resume = await (await fetch(`${baseUrl}/resume`)).json() as {
+  const resume = (await (await fetch(`${baseUrl}/resume`)).json()) as {
     resumedWith: string | null;
   };
   if (resume.resumedWith !== received[0]?.id) {
@@ -51,19 +51,17 @@ export async function exerciseRealtimeClients(baseUrl: string): Promise<void> {
   stopping = true;
   socket.close();
   if (unexpectedlyClosed) {
-    throw new Error(
-      'Read-only WebSocket client did not survive the idle sweep.',
-    );
+    throw new Error('Read-only WebSocket client did not survive the idle sweep.');
   }
 }
 
 if (import.meta.main) {
-  const nodeArgs = (globalThis as unknown as {
-    readonly process?: { readonly argv?: string[] };
-  })
-    .process?.argv;
-  const baseUrl = nodeArgs?.[2] ??
-    (typeof Deno === 'undefined' ? undefined : Deno.args[0]);
+  const nodeArgs = (
+    globalThis as unknown as {
+      readonly process?: { readonly argv?: string[] };
+    }
+  ).process?.argv;
+  const baseUrl = nodeArgs?.[2] ?? (typeof Deno === 'undefined' ? undefined : Deno.args[0]);
   if (baseUrl === undefined) {
     throw new Error('Expected the realtime server URL.');
   }

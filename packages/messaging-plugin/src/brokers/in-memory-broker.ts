@@ -73,7 +73,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * @returns Resolves when connected
    * @since 0.1.0
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async connect(): Promise<void> {
     this.#ready = true;
   }
@@ -283,7 +283,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * @returns The subscription handle
    * @since 0.1.0
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async subscribe<T>(
     topic: string,
     handler: MessageHandler<T>,
@@ -302,7 +302,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
     this.#subscribers.get(topic)!.push(subscriber);
 
     return {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       unsubscribe: async (): Promise<void> => {
         const subs = this.#subscribers.get(topic);
         if (subs) {

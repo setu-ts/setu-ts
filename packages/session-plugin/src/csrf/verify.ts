@@ -116,9 +116,10 @@ async function extractToken(
     return undefined;
   }
 
-  const form = ctx.request.formData !== undefined
-    ? await ctx.request.formData()
-    : parseFormBody(await ctx.request.bytes(), contentType);
+  const form =
+    ctx.request.formData !== undefined
+      ? await ctx.request.formData()
+      : parseFormBody(await ctx.request.bytes(), contentType);
   const value = form.get(config.fieldName);
   return typeof value === 'string' && value !== '' ? value : undefined;
 }

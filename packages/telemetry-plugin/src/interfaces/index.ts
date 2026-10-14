@@ -41,12 +41,7 @@ export type SpanProcessorKind = 'simple' | 'batch';
  *
  * @since 0.2.0
  */
-export type InstrumentationKind =
-  | 'http'
-  | 'fetch'
-  | 'ioredis'
-  | 'amqplib'
-  | 'kafkajs';
+export type InstrumentationKind = 'http' | 'fetch' | 'ioredis' | 'amqplib' | 'kafkajs';
 
 /**
  * Sampling configuration.

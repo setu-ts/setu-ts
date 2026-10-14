@@ -34,12 +34,8 @@ export const DEFAULT_PUBLISHED_AT = '2020-01-01T00:00:00.000Z';
  * How the overlay is configured: the packs to serve, or the repository root to
  * build them from.
  */
-export type RegistryOverlayOptions =
-  & OverlaySettings
-  & (
-    | { readonly packs: ReadonlyMap<string, PackedMember> }
-    | { readonly root: string }
-  );
+export type RegistryOverlayOptions = OverlaySettings &
+  ({ readonly packs: ReadonlyMap<string, PackedMember> } | { readonly root: string });
 
 /** The settings every overlay takes. */
 export interface OverlaySettings {

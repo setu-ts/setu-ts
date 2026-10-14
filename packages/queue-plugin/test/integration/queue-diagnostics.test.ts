@@ -58,15 +58,17 @@ async function startWith(options: QueuePluginOptions, fail = false) {
       RuntimePlugin(),
       QueuePlugin({
         ...options,
-        processors: [{
-          name: JOB_NAME,
-          processor: (job) => {
-            delivered.push(job.attempts);
-            if (fail) {
-              throw new Error(ERROR_CANARY);
-            }
+        processors: [
+          {
+            name: JOB_NAME,
+            processor: (job) => {
+              delivered.push(job.attempts);
+              if (fail) {
+                throw new Error(ERROR_CANARY);
+              }
+            },
           },
-        }],
+        ],
       }),
     ],
   });
@@ -120,16 +122,23 @@ describe('queue diagnostics — registration', () => {
 
 describe('queue diagnostics — minimization end to end', () => {
   it('observes retries and the dead letter with canaries absent at the source', async () => {
-    const { app, queue, delivered, source } = await startWith({
-      adapter: 'memory',
-      pollIntervalMs: POLL_MS,
-      defaultMaxAttempts: 2,
-      diagnostics: DIAGNOSTICS,
-    }, true);
+    const { app, queue, delivered, source } = await startWith(
+      {
+        adapter: 'memory',
+        pollIntervalMs: POLL_MS,
+        defaultMaxAttempts: 2,
+        diagnostics: DIAGNOSTICS,
+      },
+      true,
+    );
     try {
-      const id = await queue.add(JOB_NAME, { secret: PAYLOAD_CANARY }, {
-        headers: { traceparent: HEADER_CANARY },
-      });
+      const id = await queue.add(
+        JOB_NAME,
+        { secret: PAYLOAD_CANARY },
+        {
+          headers: { traceparent: HEADER_CANARY },
+        },
+      );
       // Attempt 1 requeues with a 1 s backoff; attempt 2 dead-letters.
       await until(() => source.read(0).attempts.length === 2, 'both attempts');
       const batch: QueueDiagnosticsSourceBatch = source.read(0);
@@ -282,12 +291,14 @@ describe('queue diagnostics — observation adds no backend work', () => {
           adapter: 'memory',
           pollIntervalMs: POLL_MS,
           defaultMaxAttempts: 1,
-          processors: [{
-            name: JOB_NAME,
-            processor: () => {
-              throw hostile;
+          processors: [
+            {
+              name: JOB_NAME,
+              processor: () => {
+                throw hostile;
+              },
             },
-          }],
+          ],
           diagnostics: {
             ...DIAGNOSTICS,
             depths: { intervalMs: 1_000, timeoutMs: 1_000, concurrency: 1 },

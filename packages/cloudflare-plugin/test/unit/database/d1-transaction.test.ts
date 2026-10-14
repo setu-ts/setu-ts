@@ -34,8 +34,9 @@ describe('D1Adapter transactions — commit', () => {
   it('refuses every requested isolation level instead of silently ignoring it', async () => {
     const { adapter } = await connected();
 
-    await expect(adapter.beginTransaction({ isolation: 'serializable' }))
-      .rejects.toThrow("D1 does not support 'serializable' transaction isolation");
+    await expect(adapter.beginTransaction({ isolation: 'serializable' })).rejects.toThrow(
+      "D1 does not support 'serializable' transaction isolation",
+    );
   });
 
   it('flushes every buffered write as ONE batch, in order', async () => {
@@ -101,13 +102,15 @@ describe('D1Adapter transactions — commit', () => {
     const users = txn.createDataSource('users');
     await txn.commit();
 
-    await expect(users.findAll({
-      where: {},
-      orderBy: {},
-      limit: -1,
-      offset: 0,
-      select: [],
-    })).rejects.toThrow('Transaction already finalized');
+    await expect(
+      users.findAll({
+        where: {},
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: [],
+      }),
+    ).rejects.toThrow('Transaction already finalized');
   });
 });
 

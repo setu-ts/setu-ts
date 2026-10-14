@@ -31,9 +31,10 @@ export function importSamlModule(): Promise<unknown> {
  * @throws {SamlRuntimeLoadError} When the module carries no `SAML` constructor
  */
 export function adaptSamlModule(module: unknown): SamlConstructor {
-  const candidate = typeof module === 'object' && module !== null
-    ? (module as Record<string, unknown>).SAML
-    : undefined;
+  const candidate =
+    typeof module === 'object' && module !== null
+      ? (module as Record<string, unknown>).SAML
+      : undefined;
   if (typeof candidate !== 'function') {
     throw new SamlRuntimeLoadError(
       SAML_SPECIFIER,

@@ -100,7 +100,10 @@ describe('TemplateEngine — component arm (M102)', () => {
     const out = await engine.render('welcome', { name: 'Ada' });
     expect(out).toEqual({ html: '<p>Ada</p>', text: 'Hi Ada' });
     // Both components were handed `data` verbatim as their props.
-    expect(view.calls).toEqual([[Greeting, { name: 'Ada' }], [GreetingText, { name: 'Ada' }]]);
+    expect(view.calls).toEqual([
+      [Greeting, { name: 'Ada' }],
+      [GreetingText, { name: 'Ada' }],
+    ]);
   });
 
   it('omits text when the template defines no text component', async () => {
@@ -139,12 +142,11 @@ describe('TemplateEngine — component arm (M102)', () => {
   });
 
   it('refuses at CONSTRUCTION a component template with no view engine, naming both remedies', () => {
-    expect(() => new TemplateEngine({ plain: { text: 'x' }, welcome: { view: Greeting } }))
-      .toThrow(
-        'Mail template "welcome" is a view component, but no CAPABILITIES.VIEW provider is ' +
-          'registered. Register ViewPlugin from @setu-ts/view-plugin (or any other provider of ' +
-          'CAPABILITIES.VIEW) so the body can be rendered, or remove the component templates.',
-      );
+    expect(() => new TemplateEngine({ plain: { text: 'x' }, welcome: { view: Greeting } })).toThrow(
+      'Mail template "welcome" is a view component, but no CAPABILITIES.VIEW provider is ' +
+        'registered. Register ViewPlugin from @setu-ts/view-plugin (or any other provider of ' +
+        'CAPABILITIES.VIEW) so the body can be rendered, or remove the component templates.',
+    );
   });
 
   it('constructs with no view engine when every template is a string template', () => {

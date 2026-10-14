@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- repository test runner
+/* eslint-disable no-console -- repository test runner */
 /** Per-member Node runs bound memory use and enforce coverage in each package's own suite. */
 import { coverageRows, runTargets, selectMembers } from './codemods/node-runner-core.ts';
 export { coverageRows, runTargets, selectMembers } from './codemods/node-runner-core.ts';
@@ -36,8 +36,11 @@ if (import.meta.main) {
   });
   if (coverage) {
     console.log(
-      ['| File | Branch % | Function % | Line % |', '| --- | --- | --- | --- |', ...result.rows]
-        .join('\n'),
+      [
+        '| File | Branch % | Function % | Line % |',
+        '| --- | --- | --- | --- |',
+        ...result.rows,
+      ].join('\n'),
     );
   }
   Deno.exit(result.code);

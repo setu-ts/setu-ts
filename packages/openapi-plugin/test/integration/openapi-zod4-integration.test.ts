@@ -43,21 +43,21 @@ describe('OpenAPI integration — zod v4', () => {
     expect(response.statusCode).toBe(200);
 
     const spec = response.json<{
-      paths: Record<string, {
-        post?: {
-          requestBody?: { content: { 'application/json': { schema: unknown } } };
-          responses: Record<
-            string,
-            { content?: { 'application/json'?: { schema: unknown } } }
-          >;
-        };
-      }>;
+      paths: Record<
+        string,
+        {
+          post?: {
+            requestBody?: { content: { 'application/json': { schema: unknown } } };
+            responses: Record<string, { content?: { 'application/json'?: { schema: unknown } } }>;
+          };
+        }
+      >;
     }>();
 
     // THE DEFECT (A9-1): this was `{"schema":{}}` before the fix. Matched as a
     // subset: zod v4 also emits a regex `pattern` beside derived formats.
-    const bodySchema = spec.paths['/widgets']?.post?.requestBody?.content['application/json']
-      .schema;
+    const bodySchema =
+      spec.paths['/widgets']?.post?.requestBody?.content['application/json'].schema;
     expect(bodySchema).toMatchObject({
       type: 'object',
       properties: {
@@ -90,7 +90,7 @@ describe('OpenAPI integration — zod v4', () => {
       children: Node[];
     }
     const Tree: z4.ZodType<Node> = z4.lazy(() =>
-      z4.object({ name: z4.string(), children: z4.array(Tree) })
+      z4.object({ name: z4.string(), children: z4.array(Tree) }),
     );
 
     const app = createApplication({
@@ -118,18 +118,21 @@ describe('OpenAPI integration — zod v4', () => {
     expect(raw).toContain('#/components/schemas/');
 
     const spec = response.json<{
-      paths: Record<string, {
-        get?: {
-          responses: Record<
-            string,
-            { content?: { 'application/json'?: { schema: { $ref?: string } } } }
-          >;
-        };
-      }>;
+      paths: Record<
+        string,
+        {
+          get?: {
+            responses: Record<
+              string,
+              { content?: { 'application/json'?: { schema: { $ref?: string } } } }
+            >;
+          };
+        }
+      >;
       components?: { schemas?: Record<string, { properties?: Record<string, unknown> }> };
     }>();
-    const ref = spec.paths['/trees/{id}']?.get?.responses['200']?.content?.['application/json']
-      ?.schema.$ref;
+    const ref =
+      spec.paths['/trees/{id}']?.get?.responses['200']?.content?.['application/json']?.schema.$ref;
     expect(ref).toMatch(/^#\/components\/schemas\//);
     const component = spec.components?.schemas?.[ref!.split('/').pop()!];
     expect(component?.properties?.name).toEqual({ type: 'string' });

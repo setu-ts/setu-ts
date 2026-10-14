@@ -82,24 +82,20 @@ export interface ${names.pascal}Payload {
  * subscribe one by hand. The barrel references the factory below by name, so the
  * factory is the single construction site.
  */
-${
-    renderDeclarationHeader(
-      `export class ${names.pascal}EventHandler`,
-      `implements IEventHandler<${names.pascal}Payload>`,
-    )
-  }
+${renderDeclarationHeader(
+  `export class ${names.pascal}EventHandler`,
+  `implements IEventHandler<${names.pascal}Payload>`,
+)}
   /**
    * Reacts to the event.
    *
    * @param event - The published domain event
    */
-${
-    renderMethodSignature(
-      'async handle',
-      [`event: IDomainEvent<${names.pascal}Payload>`],
-      'Promise<void>',
-    )
-  }
+${renderMethodSignature(
+  'async handle',
+  [`event: IDomainEvent<${names.pascal}Payload>`],
+  'Promise<void>',
+)}
     // Replace with the real reaction.
     await Promise.resolve(event.data.id);
   }

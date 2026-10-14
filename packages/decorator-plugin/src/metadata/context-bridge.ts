@@ -58,10 +58,7 @@ export type SetuClassDecorator = (value: unknown, context: ClassDecoratorContext
  *
  * @since 0.2.0
  */
-export type SetuMethodDecorator = (
-  value: unknown,
-  context: ClassMethodDecoratorContext,
-) => void;
+export type SetuMethodDecorator = (value: unknown, context: ClassMethodDecoratorContext) => void;
 
 /**
  * A standard decorator valid in either the class or the method position,

@@ -24,8 +24,14 @@ describe('normalizeIndicatorResult', () => {
   it('projects a framework result to status and object data only', () => {
     const accepted: ReadonlyArray<readonly [unknown, unknown]> = [
       [{ status: 'up' }, { status: 'up' }],
-      [{ status: 'degraded', data: { lag: 3 } }, { status: 'degraded', data: { lag: 3 } }],
-      [{ status: 'down', data: {} }, { status: 'down', data: {} }],
+      [
+        { status: 'degraded', data: { lag: 3 } },
+        { status: 'degraded', data: { lag: 3 } },
+      ],
+      [
+        { status: 'down', data: {} },
+        { status: 'down', data: {} },
+      ],
       // Undeclared fields are dropped; data that is not an object is omitted.
       [{ status: 'up', extra: 'x', latencyMs: 9 }, { status: 'up' }],
       [{ status: 'up', data: 'text' }, { status: 'up' }],

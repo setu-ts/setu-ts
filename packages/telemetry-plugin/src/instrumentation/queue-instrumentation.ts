@@ -29,9 +29,9 @@ export function createAmqplibInstrumentation(
   configArg: unknown,
 ): unknown {
   const AmqplibInstrumentation = mod.AmqplibInstrumentation as unknown;
-  return new (AmqplibInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (AmqplibInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**
@@ -62,9 +62,9 @@ export function createKafkaJsInstrumentation(
   configArg: unknown,
 ): unknown {
   const KafkaJsInstrumentation = mod.KafkaJsInstrumentation as unknown;
-  return new (KafkaJsInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (KafkaJsInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**

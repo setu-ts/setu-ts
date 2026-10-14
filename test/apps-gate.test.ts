@@ -98,16 +98,14 @@ describe('application gate configuration', () => {
 
     const repositoryBranchOnly =
       "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository";
-    for (
-      const job of [
-        'deno',
-        'boundary-compatibility',
-        'deploy',
-        'publish-dry-run',
-        'deno-view-plugin-resolution',
-        'audit',
-      ]
-    ) {
+    for (const job of [
+      'deno',
+      'boundary-compatibility',
+      'deploy',
+      'publish-dry-run',
+      'deno-view-plugin-resolution',
+      'audit',
+    ]) {
       expect(workflow).toContain(`  ${job}:\n    ${repositoryBranchOnly}`);
     }
 
@@ -130,10 +128,8 @@ describe('application gate configuration', () => {
   });
 
   it('keeps a documented smoke skip distinct from a passing smoke check', () => {
-    expect(classifySmokeExitCode({ code: 77, success: false, signal: null }))
-      .toBe('skipped');
-    expect(classifySmokeExitCode({ code: 0, success: true, signal: null }))
-      .toBe('passed');
+    expect(classifySmokeExitCode({ code: 77, success: false, signal: null })).toBe('skipped');
+    expect(classifySmokeExitCode({ code: 0, success: true, signal: null })).toBe('passed');
   });
 
   it('keeps docs/upgrading.md indexed in docs/README.md', async () => {
@@ -159,9 +155,7 @@ describe('unexpectedSkips', () => {
   });
 
   it('returns the unexpected skips when allowlist does not cover them', () => {
-    expect(
-      unexpectedSkips(['realtime', 'cloudflare'], ['cloudflare']),
-    ).toEqual(['realtime']);
+    expect(unexpectedSkips(['realtime', 'cloudflare'], ['cloudflare'])).toEqual(['realtime']);
   });
 
   it('treats every skip as unexpected when ALLOW_SKIP is set but lists nothing', () => {
@@ -173,8 +167,7 @@ describe('unexpectedSkips', () => {
 
 describe('prerequisiteTask', () => {
   it('returns null when the app declares no install task', () => {
-    expect(prerequisiteTask({ start: 'deno run main.ts', smoke: 'deno run smoke.ts' }))
-      .toBeNull();
+    expect(prerequisiteTask({ start: 'deno run main.ts', smoke: 'deno run smoke.ts' })).toBeNull();
   });
 
   it('returns null when the app declares no tasks at all', () => {
@@ -182,8 +175,7 @@ describe('prerequisiteTask', () => {
   });
 
   it('returns the install task when one is declared', () => {
-    expect(prerequisiteTask({ install: 'deno install --allow-scripts' }))
-      .toBe('install');
+    expect(prerequisiteTask({ install: 'deno install --allow-scripts' })).toBe('install');
   });
 });
 
@@ -288,12 +280,10 @@ describe('real-backend CI wiring', () => {
     }>('packages/auth-plugin/deno.json');
     expect(config.test.permissions.net).toContain('localhost:8180');
     // M100c: the sign-in suite rides the same container and the same guard.
-    for (
-      const file of [
-        'packages/auth-plugin/test/e2e/keycloak-issuer-real.test.ts',
-        'packages/auth-plugin/test/e2e/keycloak-sign-in-real.test.ts',
-      ]
-    ) {
+    for (const file of [
+      'packages/auth-plugin/test/e2e/keycloak-issuer-real.test.ts',
+      'packages/auth-plugin/test/e2e/keycloak-sign-in-real.test.ts',
+    ]) {
       const suite = await Deno.readTextFile(file);
       expect(suite).toContain("process.env['KEYCLOAK_URL']");
       expect(suite).toContain('skip: BASE === undefined');
@@ -303,8 +293,9 @@ describe('real-backend CI wiring', () => {
       clients: { clientId: string; standardFlowEnabled?: boolean }[];
       users?: { username: string }[];
     }>('packages/auth-plugin/test/fixtures/keycloak/setu-realm.json');
-    expect(realm.clients.find((client) => client.clientId === 'setu-web')?.standardFlowEnabled)
-      .toBe(true);
+    expect(
+      realm.clients.find((client) => client.clientId === 'setu-web')?.standardFlowEnabled,
+    ).toBe(true);
     expect(realm.users?.map((user) => user.username)).toContain('alice');
   });
 
@@ -589,20 +580,19 @@ describe('real-backend CI wiring', () => {
     expect(source).toContain('REAL RabbitMQ consumer retry');
     expect(source).toContain("process.env['RABBITMQ_URL']");
     expect(source).toContain('skip: rabbitUrl === undefined');
-    for (
-      const scenario of [
-        'second tier',
-        'always-failing handler',
-        'changing delays',
-        'prefetch bounds',
-        'survives a broker restart',
-        'recovers the original',
-        'declares retry queues as quorum queues',
-        'refuses reserved group names',
-        'normalizes dead-letter logs',
-        'a CC header never routes',
-      ]
-    ) expect(source).toContain(scenario);
+    for (const scenario of [
+      'second tier',
+      'always-failing handler',
+      'changing delays',
+      'prefetch bounds',
+      'survives a broker restart',
+      'recovers the original',
+      'declares retry queues as quorum queues',
+      'refuses reserved group names',
+      'normalizes dead-letter logs',
+      'a CC header never routes',
+    ])
+      expect(source).toContain(scenario);
     expect(source).toContain("docker(['restart', containerId])");
     expect(source).toContain('toBeGreaterThanOrEqual(200)');
     expect(source).toContain('toBeGreaterThanOrEqual(800)');
@@ -620,14 +610,12 @@ describe('real-backend CI wiring', () => {
     expect(source).toContain('REAL Redis Streams redelivery');
     expect(source).toContain("process.env['REDIS_URL']");
     expect(source).toContain('skip: redisUrl === undefined');
-    for (
-      const scenario of [
-        'm1 is redelivered after restart',
-        'two replicas reclaim',
-        'always-failing handler',
-        'clean stop leaves no dead consumer',
-      ]
-    ) {
+    for (const scenario of [
+      'm1 is redelivered after restart',
+      'two replicas reclaim',
+      'always-failing handler',
+      'clean stop leaves no dead consumer',
+    ]) {
       expect(source).toContain(scenario);
     }
     const config = await readJson<{ test: { permissions: { net: readonly string[] } } }>(
@@ -635,13 +623,11 @@ describe('real-backend CI wiring', () => {
     );
     expect(config.test.permissions.net).toContain('127.0.0.1:6379');
     expect(config.test.permissions.net.every((host) => host.includes(':'))).toBe(true);
-    for (
-      const path of [
-        '.github/workflows/ci.yml',
-        '.github/workflows/drift.yml',
-        '.github/workflows/release.yml',
-      ]
-    ) {
+    for (const path of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/drift.yml',
+      '.github/workflows/release.yml',
+    ]) {
       const workflow = await Deno.readTextFile(path);
       expect(workflow).toContain('image: redis:7');
       expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
@@ -717,13 +703,11 @@ describe('real-backend CI wiring', () => {
     // the proof into a permanent skip while CI stays green, so the service,
     // its health check, the port mappings, the step and both variables are
     // pinned in every workflow that runs the suite.
-    for (
-      const workflow of [
-        '.github/workflows/ci.yml',
-        '.github/workflows/drift.yml',
-        '.github/workflows/release.yml',
-      ]
-    ) {
+    for (const workflow of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/drift.yml',
+      '.github/workflows/release.yml',
+    ]) {
       const text = await Deno.readTextFile(workflow);
       expect(text).toContain(
         'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
@@ -748,16 +732,14 @@ describe('real-backend CI wiring', () => {
     const config = await readJson<{
       readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
     }>('packages/messaging-plugin/deno.json');
-    for (
-      const endpoint of [
-        '127.0.0.1:5433',
-        '127.0.0.1:27017',
-        '127.0.0.1:27018',
-        '127.0.0.1:8000',
-        '127.0.0.1:8086',
-        '127.0.0.1:8082',
-      ]
-    ) {
+    for (const endpoint of [
+      '127.0.0.1:5433',
+      '127.0.0.1:27017',
+      '127.0.0.1:27018',
+      '127.0.0.1:8000',
+      '127.0.0.1:8086',
+      '127.0.0.1:8082',
+    ]) {
       expect(config.test?.permissions?.net).toContain(endpoint);
     }
   });
@@ -891,10 +873,7 @@ describe('real-backend CI wiring', () => {
 
 describe('malformedAppDirMessage', () => {
   it('formats a missing deno.json message for NotFound', () => {
-    const msg = malformedAppDirMessage(
-      'foo',
-      new Deno.errors.NotFound('ENOENT'),
-    );
+    const msg = malformedAppDirMessage('foo', new Deno.errors.NotFound('ENOENT'));
     expect(msg).toContain('foo');
     expect(msg).toContain('missing deno.json');
     expect(msg).toContain('malformed application directory');
@@ -925,18 +904,17 @@ describe('M111c npm workflow boundaries', () => {
     ]);
     const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
     expect(text.match(/id-token: write/g)).toHaveLength(1);
-    for (
-      const fragment of [
-        'needs: gates',
-        'environment: npm',
-        'contents: read',
-        'id-token: write',
-        'persist-credentials: false',
-        'registry-url: https://registry.npmjs.org',
-        'pnpm install --frozen-lockfile --ignore-scripts',
-        'deno task release:publish',
-      ]
-    ) expect(publish).toContain(fragment);
+    for (const fragment of [
+      'needs: gates',
+      'environment: npm',
+      'contents: read',
+      'id-token: write',
+      'persist-credentials: false',
+      'registry-url: https://registry.npmjs.org',
+      'pnpm install --frozen-lockfile --ignore-scripts',
+      'deno task release:publish',
+    ])
+      expect(publish).toContain(fragment);
     expect(publish).not.toContain('secrets.');
     expect(text).not.toContain('NODE_AUTH_TOKEN');
     expect(publish).not.toMatch(/run:.*test/);
@@ -975,17 +953,16 @@ describe('M111c npm workflow boundaries', () => {
     const text = await Deno.readTextFile('.github/workflows/compat.yml');
     for (const job of ['node-compat', 'bun-compat']) {
       const block = text.split(`\n  ${job}:`)[1].split(/\n {2}[a-z]+-compat:/)[0];
-      for (
-        const fragment of [
-          'id: scope',
-          '--retry 3',
-          'registry.npmjs.org/@setu-ts%2fcommon',
-          "404) echo 'published=false'",
-          "200) echo 'published=true'",
-          'exit 1',
-          "if: steps.scope.outputs.published == 'true'",
-        ]
-      ) expect(block).toContain(fragment);
+      for (const fragment of [
+        'id: scope',
+        '--retry 3',
+        'registry.npmjs.org/@setu-ts%2fcommon',
+        "404) echo 'published=false'",
+        "200) echo 'published=true'",
+        'exit 1',
+        "if: steps.scope.outputs.published == 'true'",
+      ])
+        expect(block).toContain(fragment);
       expect(block.match(/if: steps.scope.outputs.published/g)).toHaveLength(2);
     }
   });
@@ -995,11 +972,8 @@ describe('M111b workflow lanes', () => {
   for (const workflow of ['ci', 'release', 'drift']) {
     it(`${workflow} gates all four test lanes in the test job`, async () => {
       const source = await Deno.readTextFile(`.github/workflows/${workflow}.yml`);
-      const job = workflow === 'ci'
-        ? 'deno'
-        : workflow === 'release'
-        ? 'gates'
-        : 'fresh-resolution';
+      const job =
+        workflow === 'ci' ? 'deno' : workflow === 'release' ? 'gates' : 'fresh-resolution';
       const testJob = source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
       expect(testJob).toBeDefined();
       const commands = [
@@ -1035,8 +1009,8 @@ describe('M111c declared artifact coverage', () => {
     const workspace = JSON.parse(await Deno.readTextFile('package.json'));
     const compat = JSON.parse(await Deno.readTextFile('compat/package.json'));
     const expected = await Promise.all(
-      workspace.workspaces.map(async (dir: string) =>
-        JSON.parse(await Deno.readTextFile(`${dir}/package.json`)).name
+      workspace.workspaces.map(
+        async (dir: string) => JSON.parse(await Deno.readTextFile(`${dir}/package.json`)).name,
       ),
     );
     expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());

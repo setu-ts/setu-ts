@@ -34,9 +34,11 @@ describe('default Node serve host (M87)', () => {
     const optOut = /overrideGlobalObjects\s*:\s*false/;
     const offending = SOURCE.split('\n')
       .map((line, i) => ({ line, n: i + 1 }))
-      .filter(({ line }) =>
-        optOut.test(line) && !line.trimStart().startsWith('//') &&
-        !line.trimStart().startsWith('*')
+      .filter(
+        ({ line }) =>
+          optOut.test(line) &&
+          !line.trimStart().startsWith('//') &&
+          !line.trimStart().startsWith('*'),
       );
 
     expect(offending.map((o) => `${o.n}: ${o.line.trim()}`)).toEqual([]);

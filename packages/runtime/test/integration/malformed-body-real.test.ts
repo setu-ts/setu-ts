@@ -58,7 +58,7 @@ describe('malformed JSON body on the served path (X37-1)', () => {
       expect(response.status).toBe(400);
       expect(response.headers.get('content-type')).toContain('application/problem+json');
 
-      const problem = await response.json() as Record<string, unknown>;
+      const problem = (await response.json()) as Record<string, unknown>;
       expect(problem.status).toBe(400);
       expect(problem.title).toBe('Bad Request');
       expect(problem.detail).toBe('The request body could not be parsed as JSON.');

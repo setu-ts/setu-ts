@@ -113,35 +113,11 @@
   ],
   "denoLaneLog": ".tmp/m111b/deno-lane-claude.log",
   "denoCoverage": {
-    "packages/cli/src/main.ts": [
-      93.8,
-      100,
-      96.1
-    ],
-    "packages/runtime/src/adapters/deno/deno-dns-resolver.ts": [
-      100,
-      100,
-      100
-    ],
-    "packages/runtime/src/adapters/deno/deno-http-adapter.ts": [
-      100,
-      100,
-      100
-    ],
-    "packages/runtime/src/adapters/deno/deno-runtime.ts": [
-      94.4,
-      100,
-      94.9
-    ],
-    "packages/runtime/src/adapters/deno/deno-ws-upgrader.ts": [
-      100,
-      100,
-      100
-    ],
-    "packages/runtime/src/diagnostics/local-diagnostics-listener.ts": [
-      98.1,
-      100,
-      100
-    ]
+    "packages/cli/src/main.ts": [93.8, 100, 96.1],
+    "packages/runtime/src/adapters/deno/deno-dns-resolver.ts": [100, 100, 100],
+    "packages/runtime/src/adapters/deno/deno-http-adapter.ts": [100, 100, 100],
+    "packages/runtime/src/adapters/deno/deno-runtime.ts": [94.4, 100, 94.9],
+    "packages/runtime/src/adapters/deno/deno-ws-upgrader.ts": [100, 100, 100],
+    "packages/runtime/src/diagnostics/local-diagnostics-listener.ts": [98.1, 100, 100]
   }
 }

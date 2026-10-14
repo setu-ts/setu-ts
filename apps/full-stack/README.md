@@ -62,8 +62,7 @@ Two consequences worth knowing:
   proves it: because this example carries a `package.json`, Deno resolves npm specifiers from
   `node_modules` rather than its global cache — and `check:apps` type-checks an app **before** it
   runs the smoke, which is what creates `node_modules` here. On a cold checkout
-  `deno check main.ts
-  smoke.ts` therefore failed with
+  `deno check main.ts smoke.ts` therefore failed with
   `Could not find a matching package for 'npm:ws@^8.18.0'`, because the app's import graph reaches
   plugins that lazily import npm drivers. `auto` lets Deno install what a check needs, so the order
   stops mattering. A local run hides this completely once `node_modules` exists.

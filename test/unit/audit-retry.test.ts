@@ -36,7 +36,10 @@ import { backoffMs, classifyAudit, runAuditLoop, shouldRetry } from '../../scrip
  *   loop measures elapsed time from its own start rather than an absolute.
  * @returns The deps to pass, plus the recorded calls, waits and log lines
  */
-function scripted(codes: readonly number[], msPerRun = 0): {
+function scripted(
+  codes: readonly number[],
+  msPerRun = 0,
+): {
   deps: AuditDeps;
   calls: string[][];
   budgets: number[];

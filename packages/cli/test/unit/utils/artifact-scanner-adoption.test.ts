@@ -30,10 +30,7 @@ const ROUTES = FUNCTIONAL_ROUTES_SEAM;
  * @param files - Path (relative to the project root) → source text
  * @returns The double, satisfying the required members of IFileSystem
  */
-function fsWith(
-  entries: readonly string[],
-  files: Readonly<Record<string, string>>,
-): IFileSystem {
+function fsWith(entries: readonly string[], files: Readonly<Record<string, string>>): IFileSystem {
   const relative = (path: string): string => path.replace(/^\/app\//, '');
   return {
     readdir: () => Promise.resolve(entries),
@@ -115,7 +112,8 @@ describe('manual-wiring skip', () => {
       ROUTES,
       {
         path: 'setu.config.ts',
-        source: "import { registerAdminRoutes } from './src/controllers/admin.routes.ts';\n" +
+        source:
+          "import { registerAdminRoutes } from './src/controllers/admin.routes.ts';\n" +
           'registerAdminRoutes(app.router);',
       },
     );

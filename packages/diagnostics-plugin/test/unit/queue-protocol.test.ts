@@ -27,15 +27,13 @@ describe('parseTarget — the queues operation', () => {
       after: 0,
       limit: 128,
     });
-    for (
-      const search of [
-        '',
-        'limit=1&after=0',
-        'after=01&limit=1',
-        'after=0&limit=0',
-        'after=0&limit=129',
-      ]
-    ) {
+    for (const search of [
+      '',
+      'limit=1&after=0',
+      'after=01&limit=1',
+      'after=0&limit=0',
+      'after=0&limit=129',
+    ]) {
       expect(parseTarget('/v1/queues', search)).toBeNull();
     }
     expect(parseTarget('/v1/queues/', 'after=0&limit=1')).toBeNull();
@@ -46,15 +44,17 @@ describe('readQueueSourceBatch', () => {
   it('copies a valid batch field by field', () => {
     const value = sourceBatch({
       attempts: [sourceAttempt(3), sourceAttempt(4)],
-      depths: [{
-        queueAlias: 'emails',
-        ready: 1,
-        processing: 0,
-        dead: 2,
-        scope: 'process-local',
-        coverage: 'partial',
-        ageMs: 7,
-      }],
+      depths: [
+        {
+          queueAlias: 'emails',
+          ready: 1,
+          processing: 0,
+          dead: 2,
+          scope: 'process-local',
+          coverage: 'partial',
+          ageMs: 7,
+        },
+      ],
       next: 4,
       lost: 2,
     });
@@ -93,48 +93,65 @@ describe('readQueueSourceBatch', () => {
     ['an extra key', () => ({ ...sourceBatch(), [CANARY]: 1 })],
     ['a wrong version', () => sourceBatch({ version: 2 as 1 })],
     ['an unknown state', () => sourceBatch({ state: 'collection-failed' as 'ready' })],
-    ['an enabled batch without an alias', () => {
-      const batch = sourceBatch();
-      delete (batch as unknown as Record<string, unknown>).instanceAlias;
-      return batch;
-    }],
+    [
+      'an enabled batch without an alias',
+      () => {
+        const batch = sourceBatch();
+        delete (batch as unknown as Record<string, unknown>).instanceAlias;
+        return batch;
+      },
+    ],
     ['a disabled batch with an alias', () => sourceBatch({ state: 'disabled' })],
-    ['a disabled batch with attempts', () => {
-      const batch = sourceBatch({ state: 'disabled', attempts: [sourceAttempt(1)], next: 1 });
-      delete (batch as unknown as Record<string, unknown>).instanceAlias;
-      return batch;
-    }],
-    ['a disabled batch with depths', () => {
-      const batch = sourceBatch({
-        state: 'disabled',
-        depths: [{
-          queueAlias: 'emails',
-          ready: 1,
-          processing: 0,
-          dead: 0,
-          scope: 'process-local',
-          coverage: 'complete',
-          ageMs: 0,
-        }],
-      });
-      delete (batch as unknown as Record<string, unknown>).instanceAlias;
-      return batch;
-    }],
-    ['a ready batch with a null alias and an attempt', () =>
-      sourceBatch({
-        instanceAlias: null as unknown as string,
-        attempts: [sourceAttempt(1)],
-        next: 1,
-      })],
+    [
+      'a disabled batch with attempts',
+      () => {
+        const batch = sourceBatch({ state: 'disabled', attempts: [sourceAttempt(1)], next: 1 });
+        delete (batch as unknown as Record<string, unknown>).instanceAlias;
+        return batch;
+      },
+    ],
+    [
+      'a disabled batch with depths',
+      () => {
+        const batch = sourceBatch({
+          state: 'disabled',
+          depths: [
+            {
+              queueAlias: 'emails',
+              ready: 1,
+              processing: 0,
+              dead: 0,
+              scope: 'process-local',
+              coverage: 'complete',
+              ageMs: 0,
+            },
+          ],
+        });
+        delete (batch as unknown as Record<string, unknown>).instanceAlias;
+        return batch;
+      },
+    ],
+    [
+      'a ready batch with a null alias and an attempt',
+      () =>
+        sourceBatch({
+          instanceAlias: null as unknown as string,
+          attempts: [sourceAttempt(1)],
+          next: 1,
+        }),
+    ],
     ['an oversized alias', () => sourceBatch({ instanceAlias: 'x'.repeat(65) })],
     ['a control character in an alias', () => sourceBatch({ instanceAlias: 'a\u001b[2Jb' })],
     ['an unknown coverage', () => sourceBatch({ depthCoverage: 'full' as 'complete' })],
     ['the connector-only failure', () => sourceBatch({ failure: 'source-read-failed' as 'none' })],
-    ['too many attempts', () =>
-      sourceBatch({
-        attempts: Array.from({ length: 129 }, (_, i) => sourceAttempt(i + 1)),
-        next: 129,
-      })],
+    [
+      'too many attempts',
+      () =>
+        sourceBatch({
+          attempts: Array.from({ length: 129 }, (_, i) => sourceAttempt(i + 1)),
+          next: 129,
+        }),
+    ],
     [
       'a non-increasing sequence',
       () => sourceBatch({ attempts: [sourceAttempt(2), sourceAttempt(2)], next: 2, lost: 1 }),
@@ -150,21 +167,30 @@ describe('readQueueSourceBatch', () => {
     ],
     ['a non-zero lost on an empty page', () => sourceBatch({ lost: 1 })],
     ['an empty page that moves the cursor', () => sourceBatch({ next: 3 })],
-    ['an attempt with an extra field', () =>
-      sourceBatch({
-        attempts: [{ ...sourceAttempt(1), payload: CANARY } as never],
-        next: 1,
-      })],
-    ['an attempt with a raw-looking job alias', () =>
-      sourceBatch({
-        attempts: [{ ...sourceAttempt(1), jobAlias: 'raw-uuid' }],
-        next: 1,
-      })],
-    ['an unknown settlement', () =>
-      sourceBatch({
-        attempts: [{ ...sourceAttempt(1), settlement: 'maybe' as 'unknown' }],
-        next: 1,
-      })],
+    [
+      'an attempt with an extra field',
+      () =>
+        sourceBatch({
+          attempts: [{ ...sourceAttempt(1), payload: CANARY } as never],
+          next: 1,
+        }),
+    ],
+    [
+      'an attempt with a raw-looking job alias',
+      () =>
+        sourceBatch({
+          attempts: [{ ...sourceAttempt(1), jobAlias: 'raw-uuid' }],
+          next: 1,
+        }),
+    ],
+    [
+      'an unknown settlement',
+      () =>
+        sourceBatch({
+          attempts: [{ ...sourceAttempt(1), settlement: 'maybe' as 'unknown' }],
+          next: 1,
+        }),
+    ],
     [
       'a negative duration',
       () => sourceBatch({ attempts: [{ ...sourceAttempt(1), durationMs: -1 }], next: 1 }),
@@ -173,55 +199,71 @@ describe('readQueueSourceBatch', () => {
       'a non-integer attempt',
       () => sourceBatch({ attempts: [{ ...sourceAttempt(1), attempt: 0 }], next: 1 }),
     ],
-    ['a negative depth count', () =>
-      sourceBatch({
-        depths: [{
-          queueAlias: 'e',
-          ready: -1,
-          processing: 0,
-          dead: 0,
-          scope: 'process-local',
-          coverage: 'complete',
-          ageMs: 0,
-        }],
-      })],
-    ['a depth with an extra field', () =>
-      sourceBatch({
-        depths: [{
-          queueAlias: 'e',
-          ready: 1,
-          processing: 0,
-          dead: 0,
-          scope: 'process-local',
-          coverage: 'complete',
-          ageMs: 0,
-          secret: CANARY,
-        } as never],
-      })],
-    ['too many depths', () =>
-      sourceBatch({
-        depths: Array.from({ length: 65 }, () => ({
-          queueAlias: 'e',
-          ready: 0,
-          processing: 0,
-          dead: 0,
-          scope: 'process-local' as const,
-          coverage: 'complete' as const,
-          ageMs: 0,
-        })),
-      })],
+    [
+      'a negative depth count',
+      () =>
+        sourceBatch({
+          depths: [
+            {
+              queueAlias: 'e',
+              ready: -1,
+              processing: 0,
+              dead: 0,
+              scope: 'process-local',
+              coverage: 'complete',
+              ageMs: 0,
+            },
+          ],
+        }),
+    ],
+    [
+      'a depth with an extra field',
+      () =>
+        sourceBatch({
+          depths: [
+            {
+              queueAlias: 'e',
+              ready: 1,
+              processing: 0,
+              dead: 0,
+              scope: 'process-local',
+              coverage: 'complete',
+              ageMs: 0,
+              secret: CANARY,
+            } as never,
+          ],
+        }),
+    ],
+    [
+      'too many depths',
+      () =>
+        sourceBatch({
+          depths: Array.from({ length: 65 }, () => ({
+            queueAlias: 'e',
+            ready: 0,
+            processing: 0,
+            dead: 0,
+            scope: 'process-local' as const,
+            coverage: 'complete' as const,
+            ageMs: 0,
+          })),
+        }),
+    ],
     ['a non-boolean closed', () => sourceBatch({ closed: 'no' as unknown as boolean })],
     ['a fractional counter', () => sourceBatch({ droppedAttempts: 0.5 })],
-    ['a throwing getter', () => {
-      const batch = sourceBatch();
-      Object.defineProperty(batch, 'attempts', {
-        enumerable: true,
-        get() {
-          throw new Error(CANARY);
-        },
-      });
-      return batch;
-    }],
+    [
+      'a throwing getter',
+      () => {
+        const batch = sourceBatch();
+        Object.defineProperty(batch, 'attempts', {
+          enumerable: true,
+          get() {
+            throw new Error(CANARY);
+          },
+        });
+        return batch;
+      },
+    ],
   ];
 
   for (const [label, build] of refusals) {
@@ -238,39 +280,45 @@ function mergedBatch(overrides: Partial<QueueDiagnosticsBatch> = {}): QueueDiagn
     version: 1,
     instanceId: TEST_INSTANCE_ID,
     state: 'ready',
-    sources: [{
-      sourceId: 'q1',
-      state: 'ready',
-      instanceAlias: 'mailer',
-      depthCoverage: 'complete',
-      failure: 'none',
-      lost: 0,
-      droppedAttempts: 0,
-      evictedJobAliases: 0,
-    }],
-    events: [{
-      sequence: 1,
-      sourceId: 'q1',
-      instanceAlias: 'mailer',
-      queueAlias: 'emails',
-      jobAlias: 'j1',
-      attempt: 1,
-      durationMs: 3,
-      outcome: 'completed',
-      settlement: 'acknowledged',
-      ageMs: 4,
-    }],
-    depths: [{
-      sourceId: 'q1',
-      instanceAlias: 'mailer',
-      queueAlias: 'emails',
-      ready: 0,
-      processing: 0,
-      dead: 0,
-      scope: 'process-local',
-      coverage: 'complete',
-      ageMs: 1,
-    }],
+    sources: [
+      {
+        sourceId: 'q1',
+        state: 'ready',
+        instanceAlias: 'mailer',
+        depthCoverage: 'complete',
+        failure: 'none',
+        lost: 0,
+        droppedAttempts: 0,
+        evictedJobAliases: 0,
+      },
+    ],
+    events: [
+      {
+        sequence: 1,
+        sourceId: 'q1',
+        instanceAlias: 'mailer',
+        queueAlias: 'emails',
+        jobAlias: 'j1',
+        attempt: 1,
+        durationMs: 3,
+        outcome: 'completed',
+        settlement: 'acknowledged',
+        ageMs: 4,
+      },
+    ],
+    depths: [
+      {
+        sourceId: 'q1',
+        instanceAlias: 'mailer',
+        queueAlias: 'emails',
+        ready: 0,
+        processing: 0,
+        dead: 0,
+        scope: 'process-local',
+        coverage: 'complete',
+        ageMs: 1,
+      },
+    ],
     next: 1,
     lost: 0,
     truncatedSources: 0,
@@ -293,13 +341,17 @@ describe('projectQueueBatch + isQueueBatchProjection', () => {
   });
 
   it('accepts the unsupported batch and a disabled source without an alias', () => {
-    expect(isQueueBatchProjection(mergedBatch({
-      state: 'unsupported',
-      sources: [],
-      events: [],
-      depths: [],
-      next: 0,
-    }))).toBe(true);
+    expect(
+      isQueueBatchProjection(
+        mergedBatch({
+          state: 'unsupported',
+          sources: [],
+          events: [],
+          depths: [],
+          next: 0,
+        }),
+      ),
+    ).toBe(true);
     const disabled = mergedBatch({ events: [], depths: [], next: 0 });
     const status = { ...disabled.sources[0], state: 'disabled' as const };
     delete (status as unknown as Record<string, unknown>).instanceAlias;
@@ -320,12 +372,15 @@ describe('projectQueueBatch + isQueueBatchProjection', () => {
       'a non-q source id',
       () => mergedBatch({ sources: [{ ...mergedBatch().sources[0], sourceId: 'queue.a' }] }),
     ],
-    ['a source id beyond q16', () =>
-      mergedBatch({
-        sources: [{ ...mergedBatch().sources[0], sourceId: 'q17' }],
-        events: [],
-        depths: [],
-      })],
+    [
+      'a source id beyond q16',
+      () =>
+        mergedBatch({
+          sources: [{ ...mergedBatch().sources[0], sourceId: 'q17' }],
+          events: [],
+          depths: [],
+        }),
+    ],
     [
       'an event naming no listed source',
       () => mergedBatch({ events: [{ ...mergedBatch().events[0], sourceId: 'q2' }] }),
@@ -348,14 +403,17 @@ describe('projectQueueBatch + isQueueBatchProjection', () => {
       () => mergedBatch({ sources: [{ ...mergedBatch().sources[0], state: 'fine' as 'ready' }] }),
     ],
     ['a fractional truncation count', () => mergedBatch({ truncatedDepths: 0.5 })],
-    ['more than 128 events', () =>
-      mergedBatch({
-        events: Array.from(
-          { length: 129 },
-          (_, i) => ({ ...mergedBatch().events[0], sequence: i + 1 }),
-        ),
-        next: 129,
-      })],
+    [
+      'more than 128 events',
+      () =>
+        mergedBatch({
+          events: Array.from({ length: 129 }, (_, i) => ({
+            ...mergedBatch().events[0],
+            sequence: i + 1,
+          })),
+          next: 129,
+        }),
+    ],
     [
       'an invalid depth scope',
       () =>

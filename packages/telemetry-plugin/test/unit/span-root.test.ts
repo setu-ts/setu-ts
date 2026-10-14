@@ -62,9 +62,7 @@ afterAll(async () => {
 });
 
 /** Starts `parent`, runs `inner` with it active, ends everything, returns spans by name. */
-async function underActiveParent(
-  inner: () => void,
-): Promise<Map<string, FinishedSpan>> {
+async function underActiveParent(inner: () => void): Promise<Map<string, FinishedSpan>> {
   exporter.reset();
   const parent = host.startSpan('parent') as { end(): void };
   await host.activate!(parent, () => {

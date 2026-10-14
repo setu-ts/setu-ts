@@ -402,9 +402,11 @@ describe('CachePlugin', () => {
       const timerCalls: Array<{ ms: number }> = [];
       const plugin = CachePlugin({ store: 'redis', options: { client: fake.client } });
       const { ctx, healthIndicators } = createFakeContext();
-      (ctx.runtime as {
-        setTimeout: (fn: () => void, ms: number) => unknown;
-      }).setTimeout = (fn: () => void, ms: number): unknown => {
+      (
+        ctx.runtime as {
+          setTimeout: (fn: () => void, ms: number) => unknown;
+        }
+      ).setTimeout = (fn: () => void, ms: number): unknown => {
         timerCalls.push({ ms });
         return setTimeout(fn, ms);
       };

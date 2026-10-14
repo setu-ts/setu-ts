@@ -76,9 +76,7 @@ export function jsonPathString(segments: readonly string[]): string {
  * @returns The mapped dialect, or `undefined` when the name is unknown
  * @since 0.2.0
  */
-export function dialectFromDrizzleClassName(
-  name: string | undefined,
-): SqlJsonDialect | undefined {
+export function dialectFromDrizzleClassName(name: string | undefined): SqlJsonDialect | undefined {
   if (name === undefined) return undefined;
   if (name.startsWith('Pg')) return 'postgresql';
   if (name.startsWith('MySql')) return 'mysql';

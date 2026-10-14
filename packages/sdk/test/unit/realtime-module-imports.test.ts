@@ -49,9 +49,7 @@ describe('SDK realtime module imports', () => {
     // nothing from common today, so an always-false matcher looks identical to
     // a working one.
     expect(
-      valueImportsOfCommon(
-        "import { CAPABILITIES } from 'jsr:@setu-ts/common@^0.3.0';",
-      ),
+      valueImportsOfCommon("import { CAPABILITIES } from 'jsr:@setu-ts/common@^0.3.0';"),
     ).toEqual(['jsr:@setu-ts/common@^0.3.0']);
     expect(
       valueImportsOfCommon("import type { IRequest } from 'jsr:@setu-ts/common@^0.3.0';"),

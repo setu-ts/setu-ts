@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixtures use sync methods that interface requires
+/* eslint-disable require-await -- test fixtures use sync methods that interface requires */
 /**
  * Fake runtime services for testing.
  *

@@ -77,8 +77,7 @@ const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] 
  * artifact only when it exports every symbol the barrel names — dropping it would
  * unwire the service instead of testing it.
  */
-const CAPABILITY_INJECTING_SERVICE =
-  `import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+const CAPABILITY_INJECTING_SERVICE = `import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig } from '@setu-ts/common';
 
@@ -452,9 +451,10 @@ describe('generated artifacts are wired — end to end', () => {
       }
 
       await useWorkspacePackages(project);
-      const probe = PROBE
-        .replace('__CLASS__', classBased ? CLASS_PROBE : '')
-        .replace('__CQRS__', cqrs ? CQRS_PROBE : '');
+      const probe = PROBE.replace('__CLASS__', classBased ? CLASS_PROBE : '').replace(
+        '__CQRS__',
+        cqrs ? CQRS_PROBE : '',
+      );
       const result = await bootAndProbe(project, probe);
 
       // The generated route module was called with `app.router` from `createApp()`.
@@ -516,9 +516,7 @@ describe('generated artifacts are wired — end to end', () => {
         '--style',
         'class-based',
       ]),
-    ).toBe(
-      0,
-    );
+    ).toBe(0);
     const project = `${root}/shop`;
 
     const wanted = [...ARTIFACTS, ...CLASS_BASED_ONLY, ...CLASS_MICROSERVICE_INGRESS];
@@ -540,9 +538,10 @@ describe('generated artifacts are wired — end to end', () => {
     await nodeFs.writeFile(`${project}/src/ingress/job.ingress.ts`, RECORDING_JOB);
 
     await useWorkspacePackages(project);
-    const probe = PROBE
-      .replace('__CLASS__', CLASS_PROBE)
-      .replace('__CQRS__', CLASS_MICROSERVICE_PROBE);
+    const probe = PROBE.replace('__CLASS__', CLASS_PROBE).replace(
+      '__CQRS__',
+      CLASS_MICROSERVICE_PROBE,
+    );
     const result = await bootAndProbe(project, probe);
 
     // The HTTP and DI results the class-based arm already asserts.
@@ -603,10 +602,7 @@ export function auditLogMiddleware(): MiddlewareFunction {
       expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
       await nodeFs.mkdir(`${project}/src/middleware`, { recursive: true });
-      await nodeFs.writeFile(
-        `${project}/src/middleware/audit-log.middleware.ts`,
-        OLD_MIDDLEWARE,
-      );
+      await nodeFs.writeFile(`${project}/src/middleware/audit-log.middleware.ts`, OLD_MIDDLEWARE);
 
       err = [];
       expect(await run(['g', 'middleware', 'request-id', '--dir', project])).toBe(0);
@@ -643,8 +639,7 @@ export function auditLogMiddleware(): MiddlewareFunction {
     // The developer's edit, exactly as the generated factory's JSDoc documents it:
     // the factory takes \`services\`, resolves the event bus, and builds the class
     // with it — the dependency the argument-less \`handle()\` cannot reach.
-    const EDITED_FACTORY =
-      `import type { CqrsCommand, ICommandHandler, IEventBus, IServiceRegistry } from '@setu-ts/common';
+    const EDITED_FACTORY = `import type { CqrsCommand, ICommandHandler, IEventBus, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 /** Type name the command bus routes on. */
@@ -719,10 +714,7 @@ await app.stop();
 
       // Generate the command handler, then the developer edits its factory.
       expect(await run(['g', 'command-handler', 'widget', '--dir', project])).toBe(0);
-      await nodeFs.writeFile(
-        `${project}/src/cqrs/widget.command-handler.ts`,
-        EDITED_FACTORY,
-      );
+      await nodeFs.writeFile(`${project}/src/cqrs/widget.command-handler.ts`, EDITED_FACTORY);
 
       // The regression X2-2 records: an UNRELATED generate. The barrel is managed and
       // regenerated, but the artifact — and the developer's factory edit — must survive.

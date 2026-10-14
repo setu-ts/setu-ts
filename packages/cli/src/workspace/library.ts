@@ -80,9 +80,8 @@ export function libraryFiles(
   // workspace that holds it.
   const manifest = onDeno
     ? {
-      path: joinPath(root, 'deno.json'),
-      contents: `${
-        JSON.stringify(
+        path: joinPath(root, 'deno.json'),
+        contents: `${JSON.stringify(
           {
             name: specifier,
             version: '0.1.0',
@@ -98,13 +97,11 @@ export function libraryFiles(
           },
           null,
           2,
-        )
-      }\n`,
-    }
+        )}\n`,
+      }
     : {
-      path: joinPath(root, 'package.json'),
-      contents: `${
-        JSON.stringify(
+        path: joinPath(root, 'package.json'),
+        contents: `${JSON.stringify(
           {
             name: specifier,
             version: '0.1.0',
@@ -123,9 +120,8 @@ export function libraryFiles(
           },
           null,
           2,
-        )
-      }\n`,
-    };
+        )}\n`,
+      };
 
   const barrel = `/**
  * ${specifier} — code shared by this workspace's services.
@@ -203,22 +199,22 @@ ${onDeno ? 'deno task test' : 'npm test'}
   // it imports a member's `setu.config.ts` (M111d §3.4, probed). Deno itself
   // keeps resolving it through the `deno.json` above.
   const nodeVisibility = onDeno
-    ? [{
-      path: joinPath(root, 'package.json'),
-      contents: `${
-        JSON.stringify(
-          {
-            name: specifier,
-            version: '0.1.0',
-            private: true,
-            type: 'module',
-            exports: { '.': './src/index.ts' },
-          },
-          null,
-          2,
-        )
-      }\n`,
-    }]
+    ? [
+        {
+          path: joinPath(root, 'package.json'),
+          contents: `${JSON.stringify(
+            {
+              name: specifier,
+              version: '0.1.0',
+              private: true,
+              type: 'module',
+              exports: { '.': './src/index.ts' },
+            },
+            null,
+            2,
+          )}\n`,
+        },
+      ]
     : [];
 
   return [

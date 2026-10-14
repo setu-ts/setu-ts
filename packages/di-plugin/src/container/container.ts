@@ -133,9 +133,11 @@ export class DiContainer implements IContainer {
     if (this.#registry.has(token)) {
       return true;
     }
-    return this.#autoRegister &&
+    return (
+      this.#autoRegister &&
       this.#externalResolver !== undefined &&
-      this.#externalResolver.has(token);
+      this.#externalResolver.has(token)
+    );
   }
 
   /** @inheritdoc */

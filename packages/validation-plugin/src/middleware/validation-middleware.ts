@@ -55,10 +55,7 @@ class JsonParseError extends Error {}
  * @returns The extracted data
  * @throws {JsonParseError} When body JSON is invalid
  */
-async function extractTarget(
-  ctx: IRequestContext,
-  target: ValidationTarget,
-): Promise<unknown> {
+async function extractTarget(ctx: IRequestContext, target: ValidationTarget): Promise<unknown> {
   switch (target) {
     case 'body': {
       try {
@@ -98,7 +95,9 @@ async function extractTarget(
         let value = rawValue;
         try {
           value = decodeURIComponent(rawValue);
-        } catch { /* keep raw when malformed */ }
+        } catch {
+          /* keep raw when malformed */
+        }
         record[eqIndex === -1 ? trimmed : trimmed.slice(0, eqIndex)] = value;
       }
       return record;
@@ -152,30 +151,33 @@ export function createValidationMiddleware(
   // because a helper resolves the service at REQUEST time inside its own
   // closure — so the closure a route actually carries is the helper's, not this
   // one.
-  return withValidationMetadata(async (ctx, next) => {
-    let rawData: unknown;
-    try {
-      rawData = await extractTarget(ctx, target);
-    } catch (e) {
-      if (e instanceof JsonParseError) {
-        const issues: readonly ValidationIssue[] = [
-          { path: '', message: 'Invalid JSON in request body' },
-        ];
-        return respond(ctx, formatter(issues, ctx), isProblemJson);
+  return withValidationMetadata(
+    async (ctx, next) => {
+      let rawData: unknown;
+      try {
+        rawData = await extractTarget(ctx, target);
+      } catch (e) {
+        if (e instanceof JsonParseError) {
+          const issues: readonly ValidationIssue[] = [
+            { path: '', message: 'Invalid JSON in request body' },
+          ];
+          return respond(ctx, formatter(issues, ctx), isProblemJson);
+        }
+        throw e;
       }
-      throw e;
-    }
 
-    const result = service.validate(schema, rawData);
+      const result = service.validate(schema, rawData);
 
-    if (result.success) {
-      ctx.state.set(validatedStateKey(target), result.value);
-      await next();
-      return;
-    }
+      if (result.success) {
+        ctx.state.set(validatedStateKey(target), result.value);
+        await next();
+        return;
+      }
 
-    return respond(ctx, formatter(result.error, ctx), isProblemJson);
-  }, { target, schema });
+      return respond(ctx, formatter(result.error, ctx), isProblemJson);
+    },
+    { target, schema },
+  );
 }
 
 /**
@@ -200,10 +202,7 @@ function respond(
     return ctx.response.status(400).json(body);
   }
   const bytes = new TextEncoder().encode(JSON.stringify(body));
-  return ctx.response
-    .status(400)
-    .header('content-type', PROBLEM_JSON)
-    .send(bytes);
+  return ctx.response.status(400).header('content-type', PROBLEM_JSON).send(bytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -292,8 +291,11 @@ function bindHelper(target: ValidationTarget, schema: unknown): MiddlewareFuncti
   // Branded here as well as in `createValidationMiddleware`: this closure is
   // the one a route's `middleware` array holds, and the inner middleware it
   // delegates to does not exist until the request runs.
-  return withValidationMetadata(async (ctx, next) => {
-    const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
-    await service.middleware(schema, target)(ctx, next);
-  }, { target, schema });
+  return withValidationMetadata(
+    async (ctx, next) => {
+      const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
+      await service.middleware(schema, target)(ctx, next);
+    },
+    { target, schema },
+  );
 }

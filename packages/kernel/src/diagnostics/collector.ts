@@ -508,9 +508,8 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
         stages.push(stage);
       }
       this.#routeMiddlewareNodes.set(event.entryIndex, stages);
-      const ownerNode = event.owner === undefined
-        ? undefined
-        : this.#pluginNodesByName.get(event.owner);
+      const ownerNode =
+        event.owner === undefined ? undefined : this.#pluginNodesByName.get(event.owner);
       if (ownerNode !== undefined) {
         this.#addEdge(ownerNode.id, id, 'owns');
       }
@@ -631,9 +630,10 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
     startedAtMs: number | null;
     durationMs: number | null;
   }): void {
-    const node = parts.scope === 'global'
-      ? this.#globalMiddlewareNodes[parts.position]?.id
-      : this.#routeMiddlewareNodes.get(parts.routeEntryIndex ?? -1)?.[parts.position]?.id;
+    const node =
+      parts.scope === 'global'
+        ? this.#globalMiddlewareNodes[parts.position]?.id
+        : this.#routeMiddlewareNodes.get(parts.routeEntryIndex ?? -1)?.[parts.position]?.id;
     this.#emitEvent({
       kind: 'middleware',
       stage: parts.scope,
@@ -797,11 +797,7 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
     this.#snapshotDirty = true;
   }
 
-  #nextNodeId(
-    prefix: string,
-    current: number,
-    assign: (next: number) => void,
-  ): string | undefined {
+  #nextNodeId(prefix: string, current: number, assign: (next: number) => void): string | undefined {
     // Fixed v1 limit: stop ADDING topology at 1,024 nodes and report the
     // truncation rather than retaining unbounded metadata.
     if (this.#nodes.length >= MAX_NODES) {
@@ -926,12 +922,14 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
     }
     // Identifiers are carried only when they are well-formed and non-zero —
     // the W3C all-zero ids mean "invalid", not "anonymous".
-    const traceId = TRACE_ID_PATTERN.test(context.traceId) && NON_ZERO.test(context.traceId)
-      ? context.traceId
-      : undefined;
-    const spanId = SPAN_ID_PATTERN.test(context.spanId) && NON_ZERO.test(context.spanId)
-      ? context.spanId
-      : undefined;
+    const traceId =
+      TRACE_ID_PATTERN.test(context.traceId) && NON_ZERO.test(context.traceId)
+        ? context.traceId
+        : undefined;
+    const spanId =
+      SPAN_ID_PATTERN.test(context.spanId) && NON_ZERO.test(context.spanId)
+        ? context.spanId
+        : undefined;
     return {
       ...(traceId !== undefined ? { traceId } : {}),
       ...(spanId !== undefined ? { spanId } : {}),
@@ -967,9 +965,10 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
     // A status is recorded as the application set it — any finite number,
     // ranged or not — but a non-finite one is omitted, for the same reason a
     // non-finite priority is: it would serialize to `null` in a `number` field.
-    const statusCode = parts.statusCode !== undefined && Number.isFinite(parts.statusCode)
-      ? parts.statusCode
-      : undefined;
+    const statusCode =
+      parts.statusCode !== undefined && Number.isFinite(parts.statusCode)
+        ? parts.statusCode
+        : undefined;
     const parentLength = parts.parentOperationId?.length ?? 0;
     const withinCap = eventWithinByteCap({
       operationId: parts.operationId.length,

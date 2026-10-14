@@ -71,7 +71,8 @@ function parseConnectMessages(data: Uint8Array): string[] {
     // Skip compression flag byte
     const flags = data[offset];
     // Read 4-byte big-endian length
-    const length = (data[offset + 1] << 24) |
+    const length =
+      (data[offset + 1] << 24) |
       (data[offset + 2] << 16) |
       (data[offset + 3] << 8) |
       data[offset + 4];

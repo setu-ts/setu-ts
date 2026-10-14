@@ -97,13 +97,10 @@ describe('runBounded', () => {
 
   it('rethrows the FIRST failure when several items throw', async () => {
     await expect(
-      runBounded(
-        [1, 2, 3],
-        1,
-        (item) =>
-          item === 1
-            ? Promise.reject(new Error('first'))
-            : item === 3
+      runBounded([1, 2, 3], 1, (item) =>
+        item === 1
+          ? Promise.reject(new Error('first'))
+          : item === 3
             ? Promise.reject(new Error('third'))
             : Promise.resolve(),
       ),

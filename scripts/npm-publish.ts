@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- release orchestration prints its checked artifacts.
+/* eslint-disable no-console -- release orchestration prints its checked artifacts. */
 /** Packs, checks, looks up and publishes immutable npm tarballs in dependency order. @module */
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES } from './release-packages.ts';
 import { publicationHoldRefusal } from './publication-hold.ts';
@@ -52,13 +52,16 @@ export async function runNpmPublish(options: PublishOptions): Promise<void> {
       name: string;
       version: string;
     };
-    const packed = await execute('pnpm', [
-      'pack',
-      '--ignore-scripts',
-      '--pack-destination',
-      packDir,
-    ], dir);
-    const reported = packed.trim().split('\n').reverse().find((line) => line.endsWith('.tgz'));
+    const packed = await execute(
+      'pnpm',
+      ['pack', '--ignore-scripts', '--pack-destination', packDir],
+      dir,
+    );
+    const reported = packed
+      .trim()
+      .split('\n')
+      .reverse()
+      .find((line) => line.endsWith('.tgz'));
     if (reported === undefined) throw new Error(`${dir}: pack reported no tarball`);
     const tarball = reported.startsWith('/') ? reported : `${packDir}/${reported}`;
     const manifest = JSON.parse(await execute('tar', ['-xzOf', tarball, 'package/package.json']));

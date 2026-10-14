@@ -22,8 +22,9 @@ function handler(): RouteHandler {
 
 describe('route response metadata', () => {
   it('should round-trip the status it was branded with', () => {
-    expect(responseMetadataOf(withResponseMetadata(handler(), { status: 201 })))
-      .toEqual({ status: 201 });
+    expect(responseMetadataOf(withResponseMetadata(handler(), { status: 201 }))).toEqual({
+      status: 201,
+    });
   });
 
   it('should return undefined for an unbranded handler', () => {
@@ -61,31 +62,31 @@ describe('route response metadata', () => {
   });
 
   it('should accept both ends of the serveable range', () => {
-    expect(responseMetadataOf(withResponseMetadata(handler(), { status: 200 })))
-      .toEqual({ status: 200 });
-    expect(responseMetadataOf(withResponseMetadata(handler(), { status: 599 })))
-      .toEqual({ status: 599 });
+    expect(responseMetadataOf(withResponseMetadata(handler(), { status: 200 }))).toEqual({
+      status: 200,
+    });
+    expect(responseMetadataOf(withResponseMetadata(handler(), { status: 599 }))).toEqual({
+      status: 599,
+    });
   });
 
   it('should treat a foreign value under the same global symbol as absent', () => {
     // The guard exists because `Symbol.for` is a GLOBAL key: any library may
     // write under it. A value that is not response metadata reads as absent
     // rather than being trusted.
-    for (
-      const foreign of [
-        'not-an-object',
-        null,
-        {},
-        { status: '201' },
-        { status: 2.5 },
-        { status: Number.NaN },
-        // Outside [200, 599]: the web `Response` constructor refuses these, so
-        // a brand carrying one could never be honoured by any runtime.
-        { status: 199 },
-        { status: 600 },
-        { status: 101 },
-      ]
-    ) {
+    for (const foreign of [
+      'not-an-object',
+      null,
+      {},
+      { status: '201' },
+      { status: 2.5 },
+      { status: Number.NaN },
+      // Outside [200, 599]: the web `Response` constructor refuses these, so
+      // a brand carrying one could never be honoured by any runtime.
+      { status: 199 },
+      { status: 600 },
+      { status: 101 },
+    ]) {
       const fn = handler();
       Object.defineProperty(fn, RESPONSE_METADATA, { value: foreign, configurable: true });
 

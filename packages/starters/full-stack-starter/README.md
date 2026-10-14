@@ -270,12 +270,15 @@ yet. `createFullStackAppFromConfig` closes that ordering gap for every option at
 ```typescript
 import { createFullStackAppFromConfig, fullStackConfigOf } from '@setu-ts/full-stack-starter';
 
-const app = await createFullStackAppFromConfig((config) => ({
-  // `prismaClient` is generated and constructed by the application — a Prisma v7
-  // client carries its own connection configuration, so `url` is not an option.
-  database: { type: 'prisma', options: { prismaClient } },
-  session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-}), { config: { envFilePath: ['.env.local', '.env'] } });
+const app = await createFullStackAppFromConfig(
+  (config) => ({
+    // `prismaClient` is generated and constructed by the application — a Prisma v7
+    // client carries its own connection configuration, so `url` is not an option.
+    database: { type: 'prisma', options: { prismaClient } },
+    session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+  }),
+  { config: { envFilePath: ['.env.local', '.env'] } },
+);
 
 const config = fullStackConfigOf(app); // the exact snapshot passed to the callback
 

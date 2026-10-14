@@ -145,10 +145,10 @@ export type GraphqlSubscriptionOutcome =
   | { kind: 'error'; status: number; result: GraphqlExecutionResult }
   | { kind: 'single'; status: number; result: GraphqlExecutionResult }
   | {
-    kind: 'stream';
-    status: number;
-    stream: AsyncIterable<GraphqlExecutionResult>;
-  };
+      kind: 'stream';
+      status: number;
+      stream: AsyncIterable<GraphqlExecutionResult>;
+    };
 
 /**
  * The GraphQL service contract.

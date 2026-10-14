@@ -51,7 +51,7 @@ describe('GraphQL HTTP E2E', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: '{ hello }' }),
       });
-      const json = await res.json() as { data?: { hello?: string }; errors?: unknown[] };
+      const json = (await res.json()) as { data?: { hello?: string }; errors?: unknown[] };
 
       expect(res.statusCode).toBe(200);
       expect(json.data?.hello).toBe('Hello World');
@@ -92,7 +92,7 @@ describe('GraphQL HTTP E2E', () => {
         headers: { 'content-type': 'application/json' },
         body: 'not valid json',
       });
-      const json = await res.json() as { errors?: Array<{ extensions?: { code?: string } }> };
+      const json = (await res.json()) as { errors?: Array<{ extensions?: { code?: string } }> };
 
       expect(res.statusCode).toBe(400);
       expect(json.errors?.[0]?.extensions?.code).toBe('INVALID_JSON');
@@ -136,7 +136,7 @@ describe('GraphQL HTTP E2E', () => {
         },
         body: JSON.stringify({ query: '{ unknownField }' }),
       });
-      const json = await res.json() as { errors?: unknown[] };
+      const json = (await res.json()) as { errors?: unknown[] };
 
       // Under 'json' media type, well-formed GraphQL requests (even with validation errors) return 200
       // The handler should force 200 for POST requests under JSON media type
@@ -163,7 +163,7 @@ describe('GraphQL HTTP E2E', () => {
         },
         body: JSON.stringify({ query: '{ unknownField }' }),
       });
-      const json = await res.json() as { errors?: unknown[] };
+      const json = (await res.json()) as { errors?: unknown[] };
 
       // Under 'graphql-response' media type, validation errors return 400
       expect(res.statusCode).toBe(400);
@@ -234,7 +234,7 @@ describe('GraphQL HTTP E2E', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: '{ hello' }),
       });
-      const json = await res.json() as {
+      const json = (await res.json()) as {
         errors?: Array<{ message?: string; locations?: unknown[] }>;
       };
 
@@ -264,7 +264,7 @@ describe('GraphQL HTTP E2E', () => {
         },
         body: JSON.stringify({ query: '{ hello' }),
       });
-      const json = await res.json() as {
+      const json = (await res.json()) as {
         errors?: Array<{ message?: string; locations?: unknown[] }>;
       };
 
@@ -309,7 +309,7 @@ describe('GraphQL HTTP E2E', () => {
           variables: { limit: 10 },
         }),
       });
-      const json = await res.json() as { data?: { test?: string } };
+      const json = (await res.json()) as { data?: { test?: string } };
 
       expect(res.statusCode).toBe(200);
       expect(json.data?.test).toBe('Limit: 10');
@@ -347,7 +347,7 @@ describe('GraphQL HTTP E2E', () => {
           variables: { flag: true },
         }),
       });
-      const json = await res.json() as { data?: { test?: string } };
+      const json = (await res.json()) as { data?: { test?: string } };
 
       expect(res.statusCode).toBe(200);
       expect(json.data?.test).toBe('Flag: true');
@@ -417,7 +417,7 @@ describe('GraphQL HTTP E2E', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: 'subscription { test }' }),
       });
-      const jsonBody = await asJson.json() as {
+      const jsonBody = (await asJson.json()) as {
         errors?: Array<{ extensions?: { code?: string } }>;
       };
 
@@ -434,7 +434,7 @@ describe('GraphQL HTTP E2E', () => {
         },
         body: JSON.stringify({ query: 'subscription { test }' }),
       });
-      const graphqlBody = await asGraphql.json() as {
+      const graphqlBody = (await asGraphql.json()) as {
         errors?: Array<{ extensions?: { code?: string } }>;
       };
 

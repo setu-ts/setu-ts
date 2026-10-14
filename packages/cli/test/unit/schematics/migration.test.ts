@@ -29,10 +29,10 @@ describe('migration schematic', () => {
   });
 
   it('lists an existing migration alongside the new one, in order', () => {
-    const withPrior = generateMigration(
-      deriveNames('add-orders'),
-      { ...options(), migrations: ['20200101000000-add-users'] },
-    );
+    const withPrior = generateMigration(deriveNames('add-orders'), {
+      ...options(),
+      migrations: ['20200101000000-add-users'],
+    });
     const barrel = withPrior.find((file) => file.path === 'src/migrations/index.ts');
     const body = barrel?.contents ?? '';
 
@@ -119,13 +119,11 @@ describe('the migration runner, per target', () => {
   // Node gained `import.meta.main` only in 24.2 and the floor is 22, so an npm
   // target compares its own URL with the script it was asked to run. A Deno
   // global there would not even type-check.
-  for (
-    const [runtime, command] of [
-      ['node', 'npx tsx src/migrations/run.ts'],
-      ['cloudflare-workers', 'npx tsx src/migrations/run.ts'],
-      ['bun', 'bun run src/migrations/run.ts'],
-    ] as const
-  ) {
+  for (const [runtime, command] of [
+    ['node', 'npx tsx src/migrations/run.ts'],
+    ['cloudflare-workers', 'npx tsx src/migrations/run.ts'],
+    ['bun', 'bun run src/migrations/run.ts'],
+  ] as const) {
     it(`runs as the entry script on ${runtime}`, () => {
       const runner = runnerFor(runtime);
       expect(runner).toContain(`//   ${command}          # apply`);

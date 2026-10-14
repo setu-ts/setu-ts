@@ -139,9 +139,9 @@ function marshalValue(
         throw new UnsupportedQueryFeatureError(
           'attribute-value',
           ADAPTER,
-          `The number${
-            at(path)
-          } is not a finite decimal; NaN and Infinity have no DynamoDB N representation.`,
+          `The number${at(
+            path,
+          )} is not a finite decimal; NaN and Infinity have no DynamoDB N representation.`,
         );
       }
       return { N: String(value) };
@@ -206,9 +206,9 @@ function marshalObjectValue(
     throw new UnsupportedQueryFeatureError(
       'date-encoding',
       ADAPTER,
-      `A JS Date${
-        at(path)
-      } requires a declared DynamoDB encoding; DynamoDB has no date type, so declare the attribute under the mapping's 'dateAttributes' option ('iso' | 'epochMs').`,
+      `A JS Date${at(
+        path,
+      )} requires a declared DynamoDB encoding; DynamoDB has no date type, so declare the attribute under the mapping's 'dateAttributes' option ('iso' | 'epochMs').`,
     );
   }
   if (value instanceof Uint8Array) return { B: value };
@@ -216,9 +216,9 @@ function marshalObjectValue(
     throw new UnsupportedQueryFeatureError(
       'attribute-value',
       ADAPTER,
-      `Only Uint8Array marshals to a DynamoDB binary (B) value${
-        at(path)
-      }; received '${value.constructor.name}'.`,
+      `Only Uint8Array marshals to a DynamoDB binary (B) value${at(
+        path,
+      )}; received '${value.constructor.name}'.`,
     );
   }
   if (Array.isArray(value)) {
@@ -230,9 +230,9 @@ function marshalObjectValue(
     throw new UnsupportedQueryFeatureError(
       'attribute-value',
       ADAPTER,
-      `Only plain objects marshal to a DynamoDB map (M) value${
-        at(path)
-      }; received '${value.constructor.name}'.`,
+      `Only plain objects marshal to a DynamoDB map (M) value${at(
+        path,
+      )}; received '${value.constructor.name}'.`,
     );
   }
   const members: Record<string, DynamoAttributeValue> = {};

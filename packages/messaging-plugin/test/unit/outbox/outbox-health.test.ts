@@ -36,10 +36,7 @@ function indicatorFor(
 }
 
 /** A source over a harness's stores with chosen per-instance signals. */
-function signalling(
-  h: OutboxHarness,
-  signals: OutboxInstanceSignals,
-): OutboxHealthSource {
+function signalling(h: OutboxHarness, signals: OutboxInstanceSignals): OutboxHealthSource {
   return {
     activeStores: () => [h.store],
     closing: false,

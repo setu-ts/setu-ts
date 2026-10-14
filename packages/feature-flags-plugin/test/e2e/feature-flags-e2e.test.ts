@@ -51,7 +51,7 @@ describe('feature-flags-e2e', () => {
     const flagPlugin = FeatureFlagsPlugin({
       provider: 'config',
       options: {
-        flags: { 'test': { enabled: true } },
+        flags: { test: { enabled: true } },
       },
     });
 

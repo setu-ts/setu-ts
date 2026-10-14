@@ -33,9 +33,7 @@ import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 async function docker(args: string[]): Promise<string> {
   const out = await runProcess('docker', { args });
   if (!out.success) {
-    throw new Error(
-      `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
-    );
+    throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
   return new TextDecoder().decode(out.stdout);
 }
@@ -68,48 +66,52 @@ function toIpv4(url: string): string {
 }
 
 describe('REAL Redis backplane outage (§3.7)', () => {
-  it('up → stop → down → restart → up (X3-2 self-heals)', {
-    skip: process.env['REDIS_URL'] === undefined,
-  }, async () => {
-    const url = process.env['REDIS_URL'];
-    if (url === undefined) throw new Error('Backend guard failed');
+  it(
+    'up → stop → down → restart → up (X3-2 self-heals)',
+    {
+      skip: process.env['REDIS_URL'] === undefined,
+    },
+    async () => {
+      const url = process.env['REDIS_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    await import('ioredis');
+      await import('ioredis');
 
-    const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
+      const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
 
-    const backplane = new RedisBackplane(
-      { transport: 'redis', url: toIpv4(url) },
-      'outage-origin',
-      'outage-topic',
-    );
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: toIpv4(url) },
+        'outage-origin',
+        'outage-topic',
+      );
 
-    try {
-      await backplane.connect();
-      const probe = backplane.isHealthy;
-      expect(typeof probe).toBe('function');
-      if (typeof probe !== 'function') return;
+      try {
+        await backplane.connect();
+        const probe = backplane.isHealthy;
+        expect(typeof probe).toBe('function');
+        if (typeof probe !== 'function') return;
 
-      // (up) baseline: F2 regression — the bound ping must report reachable.
-      // Poll: the two ioredis connections settle to 'ready' asynchronously.
-      await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
-      expect(await probe()).toBe(true);
+        // (up) baseline: F2 regression — the bound ping must report reachable.
+        // Poll: the two ioredis connections settle to 'ready' asynchronously.
+        await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
+        expect(await probe()).toBe(true);
 
-      // (stop) real Redis stop → probe reports down
-      await docker(['stop', containerId]);
-      await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
-      expect(await probe()).toBe(false);
+        // (stop) real Redis stop → probe reports down
+        await docker(['stop', containerId]);
+        await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
+        expect(await probe()).toBe(false);
 
-      // (restart) real Redis start → probe reports up again (X3-2 self-heals)
-      await docker(['start', containerId]);
-      await waitTrue(async () => (await probe()) === true, 'up after restart', 30_000);
-      expect(await probe()).toBe(true);
-    } finally {
-      await backplane.close();
-      await runProcess('docker', { args: ['start', containerId] });
-    }
-  });
+        // (restart) real Redis start → probe reports up again (X3-2 self-heals)
+        await docker(['start', containerId]);
+        await waitTrue(async () => (await probe()) === true, 'up after restart', 30_000);
+        expect(await probe()).toBe(true);
+      } finally {
+        await backplane.close();
+        await runProcess('docker', { args: ['start', containerId] });
+      }
+    },
+  );
 });
 
 // ── A publish on a failed connection is reported, not lost ────────────────────
@@ -137,77 +139,81 @@ function settleWithin(promise: Promise<void>, ms: number): Promise<string> {
 }
 
 describe('REAL Redis backplane: a publish on a failed connection', () => {
-  it('rejects, is recorded failed, and publishing recovers — silent and dropped connections', {
-    skip: REDIS_URL === undefined,
-  }, async () => {
-    const port = new URL(REDIS_URL!).port === '' ? 6379 : Number(new URL(REDIS_URL!).port);
-    const containerId = await containerIdForPort(port);
-    const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        RealtimeBackplanePlugin({
-          transport: 'redis',
-          url: toIpv4(REDIS_URL!),
-          topic: `outage-publish-${crypto.randomUUID()}`,
-          commandTimeoutMs: COMMAND_TIMEOUT_MS,
-          diagnostics: { enabled: true, alias: 'fanout' },
-        }),
-      ],
-    });
-    await app.start();
-    const backplane = app.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE);
-    const [source] = app.services.getAll<IRealtimeDiagnosticsSource>(
-      CAPABILITIES.REALTIME_DIAGNOSTICS,
-    );
-    const frame = { kind: 'ws-room' as const, origin: 'x', name: 'lobby', data: 'hi' };
-    let paused = false;
-    try {
-      await backplane.publish(frame);
-      expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 0 });
-
-      // (1) SILENT: the socket stays open while the server answers nothing — a
-      // paused or partitioned host that sends no reset. Before the command
-      // timeout this publish never settled, so no consumer logged it and no
-      // observation was ever recorded.
-      await docker(['pause', containerId]);
-      paused = true;
-      const silent = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-      expect(silent).toBe('rejected: Command timed out');
-      expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 1 });
-      expect(publishRecord(source!)!.lastDurationMs).toBeGreaterThanOrEqual(
-        COMMAND_TIMEOUT_MS - 50,
+  it(
+    'rejects, is recorded failed, and publishing recovers — silent and dropped connections',
+    {
+      skip: REDIS_URL === undefined,
+    },
+    async () => {
+      const port = new URL(REDIS_URL!).port === '' ? 6379 : Number(new URL(REDIS_URL!).port);
+      const containerId = await containerIdForPort(port);
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          RealtimeBackplanePlugin({
+            transport: 'redis',
+            url: toIpv4(REDIS_URL!),
+            topic: `outage-publish-${crypto.randomUUID()}`,
+            commandTimeoutMs: COMMAND_TIMEOUT_MS,
+            diagnostics: { enabled: true, alias: 'fanout' },
+          }),
+        ],
+      });
+      await app.start();
+      const backplane = app.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE);
+      const [source] = app.services.getAll<IRealtimeDiagnosticsSource>(
+        CAPABILITIES.REALTIME_DIAGNOSTICS,
       );
-      await docker(['unpause', containerId]);
-      paused = false;
-      await waitTrue(
-        () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
-        'publish after unpause',
-        30_000,
-      );
+      const frame = { kind: 'ws-room' as const, origin: 'x', name: 'lobby', data: 'hi' };
+      let paused = false;
+      try {
+        await backplane.publish(frame);
+        expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 0 });
 
-      // (2) DROPPED: the server is stopped, so the connection closes and ioredis
-      // reconnects. A publish is queued, then rejected — here by the command
-      // timeout, which starts when the command is queued.
-      const before = publishRecord(source!)!;
-      await docker(['stop', containerId]);
-      const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-      expect(dropped).toBe('rejected: Command timed out');
-      expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
+        // (1) SILENT: the socket stays open while the server answers nothing — a
+        // paused or partitioned host that sends no reset. Before the command
+        // timeout this publish never settled, so no consumer logged it and no
+        // observation was ever recorded.
+        await docker(['pause', containerId]);
+        paused = true;
+        const silent = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
+        expect(silent).toBe('rejected: Command timed out');
+        expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 1 });
+        expect(publishRecord(source!)!.lastDurationMs).toBeGreaterThanOrEqual(
+          COMMAND_TIMEOUT_MS - 50,
+        );
+        await docker(['unpause', containerId]);
+        paused = false;
+        await waitTrue(
+          () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
+          'publish after unpause',
+          30_000,
+        );
 
-      // Restarted, the same connections carry the next publish.
-      await docker(['start', containerId]);
-      await waitTrue(
-        () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
-        'publish after restart',
-        30_000,
-      );
-      expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
-    } finally {
-      if (paused) {
-        await runProcess('docker', { args: ['unpause', containerId] });
+        // (2) DROPPED: the server is stopped, so the connection closes and ioredis
+        // reconnects. A publish is queued, then rejected — here by the command
+        // timeout, which starts when the command is queued.
+        const before = publishRecord(source!)!;
+        await docker(['stop', containerId]);
+        const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
+        expect(dropped).toBe('rejected: Command timed out');
+        expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
+
+        // Restarted, the same connections carry the next publish.
+        await docker(['start', containerId]);
+        await waitTrue(
+          () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
+          'publish after restart',
+          30_000,
+        );
+        expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
+      } finally {
+        if (paused) {
+          await runProcess('docker', { args: ['unpause', containerId] });
+        }
+        await runProcess('docker', { args: ['start', containerId] });
+        await app.stop();
       }
-      await runProcess('docker', { args: ['start', containerId] });
-      await app.stop();
-    }
-  });
+    },
+  );
 });

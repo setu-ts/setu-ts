@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this CI script emits a human-readable drift report.
+/* eslint-disable no-console -- this CI script emits a human-readable drift report. */
 /**
  * Compares the committed and freshly resolved Deno lockfiles.
  *
@@ -47,17 +47,15 @@ export function findDependencyDrift(
     ...Object.keys(fresh.specifiers),
   ]);
 
-  return [...specifiers]
-    .sort()
-    .flatMap((specifier): IDependencyDrift[] => {
-      const previous = committed.specifiers[specifier] ?? null;
-      const current = fresh.specifiers[specifier] ?? null;
-      // Deno lockfiles are additive. A specifier present only in the committed
-      // lockfile may simply be stale, so its absence from a fresh graph is not
-      // upstream drift and must not bury the real moved-package report.
-      if (current === null || previous === current) return [];
-      return [{ specifier, packageName: packageNameOf(specifier), previous, current }];
-    });
+  return [...specifiers].sort().flatMap((specifier): IDependencyDrift[] => {
+    const previous = committed.specifiers[specifier] ?? null;
+    const current = fresh.specifiers[specifier] ?? null;
+    // Deno lockfiles are additive. A specifier present only in the committed
+    // lockfile may simply be stale, so its absence from a fresh graph is not
+    // upstream drift and must not bury the real moved-package report.
+    if (current === null || previous === current) return [];
+    return [{ specifier, packageName: packageNameOf(specifier), previous, current }];
+  });
 }
 
 /**
@@ -71,9 +69,10 @@ export function formatDependencyDrift(changes: readonly IDependencyDrift[]): str
     return '## Dependency drift\n\nNo direct dependency resolution changed.\n';
   }
 
-  const rows = changes.map((change) =>
-    `| \`${change.packageName}\` | \`${change.specifier}\` | ` +
-    `\`${change.previous ?? 'not locked'}\` | \`${change.current ?? 'removed'}\` |`
+  const rows = changes.map(
+    (change) =>
+      `| \`${change.packageName}\` | \`${change.specifier}\` | ` +
+      `\`${change.previous ?? 'not locked'}\` | \`${change.current ?? 'removed'}\` |`,
   );
   return [
     '## Dependency drift',

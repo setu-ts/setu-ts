@@ -79,9 +79,7 @@ export function watchKubernetesService(deps: KubernetesWatchDeps): Promise<Unsub
       signal: controller.signal,
     });
     if (!response.ok) {
-      throw new Error(
-        `Kubernetes list for '${deps.serviceName}' returned HTTP ${response.status}`,
-      );
+      throw new Error(`Kubernetes list for '${deps.serviceName}' returned HTTP ${response.status}`);
     }
     const body: unknown = JSON.parse(response.text);
     deps.listener(deps.map(body));

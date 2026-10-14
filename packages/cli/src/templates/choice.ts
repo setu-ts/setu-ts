@@ -29,19 +29,19 @@ import { getTemplate, type TemplateDefinition, type TemplateHost } from './regis
  */
 export type TemplateChoice =
   | {
-    readonly ok: true;
-    /** The selected template, or undefined when none was named. */
-    readonly template?: TemplateDefinition;
-    /** The host to render, or undefined when no template was named. */
-    readonly host?: TemplateHost;
-    /** An informational notice to log once, when an alias was selected. */
-    readonly notice?: string;
-  }
+      readonly ok: true;
+      /** The selected template, or undefined when none was named. */
+      readonly template?: TemplateDefinition;
+      /** The host to render, or undefined when no template was named. */
+      readonly host?: TemplateHost;
+      /** An informational notice to log once, when an alias was selected. */
+      readonly notice?: string;
+    }
   | {
-    readonly ok: false;
-    /** The message to print before exiting with a usage error. */
-    readonly message: string;
-  };
+      readonly ok: false;
+      /** The message to print before exiting with a usage error. */
+      readonly message: string;
+    };
 
 /**
  * Templates that were RENAMED, and what replaced them.
@@ -127,12 +127,13 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
     const renamedTo = RENAMED_TEMPLATES.get(templateFlag);
     return {
       ok: false,
-      message: renamedTo === undefined
-        ? `Unknown template "${escapeName(templateFlag)}". Expected one of: ${
-          TEMPLATES.join(', ')
-        }.`
-        : `The "${templateFlag}" template was renamed to "${renamedTo}". ` +
-          `Run \`--template ${renamedTo}\` — the composition is unchanged.`,
+      message:
+        renamedTo === undefined
+          ? `Unknown template "${escapeName(templateFlag)}". Expected one of: ${TEMPLATES.join(
+              ', ',
+            )}.`
+          : `The "${templateFlag}" template was renamed to "${renamedTo}". ` +
+            `Run \`--template ${renamedTo}\` — the composition is unchanged.`,
     };
   }
 
@@ -151,9 +152,9 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
   if (styleFlag !== 'functional' && styleFlag !== 'class-based') {
     return {
       ok: false,
-      message: `Unknown style "${
-        escapeName(styleFlag)
-      }". Expected one of: functional, class-based.`,
+      message: `Unknown style "${escapeName(
+        styleFlag,
+      )}". Expected one of: functional, class-based.`,
     };
   }
 
@@ -184,7 +185,8 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
   if (template.aliasOf !== undefined) {
     return {
       ok: false,
-      message: `--template ${template.name} is ${template.aliasOf}; for a functional project ` +
+      message:
+        `--template ${template.name} is ${template.aliasOf}; for a functional project ` +
         `use --template rest.`,
     };
   }

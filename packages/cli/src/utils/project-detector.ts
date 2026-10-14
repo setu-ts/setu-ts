@@ -35,13 +35,11 @@ export async function findWorkspaceMarker(
     if (!isMissingPath(cause)) return `cannot inspect ${workspacePath}`;
   }
 
-  for (
-    const { file, key } of [
-      { file: 'deno.json', key: 'workspace' },
-      { file: 'deno.jsonc', key: 'workspace' },
-      { file: 'package.json', key: 'workspaces' },
-    ] as const
-  ) {
+  for (const { file, key } of [
+    { file: 'deno.json', key: 'workspace' },
+    { file: 'deno.jsonc', key: 'workspace' },
+    { file: 'package.json', key: 'workspaces' },
+  ] as const) {
     const read = await readJsonManifest(fs, joinPath(dir, file));
     if (read.kind === 'ok' && isRecord(read.value) && key in read.value) {
       return `its ${file} declares "${key}"`;

@@ -49,10 +49,10 @@ export type RootManifestPlan =
   | { readonly kind: 'unchanged' }
   /** The root needs this file written in place of its current contents. */
   | {
-    readonly kind: 'update';
-    readonly file: GeneratedFile;
-    readonly extra?: readonly GeneratedFile[];
-  }
+      readonly kind: 'update';
+      readonly file: GeneratedFile;
+      readonly extra?: readonly GeneratedFile[];
+    }
   /** The root cannot be edited safely; print this and stop. */
   | { readonly kind: 'refused'; readonly message: string };
 
@@ -91,7 +91,8 @@ export function planRootNodeModulesDir(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return {
       kind: 'refused',
-      message: `The workspace ${ROOT_MANIFEST} is not a JSON object, so there is nowhere to add ` +
+      message:
+        `The workspace ${ROOT_MANIFEST} is not a JSON object, so there is nowhere to add ` +
         `\`"${NODE_MODULES_DIR}"\`, which the "${member}" member needs for its frontend build.`,
     };
   }
@@ -100,15 +101,16 @@ export function planRootNodeModulesDir(
   const current = record[NODE_MODULES_DIR];
 
   // Already answered, and answered the same way: nothing to do.
-  const ignore = gitignore === undefined || gitignore.split(/\r?\n/).includes('node_modules/')
-    ? undefined
-    : {
-      path: '.gitignore',
-      contents: `${gitignore}${
-        gitignore === '' || gitignore.endsWith('\n') ? '' : '\n'
-      }node_modules/\n`,
-      managed: true,
-    };
+  const ignore =
+    gitignore === undefined || gitignore.split(/\r?\n/).includes('node_modules/')
+      ? undefined
+      : {
+          path: '.gitignore',
+          contents: `${gitignore}${
+            gitignore === '' || gitignore.endsWith('\n') ? '' : '\n'
+          }node_modules/\n`,
+          managed: true,
+        };
   if (current === NODE_MODULES_AUTO) {
     return ignore === undefined ? { kind: 'unchanged' } : { kind: 'update', file: ignore };
   }
@@ -119,7 +121,8 @@ export function planRootNodeModulesDir(
   if (current !== undefined) {
     return {
       kind: 'refused',
-      message: `The workspace ${ROOT_MANIFEST} sets "${NODE_MODULES_DIR}": ` +
+      message:
+        `The workspace ${ROOT_MANIFEST} sets "${NODE_MODULES_DIR}": ` +
         `${JSON.stringify(current)}, and the "${member}" member's frontend build needs ` +
         `"${NODE_MODULES_AUTO}" — its Vite build resolves plugins from a real node_modules ` +
         `directory. Change it there if that is what you want, then run this again.`,
@@ -131,9 +134,11 @@ export function planRootNodeModulesDir(
     ...(ignore === undefined ? {} : { extra: [ignore] }),
     file: {
       path: ROOT_MANIFEST,
-      contents: `${
-        JSON.stringify({ ...record, [NODE_MODULES_DIR]: NODE_MODULES_AUTO }, null, 2)
-      }\n`,
+      contents: `${JSON.stringify(
+        { ...record, [NODE_MODULES_DIR]: NODE_MODULES_AUTO },
+        null,
+        2,
+      )}\n`,
       // The CLI wrote this file and is adding one field to it, so the overwrite
       // check must not treat it as somebody else's.
       managed: true,
@@ -179,7 +184,8 @@ export function planRootWorkspaceGlob(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return {
       kind: 'refused',
-      message: `The workspace ${manifestFile} is not a JSON object, so there is no ` +
+      message:
+        `The workspace ${manifestFile} is not a JSON object, so there is no ` +
         `\`${globKey}\` list to add "${glob}" to for the "${library}" library.`,
     };
   }
@@ -192,7 +198,8 @@ export function planRootWorkspaceGlob(
   if (!Array.isArray(globs) || globs.some((entry) => typeof entry !== 'string')) {
     return {
       kind: 'refused',
-      message: `The workspace ${manifestFile} does not declare \`${globKey}\` as a list ` +
+      message:
+        `The workspace ${manifestFile} does not declare \`${globKey}\` as a list ` +
         `of globs, so "${glob}" cannot be added to it for the "${library}" library.`,
     };
   }

@@ -178,10 +178,12 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
     } catch (rawError) {
       // Normalize: HttpError passes through, anything else becomes a 500.
       const isHttpError = rawError instanceof HttpError;
-      const error: HttpError = isHttpError ? rawError : internalServerError(
-        rawError instanceof Error ? rawError.message : 'Internal Server Error',
-        rawError instanceof Error ? rawError : undefined,
-      );
+      const error: HttpError = isHttpError
+        ? rawError
+        : internalServerError(
+            rawError instanceof Error ? rawError.message : 'Internal Server Error',
+            rawError instanceof Error ? rawError : undefined,
+          );
 
       // A thrower that cannot import this package states the status its own
       // error means by branding it with an `HttpStatusHint` (M89b) — the seam

@@ -44,9 +44,9 @@
   are genuinely none, write a single row "None found (checked <docs>)".
 -->
 
-| #  | Conflict | Resolution (picked side) | Doc deliverable (same PR) |
-| -- | -------- | ------------------------ | ------------------------- |
-| C1 | <FILL>   | <FILL>                   | <FILL>                    |
+| #   | Conflict | Resolution (picked side) | Doc deliverable (same PR) |
+| --- | -------- | ------------------------ | ------------------------- |
+| C1  | <FILL>   | <FILL>                   | <FILL>                    |
 
 ## 3. Design decisions
 

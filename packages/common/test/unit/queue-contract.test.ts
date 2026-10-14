@@ -26,8 +26,8 @@ import type {
 import type { MessageMetadata } from '../../src/services/messaging.ts';
 
 /** Strict identity check — fails on any added, removed, or re-typed member. */
-type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
-  : false;
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 // The channel is spelled IDENTICALLY on both ingresses, so the two cannot drift
 // on meaning — which is the whole reason X34-1 asks for a mirror of

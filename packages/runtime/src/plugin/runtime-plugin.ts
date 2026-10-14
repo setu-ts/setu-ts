@@ -156,10 +156,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   // which is the likeliest way this value is supplied in a deployment.
   // `Infinity` is rejected too: omitting the option already means unbounded,
   // so there is one way to say it rather than two.
-  if (
-    maxBodyBytes !== undefined &&
-    (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0)
-  ) {
+  if (maxBodyBytes !== undefined && (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0)) {
     throw new Error(
       `RuntimePlugin: maxBodyBytes must be a non-negative integer, received ` +
         `${String(maxBodyBytes)}. Omit the option for an unbounded body read; ` +
@@ -192,19 +189,19 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
       ctx.services.register(CAPABILITIES.RUNTIME, services);
 
       // Register HTTP adapter
-      const httpAdapterFactory = (httpAdapters as Record<
-        string,
-        ((adapterOptions?: HttpAdapterOptions) => IHttpAdapter) | undefined
-      >)[platform];
+      const httpAdapterFactory = (
+        httpAdapters as Record<
+          string,
+          ((adapterOptions?: HttpAdapterOptions) => IHttpAdapter) | undefined
+        >
+      )[platform];
       if (httpAdapterFactory === undefined) {
         throw new Error(`No HTTP adapter for platform: ${platform}`);
       }
       // `exactOptionalPropertyTypes`: omit the member entirely when unset, so
       // an adapter reading `options?.maxBodyBytes` sees the same `undefined`
       // either way and no caller can pass an explicit `undefined`.
-      const httpAdapter = httpAdapterFactory(
-        maxBodyBytes === undefined ? {} : { maxBodyBytes },
-      );
+      const httpAdapter = httpAdapterFactory(maxBodyBytes === undefined ? {} : { maxBodyBytes });
       ctx.services.register(CAPABILITIES.HTTP_ADAPTER, httpAdapter);
 
       // Register the runtime-owned local diagnostics listener factory (M98b).

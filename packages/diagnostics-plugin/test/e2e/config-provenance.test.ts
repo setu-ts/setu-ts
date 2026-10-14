@@ -167,13 +167,7 @@ describe('Configuration provenance e2e (M98e canary)', () => {
         UNAPPROVED_KEY,
         RAW_APPROVED_KEY,
       ];
-      for (
-        const layer of [
-          JSON.stringify(sourceSnapshot),
-          JSON.stringify(snapshot),
-          ...frames,
-        ]
-      ) {
+      for (const layer of [JSON.stringify(sourceSnapshot), JSON.stringify(snapshot), ...frames]) {
         for (const canary of canaries) {
           expect(layer).not.toContain(canary);
         }

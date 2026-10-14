@@ -270,10 +270,7 @@ describe('the responder passes an honest context to the formatter (M70f round 2,
     // from the request path. At a pre-pipeline site there is no context, so
     // the responder supplies the safe path the kernel captured separately.
     const { response, record } = fakeResponse();
-    const responder = createErrorResponder(
-      rfc9457Formatter,
-      'application/problem+json',
-    );
+    const responder = createErrorResponder(rfc9457Formatter, 'application/problem+json');
     const target: ErrorResponderTarget = {
       state: new Map(),
       response,
@@ -292,10 +289,7 @@ describe('the responder passes an honest context to the formatter (M70f round 2,
     // `request` field and the `instance` member is simply absent — the correct
     // RFC 9457 outcome for a request whose path cannot be known.
     const { response, record } = fakeResponse();
-    const responder = createErrorResponder(
-      rfc9457Formatter,
-      'application/problem+json',
-    );
+    const responder = createErrorResponder(rfc9457Formatter, 'application/problem+json');
     const target: ErrorResponderTarget = { state: new Map(), response };
     responder.respond(target, { status: 400, title: 'Bad Request' });
 

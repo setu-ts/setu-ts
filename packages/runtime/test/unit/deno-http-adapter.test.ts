@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Unit tests for DenoHttpAdapter — uses a fake DenoServeHost.
  *
@@ -57,7 +57,7 @@ describe('deno-http-adapter | setHandler/fetch', () => {
     const { host } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -92,7 +92,7 @@ describe('deno-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -118,7 +118,7 @@ describe('deno-http-adapter | close', () => {
     const { host } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -128,7 +128,7 @@ describe('deno-http-adapter | close', () => {
     const handle = await adapter.listen(3000);
 
     (handle as DenoHttpServerHandle).server = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       shutdown: async () => {
         shutdownCalled = true;
       },
@@ -142,7 +142,7 @@ describe('deno-http-adapter | close', () => {
     const { host } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),

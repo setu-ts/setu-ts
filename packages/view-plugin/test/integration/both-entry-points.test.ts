@@ -68,9 +68,7 @@ describe('both entry points under a non-default configuration', () => {
     expect(decorated.body).toBe('<h1>Users</h1>');
     expect(decorated.body).toBe(functional.body);
     expect(decorated.headers.get('content-type')).toBe('text/html; charset=utf-8');
-    expect(decorated.headers.get('content-type')).toBe(
-      functional.headers.get('content-type'),
-    );
+    expect(decorated.headers.get('content-type')).toBe(functional.headers.get('content-type'));
     await app.stop();
   });
 });

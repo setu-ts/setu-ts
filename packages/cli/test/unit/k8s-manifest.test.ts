@@ -29,8 +29,10 @@ function render(member: WorkspaceMember): string {
     members: [member],
   };
   const files = workspaceK8sFiles(manifest, transportSpec('http'));
-  return files.find((f: { path: string; contents: string }) => f.path === `${K8S_DIR}/members.yaml`)
-    ?.contents ?? '';
+  return (
+    files.find((f: { path: string; contents: string }) => f.path === `${K8S_DIR}/members.yaml`)
+      ?.contents ?? ''
+  );
 }
 
 describe('generated Kubernetes manifests', () => {

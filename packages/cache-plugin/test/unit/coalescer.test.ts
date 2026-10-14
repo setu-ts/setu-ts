@@ -48,11 +48,14 @@ describe('createCoalescer', () => {
     const coalescer = createCoalescer();
     const store = {};
 
-    await expect(coalescer.run(store, 'key', (): Promise<string> => {
-      return Promise.reject(new Error('failed'));
-    })).resolves.toMatchObject({ joined: false, ok: false });
-    await expect(coalescer.run(store, 'key', (): Promise<string> => Promise.resolve('recovered')))
-      .resolves.toEqual({ value: 'recovered', joined: false, ok: true });
+    await expect(
+      coalescer.run(store, 'key', (): Promise<string> => {
+        return Promise.reject(new Error('failed'));
+      }),
+    ).resolves.toMatchObject({ joined: false, ok: false });
+    await expect(
+      coalescer.run(store, 'key', (): Promise<string> => Promise.resolve('recovered')),
+    ).resolves.toEqual({ value: 'recovered', joined: false, ok: true });
   });
 
   it('reports a rejected leader to waiters without losing that they joined', async () => {

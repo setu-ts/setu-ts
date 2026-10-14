@@ -112,8 +112,8 @@ function validateMessage(tag: string, key: string, value: unknown): Localization
   }
   if (isRecord(value)) {
     const categories = Object.keys(value);
-    const valid = categories.every((category) =>
-      PLURAL_CATEGORIES.has(category) && typeof value[category] === 'string'
+    const valid = categories.every(
+      (category) => PLURAL_CATEGORIES.has(category) && typeof value[category] === 'string',
     );
     if (valid && typeof value.other === 'string') {
       // Every own key is a category and every value a string, `other` among
@@ -191,10 +191,10 @@ export function validateCatalogues(
       continue;
     }
     const named = missing.slice(0, MISSING_KEYS_NAMED).join(', ');
-    const more = missing.length > MISSING_KEYS_NAMED
-      ? ` and ${missing.length - MISSING_KEYS_NAMED} more`
-      : '';
-    const description = `locale ${tag} lacks ${missing.length} key(s) the default locale ` +
+    const more =
+      missing.length > MISSING_KEYS_NAMED ? ` and ${missing.length - MISSING_KEYS_NAMED} more` : '';
+    const description =
+      `locale ${tag} lacks ${missing.length} key(s) the default locale ` +
       `${defaultTag} defines: ${named}${more}`;
     if (!allowPartial) {
       throw new RangeError(

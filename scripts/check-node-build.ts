@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate script reports to the console.
+/* eslint-disable no-console -- a gate script reports to the console. */
 /**
  * The Node pack-and-boot gate (M111a plan §3.10).
  *
@@ -93,13 +93,17 @@ for (const dir of root.workspaces) {
     name: string;
     dependencies?: Record<string, string>;
   };
-  const packed = await step(`pack ${manifest.name}`, 'pnpm', [
-    'pack',
-    '--ignore-scripts',
-    '--pack-destination',
-    packDir,
-  ], dir);
-  const tarball = packed.output.trim().split('\n').reverse().find((line) => line.endsWith('.tgz'));
+  const packed = await step(
+    `pack ${manifest.name}`,
+    'pnpm',
+    ['pack', '--ignore-scripts', '--pack-destination', packDir],
+    dir,
+  );
+  const tarball = packed.output
+    .trim()
+    .split('\n')
+    .reverse()
+    .find((line) => line.endsWith('.tgz'));
   if (tarball === undefined) {
     refusals.push(`${manifest.name}: pnpm pack reported no tarball`);
     continue;

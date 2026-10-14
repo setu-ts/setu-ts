@@ -51,12 +51,7 @@ export type DiagnosticsEdgeKind = 'provides' | 'requires' | 'optional' | 'consum
  * @since 0.8.0
  */
 export type DiagnosticsSnapshotState =
-  | 'created'
-  | 'starting'
-  | 'running'
-  | 'failed'
-  | 'stopping'
-  | 'closed';
+  'created' | 'starting' | 'running' | 'failed' | 'stopping' | 'closed';
 
 /**
  * Bounded failure code reported by {@linkcode DiagnosticsSnapshot.failureCode}.
@@ -347,12 +342,7 @@ export interface IDiagnosticsSource {
  * @since 0.8.0
  */
 export type DiagnosticsInspectorState =
-  | 'unsupported'
-  | 'disabled'
-  | 'no-data'
-  | 'ready'
-  | 'stale'
-  | 'collection-failed';
+  'unsupported' | 'disabled' | 'no-data' | 'ready' | 'stale' | 'collection-failed';
 
 /**
  * Outcome of one observed health check, as projected by the health
@@ -495,11 +485,7 @@ export type ConfigProvenanceOrigin = 'environment' | 'file' | 'unknown';
  * @since 0.8.0
  */
 export type ConfigSchemaEffect =
-  | 'not-configured'
-  | 'validated'
-  | 'introduced'
-  | 'removed'
-  | 'unknown';
+  'not-configured' | 'validated' | 'introduced' | 'removed' | 'unknown';
 
 /**
  * One minimized provenance record for one approved configuration key alias.
@@ -630,11 +616,7 @@ export type QueueProcessorOutcome = 'completed' | 'retryable-error' | 'terminal-
  * @since 0.8.0
  */
 export type QueueSettlementState =
-  | 'acknowledged'
-  | 'requeued'
-  | 'dead-lettered'
-  | 'failed'
-  | 'unknown';
+  'acknowledged' | 'requeued' | 'dead-lettered' | 'failed' | 'unknown';
 
 /**
  * What a queue depth observation counts (M98f).
@@ -998,11 +980,7 @@ export interface QueueDiagnosticsBatch {
  * @since 0.8.0
  */
 export type TraceSourceState =
-  | 'disabled'
-  | 'unsupported'
-  | 'no-data'
-  | 'ready'
-  | 'collection-failed';
+  'disabled' | 'unsupported' | 'no-data' | 'ready' | 'collection-failed';
 
 /**
  * What completed-span population the tracing stack makes observable (M98g).
@@ -1023,10 +1001,7 @@ export type TraceSourceState =
  * @since 0.8.0
  */
 export type TraceCoverage =
-  | 'completed-sampled-spans'
-  | 'custom-provider'
-  | 'noop-no-provider'
-  | 'unknown';
+  'completed-sampled-spans' | 'custom-provider' | 'noop-no-provider' | 'unknown';
 
 /**
  * The auto-instrumentation families whose spans the trace observations can
@@ -1243,11 +1218,7 @@ export interface ITraceDiagnosticsSource {
  *
  * @since 0.8.0
  */
-export type AuthorizationDecisionOperation =
-  | 'role'
-  | 'permission'
-  | 'any-role'
-  | 'all-permissions';
+export type AuthorizationDecisionOperation = 'role' | 'permission' | 'any-role' | 'all-permissions';
 
 /**
  * Why the RBAC evaluator reached a decision's result (M98h).
@@ -1363,11 +1334,7 @@ export interface AuthorizationDecisionObservation {
  * @since 0.8.0
  */
 export type AuthorizationSourceState =
-  | 'disabled'
-  | 'no-data'
-  | 'ready'
-  | 'unsupported'
-  | 'collection-failed';
+  'disabled' | 'no-data' | 'ready' | 'unsupported' | 'collection-failed';
 
 /**
  * Why the authorization inspector cannot explain enforcement (M98h).
@@ -1389,10 +1356,7 @@ export type AuthorizationSourceState =
  * @since 0.8.0
  */
 export type AuthorizationCoverage =
-  | 'rbac-not-configured'
-  | 'provider-identity-unavailable'
-  | 'custom-provider'
-  | 'unknown';
+  'rbac-not-configured' | 'provider-identity-unavailable' | 'custom-provider' | 'unknown';
 
 /**
  * One page of authorization decision explanations from the authorization
@@ -1642,11 +1606,7 @@ export type EventObservationOperation = 'publish' | 'handler';
  * @since 0.8.0
  */
 export type EventDiagnosticsState =
-  | 'disabled'
-  | 'no-data'
-  | 'ready'
-  | 'stale'
-  | 'collection-failed';
+  'disabled' | 'no-data' | 'ready' | 'stale' | 'collection-failed';
 
 /**
  * The coverage an event source reports (M98j): always `owned-instance` —
@@ -1802,11 +1762,7 @@ export type RealtimeSourceKind = 'websocket' | 'sse' | 'backplane';
  * @since 0.8.0
  */
 export type RealtimeObservationOperation =
-  | 'open'
-  | 'close'
-  | 'send'
-  | 'backplane-publish'
-  | 'backplane-receive';
+  'open' | 'close' | 'send' | 'backplane-publish' | 'backplane-receive';
 
 /**
  * Whether a realtime source's current-state gauges were read (M98l).
@@ -2263,12 +2219,7 @@ export interface OutboundHttpDiagnosticsResponse {
  * @since 0.8.0
  */
 export type StorageDiagnosticsOperation =
-  | 'put'
-  | 'get'
-  | 'delete'
-  | 'exists'
-  | 'getSignedUrl'
-  | 'getStream';
+  'put' | 'get' | 'delete' | 'exists' | 'getSignedUrl' | 'getStream';
 
 /**
  * Cumulative counters for one (source alias, operation) pair (M98m).

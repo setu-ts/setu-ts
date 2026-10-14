@@ -134,7 +134,11 @@ import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
 // `(props) => \`<li>${user}</li>\`` template would NOT: escaping belongs to the
 // rendering runtime, and a plain string component is returned unchanged.
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+  <ul>
+    {props.users.map((user) => (
+      <li>{user}</li>
+    ))}
+  </ul>
 );
 
 @Controller('/pages')

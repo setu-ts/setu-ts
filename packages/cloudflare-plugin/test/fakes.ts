@@ -151,9 +151,10 @@ export class FakeR2 implements IR2Bucket {
     value: ArrayBuffer | ArrayBufferView,
     options?: R2PutOptions,
   ): Promise<IR2Object | null> {
-    const bytes = value instanceof ArrayBuffer
-      ? new Uint8Array(value)
-      : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    const bytes =
+      value instanceof ArrayBuffer
+        ? new Uint8Array(value)
+        : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
     this.objects.set(key, bytes);
     this.putOptions.set(key, options);
     return Promise.resolve(meta(key, bytes));

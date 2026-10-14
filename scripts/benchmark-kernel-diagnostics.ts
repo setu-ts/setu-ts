@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env
-// deno-lint-ignore-file no-console -- console output is the script's purpose (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is the script's purpose (AI_GUIDELINES §11.6) */
 /**
  * Paired throughput/latency benchmark for kernel diagnostics (M98a §3.6).
  *
@@ -34,10 +34,12 @@ import { createApplication } from '../packages/kernel/src/index.ts';
 import type { IKernelApplication } from '../packages/kernel/src/index.ts';
 import { createFakeRuntime } from '../packages/kernel/test/fixtures/fake-runtime.ts';
 
-const args = new Map(Deno.args.map((arg) => {
-  const [key, value] = arg.replace(/^--/, '').split('=');
-  return [key, value];
-}));
+const args = new Map(
+  Deno.args.map((arg) => {
+    const [key, value] = arg.replace(/^--/, '').split('=');
+    return [key, value];
+  }),
+);
 const mode = args.get('mode') ?? 'disabled';
 if (mode !== 'disabled' && mode !== 'enabled') {
   console.error(`unknown mode '${mode}': expected --mode=disabled or --mode=enabled`);

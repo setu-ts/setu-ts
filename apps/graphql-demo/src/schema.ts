@@ -104,8 +104,8 @@ export function createResolvers(): { resolvers: ResolverMap; books: Book[] } {
             async *[Symbol.asyncIterator]() {
               try {
                 while (true) {
-                  const next = queue.shift() ??
-                    await new Promise<Book>((resolve) => (deliver = resolve));
+                  const next =
+                    queue.shift() ?? (await new Promise<Book>((resolve) => (deliver = resolve)));
                   yield { bookAdded: next };
                 }
               } finally {

@@ -70,7 +70,7 @@ describe('viteDevExternals', () => {
 
     expect(builtins.slice(0, 2)).toEqual(['fs', nodeBuiltin]);
     const matches = (id: string): boolean =>
-      builtins.some((b) => typeof b === 'string' ? b === id : b.test(id));
+      builtins.some((b) => (typeof b === 'string' ? b === id : b.test(id)));
     expect(matches('jsr:@setu-ts/common@^0.9.0')).toBe(true);
     expect(matches('npm:npm-lib@^1.0.0')).toBe(true);
     // A file-mapped package matches its entry's directory, so subpaths are covered.

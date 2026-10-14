@@ -81,13 +81,9 @@ export {
 // Durable Objects — the DO-side cores the application's exported DO class
 // delegates to, plus the structural facades that class is written against
 export { RealtimeBackplaneObjectCore } from './durable-objects/realtime-backplane-object.ts';
-export type {
-  RealtimeBackplaneObjectCoreOptions,
-} from './durable-objects/realtime-backplane-object.ts';
+export type { RealtimeBackplaneObjectCoreOptions } from './durable-objects/realtime-backplane-object.ts';
 export { DistributedLockObjectCore } from './durable-objects/distributed-lock-object.ts';
-export type {
-  DistributedLockObjectCoreOptions,
-} from './durable-objects/distributed-lock-object.ts';
+export type { DistributedLockObjectCoreOptions } from './durable-objects/distributed-lock-object.ts';
 export { asUpgradeResponse } from './durable-objects/do-facades.ts';
 export type {
   DurableObjectMessageEvent,

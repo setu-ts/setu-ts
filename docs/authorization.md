@@ -78,8 +78,7 @@ await app.start();
 
 `definePolicy` infers the ability names from the object, so `requirePolicy(postPolicy, 'updaet')` is
 a compile error. It infers the target type from an annotated check parameter
-(`post: Post |
-undefined` above).
+(`post: Post | undefined` above).
 
 ## The Rules Are Fixed
 
@@ -309,9 +308,9 @@ const app = createApplication({
             map: (claims) =>
               Array.isArray(claims.orgAdminOf)
                 ? claims.orgAdminOf.map((id) => ({
-                  role: 'org-admin',
-                  scope: { type: 'organisation', id: String(id) },
-                }))
+                    role: 'org-admin',
+                    scope: { type: 'organisation', id: String(id) },
+                  }))
                 : [],
           },
         ],

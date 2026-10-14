@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- documentation snippet fixtures mirror guide examples
+/* eslint-disable require-await -- documentation snippet fixtures mirror guide examples */
 // Migration NestJS equivalent from docs/migration-nestjs.md - must compile.
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';

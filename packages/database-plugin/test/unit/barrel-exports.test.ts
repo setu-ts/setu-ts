@@ -107,15 +107,13 @@ describe('database-plugin barrel exports — M90f driver classifications', () =>
   });
 
   it('keeps the M101a saturation and progress internals OUT of the public surface', () => {
-    for (
-      const name of [
-        'isPoolExhaustion',
-        'PoolSaturatedProbeSkipped',
-        'QueryProgressTracker',
-        'readQueryProgress',
-        'DATABASE_QUERY_PROGRESS',
-      ]
-    ) {
+    for (const name of [
+      'isPoolExhaustion',
+      'PoolSaturatedProbeSkipped',
+      'QueryProgressTracker',
+      'readQueryProgress',
+      'DATABASE_QUERY_PROGRESS',
+    ]) {
       expect(Object.hasOwn(database, name)).toBe(false);
       expect(Object.hasOwn(common, name)).toBe(false);
     }
@@ -141,21 +139,19 @@ describe('database-plugin barrel exports', () => {
   });
 
   it('retains the established runtime exports', () => {
-    for (
-      const name of [
-        'DatabasePlugin',
-        'DatabaseService',
-        'BaseRepository',
-        'UnitOfWork',
-        'MemoryAdapter',
-        'PrismaAdapter',
-        'PrismaRepository',
-        'createPrismaDataSource',
-        'DrizzleAdapter',
-        'DrizzleRepository',
-        'createDrizzleDataSource',
-      ]
-    ) {
+    for (const name of [
+      'DatabasePlugin',
+      'DatabaseService',
+      'BaseRepository',
+      'UnitOfWork',
+      'MemoryAdapter',
+      'PrismaAdapter',
+      'PrismaRepository',
+      'createPrismaDataSource',
+      'DrizzleAdapter',
+      'DrizzleRepository',
+      'createDrizzleDataSource',
+    ]) {
       expect(Object.hasOwn(database, name)).toBe(true);
     }
   });
@@ -221,17 +217,15 @@ describe('database-plugin barrel exports', () => {
     expect(typeof database.UnsupportedMigrationError).toBe('function');
     expect(typeof database.UnsupportedRawQueryError).toBe('function');
     expect(typeof database.MongoTransactionUnavailableError).toBe('function');
-    for (
-      const internal of [
-        'createMongoDataSource',
-        'MongoTransaction',
-        'createInjectedClientLoader',
-        'createLazyClientLoader',
-        'translateQuery',
-        'resolveMongoTarget',
-        'parseDatabaseFromUrl',
-      ]
-    ) {
+    for (const internal of [
+      'createMongoDataSource',
+      'MongoTransaction',
+      'createInjectedClientLoader',
+      'createLazyClientLoader',
+      'translateQuery',
+      'resolveMongoTarget',
+      'parseDatabaseFromUrl',
+    ]) {
       expect(Object.hasOwn(database, internal)).toBe(false);
     }
   });
@@ -240,19 +234,17 @@ describe('database-plugin barrel exports', () => {
     expect(typeof database.CosmosAdapter).toBe('function');
     expect(typeof database.CosmosTransactionScopeError).toBe('function');
     expect(typeof database.CosmosConcurrentModificationError).toBe('function');
-    for (
-      const internal of [
-        'createCosmosDataSource',
-        'CosmosTransaction',
-        'PartitionKeyResolver',
-        'BatchBuffer',
-        'buildQuery',
-        'buildCountQuery',
-        'resolveCosmosTarget',
-        'fromDocument',
-        'toDocument',
-      ]
-    ) {
+    for (const internal of [
+      'createCosmosDataSource',
+      'CosmosTransaction',
+      'PartitionKeyResolver',
+      'BatchBuffer',
+      'buildQuery',
+      'buildCountQuery',
+      'resolveCosmosTarget',
+      'fromDocument',
+      'toDocument',
+    ]) {
       expect(Object.hasOwn(database, internal)).toBe(false);
     }
   });
@@ -292,8 +284,12 @@ describe('database-plugin barrel exports', () => {
     };
     const removal: CosmosBatchDeleteOperation = { operationType: 'Delete', id: 'o1' };
     const batch: readonly CosmosBatchOperation[] = [insert, write, patchOp, removal];
-    expect(batch.map((operation) => operation.operationType))
-      .toEqual(['Create', 'Replace', 'Patch', 'Delete']);
+    expect(batch.map((operation) => operation.operationType)).toEqual([
+      'Create',
+      'Replace',
+      'Patch',
+      'Delete',
+    ]);
     // The shapes the seam's own members return and accept are exported too, so
     // an application injecting a client can name every signature it implements.
     const response: CosmosItemResponse<Record<string, unknown>> = { statusCode: 200 };
@@ -326,21 +322,19 @@ describe('database-plugin barrel exports', () => {
     expect(typeof database.DynamoAdapter).toBe('function');
     expect(typeof database.createInjectedDynamoLoader).toBe('function');
     expect(typeof database.createLazyDynamoLoader).toBe('function');
-    for (
-      const internal of [
-        'DynamoTarget',
-        'resolveDynamoTarget',
-        'createDynamoDataSource',
-        'createDynamoTransactionBuffer',
-        'IDynamoTransactionBuffer',
-        'resolveDynamoAccessPath',
-        'translateDynamoFilter',
-        'createDynamoExpressionBuilder',
-        'marshalDynamoValue',
-        'unmarshalDynamoItem',
-        'adaptDynamoSdkModule',
-      ]
-    ) {
+    for (const internal of [
+      'DynamoTarget',
+      'resolveDynamoTarget',
+      'createDynamoDataSource',
+      'createDynamoTransactionBuffer',
+      'IDynamoTransactionBuffer',
+      'resolveDynamoAccessPath',
+      'translateDynamoFilter',
+      'createDynamoExpressionBuilder',
+      'marshalDynamoValue',
+      'unmarshalDynamoItem',
+      'adaptDynamoSdkModule',
+    ]) {
       expect(Object.hasOwn(database, internal)).toBe(false);
     }
   });
@@ -423,18 +417,16 @@ describe('database-plugin barrel exports', () => {
     // every contract member the DynamoDB backend consumes. Pinning the absence
     // by name catches a Dynamo export landing in the wrong package — every
     // other assertion here imports the concrete module and would stay green.
-    for (
-      const name of [
-        'DynamoAdapter',
-        'DynamoDatabaseOptions',
-        'DynamoAdapterOptions',
-        'DynamoEntityMapping',
-        'IDynamoClient',
-        'DynamoSdkModule',
-        'createInjectedDynamoLoader',
-        'createLazyDynamoLoader',
-      ]
-    ) {
+    for (const name of [
+      'DynamoAdapter',
+      'DynamoDatabaseOptions',
+      'DynamoAdapterOptions',
+      'DynamoEntityMapping',
+      'IDynamoClient',
+      'DynamoSdkModule',
+      'createInjectedDynamoLoader',
+      'createLazyDynamoLoader',
+    ]) {
       expect(Object.hasOwn(common, name)).toBe(false);
     }
   });
@@ -444,25 +436,23 @@ describe('database-plugin barrel exports', () => {
     expect(typeof database.BigtableTransactionScopeError).toBe('function');
     expect(typeof database.createInjectedBigtableLoader).toBe('function');
     expect(typeof database.createLazyBigtableLoader).toBe('function');
-    for (
-      const internal of [
-        'BigtableTransaction',
-        'createBigtableDataSource',
-        'resolveBigtableTarget',
-        'columnAddress',
-        'planBigtableScan',
-        'assertSupportedOrderBy',
-        'assertNoOffset',
-        'composeRowKey',
-        'composeRowKeyFromFields',
-        'parseRowKey',
-        'prefixSuccessor',
-        'renderKeySegment',
-        'encodeCellValue',
-        'decodeCellValue',
-        'adaptBigtableSdkModule',
-      ]
-    ) {
+    for (const internal of [
+      'BigtableTransaction',
+      'createBigtableDataSource',
+      'resolveBigtableTarget',
+      'columnAddress',
+      'planBigtableScan',
+      'assertSupportedOrderBy',
+      'assertNoOffset',
+      'composeRowKey',
+      'composeRowKeyFromFields',
+      'parseRowKey',
+      'prefixSuccessor',
+      'renderKeySegment',
+      'encodeCellValue',
+      'decodeCellValue',
+      'adaptBigtableSdkModule',
+    ]) {
       expect(Object.hasOwn(database, internal)).toBe(false);
     }
   });
@@ -495,18 +485,16 @@ describe('database-plugin barrel exports', () => {
     // The M82 plan commits `common` to ZERO new symbols: Bigtable's row key is
     // one composed string, which shares no type with M80's partition/sort key
     // pair, so nothing about it belongs in the portable contract.
-    for (
-      const name of [
-        'BigtableAdapter',
-        'BigtableDatabaseOptions',
-        'BigtableAdapterOptions',
-        'BigtableEntityMapping',
-        'IBigtableClient',
-        'BigtableSdkModule',
-        'createInjectedBigtableLoader',
-        'createLazyBigtableLoader',
-      ]
-    ) {
+    for (const name of [
+      'BigtableAdapter',
+      'BigtableDatabaseOptions',
+      'BigtableAdapterOptions',
+      'BigtableEntityMapping',
+      'IBigtableClient',
+      'BigtableSdkModule',
+      'createInjectedBigtableLoader',
+      'createLazyBigtableLoader',
+    ]) {
       expect(Object.hasOwn(common, name)).toBe(false);
     }
   });

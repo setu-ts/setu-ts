@@ -137,14 +137,14 @@ export function createConnectionErrorReporter(
             source,
             error: message,
             repeats: count,
-          })
+          }),
         );
         return;
       }
       last = message;
       repeats = 0;
       write((logger) =>
-        logger.warn(`${source}: connection error: ${message}`, { source, error: message })
+        logger.warn(`${source}: connection error: ${message}`, { source, error: message }),
       );
     },
     recovered(): void {
@@ -159,7 +159,7 @@ export function createConnectionErrorReporter(
         logger.info(`${source}: connection recovered after ${errors} error(s)`, {
           source,
           errors,
-        })
+        }),
       );
     },
   };

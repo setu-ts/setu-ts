@@ -158,13 +158,7 @@ export async function runJob<T>(
         'retryable-error',
         'requeued',
         () =>
-          adapter.requeue(
-            storedJob.name,
-            storedJob.id,
-            availableAtMs,
-            nextAttempts,
-            claimToken,
-          ),
+          adapter.requeue(storedJob.name, storedJob.id, availableAtMs, nextAttempts, claimToken),
         report,
       );
       return;
@@ -296,9 +290,12 @@ export function withIngressBehaviors<T>(
   // Clear the gate once open so the steady state costs nothing. A REJECTED
   // gate is deliberately left in place: startup failed, the chain is never
   // completed, and running through a partial chain is what this prevents.
-  void chainReady?.then(() => {
-    gate = undefined;
-  }, () => {});
+  void chainReady?.then(
+    () => {
+      gate = undefined;
+    },
+    () => {},
+  );
 
   const dispatch = (job: IJob<T>): void | Promise<void> => {
     if (behaviors.length === 0) {

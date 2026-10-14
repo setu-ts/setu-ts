@@ -324,9 +324,7 @@ describe('errorHandler middleware', () => {
       const logger = new FakeLogger();
       const services = new Map([[CAPABILITIES.LOGGER, logger]]);
       const { ctx, responseSnapshot } = createFakeContext({ services });
-      const driverError = new Error(
-        "SQL: SELECT * FROM users WHERE email = 'alice@example.com'",
-      );
+      const driverError = new Error("SQL: SELECT * FROM users WHERE email = 'alice@example.com'");
       const mw = errorHandler({
         respond: (error, context) => {
           expect(error.statusCode).toBe(500);
@@ -414,8 +412,9 @@ describe('errorHandler middleware', () => {
         },
       });
 
-      await expect(mw(ctx, nextThrows(internalServerError('database unavailable'))))
-        .rejects.toThrow('view rendering failed');
+      await expect(
+        mw(ctx, nextThrows(internalServerError('database unavailable'))),
+      ).rejects.toThrow('view rendering failed');
 
       expect(logger.calls).toHaveLength(1);
       expect(logger.calls[0].message).toBe('database unavailable');
@@ -453,9 +452,7 @@ describe('errorHandler middleware', () => {
 
       await mw(ctx, nextThrows(notFound('gone')));
 
-      expect(responseSnapshot().headers.get('content-type')).toBe(
-        'application/problem+json',
-      );
+      expect(responseSnapshot().headers.get('content-type')).toBe('application/problem+json');
     });
 
     it('produces RFC 7807 fields (type, title, status, detail) without "message"', async () => {
@@ -480,9 +477,7 @@ describe('errorHandler middleware', () => {
 
       await mw(ctx, nextThrows(notFound('gone')));
 
-      expect(responseSnapshot().headers.get('content-type')).toBe(
-        'application/problem+json',
-      );
+      expect(responseSnapshot().headers.get('content-type')).toBe('application/problem+json');
     });
 
     it('produces RFC 9457 fields with about:blank and without "message"', async () => {
@@ -506,9 +501,7 @@ describe('errorHandler middleware', () => {
     // `format: rfc9457Formatter` emit a Problem Details body as
     // `application/json`, which generic problem-details clients ignore — a
     // silent interoperability defect that a string-only test cannot see.
-    const problemDetailsSpellings: ReadonlyArray<
-      [string, Parameters<typeof errorHandler>[0]]
-    > = [
+    const problemDetailsSpellings: ReadonlyArray<[string, Parameters<typeof errorHandler>[0]]> = [
       ["alias 'rfc9457'", { format: 'rfc9457' }],
       ['reference rfc9457Formatter', { format: rfc9457Formatter }],
       ["deprecated alias 'rfc7807'", { format: 'rfc7807' }],
@@ -522,9 +515,7 @@ describe('errorHandler middleware', () => {
 
         await mw(ctx, nextThrows(notFound('gone')));
 
-        expect(responseSnapshot().headers.get('content-type')).toBe(
-          'application/problem+json',
-        );
+        expect(responseSnapshot().headers.get('content-type')).toBe('application/problem+json');
       });
     }
 

@@ -13,18 +13,21 @@ import {
 
 describe('dedicated browser gate', () => {
   it('resolves present and absent executables with no browser import', async () => {
-    expect(await browserGateCode('/browser', false, (path) => Promise.resolve(path === '/browser')))
-      .toBe(0);
+    expect(
+      await browserGateCode('/browser', false, (path) => Promise.resolve(path === '/browser')),
+    ).toBe(0);
     expect(await browserGateCode('/missing', false, () => Promise.resolve(false))).toBe(77);
     expect(await browserGateCode('/missing', true, () => Promise.resolve(false))).toBe(1);
     expect(browserAvailabilityCode(true, true)).toBe(0);
   });
 
   it('derives the cache from the executable Playwright resolved, on every platform layout', () => {
-    expect(browserCacheDir('/opt/pw-browsers/chromium-1243/chrome-linux64/chrome'))
-      .toBe('/opt/pw-browsers');
-    expect(browserCacheDir('/xdg/ms-playwright/chromium_headless_shell-1243/x/headless_shell'))
-      .toBe('/xdg/ms-playwright');
+    expect(browserCacheDir('/opt/pw-browsers/chromium-1243/chrome-linux64/chrome')).toBe(
+      '/opt/pw-browsers',
+    );
+    expect(
+      browserCacheDir('/xdg/ms-playwright/chromium_headless_shell-1243/x/headless_shell'),
+    ).toBe('/xdg/ms-playwright');
     expect(
       browserCacheDir(
         '/Users/a/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/' +
@@ -33,13 +36,11 @@ describe('dedicated browser gate', () => {
     ).toBe('/Users/a/Library/Caches/ms-playwright');
     expect(
       browserCacheDir('C:\\Users\\a\\AppData\\Local\\ms-playwright\\chromium-1243\\chrome.exe'),
-    )
-      .toBe('C:\\Users\\a\\AppData\\Local\\ms-playwright');
+    ).toBe('C:\\Users\\a\\AppData\\Local\\ms-playwright');
     // PR #415 review: a `chromium-` prefixed directory in the cache path is not the install.
     expect(
       browserCacheDir('/home/a/chromium-cache/ms-playwright/chromium-1243/chrome-linux64/chrome'),
-    )
-      .toBe('/home/a/chromium-cache/ms-playwright');
+    ).toBe('/home/a/chromium-cache/ms-playwright');
     expect(() => browserCacheDir('/usr/bin/chrome')).toThrow('Cannot locate');
     expect(() => browserCacheDir('chromium-1243/chrome')).toThrow('Cannot locate');
   });

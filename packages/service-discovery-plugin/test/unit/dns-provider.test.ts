@@ -56,8 +56,9 @@ describe('DnsProvider — srv mode', () => {
       },
       resolveHost: () => Promise.resolve([]),
     };
-    await srvProvider(resolver, { domainTemplate: '_http._tcp.{service}.internal' })
-      .resolve('billing');
+    await srvProvider(resolver, { domainTemplate: '_http._tcp.{service}.internal' }).resolve(
+      'billing',
+    );
     expect(queried).toBe('_http._tcp.billing.internal');
   });
 

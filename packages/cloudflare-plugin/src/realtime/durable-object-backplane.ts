@@ -122,7 +122,7 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
    * with no `webSocket` member
    */
   async connect(): Promise<void> {
-    const attempt = this.#opening ??= this.#open();
+    const attempt = (this.#opening ??= this.#open());
     try {
       await attempt;
     } catch (error) {

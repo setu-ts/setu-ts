@@ -195,9 +195,8 @@ export class DiagnosticSpanProcessor {
       this.#collector.drop();
       return;
     }
-    const outcome = span.status === undefined
-      ? 'unset'
-      : OUTCOME_BY_OTEL_CODE.get(span.status.code);
+    const outcome =
+      span.status === undefined ? 'unset' : OUTCOME_BY_OTEL_CODE.get(span.status.code);
     if (outcome === undefined) {
       this.#collector.drop();
       return;
@@ -287,8 +286,12 @@ function spanDurationMs(duration: readonly [number, number] | undefined): number
   }
   const [seconds, nanoseconds] = duration;
   if (
-    typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0 ||
-    typeof nanoseconds !== 'number' || !Number.isFinite(nanoseconds) || nanoseconds < 0
+    typeof seconds !== 'number' ||
+    !Number.isFinite(seconds) ||
+    seconds < 0 ||
+    typeof nanoseconds !== 'number' ||
+    !Number.isFinite(nanoseconds) ||
+    nanoseconds < 0
   ) {
     return null;
   }

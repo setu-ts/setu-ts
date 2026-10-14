@@ -12,10 +12,12 @@ describe('TelemetryService span activation', () => {
     };
     const service = new TelemetryService(host);
 
-    await expect(service.withSpan('active', () => {
-      expect(active).toBe(true);
-      return Promise.reject(new Error('inside active span'));
-    })).rejects.toThrow('inside active span');
+    await expect(
+      service.withSpan('active', () => {
+        expect(active).toBe(true);
+        return Promise.reject(new Error('inside active span'));
+      }),
+    ).rejects.toThrow('inside active span');
 
     expect(host.recordedSpans[0]).toMatchObject({
       name: 'active',

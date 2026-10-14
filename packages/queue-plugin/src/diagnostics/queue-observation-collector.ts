@@ -242,14 +242,13 @@ export function compileQueueDiagnosticsPolicy(
  * @throws {RangeError} With one fixed, value-free message
  * @internal
  */
-export function validateQueueReadArgs(
-  after: unknown,
-  limit: unknown,
-  current: number,
-): number {
+export function validateQueueReadArgs(after: unknown, limit: unknown, current: number): number {
   const effective = limit ?? MAX_READ_LIMIT;
   if (
-    typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0 || after > current ||
+    typeof after !== 'number' ||
+    !Number.isSafeInteger(after) ||
+    after < 0 ||
+    after > current ||
     !inRange(effective, 1, MAX_READ_LIMIT)
   ) {
     throw new RangeError(QUEUE_COLLECTOR_ERRORS.badCursor);
@@ -505,7 +504,8 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
     // retained in the ring would make every later batch fail the connector's
     // exact validator until 1,024 more attempts rolled it out.
     if (
-      this.#attemptsInFlight >= MAX_IN_FLIGHT_ATTEMPTS || !Number.isSafeInteger(attempt) ||
+      this.#attemptsInFlight >= MAX_IN_FLIGHT_ATTEMPTS ||
+      !Number.isSafeInteger(attempt) ||
       attempt < 1
     ) {
       this.#droppedAttempts = saturatingNext(this.#droppedAttempts);
@@ -733,17 +733,22 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
       }
       const registered = new Set(reader.names());
       const names = this.#policy.names.filter((name) => registered.has(name));
-      const order = names.length === 0 ? [] : [
-        ...names.slice(this.#cursor % names.length),
-        ...names.slice(0, this.#cursor % names.length),
-      ];
+      const order =
+        names.length === 0
+          ? []
+          : [
+              ...names.slice(this.#cursor % names.length),
+              ...names.slice(0, this.#cursor % names.length),
+            ];
       const fresh = new Map<string, { depths: QueueDepths; atMs: number }>();
       let failed = false;
       let timedOut = false;
       let next = 0;
       const worker = async (): Promise<void> => {
         while (
-          !this.#closed && next < order.length && this.#countsInFlight.size < policy.concurrency
+          !this.#closed &&
+          next < order.length &&
+          this.#countsInFlight.size < policy.concurrency
         ) {
           const name = order[next];
           next += 1;
@@ -777,9 +782,8 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
       if (names.length > 0) {
         this.#cursor = (this.#cursor + next) % names.length;
       }
-      const coverage: QueueDepthCycleCoverage = fresh.size === names.length
-        ? 'complete'
-        : 'partial';
+      const coverage: QueueDepthCycleCoverage =
+        fresh.size === names.length ? 'complete' : 'partial';
       // M101a V8-23: the cycle REPLACES the retained rows. A name this cycle
       // did not read (timed out, failed, never reached) has NO row, rather
       // than keeping its last count — a retained `ready: 0` under a climbing
@@ -841,11 +845,13 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
         (value) => {
           const depths = readDepthResult(value);
           finish(
-            depths === null ? { kind: 'failed' } : {
-              kind: 'ok',
-              depths,
-              atMs: this.#clock.hrtime(),
-            },
+            depths === null
+              ? { kind: 'failed' }
+              : {
+                  kind: 'ok',
+                  depths,
+                  atMs: this.#clock.hrtime(),
+                },
           );
         },
         () => finish({ kind: 'failed' }),

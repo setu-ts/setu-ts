@@ -28,11 +28,7 @@
  * @since 0.2.0
  */
 export type CosmosPartitionKeyValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly (string | number | boolean | null)[];
+  string | number | boolean | null | readonly (string | number | boolean | null)[];
 
 /**
  * One named query parameter. Values are always bound rather than interpolated,

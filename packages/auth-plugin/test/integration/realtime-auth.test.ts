@@ -141,9 +141,7 @@ describe('session-backed passive auth (HTTP + SSE)', () => {
   });
 
   it('step 2 — passive auth on a normal route (cookie, NO authorization) → 200', async () => {
-    const res = await app.fetch(
-      new Request(`${BASE}/me`, { headers: { cookie } }),
-    );
+    const res = await app.fetch(new Request(`${BASE}/me`, { headers: { cookie } }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { id: string };
     // Proves SessionStrategy.fromHeaders → toPrincipal produced a principal

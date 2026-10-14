@@ -21,8 +21,8 @@ const DENO = workspaceProfile('deno');
  * @returns Its contents
  */
 function contentsOf(path: string): string {
-  const file = workspaceRootFiles('acme', 3000, HTTP, DENO).find((candidate) =>
-    candidate.path === path
+  const file = workspaceRootFiles('acme', 3000, HTTP, DENO).find(
+    (candidate) => candidate.path === path,
   );
   expect(file).toBeDefined();
   return file?.contents ?? '';
@@ -30,13 +30,13 @@ function contentsOf(path: string): string {
 
 describe('workspaceRootFiles', () => {
   it('emits the root files and its development runner', () => {
-    expect(workspaceRootFiles('acme', 3000, HTTP, DENO).map((file) => file.path).sort()).toEqual([
-      '.gitignore',
-      'README.md',
-      WORKSPACE_MANIFEST,
-      'deno.json',
-      'scripts/dev.ts',
-    ].sort());
+    expect(
+      workspaceRootFiles('acme', 3000, HTTP, DENO)
+        .map((file) => file.path)
+        .sort(),
+    ).toEqual(
+      ['.gitignore', 'README.md', WORKSPACE_MANIFEST, 'deno.json', 'scripts/dev.ts'].sort(),
+    );
   });
 
   it('plans no path twice', () => {
@@ -89,8 +89,8 @@ describe('workspaceRootFiles', () => {
   });
 
   it('records the base port it was given', () => {
-    const file = workspaceRootFiles('acme', 4100, HTTP, DENO).find((f) =>
-      f.path === WORKSPACE_MANIFEST
+    const file = workspaceRootFiles('acme', 4100, HTTP, DENO).find(
+      (f) => f.path === WORKSPACE_MANIFEST,
     );
     expect(JSON.parse(file?.contents ?? '{}')).toMatchObject({ basePort: 4100 });
   });

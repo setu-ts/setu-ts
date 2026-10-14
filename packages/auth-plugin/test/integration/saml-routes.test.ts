@@ -162,14 +162,20 @@ function assertion(overrides: Record<string, unknown> = {}): Record<string, unkn
     $: { ID: '_a1' },
     // A bare string, as xml2js yields for an element with no attributes.
     Issuer: ['https://idp.test/saml'],
-    Subject: [{
-      NameID: [{ _: 'alice' }],
-      SubjectConfirmation: [{
-        SubjectConfirmationData: [{
-          $: { Recipient: ACS_URL, InResponseTo: '_req1', NotOnOrAfter: 'not-a-date' },
-        }],
-      }],
-    }],
+    Subject: [
+      {
+        NameID: [{ _: 'alice' }],
+        SubjectConfirmation: [
+          {
+            SubjectConfirmationData: [
+              {
+                $: { Recipient: ACS_URL, InResponseTo: '_req1', NotOnOrAfter: 'not-a-date' },
+              },
+            ],
+          },
+        ],
+      },
+    ],
     ...overrides,
   };
 }
@@ -227,13 +233,14 @@ async function runAcs(
     const login = await jar.fetch(harness.app, `/auth/${PROVIDER}/login`);
     await login.body?.cancel();
   }
-  const response = options.body === undefined
-    ? await postAcs(harness, jar, 'eA==')
-    : await jar.fetch(harness.app, `/auth/${PROVIDER}/acs`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: options.body,
-    });
+  const response =
+    options.body === undefined
+      ? await postAcs(harness, jar, 'eA==')
+      : await jar.fetch(harness.app, `/auth/${PROVIDER}/acs`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: options.body,
+        });
   return { response, jar };
 }
 
@@ -280,65 +287,111 @@ describe('SAML routes (injected library)', () => {
   });
 
   const refusals: ReadonlyArray<[string, Partial<FakeBehaviour>, string]> = [
-    ['a null profile (NoPassive / logout)', {
-      validate: () => Promise.resolve({ profile: null, loggedOut: true }),
-    }, 'assertion-invalid'],
-    ['a profile without InResponseTo', {
-      validate: () =>
-        Promise.resolve({ profile: profile({ inResponseTo: undefined }), loggedOut: false }),
-    }, 'assertion-invalid'],
-    ['a profile answering an unknown request', {
-      validate: () =>
-        Promise.resolve({ profile: profile({ inResponseTo: '_other' }), loggedOut: false }),
-    }, 'state-invalid'],
-    ['an assertion without an ID', {
-      validate: () =>
-        Promise.resolve({ profile: profile({}, assertion({ $: {} })), loggedOut: false }),
-    }, 'assertion-invalid'],
-    ['a profile with no assertion accessor', {
-      validate: () =>
-        Promise.resolve({ profile: profile({ getAssertion: undefined }), loggedOut: false }),
-    }, 'assertion-invalid'],
-    ['an assertion accessor returning nothing', {
-      validate: () =>
-        Promise.resolve({ profile: profile({ getAssertion: () => null }), loggedOut: false }),
-    }, 'assertion-invalid'],
-    ['a confirmation without data', {
-      validate: () =>
-        Promise.resolve({
-          profile: profile({}, assertion({ Subject: [{ SubjectConfirmation: [{}] }] })),
-          loggedOut: false,
-        }),
-    }, 'assertion-invalid'],
-    ['no subject confirmation at all', {
-      validate: () =>
-        Promise.resolve({ profile: profile({}, assertion({ Subject: 'x' })), loggedOut: false }),
-    }, 'assertion-invalid'],
-    ['a subject-confirmation data node without attributes', {
-      validate: () =>
-        Promise.resolve({
-          profile: profile(
-            {},
-            assertion({ Subject: [{ SubjectConfirmation: [{ SubjectConfirmationData: ['x'] }] }] }),
-          ),
-          loggedOut: false,
-        }),
-    }, 'assertion-invalid'],
-    ['an assertion with no Issuer element (the issuer only as an attribute)', {
-      validate: () => {
-        const { Issuer: _dropped, ...noIssuer } = assertion();
-        return Promise.resolve({ profile: profile({}, noIssuer), loggedOut: false });
+    [
+      'a null profile (NoPassive / logout)',
+      {
+        validate: () => Promise.resolve({ profile: null, loggedOut: true }),
       },
-    }, 'assertion-invalid'],
-    ['a profile without a NameID', {
-      // node-saml's merged profile still carries `nameID` (from an attribute
-      // of that name); only the missing ELEMENT may decide.
-      validate: () =>
-        Promise.resolve({
-          profile: profile({ nameID: 'from-attribute' }, withoutNameId()),
-          loggedOut: false,
-        }),
-    }, 'assertion-invalid'],
+      'assertion-invalid',
+    ],
+    [
+      'a profile without InResponseTo',
+      {
+        validate: () =>
+          Promise.resolve({ profile: profile({ inResponseTo: undefined }), loggedOut: false }),
+      },
+      'assertion-invalid',
+    ],
+    [
+      'a profile answering an unknown request',
+      {
+        validate: () =>
+          Promise.resolve({ profile: profile({ inResponseTo: '_other' }), loggedOut: false }),
+      },
+      'state-invalid',
+    ],
+    [
+      'an assertion without an ID',
+      {
+        validate: () =>
+          Promise.resolve({ profile: profile({}, assertion({ $: {} })), loggedOut: false }),
+      },
+      'assertion-invalid',
+    ],
+    [
+      'a profile with no assertion accessor',
+      {
+        validate: () =>
+          Promise.resolve({ profile: profile({ getAssertion: undefined }), loggedOut: false }),
+      },
+      'assertion-invalid',
+    ],
+    [
+      'an assertion accessor returning nothing',
+      {
+        validate: () =>
+          Promise.resolve({ profile: profile({ getAssertion: () => null }), loggedOut: false }),
+      },
+      'assertion-invalid',
+    ],
+    [
+      'a confirmation without data',
+      {
+        validate: () =>
+          Promise.resolve({
+            profile: profile({}, assertion({ Subject: [{ SubjectConfirmation: [{}] }] })),
+            loggedOut: false,
+          }),
+      },
+      'assertion-invalid',
+    ],
+    [
+      'no subject confirmation at all',
+      {
+        validate: () =>
+          Promise.resolve({ profile: profile({}, assertion({ Subject: 'x' })), loggedOut: false }),
+      },
+      'assertion-invalid',
+    ],
+    [
+      'a subject-confirmation data node without attributes',
+      {
+        validate: () =>
+          Promise.resolve({
+            profile: profile(
+              {},
+              assertion({
+                Subject: [{ SubjectConfirmation: [{ SubjectConfirmationData: ['x'] }] }],
+              }),
+            ),
+            loggedOut: false,
+          }),
+      },
+      'assertion-invalid',
+    ],
+    [
+      'an assertion with no Issuer element (the issuer only as an attribute)',
+      {
+        validate: () => {
+          const { Issuer: _dropped, ...noIssuer } = assertion();
+          return Promise.resolve({ profile: profile({}, noIssuer), loggedOut: false });
+        },
+      },
+      'assertion-invalid',
+    ],
+    [
+      'a profile without a NameID',
+      {
+        // node-saml's merged profile still carries `nameID` (from an attribute
+        // of that name); only the missing ELEMENT may decide.
+        validate: () =>
+          Promise.resolve({
+            profile: profile({ nameID: 'from-attribute' }, withoutNameId()),
+            loggedOut: false,
+          }),
+      },
+      'assertion-invalid',
+    ],
   ];
   for (const [label, behaviour, detail] of refusals) {
     it(`refuses ${label}`, async () => {
@@ -350,14 +403,17 @@ describe('SAML routes (injected library)', () => {
 
   it('refuses a request recorded for another provider', async () => {
     const store = new MemorySamlRequestStore();
-    await store.saveRequest({
-      requestId: '_req1',
-      provider: 'someone-else',
-      returnTo: '/',
-      binding: 'b',
-      issuedAt: 'x',
-      expiresAt: Number.MAX_SAFE_INTEGER,
-    }, 0);
+    await store.saveRequest(
+      {
+        requestId: '_req1',
+        provider: 'someone-else',
+        returnTo: '/',
+        binding: 'b',
+        issuedAt: 'x',
+        expiresAt: Number.MAX_SAFE_INTEGER,
+      },
+      0,
+    );
     // The browser presents the matching binding, so ONLY the provider check
     // can refuse this.
     const { response } = await runAcs({}, { provider: { store }, skipLogin: true, binding: 'b' });
@@ -441,8 +497,8 @@ describe('SAML routes (injected library)', () => {
   });
 
   it('fails register() with SamlRuntimeLoadError for an unusable injected module', async () => {
-    const error = await buildSamlApp(key, { provider: { module: { SAML: 'nope' } } }).catch((e) =>
-      e
+    const error = await buildSamlApp(key, { provider: { module: { SAML: 'nope' } } }).catch(
+      (e) => e,
     );
     expect(error).toBeInstanceOf(SamlRuntimeLoadError);
   });

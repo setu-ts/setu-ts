@@ -78,9 +78,7 @@ function buildResolverChain(
 }
 
 /** Build the isolation strategy from the `database` option. */
-function buildStrategy(
-  database: MultiTenancyPluginOptions['database'],
-): ITenantIsolationStrategy {
+function buildStrategy(database: MultiTenancyPluginOptions['database']): ITenantIsolationStrategy {
   if (database && typeof database === 'object' && 'kind' in database) {
     return database;
   }
@@ -116,9 +114,7 @@ const REQUIRED_STORE_METHODS = [
  * @throws {Error} When a required `ITenantDataStore` method is missing
  */
 function assertUsableStore(store: ITenantDataStore): void {
-  const missing = REQUIRED_STORE_METHODS.filter(
-    (method) => typeof store[method] !== 'function',
-  );
+  const missing = REQUIRED_STORE_METHODS.filter((method) => typeof store[method] !== 'function');
   if (missing.length > 0) {
     throw new Error(
       `MultiTenancyPlugin: the injected dataStore is missing required ITenantDataStore ` +
@@ -143,9 +139,7 @@ function getResolverType(resolverConfig: MultiTenancyPluginOptions['resolver']):
  * auto-adds the tenant middleware at priority 40, and registers a
  * health indicator + lifecycle close.
  */
-export function MultiTenancyPlugin(
-  options: MultiTenancyPluginOptions,
-): IPlugin {
+export function MultiTenancyPlugin(options: MultiTenancyPluginOptions): IPlugin {
   const {
     dataStore: providedStore,
     database = 'column-per-tenant',
@@ -166,10 +160,9 @@ export function MultiTenancyPlugin(
     register(ctx: IPluginContext) {
       // Resolve JWT decode function if needed.
       let jwtDecode: ((token: string) => Record<string, unknown> | null) | undefined;
-      const isJwtMode = options.resolver === 'jwt' || (
-        Array.isArray(options.resolver) &&
-        options.resolver.some((r) => r instanceof JwtResolver)
-      );
+      const isJwtMode =
+        options.resolver === 'jwt' ||
+        (Array.isArray(options.resolver) && options.resolver.some((r) => r instanceof JwtResolver));
 
       if (isJwtMode && jwt?.decode == null) {
         if (ctx.services.has(CAPABILITIES.JWT)) {
@@ -224,7 +217,8 @@ export function MultiTenancyPlugin(
             'token naming any tenant; acceptable only alongside authentication middleware ' +
             'which separately verifies the token',
           {
-            hint: 'Pair resolver: "jwt" with AuthPlugin (or equivalent) so the token is ' +
+            hint:
+              'Pair resolver: "jwt" with AuthPlugin (or equivalent) so the token is ' +
               'verified before its tenant claim is trusted.',
           },
         );
@@ -246,14 +240,14 @@ export function MultiTenancyPlugin(
         // MultiTenancyPluginOptions ('schema-per-tenant'/'database-per-tenant'),
         // not the resolved strategy kind ('schema'/'database'), so the warning
         // maps back to the `database` option they set.
-        const optionSpelling = strategy.kind === 'schema'
-          ? 'schema-per-tenant'
-          : 'database-per-tenant';
+        const optionSpelling =
+          strategy.kind === 'schema' ? 'schema-per-tenant' : 'database-per-tenant';
         ctx.logger?.warn(
           `Isolation strategy '${optionSpelling}' is selected but no dataStore is injected; the shipped memory store only partitions by the strategy's label and no schema or database is created`,
           {
             strategy: strategy.kind,
-            hint: 'Inject a dataStore whose backend implements the strategy, or keep ' +
+            hint:
+              'Inject a dataStore whose backend implements the strategy, or keep ' +
               "the default 'column-per-tenant'.",
           },
         );
@@ -267,11 +261,13 @@ export function MultiTenancyPlugin(
       // every `register()` phase completes before any `onInit`, so no
       // ordering edge is needed.
       const storeFactory = typeof providedStore === 'function' ? providedStore : undefined;
-      const immediateStore = typeof providedStore === 'function'
-        ? undefined
-        : providedStore ?? new MemoryTenantDataStore({
-          generateId: () => ctx.runtime.uuid(),
-        });
+      const immediateStore =
+        typeof providedStore === 'function'
+          ? undefined
+          : (providedStore ??
+            new MemoryTenantDataStore({
+              generateId: () => ctx.runtime.uuid(),
+            }));
 
       // The SAME two calls both store paths make: validate the shape, then
       // hand off isolation metadata.
@@ -338,12 +334,15 @@ export function MultiTenancyPlugin(
           data: {
             resolver: getResolverType(options.resolver),
             strategy: strategy.kind,
-            store: resolvedStore === undefined ? 'factory' : resolvedStore === immediateStore &&
-                providedStore === undefined
-              ? 'memory'
-              : 'custom',
+            store:
+              resolvedStore === undefined
+                ? 'factory'
+                : resolvedStore === immediateStore && providedStore === undefined
+                  ? 'memory'
+                  : 'custom',
           },
-        }));
+        }),
+      );
 
       // Register lifecycle close. Closes whatever store ended up bound.
       ctx.lifecycle.onClose(async () => {

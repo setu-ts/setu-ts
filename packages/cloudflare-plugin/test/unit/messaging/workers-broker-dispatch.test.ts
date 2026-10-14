@@ -105,12 +105,20 @@ describe('WorkersBroker.dispatch — routing', () => {
   it('delivers to exactly one member of a consumer group', async () => {
     const { broker } = makeBroker();
     const seen: string[] = [];
-    await broker.subscribe('orders', () => {
-      seen.push('a');
-    }, { queue: 'workers' });
-    await broker.subscribe('orders', () => {
-      seen.push('b');
-    }, { queue: 'workers' });
+    await broker.subscribe(
+      'orders',
+      () => {
+        seen.push('a');
+      },
+      { queue: 'workers' },
+    );
+    await broker.subscribe(
+      'orders',
+      () => {
+        seen.push('b');
+      },
+      { queue: 'workers' },
+    );
 
     await dispatchOne(broker, encodePublishEnvelope('orders', 'i1', 1));
 
@@ -127,9 +135,7 @@ describe('WorkersBroker.dispatch — routing', () => {
     // with no processor is a mistake, but publishing to a topic nobody listens
     // on is ordinary pub/sub.
     expect(message.disposition).toBe('acked');
-    expect(logger.messages()).toEqual([
-      'cloudflare-messaging: no subscriber for topic, acked',
-    ]);
+    expect(logger.messages()).toEqual(['cloudflare-messaging: no subscriber for topic, acked']);
     expect(logger.records[0]?.level).toBe('debug');
     expect(logger.records[0]?.meta).toMatchObject({ topic: 'orders', subscribed: ['other'] });
   });
@@ -140,9 +146,7 @@ describe('WorkersBroker.dispatch — routing', () => {
     const message = await dispatchOne(broker, { some: 'other producer' });
 
     expect(message.disposition).toBe('retried');
-    expect(logger.messages()).toEqual([
-      'cloudflare-messaging: message not readable, retried',
-    ]);
+    expect(logger.messages()).toEqual(['cloudflare-messaging: message not readable, retried']);
     expect(logger.records[0]?.level).toBe('error');
   });
 
@@ -167,9 +171,7 @@ describe('WorkersBroker.dispatch — routing', () => {
     );
 
     expect(message.disposition).toBe('retried');
-    expect(logger.messages()).toEqual([
-      'cloudflare-messaging: subscriber failed, message retried',
-    ]);
+    expect(logger.messages()).toEqual(['cloudflare-messaging: subscriber failed, message retried']);
     expect(logger.records[0]?.meta).toMatchObject({ attempts: 3, error: 'handler exploded' });
   });
 
@@ -192,8 +194,9 @@ describe('WorkersBroker.dispatch — routing', () => {
     await broker.subscribe('orders', () => {});
 
     const message = new AckFailsQueueMessage('m1', encodePublishEnvelope('orders', 'i1', 1));
-    await expect(broker.dispatch(new FakeQueueBatch('messages', [message])))
-      .rejects.toThrow('cannot ack');
+    await expect(broker.dispatch(new FakeQueueBatch('messages', [message]))).rejects.toThrow(
+      'cannot ack',
+    );
 
     // `ack()` sits outside the handler's try, so a platform-side ack failure is
     // not reported as a subscriber failure AND then also retried — which would
@@ -274,8 +277,7 @@ describe('WorkersBroker.dispatch — responders', () => {
     // that a socket exists: asserting on membership alone would pass for a
     // responder whose reply never left.
     const server = namespace.states.get('rr.inbox.abc')?.accepted[0] as
-      | { readonly sent: string[] }
-      | undefined;
+      { readonly sent: string[] } | undefined;
     expect(server?.sent).toHaveLength(1);
     expect(JSON.parse(String(server?.sent[0]))).toEqual({
       v: 1,
@@ -306,12 +308,9 @@ describe('WorkersBroker.dispatch — responders', () => {
     // redelivery would re-run a responder whose side effects already landed.
     expect(message.disposition).toBe('acked');
     const server = namespace.states.get('rr.inbox.abc')?.accepted[0] as
-      | { readonly sent: string[] }
-      | undefined;
+      { readonly sent: string[] } | undefined;
     expect(JSON.parse(String(server?.sent[0]))).toMatchObject({ ok: false, error: 'bad input' });
-    expect(logger.messages()).toEqual([
-      'cloudflare-messaging: responder failed, caller informed',
-    ]);
+    expect(logger.messages()).toEqual(['cloudflare-messaging: responder failed, caller informed']);
     expect(logger.records[0]?.meta).toMatchObject({ error: 'bad input' });
   });
 
@@ -325,9 +324,7 @@ describe('WorkersBroker.dispatch — responders', () => {
     );
 
     expect(message.disposition).toBe('acked');
-    expect(logger.messages()).toEqual([
-      'cloudflare-messaging: no responder for request topic',
-    ]);
+    expect(logger.messages()).toEqual(['cloudflare-messaging: no responder for request topic']);
     expect(logger.records[0]?.meta).toMatchObject({ responding: ['other'] });
   });
 
@@ -352,14 +349,22 @@ describe('WorkersBroker.dispatch — responders', () => {
   it('load-balances requests across a responder group', async () => {
     const { broker } = makeBroker(true);
     const seen: string[] = [];
-    await broker.respond('sum', () => {
-      seen.push('a');
-      return 1;
-    }, { queue: 'workers' });
-    await broker.respond('sum', () => {
-      seen.push('b');
-      return 1;
-    }, { queue: 'workers' });
+    await broker.respond(
+      'sum',
+      () => {
+        seen.push('a');
+        return 1;
+      },
+      { queue: 'workers' },
+    );
+    await broker.respond(
+      'sum',
+      () => {
+        seen.push('b');
+        return 1;
+      },
+      { queue: 'workers' },
+    );
 
     await dispatchOne(broker, encodeRequestEnvelope('sum', 'i1', 'c1', 'rr.inbox.abc', 1));
     await dispatchOne(broker, encodeRequestEnvelope('sum', 'i2', 'c2', 'rr.inbox.abc', 1));
@@ -392,8 +397,7 @@ describe('WorkersBroker.dispatch — responders', () => {
     // and the caller sees the same single reply either way.
     expect(ran).toEqual(['first']);
     const server = namespace.states.get('rr.inbox.abc')?.accepted[0] as
-      | { readonly sent: string[] }
-      | undefined;
+      { readonly sent: string[] } | undefined;
     expect(server?.sent).toHaveLength(1);
   });
 

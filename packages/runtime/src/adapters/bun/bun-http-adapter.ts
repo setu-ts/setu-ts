@@ -79,10 +79,7 @@ export interface BunServer {
    * @param options - Per-socket data and response headers for the handshake
    * @returns `true` when the upgrade succeeded and no response should be sent
    */
-  upgrade?(
-    request: Request,
-    options: { data: BunSocketData; headers?: Headers },
-  ): boolean;
+  upgrade?(request: Request, options: { data: BunSocketData; headers?: Headers }): boolean;
 }
 
 /**
@@ -314,7 +311,7 @@ export class BunHttpAdapter implements IHttpAdapter {
     return this.#handle.createFetchHandler()(request);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async listen(port: number, hostname?: string): Promise<ServerHandle> {
     const server = this.#host.serve({
       port,

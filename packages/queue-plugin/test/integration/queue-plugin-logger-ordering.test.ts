@@ -30,7 +30,7 @@ function createTestLoggerPlugin(): {
       provides: [CAPABILITIES.LOGGER],
       priority: 90,
       register(ctx: IPluginContext): void {
-        // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const logger: any = {
           level: 'error',
           debug: () => {},
@@ -107,10 +107,7 @@ describe('B5: QueuePlugin logger ordering through real kernel', () => {
 
   it('No LoggerPlugin: app starts and queue works without logger', async () => {
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        QueuePlugin({ adapter: 'memory' }),
-      ],
+      plugins: [RuntimePlugin(), QueuePlugin({ adapter: 'memory' })],
     });
 
     // Must not throw — logger is optional
@@ -151,11 +148,7 @@ describe('B5: QueuePlugin logger ordering through real kernel', () => {
     expect(realPlugin.optionalDependencies).toContain(CAPABILITIES.LOGGER);
 
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        realPlugin,
-        loggerHarness.plugin,
-      ],
+      plugins: [RuntimePlugin(), realPlugin, loggerHarness.plugin],
     });
 
     await app.start();

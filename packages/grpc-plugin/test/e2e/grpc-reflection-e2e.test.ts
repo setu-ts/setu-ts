@@ -83,13 +83,12 @@ describe('gRPC reflection and health E2E', () => {
       runtime.reviveDescriptorSet(ECHO_DESCRIPTOR_BASE64),
       'example.EchoService',
     );
-    app.services.get<IGrpcService>(CAPABILITIES.GRPC).addService(
-      echo as unknown as GrpcServiceDefinition,
-      {
+    app.services
+      .get<IGrpcService>(CAPABILITIES.GRPC)
+      .addService(echo as unknown as GrpcServiceDefinition, {
         echo: (request: { message: string }) => ({ response: `echo: ${request.message}` }),
         ping: () => ({ pong: true }),
-      },
-    );
+      });
   });
 
   afterEach(async () => {
@@ -99,9 +98,11 @@ describe('gRPC reflection and health E2E', () => {
   describe('list_services', () => {
     it('lists the application service and both built-ins', async () => {
       const [response] = await reflect(app, { listServices: '' });
-      const names = (response.listServicesResponse as unknown as {
-        service: { name: string }[];
-      }).service.map((s) => s.name);
+      const names = (
+        response.listServicesResponse as unknown as {
+          service: { name: string }[];
+        }
+      ).service.map((s) => s.name);
 
       expect(names).toContain('example.EchoService');
       expect(names).toContain('grpc.health.v1.Health');
@@ -117,9 +118,11 @@ describe('gRPC reflection and health E2E', () => {
   describe('file_containing_symbol', () => {
     it('returns real FileDescriptorProto bytes for a registered service', async () => {
       const [response] = await reflect(app, { fileContainingSymbol: 'example.EchoService' });
-      const files = (response.fileDescriptorResponse as unknown as {
-        fileDescriptorProto: string[];
-      }).fileDescriptorProto;
+      const files = (
+        response.fileDescriptorResponse as unknown as {
+          fileDescriptorProto: string[];
+        }
+      ).fileDescriptorProto;
 
       expect(files).toHaveLength(1);
       // JSON encodes `bytes` as base64; a non-empty payload is the whole point.
@@ -146,9 +149,11 @@ describe('gRPC reflection and health E2E', () => {
   describe('file_by_filename', () => {
     it('returns the descriptor for a known proto path', async () => {
       const [response] = await reflect(app, { fileByFilename: 'echo.proto' });
-      const files = (response.fileDescriptorResponse as unknown as {
-        fileDescriptorProto: string[];
-      }).fileDescriptorProto;
+      const files = (
+        response.fileDescriptorResponse as unknown as {
+          fileDescriptorProto: string[];
+        }
+      ).fileDescriptorProto;
       expect(atob(files[0])).toContain('EchoService');
     });
 
@@ -219,7 +224,7 @@ describe('gRPC health bridged to a registered health capability', () => {
     };
 
     app = createApplication({
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       plugins: [RuntimePlugin(), healthPlugin as any, GrpcPlugin()],
     });
     await app.start({ port: 0 });

@@ -60,7 +60,9 @@ describe('the no-template host', () => {
 describe('seam selection', () => {
   it('omits a seam whose backing plugin the host does not install', () => {
     // Emitting it would put an unresolvable import in the generated config.
-    const bare = seamsFor(new Set()).map((s) => s.schematic).sort();
+    const bare = seamsFor(new Set())
+      .map((s) => s.schematic)
+      .sort();
     // `controller` is ungated since M70h/E8 and appears here in its functional
     // shape, sharing the `route` barrel rather than adding one.
     expect(bare).toEqual(['controller', 'middleware', 'plugin', 'route']);
@@ -75,28 +77,26 @@ describe('seam selection', () => {
     // one lacks the decorator, and a class-based one routes command/query/event
     // through ingress instead (§3.4).
     const functional = new Set(
-      listSeamSpecs().map((s) => s.requiresPlugin).filter((p): p is string =>
-        p !== undefined && p !== 'decorator-plugin'
-      ),
+      listSeamSpecs()
+        .map((s) => s.requiresPlugin)
+        .filter((p): p is string => p !== undefined && p !== 'decorator-plugin'),
     );
     const selected = seamsFor(functional).map((s) => s.schematic);
     // The decorator-gated seams are absent.
     expect(selected).not.toContain('ingress');
     expect(selected).not.toContain('service');
     // The functional shapes and the plugin-gated seams are present.
-    for (
-      const schematic of [
-        'controller',
-        'route',
-        'middleware',
-        'plugin',
-        'health-indicator',
-        'metric',
-        'command-handler',
-        'query-handler',
-        'event-handler',
-      ]
-    ) {
+    for (const schematic of [
+      'controller',
+      'route',
+      'middleware',
+      'plugin',
+      'health-indicator',
+      'metric',
+      'command-handler',
+      'query-handler',
+      'event-handler',
+    ]) {
       expect(selected).toContain(schematic);
     }
   });
@@ -107,7 +107,9 @@ describe('seam selection', () => {
     // and scaffolding the functional src/cqrs and src/events barrels would be dead
     // surface that double-registers any handler placed there.
     const classBased = new Set(
-      listSeamSpecs().map((s) => s.requiresPlugin).filter((p): p is string => p !== undefined),
+      listSeamSpecs()
+        .map((s) => s.requiresPlugin)
+        .filter((p): p is string => p !== undefined),
     );
     expect(classBased.has('decorator-plugin')).toBe(true);
     const selected = seamsFor(classBased).map((s) => s.schematic);

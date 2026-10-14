@@ -92,13 +92,11 @@ describe('HTTP status hint', () => {
   it('should reject a brand missing any required member', () => {
     // Each of the three is served, so a hint short one member would answer
     // with an `undefined` status, title or detail.
-    for (
-      const partial of [
-        { title: 'Not Implemented', detail: 'x' },
-        { status: 501, detail: 'x' },
-        { status: 501, title: 'Not Implemented' },
-      ]
-    ) {
+    for (const partial of [
+      { title: 'Not Implemented', detail: 'x' },
+      { status: 501, detail: 'x' },
+      { status: 501, title: 'Not Implemented' },
+    ]) {
       const error = new Error('boom');
       Object.defineProperty(error, HTTP_STATUS_HINT, { value: partial, configurable: true });
       expect(httpStatusHintOf(error)).toBeUndefined();
@@ -114,21 +112,19 @@ describe('HTTP status hint', () => {
     //   - wrong kind: a hint says how an ERROR is answered, and an error is
     //     never a success or a redirect.
     // Refusing reads as ABSENT, so the error takes the ordinary masked path.
-    for (
-      const status of [
-        999,
-        0,
-        -1,
-        400.5,
-        Number.NaN,
-        Number.POSITIVE_INFINITY,
-        Number.NEGATIVE_INFINITY,
-        200,
-        302,
-        399,
-        600,
-      ]
-    ) {
+    for (const status of [
+      999,
+      0,
+      -1,
+      400.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      200,
+      302,
+      399,
+      600,
+    ]) {
       const error = new Error('boom');
       Object.defineProperty(error, HTTP_STATUS_HINT, {
         value: { status, title: 'T', detail: 'D' },
@@ -236,8 +232,9 @@ describe('HTTP status hint', () => {
     // caller believed it had set a status.
     const frozen = Object.freeze(new Error('boom'));
 
-    expect(() => withHttpStatusHint(frozen, { status: 501, title: 'T', detail: 'D' }))
-      .toThrow(TypeError);
+    expect(() => withHttpStatusHint(frozen, { status: 501, title: 'T', detail: 'D' })).toThrow(
+      TypeError,
+    );
   });
 
   it('should reject a non-object brand value', () => {

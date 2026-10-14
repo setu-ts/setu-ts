@@ -389,9 +389,10 @@ describe('the lifecycle read still gates the probe (M95b review)', () => {
     const manual = makeManualRuntime();
     const { ctx, indicators } = makeContext(manual.runtime);
     await DatabasePlugin({ type: 'custom', adapter }).register(ctx);
-    const indicator = indicators.get('database') as () => Promise<
-      { status: string; data: Record<string, unknown> }
-    >;
+    const indicator = indicators.get('database') as () => Promise<{
+      status: string;
+      data: Record<string, unknown>;
+    }>;
 
     expect((await indicator()).status).toBe('up');
 

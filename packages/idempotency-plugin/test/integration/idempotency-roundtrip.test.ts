@@ -101,14 +101,15 @@ describe('SDK keyed retry through the plugin (M109b §3.9)', () => {
         fetch: (input, init) => {
           attempts++;
           // Always drop, so an unkeyed POST must NOT be retried.
-          return app.fetch(new Request(input as string, init as RequestInit)).then(() =>
-            Promise.reject(new Error('connection reset'))
-          );
+          return app
+            .fetch(new Request(input as string, init as RequestInit))
+            .then(() => Promise.reject(new Error('connection reset')));
         },
       });
 
-      await expect(client.request({ method: 'POST', path: 'charge', json: { amount: 1 } }))
-        .rejects.toThrow('connection reset');
+      await expect(
+        client.request({ method: 'POST', path: 'charge', json: { amount: 1 } }),
+      ).rejects.toThrow('connection reset');
       expect(attempts).toBe(1);
     } finally {
       await app.stop();

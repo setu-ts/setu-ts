@@ -153,7 +153,9 @@ export function translateFilter(expression: FilterExpression): Record<string, un
     throw new UnsupportedQueryFeatureError(
       'nested-path',
       'mongo',
-      'Mongo adapter refused an empty path (operator ' + expression.operator + ') — ' +
+      'Mongo adapter refused an empty path (operator ' +
+        expression.operator +
+        ') — ' +
         'a path array must carry at least one segment.',
     );
   }
@@ -181,20 +183,22 @@ export function translateQuery(query: NormalizedQuery): {
 } {
   const where = { ...query.where };
   const expression = query.filter === undefined ? undefined : translateFilter(query.filter);
-  const filter = expression === undefined
-    ? where
-    : Object.keys(where).length === 0
-    ? expression
-    : { $and: [where, expression] };
+  const filter =
+    expression === undefined
+      ? where
+      : Object.keys(where).length === 0
+        ? expression
+        : { $and: [where, expression] };
 
   // `MongoFindOptions` properties are `readonly` optionals, so each is folded
   // into the object literal only when the corresponding query clause is present.
-  const projection: Record<string, 1> | undefined = query.select.length > 0
-    ? query.select.reduce<Record<string, 1>>((acc, field) => {
-      acc[field] = 1;
-      return acc;
-    }, {})
-    : undefined;
+  const projection: Record<string, 1> | undefined =
+    query.select.length > 0
+      ? query.select.reduce<Record<string, 1>>((acc, field) => {
+          acc[field] = 1;
+          return acc;
+        }, {})
+      : undefined;
 
   const options: MongoFindOptions = {
     ...(Object.keys(query.orderBy).length > 0 ? { sort: { ...query.orderBy } } : {}),

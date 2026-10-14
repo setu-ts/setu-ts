@@ -23,7 +23,7 @@ function registryWith(entries: Record<string, unknown>): IServiceRegistry {
       }
       return entries[token] as T;
     },
-    getAll: <T>(token: string): readonly T[] => token in entries ? [entries[token] as T] : [],
+    getAll: <T>(token: string): readonly T[] => (token in entries ? [entries[token] as T] : []),
     register: (): void => {},
     registerFactory: (): void => {},
     unregister: (): boolean => false,
@@ -67,8 +67,9 @@ describe('createBackplane', () => {
   it('builds a MessagingBackplane over the registered broker', () => {
     const broker = { publish: () => Promise.resolve() } as unknown as IMessageBroker;
     const registry = registryWith({ [CAPABILITIES.MESSAGING]: broker });
-    expect(createBackplane({ transport: 'messaging' }, registry, 'node-a'))
-      .toBeInstanceOf(MessagingBackplane);
+    expect(createBackplane({ transport: 'messaging' }, registry, 'node-a')).toBeInstanceOf(
+      MessagingBackplane,
+    );
   });
 
   it('throws at registration when the messaging arm has no broker', () => {
@@ -101,7 +102,7 @@ describe('createBackplane', () => {
         { transport: 'carrier-pigeon' } as unknown as Parameters<typeof createBackplane>[0],
         EMPTY,
         'node-a',
-      )
+      ),
     ).toThrow(/unrecognized transport carrier-pigeon/);
   });
 });

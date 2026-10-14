@@ -75,19 +75,21 @@ describe('build-schema', () => {
   it('throws on schema validation errors', () => {
     const runtimeWithValidation: GraphqlRuntime = {
       ...fakeRuntime,
-      validateSchema: () => [{
-        message: 'Schema error',
-        locations: [],
-        path: [],
-        toJSON: () => ({ message: 'Schema error' }),
-      }],
+      validateSchema: () => [
+        {
+          message: 'Schema error',
+          locations: [],
+          path: [],
+          toJSON: () => ({ message: 'Schema error' }),
+        },
+      ],
     };
 
     expect(() =>
       buildSchema(
         { typeDefs: 'type Query { hello: String }', resolvers: {} },
         runtimeWithValidation,
-      )
+      ),
     ).toThrow(GraphqlSchemaError);
   });
 
@@ -100,7 +102,7 @@ describe('build-schema', () => {
           schema: {} as GraphqlSchemaLike,
         } as GraphqlPluginOptions,
         fakeRuntime,
-      )
+      ),
     ).toThrow();
   });
 
@@ -109,7 +111,7 @@ describe('build-schema', () => {
       buildSchema(
         { typeDefs: 'type Query { hello: String }' } as GraphqlPluginOptions,
         fakeRuntime,
-      )
+      ),
     ).toThrow(GraphqlSchemaError);
   });
 

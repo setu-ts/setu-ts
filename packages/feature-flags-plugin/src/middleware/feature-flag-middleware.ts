@@ -37,10 +37,7 @@ import type { FlagGuardOptions } from '../interfaces/index.ts';
  * @throws {Error} If `CAPABILITIES.FEATURE_FLAGS` is not registered.
  * @since 0.1.0
  */
-export function createFlagGuard(
-  flag: string,
-  options?: FlagGuardOptions,
-): MiddlewareFunction {
+export function createFlagGuard(flag: string, options?: FlagGuardOptions): MiddlewareFunction {
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     // Resolve the flag service per-request (decouples factory from registry)
     const flags = ctx.services.get<IFeatureFlags>(CAPABILITIES.FEATURE_FLAGS);

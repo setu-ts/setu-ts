@@ -41,19 +41,25 @@ describe('resolveSecrets', () => {
     const registry = new FakeRegistry();
     registry.register(CAPABILITIES.SECRETS, manager({ SESSION_SECRET: OTHER }));
 
-    const secrets = await resolveSecrets({ secret: LONG }, {
-      services: registry,
-      env: { SESSION_SECRET: OTHER },
-    });
+    const secrets = await resolveSecrets(
+      { secret: LONG },
+      {
+        services: registry,
+        env: { SESSION_SECRET: OTHER },
+      },
+    );
 
     expect(secrets).toEqual([LONG]);
   });
 
   it('accepts an explicit rotation list in order', async () => {
-    const secrets = await resolveSecrets({ secret: [LONG, OTHER] }, {
-      services: new FakeRegistry(),
-      env: {},
-    });
+    const secrets = await resolveSecrets(
+      { secret: [LONG, OTHER] },
+      {
+        services: new FakeRegistry(),
+        env: {},
+      },
+    );
     expect(secrets).toEqual([LONG, OTHER]);
   });
 
@@ -69,10 +75,13 @@ describe('resolveSecrets', () => {
     const registry = new FakeRegistry();
     registry.register(CAPABILITIES.SECRETS, manager({ 'app/session': LONG }));
 
-    const secrets = await resolveSecrets({ secretName: 'app/session' }, {
-      services: registry,
-      env: {},
-    });
+    const secrets = await resolveSecrets(
+      { secretName: 'app/session' },
+      {
+        services: registry,
+        env: {},
+      },
+    );
     expect(secrets).toEqual([LONG]);
   });
 
@@ -81,10 +90,13 @@ describe('resolveSecrets', () => {
     registry.register(CAPABILITIES.SECRETS, manager({}));
 
     // The branch that makes a dev machine work against a production provider.
-    const secrets = await resolveSecrets({}, {
-      services: registry,
-      env: { SESSION_SECRET: LONG },
-    });
+    const secrets = await resolveSecrets(
+      {},
+      {
+        services: registry,
+        env: { SESSION_SECRET: LONG },
+      },
+    );
     expect(secrets).toEqual([LONG]);
   });
 
@@ -92,41 +104,53 @@ describe('resolveSecrets', () => {
     const registry = new FakeRegistry();
     registry.register(CAPABILITIES.SECRETS, manager({ SESSION_SECRET: '' }));
 
-    const secrets = await resolveSecrets({}, {
-      services: registry,
-      env: { SESSION_SECRET: LONG },
-    });
+    const secrets = await resolveSecrets(
+      {},
+      {
+        services: registry,
+        env: { SESSION_SECRET: LONG },
+      },
+    );
     expect(secrets).toEqual([LONG]);
   });
 
   it('reads the environment when no secrets capability is registered', async () => {
-    const secrets = await resolveSecrets({}, {
-      services: new FakeRegistry(),
-      env: { SESSION_SECRET: LONG },
-    });
+    const secrets = await resolveSecrets(
+      {},
+      {
+        services: new FakeRegistry(),
+        env: { SESSION_SECRET: LONG },
+      },
+    );
     expect(secrets).toEqual([LONG]);
   });
 
   it('splits a comma-separated environment value into a rotation list', async () => {
-    const secrets = await resolveSecrets({}, {
-      services: new FakeRegistry(),
-      env: { SESSION_SECRET: `${LONG}, ${OTHER}` },
-    });
+    const secrets = await resolveSecrets(
+      {},
+      {
+        services: new FakeRegistry(),
+        env: { SESSION_SECRET: `${LONG}, ${OTHER}` },
+      },
+    );
     expect(secrets).toEqual([LONG, OTHER]);
   });
 
   it('ignores empty entries in a comma-separated value', async () => {
-    const secrets = await resolveSecrets({}, {
-      services: new FakeRegistry(),
-      env: { SESSION_SECRET: `${LONG},,` },
-    });
+    const secrets = await resolveSecrets(
+      {},
+      {
+        services: new FakeRegistry(),
+        env: { SESSION_SECRET: `${LONG},,` },
+      },
+    );
     expect(secrets).toEqual([LONG]);
   });
 
   it('throws when nothing supplies a secret', async () => {
-    await expect(
-      resolveSecrets({}, { services: new FakeRegistry(), env: {} }),
-    ).rejects.toThrow(SessionSecretMissingError);
+    await expect(resolveSecrets({}, { services: new FakeRegistry(), env: {} })).rejects.toThrow(
+      SessionSecretMissingError,
+    );
   });
 
   it('treats an empty environment value as absent', async () => {
@@ -163,9 +187,9 @@ describe('resolveSecrets', () => {
     const registry = new FakeRegistry();
     registry.register(CAPABILITIES.SECRETS, manager({ SESSION_SECRET: 'short' }));
 
-    await expect(
-      resolveSecrets({}, { services: registry, env: {} }),
-    ).rejects.toThrow('secrets manager');
+    await expect(resolveSecrets({}, { services: registry, env: {} })).rejects.toThrow(
+      'secrets manager',
+    );
   });
 
   it('rejects an empty explicit list', async () => {
@@ -175,10 +199,13 @@ describe('resolveSecrets', () => {
   });
 
   it('accepts a secret exactly at the minimum length', async () => {
-    const secrets = await resolveSecrets({ secret: 'x'.repeat(MIN_SECRET_LENGTH) }, {
-      services: new FakeRegistry(),
-      env: {},
-    });
+    const secrets = await resolveSecrets(
+      { secret: 'x'.repeat(MIN_SECRET_LENGTH) },
+      {
+        services: new FakeRegistry(),
+        env: {},
+      },
+    );
     expect(secrets.length).toBe(1);
   });
 });

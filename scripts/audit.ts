@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a CI entry point; `scripts/` is exempt
+/* eslint-disable no-console -- a CI entry point; `scripts/` is exempt */
 /**
  * `deno audit` with bounded retries for a flaking npm advisories endpoint.
  *

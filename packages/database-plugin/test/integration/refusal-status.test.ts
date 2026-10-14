@@ -133,9 +133,10 @@ function bootMemoryApp(
   format: ErrorFormat = 'rfc9457',
   adapterArm: 'memory' | 'custom' = 'memory',
 ) {
-  const database = adapterArm === 'memory'
-    ? DatabasePlugin({ type: 'memory' })
-    : DatabasePlugin({ type: 'custom', adapter: new MemoryAdapter() });
+  const database =
+    adapterArm === 'memory'
+      ? DatabasePlugin({ type: 'memory' })
+      : DatabasePlugin({ type: 'custom', adapter: new MemoryAdapter() });
   const app = createApplication({ plugins: [RuntimePlugin(), database] });
   app.middleware.add(errorHandler({ format }), { priority: 10, name: 'errors' });
   app.router.get('/q', {
@@ -188,14 +189,12 @@ describe('query refusals answer 501 through a real application', () => {
       {
         format: 'rfc9457',
         contentType: 'application/problem+json',
-        body:
-          `{"type":"about:blank","title":"Not Implemented","status":501,"detail":"${detail}","instance":"/m"}`,
+        body: `{"type":"about:blank","title":"Not Implemented","status":501,"detail":"${detail}","instance":"/m"}`,
       },
       {
         format: 'rfc7807',
         contentType: 'application/problem+json',
-        body:
-          `{"type":"https://setu-ts.dev/errors/501","title":"Not Implemented","status":501,"detail":"${detail}","instance":"/m"}`,
+        body: `{"type":"https://setu-ts.dev/errors/501","title":"Not Implemented","status":501,"detail":"${detail}","instance":"/m"}`,
       },
     ];
 
@@ -391,17 +390,17 @@ function stubAdapter(options: StubAdapterOptions): IDatabaseAdapter {
     createDataSource: () => source,
     beginTransaction: () =>
       options.beginRejection === undefined
-        // The in-transaction conflict case: the acquisition SUCCEEDS so the
-        // work runs and hits the refusing data source; commit/rollback are
-        // inert — the framework rolls back in the same catch that classifies.
-        ? Promise.resolve({
-          commit: () => Promise.resolve(),
-          rollback: () =>
-            options.rollbackRejection === undefined
-              ? Promise.resolve()
-              : Promise.reject(options.rollbackRejection),
-          createDataSource: () => source,
-        })
+        ? // The in-transaction conflict case: the acquisition SUCCEEDS so the
+          // work runs and hits the refusing data source; commit/rollback are
+          // inert — the framework rolls back in the same catch that classifies.
+          Promise.resolve({
+            commit: () => Promise.resolve(),
+            rollback: () =>
+              options.rollbackRejection === undefined
+                ? Promise.resolve()
+                : Promise.reject(options.rollbackRejection),
+            createDataSource: () => source,
+          })
         : Promise.reject(options.beginRejection),
     rawQuery: <T>(_sql: string, _params?: unknown[]): Promise<T[]> =>
       options.rawRejection === undefined
@@ -507,10 +506,9 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
       const response = await app.inject({ method: 'POST', url: 'http://localhost/tx' });
       expect(response.statusCode).toBe(409);
       const body = response.json<{ detail: string }>();
-      expect(body.detail)
-        .toBe(
-          'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
-        );
+      expect(body.detail).toBe(
+        'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
+      );
     } finally {
       await app.stop();
     }

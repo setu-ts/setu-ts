@@ -30,7 +30,7 @@ export interface AwsSdkModule {
 
 /** Shape of the presigner SDK module. */
 export interface PresignerSdkModule {
-  // deno-lint-ignore no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getSignedUrl(client: any, command: any, options?: Record<string, unknown>): Promise<string>;
 }
 
@@ -125,10 +125,7 @@ function buildS3Config(options: S3ProviderOptions): Record<string, unknown> {
  * @param options - S3 connection options
  * @returns The facade wrapping an `S3Client`
  */
-export function adaptAwsS3Module(
-  mod: AwsStorageSdkModule,
-  options: S3ProviderOptions,
-): IS3Backend {
+export function adaptAwsS3Module(mod: AwsStorageSdkModule, options: S3ProviderOptions): IS3Backend {
   const bucket = options.bucket;
   const s3Mod = mod.s3;
   const presignerMod = mod.presigner;
@@ -152,7 +149,7 @@ export function adaptAwsS3Module(
     },
     async get(path: string): Promise<Uint8Array | null> {
       try {
-        // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const res: any = await client.send(
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
         );
@@ -194,7 +191,7 @@ export function adaptAwsS3Module(
     },
     async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
       try {
-        // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const res: any = await client.send(
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
         );
@@ -348,7 +345,7 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns The object bytes, or `null`
    */
-  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async get(path: string): Promise<Uint8Array | null> {
     this.#assertConnected();
     return this.#client!.get(path);
@@ -360,7 +357,7 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns `true` if deleted
    */
-  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async delete(path: string): Promise<boolean> {
     this.#assertConnected();
     return this.#client!.delete(path);
@@ -372,7 +369,7 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns `true` if present
    */
-  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async exists(path: string): Promise<boolean> {
     this.#assertConnected();
     return this.#client!.head(path);
@@ -385,7 +382,7 @@ export class S3Provider implements StorageProvider {
    * @param options - Expiry in seconds
    * @returns The presigned URL
    */
-  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
     this.#assertConnected();
     return this.#client!.getSignedUrl(path, options.expiresIn);
@@ -397,7 +394,7 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
-  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     return this.#client!.getStream(path);

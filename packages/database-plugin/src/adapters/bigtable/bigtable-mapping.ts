@@ -199,11 +199,7 @@ function requireColumnIdentifier(entity: string, option: string, value: string):
  * @throws {UnsupportedQueryFeatureError} When the spec is blank, carries more
  *   than one colon, or names an unusable identifier
  */
-function parseColumnSpec(
-  entity: string,
-  field: string,
-  spec: string,
-): BigtableColumnAddress {
+function parseColumnSpec(entity: string, field: string, spec: string): BigtableColumnAddress {
   const parts = spec.split(':');
   if (parts.length > 2) {
     throw new UnsupportedQueryFeatureError(

@@ -84,7 +84,7 @@ function makeCtx(options: CtxOptions = {}) {
     send: () => undefined,
     snapshot: () =>
       options.snapshot ??
-        { streaming: false, status: 200, headers: new Headers(), body: 'ok' } as ResponseSnapshot,
+      ({ streaming: false, status: 200, headers: new Headers(), body: 'ok' } as ResponseSnapshot),
   };
   const ctx = {
     request,
@@ -96,11 +96,7 @@ function makeCtx(options: CtxOptions = {}) {
 }
 
 /** Builds the middleware under test. */
-function middleware(
-  store: IIdempotencyStore,
-  options?: IdempotentRouteOptions,
-  logger?: ILogger,
-) {
+function middleware(store: IIdempotencyStore, options?: IdempotentRouteOptions, logger?: ILogger) {
   const defaults = resolveDefaults(undefined);
   return createHttpMiddleware(
     { store, runtime: createClockRuntime(), logger: () => logger, defaults },
@@ -109,9 +105,12 @@ function middleware(
 }
 
 const ok = (): Promise<void> => Promise.resolve();
-const noStoreCalls = (
-  calls: { claim: unknown[]; complete: unknown[]; release: unknown[] },
-): boolean => calls.claim.length === 0 && calls.complete.length === 0 && calls.release.length === 0;
+const noStoreCalls = (calls: {
+  claim: unknown[];
+  complete: unknown[];
+  release: unknown[];
+}): boolean =>
+  calls.claim.length === 0 && calls.complete.length === 0 && calls.release.length === 0;
 
 describe('createHttpMiddleware — the numbered check order (M109a §3.6)', () => {
   it('step 1: a safe method passes with no store call', async () => {
@@ -249,9 +248,12 @@ describe('createHttpMiddleware — claim outcomes (M109a §3.6, §3.8)', () => {
       level: 'info',
       error: (m: string) => void errors.push(m),
     } as unknown as ILogger;
-    const { store } = recordingStore({ outcome: 'claimed', takeover: false }, {
-      claim: () => Promise.reject(new Error('down')),
-    });
+    const { store } = recordingStore(
+      { outcome: 'claimed', takeover: false },
+      {
+        claim: () => Promise.reject(new Error('down')),
+      },
+    );
     const { ctx, captured } = makeCtx({ user: { id: 'u1' } });
     await middleware(store, undefined, logger)(ctx, ok);
     expect(captured.status).toBe(503);
@@ -275,17 +277,15 @@ describe('createHttpMiddleware — failure classification (M109a §3.8)', () => 
   });
 
   it('records a returned 400 and releases a returned 503, 408, 429 and a 1xx', async () => {
-    for (
-      const [status, shouldComplete] of [
-        [400, true],
-        [422, true],
-        [503, false],
-        [408, false],
-        [425, false],
-        [429, false],
-        [100, false],
-      ] as const
-    ) {
+    for (const [status, shouldComplete] of [
+      [400, true],
+      [422, true],
+      [503, false],
+      [408, false],
+      [425, false],
+      [429, false],
+      [100, false],
+    ] as const) {
       const { store, calls } = recordingStore({ outcome: 'claimed', takeover: false });
       const { ctx } = makeCtx({
         user: { id: 'u1' },
@@ -313,9 +313,12 @@ describe('createHttpMiddleware — failure classification (M109a §3.8)', () => 
       level: 'info',
       error: (m: string) => void errors.push(m),
     } as unknown as ILogger;
-    const { store } = recordingStore({ outcome: 'claimed', takeover: false }, {
-      complete: () => Promise.reject(new Error('complete down')),
-    });
+    const { store } = recordingStore(
+      { outcome: 'claimed', takeover: false },
+      {
+        complete: () => Promise.reject(new Error('complete down')),
+      },
+    );
     const { ctx, captured } = makeCtx({ user: { id: 'u1' } });
     await middleware(store, undefined, logger)(ctx, ok);
     expect(captured.status).toBe(0);

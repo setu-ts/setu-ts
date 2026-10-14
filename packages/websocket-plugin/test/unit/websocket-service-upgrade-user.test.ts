@@ -35,20 +35,20 @@ const principal: IPrincipal = {
 const minimalPrincipal: IPrincipal = { id: 'user-2' };
 
 /** Registers a route that captures the exact context `onOpen` receives. */
-function captureContext(
-  service: WebSocketService,
-  path: string,
-  options?: WebSocketRouteOptions,
-) {
+function captureContext(service: WebSocketService, path: string, options?: WebSocketRouteOptions) {
   const seen: {
     conn: IWebSocketConnection;
     context: WebSocketConnectionContext;
   }[] = [];
-  service.route(path, {
-    onOpen: (conn, context) => {
-      seen.push({ conn, context });
+  service.route(
+    path,
+    {
+      onOpen: (conn, context) => {
+        seen.push({ conn, context });
+      },
     },
-  }, options);
+    options,
+  );
   return seen;
 }
 
@@ -180,10 +180,7 @@ describe('WebSocketService.routeUpgrade — principal threading', () => {
     const service = build();
     service.route('/ws', {});
 
-    const decision = await service.routeUpgrade(
-      new Request('http://localhost/ws'),
-      principal,
-    );
+    const decision = await service.routeUpgrade(new Request('http://localhost/ws'), principal);
 
     expect(decision).toBeNull();
   });
@@ -234,11 +231,7 @@ describe('WebSocketService.createUpgradeRouter — public signature preserved', 
 
 describe('buildContext — principal parameter', () => {
   it('sets user to the principal when one is supplied', () => {
-    const context = buildContext(
-      upgradeRequest('http://localhost/ws'),
-      undefined,
-      principal,
-    );
+    const context = buildContext(upgradeRequest('http://localhost/ws'), undefined, principal);
 
     expect(context.user).toEqual(principal);
     expect(context.user).toBe(principal);
@@ -258,17 +251,9 @@ describe('buildContext — principal parameter', () => {
   });
 
   it('keeps user and protocol independent', () => {
-    const withBoth = buildContext(
-      upgradeRequest('http://localhost/ws'),
-      'chat',
-      principal,
-    );
+    const withBoth = buildContext(upgradeRequest('http://localhost/ws'), 'chat', principal);
     const protocolOnly = buildContext(upgradeRequest('http://localhost/ws'), 'chat');
-    const userOnly = buildContext(
-      upgradeRequest('http://localhost/ws'),
-      undefined,
-      principal,
-    );
+    const userOnly = buildContext(upgradeRequest('http://localhost/ws'), undefined, principal);
 
     expect(withBoth.protocol).toBe('chat');
     expect(withBoth.user).toEqual(principal);

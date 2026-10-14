@@ -21,9 +21,13 @@ import { FakeDurableObjectNamespace } from '../../do-fakes.ts';
 import { SequentialIds } from '../../fakes.ts';
 
 /** Opens an inbox over a namespace backed by the real reply-inbox core. */
-async function open(namespace: FakeDurableObjectNamespace, received: string[] = [], closed = {
-  count: 0,
-}): Promise<{ address: string; close: () => Promise<void> }> {
+async function open(
+  namespace: FakeDurableObjectNamespace,
+  received: string[] = [],
+  closed = {
+    count: 0,
+  },
+): Promise<{ address: string; close: () => Promise<void> }> {
   const ids = new SequentialIds();
   return await openReplyInbox({
     namespace,

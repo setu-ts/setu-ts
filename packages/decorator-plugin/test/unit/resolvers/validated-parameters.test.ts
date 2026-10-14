@@ -46,9 +46,7 @@ describe('parameter resolver — validated values', () => {
     const ctx = createFakeRequestContext({ params: { id: 'raw-id' } });
     const validated = { id: 'coerced-id' };
     ctx.state.set(validatedStateKey('params'), validated);
-    expect(await resolveParameter(ctx, { index: 0, type: 'param', name: 'id' })).toBe(
-      validated.id,
-    );
+    expect(await resolveParameter(ctx, { index: 0, type: 'param', name: 'id' })).toBe(validated.id);
   });
 
   it('resolves @Body() (no name) to the whole validated object', async () => {
@@ -108,16 +106,16 @@ describe('parameter resolver — validated values', () => {
     const ctx = createFakeRequestContext({ headers: { 'content-type': 'application/json' } });
     // Even a same-shaped record under the headers key must NOT be read.
     ctx.state.set(validatedStateKey('headers'), { 'content-type': 'text/plain' });
-    expect(
-      await resolveParameter(ctx, { index: 0, type: 'header', name: 'content-type' }),
-    ).toBe('application/json');
+    expect(await resolveParameter(ctx, { index: 0, type: 'header', name: 'content-type' })).toBe(
+      'application/json',
+    );
   });
 
   it('leaves @Header case-insensitive as today', async () => {
     const ctx = createFakeRequestContext({ headers: { 'Content-Type': 'application/json' } });
-    expect(
-      await resolveParameter(ctx, { index: 0, type: 'header', name: 'content-type' }),
-    ).toBe('application/json');
+    expect(await resolveParameter(ctx, { index: 0, type: 'header', name: 'content-type' })).toBe(
+      'application/json',
+    );
   });
 
   it('leaves @Cookie resolving raw even when a cookies value is in state', async () => {

@@ -134,16 +134,14 @@ function createActivationReporter(ctx: { logger?: ILogger }): ContextActivationR
     const logger = ctx.logger;
     if (!logger) return;
     if (outcome.activated) {
-      logger.debug(
-        `Span context activation available (${outcome.adopted} context manager)`,
-        { adopted: outcome.adopted },
-      );
+      logger.debug(`Span context activation available (${outcome.adopted} context manager)`, {
+        adopted: outcome.adopted,
+      });
       return;
     }
-    logger.warn(
-      `Span context activation unavailable; spans will not nest: ${outcome.reason}`,
-      { reason: outcome.reason },
-    );
+    logger.warn(`Span context activation unavailable; spans will not nest: ${outcome.reason}`, {
+      reason: outcome.reason,
+    });
   };
 }
 
@@ -186,24 +184,25 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
   const redaction = resolveRedaction(options.redaction);
   // M98g — the trace-observation policy is compiled ONCE at construction, so
   // an invalid option refuses before any application exists.
-  const tracePolicy = options.diagnostics === undefined
-    ? null
-    : compileTraceDiagnosticsPolicy(options.diagnostics);
+  const tracePolicy =
+    options.diagnostics === undefined ? null : compileTraceDiagnosticsPolicy(options.diagnostics);
   // The tracing stack's coverage is fixed by the configuration: a custom
   // provider factory owns its own provider the plugin cannot read; noop mode
   // builds none; otherwise every completed SAMPLED span of the built-in
   // provider reaches the diagnostic processor.
-  const traceCoverage: TraceCoverage = options.tracerProviderFactory !== undefined
-    ? 'custom-provider'
-    : options.exporter === undefined
-    ? 'noop-no-provider'
-    : 'completed-sampled-spans';
+  const traceCoverage: TraceCoverage =
+    options.tracerProviderFactory !== undefined
+      ? 'custom-provider'
+      : options.exporter === undefined
+        ? 'noop-no-provider'
+        : 'completed-sampled-spans';
   // The sampler description answers only where the plugin builds the
   // provider: a custom host owns its own sampler and noop mode builds none,
   // so both report `unknown` rather than a configuration that never applied.
-  const traceSampler: TraceSamplerDescription = traceCoverage === 'completed-sampled-spans'
-    ? resolveTraceSampler(options.sampling)
-    : { kind: 'unknown' };
+  const traceSampler: TraceSamplerDescription =
+    traceCoverage === 'completed-sampled-spans'
+      ? resolveTraceSampler(options.sampling)
+      : { kind: 'unknown' };
 
   return {
     name: 'telemetry-plugin',
@@ -298,12 +297,13 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
       // built-in provider; an `unsupported`-answering source when the option
       // is present but the stack cannot supply completed spans (custom host,
       // noop mode); a `disabled`-answering one when the option is absent.
-      const traceSource: ITraceDiagnosticsSource = traceCollector !== null
-        ? traceCollector
-        : createInactiveTraceSource(
-          tracePolicy !== null ? 'unsupported' : 'disabled',
-          traceAvailability,
-        );
+      const traceSource: ITraceDiagnosticsSource =
+        traceCollector !== null
+          ? traceCollector
+          : createInactiveTraceSource(
+              tracePolicy !== null ? 'unsupported' : 'disabled',
+              traceAvailability,
+            );
       ctx.services.register<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS, traceSource);
 
       // Register middleware if enabled
@@ -337,8 +337,8 @@ function resolveRedaction(
   return redaction === undefined
     ? undefined
     : 'redactRecord' in redaction
-    ? redaction
-    : createRedactionService(redaction);
+      ? redaction
+      : createRedactionService(redaction);
 }
 
 /**

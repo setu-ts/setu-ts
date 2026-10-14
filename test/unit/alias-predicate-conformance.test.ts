@@ -48,29 +48,10 @@ describe('all diagnostics alias boundaries agree', () => {
   for (const [name, validate] of Object.entries(validators)) {
     it(name, () => {
       for (const value of ['plain', 'é'.repeat(20)]) expect(() => validate(value)).not.toThrow();
-      for (
-        const code of [
-          0,
-          31,
-          127,
-          159,
-          0x200b,
-          0x200e,
-          0x202a,
-          0x202b,
-          0x202c,
-          0x202d,
-          0x202e,
-          0x2028,
-          0x2029,
-          0x2066,
-          0x2067,
-          0x2068,
-          0x2069,
-          0xfeff,
-          0xad,
-        ]
-      ) {
+      for (const code of [
+        0, 31, 127, 159, 0x200b, 0x200e, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2028, 0x2029,
+        0x2066, 0x2067, 0x2068, 0x2069, 0xfeff, 0xad,
+      ]) {
         expect(() => validate(`a${String.fromCodePoint(code)}b`)).toThrow();
       }
     });

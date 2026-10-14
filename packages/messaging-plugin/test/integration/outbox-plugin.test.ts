@@ -121,8 +121,10 @@ function writeOrder(app: IKernelApplication, n: number, token: string = CAPABILI
 
 /** Every stored outbox row. */
 function rows(app: IKernelApplication): Promise<Record<string, unknown>[]> {
-  return app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
-    .getRepository<Record<string, unknown>, string>('Outbox').findAll({});
+  return app.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>, string>('Outbox')
+    .findAll({});
 }
 
 describe('MessagingPlugin outbox wiring', () => {
@@ -171,7 +173,7 @@ describe('MessagingPlugin outbox wiring', () => {
     expect(() =>
       MessagingPlugin({
         outbox: { store: createDatabaseOutboxStore(), relay: { intervalMs: Number.NaN } },
-      })
+      }),
     ).toThrow('outbox: relay.intervalMs must be an integer');
   });
 
@@ -352,15 +354,17 @@ describe('MessagingPlugin outbox wiring', () => {
     const app = buildApp({
       outbox: { store: store.entry, relay: { intervalMs: 20 } },
       messaging: { broker: 'custom', instance: broker },
-      before: [{
-        name: 'claim-after-drain',
-        version: '0.8.0',
-        register(ctx) {
-          ctx.lifecycle.onShutdown(async () => {
-            afterDrain = await store.store().scanPending(undefined, 10);
-          });
+      before: [
+        {
+          name: 'claim-after-drain',
+          version: '0.8.0',
+          register(ctx) {
+            ctx.lifecycle.onShutdown(async () => {
+              afterDrain = await store.store().scanPending(undefined, 10);
+            });
+          },
         },
-      }],
+      ],
     });
     await app.start();
     await writeOrder(app, 1);
@@ -444,8 +448,10 @@ describe('MessagingPlugin outbox wiring', () => {
     await degraded.start();
     try {
       const id = await writeOrder(degraded, 1);
-      await degraded.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
-        .getRepository<Record<string, unknown>, string>('Outbox').update(id, { status: 'failed' });
+      await degraded.services
+        .get<IDatabaseService>(CAPABILITIES.DATABASE)
+        .getRepository<Record<string, unknown>, string>('Outbox')
+        .update(id, { status: 'failed' });
       const check = await readOutbox(degraded);
       expect(check?.status).toBe('degraded');
       expect(check?.data?.['reasons']).toEqual(['failed-rows']);
@@ -528,9 +534,7 @@ describe('MessagingPlugin outbox wiring — scheduler, tenancy and reporting sea
       ],
     });
     await app.start();
-    const outbox = app.services.get<IOutbox & { readonly closing: boolean }>(
-      CAPABILITIES.OUTBOX,
-    );
+    const outbox = app.services.get<IOutbox & { readonly closing: boolean }>(CAPABILITIES.OUTBOX);
     await app.stop();
     expect(outbox.closing).toBe(true);
     expect(warnings).toEqual([
@@ -578,7 +582,7 @@ describe('MessagingPlugin outbox wiring — scheduler, tenancy and reporting sea
       const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
       const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
       await db.transaction((uow) =>
-        outbox.write(uow, orderPlaced, { n: 1 }, { tenantId: 'tenant-b' })
+        outbox.write(uow, orderPlaced, { n: 1 }, { tenantId: 'tenant-b' }),
       );
       expect(tenantA.store().count('append')).toBe(0);
       expect(tenantB.store().count('append')).toBe(1);
@@ -600,7 +604,10 @@ describe('MessagingPlugin outbox wiring — scheduler, tenancy and reporting sea
       },
       scheduler: false,
     });
-    const error = await app.start().then(() => undefined, (e: unknown) => e as Error);
+    const error = await app.start().then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
     expect(error?.message).toContain('MessagingPlugin({ outbox: { stores } })[1]');
     expect(error?.message.includes('secret-tenant')).toBe(false);
   });

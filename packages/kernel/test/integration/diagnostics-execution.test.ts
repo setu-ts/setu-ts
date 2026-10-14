@@ -13,11 +13,14 @@ describe('diagnostics execution integration', () => {
           name: 'api',
           version: '1.0.0',
           register(ctx) {
-            ctx.middleware.add(async (_ctx, next) => {
-              runtime.tick(5);
-              await next();
-              runtime.tick(1);
-            }, { name: 'outer', priority: 10 });
+            ctx.middleware.add(
+              async (_ctx, next) => {
+                runtime.tick(5);
+                await next();
+                runtime.tick(1);
+              },
+              { name: 'outer', priority: 10 },
+            );
             ctx.router.get('/hello', (c) => {
               runtime.tick(7);
               return Promise.resolve(c.response.json({ hello: true }));
@@ -60,10 +63,13 @@ describe('diagnostics execution integration', () => {
           name: 'guard',
           version: '1.0.0',
           register(ctx) {
-            ctx.middleware.add((ctx) => {
-              ctx.response.json({ blocked: true });
-              // No next(): downstream stages and the handler never run.
-            }, { name: 'guard', priority: 10 });
+            ctx.middleware.add(
+              (ctx) => {
+                ctx.response.json({ blocked: true });
+                // No next(): downstream stages and the handler never run.
+              },
+              { name: 'guard', priority: 10 },
+            );
             ctx.router.get('/x', (c) => c.response.json({}));
           },
         },
@@ -92,10 +98,13 @@ describe('diagnostics execution integration', () => {
           name: 'double',
           version: '1.0.0',
           register(ctx) {
-            ctx.middleware.add(async (ctx, next) => {
-              ctx.response.json({ done: true });
-              await next();
-            }, { name: 'ended-plus-next', priority: 10 });
+            ctx.middleware.add(
+              async (ctx, next) => {
+                ctx.response.json({ done: true });
+                await next();
+              },
+              { name: 'ended-plus-next', priority: 10 },
+            );
             ctx.router.get('/y', (c) => c.response.json({}));
           },
         },
@@ -238,9 +247,7 @@ describe('diagnostics execution integration', () => {
     expect(handler?.statusCode).toBe(201);
     // The handler record names the route node, which carries the allowlisted
     // pattern — so a consumer can tell WHICH route was served.
-    const routeNode = app.diagnostics!.snapshot().nodes.find(
-      (node) => node.kind === 'route',
-    );
+    const routeNode = app.diagnostics!.snapshot().nodes.find((node) => node.kind === 'route');
     expect(routeNode?.label).toBe('/guarded');
     expect(handler?.nodeId).toBe(routeNode?.id);
     const stage = events.find((event) => event.stage === 'route');

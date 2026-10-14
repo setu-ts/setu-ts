@@ -35,9 +35,7 @@ import { QueuePlugin } from '../../src/index.ts';
 async function docker(args: string[]): Promise<string> {
   const out = await runProcess('docker', { args });
   if (!out.success) {
-    throw new Error(
-      `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
-    );
+    throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
   return new TextDecoder().decode(out.stdout);
 }
@@ -98,10 +96,7 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
  * an observation-only adapter (the §3.5 ReconnectSupervisor is scoped to
  * messaging-plugin brokers, not the queue).
  */
-async function reconnectWithRetry(
-  queue: RabbitMqQueue,
-  attempts = 40,
-): Promise<void> {
+async function reconnectWithRetry(queue: RabbitMqQueue, attempts = 40): Promise<void> {
   let lastError: unknown = null;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -264,9 +259,7 @@ describe(
       await app.start();
       const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
       const jobName = JOB_NAME;
-      const [source] = app.services.getAll<IQueueDiagnosticsSource>(
-        CAPABILITIES.QUEUE_DIAGNOSTICS,
-      );
+      const [source] = app.services.getAll<IQueueDiagnosticsSource>(CAPABILITIES.QUEUE_DIAGNOSTICS);
 
       let paused = false;
       try {

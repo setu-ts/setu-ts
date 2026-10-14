@@ -127,10 +127,7 @@ describe('HealthPlugin', () => {
   it('should provide CAPABILITIES.HEALTH and CAPABILITIES.HEALTH_DIAGNOSTICS', () => {
     const plugin = HealthPlugin();
 
-    expect(plugin.provides).toEqual([
-      CAPABILITIES.HEALTH,
-      CAPABILITIES.HEALTH_DIAGNOSTICS,
-    ]);
+    expect(plugin.provides).toEqual([CAPABILITIES.HEALTH, CAPABILITIES.HEALTH_DIAGNOSTICS]);
   });
 
   it('should have priority 100', () => {
@@ -689,7 +686,7 @@ describe('HealthPlugin', () => {
         services.set(token, service);
       },
       get: (token: string) => services.get(token),
-      getAll: (token: string) => token === CAPABILITIES.HEALTH_INDICATOR ? [contribution] : [],
+      getAll: (token: string) => (token === CAPABILITIES.HEALTH_INDICATOR ? [contribution] : []),
       has: (token: string) => services.has(token),
       registerFactory: () => {},
       unregister: () => false,
@@ -773,9 +770,9 @@ describe('HealthPlugin', () => {
   describe('health endpoint handlers', () => {
     it('should return 200 for /live endpoint', async () => {
       let handler:
-        | ((
-          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-        ) => Promise<unknown>)
+        | ((c: {
+            response: { status: (code: number) => { json: (body: unknown) => unknown } };
+          }) => Promise<unknown>)
         | undefined;
 
       const fakeRegistry = {
@@ -812,9 +809,9 @@ describe('HealthPlugin', () => {
         router: {
           get: (
             _path: string,
-            h: (
-              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-            ) => Promise<unknown>,
+            h: (c: {
+              response: { status: (code: number) => { json: (body: unknown) => unknown } };
+            }) => Promise<unknown>,
           ) => {
             handler = h;
           },
@@ -879,9 +876,9 @@ describe('HealthPlugin', () => {
 
     it('should return 200 for /ready endpoint when all indicators are up', async () => {
       let handler:
-        | ((
-          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-        ) => Promise<unknown>)
+        | ((c: {
+            response: { status: (code: number) => { json: (body: unknown) => unknown } };
+          }) => Promise<unknown>)
         | undefined;
 
       const fakeRegistry = {
@@ -918,9 +915,9 @@ describe('HealthPlugin', () => {
         router: {
           get: (
             _path: string,
-            h: (
-              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-            ) => Promise<unknown>,
+            h: (c: {
+              response: { status: (code: number) => { json: (body: unknown) => unknown } };
+            }) => Promise<unknown>,
           ) => {
             handler = h;
           },
@@ -985,9 +982,9 @@ describe('HealthPlugin', () => {
 
     it('should return 200 for /health endpoint when self indicator is up', async () => {
       let handler:
-        | ((
-          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-        ) => Promise<unknown>)
+        | ((c: {
+            response: { status: (code: number) => { json: (body: unknown) => unknown } };
+          }) => Promise<unknown>)
         | undefined;
 
       const fakeRegistry = {
@@ -1024,9 +1021,9 @@ describe('HealthPlugin', () => {
         router: {
           get: (
             _path: string,
-            h: (
-              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-            ) => Promise<unknown>,
+            h: (c: {
+              response: { status: (code: number) => { json: (body: unknown) => unknown } };
+            }) => Promise<unknown>,
           ) => {
             handler = h;
           },
@@ -1093,9 +1090,9 @@ describe('HealthPlugin', () => {
   describe('determineStatusCode coverage - 503 status paths', () => {
     it('should return 503 for /ready endpoint when an indicator returns down', async () => {
       let handler:
-        | ((
-          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-        ) => Promise<unknown>)
+        | ((c: {
+            response: { status: (code: number) => { json: (body: unknown) => unknown } };
+          }) => Promise<unknown>)
         | undefined;
 
       const fakeRegistry = {
@@ -1132,9 +1129,9 @@ describe('HealthPlugin', () => {
         router: {
           get: (
             _path: string,
-            h: (
-              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-            ) => Promise<unknown>,
+            h: (c: {
+              response: { status: (code: number) => { json: (body: unknown) => unknown } };
+            }) => Promise<unknown>,
           ) => {
             handler = h;
           },
@@ -1206,9 +1203,9 @@ describe('HealthPlugin', () => {
 
     it('should return 503 for /ready endpoint when an indicator returns degraded', async () => {
       let handler:
-        | ((
-          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-        ) => Promise<unknown>)
+        | ((c: {
+            response: { status: (code: number) => { json: (body: unknown) => unknown } };
+          }) => Promise<unknown>)
         | undefined;
 
       const fakeRegistry = {
@@ -1245,9 +1242,9 @@ describe('HealthPlugin', () => {
         router: {
           get: (
             _path: string,
-            h: (
-              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-            ) => Promise<unknown>,
+            h: (c: {
+              response: { status: (code: number) => { json: (body: unknown) => unknown } };
+            }) => Promise<unknown>,
           ) => {
             handler = h;
           },
@@ -1319,9 +1316,9 @@ describe('HealthPlugin', () => {
 
     it('should return 503 for /health endpoint when self indicator returns down', async () => {
       let handler:
-        | ((
-          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-        ) => Promise<unknown>)
+        | ((c: {
+            response: { status: (code: number) => { json: (body: unknown) => unknown } };
+          }) => Promise<unknown>)
         | undefined;
 
       const fakeRegistry = {
@@ -1358,9 +1355,9 @@ describe('HealthPlugin', () => {
         router: {
           get: (
             path: string,
-            h: (
-              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-            ) => Promise<unknown>,
+            h: (c: {
+              response: { status: (code: number) => { json: (body: unknown) => unknown } };
+            }) => Promise<unknown>,
           ) => {
             // Capture the /health handler specifically
             if (path === '/health') {
@@ -1442,9 +1439,9 @@ describe('HealthPlugin', () => {
 
     it('should return 200 for /health endpoint when status is degraded (not down)', async () => {
       let handler:
-        | ((
-          c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-        ) => Promise<unknown>)
+        | ((c: {
+            response: { status: (code: number) => { json: (body: unknown) => unknown } };
+          }) => Promise<unknown>)
         | undefined;
 
       const fakeRegistry = {
@@ -1481,9 +1478,9 @@ describe('HealthPlugin', () => {
         router: {
           get: (
             path: string,
-            h: (
-              c: { response: { status: (code: number) => { json: (body: unknown) => unknown } } },
-            ) => Promise<unknown>,
+            h: (c: {
+              response: { status: (code: number) => { json: (body: unknown) => unknown } };
+            }) => Promise<unknown>,
           ) => {
             // Capture the /health handler specifically
             if (path === '/health') {
@@ -1682,9 +1679,9 @@ describe('HealthPlugin', () => {
       const plugin = HealthPlugin();
       const { ctx, registered, bootstrapHooks, closeHooks } = buildContext();
       plugin.register(ctx);
-      const source = registered.get(
-        CAPABILITIES.HEALTH_DIAGNOSTICS,
-      ) as { snapshot: (id: string) => { state: string } };
+      const source = registered.get(CAPABILITIES.HEALTH_DIAGNOSTICS) as {
+        snapshot: (id: string) => { state: string };
+      };
       expect(source).toBeDefined();
       expect(source.snapshot('instance-1').state).toBe('disabled');
       // No bootstrap/close hooks: an absent option performs no capture.
@@ -1702,9 +1699,9 @@ describe('HealthPlugin', () => {
       });
       const { ctx, registered, bootstrapHooks, closeHooks, warnings } = buildContext();
       plugin.register(ctx);
-      const source = registered.get(
-        CAPABILITIES.HEALTH_DIAGNOSTICS,
-      ) as { snapshot: (id: string) => { state: string } };
+      const source = registered.get(CAPABILITIES.HEALTH_DIAGNOSTICS) as {
+        snapshot: (id: string) => { state: string };
+      };
       expect(source).toBeDefined();
       // An active collector with no captures yet reports no-data, not disabled.
       expect(source.snapshot('instance-1').state).toBe('no-data');
@@ -1719,7 +1716,7 @@ describe('HealthPlugin', () => {
       // warning that never names the indicator.
       expect(warnings).toEqual([
         'Health diagnostics: 1 approved indicator name(s) match no registered indicator ' +
-        'and will stay never-observed.',
+          'and will stay never-observed.',
       ]);
       // The unregistered name is skipped by the first cycle, not run.
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1746,9 +1743,9 @@ describe('HealthPlugin', () => {
       const { ctx, registered } = buildContext();
       plugin.register(ctx);
       const service = registered.get(CAPABILITIES.HEALTH) as HealthService;
-      const source = registered.get(
-        CAPABILITIES.HEALTH_DIAGNOSTICS,
-      ) as { snapshot: (id: string) => { state: string; observations: unknown[] } };
+      const source = registered.get(CAPABILITIES.HEALTH_DIAGNOSTICS) as {
+        snapshot: (id: string) => { state: string; observations: unknown[] };
+      };
       service.registerIndicator('db.check', () => Promise.resolve({ status: 'up' }));
       await service.check();
       const snapshot = source.snapshot('instance-1');

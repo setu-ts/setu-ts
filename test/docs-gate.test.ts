@@ -118,11 +118,9 @@ describe('documentation gate — malformed table rows', () => {
     // the cell even inside backticks, so the cell splits and GFM drops whatever
     // runs past the header's width.
     expectReasons(
-      [
-        '| Export | Purpose |',
-        '| ------ | ------- |',
-        '| `Foo`  | `P | HandlerResult` |',
-      ].join('\n'),
+      ['| Export | Purpose |', '| ------ | ------- |', '| `Foo`  | `P | HandlerResult` |'].join(
+        '\n',
+      ),
       ['unescaped-pipe'],
     );
   });
@@ -131,25 +129,18 @@ describe('documentation gate — malformed table rows', () => {
     // What the static-plugin README carried: `'/`'` renders a span holding `'/`
     // plus a stray quote and a dangling backtick.
     expectReasons(
-      [
-        '| Option      | Default |',
-        '| ----------- | ------- |',
-        "| `urlPrefix` | `'/`'`  |",
-      ].join('\n'),
+      ['| Option      | Default |', '| ----------- | ------- |', "| `urlPrefix` | `'/`'`  |"].join(
+        '\n',
+      ),
       ['unterminated-span'],
     );
   });
 
   it('reports at most one reason per row, in document order', () => {
-    expectReasons(
-      [
-        '| A | B |',
-        '| - | - |',
-        "| `x` | `'/`'` |",
-        '| `y` | `P | Q` |',
-      ].join('\n'),
-      ['unterminated-span', 'unescaped-pipe'],
-    );
+    expectReasons(['| A | B |', '| - | - |', "| `x` | `'/`'` |", '| `y` | `P | Q` |'].join('\n'), [
+      'unterminated-span',
+      'unescaped-pipe',
+    ]);
   });
 
   it('accepts a pipe that IS escaped, which is the whole remedy', () => {
@@ -190,11 +181,7 @@ describe('documentation gate — malformed table rows', () => {
 
   it('ignores a pipe outside any code span', () => {
     expectReasons(
-      [
-        '| A       | B     |',
-        '| ------- | ----- |',
-        '| a \\| b  | plain |',
-      ].join('\n'),
+      ['| A       | B     |', '| ------- | ----- |', '| a \\| b  | plain |'].join('\n'),
       [],
     );
   });
@@ -219,24 +206,13 @@ describe('documentation gate — malformed table rows', () => {
 
   it('ignores a broken row inside a fenced block', () => {
     expectReasons(
-      [
-        '```markdown',
-        "| `urlPrefix` | `'/`'` |",
-        '| ----------- | ------ |',
-        '```',
-      ].join('\n'),
+      ['```markdown', "| `urlPrefix` | `'/`'` |", '| ----------- | ------ |', '```'].join('\n'),
       [],
     );
   });
 
   it('ignores a pipe-leading run with no delimiter row', () => {
-    expectReasons(
-      [
-        '| not a table `x',
-        '| still not one',
-      ].join('\n'),
-      [],
-    );
+    expectReasons(['| not a table `x', '| still not one'].join('\n'), []);
   });
 
   it('ignores a header whose delimiter does not match it in width', () => {
@@ -266,10 +242,9 @@ describe('documentation gate — malformed table rows', () => {
     // The escape is what makes this header two cells rather than three, so a
     // count that ignored it would mismatch the delimiter and dismiss the whole
     // table — taking the genuine defect on the data row with it.
-    expectReasons(
-      ['| A \\| B | C |', '| --- | --- |', '| x | `p|q` |'].join('\n'),
-      ['unescaped-pipe'],
-    );
+    expectReasons(['| A \\| B | C |', '| --- | --- |', '| x | `p|q` |'].join('\n'), [
+      'unescaped-pipe',
+    ]);
   });
 
   it('reports a header whose own span holds a raw pipe', () => {
@@ -277,10 +252,7 @@ describe('documentation gate — malformed table rows', () => {
     // the raw pipe inflates the RENDERED count to 4 against a 3-cell delimiter,
     // so comparing rendered widths would dismiss the block as "not a table".
     // `countCells` reads spans as opaque, giving the intended 3, which matches.
-    expectReasons(
-      ['| A | `x|y` | C |', '| --- | --- | --- |'].join('\n'),
-      ['unescaped-pipe'],
-    );
+    expectReasons(['| A | `x|y` | C |', '| --- | --- | --- |'].join('\n'), ['unescaped-pipe']);
   });
 
   it('reports the row through checkDocument, with a remedy in the message', () => {
@@ -299,9 +271,7 @@ describe('documentation gate — malformed table rows', () => {
 
 describe('documentation gate — anchors', () => {
   it('derives a renderer anchor from heading text', () => {
-    expect(anchorFor('API Reference: @setu-ts/common')).toBe(
-      'api-reference-setu-tscommon',
-    );
+    expect(anchorFor('API Reference: @setu-ts/common')).toBe('api-reference-setu-tscommon');
     expect(anchorFor('createApplication()')).toBe('createapplication');
     expect(anchorFor('Feature Flags')).toBe('feature-flags');
   });
@@ -376,7 +346,8 @@ describe('documentation gate — CI wiring', () => {
     // Assert the ACTUAL invocations in the `&&` chain, not that the path is
     // mentioned somewhere: `echo scripts/check-since-tags.ts` satisfies a
     // substring check while CI runs no gate at all.
-    const invoked = checkDocs.split('&&')
+    const invoked = checkDocs
+      .split('&&')
       .map((step) => step.trim())
       .filter((step) => step.startsWith('deno run'))
       .map((step) => step.split(/\s+/).at(-1));
@@ -547,9 +518,10 @@ describe('documentation gate — package catalog', () => {
       const match = pkg.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
       const firstSegment = match?.[1];
       const secondSegment = match?.[2];
-      const name = (firstSegment === 'starters' && secondSegment)
-        ? secondSegment
-        : (match?.[1] ?? pkg.replace('packages/', ''));
+      const name =
+        firstSegment === 'starters' && secondSegment
+          ? secondSegment
+          : (match?.[1] ?? pkg.replace('packages/', ''));
       return `@setu-ts/${name}`;
     }).join(' ');
     const runtimeMd =
@@ -568,13 +540,16 @@ describe('documentation gate — package catalog', () => {
 
   // A helper to build one realistic structural section for a package, so
   // mutations prove the structural validator discriminates.
-  function buildSection(pkg: string, opts: {
-    purpose?: string;
-    readmeLink?: string;
-    apiLink?: string;
-    runtimeCells?: string;
-    caveat?: string;
-  }): string {
+  function buildSection(
+    pkg: string,
+    opts: {
+      purpose?: string;
+      readmeLink?: string;
+      apiLink?: string;
+      runtimeCells?: string;
+      caveat?: string;
+    },
+  ): string {
     const purpose = opts.purpose ?? 'Test package.';
     const readme = opts.readmeLink ?? `../packages/${pkg}/README.md`;
     const api = opts.apiLink ?? `./api/${pkg}/src/index.ts/index.html`;
@@ -632,8 +607,7 @@ describe('documentation gate — package catalog', () => {
   });
 
   it('rejects a missing runtime compatibility table', () => {
-    const section =
-      `### @setu-ts/common\n\n**Purpose:** Test.\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const section = `### @setu-ts/common\n\n**Purpose:** Test.\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -675,8 +649,7 @@ describe('documentation gate — package catalog', () => {
   });
 
   it('rejects a missing Purpose line', () => {
-    const section =
-      `### @setu-ts/common\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const section = `### @setu-ts/common\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -720,9 +693,10 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('no source-grounded override') &&
-        f.message.includes('messaging-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('no source-grounded override') &&
+          f.message.includes('messaging-plugin'),
       ),
     ).toBe(true);
   });
@@ -742,9 +716,9 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('no source-grounded override') &&
-        f.message.includes('queue-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('no source-grounded override') && f.message.includes('queue-plugin'),
       ),
     ).toBe(true);
   });
@@ -759,8 +733,8 @@ describe('documentation gate — package catalog', () => {
       caveat: 'Redis queue adapter',
     });
     // Append an Adapters list that includes the forbidden provider.
-    const section = base +
-      '\n**Adapters:**\n\n- Memory\n- Redis\n- RabbitMQ\n- SQS\n- Workers Queues\n';
+    const section =
+      base + '\n**Adapters:**\n\n- Memory\n- Redis\n- RabbitMQ\n- SQS\n- Workers Queues\n';
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -770,9 +744,10 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('attributes "Workers Queues"') &&
-        f.message.includes('cloudflare-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('attributes "Workers Queues"') &&
+          f.message.includes('cloudflare-plugin'),
       ),
     ).toBe(true);
   });
@@ -794,9 +769,8 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('attributes "R2"') &&
-        f.message.includes('cloudflare-plugin')
+      findings.some(
+        (f) => f.message.includes('attributes "R2"') && f.message.includes('cloudflare-plugin'),
       ),
     ).toBe(true);
   });
@@ -809,8 +783,8 @@ describe('documentation gate — package catalog', () => {
       runtimeCells: '| ✅ | ✅ | ✅ | ✅ |',
       caveat: 'redis transport',
     });
-    const section = base +
-      '\n**Transports:**\n\n- Memory\n- Messaging\n- Redis\n- Durable Objects\n';
+    const section =
+      base + '\n**Transports:**\n\n- Memory\n- Messaging\n- Redis\n- Durable Objects\n';
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -820,9 +794,10 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('attributes "Durable Objects"') &&
-        f.message.includes('cloudflare-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('attributes "Durable Objects"') &&
+          f.message.includes('cloudflare-plugin'),
       ),
     ).toBe(true);
   });
@@ -835,8 +810,8 @@ describe('documentation gate — package catalog', () => {
       runtimeCells: '| ✅ | ✅ | ✅ | ❌ |',
       caveat: 'Redis queue adapter',
     });
-    const section = base +
-      '\n> Workers Queues belong to @setu-ts/cloudflare-plugin, not this package.\n';
+    const section =
+      base + '\n> Workers Queues belong to @setu-ts/cloudflare-plugin, not this package.\n';
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -845,9 +820,7 @@ describe('documentation gate — package catalog', () => {
       ['packages/queue-plugin'],
       PACKAGE_METADATA,
     );
-    expect(
-      findings.some((f) => f.message.includes('attributes "Workers Queues"')),
-    ).toBe(false);
+    expect(findings.some((f) => f.message.includes('attributes "Workers Queues"'))).toBe(false);
   });
 
   it('accepts an enumerated valid override (storage-plugin Workers R2)', () => {
@@ -866,9 +839,7 @@ describe('documentation gate — package catalog', () => {
       ['packages/storage-plugin'],
       PACKAGE_METADATA,
     );
-    expect(
-      findings.some((f) => f.message.includes('no source-grounded override')),
-    ).toBe(false);
+    expect(findings.some((f) => f.message.includes('no source-grounded override'))).toBe(false);
   });
 
   it('accepts an enumerated valid override (service-discovery Workers HTTP)', () => {
@@ -887,9 +858,7 @@ describe('documentation gate — package catalog', () => {
       ['packages/service-discovery-plugin'],
       PACKAGE_METADATA,
     );
-    expect(
-      findings.some((f) => f.message.includes('no source-grounded override')),
-    ).toBe(false);
+    expect(findings.some((f) => f.message.includes('no source-grounded override'))).toBe(false);
   });
 });
 
@@ -916,8 +885,7 @@ describe('documentation gate — local links and anchors', () => {
     expect(fakeFindings.length).toBeGreaterThan(0);
     expect(
       fakeFindings.some((f) => f.message.includes('does not resolve to a known generated page')),
-    )
-      .toBe(true);
+    ).toBe(true);
   });
 
   it('includes the top-level generated docs/api/index.html in the page set', async () => {
@@ -1281,13 +1249,12 @@ describe('package exports table', () => {
     const omitted = '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n\n## Full API\n';
     expect(diffExportsTable(omitted, groups)[0]).toContain('omits 1: CachePlugin (function)');
 
-    const fabricated = '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n' +
+    const fabricated =
+      '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n' +
       '| `CachePlugin` | function |\n| `Ghost` | class |\n\n## Full API\n';
     expect(diffExportsTable(fabricated, groups)[0]).toContain('do not exist: Ghost (class)');
 
-    expect(diffExportsTable('# x\n\nNo table.\n', groups)).toEqual([
-      'has no `## Exports` section',
-    ]);
+    expect(diffExportsTable('# x\n\nNo table.\n', groups)).toEqual(['has no `## Exports` section']);
   });
 });
 
@@ -1408,8 +1375,9 @@ describe('documentation gate — generated API tree links', () => {
   it('accepts the site root written without a trailing slash', async () => {
     const source = '# Docs\n\n- [API](./api)\n';
 
-    expect(await checkLocalLinks('docs/README.md', source, ['docs/README.md'], generatedPages))
-      .toEqual([]);
+    expect(
+      await checkLocalLinks('docs/README.md', source, ['docs/README.md'], generatedPages),
+    ).toEqual([]);
   });
 
   it('still rejects a generated page that the manifest cannot produce', async () => {
@@ -1474,8 +1442,8 @@ describe('documentation gate — install-snippet versions', () => {
   });
 
   it('accepts a reference to the shipping version, with or without the caret', () => {
-    const source = 'deno add jsr:@setu-ts/kernel@^0.1.0-alpha.6\n' +
-      'jsr:@setu-ts/common@0.1.0-alpha.6\n';
+    const source =
+      'deno add jsr:@setu-ts/kernel@^0.1.0-alpha.6\n' + 'jsr:@setu-ts/common@0.1.0-alpha.6\n';
     expect(checkInstallVersions(doc('README.md', source), '0.1.0-alpha.6')).toEqual([]);
   });
 
@@ -1823,15 +1791,16 @@ describe('documentation gate — bare version claims', () => {
   });
 
   it('carries a standalone marker across a blockquote break, not only a blank line', () => {
-    const source = '> [!IMPORTANT]\n> **Status: `v0.1.0-alpha.7`**\n>\n' +
+    const source =
+      '> [!IMPORTANT]\n> **Status: `v0.1.0-alpha.7`**\n>\n' +
       '> <!-- version:history -->\n>\n> `v0.1.0-alpha.5` renamed the project\n';
     expect(checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7')).toEqual([]);
   });
 
   // Otherwise one marked paragraph would exempt everything below it.
   it('stops carrying after the block the standalone marker covers', () => {
-    const source = '<!-- version:history -->\n\n`v0.1.0-alpha.5` renamed it\n\n' +
-      'ships `v0.1.0-alpha.6`\n';
+    const source =
+      '<!-- version:history -->\n\n`v0.1.0-alpha.5` renamed it\n\n' + 'ships `v0.1.0-alpha.6`\n';
     const findings = checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7');
     expect(findings).toHaveLength(1);
     expect(findings[0]?.line).toBe(5);
@@ -2043,8 +2012,9 @@ describe('documentation gate — bare version claims', () => {
   // this project's lines explicitly instead.
   it('matches a prerelease whole, so a correct reference is not reported stale', () => {
     expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.1')).toEqual([]);
-    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.2'))
-      .toHaveLength(1);
+    expect(
+      checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.2'),
+    ).toHaveLength(1);
   });
 
   it('matches a hyphenated prerelease identifier and build metadata in a claim', () => {
@@ -2052,8 +2022,9 @@ describe('documentation gate — bare version claims', () => {
       expect(checkVersionClaims(doc('README.md', `ships \`v${version}\`\n`), version)).toEqual([]);
     }
     // Still discriminates: a DIFFERENT hyphenated prerelease is stale.
-    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc-1`\n'), '0.2.1-rc-2'))
-      .toHaveLength(1);
+    expect(
+      checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc-1`\n'), '0.2.1-rc-2'),
+    ).toHaveLength(1);
   });
 
   // Without a left boundary the `0.2.1` inside an unrelated `10.2.1` reads as a
@@ -2102,17 +2073,15 @@ describe('documentation gate — bare version claims', () => {
 
   it('leaves the documents whose old versions are a record alone', () => {
     for (const file of ['CHANGELOG.md', 'docs/releasing.md', 'plans/milestone-1.md']) {
-      const findings = checkVersionClaims(
-        doc(file, 'shipped `v0.1.0-alpha.1`\n'),
-        '0.1.0-alpha.7',
-      );
+      const findings = checkVersionClaims(doc(file, 'shipped `v0.1.0-alpha.1`\n'), '0.1.0-alpha.7');
       expect(findings).toEqual([]);
     }
   });
 
   it('reads a path written with a leading ./ as the same document', () => {
-    expect(checkVersionClaims(doc('./CLAUDE.md', 'at `0.1.0-alpha.2`\n'), '0.1.0-alpha.7'))
-      .toEqual([]);
+    expect(checkVersionClaims(doc('./CLAUDE.md', 'at `0.1.0-alpha.2`\n'), '0.1.0-alpha.7')).toEqual(
+      [],
+    );
   });
 });
 
@@ -2136,15 +2105,16 @@ describe('documentation gate — which runtimes host a workspace', () => {
   ];
 
   it('is exactly deno, node and bun — Workers is the only target refused', async () => {
-    const { WORKSPACE_RUNTIMES } = await import(
-      '../packages/cli/src/workspace/runtime-profile.ts'
-    );
+    const { WORKSPACE_RUNTIMES } = await import('../packages/cli/src/workspace/runtime-profile.ts');
     const { TARGET_RUNTIMES } = await import('../packages/cli/src/constants.ts');
 
     const refused = TARGET_RUNTIMES.filter((runtime) => !WORKSPACE_RUNTIMES.includes(runtime));
 
-    expect([...WORKSPACE_RUNTIMES], DOCUMENTS_STATING_THE_SET.join('; '))
-      .toEqual(['deno', 'node', 'bun']);
+    expect([...WORKSPACE_RUNTIMES], DOCUMENTS_STATING_THE_SET.join('; ')).toEqual([
+      'deno',
+      'node',
+      'bun',
+    ]);
     expect(refused, DOCUMENTS_STATING_THE_SET.join('; ')).toEqual(['cloudflare-workers']);
   });
 });
@@ -2162,10 +2132,7 @@ describe('documentation gate — which runtimes host a workspace', () => {
  */
 describe('documentation gate — no nonexistent kernel API in package READMEs (M70i §3.10b)', () => {
   const FORBIDDEN = [/\bnew\s+Application\s*\(/, /\bapp\.use\s*\(/];
-  const FILES = [
-    ...readPackageReadmes(),
-    'PUBLIC_API.md',
-  ];
+  const FILES = [...readPackageReadmes(), 'PUBLIC_API.md'];
 
   /** Every package README on disk, discovered rather than enumerated. */
   function readPackageReadmes(): string[] {
@@ -2194,18 +2161,16 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
       // whose only fence never closes yields 0 blocks), so its contents escape
       // this scan. Fail on the malformed file instead of silently covering
       // less than the file claims.
-      expect(unclosedAt, `${file} has an unclosed code fence at line ${unclosedAt}`)
-        .toBeNull();
+      expect(unclosedAt, `${file} has an unclosed code fence at line ${unclosedAt}`).toBeNull();
       for (const block of blocks) {
         const lang = (block as { info: string }).info;
         // Reuse the fence engine's alias set rather than a hardcoded pair: it
         // includes `tsx`, and a `tsx` fence carrying the nonexistent API used to
         // slip past this gate entirely.
         if (!TS_ALIASES.has(lang)) continue;
-        const code = lines.slice(
-          (block as { bodyStart: number }).bodyStart,
-          (block as { bodyEnd: number }).bodyEnd,
-        ).join('\n');
+        const code = lines
+          .slice((block as { bodyStart: number }).bodyStart, (block as { bodyEnd: number }).bodyEnd)
+          .join('\n');
         for (const pattern of FORBIDDEN) {
           expect(
             pattern.test(code),

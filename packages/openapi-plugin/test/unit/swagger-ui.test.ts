@@ -134,9 +134,18 @@ describe('swaggerUiHtml', () => {
     });
 
     expect(html).toContain(
-      String.fromCharCode(38) + 'lt;script' + String.fromCharCode(38) + 'gt;alert(' +
-        String.fromCharCode(38) + 'quot;XSS' + String.fromCharCode(38) + 'quot;)' +
-        String.fromCharCode(38) + 'lt;/script' + String.fromCharCode(38) + 'gt;',
+      String.fromCharCode(38) +
+        'lt;script' +
+        String.fromCharCode(38) +
+        'gt;alert(' +
+        String.fromCharCode(38) +
+        'quot;XSS' +
+        String.fromCharCode(38) +
+        'quot;)' +
+        String.fromCharCode(38) +
+        'lt;/script' +
+        String.fromCharCode(38) +
+        'gt;',
     );
   });
 

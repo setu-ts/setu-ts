@@ -236,8 +236,8 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       // option still registers a source, which answers `disabled`. Neither
       // runs an indicator or fails startup.
       const healthSource: IHealthDiagnosticsSource | null = ctx.services.has(
-          CAPABILITIES.HEALTH_DIAGNOSTICS,
-        )
+        CAPABILITIES.HEALTH_DIAGNOSTICS,
+      )
         ? ctx.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS)
         : null;
       // The optional trace-diagnostics source (M98g): resolved once, during
@@ -261,12 +261,11 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       // source, which answers `disabled`; with the option but without RBAC
       // it answers `unsupported`. A read never evaluates a role, permission or wildcard,
       // and neither fails startup.
-      const authorizationSource: IAuthorizationDiagnosticsSource | null =
-        ctx.services.has(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS)
-          ? ctx.services.get<IAuthorizationDiagnosticsSource>(
-            CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
-          )
-          : null;
+      const authorizationSource: IAuthorizationDiagnosticsSource | null = ctx.services.has(
+        CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+      )
+        ? ctx.services.get<IAuthorizationDiagnosticsSource>(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS)
+        : null;
 
       // The optional configuration provenance source (M98e): the same shape.
       // An absent source means no ConfigPlugin is registered and the
@@ -275,8 +274,8 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       // answers `disabled` rather than unsupported. A provenance read never
       // touches a configuration value.
       const configSource: IConfigDiagnosticsSource | null = ctx.services.has(
-          CAPABILITIES.CONFIG_DIAGNOSTICS,
-        )
+        CAPABILITIES.CONFIG_DIAGNOSTICS,
+      )
         ? ctx.services.get<IConfigDiagnosticsSource>(CAPABILITIES.CONFIG_DIAGNOSTICS)
         : null;
 
@@ -345,9 +344,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
         // fixed, value-free configuration error rather than silently
         // dropping one.
         const schedulerSources = ctx.services.has(CAPABILITIES.SCHEDULER_DIAGNOSTICS)
-          ? ctx.services.getAll<ISchedulerDiagnosticsSource>(
-            CAPABILITIES.SCHEDULER_DIAGNOSTICS,
-          )
+          ? ctx.services.getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)
           : [];
         if (schedulerSources.length > MAX_SCHEDULER_SOURCES) {
           active.revoke();
@@ -377,8 +374,8 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
         // authenticated request. More than 16 refuses by a fixed error.
         const outboundHttpSources = ctx.services.has(CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS)
           ? ctx.services.getAll<IOutboundHttpDiagnosticsSource>(
-            CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS,
-          )
+              CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS,
+            )
           : [];
         if (outboundHttpSources.length > MAX_OUTBOUND_HTTP_SOURCES) {
           active.revoke();
@@ -430,14 +427,15 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
         // to a no-op, so the runtime's default banner stands and the bind is
         // never silent.
         const logger = ctx.logger;
-        const announce = logger === undefined ? undefined : (
-          address: { hostname: string; port: number },
-        ): void => {
-          logger.info(
-            `Setu devtool: local diagnostics connector listening on ` +
-              `http://${address.hostname}:${address.port}`,
-          );
-        };
+        const announce =
+          logger === undefined
+            ? undefined
+            : (address: { hostname: string; port: number }): void => {
+                logger.info(
+                  `Setu devtool: local diagnostics connector listening on ` +
+                    `http://${address.hostname}:${address.port}`,
+                );
+              };
         const opened = await factory.listen({
           port: options.port,
           handler,

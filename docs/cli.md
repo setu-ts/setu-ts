@@ -409,7 +409,7 @@ export const SERVICE_PORT = 3000;
 /** Every OTHER member of this workspace, by service name. */
 export const SERVICE_ENDPOINTS = {
   // The generated file reads the BILLING_HOST environment variable first.
-  'billing': [{ host: '127.0.0.1', port: 3001 }],
+  billing: [{ host: '127.0.0.1', port: 3001 }],
 };
 ```
 

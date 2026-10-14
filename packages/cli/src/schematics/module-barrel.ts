@@ -45,9 +45,11 @@ export function renderModuleBarrel(
       const declaration = sorted.includes(name)
         ? `import { ${pascal}Module } from './${kebab}/${kebab}.module.ts';\n`
         : '';
-      return `import { ${pascal}Controller } from './${kebab}/${kebab}.controller.ts';\n` +
+      return (
+        `import { ${pascal}Controller } from './${kebab}/${kebab}.controller.ts';\n` +
         declaration +
-        `import { ${pascal}Service } from './${kebab}/${kebab}.service.ts';`;
+        `import { ${pascal}Service } from './${kebab}/${kebab}.service.ts';`
+      );
     })
     .join('\n');
 

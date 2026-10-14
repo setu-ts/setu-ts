@@ -41,20 +41,23 @@ import type { IFileSystem } from '@setu-ts/common';
  * @returns A structurally-valid inert binding
  */
 function inertBinding(): unknown {
-  return new Proxy({}, {
-    get: (_target, property) => {
-      if (property === Symbol.toPrimitive || property === 'toString') {
-        return () => '[setu discovery stub]';
-      }
-      return () => {
-        throw new Error(
-          'A Cloudflare binding was CALLED during command discovery. `setu` builds the ' +
-            'application to list plugin commands and passes inert bindings; construct ' +
-            'clients in the plugin list, but do not read through them there.',
-        );
-      };
+  return new Proxy(
+    {},
+    {
+      get: (_target, property) => {
+        if (property === Symbol.toPrimitive || property === 'toString') {
+          return () => '[setu discovery stub]';
+        }
+        return () => {
+          throw new Error(
+            'A Cloudflare binding was CALLED during command discovery. `setu` builds the ' +
+              'application to list plugin commands and passes inert bindings; construct ' +
+              'clients in the plugin list, but do not read through them there.',
+          );
+        };
+      },
     },
-  });
+  );
 }
 
 /**
@@ -67,9 +70,12 @@ function inertBinding(): unknown {
  * @returns A proxy env whose every binding is structurally valid and inert
  */
 function discoveryEnv(): Readonly<Record<string, unknown>> {
-  return new Proxy({}, {
-    get: (_target, property) => (typeof property === 'string' ? inertBinding() : undefined),
-  }) as Readonly<Record<string, unknown>>;
+  return new Proxy(
+    {},
+    {
+      get: (_target, property) => (typeof property === 'string' ? inertBinding() : undefined),
+    },
+  ) as Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -130,9 +136,12 @@ export async function configModuleExists(
 function isApplication(value: unknown): value is IApplication {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<IApplication>;
-  return typeof candidate.start === 'function' &&
+  return (
+    typeof candidate.start === 'function' &&
     typeof candidate.stop === 'function' &&
-    typeof candidate.services === 'object' && candidate.services !== null;
+    typeof candidate.services === 'object' &&
+    candidate.services !== null
+  );
 }
 
 /** The Deno manifests whose presence marks a project as a Deno target. */
@@ -198,9 +207,10 @@ export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<s
     chain.push(current);
     if (!(await exists(fs, joinPath(current, WORKSPACE_MANIFEST)))) continue;
     const read = await readWorkspaceManifest(fs, current);
-    const listed = read.ok &&
-      read.manifest.members.some((member) =>
-        slashes(joinPath(current!, joinPath(MEMBERS_DIR, member.name))) === project
+    const listed =
+      read.ok &&
+      read.manifest.members.some(
+        (member) => slashes(joinPath(current!, joinPath(MEMBERS_DIR, member.name))) === project,
       );
     return listed ? chain : [dir];
   }
@@ -248,12 +258,16 @@ export async function denoInstallRefusal(
 
   const text = new TextDecoder().decode(await fs.readFile(manifest));
   if (text.includes('jsr:@setu-ts/')) {
-    return `${escapeName(manifest)} pins the framework from JSR, which this CLI cannot load. ` +
-      `Move the project to the npm packages first — see docs/upgrading.md.`;
+    return (
+      `${escapeName(manifest)} pins the framework from JSR, which this CLI cannot load. ` +
+      `Move the project to the npm packages first — see docs/upgrading.md.`
+    );
   }
-  return `This Deno project's packages are not installed where Node can import them. ` +
+  return (
+    `This Deno project's packages are not installed where Node can import them. ` +
     `Run \`deno install\` in ${escapeName(dir)} (its manifest sets nodeModulesDir: "auto"), ` +
-    `then run this command again.`;
+    `then run this command again.`
+  );
 }
 
 /**
@@ -282,9 +296,9 @@ export async function loadApp(
     module = await load(url, dir);
   } catch (cause) {
     throw new Error(
-      `Cannot load ${escapeName(String(url))}: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      `Cannot load ${escapeName(String(url))}: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
       { cause },
     );
   }
@@ -292,9 +306,9 @@ export async function loadApp(
   const factory = module[CONFIG_EXPORT];
   if (typeof factory !== 'function') {
     throw new Error(
-      `${
-        escapeName(String(url))
-      } must export a '${CONFIG_EXPORT}' function returning the application; ` +
+      `${escapeName(
+        String(url),
+      )} must export a '${CONFIG_EXPORT}' function returning the application; ` +
         `found ${typeof factory}.`,
     );
   }

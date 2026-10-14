@@ -34,9 +34,7 @@ async function append(
 
 /** The stored row with `id`, read without the bridge. */
 async function rowOf(service: IDatabaseService, id: string): Promise<Record<string, unknown>> {
-  const row = await service.getRepository<Record<string, unknown>, EntityKey>(ENTITY).findById(
-    id,
-  );
+  const row = await service.getRepository<Record<string, unknown>, EntityKey>(ENTITY).findById(id);
   if (row === null) throw new Error(`no row ${id}`);
   return row;
 }
@@ -71,14 +69,18 @@ describe('DatabaseOutboxStore — reads', () => {
     const rows = await store.scanPending(undefined, 2);
 
     expect(rows.map((row) => row.id)).toEqual(['row-1', 'row-3']);
-    expect(calls).toEqual([{
-      method: 'findAll',
-      args: [{
-        where: { kind: OUTBOX_RECORD_KIND, status: 'pending' },
-        orderBy: { position: 'asc' },
-        limit: 2,
-      }],
-    }]);
+    expect(calls).toEqual([
+      {
+        method: 'findAll',
+        args: [
+          {
+            where: { kind: OUTBOX_RECORD_KIND, status: 'pending' },
+            orderBy: { position: 'asc' },
+            limit: 2,
+          },
+        ],
+      },
+    ]);
   });
 
   it('scanPending with a cursor reads strictly after it', async () => {
@@ -108,14 +110,18 @@ describe('DatabaseOutboxStore — reads', () => {
     const keys = await store.failedKeys(10);
 
     expect(keys).toEqual([{ tenantId: 'acme', orderingKey: 'a' }, {}, { orderingKey: 'b' }]);
-    expect(calls).toEqual([{
-      method: 'findAll',
-      args: [{
-        where: { kind: OUTBOX_RECORD_KIND, status: 'failed' },
-        select: ['tenantId', 'orderingKey'],
-        limit: 10,
-      }],
-    }]);
+    expect(calls).toEqual([
+      {
+        method: 'findAll',
+        args: [
+          {
+            where: { kind: OUTBOX_RECORD_KIND, status: 'failed' },
+            select: ['tenantId', 'orderingKey'],
+            limit: 10,
+          },
+        ],
+      },
+    ]);
   });
 
   it('failedKeys honours its limit', async () => {
@@ -243,8 +249,7 @@ describe('DatabaseOutboxStore — markSent', () => {
         sentBy: 'r/scheduled',
         deleteNow: false,
       }),
-    )
-      .toEqual({ outcome: 'applied' });
+    ).toEqual({ outcome: 'applied' });
     const row = await rowOf(service, 'row-1');
     expect(row).toMatchObject({ status: 'sent', settledAt: 9, sentBy: 'r/scheduled' });
   });
@@ -257,8 +262,7 @@ describe('DatabaseOutboxStore — markSent', () => {
         sentBy: 'r/scheduled',
         deleteNow: true,
       }),
-    )
-      .toEqual({ outcome: 'applied' });
+    ).toEqual({ outcome: 'applied' });
     expect((await allRows(service)).map((row) => row.id)).not.toContain('row-1');
   });
 
@@ -271,8 +275,7 @@ describe('DatabaseOutboxStore — markSent', () => {
         sentBy: 'r/scheduled',
         deleteNow: false,
       }),
-    )
-      .toEqual({ outcome: 'missing' });
+    ).toEqual({ outcome: 'missing' });
     expect(await allRows(service)).toEqual(before);
   });
 
@@ -284,8 +287,7 @@ describe('DatabaseOutboxStore — markSent', () => {
         sentBy: 'r/scheduled',
         deleteNow: false,
       }),
-    )
-      .toEqual({ outcome: 'not-pending', status: 'sent' });
+    ).toEqual({ outcome: 'not-pending', status: 'sent' });
     expect(await rowOf(service, 'row-2')).toMatchObject({
       settledAt: 3,
       sentBy: 'relay-a/dispatch',
@@ -293,7 +295,10 @@ describe('DatabaseOutboxStore — markSent', () => {
   });
 
   it('answers not-pending without sentBy for failed and discarded rows', async () => {
-    for (const [id, status] of [['row-3', 'failed'], ['row-4', 'discarded']] as const) {
+    for (const [id, status] of [
+      ['row-3', 'failed'],
+      ['row-4', 'discarded'],
+    ] as const) {
       const outcome = await store.markSent(id, {
         claimVersion: 0,
         settledAt: 9,
@@ -329,8 +334,7 @@ describe('DatabaseOutboxStore — markSent', () => {
         sentBy: 'r',
         deleteNow: true,
       }),
-    )
-      .toEqual({ outcome: 'missing' });
+    ).toEqual({ outcome: 'missing' });
   });
 });
 
@@ -497,9 +501,9 @@ describe('DatabaseOutboxStore — purge', () => {
         };
       },
     };
-    const refusal = await new DatabaseOutboxStore(failing, ENTITY).purge(100, 10).catch((
-      e: unknown,
-    ) => e);
+    const refusal = await new DatabaseOutboxStore(failing, ENTITY)
+      .purge(100, 10)
+      .catch((e: unknown) => e);
     expect((refusal as Error).message).toBe('store down');
     expect((await allRows(service)).length).toBe(5);
   });

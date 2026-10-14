@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
+/* eslint-disable require-await -- test fixtures use sync methods matching async interface signatures */
 /**
  * `trustedProxies` / `proxyHops` — resolving the client from the RIGHT
  * (M90a §3.3).
@@ -53,8 +53,7 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
       // real client — so nothing in this chain is trusted and the rightmost
       // entry is the answer. `7.7.7.7`, the value the caller forged, is
       // correctly ignored.
-      expect(await resolve(APPENDED, { trustedProxies: ['10.0.0.1'] }))
-        .toBe('198.51.100.9');
+      expect(await resolve(APPENDED, { trustedProxies: ['10.0.0.1'] })).toBe('198.51.100.9');
     });
 
     it('walks PAST several trusted hops', async () => {
@@ -72,23 +71,25 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
     });
 
     it('a /32 block matches exactly that address and nothing else', async () => {
-      expect(await resolve('203.0.113.5, 10.0.0.1', { trustedProxies: ['10.0.0.1/32'] }))
-        .toBe('203.0.113.5');
-      expect(await resolve('203.0.113.5, 10.0.0.2', { trustedProxies: ['10.0.0.1/32'] }))
-        .toBe('10.0.0.2');
+      expect(await resolve('203.0.113.5, 10.0.0.1', { trustedProxies: ['10.0.0.1/32'] })).toBe(
+        '203.0.113.5',
+      );
+      expect(await resolve('203.0.113.5, 10.0.0.2', { trustedProxies: ['10.0.0.1/32'] })).toBe(
+        '10.0.0.2',
+      );
     });
 
     it('a /0 block trusts every IPv4 address', async () => {
-      expect(await resolve('1.2.3.4, 5.6.7.8', { trustedProxies: ['0.0.0.0/0'] }))
-        .toBeUndefined();
+      expect(await resolve('1.2.3.4, 5.6.7.8', { trustedProxies: ['0.0.0.0/0'] })).toBeUndefined();
     });
 
     it('resolves undefined when EVERY entry is a trusted proxy', async () => {
       // The client address was never recorded, so there is nothing honest to
       // return — reporting a proxy's own address as the client would be worse
       // than reporting nothing.
-      expect(await resolve('10.0.0.1, 10.0.0.2', { trustedProxies: ['10.0.0.0/8'] }))
-        .toBeUndefined();
+      expect(
+        await resolve('10.0.0.1, 10.0.0.2', { trustedProxies: ['10.0.0.0/8'] }),
+      ).toBeUndefined();
     });
 
     it('refuses a non-numeric CIDR width at construction (CodeRabbit review)', async () => {
@@ -98,52 +99,60 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
       // IPv6 returned that caller-supplied value as the client — X32-3
       // reintroduced by a typo. `Number` also reads `'0x20'` as 32, silently
       // applying a mask the text does not state.
-      for (
-        const bad of ['10.0.0.1/', '10.0.0.0/ 8', '10.0.0.0/+8', '10.0.0.0/0x20', '10.0.0.0/8e0']
-      ) {
-        expect(() => ipSecurityMiddleware({ trustProxy: true, trustedProxies: [bad] }))
-          .toThrow(/malformed\s+CIDR width/);
+      for (const bad of [
+        '10.0.0.1/',
+        '10.0.0.0/ 8',
+        '10.0.0.0/+8',
+        '10.0.0.0/0x20',
+        '10.0.0.0/8e0',
+      ]) {
+        expect(() => ipSecurityMiddleware({ trustProxy: true, trustedProxies: [bad] })).toThrow(
+          /malformed\s+CIDR width/,
+        );
       }
     });
 
     it('still accepts every legitimate entry form', async () => {
       // The guard checks digits only and NOT the 0–32 range, so an IPv6 CIDR
       // keeps its documented literal-comparison path rather than being refused.
-      for (
-        const good of [
-          '10.0.0.1',
-          '10.0.0.0/8',
-          '10.0.0.0/0',
-          '10.0.0.0/32',
-          '2001:db8::1',
-          '2001:db8::/64',
-        ]
-      ) {
-        expect(() => ipSecurityMiddleware({ trustProxy: true, trustedProxies: [good] }))
-          .not.toThrow();
+      for (const good of [
+        '10.0.0.1',
+        '10.0.0.0/8',
+        '10.0.0.0/0',
+        '10.0.0.0/32',
+        '2001:db8::1',
+        '2001:db8::/64',
+      ]) {
+        expect(() =>
+          ipSecurityMiddleware({ trustProxy: true, trustedProxies: [good] }),
+        ).not.toThrow();
       }
     });
 
     it('a malformed CIDR falls back to a literal string comparison', async () => {
       // A wrong numeric expansion would silently TRUST an untrusted hop, so an
       // unparseable block matches only its own literal text.
-      expect(await resolve('1.2.3.4, 10.0.0.1/99', { trustedProxies: ['10.0.0.1/99'] }))
-        .toBe('1.2.3.4');
+      expect(await resolve('1.2.3.4, 10.0.0.1/99', { trustedProxies: ['10.0.0.1/99'] })).toBe(
+        '1.2.3.4',
+      );
       // A width of three or more digits is a legitimate IPv6 form (`/128`) as
       // far as the digit guard is concerned, so it is NOT refused — it falls to
       // the literal comparison, which trusts nothing.
-      expect(await resolve('1.2.3.4, 10.0.0.0/999', { trustedProxies: ['10.0.0.0/999'] }))
-        .toBe('1.2.3.4');
-      expect(await resolve('1.2.3.4, 10.0.0.7', { trustedProxies: ['10.0.0.0/999'] }))
-        .toBe('10.0.0.7');
-      expect(await resolve('1.2.3.4, 10.0.0.5', { trustedProxies: ['10.0.0.1/99'] }))
-        .toBe('10.0.0.5');
+      expect(await resolve('1.2.3.4, 10.0.0.0/999', { trustedProxies: ['10.0.0.0/999'] })).toBe(
+        '1.2.3.4',
+      );
+      expect(await resolve('1.2.3.4, 10.0.0.7', { trustedProxies: ['10.0.0.0/999'] })).toBe(
+        '10.0.0.7',
+      );
+      expect(await resolve('1.2.3.4, 10.0.0.5', { trustedProxies: ['10.0.0.1/99'] })).toBe(
+        '10.0.0.5',
+      );
     });
 
     it('an IPv6 proxy is matched case-insensitively as a literal', async () => {
-      expect(
-        await resolve('1.2.3.4, 2001:DB8::1', { trustedProxies: ['2001:db8::1'] }),
-      ).toBe('1.2.3.4');
+      expect(await resolve('1.2.3.4, 2001:DB8::1', { trustedProxies: ['2001:db8::1'] })).toBe(
+        '1.2.3.4',
+      );
     });
 
     it('a high-bit CIDR network matches (int32 sign-extension hazard)', async () => {
@@ -159,23 +168,24 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
       expect(
         await resolve('1.2.3.4, 255.255.255.255', { trustedProxies: ['255.255.255.255/32'] }),
       ).toBe('1.2.3.4');
-      expect(
-        await resolve('1.2.3.4, 128.0.0.1', { trustedProxies: ['128.0.0.0/1'] }),
-      ).toBe('1.2.3.4');
+      expect(await resolve('1.2.3.4, 128.0.0.1', { trustedProxies: ['128.0.0.0/1'] })).toBe(
+        '1.2.3.4',
+      );
     });
 
     it('an octet above 255 is not a valid address and never matches a CIDR', async () => {
-      expect(await resolve('1.2.3.4, 10.0.0.300', { trustedProxies: ['10.0.0.0/8'] }))
-        .toBe('10.0.0.300');
+      expect(await resolve('1.2.3.4, 10.0.0.300', { trustedProxies: ['10.0.0.0/8'] })).toBe(
+        '10.0.0.300',
+      );
     });
 
     it('a padded or short dotted-quad is not treated as IPv4', async () => {
       // `Number(' 1')` is 1 and `Number('')` is 0, so the digits are checked
       // explicitly rather than inferred from the conversion.
-      expect(await resolve('1.2.3.4, 10.0.0', { trustedProxies: ['10.0.0.0/8'] }))
-        .toBe('10.0.0');
-      expect(await resolve('1.2.3.4, 10.0.0.0001', { trustedProxies: ['10.0.0.0/8'] }))
-        .toBe('10.0.0.0001');
+      expect(await resolve('1.2.3.4, 10.0.0', { trustedProxies: ['10.0.0.0/8'] })).toBe('10.0.0');
+      expect(await resolve('1.2.3.4, 10.0.0.0001', { trustedProxies: ['10.0.0.0/8'] })).toBe(
+        '10.0.0.0001',
+      );
     });
 
     it('an empty trustedProxies list trusts nothing, so the rightmost wins', async () => {
@@ -187,8 +197,9 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
   describe('proxyHops', () => {
     it('resolves the nth entry from the right', async () => {
       expect(await resolve(APPENDED, { proxyHops: 1 })).toBe('7.7.7.7');
-      expect(await resolve('a, b, 203.0.113.5, 10.0.0.1, 10.0.0.2', { proxyHops: 2 }))
-        .toBe('203.0.113.5');
+      expect(await resolve('a, b, 203.0.113.5, 10.0.0.1, 10.0.0.2', { proxyHops: 2 })).toBe(
+        '203.0.113.5',
+      );
     });
 
     it('proxyHops: 0 is the rightmost entry', async () => {
@@ -205,8 +216,7 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
 
   describe('shared parsing', () => {
     it('trims whitespace and skips empty entries', async () => {
-      expect(await resolve('  7.7.7.7 , , 198.51.100.9  ', { proxyHops: 0 }))
-        .toBe('198.51.100.9');
+      expect(await resolve('  7.7.7.7 , , 198.51.100.9  ', { proxyHops: 0 })).toBe('198.51.100.9');
       expect(await resolve('  7.7.7.7 , , 198.51.100.9  ', {})).toBe('7.7.7.7');
     });
 
@@ -251,7 +261,7 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
           trustProxy: true,
           trustedProxies: ['10.0.0.1'],
           proxyHops: 1,
-        })
+        }),
       ).toThrow(/mutually/);
     });
 
@@ -269,8 +279,9 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
         // caller — the rate limiter then degrades to one shared `'anonymous'`
         // bucket with no signal anywhere. `Number()` of an unset env var is
         // `NaN`, so this is a plausible input, not a hypothetical one.
-        expect(() => ipSecurityMiddleware({ trustProxy: true, proxyHops: bad }))
-          .toThrow(/proxyHops must be a non-negative integer/);
+        expect(() => ipSecurityMiddleware({ trustProxy: true, proxyHops: bad })).toThrow(
+          /proxyHops must be a non-negative integer/,
+        );
       });
     }
 

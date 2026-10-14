@@ -162,8 +162,10 @@ export function csrfTokenField(
   // registration-time resolution.
   const published: unknown = ctx.state.get(CSRF_CONFIG_STATE_KEY);
   const publishedFieldName =
-    typeof published === 'object' && published !== null && 'fieldName' in published &&
-      typeof published.fieldName === 'string'
+    typeof published === 'object' &&
+    published !== null &&
+    'fieldName' in published &&
+    typeof published.fieldName === 'string'
       ? published.fieldName
       : undefined;
   const fieldName = options.fieldName ?? publishedFieldName ?? resolveCsrfConfig().fieldName;

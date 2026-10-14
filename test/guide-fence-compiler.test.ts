@@ -254,11 +254,9 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     for (const classified of toCompile) {
       const fence = classified.fence;
       const safe = fence.guide.replace(/[/.]/g, '_');
-      const file = `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}` +
-        `.${fenceExtension(fence.lang)}`;
-      const { assembleSource } = await import(
-        './fixtures/snippets/fence-engine.ts'
-      );
+      const file =
+        `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}` + `.${fenceExtension(fence.lang)}`;
+      const { assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
       const source = assembleSource(fence, classified);
       await Deno.writeTextFile(file, source);
       const { code, stderr } = await denoCheck(file);
@@ -282,21 +280,25 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     const perGuide = new Map<string, FenceCounts>();
     for (const classified of all) {
       const fence = classified.fence;
-      const g = perGuide.get(fence.guide) ??
-        { total: 0, ts: 0, compile: 0, external: 0, pseudocode: 0, skipped: 0 };
+      const g = perGuide.get(fence.guide) ?? {
+        total: 0,
+        ts: 0,
+        compile: 0,
+        external: 0,
+        pseudocode: 0,
+        skipped: 0,
+      };
       const next: FenceCounts = {
         ...g,
         total: g.total + 1,
         ts: g.ts + (TS_ALIASES.has(fence.lang) ? 1 : 0),
-        compile: g.compile + ((
-            classified.kind === 'compile-complete' ||
-            classified.kind === 'compile-fragment'
-          )
-          ? 1
-          : 0),
+        compile:
+          g.compile +
+          (classified.kind === 'compile-complete' || classified.kind === 'compile-fragment'
+            ? 1
+            : 0),
         external: g.external + (classified.kind === 'external-source' ? 1 : 0),
-        pseudocode: g.pseudocode +
-          (classified.kind === 'non-runnable-pseudocode' ? 1 : 0),
+        pseudocode: g.pseudocode + (classified.kind === 'non-runnable-pseudocode' ? 1 : 0),
         skipped: g.skipped + (classified.kind === 'skip' ? 1 : 0),
       };
       perGuide.set(fence.guide, next);
@@ -306,9 +308,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     for (const [guide, counts] of perGuide) {
       expect(counts.total).toBeGreaterThan(0);
       if (counts.ts === 0 && counts.compile === 0) {
-        throw new Error(
-          `${guide} has zero TypeScript fences and zero compiled fences.`,
-        );
+        throw new Error(`${guide} has zero TypeScript fences and zero compiled fences.`);
       }
     }
     expect(Object.fromEntries(perGuide)).toEqual(EXPECTED_INVENTORY);
@@ -328,9 +328,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
   });
 
   it('rejects request/plugin context mixing and synthetic context widening', async () => {
-    const { assembleSource, classify } = await import(
-      './fixtures/snippets/fence-engine.ts'
-    );
+    const { assembleSource, classify } = await import('./fixtures/snippets/fence-engine.ts');
     const cases = [
       "ctx.state['invalid'] = true;",
       'ctx.request.text(); ctx.lifecycle.onClose(() => {});',
@@ -378,7 +376,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     const guide = 'docs/mvc.md';
     const markdown = await Deno.readTextFile(guide);
     const fence = extractFences(guide, markdown).find((candidate) =>
-      candidate.code.includes('async function readForm')
+      candidate.code.includes('async function readForm'),
     );
 
     expect(fence).not.toBeUndefined();
@@ -483,15 +481,13 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     // gate, proving the fence engine (not a raw deno-check of raw code) catches
     // the mutation. Assert: original compiles, mutation replaces the option,
     // mutated source fails, and diagnostic names NONEXISTENT_BROKEN_OPTION.
-    const { classify, assembleSource } = await import(
-      './fixtures/snippets/fence-engine.ts'
-    );
+    const { classify, assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
     const cloudflareGuide = 'docs/runtime-deployment.md';
     const markdown = await Deno.readTextFile(cloudflareGuide);
     const fences = extractFences(cloudflareGuide, markdown);
     // Find the CloudflarePlugin registration fence
-    const cfFence = fences.find((f) =>
-      f.code.includes('CloudflarePlugin') && f.code.includes('import')
+    const cfFence = fences.find(
+      (f) => f.code.includes('CloudflarePlugin') && f.code.includes('import'),
     );
     expect(cfFence).not.toBeUndefined();
 
@@ -500,10 +496,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     expect(original).toBeDefined();
 
     // Original source must compile (or be a genuine external/excluded classification)
-    if (
-      original.kind === 'compile-complete' ||
-      original.kind === 'compile-fragment'
-    ) {
+    if (original.kind === 'compile-complete' || original.kind === 'compile-fragment') {
       await Deno.mkdir(SCRATCH_DIR, { recursive: true });
       await writeProjectStubs(SCRATCH_DIR);
       const origFile = `${SCRATCH_DIR}/b1-cloudflare-original.ts`;
@@ -527,9 +520,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     const mutated = classify(mutatedFence);
 
     // The mutated fence must fail compilation through the shared engine
-    if (
-      mutated.kind === 'compile-complete' || mutated.kind === 'compile-fragment'
-    ) {
+    if (mutated.kind === 'compile-complete' || mutated.kind === 'compile-fragment') {
       await Deno.mkdir(SCRATCH_DIR, { recursive: true });
       await writeProjectStubs(SCRATCH_DIR);
       const mutFile = `${SCRATCH_DIR}/b1-cloudflare-mutated.ts`;
@@ -542,9 +533,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     } else {
       // If classification itself rejects it (e.g., recognizes the bad option),
       // that is also a valid failure mode
-      throw new Error(
-        `B1: Unexpected classification for mutated fence: ${mutated.kind}`,
-      );
+      throw new Error(`B1: Unexpected classification for mutated fence: ${mutated.kind}`);
     }
   });
 

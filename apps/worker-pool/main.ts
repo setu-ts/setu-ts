@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- interactive example entry point.
+/* eslint-disable no-console -- interactive example entry point. */
 import { createWorkerPoolApp } from './src/app.ts';
 
 const app = createWorkerPoolApp();

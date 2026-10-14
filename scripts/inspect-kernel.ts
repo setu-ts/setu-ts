@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env
-// deno-lint-ignore-file no-console -- console output is the script's purpose (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is the script's purpose (AI_GUIDELINES §11.6) */
 /**
  * Runnable public consumer for kernel diagnostics (M98a).
  *

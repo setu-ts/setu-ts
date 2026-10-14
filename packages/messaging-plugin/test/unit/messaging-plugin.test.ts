@@ -230,9 +230,10 @@ describe('MessagingPlugin', () => {
 
     await plugin.register(ctx);
 
-    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      { status: string; data?: unknown }
-    >;
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<{
+      status: string;
+      data?: unknown;
+    }>;
     const result = await indicator();
 
     expect(result.status).toBe('up');
@@ -263,9 +264,9 @@ describe('MessagingPlugin', () => {
     await plugin.register(ctx);
 
     // Verify health indicator returns 'up' before disconnect
-    let indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      HealthCheckResult
-    >;
+    let indicator = healthIndicators.get(
+      CAPABILITIES.MESSAGING,
+    ) as () => Promise<HealthCheckResult>;
     let result = await indicator();
     expect(result.status).toBe('up');
 
@@ -388,9 +389,10 @@ describe('MessagingPlugin', () => {
     const memoryPlugin = MessagingPlugin({ broker: 'memory' });
     await memoryPlugin.register(ctx);
 
-    const memoryIndicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      { status: string; data?: unknown }
-    >;
+    const memoryIndicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<{
+      status: string;
+      data?: unknown;
+    }>;
     const memoryResult = await memoryIndicator();
 
     expect(memoryResult.data).toEqual({ broker: 'memory', reachable: true });
@@ -424,9 +426,10 @@ describe('MessagingPlugin', () => {
 
     await plugin.register(ctx);
 
-    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      { status: string; data?: { broker: string } }
-    >;
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<{
+      status: string;
+      data?: { broker: string };
+    }>;
     const result = await indicator();
 
     expect(result.data).toEqual({ broker: 'memory', reachable: true });
@@ -497,7 +500,7 @@ describe('MessagingPlugin', () => {
     ctx.services.register(CAPABILITIES.MESSAGING, unreadyBroker);
 
     // This is the exact code pattern from messaging-plugin.ts line 122-127
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const healthIndicator = async (): Promise<HealthCheckResult> => {
       const status: HealthStatus = unreadyBroker.isReady() ? 'up' : 'down';
       return {
@@ -507,9 +510,9 @@ describe('MessagingPlugin', () => {
     };
     ctx.health.register(CAPABILITIES.MESSAGING, healthIndicator);
 
-    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      HealthCheckResult
-    >;
+    const indicator = healthIndicators.get(
+      CAPABILITIES.MESSAGING,
+    ) as () => Promise<HealthCheckResult>;
     const result = await indicator();
 
     // This exercises the 'down' branch of the ternary
@@ -738,11 +741,7 @@ describe('MessagingPlugin', () => {
 
     const plugin = MessagingPlugin({
       broker: 'unknown-broker' as unknown as
-        | 'memory'
-        | 'redis-streams'
-        | 'rabbitmq'
-        | 'nats'
-        | 'kafka',
+        'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka',
     });
 
     await expect(plugin.register(ctx)).rejects.toThrow('Unknown broker type: unknown-broker');
@@ -809,8 +808,9 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
     await expect(broker.subscribe('orders', () => {})).rejects.toThrow('Kafka topic "orders"');
-    const attempts = fakeClient.consumer({ groupId: 'messaging-consumers:orders' }).calls
-      .filter((c) => c.method === 'subscribe').length;
+    const attempts = fakeClient
+      .consumer({ groupId: 'messaging-consumers:orders' })
+      .calls.filter((c) => c.method === 'subscribe').length;
     expect(attempts).toBe(2);
   });
 
@@ -830,8 +830,9 @@ describe('MessagingPlugin', () => {
     await expect(broker.request('ping', {})).resolves.toBe('pong');
 
     // The option is only honoured if the reply actually travelled on it.
-    const sentTopics = fakeClient.producer().calls
-      .filter((c) => c.method === 'send')
+    const sentTopics = fakeClient
+      .producer()
+      .calls.filter((c) => c.method === 'send')
       .map((c) => (c.args[0] as { topic: string }).topic);
     expect(sentTopics).toContain('svc.replies');
     expect(sentTopics).not.toContain('messaging.replies');
@@ -939,9 +940,10 @@ describe('MessagingPlugin', () => {
     expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
 
     // Health indicator should report up
-    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      { status: string; data?: unknown }
-    >;
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<{
+      status: string;
+      data?: unknown;
+    }>;
     const result = await indicator();
     expect(result.status).toBe('up');
     // The custom instance exposes no isHealthy, so reachability is unknown.
@@ -968,9 +970,9 @@ describe('MessagingPlugin', () => {
     await plugin.register(ctx);
 
     // Before disconnect: ready
-    expect(
-      (ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady(),
-    ).toBe(true);
+    expect((ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady()).toBe(
+      true,
+    );
 
     // Disconnect
     for (const handler of onCloseHandlers) {
@@ -978,9 +980,9 @@ describe('MessagingPlugin', () => {
     }
 
     // After disconnect: not ready
-    expect(
-      (ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady(),
-    ).toBe(false);
+    expect((ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady()).toBe(
+      false,
+    );
   });
 
   // ─── Bare-call regression (default arm) ───────────────────────────────────
@@ -1077,9 +1079,10 @@ describe('MessagingPlugin', () => {
 
     await plugin.register(ctx);
 
-    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      { status: string; data?: { broker: string } }
-    >;
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<{
+      status: string;
+      data?: { broker: string };
+    }>;
     const result = await indicator();
     // The fake transport exposes no isHealthy, so reachability is unknown.
     expect(result.data).toEqual({ broker: 'pubsub', reachable: 'unknown' });
@@ -1103,9 +1106,10 @@ describe('MessagingPlugin', () => {
 
     await plugin.register(ctx);
 
-    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<
-      { status: string; data?: { broker: string } }
-    >;
+    const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<{
+      status: string;
+      data?: { broker: string };
+    }>;
     const result = await indicator();
     // The fake transport exposes no isHealthy, so reachability is unknown.
     expect(result.data).toEqual({ broker: 'service-bus', reachable: 'unknown' });

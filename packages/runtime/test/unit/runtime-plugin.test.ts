@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for RuntimePlugin — HTTP adapter registration, CF platform no-throw,
  * and the new IHttpAdapter surface (setHandler/fetch/listen/close).
@@ -73,9 +73,9 @@ function createFakeRuntimeServices(platform: RuntimePlatform = 'deno'): IRuntime
     subtle: {} as SubtleCrypto,
     now: () => 0,
     hrtime: () => 0,
-    setTimeout: () => ({} as unknown),
+    setTimeout: () => ({}) as unknown,
     clearTimeout: () => {},
-    setInterval: () => ({} as unknown),
+    setInterval: () => ({}) as unknown,
     clearInterval: () => {},
     env: {},
     exit: () => {
@@ -122,7 +122,7 @@ describe('runtime-plugin | CF platform', () => {
     const adapter = ctx.services.get(CAPABILITIES.HTTP_ADAPTER) as IHttpAdapter;
     expect(adapter).toBeDefined();
     // CF adapter: fetch works, listen throws
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -276,7 +276,7 @@ describe('runtime-plugin | fake adapter records calls', () => {
 
     plugin.register(ctx);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     fakeAdapter.setHandler(async () => ({
       snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'test' }),
     }));
@@ -366,9 +366,7 @@ describe('runtime-plugin | missing factory throws', () => {
       },
     } as any;
 
-    expect(() => plugin.register(ctx as any)).toThrow(
-      'No HTTP adapter for platform: deno',
-    );
+    expect(() => plugin.register(ctx as any)).toThrow('No HTTP adapter for platform: deno');
   });
 });
 
@@ -416,8 +414,9 @@ describe('runtime-plugin | maxBodyBytes option domain', () => {
   // which is how this option's value is supplied in a real deployment.
   for (const bad of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) {
     it(`refuses maxBodyBytes: ${String(bad)} by name`, () => {
-      expect(() => RuntimePlugin({ platform: 'deno', maxBodyBytes: bad }))
-        .toThrow(/maxBodyBytes must be a non-negative integer/);
+      expect(() => RuntimePlugin({ platform: 'deno', maxBodyBytes: bad })).toThrow(
+        /maxBodyBytes must be a non-negative integer/,
+      );
     });
   }
 
@@ -432,7 +431,7 @@ describe('runtime-plugin | maxBodyBytes option domain', () => {
       RuntimePlugin({
         platform: 'deno',
         adapters: { deno: () => createFakeRuntimeServices('deno') },
-      })
+      }),
     ).not.toThrow();
   });
 });

@@ -35,31 +35,35 @@ describe('compileTraceDiagnosticsPolicy', () => {
   });
 
   it('refuses enabled other than the literal true', () => {
-    expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, enabled: false as never }))
-      .toThrow(TRACE_COLLECTOR_ERRORS.notEnabled);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, enabled: false as never }),
+    ).toThrow(TRACE_COLLECTOR_ERRORS.notEnabled);
   });
 
   it('refuses a bad service alias', () => {
     expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: '' })).toThrow(
       TRACE_COLLECTOR_ERRORS.aliasBytes,
     );
-    expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'a'.repeat(65) }))
-      .toThrow(TRACE_COLLECTOR_ERRORS.aliasBytes);
     expect(() =>
-      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\u202ealias' })
-    )
-      .toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
-    expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\nalias' }))
-      .toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
-    expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 7 as never }))
-      .toThrow(TRACE_COLLECTOR_ERRORS.badServiceAlias);
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'a'.repeat(65) }),
+    ).toThrow(TRACE_COLLECTOR_ERRORS.aliasBytes);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\u202ealias' }),
+    ).toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 'bad\nalias' }),
+    ).toThrow(TRACE_COLLECTOR_ERRORS.aliasControl);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, serviceAlias: 7 as never }),
+    ).toThrow(TRACE_COLLECTOR_ERRORS.badServiceAlias);
   });
 
   it('refuses bad operation maps', () => {
-    expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, operations: 'nope' as never }))
-      .toThrow(TRACE_COLLECTOR_ERRORS.badOperations);
     expect(() =>
-      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, operations: { span: 3 as never } })
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, operations: 'nope' as never }),
+    ).toThrow(TRACE_COLLECTOR_ERRORS.badOperations);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, operations: { span: 3 as never } }),
     ).toThrow(TRACE_COLLECTOR_ERRORS.badOperations);
   });
 
@@ -78,13 +82,14 @@ describe('compileTraceDiagnosticsPolicy', () => {
       compileTraceDiagnosticsPolicy({
         ...VALID_OPTIONS,
         operations: { 'span-a': 'same', 'span-b': 'same' },
-      })
+      }),
     ).toThrow(TRACE_COLLECTOR_ERRORS.duplicateAlias);
   });
 
   it('refuses an alias violating the byte bound', () => {
-    expect(() => compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, operations: { span: '' } }))
-      .toThrow(TRACE_COLLECTOR_ERRORS.aliasBytes);
+    expect(() =>
+      compileTraceDiagnosticsPolicy({ ...VALID_OPTIONS, operations: { span: '' } }),
+    ).toThrow(TRACE_COLLECTOR_ERRORS.aliasBytes);
   });
 });
 
@@ -195,8 +200,6 @@ describe('createInactiveTraceSource', () => {
   it('validates its arguments with the same fixed messages as the active source', () => {
     const source: ITraceDiagnosticsSource = createInactiveTraceSource('disabled', availability);
     expect(() => source.read('', 0)).toThrow(TRACE_COLLECTOR_ERRORS.badInstance);
-    expect(() => source.read('instance-1', 1, undefined)).toThrow(
-      TRACE_COLLECTOR_ERRORS.badCursor,
-    );
+    expect(() => source.read('instance-1', 1, undefined)).toThrow(TRACE_COLLECTOR_ERRORS.badCursor);
   });
 });

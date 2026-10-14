@@ -46,9 +46,8 @@ function makeAdapter(
     return respond(sql);
   });
   const adapter = new DrizzleAdapter({
-    drizzleInstance: createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    drizzleInstance: createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     ),
     drizzleTables: { Tenant: tenants },
     ...(poolStats !== undefined && { poolStats }),

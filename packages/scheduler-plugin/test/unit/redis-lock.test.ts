@@ -100,7 +100,7 @@ describe('RedisLock', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client: badClient as any,
     });
     try {
@@ -154,7 +154,7 @@ describe('validateClient', () => {
   });
 
   it('returns false for null', () => {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(validateClient(null as any)).toBe(false);
   });
 
@@ -163,31 +163,23 @@ describe('validateClient', () => {
   });
 
   it('returns false for missing del', () => {
-    expect(
-      validateClient({ set: () => {}, get: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, get: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing get', () => {
-    expect(
-      validateClient({ set: () => {}, del: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, del: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing set', () => {
-    expect(
-      validateClient({ get: () => {}, del: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ get: () => {}, del: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing quit', () => {
-    expect(
-      validateClient({ set: () => {}, get: () => {}, del: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, get: () => {}, del: () => {} })).toBe(false);
   });
 
   it('returns false for undefined', () => {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(validateClient(undefined as any)).toBe(false);
   });
 
@@ -288,7 +280,7 @@ describe('RedisLock N2 - error message', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client: badClient as any,
     });
     try {
@@ -305,9 +297,11 @@ describe('RedisLock N2 - error message', () => {
 describe('RedisLock command bound (M101a V8-24)', () => {
   /** Records the arguments each construction received. */
   function recordingCtor() {
-    const built: Array<
-      { url: string; options: RedisLockClientOptions | undefined; arity: number }
-    > = [];
+    const built: Array<{
+      url: string;
+      options: RedisLockClientOptions | undefined;
+      arity: number;
+    }> = [];
     class Ctor {
       constructor(url: string, options?: RedisLockClientOptions) {
         built.push({ url, options, arity: arguments.length });

@@ -70,15 +70,11 @@ describe('MessagingPlugin telemetry integration', () => {
 
     expect(seen).toEqual([{ id: 'o-1' }]);
     // The producer span opens first; the in-memory delivery runs inside it.
-    expect(host.recordedSpans.map((s) => s.name)).toEqual([
-      'publish orders',
-      'receive orders',
-    ]);
+    expect(host.recordedSpans.map((s) => s.name)).toEqual(['publish orders', 'receive orders']);
 
     // Identity, not mere presence. This is what a broken traceparent would fail.
     const receiveCall = host.recordedCalls.find((c) => c.args[0] === 'receive orders');
-    const parent = (receiveCall?.args[1] as { parentContext?: { traceId?: string } })
-      .parentContext;
+    const parent = (receiveCall?.args[1] as { parentContext?: { traceId?: string } }).parentContext;
     const producerTrace = traceIdOf(host, 'publish orders');
     expect(parent?.traceId).toBeDefined();
     expect(parent?.traceId).toBe(producerTrace);
@@ -105,8 +101,7 @@ describe('MessagingPlugin telemetry integration', () => {
       'receive rr.req.orders',
     ]);
     const receiveCall = host.recordedCalls.find((call) => call.args[0] === 'receive rr.req.orders');
-    const parent = (receiveCall?.args[1] as { parentContext?: { traceId?: string } })
-      .parentContext;
+    const parent = (receiveCall?.args[1] as { parentContext?: { traceId?: string } }).parentContext;
     expect(parent?.traceId).toBe(traceIdOf(host, 'publish rr.req.orders'));
 
     await app.stop();
@@ -193,11 +188,15 @@ describe('MessagingPlugin telemetry integration', () => {
     await broker.subscribe('orders', (_message, metadata) => {
       seen.push(metadata.headers ?? {});
     });
-    await broker.publish('orders', { id: 1 }, {
-      orderingKey: 'agg-1',
-      deduplicationId: 'dedup-1',
-      headers: { 'x-app': 'v' },
-    });
+    await broker.publish(
+      'orders',
+      { id: 1 },
+      {
+        orderingKey: 'agg-1',
+        deduplicationId: 'dedup-1',
+        headers: { 'x-app': 'v' },
+      },
+    );
 
     expect(seen[0]?.['x-setu-ordering-key']).toBe('agg-1');
     expect(seen[0]?.['x-setu-deduplication-id']).toBe('dedup-1');

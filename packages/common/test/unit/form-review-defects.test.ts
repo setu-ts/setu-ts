@@ -38,9 +38,7 @@ describe('boundary-like bytes inside a part value (review finding 1)', () => {
   it('keeps file bytes containing a boundary-like line intact', () => {
     const contents = `AAA\r\n--${B}-NOT-A-DELIMITER\r\nBBB`;
     const form = parseFormBody(
-      multipart([
-        `Content-Disposition: form-data; name="f"; filename="x.bin"\r\n\r\n${contents}`,
-      ]),
+      multipart([`Content-Disposition: form-data; name="f"; filename="x.bin"\r\n\r\n${contents}`]),
       CT,
     );
     const file = form.get('f') as FormFile;
@@ -77,10 +75,7 @@ describe('boundary-like bytes inside a part value (review finding 1)', () => {
 describe('part header field names are case-insensitive (review finding 2)', () => {
   for (const field of ['Content-Disposition', 'content-disposition', 'CONTENT-DISPOSITION']) {
     it(`reads the field name from ${field}`, () => {
-      const form = parseFormBody(
-        multipart([`${field}: form-data; name="_csrf"\r\n\r\nTOKEN`]),
-        CT,
-      );
+      const form = parseFormBody(multipart([`${field}: form-data; name="_csrf"\r\n\r\nTOKEN`]), CT);
       // Before the fix every casing but the first arrived as 'unknown', so a
       // CSRF token was never found and an upload was never delivered.
       expect(form.get('_csrf')).toBe('TOKEN');
@@ -92,7 +87,7 @@ describe('part header field names are case-insensitive (review finding 2)', () =
     const form = parseFormBody(
       multipart([
         'content-disposition: form-data; name="f"; filename="a.txt"\r\n' +
-        'content-type: text/plain\r\n\r\nhi',
+          'content-type: text/plain\r\n\r\nhi',
       ]),
       CT,
     );
@@ -244,9 +239,7 @@ describe('the CLOSING delimiter needs trailing context too (review round 2)', ()
     // Before the fix this truncated to 'AAA' while native returned it whole.
     const contents = `AAA\r\n--${B}--NOT-A-DELIMITER\r\nBBB`;
     const form = parseFormBody(
-      multipart([
-        `Content-Disposition: form-data; name="f"; filename="x.bin"\r\n\r\n${contents}`,
-      ]),
+      multipart([`Content-Disposition: form-data; name="f"; filename="x.bin"\r\n\r\n${contents}`]),
       CT,
     );
     expect(new TextDecoder().decode((form.get('f') as FormFile).data)).toBe(contents);

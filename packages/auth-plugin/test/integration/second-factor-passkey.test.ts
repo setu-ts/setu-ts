@@ -83,18 +83,21 @@ describe('passkey as a second factor', () => {
     // Enrol BOB's credential directly into the shared store: the attacker's
     // authenticator never registered through the ceremony.
     const rogue = await VirtualAuthenticator.create('ES256');
-    await first.store.save({
-      id: toBase64Url(rogue.credentialId),
-      principalId: 'bob',
-      userHandle: toBase64Url(rogue.userHandle),
-      publicKey: await rogue.publicKeyJwk(),
-      algorithm: -7,
-      counter: 0,
-      backedUp: false,
-      transports: ['internal'],
-      attestation: 'unverified',
-      createdAt: 0,
-    }, { maxPerPrincipal: 100 });
+    await first.store.save(
+      {
+        id: toBase64Url(rogue.credentialId),
+        principalId: 'bob',
+        userHandle: toBase64Url(rogue.userHandle),
+        publicKey: await rogue.publicKeyJwk(),
+        algorithm: -7,
+        counter: 0,
+        backedUp: false,
+        transports: ['internal'],
+        attestation: 'unverified',
+        createdAt: 0,
+      },
+      { maxPerPrincipal: 100 },
+    );
 
     const mfaApp = await buildPasskeyApp({
       passkeys: { store: first.store },

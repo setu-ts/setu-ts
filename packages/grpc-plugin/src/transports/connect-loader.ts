@@ -50,8 +50,7 @@ const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
     'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
   protobuf:
     'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
-  wkt:
-    'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
+  wkt: 'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
 };
 
 /** Structural shape of `@connectrpc/connect`. */
@@ -128,10 +127,7 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
     reviveDescriptorSet(base64: string): FileRegistryLike {
       let fileDescriptorSet: unknown;
       try {
-        fileDescriptorSet = protobuf.fromBinary(
-          wkt.FileDescriptorSetSchema,
-          decodeBase64(base64),
-        );
+        fileDescriptorSet = protobuf.fromBinary(wkt.FileDescriptorSetSchema, decodeBase64(base64));
       } catch (cause) {
         throw new GrpcDescriptorError(
           'the embedded descriptor set could not be decoded as a FileDescriptorSet',
@@ -141,10 +137,7 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
       return protobuf.createFileRegistry(fileDescriptorSet);
     },
 
-    getService(
-      registry: FileRegistryLike,
-      serviceName: string,
-    ): ServiceDescriptorLike | undefined {
+    getService(registry: FileRegistryLike, serviceName: string): ServiceDescriptorLike | undefined {
       return registry.getService(serviceName);
     },
 

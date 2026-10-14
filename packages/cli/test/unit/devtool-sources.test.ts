@@ -89,23 +89,24 @@ describe('development source policies', () => {
   });
 
   it('gates known zero-option and object-option calls on the devtool argument', () => {
-    const source = "import { CachePlugin as AppCache } from '@setu-ts/cache-plugin';\n" +
-      "import { HealthPlugin } from '@setu-ts/health-plugin';\n" + signature +
+    const source =
+      "import { CachePlugin as AppCache } from '@setu-ts/cache-plugin';\n" +
+      "import { HealthPlugin } from '@setu-ts/health-plugin';\n" +
+      signature +
       '\n return createApplication({ plugins: [\n  AppCache(),\n  HealthPlugin({ indicators: [] }),\n] });\n}';
     const wired = withDevtoolSourceWiring(source, new Set(['cache-plugin', 'health-plugin']));
     expect(wired.manual).toEqual([]);
     expect(wired.source).toContain('devtool === undefined ? {} : DEVTOOL_SOURCES');
     expect(wired.source).toContain('...sources.cache');
     expect(wired.source).toContain('...{ indicators: [] }, ...sources.health');
-    expect(withDevtoolSourceWiring(wired.source, new Set(['cache-plugin', 'health-plugin'])).source)
-      .toBe(wired.source);
+    expect(
+      withDevtoolSourceWiring(wired.source, new Set(['cache-plugin', 'health-plugin'])).source,
+    ).toBe(wired.source);
   });
 
   it('never rewrites plugin examples inside comments, literals or unfamiliar calls', () => {
     const imports = "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n";
-    for (
-      const fake of ['// $Cache(),', '/*\n$Cache(),\n*/', "const text = '$Cache(),';"]
-    ) {
+    for (const fake of ['// $Cache(),', '/*\n$Cache(),\n*/', "const text = '$Cache(),';"]) {
       const source = imports + signature + '\n' + fake + '\n $Cache(customOptions),\n}';
       const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
       expect(result.source).toBe(source);
@@ -119,7 +120,10 @@ describe('development source policies', () => {
       expect(result.source).toBe(source);
       expect(result.manual).toEqual(['CachePlugin({ ...options, ...sources.cache })']);
     }
-    const source = imports + '// ): IKernelApplication {\n' + signature +
+    const source =
+      imports +
+      '// ): IKernelApplication {\n' +
+      signature +
       '\n // ...sources.cache\n $Cache(),\n}';
     const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
     expect(result.source).toContain('// ): IKernelApplication {\n');
@@ -127,21 +131,19 @@ describe('development source policies', () => {
   });
 
   it('preserves source positions while refusing incomplete literals and comments', () => {
-    for (
-      const source of [
-        "'unterminated",
-        '"unterminated',
-        '`unterminated',
-        '/* unterminated',
-        "'trailing\\",
-        // Outside the exactly-classified language: escapes, templates, a backslash
-        // in code, a raw line break inside a string.
-        "const a = 'it\\'s';",
-        'const b = `template`;',
-        'const c = \\u0061;',
-        "const d = 'line\nbreak';",
-      ]
-    ) {
+    for (const source of [
+      "'unterminated",
+      '"unterminated',
+      '`unterminated',
+      '/* unterminated',
+      "'trailing\\",
+      // Outside the exactly-classified language: escapes, templates, a backslash
+      // in code, a raw line break inside a string.
+      "const a = 'it\\'s';",
+      'const b = `template`;',
+      'const c = \\u0061;',
+      "const d = 'line\nbreak';",
+    ]) {
       expect(maskSourceCode(source)).toBeUndefined();
       expect(maskComments(source)).toBeUndefined();
     }
@@ -152,8 +154,10 @@ describe('development source policies', () => {
     expect(masked.match(/[\r\n]/g)).toEqual(source.match(/[\r\n]/g));
     expect(masked).toContain('const a =');
     expect(masked).not.toContain('unterminated');
-    const commentedImport = "/*\nimport { CachePlugin } from '@setu-ts/cache-plugin';\n*/\n" +
-      signature + '\n CachePlugin(),\n}';
+    const commentedImport =
+      "/*\nimport { CachePlugin } from '@setu-ts/cache-plugin';\n*/\n" +
+      signature +
+      '\n CachePlugin(),\n}';
     expect(withDevtoolSourceWiring(commentedImport, new Set(['cache-plugin'])).source).toBe(
       commentedImport,
     );
@@ -161,25 +165,28 @@ describe('development source policies', () => {
 
   it('preserves module-scope calls and selects only the complete createApp body', () => {
     const outside = 'const reusedCache = [\n  CachePlugin(),\n];\n';
-    const source = "import { CachePlugin } from '@setu-ts/cache-plugin';\n" + outside +
-      signature + '\n CachePlugin(customOptions),\n}\n' + outside;
+    const source =
+      "import { CachePlugin } from '@setu-ts/cache-plugin';\n" +
+      outside +
+      signature +
+      '\n CachePlugin(customOptions),\n}\n' +
+      outside;
     const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
     expect(result.source).toBe(source);
     expect(result.manual).toEqual(['CachePlugin({ ...options, ...sources.cache })']);
-    for (
-      const incomplete of [
-        "'broken",
-        'export function createApp(',
-        'export function createApp(): Promise<IKernelApplication> {',
-        'export function createApp() {',
-      ]
-    ) {
+    for (const incomplete of [
+      "'broken",
+      'export function createApp(',
+      'export function createApp(): Promise<IKernelApplication> {',
+      'export function createApp() {',
+    ]) {
       expect(factoryScope(incomplete)).toBeUndefined();
     }
     const nested =
       "export function createApp(env = read(() => ({ value: ')' }))) { return { literal: '}' }; }";
-    expect(factoryScope(nested)?.code.slice(factoryScope(nested)!.start, factoryScope(nested)!.end))
-      .toContain('return { literal:');
+    expect(
+      factoryScope(nested)?.code.slice(factoryScope(nested)!.start, factoryScope(nested)!.end),
+    ).toContain('return { literal:');
   });
 
   it('prints the import and declaration a pasted manual line needs, and only then', () => {
@@ -190,7 +197,7 @@ describe('development source policies', () => {
     expect(unclassified.setup).toEqual([
       `Add the import: ${importLine}`,
       'Add as the first statement of createApp, whose second parameter must be the devtool ' +
-      `composition: ${declaration}`,
+        `composition: ${declaration}`,
     ]);
     // A commented-out copy of the import is not an import (PR #415 review).
     const commented = withDevtoolSourceWiring(
@@ -205,8 +212,10 @@ describe('development source policies', () => {
     expect(imported.setup).toHaveLength(1);
     expect(imported.setup[0]).toContain(declaration);
     // One call wired automatically leaves the declaration in place for the other's manual line.
-    const mixed = "import { CachePlugin } from '@setu-ts/cache-plugin';\n" +
-      "import { HealthPlugin } from '@setu-ts/health-plugin';\n" + signature +
+    const mixed =
+      "import { CachePlugin } from '@setu-ts/cache-plugin';\n" +
+      "import { HealthPlugin } from '@setu-ts/health-plugin';\n" +
+      signature +
       '\n return createApplication({ plugins: [\n  CachePlugin(),\n  HealthPlugin(options),\n] });\n}';
     const partial = withDevtoolSourceWiring(mixed, new Set(['cache-plugin', 'health-plugin']));
     // An automatic edit neither trusts a commented copy nor duplicates a live import.
@@ -228,20 +237,28 @@ describe('development source policies', () => {
     const unclassified = withDevtoolSourceWiring('handwritten()', packages);
     expect(unclassified.source).toBe('handwritten()');
     expect(unclassified.manual).toContain('CachePlugin({ ...options, ...sources.cache })');
-    const source = "import { CachePlugin } from '@setu-ts/cache-plugin';\n" + signature +
+    const source =
+      "import { CachePlugin } from '@setu-ts/cache-plugin';\n" +
+      signature +
       '\n CachePlugin(options),\n}';
     expect(withDevtoolSourceWiring(source, new Set(['cache-plugin'])).source).toContain(
       'CachePlugin(options)',
     );
     expect(withDevtoolSourceWiring(source, new Set(['cache-plugin'])).manual).toHaveLength(1);
-    expect(withDevtoolSourceWiring(signature + '\n}', new Set(['cache-plugin'])).manual)
-      .toHaveLength(1);
-    const dollarAlias = "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n" +
-      signature + '\n $Cache(),\n}';
-    expect(withDevtoolSourceWiring(dollarAlias, new Set(['cache-plugin'])).source)
-      .toContain('$Cache({ ...sources.cache })');
-    const hostileAlias = "import { CachePlugin as Evil\u202e } from '@setu-ts/cache-plugin';\n" +
-      signature + '\n Evil(),\n}';
+    expect(
+      withDevtoolSourceWiring(signature + '\n}', new Set(['cache-plugin'])).manual,
+    ).toHaveLength(1);
+    const dollarAlias =
+      "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n" +
+      signature +
+      '\n $Cache(),\n}';
+    expect(withDevtoolSourceWiring(dollarAlias, new Set(['cache-plugin'])).source).toContain(
+      '$Cache({ ...sources.cache })',
+    );
+    const hostileAlias =
+      "import { CachePlugin as Evil\u202e } from '@setu-ts/cache-plugin';\n" +
+      signature +
+      '\n Evil(),\n}';
     const refused = withDevtoolSourceWiring(hostileAlias, new Set(['cache-plugin']));
     expect(refused.source).toBe(hostileAlias);
     expect(refused.manual.join('\n')).not.toContain('\u202e');
@@ -250,7 +267,11 @@ describe('development source policies', () => {
   it('refuses slash expressions rather than extending scope through regex braces', () => {
     const imports = "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n";
     for (const expression of ['/ { /', '/{/', '/}/', '/[{}]/', '8 / 2', '8 /= 2']) {
-      const source = imports + signature + '\n const expression = ' + expression +
+      const source =
+        imports +
+        signature +
+        '\n const expression = ' +
+        expression +
         ';\n return createApplication({ plugins: [$Cache(customOptions)] });\n}\n' +
         'const reused = [\n $Cache(),\n];\nconst closing = /}/;';
       const result = withDevtoolSourceWiring(source, new Set(['cache-plugin']));
@@ -363,8 +384,8 @@ describe('development source policies', () => {
 
   it('scans import clauses in linear time and refuses non-import text', () => {
     // A regex here backtracked cubically: 10,000 spaces took 104 s (audit round 3).
-    const hostile = 'import X' + ' '.repeat(100_000) + '\n' +
-      ('import ' + ' '.repeat(50) + '\n').repeat(2000);
+    const hostile =
+      'import X' + ' '.repeat(100_000) + '\n' + ('import ' + ' '.repeat(50) + '\n').repeat(2000);
     const started = performance.now();
     maskImportDeclarations(hostile);
     expect(performance.now() - started).toBeLessThan(5000);
@@ -390,65 +411,59 @@ describe('development source policies', () => {
   // Audit round 6 (L1-R5/L2-R5): an unknown `@setu-ts/` name is an import-map
   // alias, and computed member access reaches a property no identifier names.
   it('refuses aliases and computed member access, keeps array literals', () => {
-    for (
-      const source of [
-        "import * as ns from '@setu-ts/cachealias';",
-        "import { RealtimeBackplanePlugin } from '@setu-ts/bpalias';",
-        "const o = ({} as never)['constructor'];",
-        "const o = x['proto' + 'type'];",
-        'const o = f()[k];',
-        'const o = a?.[k];',
-        'const o = list[0][k];',
-        // Audit round 7: a non-null assertion and computed keys, destructuring included.
-        "const p = o!['constructor']!['prototype']!;",
-        "const { ['constructor']: C } = {} as R;",
-        "const o = { a: 1, ['k']: v };",
-        "const o = { ['k']: v };",
-      ]
-    ) {
+    for (const source of [
+      "import * as ns from '@setu-ts/cachealias';",
+      "import { RealtimeBackplanePlugin } from '@setu-ts/bpalias';",
+      "const o = ({} as never)['constructor'];",
+      "const o = x['proto' + 'type'];",
+      'const o = f()[k];',
+      'const o = a?.[k];',
+      'const o = list[0][k];',
+      // Audit round 7: a non-null assertion and computed keys, destructuring included.
+      "const p = o!['constructor']!['prototype']!;",
+      "const { ['constructor']: C } = {} as R;",
+      "const o = { a: 1, ['k']: v };",
+      "const o = { ['k']: v };",
+    ]) {
       expect(maskSourceCode(source), source).toBeUndefined();
     }
-    for (
-      const source of [
-        "import { CachePlugin } from '@setu-ts/cache-plugin';",
-        "import { defineWorkerTask } from '@setu-ts/runtime/worker';",
-        'const plugins: readonly IPlugin[] = [a, b];',
-        'function f() { return [a]; }',
-        'for (const x of [a]) g(x);',
-        'const t = { plugins: [...GENERATED_PLUGINS] };',
-        'const n = [a, [b]];',
-        'f(a, [b]);',
-        'const v = c ? [a] : [b];',
-        'const w = ![a];',
-        'type T = Map<[A, B], C>;',
-      ]
-    ) {
+    for (const source of [
+      "import { CachePlugin } from '@setu-ts/cache-plugin';",
+      "import { defineWorkerTask } from '@setu-ts/runtime/worker';",
+      'const plugins: readonly IPlugin[] = [a, b];',
+      'function f() { return [a]; }',
+      'for (const x of [a]) g(x);',
+      'const t = { plugins: [...GENERATED_PLUGINS] };',
+      'const n = [a, [b]];',
+      'f(a, [b]);',
+      'const v = c ? [a] : [b];',
+      'const w = ![a];',
+      'type T = Map<[A, B], C>;',
+    ]) {
       expect(maskSourceCode(source), source).toBeDefined();
     }
   });
 
   it('detects an import map that points a framework name elsewhere', async () => {
     const map = (imports: Record<string, string>) => ({ imports });
-    for (
-      const same of [
-        { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin@^0.8.0' },
-        { '@setu-ts/runtime/': 'npm:@setu-ts/runtime@^0.8.0/' },
-        { '@setu-ts/cache-plugin': 'npm:@jsr/setu-ts__cache-plugin@^0.8.0' },
-        { '@setu-ts/rest-starter': '../../packages/starters/rest-starter/src/index.ts' },
-        { '@setu-ts/kernel': '/repo/packages/kernel/src/index.ts' },
-      ]
-    ) expect(importMapRetargets(map(same)), JSON.stringify(same)).toBe(false);
-    for (
-      const other of [
-        { '@setu-ts/cachealias': 'npm:@setu-ts/cache-plugin@^0.8.0' },
-        { '@setu-ts/health-plugin': 'npm:@setu-ts/cache-plugin@^1' },
-        { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin-evil@^1' },
-        // Audit round 7: a path that merely passes through `<pkg>/`.
-        { '@setu-ts/storage-plugin': '../storage-plugin/../packages/cache-plugin/src/index.ts' },
-        { '@setu-ts/storage-plugin': './vendor/storage-plugin/x.ts' },
-        { '@setu-ts/cache-plugin': 'https://example.test/cache.ts' },
-      ]
-    ) expect(importMapRetargets(map(other)), JSON.stringify(other)).toBe(true);
+    for (const same of [
+      { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin@^0.8.0' },
+      { '@setu-ts/runtime/': 'npm:@setu-ts/runtime@^0.8.0/' },
+      { '@setu-ts/cache-plugin': 'npm:@jsr/setu-ts__cache-plugin@^0.8.0' },
+      { '@setu-ts/rest-starter': '../../packages/starters/rest-starter/src/index.ts' },
+      { '@setu-ts/kernel': '/repo/packages/kernel/src/index.ts' },
+    ])
+      expect(importMapRetargets(map(same)), JSON.stringify(same)).toBe(false);
+    for (const other of [
+      { '@setu-ts/cachealias': 'npm:@setu-ts/cache-plugin@^0.8.0' },
+      { '@setu-ts/health-plugin': 'npm:@setu-ts/cache-plugin@^1' },
+      { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin-evil@^1' },
+      // Audit round 7: a path that merely passes through `<pkg>/`.
+      { '@setu-ts/storage-plugin': '../storage-plugin/../packages/cache-plugin/src/index.ts' },
+      { '@setu-ts/storage-plugin': './vendor/storage-plugin/x.ts' },
+      { '@setu-ts/cache-plugin': 'https://example.test/cache.ts' },
+    ])
+      expect(importMapRetargets(map(other)), JSON.stringify(other)).toBe(true);
     // Keys are compared AFTER JSON decoding: an escaped key is the same key.
     expect(
       importMapRetargets(
@@ -466,23 +481,21 @@ describe('development source policies', () => {
     // tag or the workspace protocol — the form the CLI writes since 0.9. Anything
     // else installs something the key does not name.
     for (const value of ['^1', '~1.2.0', '0.9.0', 'latest', 'workspace:^', 'workspace:*']) {
-      expect(importMapRetargets({ dependencies: { '@setu-ts/kernel': value } }), value)
-        .toBe(false);
+      expect(importMapRetargets({ dependencies: { '@setu-ts/kernel': value } }), value).toBe(false);
     }
-    for (
-      const value of [
-        'npm:evil@1',
-        'file:../kernel',
-        'git+https://example.test/x.git',
-        'https://example.test/kernel.tgz',
-        'user/repo',
-        './vendor/kernel',
-        'workspace:npm:evil@1',
-        '',
-      ]
-    ) {
-      expect(importMapRetargets({ devDependencies: { '@setu-ts/kernel': value } }), value)
-        .toBe(true);
+    for (const value of [
+      'npm:evil@1',
+      'file:../kernel',
+      'git+https://example.test/x.git',
+      'https://example.test/kernel.tgz',
+      'user/repo',
+      './vendor/kernel',
+      'workspace:npm:evil@1',
+      '',
+    ]) {
+      expect(importMapRetargets({ devDependencies: { '@setu-ts/kernel': value } }), value).toBe(
+        true,
+      );
     }
     // In an IMPORT map a bare range is not a specifier at all: still a retarget.
     expect(importMapRetargets({ imports: { '@setu-ts/kernel': '^1' } })).toBe(true);
@@ -558,17 +571,15 @@ describe('development source policies', () => {
   it('tells a call from a declaration', () => {
     expect(callsIdentifier('x = [CachePlugin()];', 'CachePlugin')).toBe(true);
     expect(callsIdentifier('CachePlugin(\n  opts,\n),', 'CachePlugin')).toBe(true);
-    for (
-      const declaration of [
-        '{ CachePlugin() { } }',
-        'CachePlugin(): string',
-        'CachePlugin() => 1',
-        'function CachePlugin() {}',
-        'function\n  CachePlugin(a) {}',
-        'function CachePlugin(a: string);',
-        'CachePlugin',
-      ]
-    ) {
+    for (const declaration of [
+      '{ CachePlugin() { } }',
+      'CachePlugin(): string',
+      'CachePlugin() => 1',
+      'function CachePlugin() {}',
+      'function\n  CachePlugin(a) {}',
+      'function CachePlugin(a: string);',
+      'CachePlugin',
+    ]) {
       expect(callsIdentifier(declaration, 'CachePlugin'), declaration).toBe(false);
     }
   });
@@ -583,26 +594,32 @@ describe('development source policies', () => {
       '\n  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;';
     const call = '\n  const p = [RealtimeBackplanePlugin({ ...sources.backplane })];\n}';
     const custom = async (config: string) =>
-      (await readDevtoolSourceNames(
-        createFakeFs({}),
-        '/app',
-        new Set(['realtime-backplane-plugin']),
-        config,
-      )).customBackplane;
+      (
+        await readDevtoolSourceNames(
+          createFakeFs({}),
+          '/app',
+          new Set(['realtime-backplane-plugin']),
+          config,
+        )
+      ).customBackplane;
     expect(await custom(imported + signature + declaration + call)).toBe(false);
-    for (
-      const config of [
-        "export const sources = { backplane: { transport: 'custom' } };\n" + imported + signature +
+    for (const config of [
+      "export const sources = { backplane: { transport: 'custom' } };\n" +
+        imported +
+        signature +
         call,
-        imported + signature + declaration + '\n  { const sources = other; }' + call,
-        imported + signature + declaration + '\n  const f = (sources: R) => sources;' + call,
-        imported + signature + '\n  const x = 1;' + declaration + call,
-        imported + 'const y = sources.backplane;\n' + signature + declaration + call,
-      ]
-    ) expect(await custom(config), config).toBe(true);
+      imported + signature + declaration + '\n  { const sources = other; }' + call,
+      imported + signature + declaration + '\n  const f = (sources: R) => sources;' + call,
+      imported + signature + '\n  const x = 1;' + declaration + call,
+      imported + 'const y = sources.backplane;\n' + signature + declaration + call,
+    ])
+      expect(await custom(config), config).toBe(true);
 
     const cache = "import { CachePlugin } from '@setu-ts/cache-plugin';\n";
-    const shadowed = 'export const sources = { cache: {} };\n' + cache + signature +
+    const shadowed =
+      'export const sources = { cache: {} };\n' +
+      cache +
+      signature +
       '\n  return createApplication({ plugins: [\n  CachePlugin(),\n] });\n}';
     const result = withDevtoolSourceWiring(shadowed, new Set(['cache-plugin']));
     expect(result.source).toBe(shadowed);
@@ -648,28 +665,27 @@ describe('development source policies', () => {
         createFakeFs({}),
         '/app',
         new Set(['realtime-backplane-plugin']),
-        imported + signature +
+        imported +
+          signature +
           '\n  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;' +
           `\n  const p = [${call}];\n}`,
       );
-    for (
-      const call of [
-        'RealtimeBackplanePlugin({ ...sources.backplane })',
-        "RealtimeBackplanePlugin({ ...{ transport: 'redis' }, ...sources.backplane })",
-        withSourceArgs('realtime-backplane-plugin', '', packages, { project: 'app' })
-          .replace(/^/, 'RealtimeBackplanePlugin(') + ')',
-      ]
-    ) {
+    for (const call of [
+      'RealtimeBackplanePlugin({ ...sources.backplane })',
+      "RealtimeBackplanePlugin({ ...{ transport: 'redis' }, ...sources.backplane })",
+      withSourceArgs('realtime-backplane-plugin', '', packages, { project: 'app' }).replace(
+        /^/,
+        'RealtimeBackplanePlugin(',
+      ) + ')',
+    ]) {
       expect((await names(call)).customBackplane, call).toBe(false);
     }
-    for (
-      const call of [
-        "RealtimeBackplanePlugin({ ...{ transport: 'custom' }, ...sources.backplane })",
-        'RealtimeBackplanePlugin({ ...other, ...sources.backplane })',
-        'RealtimeBackplanePlugin({ ...sources.backplane, ...other })',
-        'RealtimeBackplanePlugin({ ...sources.backplanex })',
-      ]
-    ) {
+    for (const call of [
+      "RealtimeBackplanePlugin({ ...{ transport: 'custom' }, ...sources.backplane })",
+      'RealtimeBackplanePlugin({ ...other, ...sources.backplane })',
+      'RealtimeBackplanePlugin({ ...sources.backplane, ...other })',
+      'RealtimeBackplanePlugin({ ...sources.backplanex })',
+    ]) {
       expect((await names(call)).customBackplane, call).toBe(true);
     }
     const retargeted = await readDevtoolSourceNames(
@@ -736,13 +752,14 @@ describe('development source policies', () => {
   });
 
   it('scans the factory signature in linear time', () => {
-    const source = 'export function createApp()' + ' '.repeat(150_000) +
-      ': IKernelApplication & object {\n}';
+    const source =
+      'export function createApp()' + ' '.repeat(150_000) + ': IKernelApplication & object {\n}';
     const started = performance.now();
     expect(factoryScope(source)).toBeUndefined();
     expect(performance.now() - started).toBeLessThan(5000);
-    expect(factoryScope('export function createApp()   :   IKernelApplication   {\n}'))
-      .toBeUndefined();
+    expect(
+      factoryScope('export function createApp()   :   IKernelApplication   {\n}'),
+    ).toBeUndefined();
     expect(factoryScope('export function createApp() : IKernelApplication {\n}')).toBeDefined();
     expect(factoryScope('export function createApp()\n  : IApplication\n  {\n}')).toBeDefined();
   });
@@ -760,23 +777,20 @@ describe('development source policies', () => {
     const custom = async (config: string) =>
       (await readDevtoolSourceNames(fs, '/shop', packages, config)).customBackplane === true;
     const head = "import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n";
-    for (
-      const tail of [
-        'const p = RealtimeBackplanePlugin(',
-        'const p = RealtimeBackplanePlugin(]',
-        "const p = RealtimeBackplanePlugin('memory');",
-        'const p = RealtimeBackplanePlugin({}, extra);',
-        "const p = RealtimeBackplanePlugin({ transport: 'redis' } as Options);",
-        'type T = typeof RealtimeBackplanePlugin;',
-      ]
-    ) expect(await custom(head + tail), tail).toBe(true);
-    for (
-      const declaration of [
-        "import { RealtimeBackplanePlugin as 1x } from '@setu-ts/realtime-backplane-plugin';\n",
-        "import { Other } from '@setu-ts/realtime-backplane-plugin';\n",
-        "// import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n",
-      ]
-    ) {
+    for (const tail of [
+      'const p = RealtimeBackplanePlugin(',
+      'const p = RealtimeBackplanePlugin(]',
+      "const p = RealtimeBackplanePlugin('memory');",
+      'const p = RealtimeBackplanePlugin({}, extra);',
+      "const p = RealtimeBackplanePlugin({ transport: 'redis' } as Options);",
+      'type T = typeof RealtimeBackplanePlugin;',
+    ])
+      expect(await custom(head + tail), tail).toBe(true);
+    for (const declaration of [
+      "import { RealtimeBackplanePlugin as 1x } from '@setu-ts/realtime-backplane-plugin';\n",
+      "import { Other } from '@setu-ts/realtime-backplane-plugin';\n",
+      "// import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';\n",
+    ]) {
       expect(await custom(`${declaration}const p = RealtimeBackplanePlugin();`), declaration).toBe(
         true,
       );
@@ -831,42 +845,40 @@ describe('development source policies', () => {
     // Audit round 3: a custom call hidden in a template substitution, a second
     // import form, a prototype carrying the transport, or a non-call reference
     // BESIDE a confirmed call each withholds the policy.
-    for (
-      const config of [
-        `${imported}const p = [RealtimeBackplanePlugin()];\n` +
+    for (const config of [
+      `${imported}const p = [RealtimeBackplanePlugin()];\n` +
         "const t = `${RealtimeBackplanePlugin({ transport: 'custom', backplane })}`;",
-        `${imported}import { RealtimeBackplanePlugin as X } from "@setu-ts/realtime-backplane-plugin";\n` +
+      `${imported}import { RealtimeBackplanePlugin as X } from "@setu-ts/realtime-backplane-plugin";\n` +
         "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom' })];",
-        `${imported}const p = [RealtimeBackplanePlugin({ __proto__: proto })];`,
-        `${imported}const make = RealtimeBackplanePlugin;\n` +
+      `${imported}const p = [RealtimeBackplanePlugin({ __proto__: proto })];`,
+      `${imported}const make = RealtimeBackplanePlugin;\n` +
         "const p = [RealtimeBackplanePlugin(), make({ transport: 'custom' })];",
-        `${imported}type T = typeof RealtimeBackplanePlugin;\nconst p = [RealtimeBackplanePlugin()];`,
-        // A reference followed directly by a balanced `{…}` is the one shape only
-        // the call guard refuses: without it this reads as a call with no argument.
-        `${imported}class X extends RealtimeBackplanePlugin {}\nconst p = [RealtimeBackplanePlugin()];`,
-        // Audit round 4: an escaped alias, a `jsr:` second import, or a template
-        // hiding a custom call — each beside a dead plain call.
-        `${imported}const p = [RealtimeBackplanePlugin(), R\\u0065altimeBackplanePlugin({ transport: 'custom', backplane })];`,
-        `${imported}import { RealtimeBackplanePlugin as X } from 'npm:@setu-ts/realtime-backplane-plugin@^0.8.0';\n` +
+      `${imported}type T = typeof RealtimeBackplanePlugin;\nconst p = [RealtimeBackplanePlugin()];`,
+      // A reference followed directly by a balanced `{…}` is the one shape only
+      // the call guard refuses: without it this reads as a call with no argument.
+      `${imported}class X extends RealtimeBackplanePlugin {}\nconst p = [RealtimeBackplanePlugin()];`,
+      // Audit round 4: an escaped alias, a `jsr:` second import, or a template
+      // hiding a custom call — each beside a dead plain call.
+      `${imported}const p = [RealtimeBackplanePlugin(), R\\u0065altimeBackplanePlugin({ transport: 'custom', backplane })];`,
+      `${imported}import { RealtimeBackplanePlugin as X } from 'npm:@setu-ts/realtime-backplane-plugin@^0.8.0';\n` +
         "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom', backplane })];",
-        `${imported}const o = \`\${\`/*\`}\`;\nconst c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n// */\n` +
+      `${imported}const o = \`\${\`/*\`}\`;\nconst c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n// */\n` +
         'const p = [RealtimeBackplanePlugin()];',
-      ]
-    ) expect(await custom(config), config).toBe(true);
+    ])
+      expect(await custom(config), config).toBe(true);
     // Audit round 5: prototype or global mutation, an import-map alias, and a call
     // hidden behind a U+2028-terminated comment each withhold the policy.
-    for (
-      const config of [
-        `${imported}Object.assign(Object.prototype, { transport: 'custom', backplane: x });\n` +
+    for (const config of [
+      `${imported}Object.assign(Object.prototype, { transport: 'custom', backplane: x });\n` +
         'const p = [RealtimeBackplanePlugin({})];',
-        `${imported}({}).constructor.prototype.transport = 'custom';\n` +
+      `${imported}({}).constructor.prototype.transport = 'custom';\n` +
         'const p = [RealtimeBackplanePlugin({})];',
-        `${imported}import { RealtimeBackplanePlugin as X } from 'rbalias';\n` +
+      `${imported}import { RealtimeBackplanePlugin as X } from 'rbalias';\n` +
         "const p = [RealtimeBackplanePlugin(), X({ transport: 'custom', backplane })];",
-        `${imported}// note\u2028const c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n` +
+      `${imported}// note\u2028const c = RealtimeBackplanePlugin({ transport: 'custom', backplane });\n` +
         'const p = [RealtimeBackplanePlugin()];',
-      ]
-    ) expect(await custom(config), config).toBe(true);
+    ])
+      expect(await custom(config), config).toBe(true);
     // An alias, a second import form, or no import at all confirms nothing.
     expect(await custom(`${imported}const make = RealtimeBackplanePlugin;\nmake({});`)).toBe(true);
     expect(
@@ -877,8 +889,10 @@ describe('development source policies', () => {
     ).toBe(true);
     expect(await custom('const p = [RealtimeBackplanePlugin()];')).toBe(true);
     expect(await custom(`${imported}const unused = 1;`)).toBe(true);
-    const policy = renderDevtoolSources(packages, { project: 'shop', customBackplane: true })
-      .contents;
+    const policy = renderDevtoolSources(packages, {
+      project: 'shop',
+      customBackplane: true,
+    }).contents;
     expect(policy).not.toContain('  backplane:');
   });
 });

@@ -43,8 +43,10 @@ const SECTIONS: Readonly<Record<FrameworkManifest, readonly string[]>> = {
  * @returns The unscoped framework package name
  */
 export function legacyFrameworkPackage(value: string): string | undefined {
-  return /^npm:@jsr\/setu-ts__([a-z0-9-]+)@/.exec(value)?.[1] ??
-    /^jsr:\/?@setu-ts\/([a-z0-9-]+)@/.exec(value)?.[1];
+  return (
+    /^npm:@jsr\/setu-ts__([a-z0-9-]+)@/.exec(value)?.[1] ??
+    /^jsr:\/?@setu-ts\/([a-z0-9-]+)@/.exec(value)?.[1]
+  );
 }
 
 /** One string value directly inside a pin section, with its exact source span. */
@@ -131,8 +133,11 @@ function sectionEntries(source: string, sections: readonly string[]): SectionEnt
       if (top?.kind === 'object' && top.expectingKey) {
         top.lastKey = text;
       } else if (
-        top?.kind === 'object' && stack.length === 2 && top.key !== undefined &&
-        sections.includes(top.key) && top.lastKey !== undefined
+        top?.kind === 'object' &&
+        stack.length === 2 &&
+        top.key !== undefined &&
+        sections.includes(top.key) &&
+        top.lastKey !== undefined
       ) {
         entries.push({ section: top.key, name: top.lastKey, value: text, start: index, end });
       }

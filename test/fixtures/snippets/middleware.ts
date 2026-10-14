@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- documentation snippet fixtures mirror guide examples
+/* eslint-disable no-console -- documentation snippet fixtures mirror guide examples */
 // Middleware registration from docs/plugin-architecture.md - must compile.
 import type { MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

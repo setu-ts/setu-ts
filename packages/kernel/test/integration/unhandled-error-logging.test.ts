@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 /**
  * Integration test: the kernel's fallback 500 logs the unhandled error at
  * `error` level (plan §3.4, X11-2), carrying the message, the serialized
@@ -33,7 +33,7 @@ function runtimePlugin(): IPlugin {
 /** Installs a `console.log` hook that appends to `logs`; returns the restore fn. */
 function hookConsole(logs: string[]): () => void {
   const original = console.log;
-  // deno-lint-ignore no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (console as any).log = (...args: unknown[]) => {
     logs.push(args.map(String).join(' '));
   };
@@ -80,8 +80,7 @@ describe('kernel fallback 500 is logged (X11-2)', () => {
     expect(nf.statusCode).toBe(404);
     expect(
       logs.filter((l) => l.includes('Unhandled request error') && l.includes('"/nope"')).length,
-    )
-      .toBe(0);
+    ).toBe(0);
 
     await app.stop();
   });

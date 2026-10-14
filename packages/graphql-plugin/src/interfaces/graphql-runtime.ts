@@ -200,8 +200,7 @@ export interface GraphqlExecutionResultLike {
  * stream could not be created.
  */
 export type GraphqlSubscribeResultLike =
-  | GraphqlExecutionResultLike
-  | AsyncIterable<GraphqlExecutionResultLike>;
+  GraphqlExecutionResultLike | AsyncIterable<GraphqlExecutionResultLike>;
 
 /**
  * The adapted graphql runtime interface.
@@ -255,10 +254,7 @@ export interface GraphqlRuntime {
    * `GraphQLErrorOptions | undefined`, and `undefined` is. The only `src`
    * caller (`depth-limit.ts`) passes the message alone.
    */
-  GraphQLError: new (
-    message: string,
-    options?: undefined,
-  ) => GraphqlGraphQLErrorLike;
+  GraphQLError: new (message: string, options?: undefined) => GraphqlGraphQLErrorLike;
   NoSchemaIntrospectionCustomRule: unknown;
   specifiedRules: readonly unknown[];
 }

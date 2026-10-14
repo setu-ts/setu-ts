@@ -142,7 +142,7 @@ describe('adaptServiceBusModule', () => {
     let clientClosed = false;
     let sendersClosed = 0;
 
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = {} as any;
     sdk.sends = [];
     sdk.receivers = [];
@@ -199,7 +199,7 @@ describe('adaptServiceBusModule', () => {
 
   it('subscription close works', async () => {
     let subClosed = false;
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = {} as any;
     sdk.sends = [];
     sdk.receivers = [];
@@ -295,7 +295,7 @@ describe('adaptServiceBusModule', () => {
         };
       });
 
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sdk = {} as any;
       sdk.sends = [];
       sdk.receivers = [];
@@ -394,7 +394,7 @@ describe('adaptServiceBusModule', () => {
       let abandonCalled = false;
       let completeCalled = false;
 
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sdk = {} as any;
       sdk.sends = [];
       sdk.receivers = [];
@@ -463,16 +463,16 @@ describe('adaptServiceBusModule', () => {
     it('B3: processError receives ProcessErrorArgs with .error field', async () => {
       let processErrorFn:
         | ((args: {
-          error: Error;
-          errorSource: string;
-          entityPath: string;
-          fullyQualifiedNamespace: string;
-          identifier: string;
-        }) => Promise<void>)
+            error: Error;
+            errorSource: string;
+            entityPath: string;
+            fullyQualifiedNamespace: string;
+            identifier: string;
+          }) => Promise<void>)
         | null = null;
       let loggedError: string | undefined;
 
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sdk = {} as any;
       sdk.sends = [];
       sdk.receivers = [];
@@ -562,7 +562,7 @@ describe('adaptServiceBusModule', () => {
       let abandonCount = 0;
       const settlementError = new Error('settlement-failed');
 
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sdk = {} as any;
       sdk.sends = [];
       sdk.receivers = [];
@@ -641,7 +641,7 @@ describe('adaptServiceBusModule', () => {
       let abandonCount = 0;
       const settlementError = new Error('abandon-settlement-failed');
 
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sdk = {} as any;
       sdk.sends = [];
       sdk.receivers = [];
@@ -716,7 +716,7 @@ describe('adaptServiceBusModule', () => {
       let completeCount = 0;
       const abandonError = new Error('abandon-itself-failed');
 
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sdk = {} as any;
       sdk.sends = [];
       sdk.receivers = [];

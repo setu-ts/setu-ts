@@ -258,8 +258,7 @@ export const secretsContext = contextKeyFor<ISecretManager | null>('app.secrets'
 export const currentUserContext = contextKeyFor<CurrentUser | null>('app.current-user', null);
 `;
 
-const servicesAccessModule =
-  `import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
+const servicesAccessModule = `import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import type { CurrentUser } from '~/models/user.ts';
 import {
@@ -394,8 +393,7 @@ export function formatPrice(product: Product): string {
 }
 `;
 
-const userModel =
-  `/** The signed-in user, as the application sees it. Plain data, safe for client code. */
+const userModel = `/** The signed-in user, as the application sees it. Plain data, safe for client code. */
 export interface CurrentUser {
   /** The address the user signed in with. */
   readonly email: string;

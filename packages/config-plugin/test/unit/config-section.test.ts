@@ -9,10 +9,12 @@ describe('typed configuration sections', () => {
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL', 'POOL_SIZE'],
-      schema: z.object({
-        URL: z.string().url(),
-        POOL_SIZE: z.coerce.number().int().positive(),
-      }).strict(),
+      schema: z
+        .object({
+          URL: z.string().url(),
+          POOL_SIZE: z.coerce.number().int().positive(),
+        })
+        .strict(),
     });
 
     const config = await loadConfig(

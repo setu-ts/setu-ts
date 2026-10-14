@@ -31,13 +31,7 @@ function passthrough(): MiddlewareFunction {
   };
 }
 
-const TARGETS: readonly ValidationTarget[] = [
-  'body',
-  'query',
-  'params',
-  'headers',
-  'cookies',
-];
+const TARGETS: readonly ValidationTarget[] = ['body', 'query', 'params', 'headers', 'cookies'];
 
 describe('route validation metadata', () => {
   it('should round-trip every validation target', () => {

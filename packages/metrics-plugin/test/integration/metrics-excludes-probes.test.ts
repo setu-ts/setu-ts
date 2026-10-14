@@ -30,9 +30,8 @@ describe('metrics excludes its own scrape and the health probes (X10-7)', () => 
           name: 'orders-route',
           version: '1.0.0',
           register(ctx: IPluginContext): void {
-            ctx.router.get(
-              '/orders',
-              (c: IRequestContext) => c.response.status(200).json({ ok: true }),
+            ctx.router.get('/orders', (c: IRequestContext) =>
+              c.response.status(200).json({ ok: true }),
             );
           },
         },

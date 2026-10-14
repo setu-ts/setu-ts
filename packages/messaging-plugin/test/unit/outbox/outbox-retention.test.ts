@@ -90,7 +90,10 @@ describe('outbox retention', () => {
     h.store.faults.purge = () => new Promise<void>(() => {});
     let settled = false;
     const purge = h.service.purge();
-    purge.then(() => (settled = true), () => (settled = true));
+    purge.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
     await flush();
     expect(h.store.count('purge')).toBe(1);
     await h.clock.advance(300);
@@ -115,14 +118,20 @@ describe('outbox retention', () => {
     });
     service.activate({
       kind: 'per-tenant',
-      stores: new Map([['a', first.store], ['b', second.store]]),
+      stores: new Map([
+        ['a', first.store],
+        ['b', second.store],
+      ]),
     });
     // The first store spends 200 ms of the 301 ms budget before answering.
     first.store.faults.purge = () => first.clock.step(200);
     second.store.faults.purge = () => new Promise<void>(() => {});
     let settled = false;
     const purge = service.purge();
-    purge.then(() => (settled = true), () => (settled = true));
+    purge.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
     await flush();
     expect(second.store.count('purge')).toBe(1);
     await first.clock.advance(100);

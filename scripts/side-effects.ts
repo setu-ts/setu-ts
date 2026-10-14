@@ -24,9 +24,10 @@ export interface SideEffectFinding {
  * Unapproved effects and stale approvals are refusals. Imports approve their target,
  * rather than making a pure decorator module itself non-tree-shakeable.
  */
-export function auditSideEffects(
-  files: ReadonlyMap<string, string>,
-): { readonly findings: readonly SideEffectFinding[]; readonly refusals: readonly string[] } {
+export function auditSideEffects(files: ReadonlyMap<string, string>): {
+  readonly findings: readonly SideEffectFinding[];
+  readonly refusals: readonly string[];
+} {
   const findings: SideEffectFinding[] = [];
   for (const [file, source] of files) {
     const masked = maskNonCode(source);
@@ -48,7 +49,8 @@ export function auditSideEffects(
       if (
         ts.isExpressionStatement(statement) &&
         masked.code.slice(statement.getStart(tree), statement.end).trim() !== ''
-      ) findings.push({ file, module: file, kind: 'expression' });
+      )
+        findings.push({ file, module: file, kind: 'expression' });
       if (ts.isImportDeclaration(statement) && statement.importClause === undefined) {
         const literal = source.slice(
           statement.moduleSpecifier.getStart(tree) + 1,
@@ -63,13 +65,15 @@ export function auditSideEffects(
     const visit = (node: ts.Node): void => {
       if (ts.isClassStaticBlockDeclaration(node)) {
         const local = node.body.statements.every((statement) => {
-          if (
-            !ts.isExpressionStatement(statement) || !ts.isBinaryExpression(statement.expression)
-          ) return false;
+          if (!ts.isExpressionStatement(statement) || !ts.isBinaryExpression(statement.expression))
+            return false;
           const assignment = statement.expression;
-          return assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-            ts.isIdentifier(assignment.left) && localLets.has(assignment.left.text) &&
-            (ts.isArrowFunction(assignment.right) || ts.isFunctionExpression(assignment.right));
+          return (
+            assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+            ts.isIdentifier(assignment.left) &&
+            localLets.has(assignment.left.text) &&
+            (ts.isArrowFunction(assignment.right) || ts.isFunctionExpression(assignment.right))
+          );
         });
         if (!local) findings.push({ file, module: file, kind: 'static-block' });
       }
@@ -77,7 +81,8 @@ export function auditSideEffects(
     };
     visit(tree);
   }
-  const refusals = findings.filter((f) => !Object.hasOwn(SIDE_EFFECT_MODULES, f.module))
+  const refusals = findings
+    .filter((f) => !Object.hasOwn(SIDE_EFFECT_MODULES, f.module))
     .map((f) => `${f.file}: unlisted ${f.kind} effect in ${f.module}`);
   for (const module of Object.keys(SIDE_EFFECT_MODULES)) {
     if (files.has(module) && !findings.some((f) => f.module === module && f.kind !== 'import')) {

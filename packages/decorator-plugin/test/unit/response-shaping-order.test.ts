@@ -55,10 +55,7 @@ class OrderObservingController {
 describe('response shaping is written before the handler method runs', () => {
   it('the handler observes the @HttpCode status while it is still running', async () => {
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        DecoratorPlugin({ controllers: [OrderObservingController] }),
-      ],
+      plugins: [RuntimePlugin(), DecoratorPlugin({ controllers: [OrderObservingController] })],
     });
     try {
       const res = await app.fetch(new Request('http://local/order/status'));
@@ -74,10 +71,7 @@ describe('response shaping is written before the handler method runs', () => {
 
   it('the handler observes a declared @ResponseHeader while it is still running', async () => {
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        DecoratorPlugin({ controllers: [OrderObservingController] }),
-      ],
+      plugins: [RuntimePlugin(), DecoratorPlugin({ controllers: [OrderObservingController] })],
     });
     try {
       const res = await app.fetch(new Request('http://local/order/header'));
@@ -90,10 +84,7 @@ describe('response shaping is written before the handler method runs', () => {
 
   it('the handler observes a declared @Redirect while it is still running', async () => {
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        DecoratorPlugin({ controllers: [OrderObservingController] }),
-      ],
+      plugins: [RuntimePlugin(), DecoratorPlugin({ controllers: [OrderObservingController] })],
     });
     try {
       const res = await app.fetch(new Request('http://local/order/redirect'));

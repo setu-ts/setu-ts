@@ -96,8 +96,7 @@ describe('generated Deno compiler options', () => {
     // Iterating the registry rather than a hardcoded list, so a template added
     // later cannot reintroduce the option unnoticed.
     for (const { name } of listTemplates()) {
-      expect(compilerOptionsOf(getTemplate(name)!)?.['experimentalDecorators'])
-        .toBeUndefined();
+      expect(compilerOptionsOf(getTemplate(name)!)?.['experimentalDecorators']).toBeUndefined();
     }
     expect(compilerOptionsOf(MINIMAL_HOST)?.['experimentalDecorators']).toBeUndefined();
   });

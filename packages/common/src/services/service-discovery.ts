@@ -136,11 +136,7 @@ export interface IServiceDiscovery {
    * @param options - Per-call strategy override
    * @returns The URL, or `null` when the service has no instance
    */
-  resolveUrl(
-    serviceName: string,
-    path?: string,
-    options?: PickOptions,
-  ): Promise<string | null>;
+  resolveUrl(serviceName: string, path?: string, options?: PickOptions): Promise<string | null>;
 
   /**
    * Reports how a call to an instance went.

@@ -27,9 +27,8 @@ export function generateRoute(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const seam = generatorMode(options.plugins) === 'class-based'
-    ? ROUTES_SEAM
-    : FUNCTIONAL_ROUTES_SEAM;
+  const seam =
+    generatorMode(options.plugins) === 'class-based' ? ROUTES_SEAM : FUNCTIONAL_ROUTES_SEAM;
 
   return [
     {

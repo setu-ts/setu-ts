@@ -49,7 +49,7 @@ async function appThrowing(format: ErrorFormat, error: Error): Promise<IKernelAp
 /** Drives `/boom` and returns the parsed body. */
 async function served(app: IKernelApplication): Promise<Record<string, unknown>> {
   const response = await app.fetch(new Request('http://test.local/boom'));
-  return await response.json() as Record<string, unknown>;
+  return (await response.json()) as Record<string, unknown>;
 }
 
 describe('a branded status reaches the client with its canonical title', () => {

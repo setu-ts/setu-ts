@@ -69,7 +69,7 @@ describe('GraphQL body cap E2E (V5-1)', () => {
       expect(oversized.length).toBeGreaterThan(MAX_BODY_BYTES);
 
       const res = await app.fetch(post(oversized));
-      const json = await res.json() as GraphqlBody;
+      const json = (await res.json()) as GraphqlBody;
 
       // Pre-fix this was 400 / INVALID_JSON.
       expect(res.status).toBe(413);
@@ -85,7 +85,7 @@ describe('GraphQL body cap E2E (V5-1)', () => {
     // path, or the fix would trade one wrong status for another.
     await withApp(async (app) => {
       const res = await app.fetch(post('{ this is not json'));
-      const json = await res.json() as GraphqlBody;
+      const json = (await res.json()) as GraphqlBody;
 
       expect(res.status).toBe(400);
       expect(json.errors?.[0]?.extensions?.code).toBe('INVALID_JSON');
@@ -97,7 +97,7 @@ describe('GraphQL body cap E2E (V5-1)', () => {
     // satisfy the assertion above.
     await withApp(async (app) => {
       const res = await app.fetch(post(JSON.stringify({ query: '{ echo(text: "hi") }' })));
-      const json = await res.json() as GraphqlBody;
+      const json = (await res.json()) as GraphqlBody;
 
       expect(res.status).toBe(200);
       expect(json.data?.echo).toBe('hi');
@@ -123,7 +123,7 @@ describe('GraphQL SSE body cap E2E (V5-1)', () => {
         variables: { t: 'x'.repeat(MAX_BODY_BYTES * 2) },
       });
       const res = await app.fetch(post(oversized, '/graphql/stream'));
-      const json = await res.json() as GraphqlBody;
+      const json = (await res.json()) as GraphqlBody;
 
       expect(res.status).toBe(413);
       expect(json.errors?.[0]?.extensions?.code).toBe('REQUEST_BODY_TOO_LARGE');
@@ -134,7 +134,7 @@ describe('GraphQL SSE body cap E2E (V5-1)', () => {
   it('still answers 400 INVALID_JSON on /graphql/stream for a body that is not JSON', async () => {
     await withSse(async (app) => {
       const res = await app.fetch(post('{ this is not json', '/graphql/stream'));
-      const json = await res.json() as GraphqlBody;
+      const json = (await res.json()) as GraphqlBody;
 
       expect(res.status).toBe(400);
       expect(json.errors?.[0]?.extensions?.code).toBe('INVALID_JSON');

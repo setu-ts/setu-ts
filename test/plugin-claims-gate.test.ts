@@ -46,11 +46,14 @@ const DERIVED_SITES: ReadonlyMap<string, readonly DerivedSite[]> = new Map([
   ['cache-plugin', [{ expression: '`${token}`', name: 'cache' }]],
   ['database-plugin', [{ expression: '`${token}`', name: 'database' }]],
   ['mail-plugin', [{ expression: 'CAPABILITIES.MAIL', name: 'mail' }]],
-  ['messaging-plugin', [
-    { expression: 'token', name: 'messaging' },
-    { expression: 'outboxToken', name: 'outbox' },
-    { expression: 'inboxToken', name: 'inbox' },
-  ]],
+  [
+    'messaging-plugin',
+    [
+      { expression: 'token', name: 'messaging' },
+      { expression: 'outboxToken', name: 'outbox' },
+      { expression: 'inboxToken', name: 'inbox' },
+    ],
+  ],
   ['queue-plugin', [{ expression: 'token', name: 'queue' }]],
   ['secrets-plugin', [{ expression: 'CAPABILITIES.SECRETS', name: 'secrets' }]],
   ['storage-plugin', [{ expression: 'CAPABILITIES.STORAGE', name: 'storage' }]],
@@ -144,8 +147,9 @@ describe('CLI health-indicator claim table', () => {
   });
 
   it('accounts for every derived indicator name', async () => {
-    expect(checkDerivedSites(await collectSites(), DERIVED_SITES, PLUGIN_HEALTH_INDICATORS))
-      .toEqual([]);
+    expect(
+      checkDerivedSites(await collectSites(), DERIVED_SITES, PLUGIN_HEALTH_INDICATORS),
+    ).toEqual([]);
   });
 
   it('the derived-site check itself fails on an unaccounted name (self-test)', () => {
@@ -153,10 +157,15 @@ describe('CLI health-indicator claim table', () => {
     // assumed: a package with TWO accounted derived sites passes, and a THIRD,
     // unaccounted derived name in the same package is reported.
     const claims = new Map([['demo-plugin', ['demo', 'demo-outbox']]]);
-    const derived = new Map([['demo-plugin', [
-      { expression: 'token', name: 'demo' },
-      { expression: 'outboxToken', name: 'demo-outbox' },
-    ]]]);
+    const derived = new Map([
+      [
+        'demo-plugin',
+        [
+          { expression: 'token', name: 'demo' },
+          { expression: 'outboxToken', name: 'demo-outbox' },
+        ],
+      ],
+    ]);
     const site = (argument: string): Site => ({
       pkg: 'demo-plugin',
       file: 'packages/demo-plugin/src/plugin.ts',

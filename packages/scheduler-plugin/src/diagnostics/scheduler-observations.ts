@@ -647,20 +647,22 @@ export class SchedulerObservationCollector {
         continue;
       }
       freshest = Math.min(freshest, age);
-      records.push(Object.freeze({
-        alias: record.alias,
-        operation: record.operation,
-        count: record.count,
-        lastDurationMs: record.lastDurationMs,
-        ageMs: Math.round(age),
-        started: record.started,
-        succeeded: record.succeeded,
-        failed: record.failed,
-        contended: record.contended,
-        lockFailed: record.lockFailed,
-        retryAttempts: record.retryAttempts,
-        lastLatenessMs: record.lastLatenessMs,
-      }));
+      records.push(
+        Object.freeze({
+          alias: record.alias,
+          operation: record.operation,
+          count: record.count,
+          lastDurationMs: record.lastDurationMs,
+          ageMs: Math.round(age),
+          started: record.started,
+          succeeded: record.succeeded,
+          failed: record.failed,
+          contended: record.contended,
+          lockFailed: record.lockFailed,
+          retryAttempts: record.retryAttempts,
+          lastLatenessMs: record.lastLatenessMs,
+        }),
+      );
     }
     // Records whose slot expired during this read are removed after the
     // walk that built the projection.

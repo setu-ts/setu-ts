@@ -41,10 +41,14 @@ function harness(
 }
 
 function allows(scoped: ReturnType<typeof harness>, permission: string, scope: ScopeRef) {
-  return scoped.evaluator.allows(principal(), { scope, context: requestContext() }, {
-    kind: 'permission',
-    name: permission,
-  });
+  return scoped.evaluator.allows(
+    principal(),
+    { scope, context: requestContext() },
+    {
+      kind: 'permission',
+      name: permission,
+    },
+  );
 }
 
 const REGIONAL = { scope: TX, role: 'regional-approver', permissions: ['invoices:approve'] };
@@ -70,7 +74,7 @@ describe('custom roles', () => {
   it('descends with its GRANT: a role defined on an organisation, granted there, applies on a team', async () => {
     const defined = { scope: ORG, role: 'lead', permissions: ['invoices:approve'] };
     const scoped = harness([{ subject: 'u1', role: 'lead', scope: ORG }], roleSource([defined]), {
-      inheritsFrom: (scope) => scope.type === 'team' ? [ORG] : [],
+      inheritsFrom: (scope) => (scope.type === 'team' ? [ORG] : []),
     });
     expect(await allows(scoped, 'invoices:approve', TEAM)).toBe(true);
   });
@@ -84,7 +88,7 @@ describe('custom roles', () => {
         { scope: TEAM, role: 'lead', permissions: ['invoices:read'] },
         { scope: ORG, role: 'lead', permissions: ['invoices:approve'] },
       ]),
-      { inheritsFrom: (scope) => scope.type === 'team' ? [ORG] : [] },
+      { inheritsFrom: (scope) => (scope.type === 'team' ? [ORG] : []) },
     );
     expect(await allows(scoped, 'invoices:read', TEAM)).toBe(true);
     expect(await allows(scoped, 'invoices:approve', TEAM)).toBe(false);
@@ -103,7 +107,7 @@ describe('custom roles', () => {
         { scope: ORG, role: 'lead', permissions: ['invoices:approve'] },
         { scope: ORG, role: 'auditor', permissions: ['invoices:read'] },
       ]),
-      { inheritsFrom: (scope) => scope.type === 'team' ? [ORG] : [] },
+      { inheritsFrom: (scope) => (scope.type === 'team' ? [ORG] : []) },
     );
     expect(await allows(scoped, 'invoices:read', TEAM)).toBe(true);
     expect(await allows(scoped, 'invoices:approve', TEAM)).toBe(false);
@@ -117,7 +121,7 @@ describe('custom roles', () => {
         { subject: 'u1', role: 'viewer', scope: ORG },
       ],
       roleSource([REGIONAL], calls),
-      { inheritsFrom: (scope) => scope.type === 'tenant' ? [ORG] : [] },
+      { inheritsFrom: (scope) => (scope.type === 'tenant' ? [ORG] : []) },
     );
     expect(await allows(scoped, 'invoices:approve', TX)).toBe(true);
     expect(calls).toEqual([[TX]]);
@@ -148,11 +152,10 @@ describe('custom roles', () => {
     expect(await allows(scoped, 'invoices:approve', TX)).toBe(false);
     expect(await allows(scoped, 'invoices:read', TX)).toBe(true);
     expect(
-      scoped.logger.records.some((r) =>
-        r.message === 'Scoped authorization ignored invalid entries'
+      scoped.logger.records.some(
+        (r) => r.message === 'Scoped authorization ignored invalid entries',
       ),
-    )
-      .toBe(true);
+    ).toBe(true);
   });
 
   it('drops definitions for scopes nobody asked about, and malformed ones', async () => {
@@ -214,10 +217,14 @@ describe('custom roles', () => {
       source: 'customRoles',
     });
 
-    const hanging = harness([{ subject: 'u1', role: 'r1', scope: TX }], {
-      name: 'slow',
-      rolesFor: () => new Promise(() => {}),
-    }, { sourceTimeoutMs: 10 });
+    const hanging = harness(
+      [{ subject: 'u1', role: 'r1', scope: TX }],
+      {
+        name: 'slow',
+        rolesFor: () => new Promise(() => {}),
+      },
+      { sourceTimeoutMs: 10 },
+    );
     const pending = allows(hanging, 'invoices:read', TX);
     // Advance only once the deadline timer is armed: advancing earlier fires
     // nothing, and the check would hang forever.
@@ -240,7 +247,7 @@ describe('custom roles', () => {
       scopedHarness({
         sources: [{ kind: 'static', grants: [] }],
         customRoles: () => ({}) as IScopedRoleSource,
-      })
+      }),
     ).toThrow('does not implement rolesFor');
   });
 });

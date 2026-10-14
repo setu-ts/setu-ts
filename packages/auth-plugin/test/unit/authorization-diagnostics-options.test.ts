@@ -47,12 +47,10 @@ describe('the inert authorization-diagnostics sources (M98h)', () => {
   });
 
   it('both inert sources validate arguments with the same fixed errors', () => {
-    for (
-      const source of [
-        createDisabledAuthorizationSource(),
-        createUnsupportedAuthorizationSource('custom-provider'),
-      ]
-    ) {
+    for (const source of [
+      createDisabledAuthorizationSource(),
+      createUnsupportedAuthorizationSource('custom-provider'),
+    ]) {
       expect(() => source.read('', 0)).toThrow(RangeError);
       expect(() => source.read(INSTANCE, -1)).toThrow(RangeError);
       expect(() => source.read(INSTANCE, 0, 0)).toThrow(RangeError);

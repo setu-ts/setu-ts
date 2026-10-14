@@ -48,8 +48,12 @@ export function deriveNames(raw: string): DerivedNames {
   const kebab = words.join('-');
 
   // camelCase: first word lowercase, subsequent words capitalized (first upper, rest lower)
-  const camel = words[0] +
-    words.slice(1).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+  const camel =
+    words[0] +
+    words
+      .slice(1)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join('');
 
   // PascalCase: all words capitalized (first upper, rest lower)
   const pascal = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
@@ -100,9 +104,11 @@ export function deriveNames(raw: string): DerivedNames {
  * @returns True when the names are safe as identifiers and as one path segment
  */
 export function isIdentifierSafe(names: DerivedNames): boolean {
-  return /[a-zA-Z]/.test(names.kebab) &&
+  return (
+    /[a-zA-Z]/.test(names.kebab) &&
     [names.pascal, names.camel, names.screaming].every((form) => IDENTIFIER.test(form)) &&
-    isPathSegmentSafe(names);
+    isPathSegmentSafe(names)
+  );
 }
 
 /**
@@ -136,8 +142,12 @@ export function isIdentifierSafe(names: DerivedNames): boolean {
  * @returns True when the kebab is safe as one path segment
  */
 export function isPathSegmentSafe(names: DerivedNames): boolean {
-  return PATH_SEGMENT.test(names.kebab) && !names.kebab.endsWith('.') &&
-    !WINDOWS_DEVICE.test(names.kebab) && utf8ByteLength(names.kebab) <= MAX_COMPONENT_BYTES;
+  return (
+    PATH_SEGMENT.test(names.kebab) &&
+    !names.kebab.endsWith('.') &&
+    !WINDOWS_DEVICE.test(names.kebab) &&
+    utf8ByteLength(names.kebab) <= MAX_COMPONENT_BYTES
+  );
 }
 
 /**
@@ -237,7 +247,9 @@ export function escapeName(raw: string): string {
  *   Unicode line and paragraph separators, rendered as `\uXXXX`
  */
 export function escapeTerminalControls(text: string): string {
-  return text.replace(CONTROL, (char) => char === '\n' || char === '\t' ? char : escapeChar(char));
+  return text.replace(CONTROL, (char) =>
+    char === '\n' || char === '\t' ? char : escapeChar(char),
+  );
 }
 
 /**

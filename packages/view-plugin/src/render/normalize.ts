@@ -102,10 +102,7 @@ export async function normalizeRendered(
  *         boundary (passed through unwrapped)
  * @since 0.6.0
  */
-export async function renderComponent<P>(
-  component: Component<P>,
-  props: P,
-): Promise<string> {
+export async function renderComponent<P>(component: Component<P>, props: P): Promise<string> {
   let value: unknown;
   try {
     value = component(props);

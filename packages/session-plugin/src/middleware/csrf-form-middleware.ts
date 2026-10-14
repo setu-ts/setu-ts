@@ -54,10 +54,7 @@ export function csrfFormMiddleware(options: CsrfFormOptions = {}): MiddlewareFun
   // Resolved once at registration rather than per request (AI_GUIDELINES §14).
   const config = resolveCsrfConfig(options);
 
-  return async (
-    ctx: IRequestContext,
-    next: NextFunction,
-  ): Promise<void | HandlerResult> => {
+  return async (ctx: IRequestContext, next: NextFunction): Promise<void | HandlerResult> => {
     // Publish the field name BEFORE the short-circuits below (M95c §3.2):
     // `csrfTokenField` reads it to render the form, and the request that
     // renders the form is a GET — an ignored method. A write placed after the

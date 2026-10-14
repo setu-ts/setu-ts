@@ -235,8 +235,8 @@ describe('createCircuitBreaker', () => {
     timeNow = 600;
 
     // Start a probe (simulated by a long-running promise).
-    const probePromise = cb.execute(() =>
-      new Promise<string>((resolve) => setTimeout(() => resolve('ok'), 50))
+    const probePromise = cb.execute(
+      () => new Promise<string>((resolve) => setTimeout(() => resolve('ok'), 50)),
     );
 
     // Concurrent call should be rejected.

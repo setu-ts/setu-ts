@@ -44,11 +44,7 @@ export class MockServiceRegistry implements IServiceRegistry {
 
   readonly #record: Array<{ token: string; multi: boolean }> = [];
 
-  register<T extends object>(
-    token: CapabilityToken,
-    service: T,
-    options?: RegisterOptions,
-  ): void {
+  register<T extends object>(token: CapabilityToken, service: T, options?: RegisterOptions): void {
     this.#store(token, { instance: service }, options);
   }
 
@@ -90,11 +86,7 @@ export class MockServiceRegistry implements IServiceRegistry {
     return hadSingle || hadMulti;
   }
 
-  #store(
-    token: CapabilityToken,
-    registration: Registration,
-    options?: RegisterOptions,
-  ): void {
+  #store(token: CapabilityToken, registration: Registration, options?: RegisterOptions): void {
     this.#record.push({
       token,
       multi: options?.multi ?? false,
@@ -116,9 +108,7 @@ export class MockServiceRegistry implements IServiceRegistry {
   }
 
   #lookup(token: CapabilityToken): Registration | undefined {
-    return (
-      this.#single.get(token) ?? this.#multi.get(token)?.[0]
-    );
+    return this.#single.get(token) ?? this.#multi.get(token)?.[0];
   }
 
   #resolve(registration: Registration): object {

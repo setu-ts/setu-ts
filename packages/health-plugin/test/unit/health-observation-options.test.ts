@@ -20,8 +20,10 @@ function options(overrides: Record<string, unknown> = {}): HealthDiagnosticsOpti
   } as HealthDiagnosticsOptions;
 }
 
-const compile = (overrides: Record<string, unknown> = {}) => () =>
-  compileHealthDiagnosticsPolicy(options(overrides));
+const compile =
+  (overrides: Record<string, unknown> = {}) =>
+  () =>
+    compileHealthDiagnosticsPolicy(options(overrides));
 
 const schedule = (overrides: Record<string, unknown> = {}) => ({
   indicators: ['db.check'],
@@ -117,8 +119,9 @@ describe('compileHealthDiagnosticsPolicy', () => {
     for (let i = 0; i < 17; i++) {
       indicators[`n${i}`] = `a${i}`;
     }
-    expect(compile({ indicators, scheduled: schedule({ indicators: Object.keys(indicators) }) }))
-      .toThrow(COLLECTOR_ERRORS.tooManyScheduled);
+    expect(
+      compile({ indicators, scheduled: schedule({ indicators: Object.keys(indicators) }) }),
+    ).toThrow(COLLECTOR_ERRORS.tooManyScheduled);
   });
 
   it('refuses out-of-range or non-integer interval, timeout, and concurrency', () => {

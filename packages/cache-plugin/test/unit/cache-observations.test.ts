@@ -131,7 +131,7 @@ describe('compileCacheDiagnosticsAlias', () => {
 
   it('refuses at CachePlugin() construction, before any application exists', () => {
     expect(() =>
-      CachePlugin({ diagnostics: { enabled: false } as unknown as CacheDiagnosticsOptions })
+      CachePlugin({ diagnostics: { enabled: false } as unknown as CacheDiagnosticsOptions }),
     ).toThrow(CACHE_DIAGNOSTICS_ERRORS.enabled);
   });
 });
@@ -360,14 +360,12 @@ describe('observeCacheCall — transparency', () => {
           '--input-type=module',
           '-e',
           `
-        import { CacheService, attachCacheCollector } from ${
-            JSON.stringify(new URL('../../src/services/cache-service.ts', import.meta.url).href)
-          };
-        import { CacheObservationCollector } from ${
-            JSON.stringify(
-              new URL('../../src/diagnostics/cache-observations.ts', import.meta.url).href,
-            )
-          };
+        import { CacheService, attachCacheCollector } from ${JSON.stringify(
+          new URL('../../src/services/cache-service.ts', import.meta.url).href,
+        )};
+        import { CacheObservationCollector } from ${JSON.stringify(
+          new URL('../../src/diagnostics/cache-observations.ts', import.meta.url).href,
+        )};
         const reason = new Error('fire-and-forget');
         const service = new CacheService({ get: () => Promise.reject(reason) }, '');
         if (${enabled}) attachCacheCollector(service, new CacheObservationCollector('primary', () => 1000));
@@ -552,9 +550,13 @@ describe('CacheObservationCollector — retention, state and bounds', () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.records)).toBe(true);
     expect(Object.isFrozen(snapshot.records[0])).toBe(true);
-    expect(Object.keys(snapshot).sort()).toEqual(
-      ['alias', 'coverage', 'dropped', 'records', 'state'],
-    );
+    expect(Object.keys(snapshot).sort()).toEqual([
+      'alias',
+      'coverage',
+      'dropped',
+      'records',
+      'state',
+    ]);
     expect(Object.keys(snapshot.records[0]!).length).toBe(13);
     expect(snapshot.records[0]).toMatchObject({ hits: 0, misses: 0, present: 0, absent: 0 });
   });
@@ -611,9 +613,7 @@ describe('CachePlugin — diagnostics source registration (real kernel)', () => 
     try {
       const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
       await cache.set('k', 'v');
-      const sources = app.services.getAll<ICacheDiagnosticsSource>(
-        CAPABILITIES.CACHE_DIAGNOSTICS,
-      );
+      const sources = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS);
       expect(sources.length).toBe(2);
       expect(sources[0]!.snapshot()).toMatchObject({ state: 'ready', alias: 'primary' });
       expect(sources[1]!.snapshot().state).toBe('disabled');
@@ -632,9 +632,7 @@ describe('CachePlugin — diagnostics source registration (real kernel)', () => 
       const replacement = new CacheService(new MemoryStore(''), '');
       await replacement.set('k', 'v');
       await owned.get('absent');
-      const [source] = app.services.getAll<ICacheDiagnosticsSource>(
-        CAPABILITIES.CACHE_DIAGNOSTICS,
-      );
+      const [source] = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS);
       const snapshot = source!.snapshot();
       expect(snapshot.coverage).toBe('owned-instance');
       expect(snapshot.records.map((r) => r.operation)).toEqual(['get']);
@@ -647,9 +645,7 @@ describe('CachePlugin — diagnostics source registration (real kernel)', () => 
     const app = await start([CachePlugin({ diagnostics: { enabled: true, alias: 'p' } })]);
     const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
     await cache.get('k');
-    const [source] = app.services.getAll<ICacheDiagnosticsSource>(
-      CAPABILITIES.CACHE_DIAGNOSTICS,
-    );
+    const [source] = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS);
     await app.stop();
     expect(source!.snapshot()).toMatchObject({ state: 'disabled', records: [] });
   });
@@ -663,9 +659,7 @@ describe('CachePlugin — diagnostics source registration (real kernel)', () => 
       await cache.set('a', 1);
       await cache.set('b', 2);
       expect(await cache.get('a')).toBeNull();
-      const [source] = app.services.getAll<ICacheDiagnosticsSource>(
-        CAPABILITIES.CACHE_DIAGNOSTICS,
-      );
+      const [source] = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS);
       const json = JSON.stringify(source!.snapshot());
       expect(json).not.toContain('evict');
       expect(source!.snapshot().records.find((r) => r.operation === 'get')).toMatchObject({

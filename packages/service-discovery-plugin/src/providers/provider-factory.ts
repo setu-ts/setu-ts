@@ -148,10 +148,7 @@ export function createProvider(
  * Failing here rather than at the first `resolve()` is deliberate: a
  * misconfiguration is a startup error, not a runtime surprise hours later.
  */
-function resolveApiServer(
-  options: KubernetesDiscoveryOptions,
-  runtime: IRuntimeServices,
-): string {
+function resolveApiServer(options: KubernetesDiscoveryOptions, runtime: IRuntimeServices): string {
   if (options.apiServer !== undefined) {
     return options.apiServer.replace(/\/+$/, '');
   }

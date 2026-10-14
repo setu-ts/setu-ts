@@ -35,10 +35,7 @@ import type { MetadataStore } from '../metadata/metadata-store.ts';
  * @since 0.6.0
  */
 export type RenderDecorator<P> = (
-  value: (...args: never[]) =>
-    | P
-    | HandlerResult
-    | Promise<P | HandlerResult>,
+  value: (...args: never[]) => P | HandlerResult | Promise<P | HandlerResult>,
   context: ClassMethodDecoratorContext,
 ) => void;
 

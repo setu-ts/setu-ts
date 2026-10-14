@@ -26,9 +26,7 @@ if (echoService === undefined) {
 }
 
 interface EchoClient {
-  echo(
-    request: { readonly message: string },
-  ): Promise<{ readonly response: string }>;
+  echo(request: { readonly message: string }): Promise<{ readonly response: string }>;
 }
 
 /** Creates a Connect client for the descriptor-backed Echo service. */
@@ -47,15 +45,17 @@ export function createGrpcApp(): IKernelApplication {
       RuntimePlugin(),
       GrpcPlugin({
         connectModule: runtime,
-        services: [{
-          definition: echoService as GrpcServiceDefinition,
-          implementation: {
-            echo: (request: { message: string }) => ({
-              response: `echo: ${request.message}`,
-            }),
-            ping: () => ({ pong: true }),
+        services: [
+          {
+            definition: echoService as GrpcServiceDefinition,
+            implementation: {
+              echo: (request: { message: string }) => ({
+                response: `echo: ${request.message}`,
+              }),
+              ping: () => ({ pong: true }),
+            },
           },
-        }],
+        ],
       }),
     ],
   });

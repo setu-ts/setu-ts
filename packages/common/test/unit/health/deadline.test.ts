@@ -117,16 +117,19 @@ describe('withDeadline', () => {
     const timers = new FakeTimers();
     const thrown = new Error('onTimeout-canary');
     let signal: AbortSignal | undefined;
-    const pending = withDeadline((s) => {
-      signal = s;
-      return new Promise<never>(() => {});
-    }, {
-      timeoutMs: 100,
-      onTimeout: () => {
-        throw thrown;
+    const pending = withDeadline(
+      (s) => {
+        signal = s;
+        return new Promise<never>(() => {});
       },
-      timing: timers,
-    });
+      {
+        timeoutMs: 100,
+        onTimeout: () => {
+          throw thrown;
+        },
+        timing: timers,
+      },
+    );
     await Promise.resolve();
 
     // A throw out of the timer callback would be an uncaught exception.
@@ -164,10 +167,13 @@ describe('withDeadline', () => {
       const timers = new FakeTimers();
       let ran = false;
 
-      const pending = withDeadline(() => {
-        ran = true;
-        return Promise.resolve(1);
-      }, options(timers, value));
+      const pending = withDeadline(
+        () => {
+          ran = true;
+          return Promise.resolve(1);
+        },
+        options(timers, value),
+      );
 
       await expect(pending).rejects.toBeInstanceOf(RangeError);
       expect(ran).toBe(false);

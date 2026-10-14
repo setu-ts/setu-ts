@@ -94,17 +94,15 @@ describe('validateCatalogues', () => {
   });
 
   it('refuses a malformed message, naming the key', () => {
-    for (
-      const bad of [
-        7,
-        null,
-        ['x'],
-        { one: 'x' },
-        { other: 7 },
-        { other: 'x', several: 'y' },
-        { other: 'x', one: 1 },
-      ]
-    ) {
+    for (const bad of [
+      7,
+      null,
+      ['x'],
+      { one: 'x' },
+      { other: 7 },
+      { other: 'x', several: 'y' },
+      { other: 'x', one: 1 },
+    ]) {
       expect(() => validateCatalogues(['en'], { en: { k: bad } }, false, noWarn)).toThrow(
         'message "k" in locale en',
       );

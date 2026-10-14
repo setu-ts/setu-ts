@@ -34,7 +34,8 @@ const BOUNDARY = '----setu-x48-boundary';
  * boundary-less multipart content-type is classified as not-a-form and
  * passes through, so the `400` site is driven the way a real refusal fires.
  */
-const TOO_MANY_FILES = `--${BOUNDARY}\r\n` +
+const TOO_MANY_FILES =
+  `--${BOUNDARY}\r\n` +
   'Content-Disposition: form-data; name="file"; filename="a.txt"\r\n' +
   'Content-Type: text/plain\r\n\r\nhello\r\n' +
   `--${BOUNDARY}\r\n` +
@@ -107,11 +108,11 @@ async function allSitesApp(format: 'default' | 'rfc9457'): Promise<IKernelApplic
     { priority: 110, name: 'request-size' },
   );
   app.middleware.add(
-    (ctx, next) => ctx.request.path === '/csrf' ? csrfMiddleware({})(ctx, next) : next(),
+    (ctx, next) => (ctx.request.path === '/csrf' ? csrfMiddleware({})(ctx, next) : next()),
     { priority: 120, name: 'csrf' },
   );
   app.middleware.add(
-    (ctx, next) => ctx.request.path === '/form-csrf' ? csrfFormMiddleware()(ctx, next) : next(),
+    (ctx, next) => (ctx.request.path === '/form-csrf' ? csrfFormMiddleware()(ctx, next) : next()),
     { priority: 130, name: 'form-csrf' },
   );
   app.middleware.add(
@@ -123,17 +124,15 @@ async function allSitesApp(format: 'default' | 'rfc9457'): Promise<IKernelApplic
     (ctx, next) => (ctx.request.path === '/auth' ? requireAuth()(ctx, next) : next()),
     { priority: 150, name: 'auth-guard' },
   );
-  for (
-    const path of [
-      '/flagged',
-      '/size',
-      '/csrf',
-      '/form-csrf',
-      '/upload',
-      '/auth',
-      '/tenant-protected',
-    ]
-  ) {
+  for (const path of [
+    '/flagged',
+    '/size',
+    '/csrf',
+    '/form-csrf',
+    '/upload',
+    '/auth',
+    '/tenant-protected',
+  ]) {
     app.router.get(path, (ctx) => ctx.response.text('ok'));
   }
   app.router.post('/upload', (ctx) => ctx.response.text('ok'));
@@ -244,8 +243,9 @@ describe('every converted short-circuit site answers in the configured format (X
       expect(size.status).toBe(413);
       expect(size.contentType).toBe('application/json; charset=utf-8');
       expect(size.body.message).toBe('Payload Too Large');
-      expect(String((size.body.details as Record<string, unknown>).detail))
-        .toContain('exceeds the maximum allowed size');
+      expect(String((size.body.details as Record<string, unknown>).detail)).toContain(
+        'exceeds the maximum allowed size',
+      );
 
       const csrf = await drive(app, '/csrf', {
         method: 'POST',

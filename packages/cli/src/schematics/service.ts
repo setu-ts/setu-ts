@@ -86,9 +86,9 @@ function renderInjectableService(names: DerivedNames): string {
  * - with \`DiPlugin\` (the \`--template class-based\` composition): the class is registered
  *   as a PROVIDER on the container and is NOT in the kernel registry, so
  *   \`services.get(...)\` throws. Resolve through the container —
- *   \`services.get<IContainer>(CAPABILITIES.DI_CONTAINER).resolve('${
-    serviceSeamToken(names.kebab)
-  }')\` — and \`scope\` is honored.
+ *   \`services.get<IContainer>(CAPABILITIES.DI_CONTAINER).resolve('${serviceSeamToken(
+   names.kebab,
+ )}')\` — and \`scope\` is honored.
  */
 @Injectable({ token: '${serviceSeamToken(names.kebab)}' })
 export class ${names.pascal}Service {

@@ -147,11 +147,13 @@ describe('GraphQL WS e2e (real socket)', () => {
         client.send(encodeFrame({ type: GQL_CONNECTION_INIT }));
         await nextMessage(client); // ack
 
-        client.send(encodeFrame({
-          type: GQL_SUBSCRIBE,
-          id: '1',
-          payload: { query: '{ hello }' },
-        }));
+        client.send(
+          encodeFrame({
+            type: GQL_SUBSCRIBE,
+            id: '1',
+            payload: { query: '{ hello }' },
+          }),
+        );
 
         // next
         const next = await nextMessage(client);
@@ -192,11 +194,13 @@ describe('GraphQL WS e2e (real socket)', () => {
         client.send(encodeFrame({ type: GQL_CONNECTION_INIT }));
         await nextMessage(client); // ack
 
-        client.send(encodeFrame({
-          type: GQL_SUBSCRIBE,
-          id: '1',
-          payload: { query: '{ hello }' },
-        }));
+        client.send(
+          encodeFrame({
+            type: GQL_SUBSCRIBE,
+            id: '1',
+            payload: { query: '{ hello }' },
+          }),
+        );
         await nextMessage(client); // next
         const complete = await nextMessage(client); // complete
         expect(complete).toContain(GQL_COMPLETE);

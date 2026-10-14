@@ -33,10 +33,12 @@ export function m98bIsStatusBody(value: unknown): value is {
   if (keys.length !== STATUS_BODY_KEYS.length || STATUS_BODY_KEYS.some((k) => !(k in value))) {
     return false;
   }
-  return value.version === 1 &&
+  return (
+    value.version === 1 &&
     typeof value.instanceId === 'string' &&
     value.instanceId.length > 0 &&
     typeof value.expiresInMs === 'number' &&
     Number.isFinite(value.expiresInMs) &&
-    value.expiresInMs >= 0;
+    value.expiresInMs >= 0
+  );
 }

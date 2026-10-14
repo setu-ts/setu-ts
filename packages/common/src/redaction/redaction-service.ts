@@ -37,7 +37,8 @@ export function createRedactionService(
     // `matched.redactor` is read as an OWN property: a plain read would reach
     // a polluted `Object.prototype.redactor` and emit every matched value raw.
     const fieldRedactor = Object.hasOwn(matched, 'redactor') ? matched.redactor : undefined;
-    const redactor: Redactor = fieldRedactor ??
+    const redactor: Redactor =
+      fieldRedactor ??
       (policy.redactors !== undefined && Object.hasOwn(policy.redactors, classification)
         ? policy.redactors[classification]!
         : defaultRedactor);

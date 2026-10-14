@@ -353,14 +353,12 @@ describe('rejectRawUpgrade', () => {
   });
 
   it('names each status it can answer with', () => {
-    for (
-      const [status, reason] of [
-        [503, 'Service Unavailable'],
-        [501, 'Not Implemented'],
-        [500, 'Internal Server Error'],
-        [418, 'Bad Request'],
-      ] as const
-    ) {
+    for (const [status, reason] of [
+      [503, 'Service Unavailable'],
+      [501, 'Not Implemented'],
+      [500, 'Internal Server Error'],
+      [418, 'Bad Request'],
+    ] as const) {
       const socket = fakeRawSocket();
       rejectRawUpgrade(socket, status);
       expect(socket.writes[0]).toContain(`${status} ${reason}`);
@@ -413,11 +411,13 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
     let upgradeListener: ((...args: never[]) => void) | null = null;
     const server: NodeServer = {
       close: () => {},
-      ...(options?.omitOn === true ? {} : {
-        on: (_event: string, listener: (...args: never[]) => void) => {
-          upgradeListener = listener;
-        },
-      }),
+      ...(options?.omitOn === true
+        ? {}
+        : {
+            on: (_event: string, listener: (...args: never[]) => void) => {
+              upgradeListener = listener;
+            },
+          }),
     };
 
     const host: NodeServeHost = { serve: () => Promise.resolve(server) };
@@ -492,7 +492,7 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
   it('attaches no listener when the server handle emits nothing', async () => {
     const harness = build({ omitOn: true });
     harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink() })
+      Promise.resolve({ accept: true, sink: recordingSink() }),
     );
 
     await harness.adapter.listen(3000);

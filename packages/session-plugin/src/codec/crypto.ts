@@ -84,9 +84,8 @@ export async function deriveKeyRing(
 
   for (const secret of secrets) {
     const kid = await deriveKid(subtle, secret);
-    const key = mode === 'encrypt'
-      ? await deriveAesKey(subtle, secret)
-      : await deriveHmacKey(subtle, secret);
+    const key =
+      mode === 'encrypt' ? await deriveAesKey(subtle, secret) : await deriveHmacKey(subtle, secret);
     const entry: SessionKey = { kid, key };
     keys.push(entry);
     // A repeated secret yields a repeated kid; first occurrence wins so the
@@ -237,10 +236,6 @@ async function deriveHmacKey(subtle: SubtleCrypto, secret: string): Promise<Cryp
  * working key.
  */
 async function deriveKid(subtle: SubtleCrypto, secret: string): Promise<string> {
-  const bits = await subtle.deriveBits(
-    hkdfParams(INFO_KID),
-    await importIkm(subtle, secret),
-    128,
-  );
+  const bits = await subtle.deriveBits(hkdfParams(INFO_KID), await importIkm(subtle, secret), 128);
   return toBase64Url(new Uint8Array(bits)).slice(0, KID_LENGTH);
 }

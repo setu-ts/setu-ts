@@ -155,9 +155,11 @@ export interface FakeLogger extends ILogger {
  */
 export function createFakeLogger(): FakeLogger {
   const entries: LoggedEntry[] = [];
-  const record = (level: string) => (message: string, metadata?: LogMetadata): void => {
-    entries.push({ level, message, metadata });
-  };
+  const record =
+    (level: string) =>
+    (message: string, metadata?: LogMetadata): void => {
+      entries.push({ level, message, metadata });
+    };
 
   const logger: FakeLogger = {
     level: 'trace',

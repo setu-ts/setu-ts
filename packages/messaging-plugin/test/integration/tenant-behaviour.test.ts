@@ -61,9 +61,7 @@ class PerTenantMapTenancy implements IMultiTenancyService {
     return this.#repoFor<Entity, Id>(tenant.id);
   }
 
-  getRepositoryFor<Entity, Id = string>(
-    tenantId: string,
-  ): ITenantRepository<Entity, Id> {
+  getRepositoryFor<Entity, Id = string>(tenantId: string): ITenantRepository<Entity, Id> {
     return this.#repoFor<Entity, Id>(tenantId);
   }
 
@@ -81,21 +79,20 @@ class PerTenantMapTenancy implements IMultiTenancyService {
     return {
       findAll: () =>
         Promise.resolve(
-          [...rows.values()].filter((row) =>
-            row.tenantId === tenantId
+          [...rows.values()].filter(
+            (row) => row.tenantId === tenantId,
           ) as unknown as readonly Entity[],
         ),
       findById: (id: Id) =>
-        Promise.resolve(
-          (rows.get(`${tenantId}:${String(id)}`) ?? null) as Entity | null,
-        ),
+        Promise.resolve((rows.get(`${tenantId}:${String(id)}`) ?? null) as Entity | null),
       find: (filter) =>
         Promise.resolve(
-          [...rows.values()].filter((row) =>
-            row.tenantId === tenantId &&
-            Object.entries(filter).every(([key, value]) =>
-              (row as unknown as Record<string, unknown>)[key] === value
-            )
+          [...rows.values()].filter(
+            (row) =>
+              row.tenantId === tenantId &&
+              Object.entries(filter).every(
+                ([key, value]) => (row as unknown as Record<string, unknown>)[key] === value,
+              ),
           ) as unknown as readonly Entity[],
         ),
       create: (data) => {
@@ -116,9 +113,7 @@ interface Harness {
 }
 
 function createHarness(service: IMultiTenancyService): Harness {
-  const registered = new Map<string, unknown>([
-    [CAPABILITIES.MULTI_TENANCY, service],
-  ]);
+  const registered = new Map<string, unknown>([[CAPABILITIES.MULTI_TENANCY, service]]);
   const initHooks: (() => void | Promise<void>)[] = [];
 
   const ctx = {

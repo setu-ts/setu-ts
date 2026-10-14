@@ -18,13 +18,21 @@ function testFiles(directory: string): string[] {
 
 /** Partition from the existing shared-resource classifier, excluding only the named Deno suites. */
 export function projectsFor(member: string) {
-  const candidates = member === 'tooling'
-    ? [...testFiles('test/node'), ...testFiles('scripts/codemods')]
-    : testFiles(`${member.replace(/^\.\//, '')}/test`);
-  const files = candidates.filter((file) => !(NODE_EXCLUDED_TESTS as readonly string[]).includes(file));
-  const isolated = files.filter((file) => isolationReason(file, readFileSync(resolve(root, file), 'utf8')) !== null);
+  const candidates =
+    member === 'tooling'
+      ? [...testFiles('test/node'), ...testFiles('scripts/codemods')]
+      : testFiles(`${member.replace(/^\.\//, '')}/test`);
+  const files = candidates.filter(
+    (file) => !(NODE_EXCLUDED_TESTS as readonly string[]).includes(file),
+  );
+  const isolated = files.filter(
+    (file) => isolationReason(file, readFileSync(resolve(root, file), 'utf8')) !== null,
+  );
   const parallel = files.filter((file) => !isolated.includes(file));
-  return [{ name: 'isolated', files: isolated, order: 0 }, { name: 'parallel', files: parallel, order: 1 }]
+  return [
+    { name: 'isolated', files: isolated, order: 0 },
+    { name: 'parallel', files: parallel, order: 1 },
+  ]
     .filter((project) => project.files.length > 0)
     .map((project) => ({
       extends: true as const,
@@ -38,56 +46,79 @@ export function projectsFor(member: string) {
 }
 
 export function configurationFor(member: string) {
-const include = member === 'tooling'
-  ? [
-    'scripts/codemods/*.ts',
-    'test/node-helpers.ts',
-    // Decides which importers a source redirect may NOT touch (M111d).
-    'test/node-source-hooks.ts',
-    // The scaffold-install gates' packer and local registry (M111d): `node:`
-    // APIs only, and the overlay binds a real socket, which the root Deno lane
-    // grants no permission for.
-    'scripts/pack-members.ts',
-    'scripts/registry-overlay.ts',
-  ]
-  : [`${member.replace(/^\.\//, '')}/src/**/*.ts`];
+  const include =
+    member === 'tooling'
+      ? [
+          'scripts/codemods/*.ts',
+          'test/node-helpers.ts',
+          // Decides which importers a source redirect may NOT touch (M111d).
+          'test/node-source-hooks.ts',
+          // The scaffold-install gates' packer and local registry (M111d): `node:`
+          // APIs only, and the overlay binds a real socket, which the root Deno lane
+          // grants no permission for.
+          'scripts/pack-members.ts',
+          'scripts/registry-overlay.ts',
+        ]
+      : [`${member.replace(/^\.\//, '')}/src/**/*.ts`];
 
-// Vitest 5's oxc transform does not lower TC39 decorators; esbuild must run first.
-return defineConfig({
-  plugins: [{
-    name: 'setu-source-exports', enforce: 'pre',
-    resolveId(specifier) { return sourceExport(specifier); },
-  }, {
-    name: 'tc39-decorators', enforce: 'pre',
-    async transform(code, id) {
-      if (!/\.tsx?$/.test(id) || id.includes('/node_modules/') || !id.startsWith(root)) return null;
-      const output = await transform(code, {
-        loader: id.endsWith('x') ? 'tsx' : 'ts', target: 'es2022', format: 'esm',
-        jsx: 'automatic', jsxImportSource: 'hono/jsx', sourcemap: true, sourcefile: id,
-      });
-      return { code: output.code, map: output.map };
+  // Vitest 5's oxc transform does not lower TC39 decorators; esbuild must run first.
+  return defineConfig({
+    plugins: [
+      {
+        name: 'setu-source-exports',
+        enforce: 'pre',
+        resolveId(specifier) {
+          return sourceExport(specifier);
+        },
+      },
+      {
+        name: 'tc39-decorators',
+        enforce: 'pre',
+        async transform(code, id) {
+          if (!/\.tsx?$/.test(id) || id.includes('/node_modules/') || !id.startsWith(root))
+            return null;
+          const output = await transform(code, {
+            loader: id.endsWith('x') ? 'tsx' : 'ts',
+            target: 'es2022',
+            format: 'esm',
+            jsx: 'automatic',
+            jsxImportSource: 'hono/jsx',
+            sourcemap: true,
+            sourcefile: id,
+          });
+          return { code: output.code, map: output.map };
+        },
+      },
+    ],
+    test: {
+      root,
+      projects: projectsFor(member),
+      pool: 'forks',
+      maxWorkers: 4,
+      // Code a test hands to Node directly — a worker thread, a module loaded
+      // outside Vite — resolves `@setu-ts/*` through Node, which would reach a
+      // member's built `dist/` (absent on a fresh checkout, stale after an edit).
+      // The hook maps it to source exactly as `sourceExport` does here, and a
+      // Worker inherits these flags from the fork.
+      execArgv: ['--import', new URL('../../test/node-source-register.ts', import.meta.url).href],
+      testTimeout: 30_000,
+      hookTimeout: 30_000,
+      reporters: ['default', 'json'],
+      outputFile: { json: `coverage-node/${member.split('/').pop()}/tests.json` },
+      coverage: {
+        provider: 'v8',
+        include,
+        exclude: [
+          ...DENO_ONLY_SOURCES,
+          '**/*.test.ts',
+          ...(member === 'tooling' ? [] : ['**/test/**']),
+        ],
+        reportOnFailure: true,
+        reporter: ['text', 'json-summary', 'json'],
+        reportsDirectory: `coverage-node/${member.split('/').pop()}`,
+        thresholds: { perFile: true, branches: 90, functions: 90, lines: 90 },
+      },
     },
-  }],
-  test: {
-    root, projects: projectsFor(member), pool: 'forks', maxWorkers: 4,
-    // Code a test hands to Node directly — a worker thread, a module loaded
-    // outside Vite — resolves `@setu-ts/*` through Node, which would reach a
-    // member's built `dist/` (absent on a fresh checkout, stale after an edit).
-    // The hook maps it to source exactly as `sourceExport` does here, and a
-    // Worker inherits these flags from the fork.
-    execArgv: ['--import', new URL('../../test/node-source-register.ts', import.meta.url).href],
-    testTimeout: 30_000, hookTimeout: 30_000,
-    reporters: ['default', 'json'],
-    outputFile: { json: `coverage-node/${member.split('/').pop()}/tests.json` },
-    coverage: {
-      provider: 'v8', include, exclude: [...DENO_ONLY_SOURCES, '**/*.test.ts', ...(member === 'tooling' ? [] : ['**/test/**'])],
-      reportOnFailure: true,
-      reporter: ['text', 'json-summary', 'json'],
-      reportsDirectory: `coverage-node/${member.split('/').pop()}`,
-      thresholds: { perFile: true, branches: 90, functions: 90, lines: 90 },
-    },
-  },
-});
-
+  });
 }
 export default configurationFor(process.env.SETU_TEST_MEMBER ?? 'packages/common');

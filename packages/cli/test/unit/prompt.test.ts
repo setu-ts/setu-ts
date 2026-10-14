@@ -26,12 +26,20 @@ describe('createTerminalPrompter', () => {
   });
 
   it('treats a null answer as cancellation', async () => {
-    const prompter = createTerminalPrompter(() => true, () => Promise.resolve(null), () => {});
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => Promise.resolve(null),
+      () => {},
+    );
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'cancelled' });
   });
 
   it('resolves the fallback for a bare Enter', async () => {
-    const prompter = createTerminalPrompter(() => true, () => Promise.resolve(''), () => {});
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => Promise.resolve(''),
+      () => {},
+    );
     expect(await prompter.select('Template?', CHOICES)).toEqual({ kind: 'answer', value: 'rest' });
   });
 
@@ -162,8 +170,14 @@ describe('createTerminalPrompter', () => {
   // carrying BS/BEL/ESC/U+2028 or a line feed must come back escaped, on one line.
   it('echoes a rejected answer with its control characters escaped', async () => {
     const answers = [
-      ['x', String.fromCharCode(27), '[31m', String.fromCharCode(7), String.fromCharCode(8), 'y']
-        .join(''),
+      [
+        'x',
+        String.fromCharCode(27),
+        '[31m',
+        String.fromCharCode(7),
+        String.fromCharCode(8),
+        'y',
+      ].join(''),
       `a${String.fromCharCode(0x2028)}INJECTED: done`,
       'a\nINJECTED: scaffold complete',
       'rest',
@@ -186,8 +200,9 @@ describe('createTerminalPrompter', () => {
     }
     // A pasted line feed survives the line reader and the sink escape keeps it, so
     // only the per-site escape stops it forging a line of its own.
-    expect(printed.flatMap((line) => line.split('\n')).filter((l) => l.startsWith('INJECTED')))
-      .toEqual([]);
+    expect(
+      printed.flatMap((line) => line.split('\n')).filter((l) => l.startsWith('INJECTED')),
+    ).toEqual([]);
   });
 
   // The menu is caller-supplied text printed through the same sink: a label

@@ -74,9 +74,8 @@ export function ViewPlugin(options: ViewPluginOptions = {}): IPlugin {
       ctx.services.register(CAPABILITIES.VIEW, engine);
       // Reporting the selected engine is a real fact; an invented round trip
       // would be the opposite (M90b).
-      ctx.health.register(
-        'view',
-        () => Promise.resolve({ status: 'up' as const, data: { engine: engineName } }),
+      ctx.health.register('view', () =>
+        Promise.resolve({ status: 'up' as const, data: { engine: engineName } }),
       );
     },
   };

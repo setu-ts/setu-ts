@@ -103,11 +103,13 @@ const CASES: readonly BrokerCase[] = [
     },
     deliverer: async (delivery) => {
       const client = new FakeRedisStreamsClient({
-        seededMessages: [{
-          id: '1-0',
-          payload: '{"id":1}',
-          ...(delivery?.headers ? { fields: delivery.headers } : {}),
-        }],
+        seededMessages: [
+          {
+            id: '1-0',
+            payload: '{"id":1}',
+            ...(delivery?.headers ? { fields: delivery.headers } : {}),
+          },
+        ],
       });
       const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
         client,
@@ -146,11 +148,13 @@ const CASES: readonly BrokerCase[] = [
     deliverer: async (delivery) => {
       const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeAmqpConnection({
-          seededMessages: [{
-            topic: TOPIC,
-            content: '{"id":1}',
-            properties: delivery?.headers ? { headers: delivery.headers } : {},
-          }],
+          seededMessages: [
+            {
+              topic: TOPIC,
+              content: '{"id":1}',
+              properties: delivery?.headers ? { headers: delivery.headers } : {},
+            },
+          ],
         }),
       });
       await broker.connect();
@@ -176,17 +180,19 @@ const CASES: readonly BrokerCase[] = [
       const values = new Map(Object.entries(delivery?.headers ?? {}));
       const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeNatsConnection({
-          seededMessages: [{
-            subject: TOPIC,
-            data: '{"id":1}',
-            seq: 1,
-            timestampNanos: 1735689600000000000,
-            // A real MsgHdrs answers keys()/get(); `undefined` models a message
-            // published without any headers at all.
-            ...(delivery?.headers
-              ? { headers: { keys: () => values.keys(), get: (k: string) => values.get(k) } }
-              : {}),
-          }],
+          seededMessages: [
+            {
+              subject: TOPIC,
+              data: '{"id":1}',
+              seq: 1,
+              timestampNanos: 1735689600000000000,
+              // A real MsgHdrs answers keys()/get(); `undefined` models a message
+              // published without any headers at all.
+              ...(delivery?.headers
+                ? { headers: { keys: () => values.keys(), get: (k: string) => values.get(k) } }
+                : {}),
+            },
+          ],
         }),
       });
       await broker.connect();
@@ -206,8 +212,7 @@ const CASES: readonly BrokerCase[] = [
         sentHeaders: () => {
           const call = factory.producer().calls.find((c) => c.method === 'send');
           const options = call?.args?.[0] as
-            | { messages?: Array<{ headers?: Record<string, string> }> }
-            | undefined;
+            { messages?: Array<{ headers?: Record<string, string> }> } | undefined;
           return options?.messages?.[0]?.headers ?? {};
         },
         sentNative: () => {
@@ -220,14 +225,16 @@ const CASES: readonly BrokerCase[] = [
     deliverer: async (delivery) => {
       const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeKafkaFactory({
-          seededMessages: [{
-            topic: TOPIC,
-            value: '{"id":1}',
-            partition: 0,
-            offset: '0',
-            timestamp: '1700000000000',
-            headers: delivery?.headers ?? {},
-          }],
+          seededMessages: [
+            {
+              topic: TOPIC,
+              value: '{"id":1}',
+              partition: 0,
+              offset: '0',
+              timestamp: '1700000000000',
+              headers: delivery?.headers ?? {},
+            },
+          ],
         }),
       });
       await broker.connect();
@@ -461,11 +468,15 @@ describe('broker header conformance', () => {
       it('carries both options as headers and writes the native mapping (M106 §3.3)', async () => {
         const { broker, sentHeaders, sentNative } = await testCase.publisher();
 
-        await broker.publish(TOPIC, { id: 1 }, {
-          orderingKey: 'agg-1',
-          deduplicationId: 'dedup-1',
-          headers: { 'x-app': 'v' },
-        });
+        await broker.publish(
+          TOPIC,
+          { id: 1 },
+          {
+            orderingKey: 'agg-1',
+            deduplicationId: 'dedup-1',
+            headers: { 'x-app': 'v' },
+          },
+        );
 
         await waitFor(
           () => sentHeaders()['x-setu-ordering-key'] === 'agg-1',
@@ -531,10 +542,14 @@ describe('broker header conformance', () => {
         seen.push(metadata.headers ?? {});
       });
 
-      await pipelined.publish(TOPIC, { id: 1 }, {
-        orderingKey: 'agg-1',
-        deduplicationId: 'dedup-1',
-      });
+      await pipelined.publish(
+        TOPIC,
+        { id: 1 },
+        {
+          orderingKey: 'agg-1',
+          deduplicationId: 'dedup-1',
+        },
+      );
 
       await waitFor(() => seen.length > 0, 'pipelined delivery');
       expect(seen[0]?.['x-setu-ordering-key']).toBe('agg-1');

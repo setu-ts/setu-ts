@@ -76,20 +76,17 @@ describe('Storage integration (through a real kernel app)', () => {
     ]);
 
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        StoragePlugin(),
-      ],
+      plugins: [RuntimePlugin(), StoragePlugin()],
     });
     await app.start();
 
     const storage = app.services.get<IStorage>(CAPABILITIES.STORAGE);
 
-    // deno-lint-ignore no-explicit-any
-    const { getUploadedFile } = await import('../../src/index.ts') as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { getUploadedFile } = (await import('../../src/index.ts')) as any;
 
     // Build a minimal request context that simulates what the kernel inject() provides.
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctx: any = {
       state: new Map<string, unknown>(),
       request: {
@@ -101,7 +98,7 @@ describe('Storage integration (through a real kernel app)', () => {
       },
       response: {
         _status: 200,
-        // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         _body: null as any,
         status(code: number) {
           this._status = code;

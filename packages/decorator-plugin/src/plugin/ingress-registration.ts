@@ -103,8 +103,11 @@ function isWebsocketEntry(
   IngressMetadata,
   { readonly kind: 'websocket-open' | 'websocket-message' | 'websocket-close' }
 > {
-  return entry.kind === 'websocket-open' || entry.kind === 'websocket-message' ||
-    entry.kind === 'websocket-close';
+  return (
+    entry.kind === 'websocket-open' ||
+    entry.kind === 'websocket-message' ||
+    entry.kind === 'websocket-close'
+  );
 }
 
 function ingressBehaviors(
@@ -151,9 +154,9 @@ function pipelineBehaviors(
   const primary = primaryFor(entries, handler);
   if (primary?.kind !== 'command' && primary?.kind !== 'query') {
     throw new Error(
-      `${
-        className(target)
-      }.${handler} uses @UsePipelineBehaviors, but it is not a command or query handler. ` +
+      `${className(
+        target,
+      )}.${handler} uses @UsePipelineBehaviors, but it is not a command or query handler. ` +
         'Use @UseIngressBehaviors on supported non-CQRS ingress handlers.',
     );
   }
@@ -161,10 +164,7 @@ function pipelineBehaviors(
 }
 
 /** Refuses HTTP guards whose request context cannot exist on non-HTTP ingress. */
-function refuseHttpGuards(
-  target: Constructor,
-  entries: readonly IngressMetadata[],
-): void {
+function refuseHttpGuards(target: Constructor, entries: readonly IngressMetadata[]): void {
   if ((metadataStore.getController(target)?.guards.length ?? 0) > 0) {
     throw new Error(
       `${className(target)} uses @UseGuards with non-HTTP ingress. ` +
@@ -209,9 +209,12 @@ export async function registerIngresses(
 
     for (const entry of entries) {
       if (
-        entry.kind === 'ingress-behaviors' || entry.kind === 'pipeline-behaviors' ||
-        entry.kind === 'gateway' || entry.kind.startsWith('websocket-')
-      ) continue;
+        entry.kind === 'ingress-behaviors' ||
+        entry.kind === 'pipeline-behaviors' ||
+        entry.kind === 'gateway' ||
+        entry.kind.startsWith('websocket-')
+      )
+        continue;
       const method = methodOf(instance, target, entry.handler);
       switch (entry.kind) {
         case 'queue': {
@@ -223,19 +226,23 @@ export async function registerIngresses(
             entry.handler,
           );
           const behaviors = ingressBehaviors(entries, target, entry.handler);
-          queue.process(entry.name, async (job) => {
-            await composeBehaviorChain(
-              {
-                kind: 'queue',
-                name: entry.name,
-                payload: job,
-                attempt: job.attempts,
-                ...(job.headers !== undefined ? { headers: job.headers } : {}),
-              },
-              behaviors,
-              async () => await method(job),
-            );
-          }, entry.options);
+          queue.process(
+            entry.name,
+            async (job) => {
+              await composeBehaviorChain(
+                {
+                  kind: 'queue',
+                  name: entry.name,
+                  payload: job,
+                  attempt: job.attempts,
+                  ...(job.headers !== undefined ? { headers: job.headers } : {}),
+                },
+                behaviors,
+                async () => await method(job),
+              );
+            },
+            entry.options,
+          );
           break;
         }
         case 'scheduler-cron': {
@@ -247,13 +254,18 @@ export async function registerIngresses(
             entry.handler,
           );
           const behaviors = ingressBehaviors(entries, target, entry.handler);
-          await scheduler.cron(entry.handler, entry.expression, async (job) => {
-            await composeBehaviorChain(
-              { kind: 'scheduler', name: entry.handler, payload: job, attempt: job.attempts },
-              behaviors,
-              async () => await method(job),
-            );
-          }, entry.options);
+          await scheduler.cron(
+            entry.handler,
+            entry.expression,
+            async (job) => {
+              await composeBehaviorChain(
+                { kind: 'scheduler', name: entry.handler, payload: job, attempt: job.attempts },
+                behaviors,
+                async () => await method(job),
+              );
+            },
+            entry.options,
+          );
           break;
         }
         case 'scheduler-every': {
@@ -265,13 +277,18 @@ export async function registerIngresses(
             entry.handler,
           );
           const behaviors = ingressBehaviors(entries, target, entry.handler);
-          await scheduler.every(entry.handler, entry.intervalMs, async (job) => {
-            await composeBehaviorChain(
-              { kind: 'scheduler', name: entry.handler, payload: job, attempt: job.attempts },
-              behaviors,
-              async () => await method(job),
-            );
-          }, entry.options);
+          await scheduler.every(
+            entry.handler,
+            entry.intervalMs,
+            async (job) => {
+              await composeBehaviorChain(
+                { kind: 'scheduler', name: entry.handler, payload: job, attempt: job.attempts },
+                behaviors,
+                async () => await method(job),
+              );
+            },
+            entry.options,
+          );
           break;
         }
         case 'event': {
@@ -296,18 +313,22 @@ export async function registerIngresses(
             entry.handler,
           );
           const behaviors = ingressBehaviors(entries, target, entry.handler);
-          await broker.subscribe(entry.topic, async (message, metadata) => {
-            await composeBehaviorChain(
-              {
-                kind: 'messaging',
-                name: entry.topic,
-                payload: message,
-                ...(metadata.headers !== undefined ? { headers: metadata.headers } : {}),
-              },
-              behaviors,
-              async () => await method(message, metadata),
-            );
-          }, entry.options);
+          await broker.subscribe(
+            entry.topic,
+            async (message, metadata) => {
+              await composeBehaviorChain(
+                {
+                  kind: 'messaging',
+                  name: entry.topic,
+                  payload: message,
+                  ...(metadata.headers !== undefined ? { headers: metadata.headers } : {}),
+                },
+                behaviors,
+                async () => await method(message, metadata),
+              );
+            },
+            entry.options,
+          );
           break;
         }
         case 'command': {

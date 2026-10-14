@@ -32,10 +32,7 @@ export interface FakeContext {
  */
 export function createFakeContext(withLogger = false): FakeContext {
   const registered = new Map<string, unknown>();
-  const healthIndicators = new Map<
-    string,
-    () => Promise<{ status: string; data?: unknown }>
-  >();
+  const healthIndicators = new Map<string, () => Promise<{ status: string; data?: unknown }>>();
   const onCloseHandlers: Array<() => Promise<void> | void> = [];
   const logs: LogCall[] = [];
 

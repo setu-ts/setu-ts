@@ -110,16 +110,18 @@ describe('BunHttpAdapter WebSocket upgrade (post-M70a)', () => {
 
     const server: BunServer = {
       stop: () => {},
-      ...(options?.omitUpgrade === true ? {} : {
-        upgrade: (request: Request, opts: { data: BunSocketData; headers?: Headers }) => {
-          upgradeCalls.push({
-            request,
-            data: opts.data,
-            protocol: opts.headers?.get('sec-websocket-protocol') ?? null,
-          });
-          return options?.upgradeReturns ?? true;
-        },
-      }),
+      ...(options?.omitUpgrade === true
+        ? {}
+        : {
+            upgrade: (request: Request, opts: { data: BunSocketData; headers?: Headers }) => {
+              upgradeCalls.push({
+                request,
+                data: opts.data,
+                protocol: opts.headers?.get('sec-websocket-protocol') ?? null,
+              });
+              return options?.upgradeReturns ?? true;
+            },
+          }),
     };
 
     const host: BunServeHost = {

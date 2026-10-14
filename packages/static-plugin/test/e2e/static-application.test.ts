@@ -66,9 +66,7 @@ describe('StaticPlugin e2e', () => {
   it('should handle HEAD requests', async () => {
     await app.start({ port: 0 });
 
-    const response = await app.fetch(
-      new Request('http://localhost/test.txt', { method: 'HEAD' }),
-    );
+    const response = await app.fetch(new Request('http://localhost/test.txt', { method: 'HEAD' }));
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Length')).toBe('11');
 
@@ -112,9 +110,7 @@ describe('StaticPlugin e2e', () => {
   it('should return 404 for prefix-adjacent paths', async () => {
     await app.start({ port: 0 });
 
-    const response = await app.fetch(
-      new Request('http://localhost/testtxt'),
-    );
+    const response = await app.fetch(new Request('http://localhost/testtxt'));
     expect(response.status).toBe(404);
   });
 
@@ -127,9 +123,7 @@ describe('StaticPlugin e2e', () => {
     await app.start({ port: 0 });
 
     // Request through the symlink should be contained
-    const response = await app.fetch(
-      new Request('http://localhost/test.txt'),
-    );
+    const response = await app.fetch(new Request('http://localhost/test.txt'));
     expect(response.status).toBe(200);
 
     await app.stop();
@@ -145,10 +139,7 @@ describe('StaticPlugin e2e', () => {
     await symlink(outsideDir, join(linkDir, 'outside-link'));
 
     const appWithSymlink = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        StaticPlugin({ root: linkDir }),
-      ],
+      plugins: [RuntimePlugin(), StaticPlugin({ root: linkDir })],
     });
 
     await appWithSymlink.start({ port: 0 });

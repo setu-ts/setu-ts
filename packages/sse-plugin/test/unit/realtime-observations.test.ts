@@ -264,13 +264,16 @@ describe('SsePlugin realtime observations (M98l)', () => {
       let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
       class Capturing extends original<Uint8Array> {
         constructor(source?: UnderlyingSource<Uint8Array>, strategy?: QueuingStrategy<Uint8Array>) {
-          super({
-            ...source,
-            start: (ctrl) => {
-              controller = ctrl as ReadableStreamDefaultController<Uint8Array>;
-              return source?.start?.(ctrl);
+          super(
+            {
+              ...source,
+              start: (ctrl) => {
+                controller = ctrl as ReadableStreamDefaultController<Uint8Array>;
+                return source?.start?.(ctrl);
+              },
             },
-          }, strategy);
+            strategy,
+          );
         }
       }
       globalThis.ReadableStream = Capturing as typeof globalThis.ReadableStream;

@@ -100,10 +100,8 @@ function recordingWsPlugin(
 
   const routeUpgrade = singleParameter
     ? (request: Request): Promise<WebSocketUpgradeDecision | null> => consult(request, undefined)
-    : (
-      request: Request,
-      principal?: IPrincipal,
-    ): Promise<WebSocketUpgradeDecision | null> => consult(request, principal);
+    : (request: Request, principal?: IPrincipal): Promise<WebSocketUpgradeDecision | null> =>
+        consult(request, principal);
 
   const service = {
     routeUpgrade,
@@ -146,10 +144,7 @@ describe('Kernel threads the authenticated principal to routeUpgrade (M73)', () 
     const app = createApplication({
       plugins: [
         runtimePlugin(),
-        recordingWsPlugin(
-          () => Promise.resolve({ accept: true, sink: probe.sink }),
-          calls,
-        ),
+        recordingWsPlugin(() => Promise.resolve({ accept: true, sink: probe.sink }), calls),
       ],
     });
     app.middleware.add(authMiddleware(principal), { priority: 300, name: 'auth' });
@@ -180,10 +175,7 @@ describe('Kernel threads the authenticated principal to routeUpgrade (M73)', () 
     const app = createApplication({
       plugins: [
         runtimePlugin(),
-        recordingWsPlugin(
-          () => Promise.resolve({ accept: true, sink: probe.sink }),
-          calls,
-        ),
+        recordingWsPlugin(() => Promise.resolve({ accept: true, sink: probe.sink }), calls),
       ],
     });
     await app.start();
@@ -210,11 +202,7 @@ describe('Kernel threads the authenticated principal to routeUpgrade (M73)', () 
     const app = createApplication({
       plugins: [
         runtimePlugin(),
-        recordingWsPlugin(
-          () => Promise.resolve({ accept: true, sink: probe.sink }),
-          calls,
-          true,
-        ),
+        recordingWsPlugin(() => Promise.resolve({ accept: true, sink: probe.sink }), calls, true),
       ],
     });
     await app.start();

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- documentation snippet fixtures mirror guide examples
+/* eslint-disable require-await -- documentation snippet fixtures mirror guide examples */
 // Plugin registration from docs/custom-plugins.md - must compile against the workspace.
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -18,9 +18,7 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
         greet: (name: string) => `${options.greeting ?? 'Hello'}, ${name}!`,
       });
       ctx.router.get('/greet/:name', async (ctx) => {
-        const service = ctx.services.get<{ greet: (n: string) => string }>(
-          'my-service',
-        );
+        const service = ctx.services.get<{ greet: (n: string) => string }>('my-service');
         return ctx.response.json({ message: service.greet(ctx.params.name) });
       });
     },

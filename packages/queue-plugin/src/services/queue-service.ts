@@ -468,10 +468,7 @@ export class QueueService implements IQueue {
     }
   }
 
-  #dispatchJob<T>(
-    storedJob: StoredJob<T>,
-    reg: ProcessorRegistration<T>,
-  ): void {
+  #dispatchJob<T>(storedJob: StoredJob<T>, reg: ProcessorRegistration<T>): void {
     // M98f: the attempt is observed from dispatch. The observer receives the
     // name (allowlist lookup), the raw id (alias lookup) and the attempt —
     // nothing else — and a throwing observer only costs the observation.
@@ -488,9 +485,11 @@ export class QueueService implements IQueue {
             ...(reg.onFailed === undefined ? {} : { onFailed: reg.onFailed }),
             onProcessorOutcome: (name: string, outcome: JobOutcome) =>
               this.#collector?.jobSettled(name, outcome),
-            ...(observed === null ? {} : {
-              onAttemptSettled: (outcome, settlement) => observed.settled(outcome, settlement),
-            }),
+            ...(observed === null
+              ? {}
+              : {
+                  onAttemptSettled: (outcome, settlement) => observed.settled(outcome, settlement),
+                }),
           },
         );
       } finally {

@@ -56,30 +56,39 @@ describe('resolveMongoTarget — per-entity overrides and defaults', () => {
 
 describe('fromDriverDocument — _id → primary key on read', () => {
   it('renames _id to the mapped primary key and drops _id', () => {
-    const row = fromDriverDocument({ _id: 'abc', name: 'Bolt' }, {
-      collection: 'widgets',
-      primaryKey: ['id'],
-      idType: 'auto',
-    });
+    const row = fromDriverDocument(
+      { _id: 'abc', name: 'Bolt' },
+      {
+        collection: 'widgets',
+        primaryKey: ['id'],
+        idType: 'auto',
+      },
+    );
     expect(row).toEqual({ id: 'abc', name: 'Bolt' });
     expect(Object.hasOwn(row, '_id')).toBe(false);
   });
 
   it('uses the mapped primary key from a per-entity override', () => {
-    const row = fromDriverDocument({ _id: 'abc' }, {
-      collection: 'users',
-      primaryKey: ['user_id'],
-      idType: 'auto',
-    });
+    const row = fromDriverDocument(
+      { _id: 'abc' },
+      {
+        collection: 'users',
+        primaryKey: ['user_id'],
+        idType: 'auto',
+      },
+    );
     expect(row).toEqual({ user_id: 'abc' });
   });
 
   it('leaves a document with no _id unchanged', () => {
-    const row = fromDriverDocument({ name: 'Bolt' }, {
-      collection: 'widgets',
-      primaryKey: ['id'],
-      idType: 'auto',
-    });
+    const row = fromDriverDocument(
+      { name: 'Bolt' },
+      {
+        collection: 'widgets',
+        primaryKey: ['id'],
+        idType: 'auto',
+      },
+    );
     expect(row).toEqual({ name: 'Bolt' });
   });
 
@@ -107,21 +116,27 @@ describe('fromDriverDocument — _id → primary key on read', () => {
 
 describe('toDriverDocument — primary key → _id on write', () => {
   it('renames the primary key to _id and drops the primary key', () => {
-    const doc = toDriverDocument({ id: 'abc', name: 'Bolt' }, {
-      collection: 'widgets',
-      primaryKey: ['id'],
-      idType: 'auto',
-    });
+    const doc = toDriverDocument(
+      { id: 'abc', name: 'Bolt' },
+      {
+        collection: 'widgets',
+        primaryKey: ['id'],
+        idType: 'auto',
+      },
+    );
     expect(doc).toEqual({ _id: 'abc', name: 'Bolt' });
     expect(Object.hasOwn(doc, 'id')).toBe(false);
   });
 
   it('leaves a row with no primary-key field unchanged', () => {
-    const doc = toDriverDocument({ name: 'Bolt' }, {
-      collection: 'widgets',
-      primaryKey: ['id'],
-      idType: 'auto',
-    });
+    const doc = toDriverDocument(
+      { name: 'Bolt' },
+      {
+        collection: 'widgets',
+        primaryKey: ['id'],
+        idType: 'auto',
+      },
+    );
     expect(doc).toEqual({ name: 'Bolt' });
   });
 
@@ -151,11 +166,14 @@ describe('toDriverDocument — primary key → _id on write', () => {
   });
 
   it('does not emit _id when none of the columns are present in the row', () => {
-    const doc = toDriverDocument({ name: 'Alice' }, {
-      collection: 'users',
-      primaryKey: ['tenantId', 'userId'],
-      idType: 'compound',
-    });
+    const doc = toDriverDocument(
+      { name: 'Alice' },
+      {
+        collection: 'users',
+        primaryKey: ['tenantId', 'userId'],
+        idType: 'compound',
+      },
+    );
     expect(doc).toEqual({ name: 'Alice' });
     expect(Object.hasOwn(doc, '_id')).toBe(false);
   });
@@ -179,9 +197,7 @@ describe('toIdString — driver id → string', () => {
 
 describe('toDriverId — primary-key value → driver form', () => {
   it('raw idType passes the value through verbatim', () => {
-    expect(toDriverId('507f1f77bcf86cd799439011', 'raw')).toBe(
-      '507f1f77bcf86cd799439011',
-    );
+    expect(toDriverId('507f1f77bcf86cd799439011', 'raw')).toBe('507f1f77bcf86cd799439011');
   });
 
   it('auto converts a valid 24-hex string to an ObjectId', () => {

@@ -27,9 +27,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 async function docker(args: string[]): Promise<string> {
   const out = await runProcess('docker', { args });
   if (!out.success) {
-    throw new Error(
-      `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
-    );
+    throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
   return new TextDecoder().decode(out.stdout);
 }
@@ -88,54 +86,58 @@ function makeRuntime(): IRuntimeServices {
 // ── RabbitMQ outage ─────────────────────────────────────────────────────────
 
 describe('REAL RabbitMQ outage (§3.7)', () => {
-  it('up → stop → down → restart → up, and pre-outage subscription receives post-outage publish', {
-    skip: process.env['RABBITMQ_URL'] === undefined,
-  }, async () => {
-    const url = process.env['RABBITMQ_URL'];
-    if (url === undefined) throw new Error('Backend guard failed');
+  it(
+    'up → stop → down → restart → up, and pre-outage subscription receives post-outage publish',
+    {
+      skip: process.env['RABBITMQ_URL'] === undefined,
+    },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    await import('amqplib');
+      await import('amqplib');
 
-    const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
+      const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
 
-    const broker = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), { url: toIpv4(url) });
-    const received: string[] = [];
+      const broker = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), { url: toIpv4(url) });
+      const received: string[] = [];
 
-    try {
-      await broker.connect();
+      try {
+        await broker.connect();
 
-      // (up) baseline
-      expect(await broker.isHealthy()).toBe(true);
+        // (up) baseline
+        expect(await broker.isHealthy()).toBe(true);
 
-      // Pre-outage subscription (X2-1: must survive the outage via replay)
-      const topic = `m70c.outage.${crypto.randomUUID()}`;
-      await broker.subscribe(topic, (msg: unknown) => {
-        received.push(JSON.stringify(msg));
-      });
+        // Pre-outage subscription (X2-1: must survive the outage via replay)
+        const topic = `m70c.outage.${crypto.randomUUID()}`;
+        await broker.subscribe(topic, (msg: unknown) => {
+          received.push(JSON.stringify(msg));
+        });
 
-      // (stop) real broker stop → drive-mode supervisor faults → down
-      await docker(['stop', containerId]);
-      await waitTrue(async () => (await broker.isHealthy()) === false, 'down after stop', 30_000);
-      expect(await broker.isHealthy()).toBe(false);
-      // Lifecycle intact: isReady stays true during the fault window
-      expect(broker.isReady()).toBe(true);
+        // (stop) real broker stop → drive-mode supervisor faults → down
+        await docker(['stop', containerId]);
+        await waitTrue(async () => (await broker.isHealthy()) === false, 'down after stop', 30_000);
+        expect(await broker.isHealthy()).toBe(false);
+        // Lifecycle intact: isReady stays true during the fault window
+        expect(broker.isReady()).toBe(true);
 
-      // (restart) real broker start → drive-mode reconnect → up
-      await docker(['start', containerId]);
-      await waitTrue(async () => (await broker.isHealthy()) === true, 'up after restart', 60_000);
-      expect(await broker.isHealthy()).toBe(true);
+        // (restart) real broker start → drive-mode reconnect → up
+        await docker(['start', containerId]);
+        await waitTrue(async () => (await broker.isHealthy()) === true, 'up after restart', 60_000);
+        expect(await broker.isHealthy()).toBe(true);
 
-      // X2-1: the pre-outage subscription receives a post-outage publish
-      await broker.publish(topic, { after: 'outage' });
-      await waitTrue(() => received.length >= 1, 'post-outage delivery', 20_000);
-      expect(received.length).toBeGreaterThanOrEqual(1);
-    } finally {
-      await broker.disconnect();
-      // Leave the container running for the environment.
-      await runProcess('docker', { args: ['start', containerId] });
-    }
-  });
+        // X2-1: the pre-outage subscription receives a post-outage publish
+        await broker.publish(topic, { after: 'outage' });
+        await waitTrue(() => received.length >= 1, 'post-outage delivery', 20_000);
+        expect(received.length).toBeGreaterThanOrEqual(1);
+      } finally {
+        await broker.disconnect();
+        // Leave the container running for the environment.
+        await runProcess('docker', { args: ['start', containerId] });
+      }
+    },
+  );
 });
 
 // ── Redis Streams outage ────────────────────────────────────────────────────
@@ -184,77 +186,81 @@ describe('REAL Redis Streams outage (§3.7)', () => {
 // ── M89c: register-time publish on a REAL broker ────────────────────────────
 
 describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
-  it('a register-time publish still boots and still delivers through the COMPLETE chain', {
-    skip: process.env['RABBITMQ_URL'] === undefined,
-  }, async () => {
-    const url = process.env['RABBITMQ_URL'];
-    if (url === undefined) throw new Error('Backend guard failed');
+  it(
+    'a register-time publish still boots and still delivers through the COMPLETE chain',
+    {
+      skip: process.env['RABBITMQ_URL'] === undefined,
+    },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    let amqplibPresent = false;
-    try {
-      await import('amqplib');
-      amqplibPresent = true;
-    } catch {
-      // npm:amqplib not available
-    }
-    if (!amqplibPresent) {
-      return;
-    }
+      let amqplibPresent = false;
+      try {
+        await import('amqplib');
+        amqplibPresent = true;
+      } catch {
+        // npm:amqplib not available
+      }
+      if (!amqplibPresent) {
+        return;
+      }
 
-    // The production shape: the broker wrapped by the behaviour chain with the
-    // gate armed (the factory arm). The measurement (2026-09-03) showed
-    // rabbitmq boots AND delivers complete through this path; §3.1 changed the
-    // IN-MEMORY promise only, so this pins that the real path cannot regress.
-    const { promise: chainReady, resolve: openChainGate } = Promise.withResolvers<void>();
-    const log: string[] = [];
-    const rabbit = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), { url: toIpv4(url) });
-    const piped = new PipelinedBroker(
-      rabbit,
-      [
-        {
-          handle: (ctx, next) => {
-            expect(ctx.kind).toBe('messaging');
-            log.push('instance');
-            return next();
+      // The production shape: the broker wrapped by the behaviour chain with the
+      // gate armed (the factory arm). The measurement (2026-09-03) showed
+      // rabbitmq boots AND delivers complete through this path; §3.1 changed the
+      // IN-MEMORY promise only, so this pins that the real path cannot regress.
+      const { promise: chainReady, resolve: openChainGate } = Promise.withResolvers<void>();
+      const log: string[] = [];
+      const rabbit = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), { url: toIpv4(url) });
+      const piped = new PipelinedBroker(
+        rabbit,
+        [
+          {
+            handle: (ctx, next) => {
+              expect(ctx.kind).toBe('messaging');
+              log.push('instance');
+              return next();
+            },
           },
-        },
-        {
-          handle: (ctx, next) => {
-            expect(ctx.kind).toBe('messaging');
-            log.push('factory');
-            return next();
+          {
+            handle: (ctx, next) => {
+              expect(ctx.kind).toBe('messaging');
+              log.push('factory');
+              return next();
+            },
           },
-        },
-      ],
-      chainReady,
-      { runtime: makeRuntime(), timeoutMs: 30_000 },
-    );
+        ],
+        chainReady,
+        { runtime: makeRuntime(), timeoutMs: 30_000 },
+      );
 
-    const topic = `m89c.register-publish.${crypto.randomUUID()}`;
-    const received: string[] = [];
+      const topic = `m89c.register-publish.${crypto.randomUUID()}`;
+      const received: string[] = [];
 
-    try {
-      await rabbit.connect();
-      // "register()" of a later plugin: subscribe, then AWAIT a publish —
-      // before the gate opens. On a real broker publish already returned
-      // before delivery; it must still resolve, not deadlock.
-      await piped.subscribe(topic, (msg: unknown) => {
-        log.push('handler');
-        received.push(JSON.stringify(msg));
-      });
-      await piped.publish(topic, { at: 'register-time' });
+      try {
+        await rabbit.connect();
+        // "register()" of a later plugin: subscribe, then AWAIT a publish —
+        // before the gate opens. On a real broker publish already returned
+        // before delivery; it must still resolve, not deadlock.
+        await piped.subscribe(topic, (msg: unknown) => {
+          log.push('handler');
+          received.push(JSON.stringify(msg));
+        });
+        await piped.publish(topic, { at: 'register-time' });
 
-      // "onInit" ends: the gate opens and the held message flows through the
-      // complete chain.
-      openChainGate();
-      await waitTrue(() => received.length >= 1, 'register-time delivery', 20_000);
+        // "onInit" ends: the gate opens and the held message flows through the
+        // complete chain.
+        openChainGate();
+        await waitTrue(() => received.length >= 1, 'register-time delivery', 20_000);
 
-      expect(received.length).toBe(1);
-      expect(log).toEqual(['instance', 'factory', 'handler']);
-    } finally {
-      await piped.disconnect();
-    }
-  });
+        expect(received.length).toBe(1);
+        expect(log).toEqual(['instance', 'factory', 'handler']);
+      } finally {
+        await piped.disconnect();
+      }
+    },
+  );
 });
 
 // ── M95b §3.6: the hung backend the stopped arm never produces ──────────────
@@ -296,9 +302,10 @@ describe('REAL RabbitMQ hung backend (M95b §3.6 / X51-2)', () => {
       let paused = false;
 
       try {
-        const healthBody = async (): Promise<
-          { status: string; checks?: Record<string, { status: string; data?: unknown }> }
-        > => (await app.inject({ method: 'GET', url: 'http://localhost/health' })).json();
+        const healthBody = async (): Promise<{
+          status: string;
+          checks?: Record<string, { status: string; data?: unknown }>;
+        }> => (await app.inject({ method: 'GET', url: 'http://localhost/health' })).json();
 
         // (up) baseline: the probe's real round trip answers true.
         await waitTrue(

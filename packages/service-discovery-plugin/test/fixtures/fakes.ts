@@ -165,9 +165,7 @@ export interface FakeProvider extends DiscoveryProvider {
  * @param initial - Instances `resolve` returns until changed
  * @returns The fake provider
  */
-export function createFakeProvider(
-  initial: readonly ServiceInstance[] = [],
-): FakeProvider {
+export function createFakeProvider(initial: readonly ServiceInstance[] = []): FakeProvider {
   let instances = initial;
   let failure: Error | null = null;
   let resolveCalls = 0;
@@ -319,13 +317,11 @@ export function streamOf(chunks: readonly string[]): ReadableStream<Uint8Array> 
 }
 
 /** A DNS resolver whose answers the test controls. */
-export function createFakeDns(
-  answers: {
-    srv?: readonly SrvRecord[] | Error;
-    a?: readonly string[] | Error;
-    aaaa?: readonly string[] | Error;
-  },
-): IDnsResolver {
+export function createFakeDns(answers: {
+  srv?: readonly SrvRecord[] | Error;
+  a?: readonly string[] | Error;
+  aaaa?: readonly string[] | Error;
+}): IDnsResolver {
   return {
     resolveSrv(): Promise<readonly SrvRecord[]> {
       const value = answers.srv ?? [];

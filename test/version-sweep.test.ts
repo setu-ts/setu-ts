@@ -250,14 +250,17 @@ describe('version sweep — reportSweep', () => {
   });
 
   it('fails and lists every stale reference with a remedy', () => {
-    const { failed, lines } = reportSweep({
-      findings: [
-        { file: 'packages/sdk/src/a.ts', line: 3, pkg: 'common', version: '0.2.0' },
-        { file: 'apps/minimal/deno.lock', line: 9, pkg: 'kernel', version: '0.2' },
-      ],
-      filesScanned: 767,
-      referencesSeen: 2245,
-    }, '0.3.0');
+    const { failed, lines } = reportSweep(
+      {
+        findings: [
+          { file: 'packages/sdk/src/a.ts', line: 3, pkg: 'common', version: '0.2.0' },
+          { file: 'apps/minimal/deno.lock', line: 9, pkg: 'kernel', version: '0.2' },
+        ],
+        filesScanned: 767,
+        referencesSeen: 2245,
+      },
+      '0.3.0',
+    );
     expect(failed).toBe(true);
     expect(lines[0]).toContain('2 reference(s)');
     expect(lines[1]).toBe('  packages/sdk/src/a.ts:3  @setu-ts/common@0.2.0');
@@ -287,7 +290,7 @@ describe('version sweep — trackedFiles', () => {
 
   it('splits the listing and drops the trailing blank', async () => {
     const files = await trackedFiles(() =>
-      Promise.resolve({ success: true, stdout: enc('a.ts\nb/deno.lock\n'), stderr: enc('') })
+      Promise.resolve({ success: true, stdout: enc('a.ts\nb/deno.lock\n'), stderr: enc('') }),
     );
     expect(files).toEqual(['a.ts', 'b/deno.lock']);
   });
@@ -298,7 +301,7 @@ describe('version sweep — trackedFiles', () => {
   it('throws with git stderr when the lister fails', async () => {
     await expect(
       trackedFiles(() =>
-        Promise.resolve({ success: false, stdout: enc(''), stderr: enc('not a git repository') })
+        Promise.resolve({ success: false, stdout: enc(''), stderr: enc('not a git repository') }),
       ),
     ).rejects.toThrow('not a git repository');
   });

@@ -163,7 +163,8 @@ async function consume(
 
 /** Every stored outbox row, by position. */
 async function storedRows(app: IKernelApplication): Promise<Record<string, unknown>[]> {
-  return await app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+  return await app.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
     .getRepository<Record<string, unknown>, string>('Outbox')
     .findAll({ orderBy: { position: 'asc' } });
 }
@@ -179,134 +180,145 @@ const FAST_BUDGET: OutboxRelayOptions = {
 };
 
 for (const transport of transports) {
-  describe(`outbox relay over real PostgreSQL → ${transport.name}`, {
-    skip: transport.ignore,
-  }, () => {
-    it('a business row and its event commit through one unit of work and the scheduled relay delivers it', async () => {
-      const pg = await postgresOutboxSchema(postgresUrl!, true);
-      const app = processFor(pg, transport, { relay: { intervalMs: 50 } });
-      const definition = definitionFor(transport.name.replaceAll(' ', '-').toLowerCase());
-      const delivered: Delivered[] = [];
-      await app.start();
-      try {
-        await consume(app, definition, delivered);
-        const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-        const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+  describe(
+    `outbox relay over real PostgreSQL → ${transport.name}`,
+    {
+      skip: transport.ignore,
+    },
+    () => {
+      it('a business row and its event commit through one unit of work and the scheduled relay delivers it', async () => {
+        const pg = await postgresOutboxSchema(postgresUrl!, true);
+        const app = processFor(pg, transport, { relay: { intervalMs: 50 } });
+        const definition = definitionFor(transport.name.replaceAll(' ', '-').toLowerCase());
+        const delivered: Delivered[] = [];
+        await app.start();
+        try {
+          await consume(app, definition, delivered);
+          const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+          const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
 
-        const id = await db.transaction(async (uow) => {
-          await uow.getRepository('Order').create({ id: 'o-1', total: 42 });
-          return await outbox.write(uow, definition, { n: 1 });
-        });
-        const rolledBack = await db.transaction(async (uow) => {
-          await uow.getRepository('Order').create({ id: 'o-2', total: 7 });
-          await outbox.write(uow, definition, { n: 2 });
-          throw new Error('business rule');
-        }).catch((error: unknown) => error);
+          const id = await db.transaction(async (uow) => {
+            await uow.getRepository('Order').create({ id: 'o-1', total: 42 });
+            return await outbox.write(uow, definition, { n: 1 });
+          });
+          const rolledBack = await db
+            .transaction(async (uow) => {
+              await uow.getRepository('Order').create({ id: 'o-2', total: 7 });
+              await outbox.write(uow, definition, { n: 2 });
+              throw new Error('business rule');
+            })
+            .catch((error: unknown) => error);
 
-        await waitFor(() => delivered.length >= 1, 'the relayed event');
-        // Several relay intervals pass: the rolled-back event never appears.
-        await settle(400);
+          await waitFor(() => delivered.length >= 1, 'the relayed event');
+          // Several relay intervals pass: the rolled-back event never appears.
+          await settle(400);
 
-        expect((rolledBack as Error).message).toBe('business rule');
-        expect(delivered.map((d) => [d.id, d.n])).toEqual([[id, 1]]);
-        expect(transport.deduplicationId(delivered[0]!.metadata)).toBe(id);
-        const orders = await db.getRepository<{ id: string }>('Order').findAll();
-        expect(orders.map((o) => o.id)).toEqual(['o-1']);
-        const rows = await storedRows(app);
-        expect(rows.map((r) => [r.id, r.status])).toEqual([[id, 'sent']]);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
-
-    it('one ordering key arrives in write order', async () => {
-      const pg = await postgresOutboxSchema(postgresUrl!, true);
-      const app = processFor(pg, transport, { relay: { schedule: false } });
-      const definition = definitionFor(`${transport.name.replaceAll(' ', '-').toLowerCase()}-k`);
-      const delivered: Delivered[] = [];
-      await app.start();
-      try {
-        await consume(app, definition, delivered);
-        const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-        const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
-        for (let n = 1; n <= 6; n++) {
-          await db.transaction((uow) => outbox.write(uow, definition, { key: 'K', n }));
+          expect((rolledBack as Error).message).toBe('business rule');
+          expect(delivered.map((d) => [d.id, d.n])).toEqual([[id, 1]]);
+          expect(transport.deduplicationId(delivered[0]!.metadata)).toBe(id);
+          const orders = await db.getRepository<{ id: string }>('Order').findAll();
+          expect(orders.map((o) => o.id)).toEqual(['o-1']);
+          const rows = await storedRows(app);
+          expect(rows.map((r) => [r.id, r.status])).toEqual([[id, 'sent']]);
+        } finally {
+          await app.stop();
+          await pg.dispose();
         }
-        const result = await outbox.sweep();
-
-        expect(result.published).toBe(6);
-        await waitFor(() => delivered.length === 6, 'six keyed events');
-        expect(delivered.map((d) => d.n)).toEqual([1, 2, 3, 4, 5, 6]);
-      } finally {
-        await app.stop();
-        await pg.dispose();
-      }
-    });
-
-    it('a process dying after a publish: the next process republishes that row (same id), then the rest in order', async () => {
-      const pg = await postgresOutboxSchema(postgresUrl!, true, 8);
-      let marks = 0;
-      // The first process's store: its SECOND markSent never returns — the
-      // process dies between a successful publish and the status write.
-      const dying = processFor(pg, transport, {
-        relay: FAST_BUDGET,
-        store: (services) => {
-          const store = new FaultStore(createDatabaseOutboxStore()(services));
-          store.faults.markSent = () => {
-            marks += 1;
-            return marks === 2 ? new Promise<void>(() => {}) : undefined;
-          };
-          return store;
-        },
       });
-      const fresh = processFor(pg, transport, { relay: FAST_BUDGET });
-      const definition = definitionFor(`${transport.name.replaceAll(' ', '-').toLowerCase()}-c`);
-      const delivered: Delivered[] = [];
-      await dying.start();
-      await fresh.start();
-      try {
-        await consume(fresh, definition, delivered);
-        const db = dying.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-        const outbox = dying.services.get<IOutbox>(CAPABILITIES.OUTBOX);
-        const ids: string[] = [];
-        for (let n = 1; n <= 4; n++) {
-          ids.push(await db.transaction((uow) => outbox.write(uow, definition, { key: 'K', n })));
+
+      it('one ordering key arrives in write order', async () => {
+        const pg = await postgresOutboxSchema(postgresUrl!, true);
+        const app = processFor(pg, transport, { relay: { schedule: false } });
+        const definition = definitionFor(`${transport.name.replaceAll(' ', '-').toLowerCase()}-k`);
+        const delivered: Delivered[] = [];
+        await app.start();
+        try {
+          await consume(app, definition, delivered);
+          const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+          const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+          for (let n = 1; n <= 6; n++) {
+            await db.transaction((uow) => outbox.write(uow, definition, { key: 'K', n }));
+          }
+          const result = await outbox.sweep();
+
+          expect(result.published).toBe(6);
+          await waitFor(() => delivered.length === 6, 'six keyed events');
+          expect(delivered.map((d) => d.n)).toEqual([1, 2, 3, 4, 5, 6]);
+        } finally {
+          await app.stop();
+          await pg.dispose();
         }
+      });
 
-        const dyingSweep = outbox.sweep();
-        await waitFor(() => delivered.length === 2, 'the two publishes before the crash');
-        // The abandoned status write expires at storeTimeoutMs; the key is
-        // blocked and the sweep ends, so rows 3 and 4 are never published here.
-        expect((await dyingSweep).endedBy).toBe('store-failure');
-        const afterCrash = await storedRows(dying);
-        expect(afterCrash.map((r) => r.status)).toEqual(['sent', 'pending', 'pending', 'pending']);
+      it('a process dying after a publish: the next process republishes that row (same id), then the rest in order', async () => {
+        const pg = await postgresOutboxSchema(postgresUrl!, true, 8);
+        let marks = 0;
+        // The first process's store: its SECOND markSent never returns — the
+        // process dies between a successful publish and the status write.
+        const dying = processFor(pg, transport, {
+          relay: FAST_BUDGET,
+          store: (services) => {
+            const store = new FaultStore(createDatabaseOutboxStore()(services));
+            store.faults.markSent = () => {
+              marks += 1;
+              return marks === 2 ? new Promise<void>(() => {}) : undefined;
+            };
+            return store;
+          },
+        });
+        const fresh = processFor(pg, transport, { relay: FAST_BUDGET });
+        const definition = definitionFor(`${transport.name.replaceAll(' ', '-').toLowerCase()}-c`);
+        const delivered: Delivered[] = [];
+        await dying.start();
+        await fresh.start();
+        try {
+          await consume(fresh, definition, delivered);
+          const db = dying.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+          const outbox = dying.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+          const ids: string[] = [];
+          for (let n = 1; n <= 4; n++) {
+            ids.push(await db.transaction((uow) => outbox.write(uow, definition, { key: 'K', n })));
+          }
 
-        const freshOutbox = fresh.services.get<IOutbox>(CAPABILITIES.OUTBOX);
-        expect((await freshOutbox.sweep()).published).toBe(0);
-        const runtime = fresh.services.get<import('@setu-ts/common').IRuntimeServices>(
-          CAPABILITIES.RUNTIME,
-        );
-        await waitFor(
-          () => runtime.now() >= Number(afterCrash[1]!.leaseUntil),
-          'the crashed relay claim expiry',
-        );
-        const restarted = await freshOutbox.sweep();
-        expect(restarted.published).toBe(3);
-        await waitFor(() => delivered.length === 5, 'the republished row and the rest');
+          const dyingSweep = outbox.sweep();
+          await waitFor(() => delivered.length === 2, 'the two publishes before the crash');
+          // The abandoned status write expires at storeTimeoutMs; the key is
+          // blocked and the sweep ends, so rows 3 and 4 are never published here.
+          expect((await dyingSweep).endedBy).toBe('store-failure');
+          const afterCrash = await storedRows(dying);
+          expect(afterCrash.map((r) => r.status)).toEqual([
+            'sent',
+            'pending',
+            'pending',
+            'pending',
+          ]);
 
-        expect(delivered.map((d) => d.n)).toEqual([1, 2, 2, 3, 4]);
-        // The duplicate carries ONE envelope id and one deduplication id.
-        expect(delivered[1]!.id).toBe(ids[1]);
-        expect(delivered[2]!.id).toBe(ids[1]);
-        expect(transport.deduplicationId(delivered[1]!.metadata)).toBe(ids[1]);
-        expect(transport.deduplicationId(delivered[2]!.metadata)).toBe(ids[1]);
-        expect((await storedRows(fresh)).every((r) => r.status === 'sent')).toBe(true);
-      } finally {
-        await dying.stop();
-        await fresh.stop();
-        await pg.dispose();
-      }
-    });
-  });
+          const freshOutbox = fresh.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+          expect((await freshOutbox.sweep()).published).toBe(0);
+          const runtime = fresh.services.get<import('@setu-ts/common').IRuntimeServices>(
+            CAPABILITIES.RUNTIME,
+          );
+          await waitFor(
+            () => runtime.now() >= Number(afterCrash[1]!.leaseUntil),
+            'the crashed relay claim expiry',
+          );
+          const restarted = await freshOutbox.sweep();
+          expect(restarted.published).toBe(3);
+          await waitFor(() => delivered.length === 5, 'the republished row and the rest');
+
+          expect(delivered.map((d) => d.n)).toEqual([1, 2, 2, 3, 4]);
+          // The duplicate carries ONE envelope id and one deduplication id.
+          expect(delivered[1]!.id).toBe(ids[1]);
+          expect(delivered[2]!.id).toBe(ids[1]);
+          expect(transport.deduplicationId(delivered[1]!.metadata)).toBe(ids[1]);
+          expect(transport.deduplicationId(delivered[2]!.metadata)).toBe(ids[1]);
+          expect((await storedRows(fresh)).every((r) => r.status === 'sent')).toBe(true);
+        } finally {
+          await dying.stop();
+          await fresh.stop();
+          await pg.dispose();
+        }
+      });
+    },
+  );
 }

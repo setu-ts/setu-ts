@@ -191,20 +191,18 @@ describe('MessagingCommonOptions arms are inherited by every MessagingPluginOpti
       behaviors: [behavior],
     };
 
-    for (
-      const arm of [
-        memory,
-        redis,
-        rabbit,
-        nats,
-        kafka,
-        pubsubInjected,
-        pubsubProduction,
-        serviceBusInjected,
-        serviceBusProduction,
-        custom,
-      ]
-    ) {
+    for (const arm of [
+      memory,
+      redis,
+      rabbit,
+      nats,
+      kafka,
+      pubsubInjected,
+      pubsubProduction,
+      serviceBusInjected,
+      serviceBusProduction,
+      custom,
+    ]) {
       expect(arm.subscriptions).toEqual([definition]);
       expect(arm.behaviors).toEqual([behavior]);
     }
@@ -338,10 +336,7 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
         return Promise.resolve();
       }
       subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<ISubscription> {
-        void handler(
-          { id: 'backlog-1' } as T,
-          { topic, timestamp: new Date(0), headers: {} },
-        );
+        void handler({ id: 'backlog-1' } as T, { topic, timestamp: new Date(0), headers: {} });
         return Promise.resolve({ unsubscribe: (): Promise<void> => Promise.resolve() });
       }
       request<TRes>(): Promise<TRes> {
@@ -402,10 +397,7 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
         return Promise.resolve();
       }
       subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<ISubscription> {
-        void handler(
-          { id: 'backlog-1' } as T,
-          { topic, timestamp: new Date(0), headers: {} },
-        );
+        void handler({ id: 'backlog-1' } as T, { topic, timestamp: new Date(0), headers: {} });
         return Promise.resolve({ unsubscribe: (): Promise<void> => Promise.resolve() });
       }
       request<TRes>(): Promise<TRes> {

@@ -34,8 +34,9 @@ describe('Prisma conditional translation', () => {
     const client = createFakePrismaClient();
     const source = createPrismaDataSource(client, 'User', 'postgresql', ['id', 'role'], 'id_role');
     for (const field of ['AND', 'OR', 'NOT', 'id_role']) {
-      await expect(source.updateWhere!({ id: 'a', role: 'owner' }, { [field]: 1 }, { name: 'bad' }))
-        .rejects.toThrow(/operators/);
+      await expect(
+        source.updateWhere!({ id: 'a', role: 'owner' }, { [field]: 1 }, { name: 'bad' }),
+      ).rejects.toThrow(/operators/);
       await expect(source.deleteWhere!({ id: 'a', role: 'owner' }, { [field]: 1 })).rejects.toThrow(
         /operators/,
       );

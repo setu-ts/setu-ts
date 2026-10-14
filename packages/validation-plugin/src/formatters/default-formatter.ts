@@ -62,7 +62,9 @@ export const nestjsFormatter: ValidationErrorFormatter = (
 ): FormatValidationErrors => {
   return {
     statusCode: 400,
-    message: issues.map((issue) => issue.path ? `${issue.path}: ${issue.message}` : issue.message),
+    message: issues.map((issue) =>
+      issue.path ? `${issue.path}: ${issue.message}` : issue.message,
+    ),
     error: 'Bad Request',
     errors: issues.map((issue) => ({
       field: issue.path,

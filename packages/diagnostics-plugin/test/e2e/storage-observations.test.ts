@@ -68,18 +68,16 @@ describe('Storage observations e2e (M98m canary)', () => {
       // A service constructed directly carries no collector: its work never
       // appears in any source. (Two StoragePlugin instances cannot coexist —
       // they share the single storage token.)
-      const other = new StorageService(
-        {
-          connect: () => Promise.resolve(),
-          disconnect: () => Promise.resolve(),
-          isReady: () => true,
-          put: () => Promise.resolve(),
-          get: () => Promise.resolve(new Uint8Array([1])),
-          delete: () => Promise.resolve(true),
-          exists: () => Promise.resolve(true),
-          getSignedUrl: () => Promise.resolve('memory://unobserved'),
-        } as never,
-      );
+      const other = new StorageService({
+        connect: () => Promise.resolve(),
+        disconnect: () => Promise.resolve(),
+        isReady: () => true,
+        put: () => Promise.resolve(),
+        get: () => Promise.resolve(new Uint8Array([1])),
+        delete: () => Promise.resolve(true),
+        exists: () => Promise.resolve(true),
+        getSignedUrl: () => Promise.resolve('memory://unobserved'),
+      } as never);
 
       // Every public operation settles through the observed service.
       await storage.put(CANARY_PATH, CANARY_BYTES, { contentType: CANARY_CONTENT_TYPE });

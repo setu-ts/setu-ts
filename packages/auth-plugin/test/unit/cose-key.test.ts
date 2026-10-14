@@ -32,12 +32,14 @@ describe('algorithmName', () => {
 
 describe('coseAlgorithm', () => {
   it('reads the alg label from a decoded COSE key', () => {
-    const decoded = decodeCbor(coseKeyBytes('ES256', {
-      crv: 'P-256',
-      x: 'AAA',
-      y: 'AAA',
-      kty: 'EC',
-    }));
+    const decoded = decodeCbor(
+      coseKeyBytes('ES256', {
+        crv: 'P-256',
+        x: 'AAA',
+        y: 'AAA',
+        kty: 'EC',
+      }),
+    );
     expect(decoded.ok && coseAlgorithm(decoded.value)).toBe('ES256');
   });
 
@@ -66,9 +68,7 @@ describe('coseKeyToJwk', () => {
 
   it('converts an RSA key to a JWK', () => {
     const n = 'A'.repeat(342); // 256 bytes base64url
-    const decoded = decodeCbor(
-      coseKeyBytes('RS256', { kty: 'RSA', n, e: 'AQAB' }),
-    );
+    const decoded = decodeCbor(coseKeyBytes('RS256', { kty: 'RSA', n, e: 'AQAB' }));
     expect(decoded.ok).toBe(true);
     const jwk = decoded.ok ? coseKeyToJwk(decoded.value, 'RS256') : null;
     expect(jwk?.kty).toBe('RSA');
@@ -103,12 +103,14 @@ describe('coseKeyToJwk', () => {
   });
 
   it('refuses a wrong coordinate length', () => {
-    const decoded = decodeCbor(coseKeyBytes('ES256', {
-      kty: 'EC',
-      crv: 'P-256',
-      x: 'wrong-length',
-      y: 'wrong-length',
-    }));
+    const decoded = decodeCbor(
+      coseKeyBytes('ES256', {
+        kty: 'EC',
+        crv: 'P-256',
+        x: 'wrong-length',
+        y: 'wrong-length',
+      }),
+    );
     expect(decoded.ok && coseKeyToJwk(decoded.value, 'ES256')).toBeNull();
   });
 
@@ -141,19 +143,31 @@ describe('coseKeyToJwk', () => {
 });
 
 it('refuses malformed RSA and Ed25519 map fields', () => {
-  const rsa = new Map<number, number | Uint8Array>([[1, 3], [-1, new Uint8Array(256)], [
-    -2,
-    new Uint8Array([1, 0, 1]),
-  ]]);
+  const rsa = new Map<number, number | Uint8Array>([
+    [1, 3],
+    [-1, new Uint8Array(256)],
+    [-2, new Uint8Array([1, 0, 1])],
+  ]);
   expect(coseKeyToJwk(rsa, 'RS256')?.kty).toBe('RSA');
-  for (const [field, value] of [[1, 2], [-2, new Uint8Array()]] as const) {
+  for (const [field, value] of [
+    [1, 2],
+    [-2, new Uint8Array()],
+  ] as const) {
     const invalid = new Map(rsa);
     invalid.set(field, value);
     expect(coseKeyToJwk(invalid, 'RS256')).toBeNull();
   }
-  const ed = new Map<number, number | Uint8Array>([[1, 1], [-1, 6], [-2, new Uint8Array(32)]]);
+  const ed = new Map<number, number | Uint8Array>([
+    [1, 1],
+    [-1, 6],
+    [-2, new Uint8Array(32)],
+  ]);
   expect(coseKeyToJwk(ed, 'EdDSA')?.kty).toBe('OKP');
-  for (const [field, value] of [[1, 3], [-1, 1], [-2, new Uint8Array(31)]] as const) {
+  for (const [field, value] of [
+    [1, 3],
+    [-1, 1],
+    [-2, new Uint8Array(31)],
+  ] as const) {
     const invalid = new Map(ed);
     invalid.set(field, value);
     expect(coseKeyToJwk(invalid, 'EdDSA')).toBeNull();

@@ -70,9 +70,7 @@ describe('exchangeCode', () => {
     const post = sink.posts[0];
     expect(post?.url).toBe(base.tokenEndpoint);
     // RFC 6749 §2.3.1: `client_id:client_secret`, base64 of the UTF-8 bytes.
-    expect(post?.headers.authorization).toBe(
-      `Basic ${btoa(`${base.clientId}:shhh`)}`,
-    );
+    expect(post?.headers.authorization).toBe(`Basic ${btoa(`${base.clientId}:shhh`)}`);
     expect(post?.form.client_secret).toBeUndefined();
     expect(post?.form).toMatchObject({
       grant_type: 'authorization_code',

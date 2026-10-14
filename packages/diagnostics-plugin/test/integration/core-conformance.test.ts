@@ -41,24 +41,31 @@ function catalogPlugin(): IPlugin {
     provides: ['catalog-items'],
     register(ctx) {
       ctx.services.register('catalog-items', { items: [] });
-      ctx.middleware.add(async (_ctx, next) => {
-        await next();
-      }, { name: 'audit', priority: -2.5 });
+      ctx.middleware.add(
+        async (_ctx, next) => {
+          await next();
+        },
+        { name: 'audit', priority: -2.5 },
+      );
       ctx.router.get('/items', (c) => c.response.json({ items: [] }));
       ctx.router.post('/items/:id', {
         handler: (c) => c.response.status(201).json({ ok: true }),
-        middleware: [async (_c, next) => {
-          await next();
-        }],
+        middleware: [
+          async (_c, next) => {
+            await next();
+          },
+        ],
       });
       ctx.router.get('/boom', () => {
         throw new Error('boom');
       });
       ctx.router.get('/short', {
         handler: (c) => c.response.json({ never: true }),
-        middleware: [(c) => {
-          c.response.status(403).json({ refused: true });
-        }],
+        middleware: [
+          (c) => {
+            c.response.status(403).json({ refused: true });
+          },
+        ],
       });
       ctx.router.delete('/unlabelled', (c) => c.response.status(204).text(''));
     },
@@ -90,16 +97,14 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
       diagnostics: { labels: LABELS },
     });
     await app.start();
-    for (
-      const [method, url] of [
-        ['GET', '/items'],
-        ['POST', '/items/7'],
-        ['GET', '/boom'],
-        ['GET', '/short'],
-        ['DELETE', '/unlabelled'],
-        ['GET', '/missing'],
-      ] as const
-    ) {
+    for (const [method, url] of [
+      ['GET', '/items'],
+      ['POST', '/items/7'],
+      ['GET', '/boom'],
+      ['GET', '/short'],
+      ['DELETE', '/unlabelled'],
+      ['GET', '/missing'],
+    ] as const) {
       await app.inject({ method, url });
     }
     const snapshot = app.diagnostics!.snapshot();
@@ -107,8 +112,9 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
     // The composition really did populate what the validator constrains.
     const kinds = new Set(snapshot.nodes.map((node) => node.kind));
     expect([...kinds].sort()).toEqual(['capability', 'middleware', 'plugin', 'route']);
-    expect(snapshot.nodes.some((node) => node.label === 'audit' && node.priority === -2.5))
-      .toBe(true);
+    expect(snapshot.nodes.some((node) => node.label === 'audit' && node.priority === -2.5)).toBe(
+      true,
+    );
     expect(snapshot.nodes.some((node) => node.version === '1.2.3-rc.1')).toBe(true);
 
     // Page through the whole ring in small windows: every window conforms,
@@ -219,15 +225,20 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
           version: '1.0.0',
           register(ctx) {
             // `Number(env.X)` for an unset variable yields exactly this.
-            ctx.middleware.add(async (_c, next) => {
-              await next();
-            }, { name: 'nan', priority: Number.NaN });
-            ctx.middleware.add(async (_c, next) => {
-              await next();
-            }, { name: 'inf', priority: Number.POSITIVE_INFINITY });
-            ctx.router.get(
-              '/odd/:code',
-              (c) => c.response.status(Number(c.params.code)).json({ odd: true }),
+            ctx.middleware.add(
+              async (_c, next) => {
+                await next();
+              },
+              { name: 'nan', priority: Number.NaN },
+            );
+            ctx.middleware.add(
+              async (_c, next) => {
+                await next();
+              },
+              { name: 'inf', priority: Number.POSITIVE_INFINITY },
+            );
+            ctx.router.get('/odd/:code', (c) =>
+              c.response.status(Number(c.params.code)).json({ odd: true }),
             );
           },
         },

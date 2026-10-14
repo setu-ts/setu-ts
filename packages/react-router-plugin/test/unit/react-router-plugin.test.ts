@@ -5,7 +5,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { SsrRuntime } from '../../src/interfaces/index.ts';
@@ -127,7 +127,7 @@ describe('react-router-plugin', () => {
       },
       router: routerApi,
       health: {
-        // deno-lint-ignore ban-types
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
         register(_name: string, _fn: Function) {
           // noop for tests
         },
@@ -142,12 +142,12 @@ describe('react-router-plugin', () => {
   }
 
   function makeLoadRequestHandler(response: Response) {
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     return async (_path: string, _mode: string): Promise<SsrRuntime> => {
       void _path;
       void _mode;
       return {
-        // deno-lint-ignore require-await
+        // eslint-disable-next-line require-await
         handler: async () => response,
         createLoadContext: createFakeLoadContextFactory(),
       };
@@ -186,7 +186,7 @@ describe('react-router-plugin', () => {
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
       loadRequestHandler: (() =>
-        // deno-lint-ignore require-await
+        // eslint-disable-next-line require-await
         Promise.resolve(async () => new Response('ok'))) as unknown as never,
     });
 
@@ -380,7 +380,7 @@ describe('react-router-plugin', () => {
     const healthResults = new Map<string, () => Promise<{ status: string; data?: unknown }>>();
     const fakeCtx = buildFakeCtx();
     fakeCtx.health = {
-      // deno-lint-ignore ban-types
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
       register(name: string, fn: Function) {
         healthResults.set(name, fn as () => Promise<{ status: string; data?: unknown }>);
       },

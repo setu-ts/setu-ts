@@ -142,9 +142,9 @@ export function resolveIndicatorTimeout(raw: number | undefined): number {
   }
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
     throw new Error(
-      `indicatorTimeoutMs must be a positive finite number of milliseconds, received ${
-        String(raw)
-      }`,
+      `indicatorTimeoutMs must be a positive finite number of milliseconds, received ${String(
+        raw,
+      )}`,
     );
   }
   return raw;

@@ -39,12 +39,14 @@ async function startApp(
   const app = createApplication({
     plugins: [
       RuntimePlugin(
-        subtle === undefined ? undefined : {
-          platform: 'deno',
-          adapters: {
-            deno: () => ({ ...createRuntimeServices({ platform: 'deno' }), subtle }),
-          },
-        },
+        subtle === undefined
+          ? undefined
+          : {
+              platform: 'deno',
+              adapters: {
+                deno: () => ({ ...createRuntimeServices({ platform: 'deno' }), subtle }),
+              },
+            },
       ),
       plugin,
     ],

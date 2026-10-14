@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * @module
  *
@@ -129,19 +129,20 @@ export function resolveMembers(
   for (const raw of inputs) {
     const input = raw.replace(/^\.\//, '').replace(/^@setu-ts\//, '');
     if (input === '') continue;
-    const member = byLength.find((candidate) =>
-      input === candidate ||
-      input.startsWith(`${candidate}/`) ||
-      input === candidate.slice('packages/'.length) ||
-      candidate.slice('packages/'.length) === input.replace(/^packages\//, '')
+    const member = byLength.find(
+      (candidate) =>
+        input === candidate ||
+        input.startsWith(`${candidate}/`) ||
+        input === candidate.slice('packages/'.length) ||
+        candidate.slice('packages/'.length) === input.replace(/^packages\//, ''),
     );
     if (member === undefined) {
       // Convenience fallback: most members are `<name>-plugin`, so accept the
       // bare concern (`resilience` -> `packages/resilience-plugin`) when it
       // resolves to EXACTLY one member. Ambiguity is refused rather than
       // guessed, so a selector can never silently measure the wrong package.
-      const suffixed = members.filter((candidate) =>
-        candidate.slice('packages/'.length) === `${input}-plugin`
+      const suffixed = members.filter(
+        (candidate) => candidate.slice('packages/'.length) === `${input}-plugin`,
       );
       if (suffixed.length !== 1) {
         unmatched.push(raw);
@@ -171,8 +172,9 @@ export function parseMemberTable(stdout: string): readonly CoverageRow[] {
   for (const line of stdout.split('\n')) {
     const stripped = line.replace(ansi, '');
     if (/\bAll files\b/.test(stripped)) continue;
-    const match = /^\|\s*(\S.*?)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/
-      .exec(stripped);
+    const match = /^\|\s*(\S.*?)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/.exec(
+      stripped,
+    );
     if (match === null) continue;
     rows.push({
       file: match[1] as string,
@@ -190,10 +192,8 @@ export function belowBar(
   rows: readonly CoverageRow[],
   threshold: number = THRESHOLD,
 ): readonly CoverageRow[] {
-  return rows.filter((row) =>
-    row.branchPct < threshold ||
-    row.functionPct < threshold ||
-    row.linePct < threshold
+  return rows.filter(
+    (row) => row.branchPct < threshold || row.functionPct < threshold || row.linePct < threshold,
   );
 }
 
@@ -238,8 +238,8 @@ export function findUnreportedFiles(
   expected: readonly string[],
   measured: readonly string[],
 ): readonly string[] {
-  return expected.filter((file) =>
-    !measured.some((path) => path === file || path.endsWith(`/${file}`))
+  return expected.filter(
+    (file) => !measured.some((path) => path === file || path.endsWith(`/${file}`)),
   );
 }
 
@@ -249,24 +249,22 @@ export function findUnreportedFiles(
  * A `git status --porcelain` rename reads `old -> new`; the destination is the
  * path that exists, so that is the one taken.
  */
-export function parseChangedPaths(
-  diffStdout: string,
-  statusStdout: string,
-): readonly string[] {
+export function parseChangedPaths(diffStdout: string, statusStdout: string): readonly string[] {
   const fromStatus = statusStdout
     .split('\n')
     .map((line) => line.slice(3).trim())
     .filter((line) => line !== '')
-    .map((line) => line.includes(' -> ') ? line.split(' -> ')[1] as string : line);
+    .map((line) => (line.includes(' -> ') ? (line.split(' -> ')[1] as string) : line));
   return [...diffStdout.split('\n'), ...fromStatus].filter((path) => path.trim() !== '');
 }
 
 /**
  * Splits argv into flags and positional member selectors.
  */
-export function parseArgs(
-  argv: readonly string[],
-): { readonly selectors: readonly string[]; readonly base: string } {
+export function parseArgs(argv: readonly string[]): {
+  readonly selectors: readonly string[];
+  readonly base: string;
+} {
   const selectors: string[] = [];
   let base = 'develop';
   for (const arg of argv) {
@@ -322,9 +320,7 @@ async function changedPaths(base: string): Promise<readonly string[]> {
 
   const status = await run('git', ['status', '--porcelain'], false);
   if (!status.success) {
-    console.error(
-      'coverage-targeted: git status failed — cannot infer the changed members.',
-    );
+    console.error('coverage-targeted: git status failed — cannot infer the changed members.');
     console.error(status.stderr.trim());
     Deno.exit(status.code === 0 ? 1 : status.code);
   }
@@ -386,14 +382,9 @@ async function listSourceFiles(member: string): Promise<readonly string[]> {
  * probe is written, which is what this derives from `coverageDir` instead of
  * hardcoding.
  */
-export function renderProbeModule(
-  files: readonly string[],
-  coverageDir: string,
-): string {
+export function renderProbeModule(files: readonly string[], coverageDir: string): string {
   const toRoot = '../'.repeat(coverageDir.split('/').length);
-  const imports = files
-    .map((file) => `  await import('${toRoot}${file}');`)
-    .join('\n');
+  const imports = files.map((file) => `  await import('${toRoot}${file}');`).join('\n');
   return `Deno.test('coverage-targeted: classify unreported modules', async () => {\n${imports}\n});\n`;
 }
 
@@ -425,15 +416,19 @@ async function probeUnreported(
   await Deno.writeTextFile(probePath, renderProbeModule(files, COVERAGE_DIR));
 
   try {
-    const probe = await run('deno', [
-      'test',
-      '--quiet',
-      '--no-check',
-      ...TEST_FLAGS,
-      probePath,
-      `--coverage=${COVERAGE_DIR}`,
-      '--coverage-raw-data-only',
-    ], false);
+    const probe = await run(
+      'deno',
+      [
+        'test',
+        '--quiet',
+        '--no-check',
+        ...TEST_FLAGS,
+        probePath,
+        `--coverage=${COVERAGE_DIR}`,
+        '--coverage-raw-data-only',
+      ],
+      false,
+    );
     return { ok: probe.success, stderr: probe.stderr };
   } finally {
     await Deno.remove(probePath).catch(() => {});
@@ -441,9 +436,9 @@ async function probeUnreported(
 }
 
 function formatRow(row: CoverageRow, pass: boolean): string {
-  return `| ${row.file.padEnd(58)} | ${row.branchPct.toFixed(1).padStart(8)} | ${
-    row.functionPct.toFixed(1).padStart(10)
-  } | ${row.linePct.toFixed(1).padStart(6)} | ${pass ? '✅' : '❌'}`;
+  return `| ${row.file.padEnd(58)} | ${row.branchPct.toFixed(1).padStart(8)} | ${row.functionPct
+    .toFixed(1)
+    .padStart(10)} | ${row.linePct.toFixed(1).padStart(6)} | ${pass ? '✅' : '❌'}`;
 }
 
 async function main(): Promise<void> {
@@ -454,9 +449,7 @@ async function main(): Promise<void> {
   const resolved = resolveMembers(inputs, members);
 
   if (selectors.length > 0 && resolved.unmatched.length > 0) {
-    console.error(
-      `coverage-targeted: not a workspace member: ${resolved.unmatched.join(', ')}`,
-    );
+    console.error(`coverage-targeted: not a workspace member: ${resolved.unmatched.join(', ')}`);
     console.error(
       `Members are named by path or short name, e.g. ${members.slice(0, 3).join(', ')}`,
     );
@@ -468,7 +461,7 @@ async function main(): Promise<void> {
       selectors.length > 0
         ? 'coverage-targeted: nothing to measure.'
         : `coverage-targeted: no packages/* changes against ${base} — nothing to measure.\n` +
-          'Pass member names explicitly to force a run.',
+            'Pass member names explicitly to force a run.',
     );
     Deno.exit(0);
   }
@@ -494,13 +487,11 @@ async function main(): Promise<void> {
     );
     await Deno.mkdir(COVERAGE_DIR, { recursive: true });
   } else {
-    const test = await run('deno', [
-      'test',
-      ...TEST_FLAGS,
-      ...gated,
-      `--coverage=${COVERAGE_DIR}`,
-      '--coverage-raw-data-only',
-    ], true);
+    const test = await run(
+      'deno',
+      ['test', ...TEST_FLAGS, ...gated, `--coverage=${COVERAGE_DIR}`, '--coverage-raw-data-only'],
+      true,
+    );
     if (!test.success) {
       console.error('\ncoverage-targeted: tests failed — coverage not reported.');
       Deno.exit(test.code);
@@ -544,7 +535,7 @@ async function main(): Promise<void> {
   // to be allowed to explain, not a failure to exit on (a member whose `src` is
   // all type-only measures nothing and is not a fault).
   const expected: string[] = [];
-  for (const member of gated) expected.push(...await listSourceFiles(member));
+  for (const member of gated) expected.push(...(await listSourceFiles(member)));
   if (expected.length === 0) {
     console.log('coverage-targeted: the selected member(s) have no src files to measure.');
     Deno.exit(0);
@@ -581,9 +572,7 @@ async function main(): Promise<void> {
 
   const failing = belowBar(rows);
   console.log(`Per-file coverage (≥${THRESHOLD}% branch/function/line required):`);
-  console.log(
-    `| ${'File'.padEnd(58)} | Branch % | Function % | Line % |`,
-  );
+  console.log(`| ${'File'.padEnd(58)} | Branch % | Function % | Line % |`);
   console.log(`| ${'-'.repeat(58)} | -------- | ---------- | ------ |`);
   const failingSet = new Set(failing.map((row) => row.file));
   for (const row of rows) console.log(formatRow(row, !failingSet.has(row.file)));
@@ -598,9 +587,7 @@ async function main(): Promise<void> {
   }
 
   if (failing.length > 0) {
-    console.error(
-      `\ncoverage-targeted: ${failing.length} file(s) below the ${THRESHOLD}% bar.`,
-    );
+    console.error(`\ncoverage-targeted: ${failing.length} file(s) below the ${THRESHOLD}% bar.`);
     console.error(
       "A targeted run measures only these members' tests, and a targeted FAIL is " +
         "NOT sound: another package's tests may already cover these lines (a " +

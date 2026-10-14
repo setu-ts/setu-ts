@@ -68,7 +68,7 @@ describe('createObservedFetch — registration plugin', () => {
   });
 
   it('names helpers from two separate module copies distinctly (no shared counter)', async () => {
-    const copy = await import('../../src/http/observed-fetch.ts?second-copy') as {
+    const copy = (await import('../../src/http/observed-fetch.ts?second-copy')) as {
       createObservedFetch: typeof createObservedFetch;
     };
     // Vacuity guard: the copies must really be distinct module instances.

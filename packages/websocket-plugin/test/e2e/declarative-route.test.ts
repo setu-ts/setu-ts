@@ -230,10 +230,7 @@ describe('X13 declarative board route (e2e, real sockets)', () => {
     // Assertion 1 — no IPlugin wrapper: the whole application is exactly the
     // two first-party plugins; the collaboration feature contributed none.
     expect(plugins).toHaveLength(2);
-    expect(plugins.map((plugin) => plugin.name).sort()).toEqual([
-      'runtime',
-      'websocket-plugin',
-    ]);
+    expect(plugins.map((plugin) => plugin.name).sort()).toEqual(['runtime', 'websocket-plugin']);
 
     const alice = new WebSocket(
       `ws://127.0.0.1:${port}${BOARD_PATH}?room=${ROOM}&token=${BOARD_TOKEN}`,

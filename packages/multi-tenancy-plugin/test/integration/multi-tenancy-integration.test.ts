@@ -118,7 +118,7 @@ describe('multi tenancy integration', () => {
 
     // Tenant A creates a record
     const repoA = serviceA.getRepository<unknown, string>(ctxA, 'Item');
-    const created = await repoA.create({ name: 'From A' }) as Record<string, unknown>;
+    const created = (await repoA.create({ name: 'From A' })) as Record<string, unknown>;
     expect(created.id != null).toBeTruthy();
 
     // Tenant B should NOT see it

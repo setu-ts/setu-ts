@@ -140,9 +140,7 @@ describe('KvCacheStore', () => {
     await cache.clear();
 
     expect([...kv.entries.keys()]).toEqual(['session:x']);
-    expect(kv.deletes.sort()).toEqual(
-      ['cache:a', 'cache:b', 'cache:c', 'cache:d', 'cache:e'],
-    );
+    expect(kv.deletes.sort()).toEqual(['cache:a', 'cache:b', 'cache:c', 'cache:d', 'cache:e']);
   });
 
   it('does not delete a deliberately cached null on read', async () => {

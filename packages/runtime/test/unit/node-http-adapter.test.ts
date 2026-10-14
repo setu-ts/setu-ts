@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Unit tests for NodeHttpAdapter — uses a fake NodeServeHost.
  *
@@ -75,7 +75,7 @@ describe('node-http-adapter | setHandler/fetch', () => {
 
     // Simpler: directly test fetch with a handler that returns a known response
     const adapter = new NodeHttpAdapter(host);
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -110,7 +110,7 @@ describe('node-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -138,7 +138,7 @@ describe('node-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -161,7 +161,7 @@ describe('node-http-adapter | close', () => {
     const { host } = createFakeHost();
 
     const adapter = new NodeHttpAdapter(host);
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -184,7 +184,7 @@ describe('node-http-adapter | close', () => {
   it('close with null server is a no-op', async () => {
     const { host } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -208,7 +208,7 @@ describe('node-http-adapter | close with invalid handle', () => {
     const { host } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -247,7 +247,7 @@ describe('node-http-adapter | performUpgrade via fetch path', () => {
     let onCloseCalled = false;
     let onCloseReason = '';
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (request) => {
       // Write upgrade intent on the request (simulating kernel terminal handler).
       (request as unknown as Record<symbol, any>)[UPGRADE_INTENT] = {

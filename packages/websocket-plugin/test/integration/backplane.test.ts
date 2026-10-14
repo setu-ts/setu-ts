@@ -76,9 +76,7 @@ function fakeConnection(id: string): IWebSocketConnection & { readonly sent: unk
 }
 
 /** Builds a service wired to a backplane, with its subscription live. */
-async function serviceOn(
-  backplane: IRealtimeBackplane,
-): Promise<WebSocketService> {
+async function serviceOn(backplane: IRealtimeBackplane): Promise<WebSocketService> {
   const service = new WebSocketService(
     createFakeRuntime(),
     resolveOptions(undefined),
@@ -260,11 +258,7 @@ describe('WebSocket rooms across replicas', () => {
   });
 
   it('leaves rooms purely in-process when no backplane is registered', async () => {
-    const service = new WebSocketService(
-      createFakeRuntime(),
-      resolveOptions(undefined),
-      true,
-    );
+    const service = new WebSocketService(createFakeRuntime(), resolveOptions(undefined), true);
     const member = fakeConnection('member');
     service.room('lobby').add(member);
     service.room('lobby').broadcast('local only');
@@ -292,7 +286,7 @@ describe('WebSocket backplane frame robustness', () => {
         name: 'lobby',
         data: '!!!not base64!!!',
         binary: true,
-      })
+      }),
     ).not.toThrow();
 
     expect(member.sent).toEqual([]);
@@ -418,11 +412,7 @@ describe('opening the backplane transport on first local member', () => {
   });
 
   it('is a no-op when no backplane is registered', () => {
-    const service = new WebSocketService(
-      createFakeRuntime(),
-      resolveOptions(undefined),
-      true,
-    );
+    const service = new WebSocketService(createFakeRuntime(), resolveOptions(undefined), true);
 
     service.room('lobby').add(fakeConnection('a'));
   });

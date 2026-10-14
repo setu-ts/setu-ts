@@ -108,9 +108,8 @@ function htmlEscape(str: string): string {
  */
 export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
   const specUrl = typeof options === 'string' ? options : options.specUrl;
-  const title = typeof options === 'string'
-    ? 'API Documentation'
-    : (options.title ?? 'API Documentation');
+  const title =
+    typeof options === 'string' ? 'API Documentation' : (options.title ?? 'API Documentation');
 
   // Escape both title and specUrl to prevent XSS via malicious input
   const escapedTitle = htmlEscape(title);
@@ -118,7 +117,8 @@ export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
 
   // Use function replacement for title to avoid JS $-pattern interpretation in replacement strings
   // (e.g., $&, $1, $2 would otherwise be treated as backreferences)
-  return HTML_TEMPLATE
-    .replace(/<title>.*?<\/title>/, () => `<title>${escapedTitle}</title>`)
-    .replace(/__SPEC_URL__/g, () => escapedSpecUrl);
+  return HTML_TEMPLATE.replace(
+    /<title>.*?<\/title>/,
+    () => `<title>${escapedTitle}</title>`,
+  ).replace(/__SPEC_URL__/g, () => escapedSpecUrl);
 }

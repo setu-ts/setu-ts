@@ -237,11 +237,13 @@ describe('idempotent() through app.fetch (M109a §3.6, §3.8, §3.10, §10 D1)',
     const { app, counts } = await buildFetchApp();
     try {
       const run = (user: string, tenant?: string) =>
-        app.fetch(keyedRequest('/payments', {
-          'Idempotency-Key': 'k-shared',
-          'x-user': user,
-          ...(tenant === undefined ? {} : { 'x-tenant': tenant }),
-        }));
+        app.fetch(
+          keyedRequest('/payments', {
+            'Idempotency-Key': 'k-shared',
+            'x-user': user,
+            ...(tenant === undefined ? {} : { 'x-tenant': tenant }),
+          }),
+        );
       expect((await run('alice')).status).toBe(201);
       expect((await run('bob')).status).toBe(201);
       expect((await run('alice', 'acme')).status).toBe(201);

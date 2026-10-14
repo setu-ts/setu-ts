@@ -272,11 +272,9 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
           register(ctx) {
             // Overrides the first-party RbacService during startup, before the
             // registry seals: the guards now resolve the custom provider.
-            ctx.services.register(
-              CAPABILITIES.AUTHORIZATION,
-              customAuthorization,
-              { override: true },
-            );
+            ctx.services.register(CAPABILITIES.AUTHORIZATION, customAuthorization, {
+              override: true,
+            });
             ctx.middleware.add(authMiddleware(), { name: 'auth', priority: 100 });
             ctx.router.get('/admin', {
               middleware: [requireRole('admin')],

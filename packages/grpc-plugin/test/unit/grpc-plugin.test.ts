@@ -81,12 +81,15 @@ function createHarness(
         closeHooks.push(hook);
       },
     },
-    logger: options.logger === false ? undefined : {
-      warn: (message: string) => warnings.push(message),
-      info: () => {},
-      error: () => {},
-      debug: () => {},
-    },
+    logger:
+      options.logger === false
+        ? undefined
+        : {
+            warn: (message: string) => warnings.push(message),
+            info: () => {},
+            error: () => {},
+            debug: () => {},
+          },
   } as unknown as IPluginContext;
 
   return { ctx, registered, indicators, closeHooks, warnings };
@@ -189,9 +192,9 @@ describe('GrpcPlugin — health capability bridging', () => {
     const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
     await service.handleRequest(new Request('http://x/unknown'));
     const healthImpl = runtime.registered.find((r) => r.definition.typeName === HEALTH)!;
-    const check = healthImpl.implementation.check as (
-      r: { service: string },
-    ) => Promise<{ status: number }>;
+    const check = healthImpl.implementation.check as (r: {
+      service: string;
+    }) => Promise<{ status: number }>;
 
     expect((await check({ service: '' })).status).toBe(1);
     expect(checked).toBe(true);

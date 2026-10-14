@@ -29,9 +29,7 @@ export function createRealtimeClientApp() {
     }
     eventCount += 1;
     resumedWith = ctx.request.headers.get('last-event-id');
-    const connection = ctx.services.get<ISseService>(CAPABILITIES.SSE).open(
-      ctx,
-    );
+    const connection = ctx.services.get<ISseService>(CAPABILITIES.SSE).open(ctx);
     connection.send({
       id: String(eventCount),
       event: 'score',
@@ -53,10 +51,9 @@ function RealtimeRoutePlugin(): IPlugin {
     version: '0.1.0',
     dependencies: ['websocket-plugin'],
     register(context: IPluginContext): void {
-      context.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET).route(
-        '/ws/idle',
-        { onOpen: () => {} },
-      );
+      context.services
+        .get<IWebSocketService>(CAPABILITIES.WEBSOCKET)
+        .route('/ws/idle', { onOpen: () => {} });
     },
   };
 }

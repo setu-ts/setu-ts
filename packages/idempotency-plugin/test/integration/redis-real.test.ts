@@ -74,8 +74,7 @@ describe('Redis store on real Redis (M109a §3.5)', { skip: ignore }, () => {
         leaseMs: 1_000,
         ttlMs: 60_000,
       }),
-    )
-      .toEqual({ outcome: 'completed', record: 'the-record' });
+    ).toEqual({ outcome: 'completed', record: 'the-record' });
     await a.disconnect?.();
     await b.disconnect?.();
   });
@@ -153,17 +152,15 @@ describe('Redis store on real Redis (M109a §3.5)', { skip: ignore }, () => {
     const store = await makeStore();
     const key = 'k'.repeat(64);
     const results = await Promise.all(
-      Array.from(
-        { length: 50 },
-        (_unused, index) =>
-          store.claim({
-            key,
-            scope: 's'.repeat(64),
-            fingerprint: 'f'.repeat(64),
-            token: `t${index}`,
-            leaseMs: 5_000,
-            ttlMs: 60_000,
-          }),
+      Array.from({ length: 50 }, (_unused, index) =>
+        store.claim({
+          key,
+          scope: 's'.repeat(64),
+          fingerprint: 'f'.repeat(64),
+          token: `t${index}`,
+          leaseMs: 5_000,
+          ttlMs: 60_000,
+        }),
       ),
     );
     expect(results.filter((result) => result.outcome === 'claimed')).toHaveLength(1);
@@ -191,8 +188,7 @@ describe('Redis store on real Redis (M109a §3.5)', { skip: ignore }, () => {
         leaseMs: 50,
         ttlMs: 60_000,
       }),
-    )
-      .toEqual({ outcome: 'claimed', takeover: true });
+    ).toEqual({ outcome: 'claimed', takeover: true });
     // The stale holder's complete is lost.
     expect(await store.complete(key, 'a', 'r', 60_000)).toBe('lost');
     await store.disconnect?.();

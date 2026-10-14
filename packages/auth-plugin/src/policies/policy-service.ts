@@ -159,15 +159,14 @@ export class PolicyService implements IAuthorizationPolicyService {
     if (found === undefined) {
       throw this.#policies.has(name)
         ? new UnknownPolicyError(
-          name,
-          typeof ability === 'string' ? ability : `[${typeof ability}]`,
-        )
+            name,
+            typeof ability === 'string' ? ability : `[${typeof ability}]`,
+          )
         : new UnknownPolicyError(name);
     }
     const abilityName = ability as string;
-    const denial: PolicyDenial = principal === null
-      ? 'authentication-required'
-      : 'insufficient-privileges';
+    const denial: PolicyDenial =
+      principal === null ? 'authentication-required' : 'insufficient-privileges';
     const entry = found.ability;
     if (principal === null && !isAnonymousAbility(entry)) {
       return denial;
@@ -190,9 +189,10 @@ export class PolicyService implements IAuthorizationPolicyService {
     }
     let allowed: unknown;
     try {
-      allowed = typeof entry === 'function'
-        ? await entry(principal as IPrincipal, target as never)
-        : await entry.check(principal, target as never);
+      allowed =
+        typeof entry === 'function'
+          ? await entry(principal as IPrincipal, target as never)
+          : await entry.check(principal, target as never);
     } catch (error) {
       this.#report(name, abilityName, 'check', error);
       return denial;

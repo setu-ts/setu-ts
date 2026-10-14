@@ -38,9 +38,12 @@ let _otelApi: OtelApi | null = null;
  */
 interface OtelApi {
   trace: {
-    wrapSpanContext(
-      ctx: { traceId: string; spanId: string; traceFlags: number; isRemote?: boolean },
-    ): unknown;
+    wrapSpanContext(ctx: {
+      traceId: string;
+      spanId: string;
+      traceFlags: number;
+      isRemote?: boolean;
+    }): unknown;
     setSpan(context: unknown, span: unknown): unknown;
     /**
      * Reads the span the OTel context manager currently holds active — the
@@ -100,11 +103,7 @@ export interface OtelSdkModule {
       name: string,
       version?: string,
     ): {
-      startSpan(
-        name: string,
-        options?: Record<string, unknown>,
-        context?: unknown,
-      ): unknown;
+      startSpan(name: string, options?: Record<string, unknown>, context?: unknown): unknown;
     };
     forceFlush(): Promise<void>;
     shutdown(): Promise<void>;
@@ -129,9 +128,10 @@ export interface OtelResourcesModule {
  *
  * @internal
  */
-export type OtlpExporterCtor = new (
-  args?: { url?: string; headers?: Record<string, string> },
-) => unknown;
+export type OtlpExporterCtor = new (args?: {
+  url?: string;
+  headers?: Record<string, string>;
+}) => unknown;
 
 /**
  * Console span exporter constructor type.
@@ -218,18 +218,15 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
   if (exporterKind === 'otlp') {
     const endpoint = opts.validated
       ? pluginOptions.endpoint!
-      // buildTracerHost is sometimes called directly by tests with unvalidated options.
-      // When not pre-validated, re-check endpoint here.
-      : (pluginOptions.endpoint ?? (() => {
-        throw new Error(
-          "TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'",
-        );
-      })())!;
+      : // buildTracerHost is sometimes called directly by tests with unvalidated options.
+        // When not pre-validated, re-check endpoint here.
+        (pluginOptions.endpoint ??
+          (() => {
+            throw new Error("TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'");
+          })())!;
     const OTLPTraceExporterCtor = opts.otlpExporterCtor;
     if (!OTLPTraceExporterCtor) {
-      throw new Error(
-        'TelemetryPlugin: otlpExporterCtor is required when exporter is "otlp"',
-      );
+      throw new Error('TelemetryPlugin: otlpExporterCtor is required when exporter is "otlp"');
     }
 
     const exporterArgs: { url: string; headers?: Record<string, string> } = {
@@ -248,9 +245,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
     }
     exporter = new ConsoleSpanExporter();
   } else if (!opts.validated) {
-    throw new Error(
-      `TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`,
-    );
+    throw new Error(`TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`);
   } else {
     // validated mode but no exporter — should not happen; treat as noop.
     exporter = null;
@@ -259,19 +254,16 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
   // Build sampler
   let sampler: unknown;
   if (pluginOptions.sampling?.type === 'traceidratio') {
-    sampler = new TraceIdRatioBasedSampler(
-      pluginOptions.sampling.ratio ?? 1.0,
-    );
+    sampler = new TraceIdRatioBasedSampler(pluginOptions.sampling.ratio ?? 1.0);
   } else {
     sampler = new AlwaysOnSampler();
   }
 
   // Build span processor via factory
-  const processor = createSpanProcessor(
-    pluginOptions.spanProcessor ?? 'simple',
-    exporter,
-    { SimpleSpanProcessor, BatchSpanProcessor } as never,
-  );
+  const processor = createSpanProcessor(pluginOptions.spanProcessor ?? 'simple', exporter, {
+    SimpleSpanProcessor,
+    BatchSpanProcessor,
+  } as never);
 
   // The exporter processor stays FIRST and untouched; the M98g diagnostic
   // processor is appended after it, in the same constructor config, so it
@@ -339,10 +331,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
               isRemote: true,
             };
             const parentSpan = api.trace.wrapSpanContext(spanContext);
-            parentContext = api.trace.setSpan(
-              api.context.active(),
-              parentSpan,
-            );
+            parentContext = api.trace.setSpan(api.context.active(), parentSpan);
           }
         }
       }
@@ -351,53 +340,53 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
     },
     ...(opts.contextActivation
       ? {
-        activate<T>(span: unknown, fn: () => Promise<T>): Promise<T> {
-          const api = getOtelApi();
-          return api ? api.context.with(api.trace.setSpan(api.context.active(), span), fn) : fn();
-        },
-        /**
-         * Reports the active span's identifiers, or `undefined` when nothing
-         * is active.
-         *
-         * Declared in the SAME conditional block as `activate` on purpose:
-         * without a registered context manager nothing is ever active, so a
-         * host that cannot activate could only ever answer `undefined`. Omitting
-         * the member instead says "this host cannot see", which is the honest
-         * answer and the one a consumer can act on.
-         */
-        activeSpanContext(): SpanContext | undefined {
-          const api = getOtelApi();
-          const span = api?.trace.getActiveSpan();
-          if (span === undefined) {
-            return undefined;
-          }
-          const raw = span.spanContext() as {
-            traceId?: unknown;
-            spanId?: unknown;
-            traceFlags?: unknown;
-          };
-          const candidate: SpanContext = {
-            traceId: String(raw.traceId ?? ''),
-            spanId: String(raw.spanId ?? ''),
-            traceFlags: normalizeTraceFlags(raw.traceFlags),
-          };
-          // Validity is decided by the SHARED CODEC, not by a rule spelled out
-          // again here. `contextToTraceparent` already refuses an id that is
-          // empty, malformed, or W3C all-zero (the identifiers OTel uses for an
-          // INVALID span context), and it is what the producer side writes with
-          // — so reusing it is what stops the read path and the write path from
-          // disagreeing about which contexts are real. Checking only for `''`
-          // let an all-zero context through here while the queue refused to
-          // propagate it, and a log record would then name a trace nothing else
-          // could ever carry.
-          return contextToTraceparent({
+          activate<T>(span: unknown, fn: () => Promise<T>): Promise<T> {
+            const api = getOtelApi();
+            return api ? api.context.with(api.trace.setSpan(api.context.active(), span), fn) : fn();
+          },
+          /**
+           * Reports the active span's identifiers, or `undefined` when nothing
+           * is active.
+           *
+           * Declared in the SAME conditional block as `activate` on purpose:
+           * without a registered context manager nothing is ever active, so a
+           * host that cannot activate could only ever answer `undefined`. Omitting
+           * the member instead says "this host cannot see", which is the honest
+           * answer and the one a consumer can act on.
+           */
+          activeSpanContext(): SpanContext | undefined {
+            const api = getOtelApi();
+            const span = api?.trace.getActiveSpan();
+            if (span === undefined) {
+              return undefined;
+            }
+            const raw = span.spanContext() as {
+              traceId?: unknown;
+              spanId?: unknown;
+              traceFlags?: unknown;
+            };
+            const candidate: SpanContext = {
+              traceId: String(raw.traceId ?? ''),
+              spanId: String(raw.spanId ?? ''),
+              traceFlags: normalizeTraceFlags(raw.traceFlags),
+            };
+            // Validity is decided by the SHARED CODEC, not by a rule spelled out
+            // again here. `contextToTraceparent` already refuses an id that is
+            // empty, malformed, or W3C all-zero (the identifiers OTel uses for an
+            // INVALID span context), and it is what the producer side writes with
+            // — so reusing it is what stops the read path and the write path from
+            // disagreeing about which contexts are real. Checking only for `''`
+            // let an all-zero context through here while the queue refused to
+            // propagate it, and a log record would then name a trace nothing else
+            // could ever carry.
+            return contextToTraceparent({
               _opaque: TELEMETRY_CONTEXT_OPAQUE,
               ...candidate,
             }) === null
-            ? undefined
-            : candidate;
-        },
-      }
+              ? undefined
+              : candidate;
+          },
+        }
       : {}),
     extractContext(headers: Headers): TelemetryContext {
       return extractContextFromHeaders(headers);
@@ -434,14 +423,10 @@ export async function loadOtelTracerProvider(
 ): Promise<TracerHost> {
   // Validate options BEFORE lazy-loading (fail fast, avoid unnecessary imports)
   if (options.exporter === 'otlp' && !options.endpoint) {
-    throw new Error(
-      `TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'`,
-    );
+    throw new Error(`TelemetryPlugin: 'endpoint' is required when exporter is 'otlp'`);
   }
   if (options.exporter && options.exporter !== 'otlp' && options.exporter !== 'console') {
-    throw new Error(
-      `TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`,
-    );
+    throw new Error(`TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`);
   }
 
   // Lazy-load sdk-trace-base

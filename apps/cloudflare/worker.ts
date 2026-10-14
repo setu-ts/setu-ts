@@ -95,11 +95,7 @@ export class ReplyInboxObject {
     return this.#core.fetch(request);
   }
 
-  webSocketClose(
-    ws: IDurableObjectWebSocket,
-    code: number,
-    reason: string,
-  ): void {
+  webSocketClose(ws: IDurableObjectWebSocket, code: number, reason: string): void {
     this.#core.webSocketClose(ws, code, reason);
   }
 
@@ -116,17 +112,11 @@ export default {
    * The consumer half, which Cloudflare invokes as a MODULE EXPORT rather than
    * through `fetch` — a separate invocation from the one that published.
    */
-  async queue(
-    batch: IQueueMessageBatch,
-    env: WorkerEnvironment,
-  ): Promise<void> {
+  async queue(batch: IQueueMessageBatch, env: WorkerEnvironment): Promise<void> {
     const app = await workerHandler.application(env);
     await createMessagingHandler(app)(batch);
   },
-  async scheduled(
-    controller: IScheduledController,
-    env: WorkerEnvironment,
-  ): Promise<void> {
+  async scheduled(controller: IScheduledController, env: WorkerEnvironment): Promise<void> {
     await createScheduledHandler(cron)(controller);
     await env.EXAMPLE_KV.put('scheduled-runs', String(scheduledRuns));
   },

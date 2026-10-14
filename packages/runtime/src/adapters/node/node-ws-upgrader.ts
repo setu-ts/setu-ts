@@ -442,13 +442,14 @@ export class NodeUpgradeCoordinator {
  * @since 0.2.0
  */
 export function rejectRawUpgrade(socket: RawUpgradeSocket, status: number): void {
-  const reason = status === 503
-    ? 'Service Unavailable'
-    : status === 501
-    ? 'Not Implemented'
-    : status === 500
-    ? 'Internal Server Error'
-    : 'Bad Request';
+  const reason =
+    status === 503
+      ? 'Service Unavailable'
+      : status === 501
+        ? 'Not Implemented'
+        : status === 500
+          ? 'Internal Server Error'
+          : 'Bad Request';
   socket.write(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n\r\n`);
   socket.destroy();
 }

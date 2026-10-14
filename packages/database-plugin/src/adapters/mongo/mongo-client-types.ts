@@ -204,10 +204,7 @@ export interface IMongoCollection {
    * @param options - The operation options (e.g. a session)
    * @returns The matching count
    */
-  countDocuments(
-    filter: Record<string, unknown>,
-    options?: MongoWriteOptions,
-  ): Promise<number>;
+  countDocuments(filter: Record<string, unknown>, options?: MongoWriteOptions): Promise<number>;
 }
 
 /**

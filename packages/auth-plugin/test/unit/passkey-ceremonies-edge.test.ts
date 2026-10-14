@@ -36,10 +36,10 @@ describe('ceremony edge branches', () => {
       resolvePrincipal: () => Promise.resolve(null),
     };
     expect(() =>
-      compilePasskeys({ ...base, origins: [42] as unknown as PasskeyOptions['origins'] })
+      compilePasskeys({ ...base, origins: [42] as unknown as PasskeyOptions['origins'] }),
     ).toThrow(AuthPluginConfigurationError);
     expect(() =>
-      compilePasskeys({ ...base, origins: ['not a url'] as unknown as PasskeyOptions['origins'] })
+      compilePasskeys({ ...base, origins: ['not a url'] as unknown as PasskeyOptions['origins'] }),
     ).toThrow(AuthPluginConfigurationError);
   });
 
@@ -47,18 +47,21 @@ describe('ceremony edge branches', () => {
     const harness = createCeremoniesHarness();
     const rogue = await VirtualAuthenticator.create('ES256');
     // A credential planted with a COSE algorithm this verifier does not map.
-    await harness.store.save({
-      id: toBase64Url(rogue.credentialId),
-      principalId: 'alice',
-      userHandle: toBase64Url(rogue.userHandle),
-      publicKey: await rogue.publicKeyJwk(),
-      algorithm: -47,
-      counter: 0,
-      backedUp: false,
-      transports: ['internal'],
-      attestation: 'unverified',
-      createdAt: 0,
-    }, { maxPerPrincipal: 100 });
+    await harness.store.save(
+      {
+        id: toBase64Url(rogue.credentialId),
+        principalId: 'alice',
+        userHandle: toBase64Url(rogue.userHandle),
+        publicKey: await rogue.publicKeyJwk(),
+        algorithm: -47,
+        counter: 0,
+        backedUp: false,
+        transports: ['internal'],
+        attestation: 'unverified',
+        createdAt: 0,
+      },
+      { maxPerPrincipal: 100 },
+    );
     const options = await harness.ceremonies.authenticationOptions(harness.ctx);
     const body = await rogue.assertionResult({
       challenge: options.challenge,

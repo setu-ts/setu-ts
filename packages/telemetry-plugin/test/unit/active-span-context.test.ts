@@ -11,7 +11,7 @@ import type { TracerHost } from '../../src/interfaces/index.ts';
 function hostReporting(context: SpanContext | undefined): TracerHost {
   return {
     startSpan: () => ({ end() {}, setAttribute() {}, setStatus() {}, recordException() {} }),
-    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') } as never),
+    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') }) as never,
     injectContext: () => ({}),
     shutdown: () => Promise.resolve(),
     forceFlush: () => Promise.resolve(),
@@ -23,7 +23,7 @@ function hostReporting(context: SpanContext | undefined): TracerHost {
 function hostWithoutTheMember(): TracerHost {
   return {
     startSpan: () => ({ end() {}, setAttribute() {}, setStatus() {}, recordException() {} }),
-    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') } as never),
+    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') }) as never,
     injectContext: () => ({}),
     shutdown: () => Promise.resolve(),
     forceFlush: () => Promise.resolve(),

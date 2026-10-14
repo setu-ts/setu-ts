@@ -187,8 +187,6 @@ describe('collectStream', () => {
 
   it('throws when response body is null', async () => {
     const response = new Response(null);
-    await expect(collectStream(response)).rejects.toThrow(
-      'collectStream: response body is null',
-    );
+    await expect(collectStream(response)).rejects.toThrow('collectStream: response body is null');
   });
 });

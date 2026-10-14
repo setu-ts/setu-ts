@@ -158,11 +158,7 @@ export interface ITenantDataStore {
     filter: Readonly<Record<string, unknown>>,
   ): Promise<readonly E[]>;
   /** Create a new record; returns the stored entity including its id. */
-  create<E>(
-    tenantId: string,
-    entity: string,
-    data: Readonly<Record<string, unknown>>,
-  ): Promise<E>;
+  create<E>(tenantId: string, entity: string, data: Readonly<Record<string, unknown>>): Promise<E>;
   /** Update an existing record; returns `null` when the id is unknown. */
   update<E, Id>(
     tenantId: string,

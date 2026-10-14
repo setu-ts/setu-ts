@@ -21,10 +21,7 @@ import { createMockPlugin, createTestApp } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = await createTestApp({
-  plugins: [
-    RuntimePlugin(),
-    createMockPlugin({ name: 'database', service: { query: () => [] } }),
-  ],
+  plugins: [RuntimePlugin(), createMockPlugin({ name: 'database', service: { query: () => [] } })],
 });
 
 app.router.get('/users', (ctx) => ctx.response.json([{ id: 1 }]));
@@ -178,12 +175,14 @@ the double as a provider ahead of its consumers:
 await createTestApp({
   app: createApp(),
   without: ['mail-plugin'],
-  overrides: [createMockPlugin({
-    name: 'mail-plugin',
-    provides: CAPABILITIES.MAIL,
-    service: fakeMailer,
-    priority: PLUGIN_PRIORITY.HIGH, // ahead of the consumer that captures it
-  })],
+  overrides: [
+    createMockPlugin({
+      name: 'mail-plugin',
+      provides: CAPABILITIES.MAIL,
+      service: fakeMailer,
+      priority: PLUGIN_PRIORITY.HIGH, // ahead of the consumer that captures it
+    }),
+  ],
 });
 ```
 
@@ -294,9 +293,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 const fixtures = new FixtureManager();
 
 beforeEach(async () => {
-  fixtures
-    .mock('database', { query: () => [] })
-    .mock('cache', { get: () => null });
+  fixtures.mock('database', { query: () => [] }).mock('cache', { get: () => null });
 
   const app = await createTestApp({
     plugins: [RuntimePlugin(), ...fixtures.plugins()],

@@ -88,8 +88,9 @@ describe('parseArgs', () => {
   });
 
   it('keeps every repeated dependency flag in order', () => {
-    expect(parseArgs(['--depends-on', 'orders', '--depends-on=billing']).flags['depends-on'])
-      .toEqual(['orders', 'billing']);
+    expect(
+      parseArgs(['--depends-on', 'orders', '--depends-on=billing']).flags['depends-on'],
+    ).toEqual(['orders', 'billing']);
   });
 
   it('honours a caller-supplied value-flag set', () => {
@@ -124,8 +125,9 @@ describe('stringFlags', () => {
 });
 
 it('replaces incomplete repeated dependency flags without retaining a boolean in the list', () => {
-  expect(parseArgs(['--depends-on=a', '--depends-on=b', '--depends-on=c']).flags['depends-on'])
-    .toEqual(['a', 'b', 'c']);
+  expect(
+    parseArgs(['--depends-on=a', '--depends-on=b', '--depends-on=c']).flags['depends-on'],
+  ).toEqual(['a', 'b', 'c']);
   expect(parseArgs(['--depends-on=a', '--depends-on=b', '--depends-on']).flags['depends-on']).toBe(
     true,
   );

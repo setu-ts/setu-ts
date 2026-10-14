@@ -49,10 +49,7 @@ describe('API Documentation Generation', () => {
         './worker': './src/worker/define-worker-task.ts',
       };
       const result = expandExportTargets(exports);
-      expect(result).toEqual([
-        './src/index.ts',
-        './src/worker/define-worker-task.ts',
-      ]);
+      expect(result).toEqual(['./src/index.ts', './src/worker/define-worker-task.ts']);
     });
 
     it('handles mixed string and object exports', () => {
@@ -95,19 +92,13 @@ describe('API Documentation Generation', () => {
     });
 
     it('extracts repo-relative portion from absolute paths', () => {
-      expect(
-        normalizeDiagnosticPath(
-          '/home/user/project/packages/common/src/index.ts',
-        ),
-      ).toBe(
+      expect(normalizeDiagnosticPath('/home/user/project/packages/common/src/index.ts')).toBe(
         'packages/common/src/index.ts',
       );
     });
 
     it('handles starter paths', () => {
-      expect(
-        normalizeDiagnosticPath('packages/starters/rest-starter/src/index.ts'),
-      ).toBe(
+      expect(normalizeDiagnosticPath('packages/starters/rest-starter/src/index.ts')).toBe(
         'packages/starters/rest-starter/src/index.ts',
       );
     });
@@ -276,9 +267,7 @@ error[private-type-ref]: public type references private type
         },
       ];
 
-      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(
-        diagnostics,
-      );
+      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(diagnostics);
 
       expect(cleanPackageFindings).toHaveLength(1);
       expect(knownDebt).toHaveLength(0);
@@ -294,9 +283,7 @@ error[private-type-ref]: public type references private type
         },
       ];
 
-      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(
-        diagnostics,
-      );
+      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(diagnostics);
 
       expect(cleanPackageFindings).toHaveLength(0);
       expect(knownDebt).toHaveLength(1);
@@ -312,9 +299,7 @@ error[private-type-ref]: public type references private type
         },
       ];
 
-      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(
-        diagnostics,
-      );
+      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(diagnostics);
 
       // rest-starter is in CLEAN_PACKAGES
       expect(cleanPackageFindings).toHaveLength(1);
@@ -353,9 +338,7 @@ error[private-type-ref]: public type references private type
         },
       ];
 
-      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(
-        diagnostics,
-      );
+      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(diagnostics);
 
       // Should still be recognized as common package
       expect(cleanPackageFindings).toHaveLength(1);
@@ -372,9 +355,7 @@ error[private-type-ref]: public type references private type
         },
       ];
 
-      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(
-        diagnostics,
-      );
+      const { cleanPackageFindings, knownDebt } = partitionDiagnostics(diagnostics);
 
       // Should still be recognized as kernel package
       expect(cleanPackageFindings).toHaveLength(1);
@@ -492,9 +473,7 @@ error[private-type-ref]: public type references private type
         stat: (path: string) => Deno.stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      expect(result.targets).toContain(
-        'packages/runtime/src/worker/define-worker-task.ts',
-      );
+      expect(result.targets).toContain('packages/runtime/src/worker/define-worker-task.ts');
     });
 
     it('includes CLI main entrypoint', async () => {
@@ -514,15 +493,9 @@ error[private-type-ref]: public type references private type
         stat: (path: string) => Deno.stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      expect(result.targets).toContain(
-        'packages/starters/rest-starter/src/index.ts',
-      );
-      expect(result.targets).toContain(
-        'packages/starters/microservice-starter/src/index.ts',
-      );
-      expect(result.targets).toContain(
-        'packages/starters/full-stack-starter/src/index.ts',
-      );
+      expect(result.targets).toContain('packages/starters/rest-starter/src/index.ts');
+      expect(result.targets).toContain('packages/starters/microservice-starter/src/index.ts');
+      expect(result.targets).toContain('packages/starters/full-stack-starter/src/index.ts');
     });
 
     it('does not collapse to bare ./src/... paths', async () => {
@@ -548,9 +521,7 @@ error[private-type-ref]: public type references private type
       const sorted = [...result.targets].sort();
       expect(result.targets).toEqual(sorted);
       // No duplicates
-      expect(result.targets).toHaveLength(
-        new Set(result.targets).size,
-      );
+      expect(result.targets).toHaveLength(new Set(result.targets).size);
     });
 
     it('has the expected authoritative count of 55 targets', async () => {
@@ -587,9 +558,7 @@ error[private-type-ref]: public type references private type
       expect(cliMain?.pkg).toBe('cli');
       // Verify starter maps to starter name
       const restStarter = result.targetsWithPackage.find(
-        (e) =>
-          e.target ===
-            'packages/starters/rest-starter/src/index.ts',
+        (e) => e.target === 'packages/starters/rest-starter/src/index.ts',
       );
       expect(restStarter?.pkg).toBe('rest-starter');
     });
@@ -604,32 +573,24 @@ error[private-type-ref]: public type references private type
       // Every published package should appear in targetsWithPackage
       const publishedPkgs = new Set(
         PUBLISHED_PACKAGES.map((p) => {
-          const match = p.match(
-            /^packages\/([^/]+)(?:\/([^/]+))?/,
-          );
-          const first = match?.[1]!;
+          const match = p.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
+          const first = match?.[1] ?? '';
           const second = match?.[2];
           return first === 'starters' && second ? second : first;
         }),
       );
-      const collectedPkgs = new Set(
-        result.targetsWithPackage.map((e) => e.pkg),
-      );
+      const collectedPkgs = new Set(result.targetsWithPackage.map((e) => e.pkg));
       for (const pkg of publishedPkgs) {
         expect(collectedPkgs.has(pkg!)).toBe(true);
       }
     });
 
     it('throws when a published package has an invalid export map (no exports field)', async () => {
-      const { PUBLISHED_PACKAGES } = await import(
-        '../scripts/release-packages.ts'
-      );
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
-            return Promise.resolve(
-              JSON.stringify({ workspace: PUBLISHED_PACKAGES }),
-            );
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
           }
           // All manifests return {} (no exports field) → invalid export map
           return Promise.resolve('{}');
@@ -638,21 +599,15 @@ error[private-type-ref]: public type references private type
         stat: (path: string) => Deno.stat(path),
       };
       // {} has no exports field → invalid-export-map classification
-      await expect(collectApiEntrypoints(fs)).rejects.toThrow(
-        'invalid exports map',
-      );
+      await expect(collectApiEntrypoints(fs)).rejects.toThrow('invalid exports map');
     });
 
     it('throws when a published package has no local export targets', async () => {
-      const { PUBLISHED_PACKAGES } = await import(
-        '../scripts/release-packages.ts'
-      );
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
-            return Promise.resolve(
-              JSON.stringify({ workspace: PUBLISHED_PACKAGES }),
-            );
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
           }
           // exports is an empty object → no-export-targets
           return Promise.resolve(JSON.stringify({ exports: {} }));
@@ -676,9 +631,7 @@ error[private-type-ref]: public type references private type
         try {
           await Deno.stat(target);
         } catch {
-          throw new Error(
-            `Target does not exist on disk: ${target}`,
-          );
+          throw new Error(`Target does not exist on disk: ${target}`);
         }
       }
     });
@@ -731,13 +684,7 @@ error[private-type-ref]: public type references private type
       const cmd = {
         run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }),
       };
-      const result = await runApiDocs(
-        'check',
-        'docs/api',
-        fs,
-        cmd,
-        DOC_LINT_BASELINE_DENO,
-      );
+      const result = await runApiDocs('check', 'docs/api', fs, cmd, DOC_LINT_BASELINE_DENO);
       expect(result.code).toBe(0);
       expect(result.findings).toHaveLength(0);
     });
@@ -753,17 +700,9 @@ error[private-type-ref]: public type references private type
       const cmd = {
         run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }),
       };
-      const result = await runApiDocs(
-        'check',
-        'docs/api',
-        fs,
-        cmd,
-        DOC_LINT_BASELINE_DENO,
-      );
+      const result = await runApiDocs('check', 'docs/api', fs, cmd, DOC_LINT_BASELINE_DENO);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('exceeds baseline'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('exceeds baseline'))).toBe(true);
     });
 
     it('below baseline diagnostics → failure with lower-the-constant hint', async () => {
@@ -773,20 +712,10 @@ error[private-type-ref]: public type references private type
       const cmd = {
         run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }),
       };
-      const result = await runApiDocs(
-        'check',
-        'docs/api',
-        fs,
-        cmd,
-        DOC_LINT_BASELINE_DENO,
-      );
+      const result = await runApiDocs('check', 'docs/api', fs, cmd, DOC_LINT_BASELINE_DENO);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(
-        true,
-      );
-      expect(
-        result.findings.some((f) => f.includes('Update DOC_LINT_BASELINE')),
-      ).toBe(true);
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Update DOC_LINT_BASELINE'))).toBe(true);
     });
 
     it('fatal nonzero with zero parseable diagnostics → fatal failure surfacing original error', async () => {
@@ -801,20 +730,16 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
-      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
       // Must NOT report "below baseline"
-      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(
-        false,
-      );
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(false);
     });
 
     it('fatal nonzero with partial parseable diagnostics plus fatal text → fatal failure', async () => {
       const fs = makeFs();
-      const stderr = 'error: Module not found\n' +
+      const stderr =
+        'error: Module not found\n' +
         'error[missing-jsdoc]: test\n' +
         '  --> packages/runtime/src/index.ts:1:0\n';
       const cmd = {
@@ -822,11 +747,8 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
-      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
     });
 
     it('fatal nonzero with exactly baseline-sized parseable diagnostics plus fatal text → fatal failure, never success', async () => {
@@ -843,11 +765,8 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
-      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
       // Must NOT pass even though diagnostic count equals baseline
       expect(result.code).not.toBe(0);
     });
@@ -855,28 +774,19 @@ error[private-type-ref]: public type references private type
     it('generation-mode fatal failure remains propagated', async () => {
       // Use a mock fs that returns valid manifests for the generate-mode test
       // so collectApiEntrypoints succeeds and we can test cmd.run failure.
-      const { PUBLISHED_PACKAGES } = await import(
-        '../scripts/release-packages.ts'
-      );
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
-            return Promise.resolve(
-              JSON.stringify({ workspace: PUBLISHED_PACKAGES }),
-            );
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
           }
           // Return valid manifest for published packages
-          return Promise.resolve(
-            JSON.stringify({ exports: { '.': './src/index.ts' } }),
-          );
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
         readDir: async function* () {
           yield* [];
         },
-        stat: () =>
-          Promise.resolve(
-            { isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo,
-          ),
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
         remove: (_path: string, _options?: { recursive: boolean }) => Promise.resolve(),
         mkdir: (_path: string, _options?: { recursive: boolean }) => Promise.resolve(),
       };
@@ -888,18 +798,10 @@ error[private-type-ref]: public type references private type
             stderr: 'fatal generation error\n',
           }),
       };
-      const result = await runApiDocs(
-        'generate',
-        '/tmp/fake-api-docs',
-        fs,
-        cmd,
-      );
+      const result = await runApiDocs('generate', '/tmp/fake-api-docs', fs, cmd);
       expect(result.code).toBe(2);
-      expect(result.findings.some((f) => f.includes('deno doc failed'))).toBe(
-        true,
-      );
-      expect(result.findings.some((f) => f.includes('fatal generation error')))
-        .toBe(true);
+      expect(result.findings.some((f) => f.includes('deno doc failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('fatal generation error'))).toBe(true);
     });
 
     it('clean-package finding in check mode → failure even without fatal text', async () => {
@@ -910,9 +812,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('CLEAN packages'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('CLEAN packages'))).toBe(true);
     });
 
     it('ANSI-colored fatal on stderr is detected', async () => {
@@ -923,11 +823,8 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
-      expect(result.findings.some((f) => f.includes('Permission denied'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Permission denied'))).toBe(true);
     });
 
     it('fatal text on stdout with clean stderr is detected', async () => {
@@ -942,11 +839,8 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
-      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
     });
 
     it('warning format with non-1 exit is now fatal (fail-closed)', async () => {
@@ -961,8 +855,7 @@ error[private-type-ref]: public type references private type
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       // Must be treated as fatal — residual content with exit 1 fails closed
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
     });
 
     it('fatal mixed with zero parseable diagnostics fails', async () => {
@@ -973,17 +866,15 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
       // Should NOT say "below baseline" since there's a fatal
-      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(
-        false,
-      );
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(false);
     });
 
     it('fatal mixed with partial diagnostics fails', async () => {
       const fs = makeFs();
-      const stderr = 'error: Fatal error\n' +
+      const stderr =
+        'error: Fatal error\n' +
         'error[missing-jsdoc]: some diag\n' +
         '  --> packages/runtime/src/index.ts:5:0\n';
       const cmd = {
@@ -991,8 +882,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
       expect(result.findings.some((f) => f.includes('Fatal error'))).toBe(true);
     });
 
@@ -1010,8 +900,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
       // Must NOT pass even though diagnostic count equals baseline
       expect(result.code).not.toBe(0);
     });
@@ -1032,8 +921,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).not.toBe(0);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
     });
 
     it('REVIEW REPRO 2: code 2 + 776 diagnostics + fatal module-not-found + normal summary → fatal', async () => {
@@ -1048,29 +936,22 @@ error[private-type-ref]: public type references private type
       // The prior suppression saw the summary, set isLintSummary=true, and let
       // the fatal pass. The structural classifier removes the recognized lint
       // records and rejects the residual `error: Module not found`.
-      const stderr =
-        `error: Module not found: ./missing.ts\n${diagnostics}\nFound ${DOC_LINT_BASELINE} documentation lint errors.`;
+      const stderr = `error: Module not found: ./missing.ts\n${diagnostics}\nFound ${DOC_LINT_BASELINE} documentation lint errors.`;
       const cmd = {
         run: () => Promise.resolve({ code: 2, stdout: '', stderr }),
       };
       const result = await runApiDocs('check', 'docs/api', fs, cmd);
       expect(result.code).not.toBe(0);
-      expect(result.findings.some((f) => f.includes('deno doc --lint failed')))
-        .toBe(true);
-      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('deno doc --lint failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Module not found'))).toBe(true);
       // Must NOT report "below baseline" — it is fatal, not lint debt.
-      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(
-        false,
-      );
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(false);
     });
   });
 
   describe('classifyChildResult — structural exit classification', () => {
     it('classifies the documented lint-debt exit (code 1, only diagnostics + summary) as lint-debt', () => {
-      const stderr =
-        `error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 1 documentation lint errors.`;
+      const stderr = `error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 1 documentation lint errors.`;
       const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
       expect(result.kind).toBe('lint-debt');
     });
@@ -1081,19 +962,14 @@ error[private-type-ref]: public type references private type
     });
 
     it('requires a clean exit-code-0 child', () => {
-      expect(classifyChildResult(0, 'unexpected output', '').kind).toBe(
-        'fatal',
-      );
-      expect(classifyChildResult(0, '', 'unexpected stderr').kind).toBe(
-        'fatal',
-      );
+      expect(classifyChildResult(0, 'unexpected output', '').kind).toBe('fatal');
+      expect(classifyChildResult(0, '', 'unexpected stderr').kind).toBe('fatal');
     });
 
     it('rejects malformed diagnostic records and summary mismatches', () => {
-      expect(
-        classifyChildResult(1, '', 'error[missing-jsdoc]: missing location\n')
-          .kind,
-      ).toBe('fatal');
+      expect(classifyChildResult(1, '', 'error[missing-jsdoc]: missing location\n').kind).toBe(
+        'fatal',
+      );
       expect(
         classifyChildResult(
           1,
@@ -1104,17 +980,15 @@ error[private-type-ref]: public type references private type
       ).toBe('fatal');
     });
 
-    for (
-      const residual of [
-        'plain residual',
-        'info: unattached',
-        '= hint: unattached',
-        '- unattached reference',
-        '  | unattached source',
-        'prefix Found 1 documentation lint errors suffix',
-        '  --> missing.ts:1:1',
-      ]
-    ) {
+    for (const residual of [
+      'plain residual',
+      'info: unattached',
+      '= hint: unattached',
+      '- unattached reference',
+      '  | unattached source',
+      'prefix Found 1 documentation lint errors suffix',
+      '  --> missing.ts:1:1',
+    ]) {
       it(`fails closed on unattached output: ${residual}`, () => {
         expect(classifyChildResult(1, '', residual).kind).toBe('fatal');
         expect(classifyChildResult(1, residual, '').kind).toBe('fatal');
@@ -1122,11 +996,7 @@ error[private-type-ref]: public type references private type
     }
 
     it('classifies exit code 2 as fatal regardless of content', () => {
-      const result = classifyChildResult(
-        2,
-        '',
-        'Found 5 documentation lint errors.',
-      );
+      const result = classifyChildResult(2, '', 'Found 5 documentation lint errors.');
       expect(result.kind).toBe('fatal');
     });
 
@@ -1204,8 +1074,7 @@ error[private-type-ref]: public type references private type
     });
 
     it('recognizes the lint summary line so it is not residual-fatal', () => {
-      const stderr =
-        `error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 1 documentation lint errors.`;
+      const stderr = `error[missing-jsdoc]: test\n  --> packages/runtime/src/index.ts:1:0\nFound 1 documentation lint errors.`;
       const result = classifyChildResult(DOC_LINT_EXIT_CODE, '', stderr);
       expect(result.kind).toBe('lint-debt');
     });
@@ -1216,10 +1085,7 @@ error[private-type-ref]: public type references private type
       const fs = {
         readTextFile: (_path: string) => Promise.reject(new Error('NotFound')),
       };
-      const result = await readManifestExports(
-        'packages/missing/deno.json',
-        fs,
-      );
+      const result = await readManifestExports('packages/missing/deno.json', fs);
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.failure.kind).toBe('read-failed');
@@ -1321,27 +1187,18 @@ error[private-type-ref]: public type references private type
 
   describe('runApiDocs — generate-mode edge cases', () => {
     it('generate mode with stdout on failure includes stdout in findings', async () => {
-      const { PUBLISHED_PACKAGES } = await import(
-        '../scripts/release-packages.ts'
-      );
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
-            return Promise.resolve(
-              JSON.stringify({ workspace: PUBLISHED_PACKAGES }),
-            );
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
           }
-          return Promise.resolve(
-            JSON.stringify({ exports: { '.': './src/index.ts' } }),
-          );
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
         readDir: async function* () {
           yield* [];
         },
-        stat: () =>
-          Promise.resolve(
-            { isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo,
-          ),
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
         remove: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
         mkdir: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
       };
@@ -1350,25 +1207,17 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('generate', '/tmp/fake-api', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('some stdout error'))).toBe(
-        true,
-      );
+      expect(result.findings.some((f) => f.includes('some stdout error'))).toBe(true);
     });
 
     it('generate mode with success but missing output reports the gap', async () => {
-      const { PUBLISHED_PACKAGES } = await import(
-        '../scripts/release-packages.ts'
-      );
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
-            return Promise.resolve(
-              JSON.stringify({ workspace: PUBLISHED_PACKAGES }),
-            );
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
           }
-          return Promise.resolve(
-            JSON.stringify({ exports: { '.': './src/index.ts' } }),
-          );
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
         readDir: async function* () {
           yield* [];
@@ -1378,9 +1227,7 @@ error[private-type-ref]: public type references private type
           if (path.includes('index.html')) {
             return Promise.reject(new Error('NotFound'));
           }
-          return Promise.resolve(
-            { isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo,
-          );
+          return Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo);
         },
         remove: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
         mkdir: (_p: string, _o?: { recursive: boolean }) => Promise.resolve(),
@@ -1388,16 +1235,9 @@ error[private-type-ref]: public type references private type
       const cmd = {
         run: () => Promise.resolve({ code: 0, stdout: '', stderr: '' }),
       };
-      const result = await runApiDocs(
-        'generate',
-        '/tmp/fake-api-missing',
-        fs,
-        cmd,
-      );
+      const result = await runApiDocs('generate', '/tmp/fake-api-missing', fs, cmd);
       expect(result.code).toBe(1);
-      expect(
-        result.findings.some((f) => f.includes('Generated output not found')),
-      ).toBe(true);
+      expect(result.findings.some((f) => f.includes('Generated output not found'))).toBe(true);
     });
   });
 
@@ -1413,17 +1253,12 @@ error[private-type-ref]: public type references private type
               }),
             );
           }
-          return Promise.resolve(
-            JSON.stringify({ exports: { '.': './src/index.ts' } }),
-          );
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
         readDir: async function* () {
           yield* [];
         },
-        stat: () =>
-          Promise.resolve(
-            { isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo,
-          ),
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
       };
       await expect(collectApiEntrypoints(fs)).rejects.toThrow(
         'Workspace members missing from PUBLISHED_PACKAGES',
@@ -1435,21 +1270,14 @@ error[private-type-ref]: public type references private type
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
             // Workspace has only one package; PUBLISHED_PACKAGES has more.
-            return Promise.resolve(
-              JSON.stringify({ workspace: ['packages/common'] }),
-            );
+            return Promise.resolve(JSON.stringify({ workspace: ['packages/common'] }));
           }
-          return Promise.resolve(
-            JSON.stringify({ exports: { '.': './src/index.ts' } }),
-          );
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
         readDir: async function* () {
           yield* [];
         },
-        stat: () =>
-          Promise.resolve(
-            { isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo,
-          ),
+        stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo),
       };
       await expect(collectApiEntrypoints(fs)).rejects.toThrow(
         'Published packages missing from workspace',
@@ -1457,19 +1285,13 @@ error[private-type-ref]: public type references private type
     });
 
     it('throws when a declared export target does not exist on disk', async () => {
-      const { PUBLISHED_PACKAGES } = await import(
-        '../scripts/release-packages.ts'
-      );
+      const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
           if (path === 'deno.json') {
-            return Promise.resolve(
-              JSON.stringify({ workspace: PUBLISHED_PACKAGES }),
-            );
+            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
           }
-          return Promise.resolve(
-            JSON.stringify({ exports: { '.': './src/index.ts' } }),
-          );
+          return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
         readDir: async function* () {
           yield* [];
@@ -1479,14 +1301,10 @@ error[private-type-ref]: public type references private type
           if (path.includes('src/index.ts')) {
             return Promise.reject(new Error('NotFound'));
           }
-          return Promise.resolve(
-            { isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo,
-          );
+          return Promise.resolve({ isFile: true, isDirectory: false, size: 0 } as Deno.FileInfo);
         },
       };
-      await expect(collectApiEntrypoints(fs)).rejects.toThrow(
-        'does not exist on disk',
-      );
+      await expect(collectApiEntrypoints(fs)).rejects.toThrow('does not exist on disk');
     });
   });
 

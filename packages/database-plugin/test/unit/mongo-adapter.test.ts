@@ -52,9 +52,7 @@ describe('MongoAdapter — lifecycle against an injected client', () => {
     // `MongoAdapterOptions` is a union whose arms each require one of the two,
     // so a typed caller cannot reach this — the cast stands in for the plugin's
     // untyped `buildAdapterOptions` carry, which is the only real path here.
-    expect(() => new MongoAdapter({} as unknown as MongoAdapterOptions)).toThrow(
-      /requires either/,
-    );
+    expect(() => new MongoAdapter({} as unknown as MongoAdapterOptions)).toThrow(/requires either/);
   });
 
   it('rejects an options bag supplying neither url nor client at compile time', () => {
@@ -181,8 +179,9 @@ describe('MongoAdapter — transactions', () => {
     expect(session.started).toBe(true);
     expect(session.calls).toContain('startTransaction');
     await tx.createDataSource('Widget').create({ id: '507f1f77bcf86cd799439011' });
-    await expect(tx.createDataSource('Widget').findById('507f1f77bcf86cd799439011')).resolves
-      .toEqual({ id: '507f1f77bcf86cd799439011' });
+    await expect(
+      tx.createDataSource('Widget').findById('507f1f77bcf86cd799439011'),
+    ).resolves.toEqual({ id: '507f1f77bcf86cd799439011' });
     await tx.commit();
     expect(session.calls).toContain('commitTransaction');
     expect(session.calls).toContain('endSession');
@@ -197,8 +196,9 @@ describe('MongoAdapter — transactions', () => {
       objectIdCtor: fakeObjectIdCtor,
     });
     await adapter.connect();
-    await expect(adapter.beginTransaction({ isolation: 'serializable' }))
-      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    await expect(adapter.beginTransaction({ isolation: 'serializable' })).rejects.toBeInstanceOf(
+      UnsupportedIsolationLevelError,
+    );
     expect(session.started).toBe(false);
   });
 

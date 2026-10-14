@@ -36,7 +36,7 @@ function createFailingSchema() {
 function registerPlugin(options?: Parameters<typeof ValidationPlugin>[0]): IValidationService {
   const registeredServices = new Map<string, unknown>();
   const ctx: IPluginContext = {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     runtime: {} as any,
     services: {
       register<T>(key: string, service: T): void {
@@ -86,7 +86,7 @@ function registerPlugin(options?: Parameters<typeof ValidationPlugin>[0]): IVali
     cli: { register: () => {} },
     environment: { validate: () => {} },
     options: {},
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     app: {} as any,
   };
 

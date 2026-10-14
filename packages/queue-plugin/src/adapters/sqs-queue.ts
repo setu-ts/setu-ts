@@ -352,21 +352,13 @@ export class SqsQueue implements QueueAdapter {
     await this.#transport.send(queueUrl, body, delaySeconds);
   }
 
-  async reserve<T>(
-    name: string,
-    limit: number,
-    nowMs: number,
-  ): Promise<readonly StoredJob<T>[]> {
+  async reserve<T>(name: string, limit: number, nowMs: number): Promise<readonly StoredJob<T>[]> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
 
     const queueUrl = this.#getQueueUrl(name);
     const max = Math.min(limit, SQS_MAX_RECEIVE);
 
-    const messages = await this.#transport.receive(
-      queueUrl,
-      max,
-      this.#visibilityTimeoutSeconds,
-    );
+    const messages = await this.#transport.receive(queueUrl, max, this.#visibilityTimeoutSeconds);
 
     const jobs: StoredJob<T>[] = [];
     for (const msg of messages) {
