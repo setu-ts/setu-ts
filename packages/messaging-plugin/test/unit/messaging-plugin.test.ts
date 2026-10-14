@@ -500,7 +500,7 @@ describe('MessagingPlugin', () => {
     ctx.services.register(CAPABILITIES.MESSAGING, unreadyBroker);
 
     // This is the exact code pattern from messaging-plugin.ts line 122-127
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const healthIndicator = async (): Promise<HealthCheckResult> => {
       const status: HealthStatus = unreadyBroker.isReady() ? 'up' : 'down';
       return {

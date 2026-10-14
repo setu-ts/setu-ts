@@ -1032,6 +1032,7 @@ describe('buildTracerHost (via fake modules)', () => {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
         constructor() {
+          // eslint-disable-next-line @typescript-eslint/no-this-alias -- records the receiver under test
           capturedProvider = this;
         }
         getTracer() {

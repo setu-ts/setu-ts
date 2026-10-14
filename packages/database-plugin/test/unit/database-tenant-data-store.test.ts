@@ -44,13 +44,13 @@ class FakeRepository implements IRepository<Record<string, unknown>, EntityKey> 
     }
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async findAll(options?: { where?: Record<string, unknown> }): Promise<Record<string, unknown>[]> {
     this.calls.push({ method: 'findAll', arg: options });
     return this.out;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async findOne(options?: {
     where?: Record<string, unknown>;
   }): Promise<Record<string, unknown> | null> {
@@ -67,13 +67,13 @@ class FakeRepository implements IRepository<Record<string, unknown>, EntityKey> 
     return null;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
     this.calls.push({ method: 'create', arg: data });
     return { id: 'new', ...data };
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async update(
     id: EntityKey,
     data: Partial<Record<string, unknown>>,
@@ -82,29 +82,29 @@ class FakeRepository implements IRepository<Record<string, unknown>, EntityKey> 
     return { ...this.rows.get(String(id)), ...data };
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async delete(id: EntityKey): Promise<boolean> {
     this.calls.push({ method: 'delete', arg: { id } });
     return this.rows.delete(String(id));
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async findById(id: EntityKey): Promise<Record<string, unknown> | null> {
     this.calls.push({ method: 'findById', arg: id });
     return this.rows.get(String(id)) ?? null;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async exists(id: EntityKey): Promise<boolean> {
     return this.rows.has(String(id));
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async count(): Promise<number> {
     return this.out.length;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async findPage(): Promise<never> {
     throw new Error('not used');
   }
@@ -124,22 +124,22 @@ class FakeDatabaseService implements IDatabaseService {
     return repo as unknown as IRepository<Entity, Id>;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async transaction(): Promise<never> {
     throw new Error('not used');
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async query(): Promise<never[]> {
     throw new Error('not used');
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async migrate(): Promise<void> {
     throw new Error('not used');
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async isHealthy(): Promise<boolean> {
     return true;
   }

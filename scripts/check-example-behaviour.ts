@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate must print actionable findings.
+/* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * Executable behaviour gate for documented view components.
  *

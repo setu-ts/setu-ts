@@ -94,8 +94,7 @@ describe('ports --reallocate', () => {
       '/ws/apps/orders/main.dev.ts': devEntryVariants(4919)[0],
     });
     const occupied = new Set([3000, 3001]);
-    let code = 0;
-    code = await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+    const code = await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
       fs,
       cwd: '/ws',
       log: () => {},

@@ -658,7 +658,6 @@ describe('SchedulerPlugin diagnostics wiring', () => {
   });
 
   it('observes fires and attempts of an app-registered job and closes cleanly', async () => {
-    let handler: (() => void | Promise<void>) | undefined;
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -668,9 +667,7 @@ describe('SchedulerPlugin diagnostics wiring', () => {
               trigger: 'delay',
               name: 'tick',
               delayMs: 30,
-              handler: () => {
-                handler?.();
-              },
+              handler: () => {},
             },
           ],
           diagnostics: { enabled: true, alias: 'cron', jobs: { tick: 'tick-alias' } },
@@ -700,7 +697,6 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       );
       expect(snapshot.records.some((r) => r.alias === 'oneshot')).toBe(false);
       expect(['ready', 'stale']).toContain(snapshot.state);
-      void handler;
     } finally {
       await app.stop();
     }

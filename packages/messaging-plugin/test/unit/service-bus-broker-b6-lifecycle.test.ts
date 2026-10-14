@@ -195,7 +195,6 @@ describe('ServiceBusBroker B6 lifecycle', () => {
     it('failed inbox not cached: second request retries create and open successfully', async () => {
       let createSubCount = 0;
       let openCount = 0;
-      let deleteSubCount = 0;
       let inboxDeferred = createDeferred();
       let shouldFail = true;
 
@@ -206,7 +205,6 @@ describe('ServiceBusBroker B6 lifecycle', () => {
           return Promise.resolve();
         },
         deleteSubscription: () => {
-          deleteSubCount++;
           return Promise.resolve();
         },
         open: async () => {

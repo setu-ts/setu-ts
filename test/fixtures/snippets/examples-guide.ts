@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- documentation snippet fixtures mirror guide examples
+/* eslint-disable require-await -- documentation snippet fixtures mirror guide examples */
 // Examples-guide composition from docs/examples.md - must compile against the workspace.
 // This is the canonical minimal composition shown in the examples guide's
 // "Getting Started" section.

@@ -574,7 +574,7 @@ error[private-type-ref]: public type references private type
       const publishedPkgs = new Set(
         PUBLISHED_PACKAGES.map((p) => {
           const match = p.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
-          const first = match?.[1]!;
+          const first = match?.[1] ?? '';
           const second = match?.[2];
           return first === 'starters' && second ? second : first;
         }),

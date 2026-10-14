@@ -291,6 +291,7 @@ export async function mergedPullRequests(
       'No release tag is reachable from HEAD, so merged pull requests cannot be listed. ' +
         'In CI this means a shallow checkout: set `fetch-depth: 0` on the job. ' +
         `(${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
     );
   }
   const log = await git(['log', '--merges', '--format=%H%x1f%s', `${previousTag}..HEAD`]);

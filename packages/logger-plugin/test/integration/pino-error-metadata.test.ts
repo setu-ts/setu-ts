@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Integration test: a raw `Error` in metadata reaches a REAL Pino sink with its
  * message (plan §3.6, X2-5). This is the guarded `npm:pino` probe (the M4

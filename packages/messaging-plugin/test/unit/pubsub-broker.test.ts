@@ -544,14 +544,12 @@ describe('GcpPubSubBroker', () => {
 
   describe('connect() idempotent', () => {
     it('returns early when already connected', async () => {
-      let connectCount = 0;
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
         createSubscription: () => Promise.resolve(),
         deleteSubscription: () => Promise.resolve(),
         close: () => {
-          connectCount++;
           return Promise.resolve();
         },
       };
@@ -1313,7 +1311,7 @@ describe('C6: createSubscription error discrimination', () => {
       },
     };
     const transport = adaptPubSubModule(
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mod as any,
       { projectId: 'test' },
     );
@@ -1342,7 +1340,7 @@ describe('C6: createSubscription error discrimination', () => {
       },
     };
     const transport = adaptPubSubModule(
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mod as any,
       { projectId: 'test' },
     );
@@ -1383,7 +1381,7 @@ describe('C7: on(error) wires to logger', () => {
       },
     };
     const transport = adaptPubSubModule(
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mod as any,
       { projectId: 'test', logger: fakeLogger },
     );

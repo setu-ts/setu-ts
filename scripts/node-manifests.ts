@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate prints what it found (AI_GUIDELINES §11.5/§11.6)
+/* eslint-disable no-console -- a gate prints what it found (AI_GUIDELINES §11.5/§11.6) */
 /**
  * The Node-manifest generator and drift gate (M111a plan §3.1).
  *

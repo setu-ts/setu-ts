@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- an example app's entry point prints its
+/* eslint-disable no-console -- an example app's entry point prints its */
 // own endpoints; this is a runnable demo, not library code.
 /**
  * Starts the demo server for interactive use.

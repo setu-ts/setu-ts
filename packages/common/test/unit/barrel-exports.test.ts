@@ -564,17 +564,17 @@ describe('@setu-ts/common barrel — M101c identity composition', () => {
       useIsolation: (s: common.ITenantIsolationStrategy) => {
         expect(s.kind).toBe(strategy.kind);
       },
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       findAll: async () => [],
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       findById: async () => null,
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       find: async () => [],
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       create: async <E>(): Promise<E> => ({}) as unknown as E,
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       update: async () => null,
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       delete: async () => false,
     };
     await expect(store.findAll('a', 'User')).resolves.toEqual([]);

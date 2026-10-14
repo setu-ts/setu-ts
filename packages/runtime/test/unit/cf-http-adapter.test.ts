@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Unit tests for CloudflareWorkersHttpAdapter.
  *
@@ -16,7 +16,7 @@ describe('cf-http-adapter | setHandler/fetch', () => {
   it('stores handler; fetch round-trips', async () => {
     const adapter = new CloudflareWorkersHttpAdapter();
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -61,8 +61,8 @@ describe('cf-http-adapter | setHandler/fetch', () => {
   it('still returns a promise when the handler is asynchronous', async () => {
     const adapter = new CloudflareWorkersHttpAdapter();
 
-    // deno-lint-ignore require-await
     adapter.setHandler(
+      // eslint-disable-next-line require-await -- an asynchronous handler is the case under test
       async (_request) =>
         ({
           snapshot: () => ({ status: 202, headers: new Headers(), body: 'async' }),

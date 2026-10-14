@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- documentation snippet fixtures mirror guide examples
+/* eslint-disable require-await -- documentation snippet fixtures mirror guide examples */
 // Plugin registration from docs/custom-plugins.md - must compile against the workspace.
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
+/* eslint-disable require-await -- test fixtures use sync methods matching async interface signatures */
 /**
  * `trustedProxies` / `proxyHops` — resolving the client from the RIGHT
  * (M90a §3.3).

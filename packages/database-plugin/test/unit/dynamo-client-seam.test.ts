@@ -192,6 +192,7 @@ describe('DynamoDB client seam', () => {
       DynamoDBClient: class extends FakeDynamoSdkClient {
         constructor(configuration: unknown) {
           super(configuration);
+          // eslint-disable-next-line @typescript-eslint/no-this-alias -- records the receiver under test
           nativeClient = this;
         }
       },

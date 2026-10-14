@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this CI script reports progress and skips.
+/* eslint-disable no-console -- this CI script reports progress and skips. */
 /** Checks every standalone application and runs its mandatory smoke task. */
 
 const SKIP_EXIT_CODE = 77;

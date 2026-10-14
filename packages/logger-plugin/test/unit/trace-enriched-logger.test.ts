@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- the sink under test IS `console.log`:
+/* eslint-disable no-console -- the sink under test IS `console.log`: */
 // ConsoleLogger writes there (AI_GUIDELINES §11.6), so capturing it is how the
 // emitted record is read.
 /**

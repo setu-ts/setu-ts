@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 export type Counts = Record<string, string[]>;
 export type Coverage = Record<string, readonly [number, number, number]>;
 export type GainCause = 'deno-uncounted' | 'added-proof' | 'registration';
+// eslint-disable-next-line no-control-regex -- strips ANSI colour escapes
 const clean = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, '');
 
 /** Suite summary lines are parents, never additional leaf tests. */

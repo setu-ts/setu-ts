@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- async methods must match real Drizzle instance interface
+/* eslint-disable require-await -- async methods must match real Drizzle instance interface */
 /**
  * Fake Drizzle database instance for unit testing the DrizzleAdapter.
  *

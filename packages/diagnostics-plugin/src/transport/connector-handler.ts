@@ -775,7 +775,7 @@ function readEventProjection(
   const perSourceStates: string[] = [];
   for (let index = 0; index < sources.length; index++) {
     const source = sources[index];
-    let snapshot: EventDiagnosticsSnapshot | null = null;
+    let snapshot: EventDiagnosticsSnapshot | null;
     try {
       snapshot = readEventSourceSnapshot(source.snapshot());
     } catch {

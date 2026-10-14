@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 /**
  * Smoke check for the static-file example.
  *

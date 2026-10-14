@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any, require-await
+/* eslint-disable @typescript-eslint/no-explicit-any, require-await */
 import { describe, expect, it } from 'vitest';
 import { DenoHttpAdapter } from '../../src/adapters/deno/deno-http-adapter.ts';
 import type { DenoServeHost } from '../../src/adapters/deno/deno-http-adapter.ts';

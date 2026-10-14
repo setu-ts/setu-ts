@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- repository test runner
+/* eslint-disable no-console -- repository test runner */
 /** Per-member Node runs bound memory use and enforce coverage in each package's own suite. */
 import { coverageRows, runTargets, selectMembers } from './codemods/node-runner-core.ts';
 export { coverageRows, runTargets, selectMembers } from './codemods/node-runner-core.ts';

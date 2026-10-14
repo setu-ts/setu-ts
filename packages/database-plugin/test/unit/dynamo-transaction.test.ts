@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- async facade fakes model IDynamoClient promises.
+/* eslint-disable require-await -- async facade fakes model IDynamoClient promises. */
 /**
  * Coverage for the {@linkcode DynamoAdapter} deferred transaction.
  *

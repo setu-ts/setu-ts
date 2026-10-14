@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await
+/* eslint-disable require-await */
 /**
  * Tests for the telemetry service implementations.
  *

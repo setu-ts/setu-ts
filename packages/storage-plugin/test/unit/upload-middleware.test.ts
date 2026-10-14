@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for {@linkcode createUploadMiddleware} and {@linkcode getUploadedFile}.
  *

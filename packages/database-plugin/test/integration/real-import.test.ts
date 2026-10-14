@@ -108,7 +108,6 @@ describe('Real ORM imports (guarded)', () => {
     let imported: unknown = undefined;
     let error: Error | null = null;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       imported = await import('drizzle-orm');
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));

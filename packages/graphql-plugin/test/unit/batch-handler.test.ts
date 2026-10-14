@@ -126,7 +126,6 @@ describe('batch handler', () => {
 
     const body = [{ query: '{ hello }' }, { query: '{ hello }' }];
     const ctx = createMockContext(body);
-    // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 
     await post(ctx);
@@ -158,7 +157,6 @@ describe('batch handler', () => {
 
     const body = [{ query: '{ hello }' }, { query: '{ hello }' }];
     const ctx = createMockContext(body);
-    // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 
     await post(ctx);
@@ -188,7 +186,6 @@ describe('batch handler', () => {
     });
 
     const ctx = createMockContext([]);
-    // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 
     await post(ctx);
@@ -218,7 +215,6 @@ describe('batch handler', () => {
     });
 
     const ctx = createMockContext([{ query: '{ a }' }, { query: '{ b }' }, { query: '{ c }' }]);
-    // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 
     await post(ctx);
@@ -248,7 +244,6 @@ describe('batch handler', () => {
     });
 
     const ctx = createMockContext([{ query: '{ hello }' }]);
-    // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 
     await post(ctx);
@@ -276,7 +271,6 @@ describe('batch handler', () => {
     });
 
     const ctx = createMockContext([{ query: '{ hello }' }], 'application/graphql-response+json');
-    // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 
     await post(ctx);
@@ -306,7 +300,6 @@ describe('batch handler', () => {
     });
 
     const ctx = createMockContext({ query: '{ hello }' });
-    // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 
     await post(ctx);

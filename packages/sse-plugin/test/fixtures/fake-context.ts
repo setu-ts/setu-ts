@@ -46,7 +46,7 @@ export function createFakeContext(opts?: {
     }
   }
 
-  const rt = opts?.runtime!;
+  const rt = opts?.runtime;
 
   // Build response builder.
   const resp: IResponse = {

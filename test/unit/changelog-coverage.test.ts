@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- one test swaps `console.log`/`console.error`
+/* eslint-disable no-console -- one test swaps `console.log`/`console.error` */
 // to prove the production reporters route to the streams a CI log separates.
 /**
  * The changelog-coverage gate's own controls.

@@ -140,7 +140,6 @@ export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): 
         file(name: string) {
           return {
             getMetadata() {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
               return new Promise<[Record<string, unknown>]>((resolve, reject) => {
                 const fileHandle = b.file(name);
                 (
@@ -156,7 +155,6 @@ export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): 
               });
             },
             download() {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
               return new Promise<{ body: Uint8Array | NodeJS.ReadableStream }>(
                 (resolve, reject) => {
                   const fileHandle = b.file(name);
@@ -188,7 +186,6 @@ export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): 
               ).save(data, options, cb);
             },
             delete() {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
               return new Promise<boolean>((resolve, reject) => {
                 const fileHandle = b.file(name);
                 (fileHandle as { delete: (cb: (err: Error | null) => void) => void }).delete(
@@ -200,7 +197,6 @@ export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): 
               });
             },
             getSignedUrl(config: { action: string; expires: number }) {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
               return new Promise<[string]>((resolve, reject) => {
                 const fileHandle = b.file(name);
                 (
@@ -334,7 +330,7 @@ export class GcsProvider implements StorageProvider {
    * @param data - Object bytes
    * @param options - Object attributes to record with the bytes
    */
-  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
     this.#assertConnected();
     // `save(data, opts, cb)` is the SDK's three-argument overload; the bag is
@@ -388,7 +384,6 @@ export class GcsProvider implements StorageProvider {
   async delete(path: string): Promise<boolean> {
     this.#assertConnected();
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       await this.#getFile(path).delete();
       return true;
     } catch {
@@ -423,7 +418,6 @@ export class GcsProvider implements StorageProvider {
     this.#assertConnected();
     // GCS `expires` is epoch-seconds (numeric), not milliseconds.
     const expires = Math.floor(this.#now() / 1000) + options.expiresIn;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [url] = await this.#getFile(path).getSignedUrl({ action: 'read', expires });
     return url;
   }
@@ -451,7 +445,7 @@ export class GcsProvider implements StorageProvider {
    * @returns A `ReadableStream`, `null` if absent, or a rejection naming the
    *          unusable stream shape
    */
-  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     try {

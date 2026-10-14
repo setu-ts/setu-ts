@@ -285,7 +285,7 @@ export class DenoHttpAdapter implements IHttpAdapter {
     return this.#handle.createFetchHandler()(request);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async listen(port: number, hostname?: string): Promise<ServerHandle> {
     const fetchHandler = this.#handle.createFetchHandler();
     const server = this.#host.serve({

@@ -155,6 +155,7 @@ export async function loadRequestHandler(
       `Failed to load React Router server build from "${serverBuildPath}". ` +
         `Ensure the path is correct and the file exports a ServerBuild as default. ` +
         `Cause: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 
@@ -168,6 +169,7 @@ export async function loadRequestHandler(
     throw new Error(
       `Failed to import 'react-router'. Ensure it is available in the ` +
         `runtime/module resolution. Cause: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 

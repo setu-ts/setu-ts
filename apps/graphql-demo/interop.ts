@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this is a runnable report, not library
+/* eslint-disable no-console -- this is a runnable report, not library */
 // code; its whole output is the result table an operator reads.
 /**
  * Interop checks against REAL third-party GraphQL clients.

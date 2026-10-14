@@ -136,7 +136,7 @@ export async function planAdoption(
 
   const files: AdoptedFile[] = [];
   for (const entry of ADOPTED_ENTRIES) {
-    let isDirectory = false;
+    let isDirectory: boolean;
     try {
       isDirectory = (await fs.stat(joinPath(project, entry))).isDirectory;
     } catch {

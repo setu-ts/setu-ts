@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Milestone-plan linter — enforces the plan structure CLAUDE.md mandates,
  * mechanically, so a plan (human- or model-authored) cannot silently omit a

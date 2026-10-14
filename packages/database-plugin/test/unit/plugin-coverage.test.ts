@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- interface methods must be async (IPlugin)
+/* eslint-disable require-await -- interface methods must be async (IPlugin) */
 /**
  * Coverage tests for DatabasePlugin createAdapter branches.
  *

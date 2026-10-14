@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
+/* eslint-disable no-console -- guarded skip tests log SKIP messages. */
 /**
  * X34-1 / X29-3 end to end, against REAL OpenTelemetry.
  *

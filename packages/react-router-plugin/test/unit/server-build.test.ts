@@ -31,7 +31,7 @@ describe('server-build', () => {
       factoryCalled = true;
       capturedBuild = build;
       capturedMode = mode;
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async (_request, _context) => fakeRRResponse;
     };
 
@@ -55,7 +55,7 @@ describe('server-build', () => {
     let receivedContext: unknown = null;
 
     const createRequestHandler = () => {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async (request: Request, context: unknown) => {
         receivedRequest = request;
         receivedContext = context;
@@ -138,7 +138,7 @@ describe('server-build', () => {
 
   it('assertSsrRuntime returns the runtime when both members are functions', () => {
     const runtime = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       handler: async () => new Response('ok'),
       createLoadContext: createFakeLoadContextFactory(),
     };
@@ -147,7 +147,7 @@ describe('server-build', () => {
   });
 
   it('assertSsrRuntime rejects a bare handler and names the pre-0.2.0 shape', () => {
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const legacy = async () => new Response('ok');
 
     expect(() => assertSsrRuntime(legacy)).toThrow(

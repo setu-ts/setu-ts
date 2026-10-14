@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
+/* eslint-disable no-console -- this CI script reports progress, drift and skips. */
 import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
 import { startRegistryOverlay } from './registry-overlay.ts';
 

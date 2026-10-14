@@ -364,7 +364,7 @@ export class WorkersBroker implements IMessageBroker {
    * @returns The active subscription
    * @throws {CloudflareUnsupportedError} When the `messaging.rpc` arm is absent
    */
-  // deno-lint-ignore require-await -- the refusal below must REJECT, not throw
+  // eslint-disable-next-line require-await -- the refusal below must REJECT, not throw
   async respond<TReq, TRes>(
     topic: string,
     handler: RequestHandler<TReq, TRes>,

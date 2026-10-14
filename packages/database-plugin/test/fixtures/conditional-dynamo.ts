@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- fake native commands reject asynchronously.
+/* eslint-disable require-await -- fake native commands reject asynchronously. */
 import type {
   DynamoAttributeMap,
   DynamoConditionExpression,

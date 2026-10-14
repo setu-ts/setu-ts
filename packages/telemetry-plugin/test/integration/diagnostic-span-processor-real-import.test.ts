@@ -141,9 +141,9 @@ describe('DiagnosticSpanProcessor — real locked OTel SDK', () => {
     for (const kind of kinds) {
       await service.withSpan(kind, () => Promise.resolve(), { kind });
     }
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     await service.withSpan('status.ok', async (span) => span.setStatus('ok'));
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     await service.withSpan('status.error', async (span) => span.setStatus('error'));
     await service
       .withSpan('status.thrown', () => Promise.reject(new Error('boom')))

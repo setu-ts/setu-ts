@@ -134,7 +134,7 @@ describe('ValidationService — middleware', () => {
 describe('ValidationService — real Zod schema', () => {
   it('validates a real Zod schema and maps ZodIssue to ValidationIssue', async () => {
     // Dynamically import Zod — skip if unavailable.
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let z: { z: any };
     try {
       const mod = await import('zod-v3');
@@ -165,7 +165,7 @@ describe('ValidationService — real Zod schema', () => {
   });
 
   it('validates a nested Zod schema with dotted paths', async () => {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let z: { z: any };
     try {
       const mod = await import('zod-v3');

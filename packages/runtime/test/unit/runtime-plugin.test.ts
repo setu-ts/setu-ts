@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for RuntimePlugin — HTTP adapter registration, CF platform no-throw,
  * and the new IHttpAdapter surface (setHandler/fetch/listen/close).
@@ -122,7 +122,7 @@ describe('runtime-plugin | CF platform', () => {
     const adapter = ctx.services.get(CAPABILITIES.HTTP_ADAPTER) as IHttpAdapter;
     expect(adapter).toBeDefined();
     // CF adapter: fetch works, listen throws
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -276,7 +276,7 @@ describe('runtime-plugin | fake adapter records calls', () => {
 
     plugin.register(ctx);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     fakeAdapter.setHandler(async () => ({
       snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'test' }),
     }));

@@ -150,7 +150,7 @@ describe('renderPrometheus', () => {
     };
     const result = renderPrometheus([snapshot]);
     // No raw control character other than the separating line feeds survives.
-    // deno-lint-ignore no-control-regex
+    // eslint-disable-next-line no-control-regex
     expect(/[\u0000-\u0009\u000b-\u001f\u007f]/.test(result)).toBe(false);
     expect(result).toContain('task_module="file:///a\ufffd0d\\n# FAKE 1\ufffd00\ufffd7f.ts"');
     expect(result).toContain(

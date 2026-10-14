@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- harness output is the report (AI_GUIDELINES §11.6).
+/* eslint-disable no-console -- harness output is the report (AI_GUIDELINES §11.6). */
 /**
  * Compatibility proof against the published npm packages, on Node and Bun.
  * Breadth covers every workspace member; the core packages also serve requests.

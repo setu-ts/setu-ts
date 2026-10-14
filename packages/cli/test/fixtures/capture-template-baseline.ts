@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- a capture script reports what it wrote
 import * as nodeFs from 'node:fs/promises';
 /**
  * Captures the template byte-identity baseline for M99e §3.7.

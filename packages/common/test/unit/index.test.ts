@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await
+/* eslint-disable require-await */
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, none, ok, PLUGIN_PRIORITY, some } from '../../src/index.ts';
 import type {

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 // ConsoleLogger is the sanctioned logger implementation (AI_GUIDELINES §11.6).
 /**
  * Console-backed structured logger — runtime-independent JSON or pretty

@@ -67,7 +67,7 @@ describe('canSign', () => {
   });
 
   it('returns false with no config', () => {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(canSign({} as any)).toBe(false);
   });
 
@@ -135,7 +135,7 @@ describe('adaptAzureModule', () => {
                     store.set(key, data);
                     return Promise.resolve({ _hasSas: canSign });
                   },
-                  // deno-lint-ignore require-await
+                  // eslint-disable-next-line require-await
                   async download() {
                     const data = store.get(key);
                     if (data === undefined) {
@@ -201,7 +201,7 @@ describe('adaptAzureModule', () => {
       accountKey: 'dGVzdGtleQ==',
     }) as IAzureBlobClient & { canSign: boolean };
     const container = facade.getContainerClient('mycontainer');
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blob = (container as any).getBlockBlobClient('test.bin');
     await blob.uploadData(new Uint8Array([11, 22, 33]));
     expect(store().get('mycontainer/test.bin')).toEqual(new Uint8Array([11, 22, 33]));
@@ -214,7 +214,7 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'missing.bin',
     );
@@ -224,7 +224,7 @@ describe('adaptAzureModule', () => {
 
   it('non-404 error does not match isAzureNotFound', () => {
     const error = new Error('boom');
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (error as any).statusCode = 500;
     expect(isAzureNotFound(error)).toBe(false);
   });
@@ -236,7 +236,7 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'missing.bin',
     );
@@ -259,7 +259,7 @@ describe('adaptAzureModule', () => {
                   store.set(`${name}/${blobName}`, _data);
                   return Promise.resolve();
                 },
-                // deno-lint-ignore require-await
+                // eslint-disable-next-line require-await
                 async download() {
                   throw { statusCode: 404 };
                 },
@@ -296,10 +296,11 @@ describe('adaptAzureModule', () => {
       accountName: 'fake',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
-    // deno-lint-ignore no-explicit-any
-    const blob = (
-      (adapterResult as any).getContainerClient('errRecover') as any
-    ).getBlockBlobClient('gone.bin');
+    const blob =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the adapter result is untyped here
+      ((adapterResult as any).getContainerClient('errRecover') as any).getBlockBlobClient(
+        'gone.bin',
+      );
     const downloadResult = await blob.download();
     expect(downloadResult.deleted).toBe(true);
     expect(downloadResult.contentLength).toBe(0);
@@ -312,7 +313,7 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blob = ((facade as any).getContainerClient('mycontainer') as any).getBlockBlobClient(
       'new.bin',
     );
@@ -353,7 +354,7 @@ describe('adaptAzureModule', () => {
     }) as IAzureBlobClient & { canSign: boolean };
     expect(facade.canSign).toBe(true);
     const container = facade.getContainerClient('mycontainer');
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blob = (container as any).getBlockBlobClient('cs-test.bin');
     await blob.uploadData(new Uint8Array([8]));
     expect(await blob.exists()).toBe(true);
@@ -361,7 +362,7 @@ describe('adaptAzureModule', () => {
 
   it('getSignedUrl resolves credentials from connectionString (covers cs-parsing path)', async () => {
     const { mod } = buildFakeAzure();
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const facade: any = adaptAzureModule(mod, {
       containerName: 'mycontainer',
       connectionString:
@@ -400,7 +401,7 @@ describe('adaptAzureModule', () => {
       generateBlobSASQueryParameters: () => ({ toString: () => 'x' }),
     } as unknown as import('../../src/providers/azure-provider.ts').AzureSdkModule;
     const facade = adaptAzureModule(mod, { containerName: 'c', accountName: 'a', accountKey: 'k' });
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blob = ((facade as any).getContainerClient('c') as any).getBlockBlobClient('b');
     await expect(blob.download()).rejects.toThrow('boom');
   });
@@ -434,7 +435,7 @@ describe('adaptAzureModule', () => {
       containerName: 'c',
       connectionString: 'AccountName=a;AccountKey=k;',
     });
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blob = ((facade as any).getContainerClient('c') as any).getBlockBlobClient('b');
     expect(await blob.delete()).toBe(true);
     shouldThrow = true;
@@ -503,7 +504,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -556,7 +557,7 @@ describe('AzureBlobProvider', () => {
             putCalled = true;
             return Promise.resolve();
           },
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -584,7 +585,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: false,
@@ -612,7 +613,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -640,7 +641,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -670,7 +671,7 @@ describe('AzureBlobProvider', () => {
           uploadData: () => {
             return Promise.resolve();
           },
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -700,7 +701,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: false,
@@ -760,7 +761,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -788,7 +789,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             throw { statusCode: 404 };
           },
@@ -812,7 +813,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -840,7 +841,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             throw { statusCode: 404 };
           },
@@ -864,7 +865,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             throw new Error('network error');
           },
@@ -887,7 +888,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -917,7 +918,7 @@ describe('AzureBlobProvider', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: true,
@@ -959,7 +960,7 @@ describe('AzureBlobProvider getStream cancellation safety', () => {
       getContainerClient: () => ({
         getBlockBlobClient: () => ({
           uploadData: async () => {},
-          // deno-lint-ignore require-await
+          // eslint-disable-next-line require-await
           async download() {
             return {
               deleted: false,

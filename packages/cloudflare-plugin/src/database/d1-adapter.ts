@@ -214,7 +214,7 @@ export class D1Adapter implements IDatabaseAdapter {
    * Returns a handle that buffers writes and flushes them as one `batch()`.
    * See the transaction discussion on {@linkcode D1Adapter}.
    */
-  // deno-lint-ignore require-await -- must reject, not throw synchronously
+  // eslint-disable-next-line require-await -- must reject, not throw synchronously
   async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     this.assertReady();
     if (options?.isolation !== undefined) {

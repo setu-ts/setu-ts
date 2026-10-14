@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- release orchestration prints its checked artifacts.
+/* eslint-disable no-console -- release orchestration prints its checked artifacts. */
 /** Packs, checks, looks up and publishes immutable npm tarballs in dependency order. @module */
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES } from './release-packages.ts';
 import { publicationHoldRefusal } from './publication-hold.ts';

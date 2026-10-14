@@ -358,7 +358,7 @@ export function createD1TransactionDataSource(
       return await committed.findById(id);
     },
 
-    // deno-lint-ignore require-await -- must reject, not throw synchronously
+    // eslint-disable-next-line require-await -- must reject, not throw synchronously
     async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
       buffer.assertOpen();
       // A deferred INSERT cannot report a generated key back to a caller that

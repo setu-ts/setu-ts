@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a skipped prerequisite must be visible in CI.
+/* eslint-disable no-console -- a skipped prerequisite must be visible in CI. */
 const redisUrl = Deno.env.get('REDIS_URL');
 if (redisUrl === undefined) {
   console.warn('SKIP: set REDIS_URL to run the two-replica realtime backplane smoke check.');

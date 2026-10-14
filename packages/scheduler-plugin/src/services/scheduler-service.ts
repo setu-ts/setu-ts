@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await
+/* eslint-disable require-await */
 /**
  * Scheduler service implementation.
  *

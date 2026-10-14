@@ -169,7 +169,7 @@ export class FakeMongoCollection implements IMongoCollection {
   readonly #docs: Record<string, unknown>[] = [];
   readonly calls: Array<{ method: string; args: unknown[] }> = [];
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async insertOne(
     document: Record<string, unknown>,
     _options?: MongoOptions,
@@ -192,7 +192,7 @@ export class FakeMongoCollection implements IMongoCollection {
     return { acknowledged: true, insertedId: id };
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async findOne(
     filter: Record<string, unknown>,
     _options?: MongoOptions & {
@@ -255,7 +255,7 @@ export class FakeMongoCollection implements IMongoCollection {
     return { toArray: (): Promise<Record<string, unknown>[]> => Promise.resolve(result) };
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async findOneAndUpdate(
     filter: Record<string, unknown>,
     update: Record<string, unknown>,
@@ -274,7 +274,7 @@ export class FakeMongoCollection implements IMongoCollection {
     return options.returnDocument === 'before' ? before : { ...updated };
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async deleteOne(
     filter: Record<string, unknown>,
     _options?: MongoOptions,
@@ -286,7 +286,7 @@ export class FakeMongoCollection implements IMongoCollection {
     return { deletedCount: 1 };
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async countDocuments(filter: Record<string, unknown>, _options?: MongoOptions): Promise<number> {
     this.calls.push({ method: 'countDocuments', args: [filter, _options] });
     return this.#docs.filter((d) => matchFilter(d, filter)).length;
@@ -356,12 +356,12 @@ export class FakeMongoClient implements IMongoClient {
   #connected = false;
   readonly databases = new Map<string, FakeMongoDatabase>();
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async connect(): Promise<void> {
     this.#connected = true;
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async close(): Promise<void> {
     this.#connected = false;
   }
@@ -395,7 +395,7 @@ export class FakeSession implements IMongoSession {
     this.#throwOnStart = throwOnStart;
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async startTransaction(_options?: Record<string, unknown>): Promise<void> {
     if (this.#throwOnStart) {
       throw new Error('not allowed on a standalone mongod');
@@ -405,17 +405,17 @@ export class FakeSession implements IMongoSession {
     this.#started = true;
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async commitTransaction(): Promise<void> {
     this.calls.push('commitTransaction');
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async abortTransaction(): Promise<void> {
     this.calls.push('abortTransaction');
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
+  // eslint-disable-next-line require-await -- in-memory double, resolves synchronously
   async endSession(): Promise<void> {
     this.calls.push('endSession');
   }

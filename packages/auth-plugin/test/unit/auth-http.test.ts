@@ -149,6 +149,7 @@ describe('createDefaultAuthHttp', () => {
     const original = globalThis.fetch;
     let receiver: unknown = null;
     globalThis.fetch = function (this: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- records the receiver under test
       receiver = this;
       return Promise.resolve(new Response('{}'));
     } as typeof fetch;

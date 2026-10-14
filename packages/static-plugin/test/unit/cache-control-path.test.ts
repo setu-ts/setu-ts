@@ -58,7 +58,7 @@ function harness(urlPrefix: string): Harness {
   };
 
   const handler = createStaticHandler({
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fs: fs as any,
     root: '/root',
     urlPrefix,
@@ -154,7 +154,7 @@ describe('the cacheControl callback receives the full request path (R13)', () =>
       rm: () => Promise.resolve(),
     };
     const handler = createStaticHandler({
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fs: fs as any,
       root: '/root/only.html',
       urlPrefix: '/',

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this CI script emits a human-readable drift report.
+/* eslint-disable no-console -- this CI script emits a human-readable drift report. */
 /**
  * Compares the committed and freshly resolved Deno lockfiles.
  *

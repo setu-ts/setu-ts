@@ -140,7 +140,7 @@ describe('Distributed tracing observations (M98g) — end to end', () => {
       // callback shape even when the body has nothing to await.
       await first.telemetry.withSpan(
         APPROVED_NAME,
-        // deno-lint-ignore require-await
+        // eslint-disable-next-line require-await
         async (span) => {
           span.setAttribute('order.url', ATTRIBUTE_CANARY);
         },

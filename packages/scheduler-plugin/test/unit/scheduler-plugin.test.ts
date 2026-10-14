@@ -60,7 +60,7 @@ describe('SchedulerPlugin', () => {
       },
     };
 
-    // @ts-ignore — ctx shape matches IPluginContext for test purposes
+    // @ts-expect-error — ctx shape matches IPluginContext for test purposes
     await plugin.register(ctx);
 
     // Service registered under 'scheduler'
@@ -98,7 +98,7 @@ describe('SchedulerPlugin', () => {
       },
     };
 
-    // @ts-ignore — ctx shape matches IPluginContext for test purposes
+    // @ts-expect-error — ctx shape matches IPluginContext for test purposes
     await plugin.register(ctx);
 
     // Service registered under 'scheduler'
@@ -133,7 +133,7 @@ describe('SchedulerPlugin', () => {
       },
     };
 
-    // @ts-ignore — ctx shape matches IPluginContext for test purposes
+    // @ts-expect-error — ctx shape matches IPluginContext for test purposes
     await plugin.register(ctx);
 
     // Fire close callback
@@ -169,7 +169,7 @@ describe('SchedulerPlugin', () => {
       },
     };
 
-    // @ts-ignore — ctx shape matches IPluginContext for test purposes
+    // @ts-expect-error — ctx shape matches IPluginContext for test purposes
     await plugin.register(ctx);
 
     // Service registered
@@ -223,7 +223,7 @@ describe('SchedulerPlugin acquire bound (M101a V8-24)', () => {
         },
       },
     };
-    // @ts-ignore — ctx shape matches IPluginContext for test purposes
+    // @ts-expect-error — ctx shape matches IPluginContext for test purposes
     await plugin.register(ctx);
     const scheduler = services.get('scheduler') as IScheduler;
     await scheduler.every('tick', 100, () => {});

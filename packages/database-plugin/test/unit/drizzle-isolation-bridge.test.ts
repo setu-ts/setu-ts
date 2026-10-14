@@ -59,6 +59,7 @@ describe('Drizzle isolation bridge', () => {
   });
 
   it('keeps two-parameter application bridges source-compatible', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`
     const database = createFakeDrizzleInstance();
     const bridge: DrizzleTransactionBridge<typeof database> = (outer, work) =>
       outer.transaction(work);

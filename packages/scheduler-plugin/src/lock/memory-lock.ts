@@ -59,7 +59,7 @@ export class MemoryLock implements IDistributedLock {
    * @param ttlMs - Time-to-live in milliseconds
    * @returns A unique token if acquired, or `null` if held
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async acquire(key: string, ttlMs: number): Promise<string | null> {
     const now = this.#runtime.now();
 
@@ -84,7 +84,7 @@ export class MemoryLock implements IDistributedLock {
    * @param key - The lock key
    * @param token - The token returned by `acquire`
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async release(key: string, token: string): Promise<void> {
     const existing = this.#held.get(key);
     if (existing === undefined || existing.token !== token) {

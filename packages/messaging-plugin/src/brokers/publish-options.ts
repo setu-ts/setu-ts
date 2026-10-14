@@ -42,7 +42,7 @@ export type ValidatedPublishOptions = ParsedPublishOptions;
  */
 // `async` here is load-bearing, not a forgotten await: it is what turns the
 // synchronous throw below into a REJECTED promise.
-// deno-lint-ignore require-await
+// eslint-disable-next-line require-await
 export async function validatePublishOptions(options: unknown): Promise<ValidatedPublishOptions> {
   return parsePublishOptions(options);
 }

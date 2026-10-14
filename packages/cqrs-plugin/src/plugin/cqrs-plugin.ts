@@ -111,7 +111,7 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
     provides: [CAPABILITIES.CQRS, CAPABILITIES.COMMAND_BUS, CAPABILITIES.QUERY_BUS],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     async register(ctx: IPluginContext): Promise<void> {
       // Build buses with the configured behaviors. Instance behaviors are
       // passed to the constructors as today; factory behaviors are resolved at
@@ -145,7 +145,7 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
       ctx.services.register(CAPABILITIES.CQRS, facade);
 
       // Register health indicator.
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       ctx.health.register('cqrs', async () => ({
         status: 'up' as const,
         data: {
@@ -185,7 +185,7 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
       });
 
       // Register shutdown hook.
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       ctx.lifecycle.onClose(async () => {
         commandBus.clear();
         queryBus.clear();

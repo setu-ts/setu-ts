@@ -34,7 +34,7 @@ describe('diagnostics activation', () => {
         diagnostics: { labels: { plugins: ['x'.repeat(500)] } },
       }),
     ).toThrow(RangeError);
-    let message = '';
+    let message: string;
     try {
       createApplication({
         plugins: [runtimePlugin()],

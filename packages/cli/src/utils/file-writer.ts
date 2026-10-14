@@ -593,6 +593,7 @@ export async function withFileTransaction<T>(
       throw new AggregateError(
         [cause, ...failures],
         `${failureMessage(cause)}; rollback incomplete: ${failures.map(failureMessage).join('; ')}`,
+        // eslint-disable-next-line preserve-caught-error -- the interruption, unwrapped, is the cause
         { cause: originalCause },
       );
     }

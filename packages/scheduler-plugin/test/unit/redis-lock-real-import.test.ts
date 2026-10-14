@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 /**
  * Guarded real-import test for RedisLock.
  *

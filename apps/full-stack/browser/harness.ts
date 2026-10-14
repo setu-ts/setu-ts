@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- gate diagnostics belong on the command line.
+/* eslint-disable no-console -- gate diagnostics belong on the command line. */
 /** Dedicated browser prerequisite gate. Ordinary tests never launch Chromium. */
 
 /** Pin shared with CI's browser installation step. */

@@ -99,16 +99,14 @@ describe('barrel exports', () => {
     };
     void _lc;
     const _runtime: SsrRuntime = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       handler: async () => new Response('ok'),
       createLoadContext: () => ({ get: <T>() => undefined as T, set: () => {} }),
     };
     void _runtime;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const _handler: SsrRequestHandler = async (_r: Request, _c: unknown) => new Response('ok');
     void _handler;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _svc: import('@setu-ts/common').ISsrService = {} as import('@setu-ts/common').ISsrService;
     void _svc;
 

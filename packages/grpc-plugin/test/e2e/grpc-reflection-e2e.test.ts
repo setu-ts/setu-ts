@@ -224,7 +224,7 @@ describe('gRPC health bridged to a registered health capability', () => {
     };
 
     app = createApplication({
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       plugins: [RuntimePlugin(), healthPlugin as any, GrpcPlugin()],
     });
     await app.start({ port: 0 });

@@ -173,8 +173,6 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     await adapter.connect();
     const source = adapter.createDataSource('User');
 
-    let counted = 0;
-
     await source.findById('u1');
     await source.findAll(
       query({
@@ -185,7 +183,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
         select: ['name'],
       }),
     );
-    counted = await source.count({ role: 'admin' });
+    const counted = await source.count({ role: 'admin' });
     await expect(source.create({ id: 'u1', name: 'Ada', role: 'admin' })).rejects.toThrow(
       'returned no row',
     );

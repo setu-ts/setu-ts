@@ -245,9 +245,9 @@ describe('react-router integration (real socket)', () => {
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
       assetsDir: './build/client',
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       loadRequestHandler: async (_path: string, _mode: string) => ({
-        // deno-lint-ignore require-await
+        // eslint-disable-next-line require-await
         handler: async () => new Response('ok'),
         createLoadContext: createFakeLoadContextFactory(),
       }),
@@ -267,9 +267,9 @@ describe('react-router integration (real socket)', () => {
   it('SSR handler invoked via route fires SsrService.render', async () => {
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       loadRequestHandler: async (_path: string, _mode: string) => ({
-        // deno-lint-ignore require-await
+        // eslint-disable-next-line require-await
         handler: async () => new Response('<html>ok</html>'),
         createLoadContext: createFakeLoadContextFactory(),
       }),

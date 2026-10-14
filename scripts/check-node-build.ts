@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate script reports to the console.
+/* eslint-disable no-console -- a gate script reports to the console. */
 /**
  * The Node pack-and-boot gate (M111a plan §3.10).
  *

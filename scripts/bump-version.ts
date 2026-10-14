@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a release tool prints what it changed.
+/* eslint-disable no-console -- a release tool prints what it changed. */
 /**
  * @module
  *

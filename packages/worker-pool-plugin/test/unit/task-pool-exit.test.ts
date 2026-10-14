@@ -48,7 +48,7 @@ async function captureExit(promise: Promise<unknown>): Promise<WorkerExitError> 
     if (raised instanceof WorkerExitError) {
       return raised;
     }
-    throw new Error(`expected WorkerExitError, got ${String(raised)}`);
+    throw new Error(`expected WorkerExitError, got ${String(raised)}`, { cause: raised });
   }
   throw new Error('expected the task to reject, but it resolved');
 }

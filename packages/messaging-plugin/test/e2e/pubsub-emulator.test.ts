@@ -62,7 +62,7 @@ async function until(predicate: () => boolean, budgetMs = 15000): Promise<void> 
 }
 
 describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, () => {
-  // deno-lint-ignore no-explicit-any -- the SDK's PubSub type is not imported here.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the SDK's PubSub type is not imported here.
   let admin: any;
 
   beforeAll(async () => {

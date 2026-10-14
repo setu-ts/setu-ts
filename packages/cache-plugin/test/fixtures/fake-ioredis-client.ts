@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixture mirrors async ioredis signatures
+/* eslint-disable require-await -- test fixture mirrors async ioredis signatures */
 /**
  * Fake ioredis client for testing RedisStore without a real Redis server.
  *

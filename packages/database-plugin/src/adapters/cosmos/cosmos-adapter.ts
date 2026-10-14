@@ -267,7 +267,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
    *
    * @inheritdoc
    */
-  // deno-lint-ignore require-await -- the refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the refusal must REJECT, not throw synchronously
   async rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     throw new UnsupportedRawQueryError(
       'cosmos',

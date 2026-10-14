@@ -741,7 +741,7 @@ describe('createSseHandler — a consumer that goes away', () => {
               if (produced > 1) await gate.promise;
               return { done: false, value: { data: { tick: produced } } };
             },
-            // deno-lint-ignore require-await
+            // eslint-disable-next-line require-await
             async return() {
               released = true;
               return { done: true as const, value: undefined };

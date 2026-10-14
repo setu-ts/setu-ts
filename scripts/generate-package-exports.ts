@@ -9,7 +9,7 @@
  * not follow.
  */
 
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 import {
   collectPackageExports,

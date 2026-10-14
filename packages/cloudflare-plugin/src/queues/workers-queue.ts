@@ -198,7 +198,7 @@ export class WorkersQueue implements IQueue {
    * @returns Never resolves
    * @throws {CloudflareUnsupportedError} Always
    */
-  // deno-lint-ignore require-await -- IQueue.addRecurring is async by contract
+  // eslint-disable-next-line require-await -- IQueue.addRecurring is async by contract
   async addRecurring<T>(name: string, _data: T, options: RecurringOptions): Promise<void> {
     throw new CloudflareUnsupportedError(
       `Cloudflare Queues has no recurring message, so addRecurring('${name}', …) with cron ` +

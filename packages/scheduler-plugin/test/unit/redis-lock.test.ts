@@ -100,7 +100,7 @@ describe('RedisLock', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client: badClient as any,
     });
     try {
@@ -154,7 +154,7 @@ describe('validateClient', () => {
   });
 
   it('returns false for null', () => {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(validateClient(null as any)).toBe(false);
   });
 
@@ -179,7 +179,7 @@ describe('validateClient', () => {
   });
 
   it('returns false for undefined', () => {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(validateClient(undefined as any)).toBe(false);
   });
 
@@ -280,7 +280,7 @@ describe('RedisLock N2 - error message', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       client: badClient as any,
     });
     try {

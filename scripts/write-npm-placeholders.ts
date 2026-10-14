@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- the filesystem seam reports the generated placeholder set.
+/* eslint-disable no-console -- the filesystem seam reports the generated placeholder set. */
 /** Writes the pure generator output, without publishing. @module */
 import { placeholderFiles } from './npm-placeholders.ts';
 const root = '.tmp/npm-placeholders';

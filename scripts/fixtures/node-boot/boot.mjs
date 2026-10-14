@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a boot probe reports its verdict on stdout/stderr.
+/* eslint-disable no-console -- a boot probe reports its verdict on stdout/stderr. */
 // Runs on Node 24, Node 22 and Bun against the PACKED tarballs (M111a §3.10).
 // Prints exactly one line starting `BOOT-OK ` on success; anything else is a
 // failure, which the gate reports with this process's output.

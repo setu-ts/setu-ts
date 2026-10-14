@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any, require-await
+/* eslint-disable @typescript-eslint/no-explicit-any, require-await */
 import { describe, expect, it } from 'vitest';
 import { BunHttpAdapter, BunHttpServerHandle } from '../../src/adapters/bun/bun-http-adapter.ts';
 import type { BunServeHost } from '../../src/adapters/bun/bun-http-adapter.ts';

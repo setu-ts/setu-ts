@@ -133,7 +133,7 @@ describe('ValidationPlugin E2E — with real application', () => {
       ],
       handler: () => {
         handlerRan = true;
-        // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return { __handlerResult: true } as any;
       },
     });
@@ -175,7 +175,7 @@ describe('ValidationPlugin E2E — with real application', () => {
         }),
       ],
       handler: () => {
-        // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return { __handlerResult: true } as any;
       },
     });

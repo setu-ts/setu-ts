@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 /**
  * Integration tests for Node HTTP adapter — REAL round-trip with @hono/node-server.
@@ -61,7 +61,7 @@ describe('node-http-adapter integration', () => {
 
     const adapter = new NodeHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({

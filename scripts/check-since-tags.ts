@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate must print actionable findings.
+/* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * The `@since` gate: every tag is checked against the version that SHIPPED the
  * symbol it sits on — from JSR through 0.8.x, and npm tarball sources thereafter.

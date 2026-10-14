@@ -124,7 +124,7 @@ export default {
     const { handler } = await loadRequestHandler(modulePath, 'production', {
       rrImportHook: () =>
         Promise.resolve({
-          // deno-lint-ignore no-explicit-any
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           createRequestHandler: ((build: any, _mode: string) => {
             capturedBuild = build;
             return () => Promise.resolve(new Response('ok'));

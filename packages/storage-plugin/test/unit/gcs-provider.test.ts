@@ -171,7 +171,7 @@ describe('adaptGcsModule', () => {
   it('getMetadata throws when absent', async () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fileHandle = (facade.bucket() as any).file('nope');
     await expect(fileHandle.getMetadata()).rejects.toThrow('ENOENT');
   });
@@ -179,7 +179,7 @@ describe('adaptGcsModule', () => {
   it('delete resolves when present', async () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fileHandle = (facade.bucket() as any).file('to-delete');
     result.store.set('to-delete', new Uint8Array([1]));
     await fileHandle.delete();
@@ -189,7 +189,7 @@ describe('adaptGcsModule', () => {
   it('getSignedUrl returns signed URL', async () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fileHandle = (facade.bucket() as any).file('sig-url.bin');
     const [url] = await fileHandle.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
     expect(url).toContain('signed.url');
@@ -198,7 +198,7 @@ describe('adaptGcsModule', () => {
   it('B4: GcsProvider.getSignedUrl uses epoch-seconds for expires (not ms)', async () => {
     let capturedExpires: number | undefined;
     // Inject a pre-adapted facade directly — avoids adaptGcsModule's callback wrapping.
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const facade: any = {
       bucket() {
         return {

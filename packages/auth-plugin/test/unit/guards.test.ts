@@ -31,6 +31,7 @@ import { RbacService } from '../../src/services/rbac-service.ts';
 /**
  * Create a fake response that records the status and body.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`
 function createFakeResponse(): {
   response: IResponse;
   status: number;

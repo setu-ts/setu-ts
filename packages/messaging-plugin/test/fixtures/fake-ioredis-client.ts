@@ -75,7 +75,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
       activeAt: active ? this.#now() : (previous?.activeAt ?? -1),
     });
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async xadd(
     name: string,
     id: string,
@@ -97,7 +97,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     this.#streams.set(name, stream);
     return entryId;
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async xgroup(
     command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
     ...args: string[]
@@ -131,7 +131,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     if (command === 'DELETE') this.#groups.get(topic)?.delete(group);
     return 'OK';
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async xreadgroup(...args: string[]): Promise<unknown[][] | null> {
     this.#record('xreadgroup', args);
     if (this.#options.rejectXreadgroup) throw new Error('XREADGROUP failed');
@@ -155,7 +155,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     }
     return entries.length ? [[topic, entries]] : null;
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async xpending(...args: string[]): Promise<Array<[string, string, number, number]>> {
     this.#record('xpending', args);
     const [topic, group] = args;
@@ -181,7 +181,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
       .slice(0, Number(count))
       .map((p) => [p.id, p.owner, this.#now() - p.deliveredAt, p.deliveries]);
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async xclaim(...args: string[]): Promise<Array<[string, string[]] | null>> {
     this.#record('xclaim', args);
     const [topic, group, owner, minIdle, ...ids] = args;
@@ -209,7 +209,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     }
     return entries;
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async xinfo(...args: string[]): Promise<unknown[][]> {
     this.#record('xinfo', args);
     const [, topic, group] = args;
@@ -225,7 +225,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
       times.activeAt < 0 ? -1 : this.#now() - times.activeAt,
     ]);
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async call(command: string, ...args: string[]): Promise<unknown> {
     this.#record('call', [command, ...args]);
     if (command !== 'EVAL') throw new Error('Unsupported command');
@@ -244,19 +244,19 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     }
     return removed;
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async xack(topic: string, group: string, ...ids: string[]): Promise<number> {
     this.#record('xack', [topic, group, ...ids]);
     let count = 0;
     for (const id of ids) if (this.#group(topic, group).pending.delete(id)) count++;
     return count;
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async quit(): Promise<void> {
     this.#record('quit', []);
     this.#quitCalled = true;
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async connect(): Promise<void> {
     this.#record('connect', []);
     this.#connectCalled = true;

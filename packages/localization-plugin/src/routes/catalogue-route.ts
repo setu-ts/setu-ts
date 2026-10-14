@@ -90,6 +90,7 @@ export function validateCacheControl(cacheControl: unknown): string {
       `localization-plugin: exposeCatalogues.cacheControl is not a valid header value (${
         (error as Error).message
       }).`,
+      { cause: error },
     );
   }
 }

@@ -108,7 +108,7 @@ export class FileAuditStorage implements IAuditStorage {
 
   /** Reads and filters lines via {@linkcode matchAuditQuery}. */
   async query(criteria?: AuditQuery): Promise<StoredAuditEntry[]> {
-    let content = '';
+    let content: string;
     try {
       const buf = await this.fs.readFile(this.path);
       content = new TextDecoder().decode(buf);

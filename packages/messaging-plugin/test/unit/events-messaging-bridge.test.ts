@@ -18,7 +18,7 @@ class FakeEventBus {
     const handlers = this.#subscribers.get(eventType)!;
     handlers.push(handler as (event: unknown) => Promise<void>);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     return async () => {
       const idx = handlers.indexOf(handler as (event: unknown) => Promise<void>);
       if (idx >= 0) {
@@ -43,7 +43,7 @@ class FakeMessageBroker {
   publishedMessages: Array<{ topic: string; message: unknown }> = [];
   publishCalls: Array<{ topic: string; message: unknown }> = [];
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async publish<T>(topic: string, message: T): Promise<void> {
     this.publishCalls.push({ topic, message });
     this.publishedMessages.push({ topic, message });
@@ -54,7 +54,7 @@ class FakeMessageBroker {
   isReady(): boolean {
     return true;
   }
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async subscribe<T>(
     _topic: string,
     _handler: (msg: T, meta: unknown) => Promise<void>,

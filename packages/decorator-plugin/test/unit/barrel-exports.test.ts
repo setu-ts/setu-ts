@@ -185,6 +185,7 @@ describe('@setu-ts/decorator-plugin barrel — authorization policies (M110a)', 
     expect(typeof barrel.Ability).toBe('function');
     expect(typeof barrel.RequirePolicy).toBe('function');
     const options: barrel.AbilityOptions = { anonymous: true };
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`
     class Sample {
       go(): boolean {
         return true;

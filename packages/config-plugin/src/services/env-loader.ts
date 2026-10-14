@@ -212,6 +212,8 @@ async function readFile(fileSystem: IFileSystem, path: string): Promise<string> 
     return new TextDecoder().decode(await fileSystem.readFile(path));
   } catch (error) {
     const detail = error instanceof Error ? `: ${error.message}` : '';
-    throw new Error(`ConfigPlugin: unable to read env file '${path}'${detail}.`);
+    throw new Error(`ConfigPlugin: unable to read env file '${path}'${detail}.`, {
+      cause: error,
+    });
   }
 }

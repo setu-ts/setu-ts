@@ -42,7 +42,7 @@ function escapeLabelValue(value: string): string {
  */
 function replaceUnescapableControls(text: string): string {
   return text.replace(
-    // deno-lint-ignore no-control-regex
+    // eslint-disable-next-line no-control-regex
     /[\u0000-\u001f\u007f\ufffd]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
     (char) => {
       if (char === '\ufffd') return '\ufffd\ufffd';

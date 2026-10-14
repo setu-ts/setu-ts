@@ -30,7 +30,7 @@ function createTestLoggerPlugin(): {
       provides: [CAPABILITIES.LOGGER],
       priority: 90,
       register(ctx: IPluginContext): void {
-        // deno-lint-ignore no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const logger: any = {
           level: 'error',
           debug: () => {},

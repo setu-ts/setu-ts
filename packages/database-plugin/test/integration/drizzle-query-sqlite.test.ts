@@ -46,8 +46,10 @@ type ForgedDatabase<TDatabase extends object> = Omit<TDatabase, 'transaction'> &
 
 declare const synchronousDatabase: BetterSQLite3Database;
 
+/* eslint-disable @typescript-eslint/no-unused-expressions -- compile-only type assertions */
 /** Compile-only assertions for the two public accessors; this function is never invoked. */
 function assertDrizzleScopeTypes(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`
   drizzleDb: ReturnType<typeof drizzle>,
   database: DrizzleDatabase<ReturnType<typeof drizzle>>,
   service: IDatabaseService,
@@ -70,6 +72,7 @@ function assertDrizzleScopeTypes(
     Promise.resolve(configured.transaction(work)),
   );
 }
+/* eslint-enable @typescript-eslint/no-unused-expressions */
 void assertDrizzleScopeTypes;
 
 interface ArrayReturningStatement {

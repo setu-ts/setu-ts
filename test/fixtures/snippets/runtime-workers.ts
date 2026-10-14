@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- documentation snippet fixtures mirror guide examples
+/* eslint-disable require-await -- documentation snippet fixtures mirror guide examples */
 // Runtime/Workers composition from docs/runtime-deployment.md - must compile.
 import { createApplication } from '@setu-ts/kernel';
 import { CloudflareWorkersHttpAdapter } from '@setu-ts/runtime';
@@ -24,7 +24,6 @@ app.router.get('/', async (ctx) => {
   return ctx.response.json({ message: 'Hello from Workers!' });
 });
 
-// deno-lint-ignore-file no-unused-vars
 export default {
   async fetch(request: Request, _env: unknown, _ctx: unknown) {
     return app.fetch(request);

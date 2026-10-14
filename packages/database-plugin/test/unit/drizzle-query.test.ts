@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- structural service doubles implement async contracts
+/* eslint-disable require-await -- structural service doubles implement async contracts */
 import { describe, expect, it } from 'vitest';
 import type { EntityKey, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type {

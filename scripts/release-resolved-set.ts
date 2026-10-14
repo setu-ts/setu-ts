@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this release script reports its output path.
+/* eslint-disable no-console -- this release script reports its output path. */
 /**
  * Captures the complete lockfile resolved set attached to a GitHub Release.
  *

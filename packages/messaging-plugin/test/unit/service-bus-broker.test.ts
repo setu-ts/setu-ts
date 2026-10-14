@@ -1319,7 +1319,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     let releaseAbandon: (() => void) | null = null;
     let processMessageFn: ((msg: unknown) => Promise<void>) | null = null;
 
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = {} as any;
     sdk.sends = [];
     sdk.receivers = [];

@@ -247,7 +247,7 @@ describe('SchedulerService', () => {
     // Simulate a lock that always fails to acquire.
     const runtime = new FakeRuntime();
     const lock = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       acquire: async () => null,
       release: async () => {},
     };

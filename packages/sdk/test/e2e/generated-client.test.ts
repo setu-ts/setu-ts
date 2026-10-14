@@ -228,10 +228,12 @@ describe('typed error responses (X11-7)', () => {
         // a `Record<string, unknown>` — would satisfy every runtime assertion
         // in this file while typing nothing, and an unused `@ts-expect-error`
         // is itself a compile error, so this cannot rot into a no-op.
+        /* eslint-disable @typescript-eslint/no-unused-expressions -- the access is the type assertion */
         // @ts-expect-error - the 404 body carries no `conflictingId`
         e.body.conflictingId;
+        /* eslint-enable @typescript-eslint/no-unused-expressions */
       } else {
-        throw new Error(`unexpected status ${e.status}`);
+        throw new Error(`unexpected status ${e.status}`, { cause: e });
       }
     }
   });
@@ -252,7 +254,8 @@ describe('typed error responses (X11-7)', () => {
       await createApi(client).getUserById('1');
       throw new Error('expected the 409 to throw');
     } catch (e) {
-      if (!isGetUserByIdError(e) || e.status !== 409) throw new Error('expected a 409 arm');
+      if (!isGetUserByIdError(e) || e.status !== 409)
+        throw new Error('expected a 409 arm', { cause: e });
       const id: string = e.body.conflictingId;
       expect(id).toBe('u2');
     }

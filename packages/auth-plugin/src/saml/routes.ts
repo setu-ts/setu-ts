@@ -350,7 +350,7 @@ export function describeError(error: unknown): string {
   // issuer), so control characters are removed and the length capped before
   // the text reaches a log line.
   const text = error instanceof Error ? error.message : 'non-error thrown';
-  // deno-lint-ignore no-control-regex
+  // eslint-disable-next-line no-control-regex
   return text.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200);
 }
 

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
+/* eslint-disable no-console -- guarded skip tests log SKIP messages. */
 /**
  * Real-import test for the optional OTel context manager (§12.2).
  *

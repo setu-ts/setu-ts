@@ -22,7 +22,7 @@
  * @module
  */
 
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 
 /** The ten packages measured clean in the M38 plan baseline. */

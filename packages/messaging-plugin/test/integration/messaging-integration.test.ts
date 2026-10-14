@@ -190,7 +190,7 @@ describe('EventsMessagingBridge integration', () => {
 
 describe('MessagingPlugin arms integration', () => {
   it('registers pubsub broker when broker is pubsub', async () => {
-    let connected = false;
+    let connected: boolean;
     const fakeTransport: import('../../src/brokers/pubsub-broker.ts').IPubSubTransport = {
       publish: () => Promise.resolve(),
       open: () =>

@@ -1,8 +1,8 @@
 // Reproducible package-test conversion. Usage: node scripts/codemods/std-to-vitest.ts [--write|--check]
-// deno-lint-ignore-file no-console -- repository command-line tooling
+/* eslint-disable no-console -- repository command-line tooling */
 // Rewrites only what maps 1:1; everything else is REPORTED, never guessed.
 import ts from 'typescript';
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { writeFileSync, readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { expect as vitestExpect } from 'vitest';

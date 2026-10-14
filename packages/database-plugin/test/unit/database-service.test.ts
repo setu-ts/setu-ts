@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- interface methods must be async
+/* eslint-disable require-await -- interface methods must be async */
 /**
  * Unit tests for DatabaseService.
  *

@@ -88,7 +88,7 @@ describe('ssr-service', () => {
       status: 200,
       headers: { 'Content-Type': 'text/html' },
     });
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const fakeHandler: SsrRequestHandler = async () => fakeResponse;
     const service = new SsrService(fakeHandler, createFakeLoadContextFactory(), undefined);
     const ctx = buildMockCtx();
@@ -101,7 +101,7 @@ describe('ssr-service', () => {
   it('render passes a provider instance carrying the plugin defaults', async () => {
     let capturedContext: FakeRouterContextProvider | null = null;
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const fakeHandler: SsrRequestHandler = async (_req: Request, loadContext: unknown) => {
       capturedContext = loadContext as FakeRouterContextProvider;
       return new Response('ok');
@@ -122,7 +122,7 @@ describe('ssr-service', () => {
     const tenantContext = { defaultValue: null } as { defaultValue: string | null };
     let capturedContext: FakeRouterContextProvider | null = null;
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const fakeHandler: SsrRequestHandler = async (_req: Request, loadContext: unknown) => {
       capturedContext = loadContext as FakeRouterContextProvider;
       return new Response('ok');
@@ -142,7 +142,7 @@ describe('ssr-service', () => {
   it('service is the value registered under CAPABILITIES.SSR (structural check)', () => {
     // Verify the interface matches what CAPABILITIES.SSR would resolve to.
     const service = new SsrService(
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       async () => new Response('ok'),
       createFakeLoadContextFactory(),
       undefined,

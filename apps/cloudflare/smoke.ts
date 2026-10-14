@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- an unavailable external prerequisite must be visible in CI.
+/* eslint-disable no-console -- an unavailable external prerequisite must be visible in CI. */
 function unusedPort(): number {
   const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
   const address = listener.addr;

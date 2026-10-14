@@ -154,7 +154,7 @@ export async function runWithRetry<T>(
         throw error;
       }
 
-      let isRetryable = false;
+      let isRetryable: boolean;
       let retryAfter: number | null = null;
 
       if (error instanceof HttpClientError) {

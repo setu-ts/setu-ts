@@ -113,7 +113,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
     provides: [CAPABILITIES.EVENTS],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     async register(ctx: IPluginContext): Promise<void> {
       // Resolve optional logger.
       const logger = ctx.services.has('logger') ? ctx.services.get<ILogger>('logger') : undefined;
@@ -197,7 +197,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       });
 
       // Register health indicator.
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       ctx.health.register('events', async () => ({
         status: 'up' as const,
         data: { handlers: bus.subscriptionCount },
@@ -207,7 +207,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // observation is discarded, then state is cleared — exactly the plan's
       // "close detaches first, then clears" order. Detaching the observer
       // makes the bus's hot path a single failing WeakMap probe again.
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       ctx.lifecycle.onClose(async () => {
         attachEventObserver(bus, null);
         collector?.close();

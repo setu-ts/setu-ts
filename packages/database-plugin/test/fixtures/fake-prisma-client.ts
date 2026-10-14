@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- async methods must match real Prisma client interface
+/* eslint-disable require-await -- async methods must match real Prisma client interface */
 /**
  * Fake Prisma client for unit testing the PrismaAdapter.
  *

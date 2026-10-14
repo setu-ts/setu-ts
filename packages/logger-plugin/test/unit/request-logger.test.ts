@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await
+/* eslint-disable require-await */
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type {

@@ -27,6 +27,7 @@ import {
 } from '../../src/instrumentation/queue-instrumentation.ts';
 
 /** The instrumentation export name each loader's module must expose. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`
 const EXPORT_BY_KIND = {
   http: 'HttpInstrumentation',
   fetch: 'UndiciInstrumentation',

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- repository test runner
+/* eslint-disable no-console -- repository test runner */
 import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
 import { belowThreshold, parseCoverageTable, validateTargetSet } from './script-coverage.ts';
 

@@ -317,7 +317,6 @@ describe('createEagerIterableStream', () => {
 
   it('cancel releases the iterator and destroys the source; later chunks are dropped, not enqueued', async () => {
     let destroys = 0;
-    let afterCancelYields = 0;
     async function* source(): AsyncGenerator<Uint8Array> {
       yield new Uint8Array([1]);
       // Reaching here means the consumer cancelled mid-download; the chunks
@@ -325,7 +324,6 @@ describe('createEagerIterableStream', () => {
       // TypeError). Now they must simply never be enqueued.
       for (let i = 0; i < 3; i++) {
         await tick();
-        afterCancelYields++;
         yield new Uint8Array([i]);
       }
     }

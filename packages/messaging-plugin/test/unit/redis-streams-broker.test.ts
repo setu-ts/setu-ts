@@ -347,7 +347,7 @@ describe('RedisStreamsBroker', () => {
     await broker.connect();
 
     // Handler that always fails
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     await broker.subscribe('test.stream', async () => {
       throw new Error('Handler always fails');
     });
@@ -599,13 +599,12 @@ describe('RedisStreamsBroker', () => {
     const fakeClient = new FakeRedisStreamsClient();
     // Override xgroup to throw a different error
     const originalXgroup = fakeClient.xgroup.bind(fakeClient);
-    // deno-lint-ignore require-await
-    fakeClient.xgroup = async (
+    fakeClient.xgroup = (
       command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
       ...args: string[]
     ) => {
       if (command === 'CREATE') {
-        throw new Error('Some other error');
+        return Promise.reject(new Error('Some other error'));
       }
       return originalXgroup(command, ...args);
     };
@@ -640,7 +639,7 @@ describe('RedisStreamsBroker', () => {
 
     // Subscribe - this starts the poll loop
     let pollCount = 0;
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     await broker.subscribe('test.stream', async () => {
       pollCount++;
     });

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- interface methods must be async (IPlugin)
+/* eslint-disable require-await -- interface methods must be async (IPlugin) */
 /**
  * Integration test for DatabasePlugin registration flow.
  *

@@ -40,7 +40,7 @@ describe('OTel real-import integration', () => {
     // In OTel SDK 2.x, span attributes are a plain object, NOT a Map — the
     // old `attrs.get(...)` form threw a TypeError that the swallowed catch
     // hid (the test passed without ever asserting). Access as a record.
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const attrs = finished[0]!.attributes as Record<string, any>;
     expect(attrs['http.method']).toBe('GET');
     expect(attrs['http.status_code']).toBe(200);
@@ -115,7 +115,7 @@ describe('OTel real-import integration', () => {
 
     expect(finished).toHaveLength(1);
     // In SDK 2.x, attributes are a plain object, not a Map.
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const spanAttrs = finished[0]!.attributes as Record<string, any>;
     expect(spanAttrs['http.method']).toBe('GET');
     expect(spanAttrs['http.status_code']).toBe(200);
@@ -131,7 +131,7 @@ describe('OTel real-import integration', () => {
     const exportedSpanContext = exportedSpan.spanContext();
     expect(exportedSpanContext.traceId).toBe(incomingTraceId);
 
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parentCtx = (exportedSpan as any).parentSpanContext as
       | {
           traceId: string;

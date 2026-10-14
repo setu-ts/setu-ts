@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages, and
+/* eslint-disable no-console -- guarded skip tests log SKIP messages, and */
 // the ConsoleLogger sink under test IS `console.log`.
 /**
  * X34-2 end to end — the join itself, through a real kernel application with

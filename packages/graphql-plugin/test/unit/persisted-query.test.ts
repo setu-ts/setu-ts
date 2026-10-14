@@ -11,7 +11,7 @@ describe('extractPersistedQuery', () => {
   });
 
   it('returns null when extensions is not an object', () => {
-    // @ts-ignore -- intentional: test non-object input
+    // @ts-expect-error -- intentional: test non-object input
     expect(extractPersistedQuery(null)).toBeNull();
   });
 

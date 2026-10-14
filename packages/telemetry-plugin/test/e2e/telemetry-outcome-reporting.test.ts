@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- captures the real ConsoleLogger's console.log output
+/* eslint-disable no-console -- captures the real ConsoleLogger's console.log output */
 /**
  * E2E — instrumentation outcome reporting in the STANDARD plugin configuration.
  *

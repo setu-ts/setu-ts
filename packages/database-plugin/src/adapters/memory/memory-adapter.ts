@@ -326,7 +326,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * every third-party implementor reading this as the reference, the one
    * pattern that makes a liveness probe lie.
    */
-  // deno-lint-ignore require-await -- reads synchronous lifecycle state
+  // eslint-disable-next-line require-await -- reads synchronous lifecycle state
   async isHealthy(): Promise<boolean> {
     return this.isReady();
   }
@@ -708,7 +708,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       create: (data) => this.insertEntity(entity, data),
       update: (id, data) => this.updateEntity(entity, id, data),
       delete: (id) => this.deleteEntity(entity, id),
-      // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
+      // eslint-disable-next-line require-await -- atomic store mutation; errors must reject.
       updateWhere: async (id, where, data) => {
         const checked = checkWritePrecondition(where, data);
         if (!checked.ok) {
@@ -725,7 +725,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
         store.records[index] = { ...store.records[index], ...data };
         return { ...store.records[index] };
       },
-      // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
+      // eslint-disable-next-line require-await -- atomic store mutation; errors must reject.
       deleteWhere: async (id, where) => {
         const checked = checkWritePrecondition(where);
         if (!checked.ok) {

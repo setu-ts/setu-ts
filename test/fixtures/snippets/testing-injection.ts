@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- documentation snippet fixtures mirror guide examples
+/* eslint-disable require-await -- documentation snippet fixtures mirror guide examples */
 // Testing injection from docs/getting-started.md - must compile against the workspace.
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';

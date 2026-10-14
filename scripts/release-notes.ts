@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- this CI script prints the notes it builds.
+/* eslint-disable no-console -- this CI script prints the notes it builds. */
 /**
  * Builds the body of a GitHub Release object from `CHANGELOG.md`.
  *

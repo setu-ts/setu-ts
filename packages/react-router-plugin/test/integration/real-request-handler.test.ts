@@ -31,7 +31,7 @@ try {
  * Minimal-but-real `ServerBuild`: enough shape for `createRequestHandler` to
  * route a GET `/` to a single root route whose loader reads the context.
  */
-// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildServerBuild(onLoaderContext: (context: any) => void): unknown {
   return {
     ssr: true,
@@ -57,7 +57,7 @@ function buildServerBuild(onLoaderContext: (context: any) => void): unknown {
         path: '',
         module: {
           default: () => null,
-          // deno-lint-ignore no-explicit-any
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           loader: ({ context }: any) => {
             onLoaderContext(context);
             return { ok: true };
@@ -155,7 +155,7 @@ describe('real createRequestHandler — loadContext contract', { skip: rrModule 
     const rr = rrModule!;
     const registry = { get: () => undefined } as unknown as IServiceRegistry;
 
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let loaderContext: any = null;
     const createRequestHandler = rr.createRequestHandler as (
       build: unknown,

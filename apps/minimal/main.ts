@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- interactive example entry point.
+/* eslint-disable no-console -- interactive example entry point. */
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { createMinimalApp } from './src/app.ts';
 

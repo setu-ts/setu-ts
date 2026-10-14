@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- captures console.error/warn to prove ioredis wrote nothing there.
+/* eslint-disable no-console -- captures console.error/warn to prove ioredis wrote nothing there. */
 import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Shared real-Redis harness for the connection-error routing suites.

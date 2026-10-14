@@ -36,7 +36,7 @@ interface PollTimer {
  * @since 0.1.0
  */
 export class DatabaseProvider implements FlagProvider {
-  readonly type: 'database' = 'database';
+  readonly type = 'database' as const;
 
   private readonly _store: IFlagStore;
   private readonly _runtime: IRuntimeServices;

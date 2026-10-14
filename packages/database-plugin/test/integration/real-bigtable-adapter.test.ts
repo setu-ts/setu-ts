@@ -72,10 +72,10 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
  *
  * @returns The native Bigtable client
  */
-// deno-lint-ignore no-explicit-any -- the native SDK is untyped at this boundary
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the native SDK is untyped at this boundary
 async function rawClient(): Promise<any> {
   const { Bigtable } = await import('@google-cloud/bigtable');
-  // deno-lint-ignore no-explicit-any -- ditto
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ditto
   return new (Bigtable as any)({ projectId, apiEndpoint: endpoint });
 }
 

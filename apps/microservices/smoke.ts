@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a skipped prerequisite must be visible in CI.
+/* eslint-disable no-console -- a skipped prerequisite must be visible in CI. */
 import {
   brokeredGreeting,
   callServiceB,

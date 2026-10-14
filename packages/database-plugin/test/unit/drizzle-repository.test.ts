@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixtures must be async to satisfy IRepository
+/* eslint-disable require-await -- test fixtures must be async to satisfy IRepository */
 /**
  * Unit tests for DrizzleRepository and createDrizzleDataSource.
  *

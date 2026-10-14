@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await
+/* eslint-disable require-await */
 /**
  * Integration test for the telemetry plugin with a fake TracerHost.
  *
