@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Errors keep their cause (M111e1).** Four errors that were thrown from a `catch` without the
+  original error now carry it as `error.cause`: the `ConfigPlugin` env-file read failure, both
+  `react-router-plugin` server-build load failures (the build module and `react-router`), and the
+  `localization-plugin` refusal of an invalid `exposeCatalogues.cacheControl`. Messages are
+  unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
+
 ## [0.9.0] — 2026-10-12
 
 ### Added

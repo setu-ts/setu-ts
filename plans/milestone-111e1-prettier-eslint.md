@@ -98,7 +98,8 @@ the rules the current gates enforce carried across, while every other gate keeps
     empty enums (deno's `no-empty-enum`). Deprecated import assertions are NOT carried here: an
     `assert` import and a `with` import parse to the identical ESTree node, so no selector can tell
     them apart, and TypeScript 6 refuses `assert` with TS2880 in both `deno check` and `tsc -b`
-    (measured), so the type-check gate already owns that rule.
+    (measured), so the type-check gate already owns that rule. Likewise `no-await-in-sync-fn`: no
+    ESLint rule exists, and both checkers refuse it with TS1308 (measured).
   - `consistent-type-imports` with `disallowTypeAnnotations: false`: the default forbids
     `typeof import('ioredis')`, the pattern for typing a lazily loaded optional dependency (245
     sites, all permitted by deno's `verbatim-module-syntax`).
@@ -107,7 +108,14 @@ the rules the current gates enforce carried across, while every other gate keeps
   - `@eslint-community/eslint-comments/no-unlimited-disable` refusing a blanket
     `/* eslint-disable */` (deno's `ban-untagged-ignore`), and
     `linterOptions.reportUnusedDisableDirectives: 'error'` (deno's `ban-unused-ignore`).
-  - Node globals (the `globals` package) for `**/*.{js,mjs}`.
+  - The core rules typescript-eslint's preset switches off for TypeScript on the grounds that a type
+    check reports them (`no-dupe-keys`, `no-const-assign`, `getter-return`,
+    `no-new-native- nonconstructor` and eleven more), restored for every file — deno lint enforced
+    them and nothing type-checks `.js`/`.mjs`. `no-dupe-class-members` and `no-redeclare` stay off
+    for TypeScript only (they misfire on overloads and declaration merging; `tsc` reports the real
+    cases). `valid-typeof` with `requireStringLiterals: true` and `no-inner-declarations` with
+    `blockScopedFunctions: 'disallow'`, matching deno's stricter forms. Found by the code review.
+  - Node globals (the `globals` package) and JSX parsing for `**/*.{js,jsx,mjs,cjs}`.
   - Global ignores from `.gitignore` via `includeIgnoreFile` (`@eslint/compat`), plus `website/` and
     `apps/full-stack/build/` (§3.1 says why the Node-code exclusions are not carried).
 
@@ -250,6 +258,11 @@ All of it runs after the reconciliation commit, never between it and the reforma
 - Scripts, root tests, `deno check`, `deno doc` gates on Node — 111e2.
 - Workflow rewrites, `apps/*` on pnpm, `apps/compiled-binary`, removing `deno.json`/`deno.lock`, the
   SDK generator's target formatter — 111e3.
-- Governing documents (`CLAUDE.md`, `AI_GUIDELINES.md` lint wording, C3) — 111f.
+- Governing documents — 111f. Found stale by the M111e1 code review: `CLAUDE.md` "Common pitfalls"
+  (the `verbatim-module-syntax` rule name, `deno-lint-ignore` directives, the scripts exemption
+  (C3), "do not underscore-prefix" while `^_` is the kept escape, "run `deno fmt`"), its note that
+  the gates cannot catch `new Function` (the restricted-syntax rule now does), and
+  `AI_GUIDELINES.md` §11–§12's formatter/linter naming and `deno-lint-ignore` instructions. Comments
+  that describe the SDK generator's `deno fmt` target stay true and are left alone.
 - The website workflow and `website/` keep their own Deno `fmt`/`lint` tasks (`website.yml:37`,
   `website/deno.json:16`) until the website moves.

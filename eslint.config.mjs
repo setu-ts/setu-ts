@@ -48,9 +48,28 @@ export default tseslint.config(
           destructuredArrayIgnorePattern: '^_',
         },
       ],
-      // typescript-eslint's override turns this off, assuming a type check reports it. The type
-      // check only warns about unreachable code, and deno lint refused it.
+      // typescript-eslint's preset turns these off for TypeScript on the grounds that a type check
+      // reports them. deno lint enforced them, and a type check only warns about unreachable code,
+      // so they come back. no-dupe-class-members and no-redeclare stay off for TypeScript: both
+      // misfire on overloads and declaration merging, and tsc reports the real cases. Neither
+      // preset touches them for JavaScript, where nothing type-checks.
       'no-unreachable': 'error',
+      'constructor-super': 'error',
+      'getter-return': 'error',
+      'no-class-assign': 'error',
+      'no-const-assign': 'error',
+      'no-dupe-args': 'error',
+      'no-dupe-keys': 'error',
+      'no-func-assign': 'error',
+      'no-import-assign': 'error',
+      'no-new-native-nonconstructor': 'error',
+      'no-obj-calls': 'error',
+      'no-setter-return': 'error',
+      'no-this-before-super': 'error',
+      'no-unsafe-negation': 'error',
+      'no-with': 'error',
+      'valid-typeof': ['error', { requireStringLiterals: true }],
+      'no-inner-declarations': ['error', 'functions', { blockScopedFunctions: 'disallow' }],
       'no-restricted-syntax': [
         'error',
         {
@@ -72,7 +91,10 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   {
-    files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
-    languageOptions: { globals: { ...globals.node } },
+    files: ['**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs'],
+    languageOptions: {
+      globals: { ...globals.node },
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
   },
 );

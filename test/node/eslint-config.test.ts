@@ -74,6 +74,62 @@ describe('ESLint configuration parity with deno lint', () => {
     expect(await rulesFor(code)).toContain(rule);
   });
 
+  // Rules typescript-eslint's preset turns off on the grounds that a type check reports them.
+  // Restored for every file, since .js/.mjs files are not type-checked (M111e1 review).
+  it.each([
+    ['a duplicate object key', 'export const o = { a: 1, a: 2 };\n', 'no-dupe-keys'],
+    ['a const reassignment', 'const c = 1;\nc = 2;\nexport { c };\n', 'no-const-assign'],
+    [
+      'a getter without return',
+      'export const o = {\n  get v() {\n    void 0;\n  },\n};\n',
+      'getter-return',
+    ],
+    [
+      'a function reassignment',
+      'function f() {}\nf = () => {};\nexport { f };\n',
+      'no-func-assign',
+    ],
+    ['a class reassignment', 'class C {}\nC = class {};\nexport { C };\n', 'no-class-assign'],
+    ['an unsafe negation', "export const t = (o: object) => !'k' in o;\n", 'no-unsafe-negation'],
+    ['new Symbol', "export const s = new Symbol('x');\n", 'no-new-native-nonconstructor'],
+    [
+      'a typeof compared with a variable',
+      'export function f(x: unknown, t: string) {\n  return typeof x === t;\n}\n',
+      'valid-typeof',
+    ],
+    [
+      'a function declared in a block',
+      'export function f() {\n  if (Math.random()) {\n    function g() {}\n    g();\n  }\n}\n',
+      'no-inner-declarations',
+    ],
+  ])('reports %s', async (_name, code, rule) => {
+    expect(await rulesFor(code)).toContain(rule);
+  });
+
+  it.each([
+    ['a duplicate parameter', 'export function f(a, a) {\n  return a;\n}\n', 'no-dupe-args'],
+    ['a redeclared variable', 'var v = 1;\nvar v = 2;\nexport { v };\n', 'no-redeclare'],
+    [
+      'a duplicate class member',
+      'export class C {\n  m() {}\n  m() {}\n}\n',
+      'no-dupe-class-members',
+    ],
+  ])('reports %s in JavaScript', async (_name, code, rule) => {
+    expect(await rulesFor(code, 'scripts/sample.mjs')).toContain(rule);
+  });
+
+  it('accepts TypeScript overloads and declaration merging', async () => {
+    const code =
+      'export class C {\n  m(a: string): void;\n  m(a: number): void;\n  m(_a: unknown) {}\n}\nexport interface I {\n  a: string;\n}\nexport interface I {\n  b: string;\n}\n';
+    expect(await rulesFor(code)).toEqual([]);
+  });
+
+  it('lints .jsx files', async () => {
+    expect(await rulesFor('console.log(<div />);\n', 'packages/sample/src/view.jsx')).toContain(
+      'no-console',
+    );
+  });
+
   it('reports a directive that suppresses nothing', async () => {
     const rules = await rulesFor('// eslint-disable-next-line no-console\nexport const a = 1;\n');
     expect(

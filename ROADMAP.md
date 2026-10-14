@@ -14008,9 +14008,10 @@ own tests and the Deno-target CLI gate.
 
 - Prettier and ESLint with `typescript-eslint`, configured to keep the rules the gates enforce
   today: `no-explicit-any`, `consistent-type-imports` (in place of `verbatim-module-syntax`),
-  `no-console` outside `cli`/`scripts`, unused-variable errors that ignore a leading `_` exactly as
-  `deno lint` does (1,381 sites rely on it; removing the escape is a separate decision), and a
-  restricted-syntax rule for `new Function` (which `deno lint` never caught — a gain).
+  `no-console` outside `cli` (scripts were never exempt; each carries a reasoned directive),
+  unused-variable errors that ignore a leading `_` exactly as `deno lint` does (1,381 sites rely on
+  it; removing the escape is a separate decision), and a restricted-syntax rule for `new Function`
+  (which `deno lint` never caught — a gain).
 - Root `test/` moves to Vitest alongside the scripts it tests.
 - The Deno scripts ported to Node (`tsx` or compiled); the doc gates (`check:docs`, `check:plan`,
   fence compilers, `@since`, doc-lint ratchet) re-pointed. The JSDoc ratchet's baseline is

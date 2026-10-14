@@ -74,23 +74,28 @@ export function convertSource(file: string, source: string): Conversion {
 /**
  * Every comment in the file, in source order, found from a real parse. A bare scanner loses sync
  * after a regular expression or a template literal (only the parser rescans those), which would
- * skip the comments after one and could read string content as a comment.
+ * skip the comments after one and could read string content as a comment. JSX text is content, not
+ * trivia, so a range that starts inside it is dropped.
  */
 function commentRanges(file: string, source: string): ts.CommentRange[] {
   const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false, kind);
   const found = new Map<number, ts.CommentRange>();
+  const jsxText: { pos: number; end: number }[] = [];
   const collect = (ranges: ts.CommentRange[] | undefined) => {
     for (const range of ranges ?? []) found.set(range.pos, range);
   };
   const visit = (node: ts.Node) => {
+    if (ts.isJsxText(node)) jsxText.push({ pos: node.pos, end: node.end });
     collect(ts.getLeadingCommentRanges(source, node.pos));
     collect(ts.getTrailingCommentRanges(source, node.end));
     node.forEachChild(visit);
   };
   visit(tree);
   collect(ts.getLeadingCommentRanges(source, tree.endOfFileToken.pos));
-  return [...found.values()].sort((a, b) => a.pos - b.pos);
+  return [...found.values()]
+    .filter((range) => !jsxText.some((span) => range.pos >= span.pos && range.pos < span.end))
+    .sort((a, b) => a.pos - b.pos);
 }
 
 function rewrite(fileLevel: boolean, rest: string): string | { refusal: string } {

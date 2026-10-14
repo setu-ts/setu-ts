@@ -77,6 +77,24 @@ describe('deno-lint-ignore-to-eslint codemod', () => {
     expect(convertSource('view.tsx', source).converted).toBe(1);
   });
 
+  it('leaves directive-shaped JSX text alone, and converts a comment in a JSX expression', () => {
+    const text = [
+      'export const a = (',
+      '  <div>',
+      '    // deno-lint-ignore no-console',
+      '    // deno-lint-ignore-file require-await',
+      '  </div>',
+      ');',
+      '',
+    ].join('\n');
+    expect(convertSource('view.tsx', text)).toEqual({ text, converted: 0, refusals: [] });
+    const expression =
+      'export const b = (\n  <div>\n    {\n      // deno-lint-ignore no-console\n      console.log(1)\n    }\n  </div>\n);\n';
+    expect(convertSource('view.tsx', expression).text).toContain(
+      '// eslint-disable-next-line no-console\n      console.log(1)',
+    );
+  });
+
   it('refuses an unmapped rule by line and leaves the file unchanged', () => {
     const source = '// deno-lint-ignore require-await\nx;\n// deno-lint-ignore no-window\n';
     const result = convert(source);
