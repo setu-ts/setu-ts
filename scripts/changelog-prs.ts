@@ -85,14 +85,17 @@ export interface ChangelogPrResult {
 /** Matches a GitHub merge-commit subject. */
 const MERGE_SUBJECT = /^Merge pull request #(\d+) from [^/\s]+\/(\S+)/;
 
-/** A milestone feature branch: `feat/m103-…`, `feat/m101d-…`, `feat/M70h-…`. */
-const MILESTONE_BRANCH = /^feat\/m(\d+[a-z]?)(?:-|$)/i;
+/**
+ * A milestone feature branch: `feat/m103-…`, `feat/m101d-…`, `feat/M70h-…`, and a lettered milestone
+ * split into numbered parts, `feat/m111e1-…` (one digit after the letter, as plan-lint allows).
+ */
+const MILESTONE_BRANCH = /^feat\/m(\d+(?:[a-z]\d?)?)(?:-|$)/i;
 
 /** A path whose change alters what a published package ships. */
 const PUBLISHED_SOURCE = /^packages\/(?:starters\/)?[^/]+\/src\//;
 
-/** The milestone tag in an entry's bold lead: `- **… (M101d).**` / `(M101b, V8-2)`. */
-const ENTRY_LEAD_TAG = /^- \*\*[^\n]*?\((M\d+[a-z]?)(?=[,) ])/gm;
+/** The milestone tag in an entry's bold lead: `- **… (M101d).**` / `(M101b, V8-2)` / `(M111e1)`. */
+const ENTRY_LEAD_TAG = /^- \*\*[^\n]*?\((M\d+(?:[a-z]\d?)?)(?=[,) ])/gm;
 
 /**
  * Parses one merge-commit subject into its PR number and branch, or `null`
