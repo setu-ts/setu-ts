@@ -94,8 +94,16 @@ the rules the current gates enforce carried across, while every other gate keeps
     the default would pass an unused parameter before a used one, which deno reports.
   - `no-unreachable` re-enabled after the typescript-eslint override, since no type check runs in
     the lint gate.
-  - `no-restricted-syntax` banning `new Function` (a gain — deno never caught it), deprecated import
-    assertions (`ImportAttribute` under `assert`), and empty enums (deno's `no-empty-enum`).
+  - `no-restricted-syntax` banning the `Function` constructor (a gain — deno never caught it) and
+    empty enums (deno's `no-empty-enum`). Deprecated import assertions are NOT carried here: an
+    `assert` import and a `with` import parse to the identical ESTree node, so no selector can tell
+    them apart, and TypeScript 6 refuses `assert` with TS2880 in both `deno check` and `tsc -b`
+    (measured), so the type-check gate already owns that rule.
+  - `consistent-type-imports` with `disallowTypeAnnotations: false`: the default forbids
+    `typeof import('ioredis')`, the pattern for typing a lazily loaded optional dependency (245
+    sites, all permitted by deno's `verbatim-module-syntax`).
+  - `no-empty-object-type` with `allowInterfaces: 'with-single-extends'`, for named contracts such
+    as `interface CqrsCommand<T> extends CqrsRequest<T> {}`.
   - `@eslint-community/eslint-comments/no-unlimited-disable` refusing a blanket
     `/* eslint-disable */` (deno's `ban-untagged-ignore`), and
     `linterOptions.reportUnusedDisableDirectives: 'error'` (deno's `ban-unused-ignore`).
@@ -116,9 +124,8 @@ the rules the current gates enforce carried across, while every other gate keeps
   API with the real config and asserts each carried rule reports: `console.log` in a plugin (and not
   in `packages/cli`), `eval`, `new Function`, an untyped type-only import, an unused non-`_`
   parameter both before and after a used one, an unused caught error, unreachable code after
-  `throw`, an import assertion, an empty enum, a blanket disable, an unused disable directive,
-  `window`; a `_`-prefixed name passes; a file under `.tmp/` is ignored; a `.mjs` file using
-  `process` passes.
+  `throw`, an empty enum, a blanket disable, an unused disable directive, `window`; a `_`-prefixed
+  name passes; a file under `.tmp/` is ignored; a `.mjs` file using `process` passes.
 
 ### 3.3 Directive conversion
 
@@ -129,9 +136,12 @@ the rules the current gates enforce carried across, while every other gate keeps
   `no-console`, `no-control-regex` → same, `no-unused-vars` / `no-this-alias` → the
   `@typescript-eslint/` form, `ban-types` → `@typescript-eslint/no-unsafe-function-type` (all three
   sites type a bare `Function`, `packages/react-router-plugin/test`), and `ban-unused-ignore`
-  dropped. A comma- or space-separated rule list maps element-wise; an unmapped rule is refused with
-  its file and line, never guessed. The configured `reportUnusedDisableDirectives: 'error'` then
-  catches any converted directive that suppresses nothing.
+  dropped. Directives are found from comment ranges of a real `ts.createSourceFile` parse: a bare
+  scanner loses sync after a regular expression or a template literal (measured: it missed 107 of
+  427), and could read string content as a comment. A comma- or space-separated rule list maps
+  element-wise; an unmapped rule is refused with its file and line, never guessed. The configured
+  `reportUnusedDisableDirectives: 'error'` then catches any converted directive that suppresses
+  nothing.
 - **Why:** 429 mechanical edits; a deterministic script is reviewable and rerunnable.
 - **Test home:** `scripts/codemods/deno-lint-ignore-to-eslint.test.ts` (Node tooling target, so the
   codemod is coverage-measured with the other codemods); after conversion
