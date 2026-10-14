@@ -110,6 +110,16 @@ describe('requiredToken', () => {
     expect(requiredToken(pr(394, 'release/v0.8.0', bump), '0.9.0')).toBe('#394');
     expect(requiredToken(pr(451, 'release/v0.9.0', bump))).toBe('#451');
   });
+
+  it('exempts the main -> develop back-merge after a release, whatever it touched', () => {
+    // #453 carried the v0.9.0 version bump back to develop; every commit in it was already
+    // represented in the section it was released in.
+    const bump = ['packages/kernel/src/version.ts'];
+    expect(requiredToken(pr(453, 'main', bump), '0.9.0')).toBeNull();
+    expect(requiredToken(pr(453, 'main', bump))).toBeNull();
+    // Only the exact branch: a feature branch that merely starts with "main" is not exempt.
+    expect(requiredToken(pr(460, 'fix/main-loop', bump))).toBe('#460');
+  });
 });
 
 describe('checkChangelogPrs', () => {

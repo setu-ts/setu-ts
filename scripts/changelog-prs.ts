@@ -30,7 +30,9 @@
  * release note. The release's own PR (`release/v<version>`) is exempt too: its
  * `src/` changes are the version bump, the section it would have to name itself
  * in is the release, and on the tag — the only place it is merged — nothing can
- * edit that section any more.
+ * edit that section any more. So is the `main` → `develop` back-merge that follows
+ * every release: it carries only commits already represented in the section they
+ * were released in, and its `src/` changes are that release's version bump.
  *
  * **Misfiling** is checked for milestone PRs only, because that is the shape
  * that has actually happened and the only one with an identifier that can be
@@ -172,12 +174,13 @@ export function shippingSection(
  *
  * @param pr - The merged pull request
  * @param version - The version being verified; its own release PR
- *   (`release/v<version>`) needs no entry
+ *   (`release/v<version>`) needs no entry, and neither does a back-merge from `main`
  * @returns `M<id>` for a milestone branch, `#<n>` for any other branch that
  *   changed a published `src/` tree, `null` otherwise
  */
 export function requiredToken(pr: MergedPullRequest, version?: string): string | null {
   if (version !== undefined && pr.branch === `release/v${version}`) return null;
+  if (pr.branch === 'main') return null;
   const milestone = MILESTONE_BRANCH.exec(pr.branch);
   if (milestone !== null) return `M${milestone[1]}`;
   return pr.changedPaths.some((path) => PUBLISHED_SOURCE.test(path)) ? `#${pr.number}` : null;
