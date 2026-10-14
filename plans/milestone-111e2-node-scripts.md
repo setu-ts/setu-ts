@@ -442,12 +442,12 @@ these negative controls, each observed failing and then reverted:
 
 ## 10. Design security review
 
-| Boundary                               | Before                                                 | After                                                                                                            | Residual risk / decision                                                                                                                                                                                                            |
-| -------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Prose-assertion expressions (Markdown) | `deno run` with no permissions (local imports allowed) | `node --permission --allow-fs-read=<repo>`, source hooks, `env: {}`, timeout, `vm` context with no `fetch` (§11) | repository files readable and network reachable through a `vm` escape; accepted, because the inputs are reviewed Markdown in this repository (maintainer, 2026-10-15); write, child process and reads outside the repository denied |
-| Example-behaviour probe                | `deno run --allow-read`                                | `node --permission --allow-fs-read=<repo>`, `env: {}`, timeout                                                   | network not gated; accepted on the same basis; no write and no child process                                                                                                                                                        |
-| Trusted repository scripts             | scoped `--allow-*` flags                               | unrestricted `node`                                                                                              | loss of defence in depth for the repository's own code; release scripts touching npm/JSR are unchanged in what they call                                                                                                            |
-| Registry tarball reads (`@since` gate) | Deno with `--allow-net` scoped to two hosts            | Node `fetch`, hosts fixed in code; the 64 MiB decompression cap kept                                             | host scoping is now by code rather than by flag; `test/unit/check-since-tags.test.ts` asserts only the two hosts are fetched                                                                                                        |
+| Boundary                               | Before                                                 | After                                                                                                                                                             | Residual risk / decision                                                                                                                                                                                     |
+| -------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Prose-assertion expressions (Markdown) | `deno run` with no permissions (local imports allowed) | `node --permission`, read grants limited to package sources, `node_modules`, root manifests and the hooks; `env: {}`, timeout, `vm` context with no `fetch` (§11) | package sources readable and network reachable through a `vm` escape; accepted, because the inputs are reviewed Markdown in this repository (maintainer, 2026-10-15); `.git`, write and child process denied |
+| Example-behaviour probe                | `deno run --allow-read`                                | `node --permission --allow-fs-read=<repo>`, `env: {}`, timeout                                                                                                    | network not gated; accepted on the same basis; no write and no child process                                                                                                                                 |
+| Trusted repository scripts             | scoped `--allow-*` flags                               | unrestricted `node`                                                                                                                                               | loss of defence in depth for the repository's own code; release scripts touching npm/JSR are unchanged in what they call                                                                                     |
+| Registry tarball reads (`@since` gate) | Deno with `--allow-net` scoped to two hosts            | Node `fetch`, hosts fixed in code; the 64 MiB decompression cap kept                                                                                              | host scoping is now by code rather than by flag; `test/unit/check-since-tags.test.ts` asserts only the two hosts are fetched                                                                                 |
 
 A committed-tree security audit runs before merge, per CLAUDE.md, because the two sandboxed gates
 cross a trust boundary.
@@ -460,10 +460,14 @@ shipped is the corrected one.
 - **§3.5 prose assertions.** A child with no read grant cannot run the claims the documents already
   carry: `packages/common/README.md` and `packages/auth-plugin/README.md` assert results through
   `await import('@setu-ts/common')`, which Deno's loader allowed with no permission. The child now
-  gets `--allow-fs-read=<repository>` and the source hooks, and each claim runs as an awaited
-  `async` body with `importModuleDynamically` set to the main loader. Writing, child processes and
-  reads outside the repository stay denied, and the environment is still empty;
-  `test/prose-assertion-gate.test.ts` asserts all three plus a successful package import.
+  gets read grants for exactly what importing a workspace package needs (`scripts/lib/sandbox.ts`:
+  `packages`, `node_modules`, the root `deno.json` and `package.json`, and the source hooks) and
+  each claim runs as an awaited `async` body with `importModuleDynamically` set to the main loader.
+  Granting the whole repository was tried first and rejected, because it exposes `.git` (where a CI
+  checkout keeps its token) and any local `.env`. Writing, child processes and every other read stay
+  denied, and the environment is still empty; `test/prose-assertion-gate.test.ts` asserts each, plus
+  a successful package import. The example-behaviour probe uses the same grants plus its scratch
+  directory.
 - **§3.5 example behaviour.** `module.register` starts a loader thread, which `--permission` refuses
   (`ERR_ACCESS_DENIED`, `WorkerThreads`). The source hooks use the synchronous
   `module.registerHooks` instead, so no worker grant is needed.

@@ -23,6 +23,7 @@
  * @module
  */
 
+import { sandboxReadFlags } from './lib/sandbox.ts';
 import { transform } from 'esbuild';
 import { run as runProcess } from './lib/run.ts';
 import { type Dirent } from 'node:fs';
@@ -1033,7 +1034,7 @@ export async function run(
     process.execPath,
     [
       '--permission',
-      `--allow-fs-read=${process.cwd()}`,
+      ...sandboxReadFlags(process.cwd(), [SCRATCH]),
       '--import',
       './test/node-source-register.ts',
       executable,

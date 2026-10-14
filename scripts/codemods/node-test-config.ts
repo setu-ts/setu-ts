@@ -61,6 +61,8 @@ export function configurationFor(member: string) {
           // grants no permission for.
           'scripts/pack-members.ts',
           'scripts/registry-overlay.ts',
+          // The shared subprocess helper and sandbox grants added in M111e2.
+          'scripts/lib/*.ts',
           ...SCRIPT_TARGETS,
         ]
       : [`${member.replace(/^\.\//, '')}/src/**/*.ts`];

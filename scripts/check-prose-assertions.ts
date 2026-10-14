@@ -11,6 +11,7 @@
  */
 
 import { run as runProcess } from './lib/run.ts';
+import { sandboxReadFlags } from './lib/sandbox.ts';
 import { type Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 
@@ -226,9 +227,10 @@ export function parseResults(stdout: string, expected: number): readonly ClaimRe
 }
 
 /**
- * Evaluates a document's claims in a Node permission-model subprocess that may only
- * read the repository (so a claim can import the package it describes, as Deno's
- * loader allowed), with an empty environment and no write or child-process access.
+ * Evaluates a document's claims in a Node permission-model subprocess that may read
+ * only what importing a workspace package needs (so a claim can import the package
+ * it describes, as Deno's loader allowed), with an empty environment and no write
+ * or child-process access.
  *
  * @param claims - Claims in one document
  * @param timeoutMs - Maximum time permitted for the complete batch
@@ -243,7 +245,7 @@ export async function evaluateClaims(
       process.execPath,
       [
         '--permission',
-        `--allow-fs-read=${process.cwd()}`,
+        ...sandboxReadFlags(process.cwd()),
         '--import',
         './test/node-source-register.ts',
         '--no-warnings',

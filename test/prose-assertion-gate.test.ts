@@ -174,6 +174,15 @@ describe('prose assertion gate — evaluator', () => {
     for (const finding of findings) expect(finding.message).toContain('ERR_ACCESS_DENIED');
   });
 
+  it('denies reading repository files outside the import grants, such as .git', async () => {
+    const proc = 'this.constructor.constructor("return process")()';
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${proc}.getBuiltinModule('fs').readFileSync('.git', 'utf8')\` | \`null\` |\n| \`${proc}.getBuiltinModule('fs').readFileSync('README.md', 'utf8')\` | \`null\` |`;
+    const findings = await checkDocument('git.md', source);
+
+    expect(findings.length).toBe(2);
+    for (const finding of findings) expect(finding.message).toContain('ERR_ACCESS_DENIED');
+  });
+
   it('fails closed when a claim exits before every result is emitted', async () => {
     const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`this.constructor.constructor("return process")().exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
     const findings = await checkDocument('exit.md', source);
