@@ -14030,7 +14030,14 @@ Delivered as three PRs, in order:
 - **111e2** — repository scripts and root `test/` move to Node (Vitest); the doc gates are
   re-pointed and the JSDoc ratchet re-measured.
 - **111e3** — CI on `actions/setup-node` + pnpm, `apps/*` on pnpm, `apps/compiled-binary` decided
-  after a Node SEA probe, and `deno.json`/`deno.lock` removed from the root.
+  after a Node SEA probe, and `deno.json`/`deno.lock` removed from the root. It also moves the
+  **website** off Deno: `website/deno.json` (install, test, lint and format tasks) and the six Deno
+  steps in `website.yml` move to pnpm, Node and the root Prettier/ESLint config, which already
+  ignores `website/`. Nothing else in M111e owned the website, which is why it is named here.
+- **What stays on Deno, deliberately:** Deno is a supported runtime, not repository tooling. The
+  `packages/runtime` Deno adapter, the CLI's `--runtime deno` projects, and the Deno-lane proofs
+  (`test:deno-lane`) that keep that support honest all remain. After 111e3 the lane runs as a CI job
+  that installs Deno only to run those proofs.
 
 ### Milestone 111f: Governing Documents and the JSR Sunset
 
@@ -14301,5 +14308,5 @@ patch by construction and gains nothing new here.
 | 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
 | 111e1     | ✅     | Prettier + ESLint replace deno fmt / deno lint; task names kept                                                                                                                                                                               |
 | 111e2     | ⬜     | repository scripts and root tests on Node (Vitest); doc gates re-pointed                                                                                                                                                                      |
-| 111e3     | ⬜     | CI on pnpm, apps on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                                           |
+| 111e3     | ⬜     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                               |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |
