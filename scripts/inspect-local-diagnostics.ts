@@ -1,4 +1,5 @@
-#!/usr/bin/env -S deno run --allow-read --allow-env --allow-net=127.0.0.1
+#!/usr/bin/env node
+import { run } from './lib/run.ts';
 /* eslint-disable no-console -- console output is the script's purpose (AI_GUIDELINES §11.6) */
 /**
  * Runnable public consumer for the local diagnostics connector (M98b).
@@ -30,116 +31,128 @@ import {
 } from '../packages/diagnostics-plugin/src/index.ts';
 
 /** The fixed demo route, also the label allowlist entry. */
-const DEMO_ROUTE = '/items';
+async function main(): Promise<void> {
+  if (!('Deno' in globalThis)) {
+    const result = await run(
+      'deno',
+      ['run', '--allow-read', '--allow-env', '--allow-net=127.0.0.1', import.meta.filename],
+      { inherit: true },
+    );
+    process.exitCode = result.code;
+    return;
+  }
+  const DEMO_ROUTE = '/items';
 
-/**
- * Generates `length` random bytes from the Web Crypto source.
- *
- * @param length - Number of bytes
- * @returns The random bytes
- */
-function randomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return bytes;
-}
+  /**
+   * Generates `length` random bytes from the Web Crypto source.
+   *
+   * @param length - Number of bytes
+   * @returns The random bytes
+   */
+  function randomBytes(length: number): Uint8Array {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return bytes;
+  }
 
-/**
- * Encodes bytes as lowercase hex.
- *
- * @param bytes - The bytes to encode
- * @returns Lowercase hex
- */
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
+  /**
+   * Encodes bytes as lowercase hex.
+   *
+   * @param bytes - The bytes to encode
+   * @returns Lowercase hex
+   */
+  function hex(bytes: Uint8Array): string {
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
 
-/**
- * Picks a random port in the dynamic range. A bind conflict fails the demo
- * closed — there is deliberately no scan or fallback.
- *
- * @returns A port number from 49152 to 65535
- */
-function randomPort(): number {
-  return 49152 + (crypto.getRandomValues(new Uint16Array(1))[0] % 16384);
-}
+  /**
+   * Picks a random port in the dynamic range. A bind conflict fails the demo
+   * closed — there is deliberately no scan or fallback.
+   *
+   * @returns A port number from 49152 to 65535
+   */
+  function randomPort(): number {
+    return 49152 + (crypto.getRandomValues(new Uint16Array(1))[0] % 16384);
+  }
 
-const sessionId = hex(randomBytes(16));
-const sessionKey = randomBytes(32);
-const port = randomPort();
+  const sessionId = hex(randomBytes(16));
+  const sessionKey = randomBytes(32);
+  const port = randomPort();
 
-const diagnostics = DiagnosticsPlugin({
-  enabled: true,
-  port,
-  sessionId,
-  sessionKey,
-  ttlMs: 5_000,
-  maxSessionLifetimeMs: 15_000,
-});
+  const diagnostics = DiagnosticsPlugin({
+    enabled: true,
+    port,
+    sessionId,
+    sessionKey,
+    ttlMs: 5_000,
+    maxSessionLifetimeMs: 15_000,
+  });
 
-const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    diagnostics,
-    {
-      name: 'catalog',
-      version: '1.0.0',
-      provides: ['catalog-items'],
-      register(ctx) {
-        ctx.services.register('catalog-items', { items: [] });
-        ctx.router.get(DEMO_ROUTE, (_ctx) => _ctx.response.json({ items: [] }));
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin(),
+      diagnostics,
+      {
+        name: 'catalog',
+        version: '1.0.0',
+        provides: ['catalog-items'],
+        register(ctx) {
+          ctx.services.register('catalog-items', { items: [] });
+          ctx.router.get(DEMO_ROUTE, (_ctx) => _ctx.response.json({ items: [] }));
+        },
+      },
+    ],
+    diagnostics: {
+      labels: {
+        plugins: ['catalog'],
+        capabilities: ['catalog-items'],
+        routes: [DEMO_ROUTE],
       },
     },
-  ],
-  diagnostics: {
-    labels: {
-      plugins: ['catalog'],
-      capabilities: ['catalog-items'],
-      routes: [DEMO_ROUTE],
-    },
-  },
-});
+  });
 
-await app.start(); // no public port: only the loopback diagnostics listener
+  await app.start(); // no public port: only the loopback diagnostics listener
 
-const client = createDiagnosticsClient({
-  endpoint: `http://127.0.0.1:${port}`,
-  sessionId,
-  sessionKey,
-  subtle: crypto.subtle,
-  fetch,
-  timing: { setTimeout, clearTimeout },
-});
+  const client = createDiagnosticsClient({
+    endpoint: `http://127.0.0.1:${port}`,
+    sessionId,
+    sessionKey,
+    subtle: crypto.subtle,
+    fetch,
+    timing: { setTimeout, clearTimeout },
+  });
 
-const snapshot = await client.snapshot();
-console.log(`paired and read snapshot: state=${snapshot.state} nodes=${snapshot.nodes.length}`);
-const lifetime = await client.session();
-const renewed = await client.renew();
-console.log(
-  `renewed session: before=${lifetime.expiresInMs} after=${renewed.expiresInMs} ` +
-    `cap=${renewed.renewal?.maxRemainingMs ?? 0}`,
-);
+  const snapshot = await client.snapshot();
+  console.log(`paired and read snapshot: state=${snapshot.state} nodes=${snapshot.nodes.length}`);
+  const lifetime = await client.session();
+  const renewed = await client.renew();
+  console.log(
+    `renewed session: before=${lifetime.expiresInMs} after=${renewed.expiresInMs} ` +
+      `cap=${renewed.renewal?.maxRemainingMs ?? 0}`,
+  );
 
-await app.inject({ method: 'GET', url: DEMO_ROUTE });
-const batch = await client.read(0, 8);
-console.log(
-  `read ${batch.events.length} event(s); first stage: ${batch.events[0]?.stage ?? 'n/a'}`,
-);
+  await app.inject({ method: 'GET', url: DEMO_ROUTE });
+  const batch = await client.read(0, 8);
+  console.log(
+    `read ${batch.events.length} event(s); first stage: ${batch.events[0]?.stage ?? 'n/a'}`,
+  );
 
-// End the session: authorization is disabled and the listener closes, but
-// the application keeps serving.
-await diagnostics.revoke();
+  // End the session: authorization is disabled and the listener closes, but
+  // the application keeps serving.
+  await diagnostics.revoke();
 
-let revokedReadFailed = false;
-try {
-  await client.read(0, 8);
-} catch {
-  revokedReadFailed = true;
+  let revokedReadFailed = false;
+  try {
+    await client.read(0, 8);
+  } catch {
+    revokedReadFailed = true;
+  }
+  console.log(`post-revoke read refused: ${revokedReadFailed}`);
+
+  const after = await app.inject({ method: 'GET', url: DEMO_ROUTE });
+  console.log(`application still serves: GET ${DEMO_ROUTE} -> ${after.statusCode}`);
+
+  client.close();
+  await app.stop();
 }
-console.log(`post-revoke read refused: ${revokedReadFailed}`);
-
-const after = await app.inject({ method: 'GET', url: DEMO_ROUTE });
-console.log(`application still serves: GET ${DEMO_ROUTE} -> ${after.statusCode}`);
-
-client.close();
-await app.stop();
+if (import.meta.main) await main();

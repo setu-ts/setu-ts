@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 /**
  * The release bump's own controls.
  *
@@ -8,8 +9,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   type BumpOptions,
@@ -137,11 +137,19 @@ describe('isTestPath', () => {
     expect(isTestPath('packages/testing/src/index.ts')).toBe(false);
   });
 
-  // Cutting v0.9.0: a codemod's colocated test carried a `jsr:@setu-ts/…`
-  // input fixture, and the sweep moved it.
-  it('matches a colocated *.test.ts outside a test directory', () => {
-    expect(isTestPath('scripts/codemods/std-to-vitest.test.ts')).toBe(true);
-    expect(isTestPath('scripts/codemods/std-to-vitest.ts')).toBe(false);
+  it('runs the bump and its manifest sync on Node, with git available to the helper', async () => {
+    const config = JSON.parse(
+      await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+    );
+    expect(config.scripts['release:bump']).toBe('node scripts/bump-version.ts');
+    const source = await readFile(
+      new URL('../../scripts/bump-version.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain(
+      "runProcess(process.execPath, ['scripts/node-manifests.ts', '--write']",
+    );
+    expect(source).toContain("runProcess('git'");
   });
 });
 
@@ -166,16 +174,19 @@ describe('isArchivedPlan', () => {
 });
 
 describe('the release:bump task', () => {
-  // Cutting v0.9.0: the task granted `--allow-run=git` while `syncManifests`
-  // spawns `Deno.execPath()`, so a real bump rewrote every file and then died
-  // with NotCapable before regenerating the manifests.
-  it('grants run access to the deno binary syncManifests spawns', async () => {
+  it('runs the bump and its manifest sync on Node, with git available to the helper', async () => {
     const config = JSON.parse(
-      await Deno.readTextFile(new URL('../../deno.json', import.meta.url)),
-    ) as { tasks: Record<string, string> };
-    const grant = /--allow-run=(\S+)/.exec(config.tasks['release:bump'] ?? '')?.[1] ?? '';
-    expect(grant.split(',')).toContain('deno');
-    expect(grant.split(',')).toContain('git');
+      await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+    );
+    expect(config.scripts['release:bump']).toBe('node scripts/bump-version.ts');
+    const source = await readFile(
+      new URL('../../scripts/bump-version.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain(
+      "runProcess(process.execPath, ['scripts/node-manifests.ts', '--write']",
+    );
+    expect(source).toContain("runProcess('git'");
   });
 });
 

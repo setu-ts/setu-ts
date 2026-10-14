@@ -1,6 +1,5 @@
 /** M96 recurrence gate: framework egress consumers accept one redaction seam. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IRedactionService } from '@setu-ts/common';
 import type { AuditPluginOptions } from '@setu-ts/audit-plugin';
 import type { LoggerPluginOptions } from '@setu-ts/logger-plugin';

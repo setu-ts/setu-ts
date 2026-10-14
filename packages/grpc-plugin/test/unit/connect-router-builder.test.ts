@@ -220,7 +220,9 @@ describe('buildConnectRouter — health and reflection wiring', () => {
       yield { messageRequest: { case: 'listServices', value: '' } };
     }
 
-    const [response] = await Array.fromAsync(info(requests()));
+    const responses = [];
+    for await (const response of info(requests())) responses.push(response);
+    const [response] = responses;
     expect(response.messageResponse.case).toBe('listServicesResponse');
     expect(response.messageResponse.value).toEqual({
       service: [{ name: 'example.Echo' }, { name: HEALTH }, { name: REFLECTION }],
@@ -251,7 +253,9 @@ describe('buildConnectRouter — health and reflection wiring', () => {
       yield { messageRequest: { case: 'fileContainingSymbol', value: 'example.Shared' } };
     }
 
-    const [response] = await Array.fromAsync(info(requests()));
+    const responses = [];
+    for await (const response of info(requests())) responses.push(response);
+    const [response] = responses;
     expect(response.messageResponse.case).toBe('fileDescriptorResponse');
     expect(runtime.serializedFiles).toContain('example/shared.proto');
   });

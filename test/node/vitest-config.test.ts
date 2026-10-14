@@ -60,9 +60,9 @@ it('lowers a TC39 decorator and JSX before the runner parses the module', async 
     'function mark(value: unknown, context: ClassDecoratorContext) {}\n@mark class Subject {}',
     `${root}/.tmp/proof.ts`,
   );
-  expect(output?.code).toContain('__decorateElement');
+  expect(typeof output === 'string' ? output : output?.code).toContain('__decorateElement');
   const jsx = await lower('export const element = <div />;', `${root}/.tmp/proof.tsx`);
-  expect(jsx?.code).toContain('hono/jsx/jsx-runtime');
+  expect(typeof jsx === 'string' ? jsx : jsx?.code).toContain('hono/jsx/jsx-runtime');
   const resolver = config.plugins?.find(
     (p) => p && 'name' in p && p.name === 'setu-source-exports',
   );
@@ -71,5 +71,43 @@ it('lowers a TC39 decorator and JSX before the runner parses the module', async 
   }
   expect(resolver.resolveId.call({} as never, '@setu-ts/common', undefined, {} as never)).toMatch(
     /common\/src\/index.ts$/,
+  );
+});
+
+it('widens tooling and preserves the frozen pre-retirement script coverage set', () => {
+  const files = projectsFor('tooling').flatMap((p) => p.test.include);
+  expect(files).toContain('test/docs-gate.test.ts');
+  expect(files).toContain('scripts/codemods/std-to-vitest.test.ts');
+  expect(files.some((f) => f.startsWith('test/deno-lane/'))).toBe(false);
+  const frozen = [
+    'scripts/codemods/*.ts',
+    'test/node-helpers.ts',
+    'test/node-source-hooks.ts',
+    'scripts/pack-members.ts',
+    'scripts/registry-overlay.ts',
+    'scripts/side-effects.ts',
+    'scripts/npm-release-gate.ts',
+    'scripts/npm-placeholders.ts',
+    'scripts/tar-read.ts',
+    'scripts/check-docs.ts',
+    'scripts/check-prose-assertions.ts',
+    'scripts/check-example-behaviour.ts',
+    'scripts/generate-api-docs.ts',
+    'scripts/package-exports.ts',
+    'scripts/npm-specifier-audit.ts',
+    'scripts/version-sweep.ts',
+    'scripts/check-since-tags.ts',
+    'scripts/check-changelog-coverage.ts',
+    'scripts/changelog-prs.ts',
+    'scripts/node-manifests.ts',
+    'scripts/node-build-gate.ts',
+    'scripts/bump-version.ts',
+    'scripts/version-sites.ts',
+    'scripts/release-shape.ts',
+    'scripts/test-partition-rules.ts',
+    'scripts/publication-hold.ts',
+  ];
+  expect([...(configurationFor('tooling').test?.coverage?.include ?? [])].sort()).toEqual(
+    frozen.sort(),
   );
 });

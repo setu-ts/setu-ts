@@ -1,3 +1,6 @@
+import { run as runProcess } from './lib/run.ts';
+import { type Dirent } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * Executable prose-assertion gate.
@@ -176,17 +179,17 @@ export function parseClaimTable(block: ClaimBlock): readonly Claim[] {
  * @returns TypeScript source that emits one JSON line per expression
  */
 export function buildProgram(claims: readonly Claim[]): string {
-  return claims
-    .map(
-      (claim) =>
-        `try {
-  const value = (${claim.expression});
-  console.log(JSON.stringify({ ok: true, value }));
-} catch (error) {
-  console.log(JSON.stringify({ ok: false, error: error instanceof Error ? error.name + ': ' + error.message : String(error) }));
-}`,
-    )
-    .join('\n');
+  return `import { createContext, runInContext } from 'node:vm';
+const context = createContext({ JSON, Math, Number, String, Array, Object, Boolean });
+for (const expression of ${JSON.stringify(claims.map((claim) => claim.expression))}) {
+  try {
+    const value = runInContext('(' + expression + ')', context);
+    console.log(JSON.stringify({ ok: true, value }));
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? '[' + String(error.code) + '] ' : '';
+    console.log(JSON.stringify({ ok: false, error: code + String(error) }));
+  }
+}`;
 }
 
 /**
@@ -230,36 +233,16 @@ export async function evaluateClaims(
   claims: readonly Claim[],
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<readonly ClaimResult[] | null> {
-  const child = new Deno.Command('deno', {
-    args: ['run', '--no-prompt', '--ext=ts', '-'],
-    stdin: 'piped',
-    stdout: 'piped',
-    stderr: 'piped',
-  }).spawn();
-  const outputPromise = child.output();
-  const writer = child.stdin.getWriter();
   try {
-    await writer.write(new TextEncoder().encode(buildProgram(claims)));
-    await writer.close();
+    const output = await runProcess(
+      process.execPath,
+      ['--permission', '--input-type=module-typescript', '-'],
+      { env: {}, stdin: buildProgram(claims), timeoutMs },
+    );
+    return output.code === 0 ? parseResults(output.stdout, claims.length) : null;
   } catch {
     return null;
   }
-
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const output = await Promise.race([
-    outputPromise,
-    new Promise<null>((resolve) => {
-      timeoutId = setTimeout(() => resolve(null), timeoutMs);
-    }),
-  ]);
-  if (timeoutId !== undefined) clearTimeout(timeoutId);
-  if (output === null) {
-    child.kill('SIGKILL');
-    await outputPromise;
-    return null;
-  }
-  if (!output.success) return null;
-  return parseResults(new TextDecoder().decode(output.stdout), claims.length);
 }
 
 function jsonValuesEqual(left: unknown, right: unknown): boolean {
@@ -367,17 +350,18 @@ export async function checkDocument(
 export async function collectMarkdown(root: string): Promise<readonly string[]> {
   const found: string[] = [];
   const walk = async (directory: string): Promise<void> => {
-    let entries: Deno.DirEntry[];
+    let entries: Dirent[];
     try {
       entries = [];
-      for await (const entry of Deno.readDir(directory)) entries.push(entry);
+      for await (const entry of await readdir(directory, { withFileTypes: true }))
+        entries.push(entry);
     } catch {
       return;
     }
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
       const path = directory === '.' ? entry.name : `${directory}/${entry.name}`;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         if (directory !== '.') await walk(path);
       } else if (entry.name.endsWith('.md')) {
         found.push(path);
@@ -417,7 +401,7 @@ export async function run(args: readonly string[]): Promise<readonly Finding[]> 
   const findings: Finding[] = [];
   for (const file of files) {
     try {
-      findings.push(...(await checkDocument(file, await Deno.readTextFile(file), timeoutMs)));
+      findings.push(...(await checkDocument(file, await readFile(file, 'utf8'), timeoutMs)));
     } catch (error) {
       findings.push({
         file,
@@ -429,11 +413,18 @@ export async function run(args: readonly string[]): Promise<readonly Finding[]> 
   return findings;
 }
 
-if (import.meta.main) {
-  const findings = await run(Deno.args);
-  if (findings.length === 0) Deno.exit(0);
+/** Repository entry point; returns a status without exiting its caller. */
+export async function runProseMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const findings = await run(args);
+  if (findings.length === 0) {
+    return 0;
+  }
   for (const finding of findings) {
     console.error(`${finding.file}:${finding.line}: ${finding.message}`);
   }
-  Deno.exit(1);
+  return 1;
 }
+
+if (import.meta.main) process.exitCode = await runProseMain();

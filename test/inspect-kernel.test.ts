@@ -1,5 +1,6 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { describe, expect, it } from 'vitest';
+import { mkdir, writeFile } from 'node:fs/promises';
 
 /**
  * Exercises `scripts/inspect-kernel.ts` as a real SUBPROCESS and asserts on
@@ -8,16 +9,26 @@ import { expect } from '@std/expect';
  * port, and emit only the snapshot and batch DTOs.
  */
 async function runInspectScript(): Promise<{ stdout: string; stderr: string; code: number }> {
-  const command = new Deno.Command(Deno.execPath(), {
-    args: ['run', '--allow-read', '--allow-env', 'scripts/inspect-kernel.ts'],
-    cwd: Deno.cwd(),
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const result = await command.output();
+  await mkdir('.tmp/inspect-kernel', { recursive: true });
+  await writeFile(
+    '.tmp/inspect-kernel/deny-bind.mjs',
+    "import { Server } from 'node:net'; Server.prototype.listen = function () { throw new Error('Unexpected network listen'); };\n",
+  );
+  const command = runProcess(
+    process.execPath,
+    [
+      '--import',
+      './test/node-source-register.ts',
+      '--import',
+      './.tmp/inspect-kernel/deny-bind.mjs',
+      'scripts/inspect-kernel.ts',
+    ],
+    { cwd: process.cwd() },
+  );
+  const result = await command;
   return {
-    stdout: new TextDecoder().decode(result.stdout),
-    stderr: new TextDecoder().decode(result.stderr),
+    stdout: result.stdout,
+    stderr: result.stderr,
     code: result.code,
   };
 }
@@ -121,11 +132,8 @@ describe('inspect-kernel consumer script', () => {
   });
 
   it('binds no port', async () => {
-    // The subprocess runs WITHOUT `--allow-net`, so a bind attempt would be
-    // refused and the script would exit non-zero — the exit code IS the proof.
-    // Asserting `stderr === ''` proved nothing about a listener and was
-    // brittle besides: a cold module cache makes Deno print download notices
-    // there, failing the test for a reason unrelated to sockets.
+    // The preload refuses every Node server listen call, so a new listener
+    // makes the real subprocess fail. Node's permission model does not gate sockets.
     const { code, stderr } = await runInspectScript();
     expect(code).toBe(0);
     expect(stderr).not.toMatch(/NotCapable|Requires net access|AddrInUse|listen/i);

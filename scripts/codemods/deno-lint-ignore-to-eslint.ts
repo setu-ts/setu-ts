@@ -5,7 +5,7 @@
 // what it would change. A rule with no mapping is refused by file and line, never guessed.
 import ts from 'typescript';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -133,7 +133,7 @@ export function trackedSources(cwd = '.'): string[] {
       encoding: 'utf8',
     },
   );
-  return output.split('\n').filter((file) => file !== '');
+  return output.split('\n').filter((file) => file !== '' && existsSync(resolve(cwd, file)));
 }
 
 /**

@@ -20,6 +20,9 @@
     },
     "../../packages/websocket-plugin/test/": {
       "vitest": "./vitest-shim.ts"
+    },
+    "../../test/": {
+      "vitest": "./vitest-shim.ts"
     }
   }
 }

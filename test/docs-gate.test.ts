@@ -1,3 +1,6 @@
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFile, readdir, stat, writeFile, rm, mkdir } from 'node:fs/promises';
+import { readdirSync, statSync } from 'node:fs';
 /**
  * Pins the documentation gate: that its checks actually discriminate, and that
  * CI runs it.
@@ -11,8 +14,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   anchorFor,
@@ -313,25 +315,25 @@ describe('documentation gate — table of contents', () => {
 
 describe('documentation gate — CI wiring', () => {
   it('is registered as a task', async () => {
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
-    expect(manifest.tasks['check:docs']).toContain('scripts/check-docs.ts');
+    expect(manifest.scripts['check:docs']).toContain('scripts/check-docs.ts');
   });
 
   it('runs on every pull request', async () => {
     // Without this the gate is a script nobody executes, and the class of
     // defect it exists for reaches main exactly as it did before.
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     expect(workflow).toContain('deno task check:docs');
   });
 
   it('check:docs runs the aggregate gate (docs + api lint)', async () => {
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
     // check:docs should include both check-docs.ts and generate-api-docs.ts
-    const checkDocs = manifest.tasks['check:docs'];
+    const checkDocs = manifest.scripts['check:docs'];
     expect(checkDocs).toContain('check-docs.ts');
     expect(checkDocs).toContain('generate-api-docs.ts');
   });
@@ -339,23 +341,23 @@ describe('documentation gate — CI wiring', () => {
   it('check:docs composes the behaviour gate and the @since gate', async () => {
     // Dropping either script from the chain is a failing test rather than a
     // silent loss of coverage (M95d).
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
-    const checkDocs = manifest.tasks['check:docs'] ?? '';
+    const checkDocs = manifest.scripts['check:docs'] ?? '';
     // Assert the ACTUAL invocations in the `&&` chain, not that the path is
     // mentioned somewhere: `echo scripts/check-since-tags.ts` satisfies a
     // substring check while CI runs no gate at all.
     const invoked = checkDocs
       .split('&&')
       .map((step) => step.trim())
-      .filter((step) => step.startsWith('deno run'))
+      .filter((step) => step.startsWith('node '))
       .map((step) => step.split(/\s+/).at(-1));
     expect(invoked).toContain('scripts/check-example-behaviour.ts');
     expect(invoked).toContain('scripts/check-since-tags.ts');
     // And the @since gate stays runnable in isolation, which is how its
     // skip-on-network behaviour is negative-controlled.
-    expect(manifest.tasks['check:since-tags']).toContain('scripts/check-since-tags.ts');
+    expect(manifest.scripts['check:since-tags']).toContain('scripts/check-since-tags.ts');
   });
 });
 
@@ -865,9 +867,9 @@ describe('documentation gate — package catalog', () => {
 describe('documentation gate — local links and anchors', () => {
   it('rejects a fake generated API link while accepting a real one', async () => {
     const fs = {
-      readTextFile: async (path: string) => await Deno.readTextFile(path),
-      readDir: (path: string) => Deno.readDir(path),
-      stat: (path: string) => Deno.stat(path),
+      readTextFile: async (path: string) => await readFile(path, 'utf8'),
+      readDir: async (path: string) => await readdir(path, { withFileTypes: true }),
+      stat: (path: string) => stat(path),
     };
     const { targets } = await collectApiEntrypoints(fs);
     const generatedApiPages = buildGeneratedApiPages(targets);
@@ -893,9 +895,9 @@ describe('documentation gate — local links and anchors', () => {
     // docs/api/index.html. buildGeneratedApiPages must include it so a doc
     // linking to the bare top-level index resolves instead of false-positiving.
     const fs = {
-      readTextFile: async (path: string) => await Deno.readTextFile(path),
-      readDir: (path: string) => Deno.readDir(path),
-      stat: (path: string) => Deno.stat(path),
+      readTextFile: async (path: string) => await readFile(path, 'utf8'),
+      readDir: async (path: string) => await readdir(path, { withFileTypes: true }),
+      stat: (path: string) => stat(path),
     };
     const { targets } = await collectApiEntrypoints(fs);
     const generatedApiPages = buildGeneratedApiPages(targets);
@@ -916,25 +918,25 @@ describe('documentation gate — local links and anchors', () => {
   it('rejects a cross-file anchor that matches no heading in the target file', async () => {
     // Write a temp target file with one heading, then link to a missing anchor.
     const targetPath = 'test/fixtures/link-target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    await writeFile(targetPath, '# Target\n\n## Real Heading\n');
     try {
       const source = `[bad](../test/fixtures/link-target.md#missing-heading)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.some((f) => f.message.includes('matches no heading'))).toBe(true);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
   it('accepts a cross-file anchor that matches a heading in the target file', async () => {
     const targetPath = 'test/fixtures/link-target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    await writeFile(targetPath, '# Target\n\n## Real Heading\n');
     try {
       const source = `[good](../test/fixtures/link-target.md#real-heading)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.length).toBe(0);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
@@ -946,26 +948,26 @@ describe('documentation gate — local links and anchors', () => {
 
   it('accepts a decoded URI-encoded path and fragment', async () => {
     const targetPath = 'test/fixtures/link target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    await writeFile(targetPath, '# Target\n\n## Real Heading\n');
     try {
       // %20 decodes to a space; the path resolves.
       const source = `[good](../test/fixtures/link%20target.md#real-heading)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.length).toBe(0);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
   it('strips a query string before resolving', async () => {
     const targetPath = 'test/fixtures/query-target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n');
+    await writeFile(targetPath, '# Target\n');
     try {
       const source = `[good](../test/fixtures/query-target.md?raw=true)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.length).toBe(0);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
@@ -1031,39 +1033,41 @@ describe('documentation gate — local links and anchors', () => {
 
 describe('documentation gate — script subprocess integration', () => {
   it('check-docs.ts main() exits 0 on a single good file', async () => {
-    const cmd = new Deno.Command('deno', {
-      args: ['run', '--allow-read', '--allow-run', 'scripts/check-docs.ts', 'README.md'],
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const output = await cmd.output();
+    const cmd = runProcess(process.execPath, [
+      '--import',
+      './test/node-source-register.ts',
+      'scripts/check-docs.ts',
+      'README.md',
+    ]);
+    const output = await cmd;
     expect(output.code).toBe(0);
   });
 
   it('check-docs.ts main() default scan exits 0 on the real repository', async () => {
-    const cmd = new Deno.Command('deno', {
-      args: ['run', '--allow-read', '--allow-run', 'scripts/check-docs.ts'],
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const output = await cmd.output();
+    const cmd = runProcess(process.execPath, [
+      '--import',
+      './test/node-source-register.ts',
+      'scripts/check-docs.ts',
+    ]);
+    const output = await cmd;
     expect(output.code).toBe(0);
   });
 
   it('check-docs.ts main() exits 1 on a file with a broken anchor', async () => {
     const tmpPath = '.tmp/broken-anchor.md';
-    await Deno.mkdir('.tmp', { recursive: true });
-    await Deno.writeTextFile(tmpPath, '# T\n\n## A\n\nSee [B](#nope).\n');
+    await mkdir('.tmp', { recursive: true });
+    await writeFile(tmpPath, '# T\n\n## A\n\nSee [B](#nope).\n');
     try {
-      const cmd = new Deno.Command('deno', {
-        args: ['run', '--allow-read', 'scripts/check-docs.ts', tmpPath],
-        stdout: 'piped',
-        stderr: 'piped',
-      });
-      const output = await cmd.output();
+      const cmd = runProcess(process.execPath, [
+        '--import',
+        './test/node-source-register.ts',
+        'scripts/check-docs.ts',
+        tmpPath,
+      ]);
+      const output = await cmd;
       expect(output.code).toBe(1);
     } finally {
-      await Deno.remove(tmpPath);
+      await rm(tmpPath);
     }
   });
 });
@@ -2137,11 +2141,11 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
   /** Every package README on disk, discovered rather than enumerated. */
   function readPackageReadmes(): string[] {
     const out: string[] = [];
-    for (const entry of Deno.readDirSync('packages')) {
-      if (!entry.isDirectory) continue;
+    for (const entry of readdirSync('packages', { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       const candidate = `packages/${entry.name}/README.md`;
       try {
-        Deno.statSync(candidate);
+        statSync(candidate);
         out.push(candidate);
       } catch {
         // No README in this package — nothing to check.
@@ -2155,7 +2159,7 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
     const { TS_ALIASES } = await import('./fixtures/snippets/fence-engine.ts');
     expect(FILES.length).toBeGreaterThanOrEqual(5);
     for (const file of FILES) {
-      const lines = (await Deno.readTextFile(file)).split('\n');
+      const lines = (await readFile(file, 'utf8')).split('\n');
       const { blocks, unclosedAt } = scanFences(lines);
       // An UNCLOSED fence is omitted from `blocks` entirely (measured: a file
       // whose only fence never closes yields 0 blocks), so its contents escape
@@ -2238,8 +2242,8 @@ describe('docs/upgrading.md release attribution', () => {
   }
 
   it('files every reader action under the release that shipped it', async () => {
-    const guide = await Deno.readTextFile('docs/upgrading.md');
-    const sections = changelogSections(await Deno.readTextFile('CHANGELOG.md'));
+    const guide = await readFile('docs/upgrading.md', 'utf8');
+    const sections = changelogSections(await readFile('CHANGELOG.md', 'utf8'));
 
     let release: string | null = null;
     let checked = 0;
@@ -2330,7 +2334,7 @@ describe('documentation gate — diagnostics field tables match their fences (M1
 
   for (const readme of DIAGNOSTIC_READMES) {
     it(`${readme} lists only fields its ## Diagnostics fence sets`, async () => {
-      const { fields, fence } = diagnosticsSection(await Deno.readTextFile(readme));
+      const { fields, fence } = diagnosticsSection(await readFile(readme, 'utf8'));
       expect(fields.length).toBeGreaterThan(0);
       for (const field of fields) {
         expect(

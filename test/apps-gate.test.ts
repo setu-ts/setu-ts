@@ -1,5 +1,7 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { isNotFound } from './../scripts/lib/run.ts';
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
 import {
   classifySmokeExitCode,
   malformedAppDirMessage,
@@ -16,13 +18,13 @@ interface AppConfig {
 }
 
 async function readJson<T>(path: string): Promise<T> {
-  return JSON.parse(await Deno.readTextFile(path)) as T;
+  return JSON.parse(await readFile(path, 'utf8')) as T;
 }
 
 describe('application gate configuration', () => {
   it('supplies the M109b within-real backend guards in every suite workflow', async () => {
     for (const path of ['ci', 'drift', 'release']) {
-      const workflow = await Deno.readTextFile(`.github/workflows/${path}.yml`);
+      const workflow = await readFile(`.github/workflows/${path}.yml`, 'utf8');
       expect(workflow).toContain('DYNAMODB_ENDPOINT_URL: http://127.0.0.1:8000');
       expect(workflow).toContain(
         'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
@@ -36,7 +38,7 @@ describe('application gate configuration', () => {
   });
 
   it('fails CI when the example gate changes tracked application files', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const start = workflow.indexOf('\n  deno:');
     const end = workflow.indexOf('\n  publish-dry-run:');
     expect(start).toBeGreaterThan(-1);
@@ -55,8 +57,8 @@ describe('application gate configuration', () => {
   });
 
   it('requires every example application to declare start and smoke tasks', async () => {
-    for await (const entry of Deno.readDir('apps')) {
-      if (!entry.isDirectory) continue;
+    for await (const entry of await readdir('apps', { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       const config = await readJson<AppConfig>(`apps/${entry.name}/deno.json`);
       expect(config.tasks?.start).toBeDefined();
       expect(config.tasks?.smoke).toBeDefined();
@@ -64,7 +66,7 @@ describe('application gate configuration', () => {
   });
 
   it('keeps the realtime-client exercise out of the CI skip allowlist', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     // Scoped to the `deno` job, not the whole file: `node-compat` and
     // `bun-compat` declare the same two actions, so a repo-wide `toContain`
     // stays green after they are removed from the job that runs `check:apps`.
@@ -80,7 +82,7 @@ describe('application gate configuration', () => {
   });
 
   it('keeps fork pull requests as no-checkout proposals', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const policyStart = workflow.indexOf('\n  fork-contribution-policy:');
     const denoStart = workflow.indexOf('\n  deno:');
     const policyJob = workflow.slice(policyStart, denoStart);
@@ -114,7 +116,7 @@ describe('application gate configuration', () => {
     // guard has to move WITH them: that workflow still has a `pull_request`
     // trigger (path-filtered to `compat/`), so a fork PR touching the suite
     // would otherwise run it.
-    const compat = await Deno.readTextFile('.github/workflows/compat.yml');
+    const compat = await readFile('.github/workflows/compat.yml', 'utf8');
     for (const job of ['node-compat', 'bun-compat']) {
       expect(compat).toContain(`  ${job}:\n    ${repositoryBranchOnly}`);
     }
@@ -139,9 +141,9 @@ describe('application gate configuration', () => {
     // orphans the guide rather than deleting it, which is the worse of the
     // two. `check:docs` validates the link once it exists; it cannot see an
     // entry that was never written.
-    const index = await Deno.readTextFile('docs/README.md');
+    const index = await readFile('docs/README.md', 'utf8');
     expect(index).toContain('[Upgrading Setu-TS](./upgrading.md)');
-    await Deno.stat('docs/upgrading.md'); // throws NotFound if the link dangles
+    await stat('docs/upgrading.md'); // throws NotFound if the link dangles
   });
 });
 
@@ -190,17 +192,17 @@ describe('cold-checkout npm resolution', () => {
     // means an app with a `package.json` and no such task silently keeps the
     // bug. Asserted here because a warm tree proves nothing: every local run
     // passes once `node_modules` exists from any earlier build.
-    for await (const entry of Deno.readDir('apps')) {
-      if (!entry.isDirectory) continue;
+    for await (const entry of await readdir('apps', { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       let hasPackageJson = true;
       try {
-        await Deno.stat(`apps/${entry.name}/package.json`);
+        await stat(`apps/${entry.name}/package.json`);
       } catch (error) {
         // Only absence means "no npm toolchain here". Any other stat failure
         // is a real problem, and swallowing it would skip the app and pass
         // the assertion vacuously — `check-apps.ts` itself rethrows a
         // non-NotFound error from the equivalent `worker.ts` probe.
-        if (!(error instanceof Deno.errors.NotFound)) throw error;
+        if (!isNotFound(error)) throw error;
         hasPackageJson = false;
       }
       if (!hasPackageJson) continue;
@@ -221,7 +223,7 @@ describe('real-backend CI wiring', () => {
   // tests M53 added, so the wiring cannot be removed without a red gate.
 
   it('declares a Redis service and REDIS_URL on the deno job', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
     expect(workflow).toContain('image: redis:7');
     // The port mapping is load-bearing: the job runs directly on the runner,
@@ -232,7 +234,7 @@ describe('real-backend CI wiring', () => {
 
   it('declares the Mongo service, URI, and scoped database-plugin permission', async () => {
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
-      const workflowText = await Deno.readTextFile(workflow);
+      const workflowText = await readFile(workflow, 'utf8');
       expect(workflowText).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
       expect(workflowText).toContain('image: mongo:8');
       expect(workflowText).toContain('- 27017:27017');
@@ -262,7 +264,7 @@ describe('real-backend CI wiring', () => {
   });
 
   it('starts Keycloak and declares its URL and grant (M100b §6)', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     // A step rather than a service: the realm is imported by a COMMAND and a
     // volume, neither of which a service block can set. Pinned so a later edit
     // cannot drop it and turn the real-provider suite into a permanent skip.
@@ -284,7 +286,7 @@ describe('real-backend CI wiring', () => {
       'packages/auth-plugin/test/e2e/keycloak-issuer-real.test.ts',
       'packages/auth-plugin/test/e2e/keycloak-sign-in-real.test.ts',
     ]) {
-      const suite = await Deno.readTextFile(file);
+      const suite = await readFile(file, 'utf8');
       expect(suite).toContain("process.env['KEYCLOAK_URL']");
       expect(suite).toContain('skip: BASE === undefined');
     }
@@ -300,7 +302,7 @@ describe('real-backend CI wiring', () => {
   });
 
   it('starts the Bigtable emulator and declares its endpoint and grant (M82 §3.13)', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     // Started as a STEP rather than a `services:` container, because the
     // Google Cloud CLI image's default command is a shell and a service block
     // has no way to set one — `options` reaches `docker create` before the
@@ -328,7 +330,7 @@ describe('real-backend CI wiring', () => {
   });
 
   it('declares the DynamoDB Local service, endpoint env, and scoped grant (M80 §6.2)', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     // Pinned to a VERSION, never `latest`: the guarded suite asserts this
     // emulator's behaviour, and a floating tag can change it between runs.
     // Asserted as a pattern rather than a literal so a later upgrade is a
@@ -354,7 +356,7 @@ describe('real-backend CI wiring', () => {
   });
 
   it('pins ElasticMQ image and declares SQS local-region/credentials', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     // Pin the ElasticMQ image to avoid drift from `latest`
     expect(workflow).toContain('image: softwaremill/elasticmq-native:1.7.1');
     // SQS_ENDPOINT_URL must be present for the e2e test guard
@@ -378,16 +380,16 @@ describe('real-backend CI wiring', () => {
     // rather than implicit — a later reader must not mistake it for an
     // oversight — and that the doc keeps naming the guard variable and the
     // run command the suite is guarded on.
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     expect(workflow).not.toContain('servicebus-emulator');
     expect(workflow).not.toContain('SERVICEBUS_CONNECTION_STRING');
-    const doc = await Deno.readTextFile('docs/messaging-emulators.md');
+    const doc = await readFile('docs/messaging-emulators.md', 'utf8');
     expect(doc).toContain('service-bus-outage-real.test.ts');
     expect(doc).toContain('SERVICEBUS_CONNECTION_STRING');
   });
 
   it('pins the RabbitMQ service at major version 4 (M70l §3.1)', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const rabbitLine = workflow
       .split('\n')
       .find((line) => line.trim().startsWith('image: rabbitmq:'));
@@ -494,7 +496,7 @@ describe('real-backend CI wiring', () => {
     // dropped service or a missing var must fail CI, not skip. These pins keep
     // the service, the port mapping, and the env var from drifting.
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
-      const text = await Deno.readTextFile(workflow);
+      const text = await readFile(workflow, 'utf8');
       // RabbitMQ (messaging broker + queue outage suites). Major version 4 is
       // load-bearing since M70l §3.1 — 3.13 accepts the queue declaration the
       // defect lives in, so a revert to 3 makes those suites pass vacuously.
@@ -551,8 +553,9 @@ describe('real-backend CI wiring', () => {
       ['queue-plugin', 'REAL RabbitMQ job durability'],
     ] as const;
     for (const [pkg, title] of suites) {
-      const source = await Deno.readTextFile(
+      const source = await readFile(
         `packages/${pkg}/test/integration/durability-real.test.ts`,
+        'utf8',
       );
       expect(source).toContain(title);
       expect(source).toContain("process.env['RABBITMQ_URL']");
@@ -574,8 +577,9 @@ describe('real-backend CI wiring', () => {
   });
 
   it('pins real RabbitMQ consumer retries, tiers, restart, and guard', async () => {
-    const source = await Deno.readTextFile(
+    const source = await readFile(
       'packages/messaging-plugin/test/integration/consumer-retry-real.test.ts',
+      'utf8',
     );
     expect(source).toContain('REAL RabbitMQ consumer retry');
     expect(source).toContain("process.env['RABBITMQ_URL']");
@@ -604,8 +608,9 @@ describe('real-backend CI wiring', () => {
   });
 
   it('pins real Redis Streams redelivery, its ignore guard, CI broker, and endpoint grants', async () => {
-    const source = await Deno.readTextFile(
+    const source = await readFile(
       'packages/messaging-plugin/test/integration/redis-redelivery-real.test.ts',
+      'utf8',
     );
     expect(source).toContain('REAL Redis Streams redelivery');
     expect(source).toContain("process.env['REDIS_URL']");
@@ -628,7 +633,7 @@ describe('real-backend CI wiring', () => {
       '.github/workflows/drift.yml',
       '.github/workflows/release.yml',
     ]) {
-      const workflow = await Deno.readTextFile(path);
+      const workflow = await readFile(path, 'utf8');
       expect(workflow).toContain('image: redis:7');
       expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
     }
@@ -645,9 +650,7 @@ describe('real-backend CI wiring', () => {
       ['scheduler-plugin', 'REAL Redis scheduler lock outage (M101a V8-24)'],
     ] as const;
     for (const [pkg, title] of suites) {
-      const source = await Deno.readTextFile(
-        `packages/${pkg}/test/integration/outage-real.test.ts`,
-      );
+      const source = await readFile(`packages/${pkg}/test/integration/outage-real.test.ts`, 'utf8');
       expect(source).toContain(title);
       expect(source).toContain("process.env['REDIS_URL']");
       expect(source).toContain('skip: redisUrl === undefined');
@@ -678,20 +681,22 @@ describe('real-backend CI wiring', () => {
     // also fails; the lookbehind refuses the bare name and admits the
     // prefixed one.
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
-      const text = await Deno.readTextFile(workflow);
+      const text = await readFile(workflow, 'utf8');
       expect(text).not.toContain('VAULT_ADDR');
       expect(text).not.toMatch(/(?<![A-Z_])POSTGRES_URL/);
     }
-    const vault = await Deno.readTextFile(
+    const vault = await readFile(
       'packages/secrets-plugin/test/integration/vault-outage-real.test.ts',
+      'utf8',
     );
     expect(vault).toContain('local-only');
     expect(vault).toContain("process.env['VAULT_ADDR']");
     expect(vault).toContain('skip: skip');
     // The header carries the command that runs it, since no doc does.
     expect(vault).toContain('docker run');
-    const postgres = await Deno.readTextFile(
+    const postgres = await readFile(
       'packages/database-plugin/test/integration/real-drizzle-adapter.test.ts',
+      'utf8',
     );
     expect(postgres).toContain("process.env['POSTGRES_URL']");
     expect(postgres).toContain('skip: skipLivePg');
@@ -708,7 +713,7 @@ describe('real-backend CI wiring', () => {
       '.github/workflows/drift.yml',
       '.github/workflows/release.yml',
     ]) {
-      const text = await Deno.readTextFile(workflow);
+      const text = await readFile(workflow, 'utf8');
       expect(text).toContain(
         'OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres',
       );
@@ -751,7 +756,7 @@ describe('real-backend CI wiring', () => {
     // green. These pins keep both backends, their port mappings, their env
     // vars and their manifest grants from drifting.
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
-      const text = await Deno.readTextFile(workflow);
+      const text = await readFile(workflow, 'utf8');
       // Steps, not `services:` blocks — JetStream is enabled by the `-js`
       // command-line flag, and a service block has no way to set one (the
       // Bigtable precedent, measured in M82).
@@ -793,7 +798,7 @@ describe('real-backend CI wiring', () => {
     // runs, which is the pattern M53 exists to end. Asserted rather than
     // trusted, because the exemption would be a one-word edit and CI would stay
     // green.
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const allowSkip = /ALLOW_SKIP:\s*(.+)/.exec(workflow)?.[1] ?? '';
     expect(allowSkip.split(',').map((name) => name.trim())).not.toContain('full-stack');
   });
@@ -812,7 +817,7 @@ describe('real-backend CI wiring', () => {
     // in `test/unit/release-notes.test.ts`, because a hand-list is what let
     // DynamoDB Local and the Bigtable emulator drift in unnoticed after M80
     // and M82 added them to the PR job alone.
-    const workflow = await Deno.readTextFile('.github/workflows/release.yml');
+    const workflow = await readFile('.github/workflows/release.yml', 'utf8');
     expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
     expect(workflow).toContain('image: redis:7');
     expect(workflow).toContain('- 6379:6379');
@@ -831,7 +836,7 @@ describe('real-backend CI wiring', () => {
     // fix: `npx wrangler` installs on first use, so spawning `wrangler dev` and
     // only then starting a ten-second readiness budget loses that budget to the
     // download. Resolving it first pays the install outside the window.
-    const smoke = await Deno.readTextFile('apps/realtime-clients/smoke.ts');
+    const smoke = await readFile('apps/realtime-clients/smoke.ts', 'utf8');
     const preflight = smoke.indexOf("await run('npx', ['--yes', 'wrangler', '--version']);");
     const spawn = smoke.indexOf("new Deno.Command('npx'");
     expect(preflight).toBeGreaterThan(-1);
@@ -866,14 +871,17 @@ describe('real-backend CI wiring', () => {
     // loss was the six guarded suites silently skipping there. Which workflows
     // must satisfy it is derived from ci.yml in
     // `test/unit/release-notes.test.ts`, so the list cannot go stale.
-    if (Deno.env.get('CI') === undefined) return;
-    expect(Deno.env.get('REDIS_URL')).toBeDefined();
+    if (process.env['CI'] === undefined) return;
+    expect(process.env['REDIS_URL']).toBeDefined();
   });
 });
 
 describe('malformedAppDirMessage', () => {
   it('formats a missing deno.json message for NotFound', () => {
-    const msg = malformedAppDirMessage('foo', new Deno.errors.NotFound('ENOENT'));
+    const msg = malformedAppDirMessage(
+      'foo',
+      Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
+    );
     expect(msg).toContain('foo');
     expect(msg).toContain('missing deno.json');
     expect(msg).toContain('malformed application directory');
@@ -894,7 +902,7 @@ describe('malformedAppDirMessage', () => {
 
 describe('M111c npm workflow boundaries', () => {
   it('confines publish identity to the npm environment job with scripts disabled', async () => {
-    const text = await Deno.readTextFile('.github/workflows/release.yml');
+    const text = await readFile('.github/workflows/release.yml', 'utf8');
     const jobs = '\n' + text.split('\njobs:\n')[1];
     expect(text.split('\njobs:\n')[0]).not.toContain('id-token: write');
     expect([...jobs.matchAll(/^ {2}([a-z]+):$/gm)].map((m) => m[1])).toEqual([
@@ -924,7 +932,7 @@ describe('M111c npm workflow boundaries', () => {
   it('publishes only from a pushed v* tag; a manual run rehearses without an identity', async () => {
     // Security audit F1: a manual dispatch with a false dry-run input once made a real
     // OIDC publish from any branch, skipping the tag-only release checks.
-    const text = await Deno.readTextFile('.github/workflows/release.yml');
+    const text = await readFile('.github/workflows/release.yml', 'utf8');
     const jobs = '\n' + text.split('\njobs:\n')[1];
     const gates = jobs.split('\n  gates:')[1].split('\n  publish:')[0];
     const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
@@ -941,7 +949,7 @@ describe('M111c npm workflow boundaries', () => {
   it('pins every action in the release workflow to a full commit SHA', () => {
     // Security audit F2: the publish job can mint an npm OIDC token, so an action
     // that moved under a tag (or a branch, as setup-deno@v2 is) could publish.
-    const text = Deno.readTextFileSync('.github/workflows/release.yml');
+    const text = readFileSync('.github/workflows/release.yml', 'utf8');
     const uses = [...text.matchAll(/^\s*-?\s*uses:\s*(\S+)(.*)$/gm)];
     expect(uses.length).toBeGreaterThanOrEqual(10);
     for (const [, ref, comment] of uses) {
@@ -950,7 +958,7 @@ describe('M111c npm workflow boundaries', () => {
     }
   });
   it('arms each compatibility suite only on a successful npm scope probe', async () => {
-    const text = await Deno.readTextFile('.github/workflows/compat.yml');
+    const text = await readFile('.github/workflows/compat.yml', 'utf8');
     for (const job of ['node-compat', 'bun-compat']) {
       const block = text.split(`\n  ${job}:`)[1].split(/\n {2}[a-z]+-compat:/)[0];
       for (const fragment of [
@@ -971,7 +979,7 @@ describe('M111c npm workflow boundaries', () => {
 describe('M111b workflow lanes', () => {
   for (const workflow of ['ci', 'release', 'drift']) {
     it(`${workflow} gates all four test lanes in the test job`, async () => {
-      const source = await Deno.readTextFile(`.github/workflows/${workflow}.yml`);
+      const source = await readFile(`.github/workflows/${workflow}.yml`, 'utf8');
       const job =
         workflow === 'ci' ? 'deno' : workflow === 'release' ? 'gates' : 'fresh-resolution';
       const testJob = source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
@@ -1006,20 +1014,24 @@ describe('M111b workflow lanes', () => {
 
 describe('M111c declared artifact coverage', () => {
   it('declares the complete npm package set and retires the JSR task', async () => {
-    const workspace = JSON.parse(await Deno.readTextFile('package.json'));
-    const compat = JSON.parse(await Deno.readTextFile('compat/package.json'));
+    const workspace = JSON.parse(await readFile('package.json', 'utf8'));
+    const compat = JSON.parse(await readFile('compat/package.json', 'utf8'));
     const expected = await Promise.all(
       workspace.workspaces.map(
-        async (dir: string) => JSON.parse(await Deno.readTextFile(`${dir}/package.json`)).name,
+        async (dir: string) => JSON.parse(await readFile(`${dir}/package.json`, 'utf8')).name,
       ),
     );
     expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
     expect(expected).toHaveLength(52);
     expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
-    const deno = JSON.parse(await Deno.readTextFile('deno.json'));
+    const deno = JSON.parse(await readFile('deno.json', 'utf8'));
     expect(deno.tasks['publish:check']).toBeUndefined();
-    expect(deno.tasks['release:publish']).toContain('scripts/npm-publish.ts');
-    expect(deno.tasks['release:placeholders']).toContain('scripts/write-npm-placeholders.ts');
-    await expect(Deno.stat('compat/.npmrc')).rejects.toThrow();
+    expect(deno.tasks['release:publish']).toBe('pnpm run release:publish');
+    expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');
+    expect(deno.tasks['release:placeholders']).toBe('pnpm run release:placeholders');
+    expect(workspace.scripts['release:placeholders']).toBe(
+      'node scripts/write-npm-placeholders.ts',
+    );
+    await expect(stat('compat/.npmrc')).rejects.toThrow();
   });
 });

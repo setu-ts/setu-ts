@@ -1,9 +1,8 @@
 # Setu-TS — Session Instructions
 
 Plugin-first enterprise backend framework, published to **JSR** under `@setu-ts` and consumable from
-Node/Bun via JSR npm compatibility. Package tests run on Node 24 with pnpm and Vitest. Deno 2
-workspaces retain repository scripts, root tests, and the named native-adapter test lane until
-M111e.
+Node/Bun via JSR npm compatibility. Package and root tooling tests run on Node 24 with pnpm and
+Vitest. Repository scripts run on Node; the named native-adapter lane retains Deno proofs.
 
 The React Router SSR plugin (M44) uses Vite on the Node/npm toolchain for application frontend
 builds. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and never
@@ -6439,6 +6438,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   directories it created, and reporting incomplete recovery; `adopt` reports entry rewrite failures
   rather than a port-literal mismatch — complete (PR #346).
 
+- **Milestone 111e2** (repository scripts and root tests on Node) — implementation in progress. The
+  TypeDoc ratchet is re-measured at 554 on 0.28.20; source conflicts in the retained-Deno set,
+  browser type graph and export-table no-diff acceptance remain pending before completion.
+
 ## Verification (run before declaring any work done)
 
 ```bash
@@ -6448,11 +6451,12 @@ deno task check
 deno task test
 ```
 
-These Deno checks cover formatting, lint, types, and the root tooling suite. Package changes also
-require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for the
-retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured source
-file must reach 90% branch/function/line; Node, Deno-lane, and root-script gates enforce their bars
-with nonzero exits. Read the per-file tables as evidence.
+These task names forward to the Node formatting, lint, type and root tooling gates. Package changes
+also require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for
+the retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured
+source file must reach 90% branch/function/line. Root scripts and root tests share the `tooling`
+Vitest coverage report; its per-file thresholds enforce the bar with a nonzero exit. The named Deno
+lane enforces its own bar. Read the per-file tables as evidence.
 
 For the edit loop, `pnpm test:coverage <members…>` measures those members and the Node tooling
 target. Each member owns its source coverage, so a targeted failure is authoritative. A milestone
@@ -6519,8 +6523,9 @@ because nothing defined what one was.
 - Unused variables fail lint — delete them; do not underscore-prefix.
 - Run `deno fmt` before `deno task fmt:check`; it also reformats markdown — never hand-wrap tables.
 - Coverage is per file, across branch, function, and line. The Node runner uses Vitest V8
-  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses
-  `scripts/script-coverage.ts`. Inspect all three tables before claiming completion.
+  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses the `tooling`
+  member's Vitest thresholds over the frozen script inventory. Inspect the reports before claiming
+  completion.
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
 - `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). NOTE: `deno lint`'s `no-eval`
@@ -6702,10 +6707,10 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
   plan-cleanup rule in "Before reporting a task done").
 - Package tests use `describe`, `it`, hooks, and `expect` from `vitest` in
-  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` uses `@std/testing/bdd` and
-  `@std/expect` until M111e. Deno-only package proofs use the same Vitest-shaped files through the
-  Deno-lane import-map shim. Write in the runner style appropriate to that location from the first
-  line; `Deno.test` remains banned.
+  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` also imports `vitest` and runs in
+  the `tooling` member. Deno-only proofs use the same Vitest-shaped files through the Deno-lane
+  import-map shim. Write in the runner style appropriate to that location from the first line;
+  `Deno.test` remains banned.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).

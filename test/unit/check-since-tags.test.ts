@@ -1,3 +1,5 @@
+import { run as runProcess } from './../../scripts/lib/run.ts';
+import { mkdir, writeFile } from 'node:fs/promises';
 /**
  * The `@since` gate's own controls, because a gate that has never been
  * observed failing is not a gate.
@@ -10,8 +12,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   collectSinceTags,
@@ -223,10 +224,10 @@ describe('registry URLs and package names', () => {
 describe('defaultListSourceFiles — the real walk', () => {
   it('finds .ts files under <member>/src, recursively and sorted', async () => {
     const root = '.tmp/check-since-tags-fixture/member';
-    await Deno.mkdir(`${root}/src/nested`, { recursive: true });
-    await Deno.writeTextFile(`${root}/src/a.ts`, 'export const a = 1;\n');
-    await Deno.writeTextFile(`${root}/src/nested/b.ts`, 'export const b = 1;\n');
-    await Deno.writeTextFile(`${root}/src/notes.txt`, 'not source\n');
+    await mkdir(`${root}/src/nested`, { recursive: true });
+    await writeFile(`${root}/src/a.ts`, 'export const a = 1;\n');
+    await writeFile(`${root}/src/nested/b.ts`, 'export const b = 1;\n');
+    await writeFile(`${root}/src/notes.txt`, 'not source\n');
     expect(await defaultListSourceFiles(root)).toEqual([
       `${root}/src/a.ts`,
       `${root}/src/nested/b.ts`,
@@ -234,7 +235,7 @@ describe('defaultListSourceFiles — the real walk', () => {
   });
 
   it('tolerates a member without a src directory', async () => {
-    await Deno.mkdir('.tmp/check-since-tags-fixture/bare', { recursive: true });
+    await mkdir('.tmp/check-since-tags-fixture/bare', { recursive: true });
     expect(await defaultListSourceFiles('.tmp/check-since-tags-fixture/bare')).toEqual([]);
   });
 });
@@ -690,17 +691,17 @@ describe('the script itself — the literal exit code inside check:docs', () => 
       // only: every fetch throws NotCapable, the whole run skips, and the gate
       // must still exit 0, printing `verified 0` so silence never reads as a
       // pass. (This is the only test here that touches the real tree; it reads.)
-      const command = new Deno.Command('deno', {
-        args: ['run', '--allow-read', '--no-prompt', 'scripts/check-since-tags.ts'],
-        stdout: 'piped',
-        stderr: 'piped',
-      });
-      const output = await command.output();
-      const stdout = new TextDecoder().decode(output.stdout);
-      expect(output.success, stdout).toBe(true);
+      const command = runProcess(process.execPath, [
+        '--import',
+        './test/fixtures/deny-network.ts',
+        'scripts/check-since-tags.ts',
+      ]);
+      const output = await command;
+      const stdout = output.stdout;
+      expect(output.code === 0, stdout).toBe(true);
       expect(output.code).toBe(0);
       expect(stdout).toContain('verified 0 tag(s)');
-      expect(new TextDecoder().decode(output.stderr)).toContain('skipped');
+      expect(output.stderr).toContain('skipped');
     },
   );
 });
@@ -711,6 +712,7 @@ describe('npm source tarballs after the JSR line', () => {
     entries: Uint8Array[],
     versions = ['0.9.0'],
     failure?: '404' | '500' | 'missing-url' | 'missing-body' | 'corrupt',
+    tarball = 'https://registry.npmjs.org/mock.tgz',
   ) {
     const { archive } = await import('../fixtures/tar-fixture.ts');
     const bytes = archive(...entries);
@@ -727,9 +729,7 @@ describe('npm source tarballs after the JSR line', () => {
               versions: Object.fromEntries(
                 versions.map((version) => [
                   version,
-                  failure === 'missing-url'
-                    ? {}
-                    : { dist: { tarball: 'https://registry.npmjs.org/mock.tgz' } },
+                  failure === 'missing-url' ? {} : { dist: { tarball } },
                 ]),
               ),
             }),
@@ -758,6 +758,27 @@ describe('npm source tarballs after the JSR line', () => {
     });
     return { result, calls };
   }
+
+  it('never passes a tarball outside the two registry hosts to the injected fetch', async () => {
+    for (const url of [
+      'https://example.test/mock.tgz',
+      'https://registry.npmjs.org.evil.test/mock.tgz',
+      'http://registry.npmjs.org/mock.tgz',
+      'https://registry.npmjs.org:8443/mock.tgz',
+    ]) {
+      const { result, calls } = await drive(
+        { 'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;' },
+        [],
+        ['0.9.0'],
+        undefined,
+        url,
+      );
+      expect(calls).toEqual(['https://registry.npmjs.org/@setu-ts%2fmock']);
+      expect(result.verified).toBe(0);
+      expect(result.skipped).toHaveLength(1);
+      expect(result.skipped[0]?.reason).toContain('outside the allowed hosts');
+    }
+  });
 
   it('reads present, absent, non-exported and pax long-path source declarations, caching the tarball', async () => {
     const { tarEntry, paxRecord } = await import('../fixtures/tar-fixture.ts');

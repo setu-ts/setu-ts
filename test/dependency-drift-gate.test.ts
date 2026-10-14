@@ -1,10 +1,11 @@
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 const WORKFLOW = '.github/workflows/drift.yml';
 
 async function readWorkflow(): Promise<string> {
-  return await Deno.readTextFile(WORKFLOW);
+  return await readFile(WORKFLOW, 'utf8');
 }
 
 /** @returns The file's lowercase extension, without the dot. */
@@ -20,19 +21,12 @@ function extensionOf(file: string): string {
  * @returns Tracked, non-ignored paths matching them
  */
 async function gitLsFiles(pathspecs: readonly string[]): Promise<string[]> {
-  const command = new Deno.Command('git', {
-    args: ['ls-files', '--', ...pathspecs],
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const { code, stdout, stderr } = await command.output();
+  const command = runProcess('git', ['ls-files', '--', ...pathspecs]);
+  const { code, stdout, stderr } = await command;
   if (code !== 0) {
-    throw new Error(`git ls-files failed: ${new TextDecoder().decode(stderr)}`);
+    throw new Error(`git ls-files failed: ${stderr}`);
   }
-  return new TextDecoder()
-    .decode(stdout)
-    .split('\n')
-    .filter((line) => line !== '');
+  return stdout.split('\n').filter((line) => line !== '');
 }
 
 /**

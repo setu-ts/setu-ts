@@ -1,3 +1,4 @@
+import { readdir, readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Milestone-plan linter — enforces the plan structure CLAUDE.md mandates,
@@ -186,8 +187,8 @@ export function lintText(file: string, text: string): { errors: Finding[]; warni
 /** Repo-hygiene: only canonical plan files may sit at plans/ root. */
 async function rootHygiene(): Promise<Finding[]> {
   const findings: Finding[] = [];
-  for await (const entry of Deno.readDir(PLANS_DIR)) {
-    if (!entry.isFile || !entry.name.endsWith('.md')) continue;
+  for await (const entry of await readdir(PLANS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
     if (!isCanonicalPlanName(entry.name)) {
       findings.push({
         file: `${PLANS_DIR}/${entry.name}`,
@@ -204,8 +205,8 @@ async function rootHygiene(): Promise<Finding[]> {
 
 async function defaultTargets(): Promise<string[]> {
   const targets: string[] = [];
-  for await (const entry of Deno.readDir(PLANS_DIR)) {
-    if (entry.isFile && entry.name.endsWith('.md')) targets.push(`${PLANS_DIR}/${entry.name}`);
+  for await (const entry of await readdir(PLANS_DIR, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.md')) targets.push(`${PLANS_DIR}/${entry.name}`);
   }
   return targets.sort();
 }
@@ -215,7 +216,7 @@ function format(f: Finding): string {
   return `  ${loc}  ${f.message}`;
 }
 
-if (import.meta.main) await main(Deno.args);
+if (import.meta.main) await main(process.argv.slice(2));
 
 /** The command: lint the given files, or every plan at `plans/` root. */
 async function main(args: readonly string[]): Promise<void> {
@@ -235,7 +236,7 @@ async function main(args: readonly string[]): Promise<void> {
     planCount++;
     let content: string;
     try {
-      content = await Deno.readTextFile(file);
+      content = await readFile(file, 'utf8');
     } catch (err) {
       errors.push({
         file,
@@ -258,7 +259,8 @@ async function main(args: readonly string[]): Promise<void> {
     console.error(`\n✖  ${errors.length} error(s):`);
     for (const e of errors) console.error(format(e));
     console.error('\nplan-lint failed. Fix the errors above before implementing.');
-    Deno.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const suffix = warnings.length > 0 ? ` (${warnings.length} warning(s))` : '';

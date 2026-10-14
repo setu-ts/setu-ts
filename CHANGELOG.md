@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Repository tooling on Node (M111e2).** Repository scripts use Node 24 and a shared subprocess
+  helper. Root tests join the Vitest `tooling` member, which enforces the existing script coverage
+  inventory per file. Root tasks forward to pnpm; the tooling-only and all-member test commands keep
+  their separate scopes. The type-check gate includes package tests and repository tooling.
+
 - **Errors keep their cause (M111e1).** Four errors that were thrown from a `catch` without the
   original error now carry it as `error.cause`: the `ConfigPlugin` env-file read failure, both
   `react-router-plugin` server-build load failures (the build module and `react-router`), and the

@@ -41,99 +41,105 @@ import { PUBLISHED_PACKAGES } from './release-packages.ts';
 // Overridable so the error paths below can be driven against a local stub — an
 // untested error path is how a release script fails at the worst moment.
 // Defaults to the real API; production runs never set it.
-const API = Deno.env.get('JSR_API_BASE') ?? 'https://api.jsr.io';
-const SCOPE = 'setu-ts';
-const OWNER = Deno.env.get('JSR_REPO_OWNER') ?? 'setu-ts';
-const REPO = Deno.env.get('JSR_REPO_NAME') ?? 'setu-ts';
+async function main(): Promise<void> {
+  const API = process.env['JSR_API_BASE'] ?? 'https://api.jsr.io';
+  const SCOPE = 'setu-ts';
+  const OWNER = process.env['JSR_REPO_OWNER'] ?? 'setu-ts';
+  const REPO = process.env['JSR_REPO_NAME'] ?? 'setu-ts';
 
-const dryRun = Deno.args.includes('--dry-run');
-const token = Deno.env.get('JSR_TOKEN');
+  const dryRun = process.argv.slice(2).includes('--dry-run');
+  const token = process.env['JSR_TOKEN'];
 
-if (!token && !dryRun) {
-  console.error(
-    'JSR_TOKEN is not set.\n\n' +
-      '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
-      '  2. Re-run with it in the environment, e.g. (fish):\n' +
-      '       env JSR_TOKEN=jsrp_… deno task release:link-repos\n',
+  if (!token && !dryRun) {
+    console.error(
+      'JSR_TOKEN is not set.\n\n' +
+        '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
+        '  2. Re-run with it in the environment, e.g. (fish):\n' +
+        '       env JSR_TOKEN=jsrp_… deno task release:link-repos\n',
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  /** `packages/foo-plugin` → `foo-plugin` (the JSR package name within the scope). */
+  function packageName(dir: string): string {
+    return dir.slice(dir.lastIndexOf('/') + 1);
+  }
+
+  /** The repository a package is currently linked to, or undefined when unlinked. */
+  async function currentLink(name: string): Promise<string | undefined> {
+    const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return undefined;
+    const pkg = (await response.json()) as {
+      githubRepository?: { owner?: string; name?: string } | null;
+    };
+    const repo = pkg.githubRepository;
+    return repo?.owner === undefined ? undefined : `${repo.owner}/${repo.name}`;
+  }
+
+  const linked: string[] = [];
+  const already: string[] = [];
+  const failed: { name: string; status: number; body: string }[] = [];
+
+  console.log(
+    `${dryRun ? 'Simulating' : 'Linking'} ${PUBLISHED_PACKAGES.length} packages ` +
+      `to ${OWNER}/${REPO}…\n`,
   );
-  Deno.exit(2);
-}
 
-/** `packages/foo-plugin` → `foo-plugin` (the JSR package name within the scope). */
-function packageName(dir: string): string {
-  return dir.slice(dir.lastIndexOf('/') + 1);
-}
+  for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
+    const name = packageName(dir);
+    const position = `[${index + 1}/${PUBLISHED_PACKAGES.length}]`;
 
-/** The repository a package is currently linked to, or undefined when unlinked. */
-async function currentLink(name: string): Promise<string | undefined> {
-  const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) return undefined;
-  const pkg = (await response.json()) as {
-    githubRepository?: { owner?: string; name?: string } | null;
-  };
-  const repo = pkg.githubRepository;
-  return repo?.owner === undefined ? undefined : `${repo.owner}/${repo.name}`;
-}
+    if (dryRun) {
+      console.log(`${position} would link @${SCOPE}/${name} → ${OWNER}/${REPO}`);
+      continue;
+    }
 
-const linked: string[] = [];
-const already: string[] = [];
-const failed: { name: string; status: number; body: string }[] = [];
+    if ((await currentLink(name)) === `${OWNER}/${REPO}`) {
+      console.log(`${position} linked   @${SCOPE}/${name}`);
+      already.push(name);
+      continue;
+    }
 
-console.log(
-  `${dryRun ? 'Simulating' : 'Linking'} ${PUBLISHED_PACKAGES.length} packages ` +
-    `to ${OWNER}/${REPO}…\n`,
-);
+    const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ githubRepository: { owner: OWNER, name: REPO } }),
+    });
 
-for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
-  const name = packageName(dir);
-  const position = `[${index + 1}/${PUBLISHED_PACKAGES.length}]`;
+    if (response.ok) {
+      console.log(`${position} linking  @${SCOPE}/${name} → ${OWNER}/${REPO}`);
+      linked.push(name);
+      continue;
+    }
+
+    const body = await response.text();
+    console.error(`${position} FAILED   @${SCOPE}/${name} — ${response.status} ${body}`);
+    failed.push({ name, status: response.status, body });
+  }
 
   if (dryRun) {
-    console.log(`${position} would link @${SCOPE}/${name} → ${OWNER}/${REPO}`);
-    continue;
+    console.log(`\nAll ${PUBLISHED_PACKAGES.length} packages simulated.`);
+    process.exitCode = 0;
+    return;
   }
 
-  if ((await currentLink(name)) === `${OWNER}/${REPO}`) {
-    console.log(`${position} linked   @${SCOPE}/${name}`);
-    already.push(name);
-    continue;
-  }
-
-  const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ githubRepository: { owner: OWNER, name: REPO } }),
-  });
-
-  if (response.ok) {
-    console.log(`${position} linking  @${SCOPE}/${name} → ${OWNER}/${REPO}`);
-    linked.push(name);
-    continue;
-  }
-
-  const body = await response.text();
-  console.error(`${position} FAILED   @${SCOPE}/${name} — ${response.status} ${body}`);
-  failed.push({ name, status: response.status, body });
-}
-
-if (dryRun) {
-  console.log(`\nAll ${PUBLISHED_PACKAGES.length} packages simulated.`);
-  Deno.exit(0);
-}
-
-console.log(
-  `\nDone: ${linked.length} linked, ${already.length} already linked, ${failed.length} failed.`,
-);
-
-if (failed.length > 0) {
-  console.error(
-    '\nUnlinked packages cannot be published from GitHub Actions. Link them by hand at\n' +
-      failed.map((f) => `  https://jsr.io/@${SCOPE}/${f.name}/settings`).join('\n'),
+  console.log(
+    `\nDone: ${linked.length} linked, ${already.length} already linked, ${failed.length} failed.`,
   );
-  Deno.exit(1);
+
+  if (failed.length > 0) {
+    console.error(
+      '\nUnlinked packages cannot be published from GitHub Actions. Link them by hand at\n' +
+        failed.map((f) => `  https://jsr.io/@${SCOPE}/${f.name}/settings`).join('\n'),
+    );
+    process.exitCode = 1;
+    return;
+  }
 }
+if (import.meta.main) await main();

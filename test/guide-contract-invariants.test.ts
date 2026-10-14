@@ -1,6 +1,6 @@
+import { readFile } from 'node:fs/promises';
 /** Source-derived invariants for curated M38 guide contracts. @module */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import { contractsMatch } from './fixtures/contract-ast.ts';
 import { GUIDES } from './fixtures/snippets/fence-engine.ts';
@@ -14,8 +14,8 @@ function documentedInterface(markdown: string, name: string): string {
 
 describe('curated guide source-derived contracts', () => {
   it('documents IRequest exactly, including readonly and mutable members', async () => {
-    const source = await Deno.readTextFile('packages/common/src/http.ts');
-    const guide = await Deno.readTextFile('docs/programmatic-api.md');
+    const source = await readFile('packages/common/src/http.ts', 'utf8');
+    const guide = await readFile('docs/programmatic-api.md', 'utf8');
     const documented = documentedInterface(guide, 'IRequest');
     expect(await contractsMatch(source, documented, 'IRequest', 'request-exact')).toBe(true);
     for (const [name, mutation] of [
@@ -33,8 +33,8 @@ describe('curated guide source-derived contracts', () => {
   });
 
   it('documents IRuntimeServices exactly through the TypeScript AST', async () => {
-    const source = await Deno.readTextFile('packages/common/src/runtime.ts');
-    const guide = await Deno.readTextFile('docs/programmatic-api.md');
+    const source = await readFile('packages/common/src/runtime.ts', 'utf8');
+    const guide = await readFile('docs/programmatic-api.md', 'utf8');
     const documented = documentedInterface(guide, 'IRuntimeServices');
     expect(await contractsMatch(source, documented, 'IRuntimeServices', 'runtime-exact')).toBe(
       true,
@@ -71,7 +71,7 @@ describe('curated guide source-derived contracts', () => {
     const standard = new Set<string>(Object.values(CAPABILITIES));
     const findings: string[] = [];
     for (const guide of GUIDES) {
-      const text = await Deno.readTextFile(guide);
+      const text = await readFile(guide, 'utf8');
       for (const [index, line] of text.split('\n').entries()) {
         for (const match of line.matchAll(/['"]([^'"]+)['"]/g)) {
           const prefix = line.slice(0, match.index);
@@ -92,7 +92,7 @@ describe('curated guide source-derived contracts', () => {
   it('keeps copyable guides free of ambient runtime APIs', async () => {
     const findings: string[] = [];
     for (const guide of GUIDES) {
-      const text = await Deno.readTextFile(guide);
+      const text = await readFile(guide, 'utf8');
       for (const [index, line] of text.split('\n').entries()) {
         const code = line.replace(/\/\/.*$/, '');
         if (
@@ -107,8 +107,8 @@ describe('curated guide source-derived contracts', () => {
   });
 
   it('pins the source shutdown phase order in the guide', async () => {
-    const source = await Deno.readTextFile('packages/kernel/src/application/application.ts');
-    const guide = await Deno.readTextFile('docs/programmatic-api.md');
+    const source = await readFile('packages/kernel/src/application/application.ts', 'utf8');
+    const guide = await readFile('docs/programmatic-api.md', 'utf8');
     const sequence = [
       'runStopping()',
       'this.#stopping = true',
@@ -153,7 +153,7 @@ describe('curated guide source-derived contracts', () => {
     // Derive the deprecated aliases from source rather than naming them here.
     const deprecated: string[] = [];
     for (const path of formatterSources) {
-      const source = await Deno.readTextFile(path);
+      const source = await readFile(path, 'utf8');
       if (!source.includes('@deprecated')) continue;
       const alias = path.match(/(rfc\d+)-formatter\.ts$/)?.[1];
       if (alias !== undefined && !deprecated.includes(alias)) {
@@ -169,7 +169,7 @@ describe('curated guide source-derived contracts', () => {
 
     const offenders: string[] = [];
     for (const guide of [...GUIDES, 'docs/plugins.md']) {
-      const markdown = await Deno.readTextFile(guide);
+      const markdown = await readFile(guide, 'utf8');
       for (const alias of deprecated) {
         if (configured(markdown, alias)) offenders.push(`${guide} → '${alias}'`);
       }

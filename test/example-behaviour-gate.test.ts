@@ -1,3 +1,4 @@
+import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
 /**
  * The executable behaviour gate for documented view components.
  *
@@ -9,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   attachedComment,
@@ -719,7 +719,7 @@ describe('the gate covers the repository it is meant to cover', () => {
     const documents = await scanDocuments(['docs', 'packages', '.']);
     const collected: DocComponent[] = [];
     for (const file of documents) {
-      collected.push(...collectComponents(file, await Deno.readTextFile(file)));
+      collected.push(...collectComponents(file, await readFile(file, 'utf8')));
     }
     const files = [...new Set(collected.map((c) => c.file))].sort();
 
@@ -750,7 +750,7 @@ describe('the gate covers the repository it is meant to cover', () => {
     const collected: DocComponent[] = [];
     const spots: BlindSpot[] = [];
     for (const file of documents) {
-      const markdown = await Deno.readTextFile(file);
+      const markdown = await readFile(file, 'utf8');
       collected.push(...collectComponents(file, markdown));
       spots.push(...collectUnrenderedBlindSpots(file, markdown));
     }
@@ -770,11 +770,27 @@ describe('run — end to end, through the real renderer', () => {
   const dir = '.tmp/example-behaviour-fixtures';
 
   async function write(name: string, body: string): Promise<string> {
-    await Deno.mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true });
     const path = `${dir}/${name}`;
-    await Deno.writeTextFile(path, doc(body));
+    await writeFile(path, doc(body));
     return path;
   }
+
+  it('clears the environment and denies file writes in the real probe', async () => {
+    const environment = await write(
+      'environment.md',
+      `const Safe = (p: { title: string }) => { if (process.env.HOME !== undefined) throw new Error('environment leaked'); return <p>{p.title}</p>; };\n@Render(Safe)`,
+    );
+    expect(await run([environment])).toEqual([]);
+    const attemptedWrite = await write(
+      'denied-write.md',
+      `const File = (p: { title: string }) => { process.getBuiltinModule('fs').writeFileSync('.tmp/example-write-proof', 'bad'); return <p>{p.title}</p>; };\n@Render(File)`,
+    );
+    const findings = await run([attemptedWrite]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain('could not be rendered');
+    await expect(stat('.tmp/example-write-proof')).rejects.toThrow();
+  });
 
   it('passes a JSX component, which the rendering runtime escapes', async () => {
     const path = await write('safe.md', `const Safe = ${JSX};\n@Render(Safe)`);

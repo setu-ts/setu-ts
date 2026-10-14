@@ -1,3 +1,4 @@
+import { readFile, writeFile } from 'node:fs/promises';
 /* eslint-disable no-console -- this release script reports its output path. */
 /**
  * Captures the complete lockfile resolved set attached to a GitHub Release.
@@ -63,19 +64,22 @@ export function serializeReleaseResolvedSet(resolvedSet: IReleaseResolvedSet): s
  * @returns Process exit status for the command-line caller.
  */
 async function main(): Promise<number> {
-  const [release, output] = Deno.args;
+  const [release, output] = process.argv.slice(2);
   if (release === undefined || output === undefined || release === '' || output === '') {
     console.error('usage: release-resolved-set.ts <version> <output-path>');
     return 2;
   }
 
-  const parsed = JSON.parse(await Deno.readTextFile('deno.lock')) as ILockfileContents;
+  const parsed = JSON.parse(await readFile('deno.lock', 'utf8')) as ILockfileContents;
   const artifact = createReleaseResolvedSet(release, parsed);
-  await Deno.writeTextFile(output, serializeReleaseResolvedSet(artifact));
+  await writeFile(output, serializeReleaseResolvedSet(artifact));
   console.log(`Wrote resolved dependency set for ${release} to ${output}.`);
   return 0;
 }
 
 if (import.meta.main) {
-  Deno.exit(await main());
+  await (async () => {
+    process.exitCode = await main();
+    return;
+  })();
 }

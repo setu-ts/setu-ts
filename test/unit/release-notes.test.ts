@@ -1,5 +1,5 @@
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   buildReleaseBody,
   extractReleaseNotes,
@@ -79,7 +79,7 @@ describe('the real CHANGELOG', () => {
     // Drives the actual file, not a fixture: the extraction is bounded by the
     // heading format the repo really uses, and a format change here would
     // otherwise surface only during a tag run that cannot be rehearsed.
-    const changelog = await Deno.readTextFile('CHANGELOG.md');
+    const changelog = await readFile('CHANGELOG.md', 'utf8');
     const notes = extractReleaseNotes(changelog, '0.1.0-alpha.8');
     expect(notes).not.toBeNull();
     expect(notes?.length ?? 0).toBeGreaterThan(200);
@@ -234,13 +234,13 @@ describe('release workflow wiring', () => {
     // flags, and failed three consecutive releases. A reimplementation of the
     // extraction inside the workflow would be exercised only by a tag run,
     // which cannot be rehearsed — so the call is pinned here.
-    const workflow = await Deno.readTextFile('.github/workflows/release.yml');
+    const workflow = await readFile('.github/workflows/release.yml', 'utf8');
     expect(workflow).toContain('scripts/release-notes.ts');
     expect(workflow).toContain('gh release create');
   });
 
   it('creates the release AFTER publishing, so a failure cannot cost the publish', async () => {
-    const workflow = await Deno.readTextFile('.github/workflows/release.yml');
+    const workflow = await readFile('.github/workflows/release.yml', 'utf8');
     const publish = workflow.indexOf('- name: Publish');
     const release = workflow.indexOf('- name: Create GitHub Release');
     expect(publish).toBeGreaterThan(-1);
@@ -259,7 +259,7 @@ describe('release workflow wiring', () => {
     // the file: a bare `toContain` passes just as well when the command sits
     // in a comment, or is moved to a tag-only job, which is precisely the
     // arrangement this pins against.
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     expect(workflow).toMatch(/^on:\n(?:.*\n)*? {2}pull_request:/m);
 
     // One assertion, pinning the whole command as a real `run:` step: a
@@ -286,10 +286,10 @@ describe('release workflow wiring', () => {
     // in front of an immutable publish, and nothing else would say so.
     // Asserted as real `run:` lines inside their jobs, since a bare
     // `toContain` is satisfied by a commented-out line.
-    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    const ci = await readFile('.github/workflows/ci.yml', 'utf8');
     expect(jobBlock(ci, 'publish-dry-run')).toMatch(/^ +run: deno task check:versions$/m);
 
-    const release = await Deno.readTextFile('.github/workflows/release.yml');
+    const release = await readFile('.github/workflows/release.yml', 'utf8');
     expect(release).toMatch(
       /^ +run: deno run --allow-read --allow-run=git scripts\/version-sweep\.ts "\$\{GITHUB_REF_NAME#v\}"$/m,
     );
@@ -302,10 +302,10 @@ describe('release workflow wiring', () => {
     // #413 blaming dependency drift for a failure no dependency caused.
     // Required of the PR job too, as the reference the consumers follow.
     const depth = activeLine('fetch-depth: 0');
-    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    const ci = await readFile('.github/workflows/ci.yml', 'utf8');
     expect(jobBlock(ci, 'deno')).toMatch(depth);
     for (const consumer of SUITE_CONSUMERS) {
-      const workflow = await Deno.readTextFile(consumer.workflow);
+      const workflow = await readFile(consumer.workflow, 'utf8');
       expect({
         workflow: consumer.workflow,
         depth: depth.test(jobBlock(workflow, consumer.job)),
@@ -327,7 +327,7 @@ describe('release workflow wiring', () => {
     // Derived from ci.yml rather than listed by hand, because a hand-written
     // list is what drifted: a backend added to the PR job is automatically
     // required in every consumer below.
-    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    const ci = await readFile('.github/workflows/ci.yml', 'utf8');
     const prJob = jobBlock(ci, 'deno');
 
     // Matched as ACTIVE lines rather than substrings: commenting a declaration
@@ -366,7 +366,7 @@ describe('release workflow wiring', () => {
     expect(stepBackends.length).toBeGreaterThanOrEqual(6);
 
     for (const { workflow, job, expectedStep } of SUITE_CONSUMERS) {
-      const text = await Deno.readTextFile(workflow);
+      const text = await readFile(workflow, 'utf8');
       const consumer = jobBlock(text, job);
       for (const image of images) {
         expect(consumer).toMatch(activeLine(`image: ${image}`));
@@ -385,14 +385,14 @@ describe('release workflow wiring', () => {
     // v0.2.0 dropped the `alpha` label without freezing the API, so matching
     // only `*-*` would publish a Release object presented as stable. The
     // `0.*` arm is dropped at 1.0 and not before.
-    const workflow = await Deno.readTextFile('.github/workflows/release.yml');
+    const workflow = await readFile('.github/workflows/release.yml', 'utf8');
     expect(workflow).toContain('case "$version" in 0.*|*-*) prerelease=\'--prerelease\' ;; esac');
   });
 
   it('grants the contents:write the release step needs', async () => {
     // Tokenless OIDC covers the JSR publish; creating a Release object does
     // not ride on it, and the job token is read-only by default.
-    const workflow = await Deno.readTextFile('.github/workflows/release.yml');
+    const workflow = await readFile('.github/workflows/release.yml', 'utf8');
     expect(workflow).toContain('contents: write');
   });
 });

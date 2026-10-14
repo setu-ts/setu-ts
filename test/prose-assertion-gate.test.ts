@@ -1,11 +1,11 @@
+import { readFile } from 'node:fs/promises';
 /**
  * Exercises the executable prose-assertion gate's grammar, sandbox, and CI
  * wiring. The gate is useful only when a false claim demonstrably fails.
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   buildProgram,
@@ -20,7 +20,7 @@ import {
   run,
   SCAN_ROOTS,
 } from '../scripts/check-prose-assertions.ts';
-import { SCRIPT_TARGETS } from '../scripts/script-coverage.ts';
+import { SCRIPT_TARGETS } from '../scripts/script-targets.ts';
 
 const TABLE = [
   `<!-- ${MARKER} -->`,
@@ -119,12 +119,24 @@ describe('prose assertion gate — marker and grammar', () => {
 });
 
 describe('prose assertion gate — evaluator', () => {
+  it('refuses environment and network access from the expression context', async () => {
+    for (const expression of ['process.env.HOME', 'fetch("https://example.test")']) {
+      const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${expression}\` | \`null\` |`;
+      const findings = await checkDocument('sandbox-globals.md', source);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.message).toContain('ReferenceError');
+    }
+  });
   it('wraps every expression in its own catch block', () => {
     const block = findClaimBlocks(TABLE)[0];
     if (block === undefined) throw new Error('Expected a marked block');
     const program = buildProgram(parseClaimTable(block));
 
-    expect(program.match(/try \{/g)?.length).toBe(2);
+    expect(program).toContain(
+      JSON.stringify(parseClaimTable(block).map((claim) => claim.expression)),
+    );
+    expect(program).toContain('for (const expression');
+    expect(program).toContain('try {');
     expect(program).toContain('catch (error)');
   });
 
@@ -140,15 +152,15 @@ describe('prose assertion gate — evaluator', () => {
   });
 
   it('denies filesystem access to an expression from the document', async () => {
-    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.readTextFileSync('/etc/hostname')\` | \`"unreachable"\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`this.constructor.constructor("return process")().getBuiltinModule('fs').readFileSync('/etc/hostname', 'utf8')\` | \`"unreachable"\` |`;
     const findings = await checkDocument('sandbox.md', source);
 
     expect(findings.length).toBe(1);
-    expect(findings[0]?.message).toContain('NotCapable');
+    expect(findings[0]?.message).toContain('ERR_ACCESS_DENIED');
   });
 
   it('fails closed when a claim exits before every result is emitted', async () => {
-    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`this.constructor.constructor("return process")().exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
     const findings = await checkDocument('exit.md', source);
 
     expect(findings.length).toBe(2);
@@ -161,7 +173,7 @@ describe('prose assertion gate — evaluator', () => {
       '',
       '| Expression | Value |',
       '| - | - |',
-      '| `Deno.exit(0)` | `null` |',
+      '| `this.constructor.constructor("return process")().exit(0)` | `null` |',
       '',
       `<!-- ${MARKER} -->`,
       '',
@@ -219,19 +231,19 @@ describe('prose assertion gate — evaluator', () => {
 
 describe('prose assertion gate — inventory and wiring', () => {
   it('pins the seeded numeric-claim inventory', async () => {
-    const source = await Deno.readTextFile('.roo/rules-code-review/01-review-only.md');
+    const source = await readFile('.roo/rules-code-review/01-review-only.md', 'utf8');
     const claims = findClaimBlocks(source).flatMap((block) => parseClaimTable(block));
 
     expect(claims.length).toBe(12);
   });
 
   it('scans .roo and is wired into both documentation gates', async () => {
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
 
     expect(SCAN_ROOTS).toContain('.roo');
-    expect(manifest.tasks['check:docs']).toContain('scripts/check-prose-assertions.ts');
+    expect(manifest.scripts['check:docs']).toContain('scripts/check-prose-assertions.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
   });
 

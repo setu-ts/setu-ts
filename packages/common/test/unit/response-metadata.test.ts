@@ -12,7 +12,9 @@ import type { HandlerResult, IRequestContext, RouteHandler } from '../../src/ind
  * module, with its own module-level constants — the same situation as two
  * copies of this package resolved into one process.
  */
-const secondCopy = await import('../../src/http.ts?copy=2');
+const secondCopy = (await import(
+  '../../src/http.ts?copy=2' as string
+)) as typeof import('../../src/http.ts');
 const firstCopy = await import('../../src/http.ts');
 
 /** The brand only needs a function; the body is never invoked here. */

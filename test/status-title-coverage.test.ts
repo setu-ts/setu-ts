@@ -1,3 +1,4 @@
+import { readdir, readFile } from 'node:fs/promises';
 /**
  * Every status the framework BRANDS must have a `STATUS_TITLES` row.
  *
@@ -21,18 +22,17 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { STATUS_TITLES, statusTitle } from '@setu-ts/exceptions';
 
 /** Recursively collects every `.ts` file under a directory. */
 async function sourceFiles(directory: string): Promise<string[]> {
   const result: string[] = [];
-  for await (const entry of Deno.readDir(directory)) {
+  for await (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       result.push(...(await sourceFiles(path)));
-    } else if (entry.isFile && path.endsWith('.ts')) {
+    } else if (entry.isFile() && path.endsWith('.ts')) {
       result.push(path);
     }
   }
@@ -60,8 +60,8 @@ function brandedStatuses(source: string): number[] {
 
 describe('STATUS_TITLES covers every status the framework brands', () => {
   it('names a canonical title for each branded status', async () => {
-    const packages = (await Array.fromAsync(Deno.readDir('packages'))).filter(
-      (entry) => entry.isDirectory,
+    const packages = (await await readdir('packages', { withFileTypes: true })).filter((entry) =>
+      entry.isDirectory(),
     );
 
     const statuses = new Set<number>();
@@ -74,7 +74,7 @@ describe('STATUS_TITLES covers every status the framework brands', () => {
         continue; // a package without a src/ (a starter directory)
       }
       for (const file of files) {
-        for (const status of brandedStatuses(await Deno.readTextFile(file))) {
+        for (const status of brandedStatuses(await readFile(file, 'utf8'))) {
           statuses.add(status);
           if (!origins.has(status)) origins.set(status, file);
         }

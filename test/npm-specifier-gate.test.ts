@@ -1,3 +1,4 @@
+import { readdir } from 'node:fs/promises';
 /**
  * Repo-wide recurrence gate for computed `import()` specifiers (M70e §3.7).
  *
@@ -9,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { auditPackageSources } from '../scripts/npm-specifier-audit.ts';
 
 /**
@@ -20,12 +20,12 @@ import { auditPackageSources } from '../scripts/npm-specifier-audit.ts';
  */
 async function countTsFilesUnderSrc(dir: string, inSrc = false): Promise<number> {
   let count = 0;
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       if (entry.name === 'node_modules') continue;
       count += await countTsFilesUnderSrc(path, inSrc || entry.name === 'src');
-    } else if (inSrc && entry.isFile && entry.name.endsWith('.ts')) {
+    } else if (inSrc && entry.isFile() && entry.name.endsWith('.ts')) {
       count++;
     }
   }

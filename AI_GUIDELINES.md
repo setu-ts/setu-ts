@@ -370,8 +370,8 @@ Every package must include:
 
 - Package tests import `describe`, `it`, hooks, and `expect` from `vitest` and run through
   `pnpm test` on Node 24.
-- Root tests import `@std/testing/bdd` and `@std/expect` and run through `deno task test` until
-  M111e.
+- Root tests import `vitest` and run in the `tooling` member through `pnpm run test:tooling`.
+  `deno task test` forwards to that member; the named Deno-only root proof stays in the Deno lane.
 - Deno-only package tests keep Vitest-shaped imports; `deno task test:deno-lane` maps those imports
   to the small Deno BDD shim.
 - Use `@setu-ts/testing` for test utilities.
@@ -417,8 +417,9 @@ Every package must include:
 
 `pnpm test` runs each member in two ordered Vitest projects: shared-resource suites with file
 parallelism disabled, followed by the remaining suites in parallel. `deno task test` applies the
-same partition to root tests. [`scripts/test-partition.ts`](scripts/test-partition.ts) is the root
-runner; the classification lives in
+same partition to root tests.
+[`scripts/codemods/node-test-config.ts`](scripts/codemods/node-test-config.ts) configures the
+`tooling` member; the classification lives in
 [`scripts/test-partition-rules.ts`](scripts/test-partition-rules.ts) and is DERIVED on every run —
 there is no list to maintain, and a new suite is classified the moment it is written.
 

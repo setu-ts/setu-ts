@@ -1,3 +1,7 @@
+import ts from 'typescript';
+import { Worker } from 'node:worker_threads';
+import { resolve } from 'node:path';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 /**
  * Shared fence-classification and compilation engine for the M38 guide-fence
  * and decorator-fence compilers.
@@ -14,7 +18,7 @@
  * explicit classification:
  *
  *   - **compile-complete** — standalone Setu-TS code, extracted and
- *     `deno check`ed directly.
+ *     checked through the TypeScript compiler API directly.
  *   - **compile-fragment** — a Setu-TS fragment compiled using a deterministic,
  *     committed prelude that supplies only surrounding declarations/types and
  *     never masks API errors. The prelude imports real exported types and uses
@@ -35,7 +39,7 @@
  *
  * The engine reuses [`scanFences`](../../scripts/check-docs.ts) so fence
  * tracking is CommonMark-faithful, and compiles from a committed-only clean
- * checkout (the snippet import map at `test/fixtures/snippets/deno.json`).
+ * checkout (the snippet import map at `test/fixtures/snippets/tsconfig.json`).
  *
  * @module
  */
@@ -54,10 +58,10 @@ import { scanFences } from '../../../scripts/check-docs.ts';
 export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx', 'jsx']);
 
 /**
- * The file extension a fence must be written to before `deno check` sees it.
+ * The file extension a fence must be written to before the compiler sees it.
  *
  * `.tsx` for a JSX fence, `.ts` otherwise. Load-bearing rather than cosmetic:
- * Deno decides whether to PARSE JSX from the extension, so a fence carrying
+ * The compiler decides whether to parse JSX from the extension, so a fence carrying
  * real JSX written to `.ts` dies with `SyntaxError: Expected ',', got '.'`
  * before type-checking begins. Both fence compilers hardcoded `.ts`, which
  * held only because every `tsx` fence in the corpus happened to contain no JSX
@@ -91,8 +95,8 @@ export const GUIDES = [
   'docs/authorization.md',
 ] as const;
 
-/** The committed snippet import map used for all fence compilation. */
-export const SNIPPET_CONFIG = 'test/fixtures/snippets/deno.json';
+/** The committed snippet compiler configuration used for all fence compilation. */
+export const SNIPPET_CONFIG = 'test/fixtures/snippets/tsconfig.json';
 
 /** The four explicit classifications a TypeScript/TSX fence may receive. */
 export type Classification =
@@ -841,14 +845,14 @@ export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' 
  */
 export async function writeProjectStubs(scratchDir: string): Promise<void> {
   const parent = scratchDir.replace(/\/[^/]+$/, '');
-  await Deno.mkdir(scratchDir, { recursive: true });
+  await mkdir(scratchDir, { recursive: true });
   const source =
     "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
     'export function createApp(): IKernelApplication {\n' +
     '  return createApplication({ plugins: [] });\n' +
     '}\n';
-  await Deno.writeTextFile(`${parent}/setu.config.ts`, source);
-  await Deno.writeTextFile(`${scratchDir}/setu.config.ts`, source);
+  await writeFile(`${parent}/setu.config.ts`, source);
+  await writeFile(`${scratchDir}/setu.config.ts`, source);
 }
 
 /**
@@ -1087,19 +1091,113 @@ export function assembleSource(fence: Fence, classified: ClassifiedFence): strin
 }
 
 /**
- * Invokes `deno check --config <config> <file>` and returns exit code + stderr.
+ * Compiles one fence with the shared strict options. A caller-owned context reuses
+ * unchanged dependency diagnostics across an inventory; each fence gets its own program.
+ * Changed source versions invalidate TypeScript's cache, including negative controls.
  */
-export async function denoCheck(filePath: string): Promise<{ code: number; stderr: string }> {
-  const cmd = new Deno.Command('deno', {
-    args: ['check', '--config', SNIPPET_CONFIG, filePath],
-    stdout: 'null',
-    stderr: 'piped',
-  });
-  const output = await cmd.output();
-  return {
-    code: output.code,
-    stderr: new TextDecoder().decode(output.stderr),
+export async function compileFenceInProcess(
+  filePath: string,
+  context: { builder?: ts.SemanticDiagnosticsBuilderProgram } = {},
+): Promise<{ code: number; stderr: string }> {
+  const input = normaliseFenceSpecifiers(await readFile(filePath, 'utf8'));
+  const config = ts.readConfigFile(SNIPPET_CONFIG, ts.sys.readFile);
+  if (config.error)
+    return { code: 1, stderr: ts.flattenDiagnosticMessageText(config.error.messageText, '\n') };
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, 'test/fixtures/snippets');
+  const options = parsed.options;
+  const host = ts.createIncrementalCompilerHost(options);
+  const read = host.readFile.bind(host);
+  host.readFile = (file) => {
+    return resolve(file) === resolve(filePath) ? input : read(file);
   };
+  const program = ts.createProgram([filePath], options, host, context.builder?.getProgram());
+  const builder = ts.createSemanticDiagnosticsBuilderProgram(program, host, context.builder);
+  context.builder = builder;
+  const diagnostics = [
+    ...parsed.errors,
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...builder.getSyntacticDiagnostics(),
+    ...builder.getSemanticDiagnostics(),
+  ].filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
+  return {
+    code: diagnostics.length ? 1 : 0,
+    stderr: ts.formatDiagnostics(diagnostics, {
+      getCanonicalFileName: (f) => f,
+      getCurrentDirectory: () => process.cwd(),
+      getNewLine: () => '\n',
+    }),
+  };
+}
+
+/**
+ * One compiler thread per caller-owned inventory keeps the unmeasured TypeScript
+ * engine outside the test profiler. Every request still creates its own program,
+ * and the thread caches only unchanged dependency diagnostics. Standalone requests
+ * terminate their thread; inventory threads are unreferenced between requests.
+ */
+export async function compileFence(
+  filePath: string,
+  context?: { worker?: Worker },
+): Promise<{ code: number; stderr: string }> {
+  const worker =
+    context?.worker ??
+    new Worker(new URL('./compiler-worker.ts', import.meta.url), { env: {}, execArgv: [] });
+  if (context) context.worker = worker;
+  worker.ref();
+  try {
+    return await new Promise((resolve, reject) => {
+      const onError = (error: Error): void => {
+        worker.off('message', onMessage);
+        reject(error);
+      };
+      const onMessage = (result: { code: number; stderr: string } | { error: string }): void => {
+        worker.off('error', onError);
+        if ('error' in result) reject(new Error(result.error));
+        else resolve(result);
+      };
+      worker.once('error', onError);
+      worker.once('message', onMessage);
+      worker.postMessage(filePath);
+    });
+  } finally {
+    if (context) worker.unref();
+    else await worker.terminate();
+  }
+}
+
+/** Rewrite only module specifiers, leaving prose strings and comments untouched. */
+export function normaliseFenceSpecifiers(source: string): string {
+  const sf = ts.createSourceFile(
+    'fence.tsx',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const edits: { start: number; end: number; text: string }[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isStringLiteral(node) &&
+      (((ts.isImportDeclaration(node.parent) || ts.isExportDeclaration(node.parent)) &&
+        node.parent.moduleSpecifier === node) ||
+        (ts.isCallExpression(node.parent) &&
+          node.parent.expression.kind === ts.SyntaxKind.ImportKeyword) ||
+        (ts.isLiteralTypeNode(node.parent) && ts.isImportTypeNode(node.parent.parent)))
+    ) {
+      let value = node.text;
+      const match = /^npm:(@[^/]+\/[^@/]+|[^@/]+)(?:@[^/]+)?(\/.*)?$/.exec(value);
+      if (match) value = match[1]! + (match[2] ?? '');
+      value = value.replace(/^@hono\/hono(?=\/|$)/, 'hono');
+      if (value !== node.text)
+        edits.push({ start: node.getStart(sf) + 1, end: node.getEnd() - 1, text: value });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  for (const edit of edits.sort((a, b) => b.start - a.start))
+    source = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
+  return source;
 }
 
 /**
@@ -1108,7 +1206,7 @@ export async function denoCheck(filePath: string): Promise<{ code: number; stder
 export async function allFences(): Promise<readonly ClassifiedFence[]> {
   const out: ClassifiedFence[] = [];
   for (const guide of GUIDES) {
-    const markdown = await Deno.readTextFile(guide);
+    const markdown = await readFile(guide, 'utf8');
     for (const fence of extractFences(guide, markdown)) {
       out.push(classify(fence));
     }

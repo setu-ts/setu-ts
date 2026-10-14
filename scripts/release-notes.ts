@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- this CI script prints the notes it builds. */
 /**
  * Builds the body of a GitHub Release object from `CHANGELOG.md`.
@@ -61,13 +62,13 @@ export function buildReleaseBody(notes: string, version: string): string {
 }
 
 async function main(): Promise<number> {
-  const version = Deno.args[0];
+  const version = process.argv.slice(2)[0];
   if (version === undefined || version === '') {
     console.error('usage: release-notes.ts <version>   (e.g. 0.1.0-alpha.9)');
     return 2;
   }
 
-  const changelog = await Deno.readTextFile('CHANGELOG.md');
+  const changelog = await readFile('CHANGELOG.md', 'utf8');
   const notes = extractReleaseNotes(changelog, version);
   if (notes === null) {
     console.error(`CHANGELOG.md has no '## [${version}]' section.`);
@@ -79,5 +80,8 @@ async function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  Deno.exit(await main());
+  await (async () => {
+    process.exitCode = await main();
+    return;
+  })();
 }

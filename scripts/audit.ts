@@ -1,3 +1,4 @@
+import { run as runProcess } from './lib/run.ts';
 /* eslint-disable no-console -- a CI entry point; `scripts/` is exempt */
 /**
  * `deno audit` with bounded retries for a flaking npm advisories endpoint.
@@ -280,30 +281,23 @@ export async function runAuditLoop(deps: AuditDeps): Promise<number> {
  * @returns The exit code, and whether the deadline killed it
  */
 async function spawnAudit(extra: readonly string[], timeoutMs: number): Promise<AuditRun> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const { code } = await new Deno.Command(Deno.execPath(), {
-      args: ['audit', '--level=high', ...extra],
-      stdout: 'inherit',
-      stderr: 'inherit',
-      signal: controller.signal,
-    }).output();
-    return { code, timedOut: controller.signal.aborted };
-  } finally {
-    clearTimeout(timer);
-  }
+  const { code } = await runProcess('deno', ['audit', '--level=high', ...extra], {
+    inherit: true,
+    timeoutMs,
+  });
+  return { code, timedOut: code === 124 };
 }
 
 if (import.meta.main) {
-  Deno.exit(
-    await runAuditLoop({
+  await (async () => {
+    process.exitCode = await runAuditLoop({
       run: spawnAudit,
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       // Monotonic: this measures an elapsed duration, so a wall-clock jump
       // (an NTP correction mid-job) must not shorten or extend the budget.
       now: () => performance.now(),
       log: (message) => console.log(message),
-    }),
-  );
+    });
+    return;
+  })();
 }

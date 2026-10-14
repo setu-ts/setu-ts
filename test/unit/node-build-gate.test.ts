@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 /**
  * Unit tests for the decidable half of the Node pack-and-boot gate
  * (M111a plan §3.10): the `workspace:` scan and the
@@ -5,8 +6,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   classifyLeg,
   decideOutcome,
@@ -107,7 +107,7 @@ describe('classifyLeg', () => {
 describe('the CI job runs the gate strictly (M111a §3.10)', () => {
   /** The `node-build` job's block of `.github/workflows/ci.yml`. */
   async function nodeBuildJob(): Promise<string> {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const start = workflow.indexOf('\n  node-build:\n');
     expect(start).toBeGreaterThan(-1);
     const next = workflow.slice(start + 1).search(/\n {2}[a-z-]+:\n/);

@@ -20,7 +20,9 @@ import {
   withHttpStatusHint,
 } from '../../src/errors/status-hint.ts';
 
-const secondCopy = await import('../../src/errors/status-hint.ts?copy=2');
+const secondCopy = (await import(
+  '../../src/errors/status-hint.ts?copy=2' as string
+)) as typeof import('../../src/errors/status-hint.ts');
 
 /** The shape `@setu-ts/database-plugin` brands its query-shape refusals with. */
 const NOT_IMPLEMENTED: HttpStatusHint = {

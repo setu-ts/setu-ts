@@ -1,3 +1,5 @@
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFile } from 'node:fs/promises';
 /**
  * Every documented `setu` install command is the one that works.
  *
@@ -11,17 +13,12 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 /** Tracked Markdown files that may carry a current install command. */
 async function documents(): Promise<string[]> {
-  const output = await new Deno.Command('git', {
-    args: ['ls-files', '*.md'],
-    stdout: 'piped',
-  }).output();
-  return new TextDecoder()
-    .decode(output.stdout)
+  const output = await runProcess('git', ['ls-files', '*.md']);
+  return output.stdout
     .split('\n')
     .filter((path) => path !== '' && path !== 'CHANGELOG.md')
     .filter((path) => !path.startsWith('plans/') && !path.startsWith('smoke/'));
@@ -35,7 +32,7 @@ describe('documented setu install command', () => {
     const npm: string[] = [];
     const jsr: string[] = [];
     for (const path of await documents()) {
-      const text = await Deno.readTextFile(path);
+      const text = await readFile(path, 'utf8');
       for (const [index, line] of text.split('\n').entries()) {
         const where = `${path}:${index + 1}: ${line.trim()}`;
         if (/\bdeno install\b/.test(line) && line.includes('jsr:@setu-ts/cli')) jsr.push(where);

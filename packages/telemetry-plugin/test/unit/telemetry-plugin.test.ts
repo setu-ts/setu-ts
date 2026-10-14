@@ -188,7 +188,7 @@ describe('TelemetryPlugin', () => {
       response: {
         snapshot: () => ({
           status: 200,
-          headers: new Headers(responseHeaders) as Headers,
+          headers: new Headers([...responseHeaders]) as Headers,
           body: null,
         }),
         header: (name: string, value: string) => {
@@ -234,7 +234,7 @@ describe('TelemetryPlugin', () => {
       response: {
         snapshot: () => ({
           status: 201,
-          headers: new Headers(responseHeaders) as Headers,
+          headers: new Headers([...responseHeaders]) as Headers,
           body: null,
         }),
         header: (name: string, value: string) => {
@@ -279,7 +279,7 @@ describe('TelemetryPlugin', () => {
       response: {
         snapshot: () => ({
           status: 200,
-          headers: new Headers(responseHeaders) as Headers,
+          headers: new Headers([...responseHeaders]) as Headers,
           body: null,
         }),
         header: (name: string, value: string) => {
@@ -324,7 +324,7 @@ describe('TelemetryPlugin', () => {
       response: {
         snapshot: () => ({
           status: 200,
-          headers: new Headers(responseHeaders) as Headers,
+          headers: new Headers([...responseHeaders]) as Headers,
           body: null,
         }),
         header: (name: string, value: string) => {

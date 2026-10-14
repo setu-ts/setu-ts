@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { DENO_ONLY_SOURCES, NODE_EXCLUDED_TESTS } from '../test-lanes.ts';
 import { isolationReason } from '../test-partition-rules.ts';
 import { sourceExport } from './workspace-sources.ts';
+import { SCRIPT_TARGETS } from '../script-targets.ts';
 
 const root = resolve(import.meta.dirname, '../..');
 export { sourceExport };
@@ -20,10 +21,12 @@ function testFiles(directory: string): string[] {
 export function projectsFor(member: string) {
   const candidates =
     member === 'tooling'
-      ? [...testFiles('test/node'), ...testFiles('scripts/codemods')]
+      ? [...testFiles('test'), ...testFiles('scripts')]
       : testFiles(`${member.replace(/^\.\//, '')}/test`);
   const files = candidates.filter(
-    (file) => !(NODE_EXCLUDED_TESTS as readonly string[]).includes(file),
+    (file) =>
+      !file.startsWith('test/deno-lane/') &&
+      !(NODE_EXCLUDED_TESTS as readonly string[]).includes(file),
   );
   const isolated = files.filter(
     (file) => isolationReason(file, readFileSync(resolve(root, file), 'utf8')) !== null,
@@ -58,6 +61,7 @@ export function configurationFor(member: string) {
           // grants no permission for.
           'scripts/pack-members.ts',
           'scripts/registry-overlay.ts',
+          ...SCRIPT_TARGETS,
         ]
       : [`${member.replace(/^\.\//, '')}/src/**/*.ts`];
 
@@ -101,7 +105,9 @@ export function configurationFor(member: string) {
       // The hook maps it to source exactly as `sourceExport` does here, and a
       // Worker inherits these flags from the fork.
       execArgv: ['--import', new URL('../../test/node-source-register.ts', import.meta.url).href],
-      testTimeout: 30_000,
+      // Deno's former root suite had no default deadline. Full fence inventories
+      // compile hundreds of programs; keep their assertions, with a finite budget.
+      testTimeout: member === 'tooling' ? 600_000 : 30_000,
       hookTimeout: 30_000,
       reporters: ['default', 'json'],
       outputFile: { json: `coverage-node/${member.split('/').pop()}/tests.json` },

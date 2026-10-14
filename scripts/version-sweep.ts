@@ -1,3 +1,6 @@
+import { run as runProcess } from './lib/run.ts';
+import { readFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 /* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Residual-version gate for the sites the other release gates cannot see.
@@ -203,8 +206,8 @@ export function isSweptPath(path: string): boolean {
 /** What {@linkcode trackedFiles} needs back from `git ls-files`. */
 export interface ListOutput {
   readonly success: boolean;
-  readonly stdout: Uint8Array;
-  readonly stderr: Uint8Array;
+  readonly stdout: string;
+  readonly stderr: string;
 }
 
 /** The injectable seam that runs `git ls-files`. */
@@ -212,7 +215,11 @@ export type ListRunner = () => Promise<ListOutput>;
 
 /** Spawns the real `git ls-files`. The one external-I/O line in this module. */
 const runGitLsFiles: ListRunner = () =>
-  new Deno.Command('git', { args: ['ls-files'], stdout: 'piped', stderr: 'piped' }).output();
+  runProcess('git', ['ls-files']).then((result) => ({
+    success: result.code === 0,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  }));
 
 /**
  * Lists the repository's tracked files.
@@ -228,9 +235,9 @@ const runGitLsFiles: ListRunner = () =>
 export async function trackedFiles(run: ListRunner = runGitLsFiles): Promise<readonly string[]> {
   const listed = await run();
   if (!listed.success) {
-    throw new Error(`git ls-files failed: ${new TextDecoder().decode(listed.stderr)}`);
+    throw new Error(`git ls-files failed: ${listed.stderr}`);
   }
-  return new TextDecoder().decode(listed.stdout).split('\n').filter(Boolean);
+  return listed.stdout.split('\n').filter(Boolean);
 }
 
 /**
@@ -252,7 +259,7 @@ export async function sweepTrackedFiles(
   for (const path of candidates) {
     let source: string;
     try {
-      source = await Deno.readTextFile(path);
+      source = await readFile(path, 'utf8');
     } catch (error) {
       // A path git lists but the working tree does not have is ordinary — a
       // deleted-but-staged file, or a `paths` argument naming one. Anything
@@ -261,7 +268,7 @@ export async function sweepTrackedFiles(
       // the vacuity guard would stay green while a stale reference sat in the
       // file that failed to open. This gate's whole failure mode is a silent
       // pass, so a read it cannot perform must be loud.
-      if (error instanceof Deno.errors.NotFound) continue;
+      if (isNotFound(error)) continue;
       throw error;
     }
     filesScanned += 1;
@@ -350,7 +357,7 @@ export async function main(current: string): Promise<boolean> {
  * @returns The `version` field of the kernel manifest
  */
 export async function workspaceVersion(): Promise<string> {
-  const manifest = JSON.parse(await Deno.readTextFile('packages/kernel/deno.json')) as {
+  const manifest = JSON.parse(await readFile('packages/kernel/deno.json', 'utf8')) as {
     version?: string;
   };
   if (manifest.version === undefined || manifest.version.length === 0) {
@@ -359,7 +366,12 @@ export async function workspaceVersion(): Promise<string> {
   return manifest.version;
 }
 
-if (import.meta.main) {
-  const version = Deno.args[0] ?? (await workspaceVersion());
-  Deno.exit((await main(version)) ? 1 : 0);
+/** Repository entry point; returns a status without exiting its caller. */
+export async function runVersionSweepMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const version = args[0] ?? (await workspaceVersion());
+  return (await main(version)) ? 1 : 0;
 }
+
+if (import.meta.main) process.exitCode = await runVersionSweepMain();

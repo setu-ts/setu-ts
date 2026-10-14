@@ -22,7 +22,9 @@ import type { MiddlewareFunction, ValidationTarget } from '../../src/index.ts';
  * situation as two copies of this package resolved into one process (the M64
  * `context-marker-copies` technique).
  */
-const secondCopy = await import('../../src/http.ts?copy=2');
+const secondCopy = (await import(
+  '../../src/http.ts?copy=2' as string
+)) as typeof import('../../src/http.ts');
 
 /** A middleware that does nothing but continue — enough to be branded. */
 function passthrough(): MiddlewareFunction {

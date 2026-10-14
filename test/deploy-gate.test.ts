@@ -1,5 +1,7 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFileSync, readdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   BUILD_MATRIX,
   buildGeneratedImage,
@@ -18,7 +20,7 @@ import {
   SKIP_EXIT_CODE,
 } from '../scripts/check-deploy.ts';
 
-const read = (path: string): string => Deno.readTextFileSync(path);
+const read = (path: string): string => readFileSync(path, 'utf8');
 
 /**
  * Strips comment lines so an assertion is about EFFECTIVE configuration.
@@ -173,8 +175,8 @@ describe('build matrix', () => {
     // The real guard against an example silently falling out of coverage: a new apps/ directory
     // must be classified deliberately.
     const directories: string[] = [];
-    for (const entry of Deno.readDirSync('apps')) {
-      if (entry.isDirectory) directories.push(entry.name);
+    for (const entry of readdirSync('apps', { withFileTypes: true })) {
+      if (entry.isDirectory()) directories.push(entry.name);
     }
     const classified = new Set([
       ...BUILD_MATRIX.map((target) => target.app),
@@ -300,22 +302,12 @@ describe('skip contract', () => {
     // a hard FAILED and CI could not tell "tool missing" from "gate genuinely failed".
     //
     // PATH is narrowed to Deno's own directory so `helm` cannot be found while `deno` still can.
-    const denoDir = Deno.execPath().replace(/\/[^/]+$/, '');
-    const result = await new Deno.Command(Deno.execPath(), {
-      args: [
-        'run',
-        '--allow-read',
-        '--allow-write',
-        '--allow-run',
-        '--allow-env',
-        'scripts/check-deploy.ts',
-        '--render',
-      ],
-      env: { PATH: denoDir },
-      clearEnv: true,
-      stdout: 'piped',
-      stderr: 'piped',
-    }).output();
+    const denoDir = process.execPath.replace(/\/[^/]+$/, '');
+    const result = await runProcess(
+      process.execPath,
+      ['--import', './test/node-source-register.ts', 'scripts/check-deploy.ts', '--render'],
+      { env: { ...process.env, ...{ PATH: denoDir } } },
+    );
 
     expect(result.code).toBe(SKIP_EXIT_CODE);
   });
@@ -358,7 +350,7 @@ describe('generated mode (M95a)', () => {
     // see its own allowlist grow. CI runs this gate (`deno task check:deploy`)
     // with no skip allowance at all — a skip must surface as exit 77, never as
     // a listed name.
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const allowSkip = /ALLOW_SKIP:\s*(.+)/.exec(workflow)?.[1] ?? '';
     expect(allowSkip).not.toContain('generated');
   });
@@ -439,12 +431,12 @@ describe('generated deployment install ordering', () => {
     // and the image's own install step through the build argument.
     const env = { NPM_CONFIG_REGISTRY: REGISTRY };
     expect(calls[0]).toEqual({
-      command: [Deno.execPath(), 'install'],
+      command: [process.execPath, 'install'],
       cwd: '/workspace/acme',
       env,
     });
     expect(calls[1]).toEqual({
-      command: [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+      command: [process.execPath, 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
       cwd: '/workspace/acme',
       env,
     });
@@ -479,7 +471,7 @@ describe('generated deployment install ordering', () => {
       },
     );
     expect(result).toBe(failure);
-    expect(commands).toEqual([[Deno.execPath(), 'install']]);
+    expect(commands).toEqual([[process.execPath, 'install']]);
   });
 
   it('never builds an image after entry point caching fails', async () => {
@@ -498,8 +490,8 @@ describe('generated deployment install ordering', () => {
     );
     expect(result).toBe(failure);
     expect(commands).toEqual([
-      [Deno.execPath(), 'install'],
-      [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+      [process.execPath, 'install'],
+      [process.execPath, 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
     ]);
   });
 });

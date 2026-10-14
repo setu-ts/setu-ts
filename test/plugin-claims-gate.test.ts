@@ -1,3 +1,4 @@
+import { readdir, stat, readFile } from 'node:fs/promises';
 /**
  * Drift gate for the CLI's health-indicator claim table (M70g — register row A1).
  *
@@ -14,8 +15,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import { PLUGIN_HEALTH_INDICATORS } from '../packages/cli/src/utils/plugin-claims.ts';
 
@@ -62,9 +62,9 @@ const DERIVED_SITES: ReadonlyMap<string, readonly DerivedSite[]> = new Map([
 /** Recursively lists every `.ts` file under `dir`, workspace-relative. */
 async function listTsFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
-    if (entry.isFile && entry.name.endsWith('.ts')) out.push(`${dir}/${entry.name}`);
-    else if (entry.isDirectory) out.push(...(await listTsFiles(`${dir}/${entry.name}`)));
+  for await (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.ts')) out.push(`${dir}/${entry.name}`);
+    else if (entry.isDirectory()) out.push(...(await listTsFiles(`${dir}/${entry.name}`)));
   }
   return out;
 }
@@ -121,16 +121,16 @@ function checkDerivedSites(
 /** Collects every registration site across the package sources. */
 async function collectSites(): Promise<Site[]> {
   const sites: Site[] = [];
-  for await (const pkg of Deno.readDir('packages')) {
-    if (!pkg.isDirectory || NON_PLUGIN_PACKAGES.has(pkg.name)) continue;
+  for await (const pkg of await readdir('packages', { withFileTypes: true })) {
+    if (!pkg.isDirectory() || NON_PLUGIN_PACKAGES.has(pkg.name)) continue;
     const srcDir = `packages/${pkg.name}/src`;
     try {
-      await Deno.stat(srcDir);
+      await stat(srcDir);
     } catch {
       continue;
     }
     for (const file of await listTsFiles(srcDir)) {
-      sites.push(...sitesIn(pkg.name, file, await Deno.readTextFile(file)));
+      sites.push(...sitesIn(pkg.name, file, await readFile(file, 'utf8')));
     }
   }
   return sites;
