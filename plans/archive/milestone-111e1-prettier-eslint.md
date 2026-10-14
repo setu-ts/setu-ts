@@ -209,18 +209,18 @@ the rules the current gates enforce carried across, while every other gate keeps
 
 ## 5. Implementation files
 
-| File                                             | Purpose                                                                                                                                                                          |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.prettierrc.json`, `.prettierignore`            | §3.1                                                                                                                                                                             |
-| `eslint.config.mjs`                              | §3.2                                                                                                                                                                             |
-| `scripts/codemods/deno-lint-ignore-to-eslint.ts` | §3.3                                                                                                                                                                             |
-| `.git-blame-ignore-revs`                         | §3.1                                                                                                                                                                             |
-| `scripts/node-manifests.ts`                      | §3.5 — root scripts and dev dependencies `prettier`, `eslint`, `@eslint/js`, `typescript-eslint`, `@eslint/compat`, `@eslint-community/eslint-plugin-eslint-comments`, `globals` |
-| `package.json`, `pnpm-lock.yaml`                 | regenerated / installed                                                                                                                                                          |
-| `deno.json`                                      | §3.4, §3.5 — tasks re-pointed; `lint` block and `fmt.exclude` removed                                                                                                            |
-| `.github/workflows/drift.yml`                    | §3.5 guards                                                                                                                                                                      |
-| `docs/health-indicators.md`                      | §3.1 reconciliation                                                                                                                                                              |
-| `ROADMAP.md`                                     | C1, C2                                                                                                                                                                           |
+| File                                             | Purpose                                                                                                                                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.prettierrc.json`, `.prettierignore`            | §3.1                                                                                                                                                                                       |
+| `eslint.config.mjs`                              | §3.2                                                                                                                                                                                       |
+| `scripts/codemods/deno-lint-ignore-to-eslint.ts` | §3.3                                                                                                                                                                                       |
+| `.git-blame-ignore-revs`                         | §3.1                                                                                                                                                                                       |
+| `scripts/node-manifests.ts`                      | §3.5 — root scripts and dev dependencies `prettier`, `eslint`, `@eslint/js`, `typescript-eslint`, `@eslint/compat`, `@eslint-community/eslint-plugin-eslint-comments`, `globals`, `espree` |
+| `package.json`, `pnpm-lock.yaml`                 | regenerated / installed                                                                                                                                                                    |
+| `deno.json`                                      | §3.4, §3.5 — tasks re-pointed; `lint` block and `fmt.exclude` removed                                                                                                                      |
+| `.github/workflows/drift.yml`                    | §3.5 guards                                                                                                                                                                                |
+| `docs/health-indicators.md`                      | §3.1 reconciliation                                                                                                                                                                        |
+| `ROADMAP.md`                                     | C1, C2                                                                                                                                                                                     |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -228,7 +228,8 @@ the rules the current gates enforce carried across, while every other gate keeps
 | ----------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `scripts/codemods/deno-lint-ignore-to-eslint.test.ts` | `scripts/codemods/deno-lint-ignore-to-eslint.ts` | each directive form converts; reason preserved; file-level form; multi-rule list mapped element-wise; `ban-types` → `no-unsafe-function-type`; `ban-unused-ignore` dropped; unmapped rule refused naming file and line; idempotent |
 | `test/node/eslint-config.test.ts`                     | `eslint.config.mjs` (behaviour)                  | §3.2 test home: every carried rule reports on its planted snippet; the `_` escape, ignores and `.mjs` globals hold                                                                                                                 |
-| `test/unit/node-manifests.test.ts`                    | `scripts/node-manifests.ts`                      | root `package.json` carries the three scripts and seven dev dependencies                                                                                                                                                           |
+| `test/unit/node-manifests.test.ts`                    | `scripts/node-manifests.ts`                      | root `package.json` carries the three scripts and eight dev dependencies                                                                                                                                                           |
+| `test/node/prettier-config.test.ts`                   | `.prettierrc.json` (behaviour)                   | an `html` template's contents are left verbatim in a code file and in a Markdown fence (added after the Node suite and the code review found embedded formatting rewriting them)                                                   |
 | `test/dependency-drift-gate.test.ts`                  | `drift.yml`                                      | updated guard assertion (§3.5)                                                                                                                                                                                                     |
 | existing full suites (Node, Deno lane, root)          | everything reformatted                           | green after the reconciliation commit — the evidence that formatting changed no behaviour                                                                                                                                          |
 
@@ -271,7 +272,9 @@ All of it runs after the reconciliation commit, never between it and the reforma
   (the `verbatim-module-syntax` rule name, `deno-lint-ignore` directives, the scripts exemption
   (C3), "do not underscore-prefix" while `^_` is the kept escape, "run `deno fmt`"), its note that
   the gates cannot catch `new Function` (the restricted-syntax rule now does), and
-  `AI_GUIDELINES.md` §11–§12's formatter/linter naming and `deno-lint-ignore` instructions. Comments
-  that describe the SDK generator's `deno fmt` target stay true and are left alone.
+  `AI_GUIDELINES.md` §11–§12's formatter/linter naming and `deno-lint-ignore` instructions,
+  `ARCHITECTURE.md`'s "custom `deno lint` plugin rule" for the runtime-import ban, and the
+  `.roo/skills/verify-milestone` grep note. Comments that describe the SDK generator's `deno fmt`
+  target stay true and are left alone.
 - The website workflow and `website/` keep their own Deno `fmt`/`lint` tasks (`website.yml:37`,
   `website/deno.json:16`) until the website moves.

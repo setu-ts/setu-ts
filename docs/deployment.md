@@ -131,11 +131,11 @@ helm install setu k8s/chart --namespace setu --create-namespace \
 The two never disagree: `deno task check:deploy --render` re-renders and fails on any difference,
 and `deno task deploy:render` regenerates the committed copy.
 
-Both directories are in `deno.json`'s `fmt.exclude`, for different reasons. `k8s/chart/templates` is
-not valid YAML before rendering — `{{ }}` and block conditionals — so `deno fmt` cannot parse it at
-all. `k8s/manifests` is a **generated artifact** compared byte-for-byte against `helm template`
-output; formatting it would put the formatter and the render gate in a fight over the same file,
-each undoing the other.
+Both directories are in `.prettierignore`, for different reasons. `k8s/chart/templates` is not valid
+YAML before rendering — `{{ }}` and block conditionals — so a formatter cannot parse it at all.
+`k8s/manifests` is a **generated artifact** compared byte-for-byte against `helm template` output;
+formatting it would put the formatter and the render gate in a fight over the same file, each
+undoing the other.
 
 ### The manifests pin their namespace
 

@@ -13,7 +13,7 @@ on the `chore/website` branch.
   and the reason this works on machines without a global npm binary. The Deno
   tasks run Astro and Pagefind with Node after installation so their transitive
   npm dependencies use Node's package resolver rather than Deno's import map.
-- The root `deno.json` excludes `website/` from `deno fmt` and `deno lint`; the
+- The repository's Prettier and ESLint configs ignore `website/`; the
   site is governed by its own gates (build-time dead-link check, Lighthouse
   assertions).
 - `../docs/` is the **sole canonical documentation source** and a read-only
