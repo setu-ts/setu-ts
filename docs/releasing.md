@@ -1,10 +1,10 @@
 # Releasing to npm
 
 The npm publisher ships all 52 workspace members as `@setu-ts/*`. M111c builds the machinery; it
-publishes nothing. The first real npm release, `v0.9.0`, waits for M111d's npm scaffolding. Existing
-versions through `0.8.0` remain on JSR. npm versions cannot be reused.
+publishes nothing. `v0.9.0` was the first npm release. Existing versions through `0.8.0` remain on
+JSR. npm versions cannot be reused.
 
-## One-time setup — at the cut, after M111d
+## One-time setup — the first npm publish
 
 The `@setu-ts` npm organization was claimed on 2026-10-10 by `dkpaul91`. Create the GitHub `npm`
 environment with the maintainer as required reviewer, and set its deployment branches and tags to
@@ -27,13 +27,33 @@ no session outlives a sitting.
    ```fish
    deno task release:placeholders
    for dir in .tmp/npm-placeholders/*
-       read -P "2FA code for $dir: " otp
-       npm publish "$dir" --tag bootstrap --access public --ignore-scripts --otp "$otp"; or break
+       set name (node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).name" "$dir/package.json")
+       npm view "$name" name >/dev/null 2>&1; and continue
+       npm publish "$dir" --tag bootstrap --access public --ignore-scripts; or break
    end
    ```
 
-   The placeholders only create names. Inspect the output first; it contains no framework code. A
-   partial run can be resumed by publishing only missing names, checked with `npm view`.
+   The placeholders only create names. Inspect the output first; it contains no framework code. The
+   loop skips names that already exist, so rerunning it resumes a partial run.
+
+   Lessons from the `v0.9.0` bootstrap (52 packages, 2026-10-13/14):
+
+   - **npm limits each account to about 25 new packages per 24 hours.** Spacing the publishes out
+     does not help. Plan to create the names over two days, or have a second organization member
+     with publish rights create the remainder; remove that member from the organization afterwards.
+     The limit applies only to creating a package, not to new versions of existing ones.
+   - **With a passkey or security key as the second factor there is no one-time code.** npm opens a
+     browser approval for each publish, so drop `--otp`. When the limit is hit, the approval is
+     consumed by the refused attempt and npm reports `EOTP`; that `EOTP` hides a `429`, and retrying
+     at once only fails again.
+   - **A granular access token with "bypass 2FA" publishes without a browser approval per package.**
+     Pass it through a config file rather than the environment, for example
+     `npm publish … --userconfig /path/to/npmrc`, where the file holds
+     `//registry.npmjs.org/:_authToken=${NPM_TOKEN}`. Give it a one-day expiry and revoke it when
+     the bootstrap ends. npm is restricting 2FA-bypassing tokens from August 2026, so do not rely on
+     this path for later bootstraps. A publish with no credentials at all answers `404`, not `401`.
+   - **npm adds a `0.0.0-stage` version to each new package.** Deprecate it with the placeholder in
+     step 4.
 
 2. Prepare the reviewed `0.9.0` release tree before configuring trust. Then configure all 52
    packages immediately before tagging. npm's 2FA skip window covers a scripted trust loop:
@@ -60,9 +80,13 @@ no session outlives a sitting.
    for dir in .tmp/npm-placeholders/*
        set name (node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).name" "$dir/package.json")
        npm deprecate "$name@0.0.0-bootstrap.0" 'Name placeholder; install 0.9.0 or later.'; or break
+       npm deprecate "$name@0.0.0-stage" 'Registry placeholder; install 0.9.0 or later.'
        npm dist-tag rm "$name" bootstrap; or break
    end
    ```
+
+   The `0.0.0-stage` line has no `or break`: a package may not carry that version, and its absence
+   is not a failure.
 
    In every package's publishing-access settings, select **Require two-factor authentication and
    disallow tokens**. This leaves trusted publishing working. Then run `npm logout`. From here on no
@@ -202,11 +226,14 @@ holds, stale internal ranges, missing metadata and missing `dist` or `src` file 
 retries resume. A prerelease uses tag `next`; an ordinary release uses `latest`.
 
 `release:verify` checks version sites, source `workspace:^` ranges, release-list coverage, non-stub
-exports, non-empty READMEs, manifest metadata, release assets, changelog PRs and release shape.
-JSR's slow-type dry run is replaced by `tsc -b` with `isolatedDeclarations`; the `@module`-first
-rule is retired because npm renders README.md. The `@since` gate reads JSR through 0.8.x and later
-claims from npm tarball `package/src/` sources. `check:versions` still catches stale specifiers
-outside manifests; fixtures remain data.
+exports, non-empty READMEs, manifest metadata, release assets, changelog PRs and release shape. The
+changelog PR check exempts the release PR for the version being verified (`release/v<version>`): its
+source changes are the version bump, and the section it would have to name is the release itself.
+Without the exemption the check passes on the release PR, which is not merged yet, and fails on the
+tag (#452). JSR's slow-type dry run is replaced by `tsc -b` with `isolatedDeclarations`; the
+`@module`-first rule is retired because npm renders README.md. The `@since` gate reads JSR through
+0.8.x and later claims from npm tarball `package/src/` sources. `check:versions` still catches stale
+specifiers outside manifests; fixtures remain data.
 
 ### 3. Merge, tag, and let CI publish
 
