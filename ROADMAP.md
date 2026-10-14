@@ -13063,9 +13063,10 @@ brief before it); this section carries the mechanism, which is the durable half.
 **Method.**
 
 1. **Cold start against the published packages** (Part 6's rule): the agent has the brief, the
-   public docs and jsr.io, and nothing from this repository's history. It scaffolds with the CLI and
-   records the Part 14 table — what the CLI wrote versus what was hand-written, every document
-   consulted and whether it misled, every failed attempt, and wall-clock per step. That table is the
+   public docs and npmjs.com (`0.9.0` is published to npm only), and nothing from this repository's
+   history. It scaffolds with the CLI and records the **M104 delivery ledger** (a named section of
+   `smoke/EXERCISES.md`) — what the CLI wrote versus what was hand-written, every document consulted
+   and whether it misled, every failed attempt, and wall-clock per step. That ledger is the
    delivery-speed baseline; later runs of the same brief against later releases are compared against
    it.
 2. **Build to the brief's definition of done**, not to a probe: the acceptance criteria are executed
@@ -13085,9 +13086,9 @@ brief before it); this section carries the mechanism, which is the durable half.
 measure if any acceptance criterion cannot be met without changing framework source, or if the
 outage or security pass finds a High. It fails as a speed measure if the hand-written share of the
 application's own wiring exceeds what Part 14 measured for X60 (~100 of 144 lines were the
-diagnostics options M101g's no-row deliverable removes), or if any single step in the table exceeds
-the brief's deadline budget for it. Those thresholds are the first ones written down; the next run
-revises them against this one's table.
+diagnostics options M101g's no-row deliverable removes), if any single step exceeds the brief's
+budget for it by more than 50%, or if the whole build exceeds the brief's 16-hour total. Those
+thresholds are the first ones written down; the next run revises them against this one's ledger.
 
 **Dependencies.** Runs AFTER the `v0.9.0` cut (the brief targets published artifacts) and after
 M101g (the browser harness it uses for UI acceptance). M101c and M101e–h closing first is preferred
@@ -13097,11 +13098,12 @@ re-filed.
 **Deliverables**
 
 - [ ] `smoke/v0.9.0/CLIENT-BRIEF.md` — the brief, with acceptance criteria and the deadline budget
-- [ ] The product built cold against `0.9.0`, with the Part 14 delivery table completed
+- [ ] The product built cold against `0.9.0`, with the M104 delivery ledger completed
 - [ ] Acceptance criteria executed from a browser and from a generated partner client
 - [ ] Outage pass and a fresh-agent security pass against the deployed product
 - [ ] V9-rows in `smoke/DEFECTS.md`, grouped by shape into closeout letters, plus the generator-gap
-      list and the delivery-speed baseline recorded in `smoke/EXERCISES.md` Part 15
+      list and the delivery-speed baseline recorded in the M104 delivery ledger in
+      `smoke/EXERCISES.md`
 
 ---
 
