@@ -42,11 +42,7 @@ import type { IRequestContext } from '@setu-ts/common';
 import { renderView } from '@setu-ts/view-plugin';
 
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>
-    {props.users.map((user) => (
-      <li>{user}</li>
-    ))}
-  </ul>
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
 );
 
 export function usersRoute(ctx: IRequestContext) {
@@ -63,11 +59,7 @@ import { ViewPlugin } from '@setu-ts/view-plugin';
 // JSX escapes every interpolation. A plain
 // `(props) => \`<li>${user}</li>\`` template would NOT — see Escaping below.
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>
-    {props.users.map((user) => (
-      <li>{user}</li>
-    ))}
-  </ul>
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
 );
 
 @Controller('/pages')
@@ -127,18 +119,20 @@ interface TaskFormProps {
 // JSX escapes every interpolation. This component redisplays a REJECTED
 // submission, so `props.values.title` is attacker-controlled by definition.
 const TaskForm = (props: TaskFormProps) => (
-  <form method="post" action="/tasks">
-    <input name="title" value={props.values.title} />
+  <form method='post' action='/tasks'>
+    <input name='title' value={props.values.title} />
     {String(props.errors.title ?? '')}
   </form>
 );
 
 /** Reads both form encodings, including custom requests without `formData()`. */
 async function readForm(ctx: IRequestContext): Promise<Record<string, string>> {
-  const form =
-    ctx.request.formData === undefined
-      ? parseFormBody(await ctx.request.bytes(), ctx.request.headers.get('content-type'))
-      : await ctx.request.formData();
+  const form = ctx.request.formData === undefined
+    ? parseFormBody(
+      await ctx.request.bytes(),
+      ctx.request.headers.get('content-type'),
+    )
+    : await ctx.request.formData();
   const out: Record<string, string> = {};
   for (const [key, value] of form.entries()) {
     if (typeof value === 'string') out[key] = value;
@@ -187,8 +181,8 @@ interface TaskFormProps {
 }
 
 const TaskForm = (props: TaskFormProps) => (
-  <form method="post" action="/tasks">
-    <input name="title" value={props.values.title} />
+  <form method='post' action='/tasks'>
+    <input name='title' value={props.values.title} />
     {String(props.errors.title ?? '')}
   </form>
 );
@@ -355,12 +349,11 @@ es.onmessage = (e) => { if (e.data < '9') console.log(e.data); };`;
 
 // UNCHECKED-EXEMPT: raw() wraps the module-level CLIENT constant, not a prop —
 // nothing user-controlled reaches raw(), so the probe's stub hides nothing.
-export const Page = () => html`
-  <div id="log"></div>
-  <script>
-    ${raw(CLIENT)};
-  </script>
-`;
+export const Page = () =>
+  html`
+    <div id="log"></div>
+    <script>${raw(CLIENT)}</script>
+  `;
 ```
 
 The JSX arm has the identical trap in its own spelling — `<script>{CLIENT}</script>` escapes the

@@ -178,10 +178,11 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { renderView, ViewPlugin } from '@setu-ts/view-plugin';
 import { LocalizationPlugin, localizerFor } from '@setu-ts/localization-plugin';
 
-const Cart = (props: { readonly title: string; readonly summary: string }) => html`
-  <h1>${props.title}</h1>
-  <p>${props.summary}</p>
-`;
+const Cart = (props: { readonly title: string; readonly summary: string }) =>
+  html`
+    <h1>${props.title}</h1>
+    <p>${props.summary}</p>
+  `;
 
 const app = createApplication({
   plugins: [
@@ -253,17 +254,14 @@ import type { MessageCatalogue } from '@setu-ts/common';
 
 const supported = ['en', 'de'];
 const locale = negotiateLocale(navigator.languages, supported) ?? 'en';
-const { messages } = (await (await fetch(`/i18n/${locale}`)).json()) as {
+const { messages } = await (await fetch(`/i18n/${locale}`)).json() as {
   readonly messages: MessageCatalogue;
 };
 
 const greeting = messages.greeting;
-const text =
-  greeting === undefined
-    ? ''
-    : format(greeting, { name: 'Ada' }, locale, {
-        timeZone: 'Europe/Berlin',
-      });
+const text = greeting === undefined ? '' : format(greeting, { name: 'Ada' }, locale, {
+  timeZone: 'Europe/Berlin',
+});
 ```
 
 The route serves only supported locales, each overlaid on the default locale's messages so a partial

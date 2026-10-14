@@ -18,29 +18,23 @@ import { MailPlugin } from '@setu-ts/mail-plugin';
 import { MailPlugin } from '@setu-ts/mail-plugin';
 import { CAPABILITIES, type IMailer } from '@setu-ts/common';
 
-app.register(
-  MailPlugin({
-    provider: 'sendgrid',
-    options: { apiKey: process.env.SENDGRID_API_KEY! },
-    defaults: { from: 'no-reply@example.com' },
-    templates: {
-      welcome: { html: '<p>Hello {{ name }}</p>' },
-    },
-  }),
-);
+app.register(MailPlugin({
+  provider: 'sendgrid',
+  options: { apiKey: process.env.SENDGRID_API_KEY! },
+  defaults: { from: 'no-reply@example.com' },
+  templates: {
+    welcome: { html: '<p>Hello {{ name }}</p>' },
+  },
+}));
 
 const mailer = app.services.get<IMailer>(CAPABILITIES.MAIL);
 
 await mailer.send({ to: 'ada@example.com', subject: 'Hi', text: 'Hello' });
 
 // `subject` is required on sendTemplate; the template supplies the body.
-await mailer.sendTemplate(
-  'welcome',
-  { to: 'ada@example.com', subject: 'Welcome' },
-  {
-    name: 'Ada',
-  },
-);
+await mailer.sendTemplate('welcome', { to: 'ada@example.com', subject: 'Welcome' }, {
+  name: 'Ada',
+});
 ```
 
 ## Options
@@ -90,10 +84,11 @@ interface WelcomeProps {
 }
 
 // The `html` tag escapes `name` and `plan`; a JSX component would too.
-const WelcomeHtml = (p: WelcomeProps) => html`
-  <h1>Welcome ${p.name}</h1>
-  <p>You are on the ${p.plan} plan.</p>
-`;
+const WelcomeHtml = (p: WelcomeProps) =>
+  html`
+    <h1>Welcome ${p.name}</h1>
+    <p>You are on the ${p.plan} plan.</p>
+  `;
 const WelcomeText = (p: WelcomeProps) => `Welcome ${p.name}. You are on the ${p.plan} plan.`;
 
 const app = createApplication({
@@ -111,14 +106,10 @@ const app = createApplication({
 await app.start();
 
 const mailer = app.services.get<IMailer>(CAPABILITIES.MAIL);
-await mailer.sendTemplate(
-  'welcome',
-  { to: 'ada@example.com', subject: 'Welcome' },
-  {
-    name: 'Ada',
-    plan: 'team',
-  },
-);
+await mailer.sendTemplate('welcome', { to: 'ada@example.com', subject: 'Welcome' }, {
+  name: 'Ada',
+  plan: 'team',
+});
 ```
 
 Two things differ from the string arm. Escaping is the rendering runtime's: an `html` template and a
