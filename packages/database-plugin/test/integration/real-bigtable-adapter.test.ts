@@ -93,7 +93,10 @@ async function rawClient(): Promise<any> {
 async function provision(table: string, families: readonly string[]): Promise<string> {
   const client = await rawClient();
   try {
-    await client.instance(instanceId).table(table).create({ families: [...families] });
+    await client
+      .instance(instanceId)
+      .table(table)
+      .create({ families: [...families] });
   } catch (error) {
     // `6 ALREADY_EXISTS` is the only tolerable failure here.
     if ((error as { code?: number }).code !== 6) throw error;
@@ -125,73 +128,90 @@ async function connect(
 }
 
 describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
-  it('M105 conditional writes ignore retained historical matches and persist current matches', {
-    skip: skipReal,
-  }, async () => {
-    const tableId = await provision(`conditional_${suffix}`, ['cf']);
-    const adapter = await connect({ Row: { table: tableId } });
-    const raw = await rawClient();
-    try {
-      const source = adapter.createDataSource('Row');
-      await conditionalContract(
-        source,
-        'simple',
-        'missing',
-        { id: 'simple', tenant_id: 'a', name: 'old' },
-        { tenant_id: 'a' },
-        { name: 'new' },
-      );
-      const table = raw.instance(instanceId).table(tableId);
-      for (const operation of ['update', 'delete'] as const) {
-        await table.insert([{
-          key: operation,
-          data: {
-            cf: {
-              id: { value: `s:${operation}`, timestamp: new Date(1000) },
-              tenant_id: { value: 's:a', timestamp: new Date(1000) },
-              status: { value: 's:pending', timestamp: new Date(1000) },
-              name: { value: 's:secret', timestamp: new Date(1000) },
-            },
-          },
-        }]);
-        await table.insert([{
-          key: operation,
-          data: {
-            cf: {
-              tenant_id: { value: 's:b', timestamp: new Date(2000) },
-              status: { value: 's:sent', timestamp: new Date(2000) },
-            },
-          },
-        }]);
-        const [native] = await table.row(operation).get();
-        expect(native.data.cf.tenant_id).toHaveLength(2);
-        const before = await source.findById(operation);
-        const result = operation === 'update'
-          ? await source.updateWhere!(operation, { tenant_id: 'a', status: 'pending' }, {
-            name: 'historical-write',
-          })
-          : await source.deleteWhere!(operation, { tenant_id: 'a', status: 'pending' });
-        const readBack = await source.findById(operation);
-        expect({ result, readBack }).toEqual({
-          result: operation === 'update' ? null : false,
-          readBack: before,
-        });
-        expect(
-          operation === 'update'
-            ? await source.updateWhere!(operation, { tenant_id: 'b', status: 'sent' }, {
-              name: 'current-write',
-            })
-            : await source.deleteWhere!(operation, { tenant_id: 'b', status: 'sent' }),
-        ).toBeTruthy();
-        expect(await source.findById(operation)).toEqual(
-          operation === 'update' ? { ...before, name: 'current-write' } : null,
+  it(
+    'M105 conditional writes ignore retained historical matches and persist current matches',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const tableId = await provision(`conditional_${suffix}`, ['cf']);
+      const adapter = await connect({ Row: { table: tableId } });
+      const raw = await rawClient();
+      try {
+        const source = adapter.createDataSource('Row');
+        await conditionalContract(
+          source,
+          'simple',
+          'missing',
+          { id: 'simple', tenant_id: 'a', name: 'old' },
+          { tenant_id: 'a' },
+          { name: 'new' },
         );
+        const table = raw.instance(instanceId).table(tableId);
+        for (const operation of ['update', 'delete'] as const) {
+          await table.insert([
+            {
+              key: operation,
+              data: {
+                cf: {
+                  id: { value: `s:${operation}`, timestamp: new Date(1000) },
+                  tenant_id: { value: 's:a', timestamp: new Date(1000) },
+                  status: { value: 's:pending', timestamp: new Date(1000) },
+                  name: { value: 's:secret', timestamp: new Date(1000) },
+                },
+              },
+            },
+          ]);
+          await table.insert([
+            {
+              key: operation,
+              data: {
+                cf: {
+                  tenant_id: { value: 's:b', timestamp: new Date(2000) },
+                  status: { value: 's:sent', timestamp: new Date(2000) },
+                },
+              },
+            },
+          ]);
+          const [native] = await table.row(operation).get();
+          expect(native.data.cf.tenant_id).toHaveLength(2);
+          const before = await source.findById(operation);
+          const result =
+            operation === 'update'
+              ? await source.updateWhere!(
+                  operation,
+                  { tenant_id: 'a', status: 'pending' },
+                  {
+                    name: 'historical-write',
+                  },
+                )
+              : await source.deleteWhere!(operation, { tenant_id: 'a', status: 'pending' });
+          const readBack = await source.findById(operation);
+          expect({ result, readBack }).toEqual({
+            result: operation === 'update' ? null : false,
+            readBack: before,
+          });
+          expect(
+            operation === 'update'
+              ? await source.updateWhere!(
+                  operation,
+                  { tenant_id: 'b', status: 'sent' },
+                  {
+                    name: 'current-write',
+                  },
+                )
+              : await source.deleteWhere!(operation, { tenant_id: 'b', status: 'sent' }),
+          ).toBeTruthy();
+          expect(await source.findById(operation)).toEqual(
+            operation === 'update' ? { ...before, name: 'current-write' } : null,
+          );
+        }
+      } finally {
+        await adapter.disconnect();
+        await raw.close();
       }
-    } finally {
-      await adapter.disconnect();
-      await raw.close();
-    }
-  });
+    },
+  );
   it('lazily imports the SDK and reads every CRUD write back', { skip: skipReal }, async () => {
     const table = await provision(`crud_${suffix}`, ['cf']);
     const adapter = await connect({ User: { table } });
@@ -238,8 +258,11 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     try {
       const orders = adapter.createDataSource('Order');
       await orders.create({ tenantId: 't1', orderId: 'a9', total: 42 });
-      expect(await orders.findById({ tenantId: 't1', orderId: 'a9' }))
-        .toEqual({ tenantId: 't1', orderId: 'a9', total: 42 });
+      expect(await orders.findById({ tenantId: 't1', orderId: 'a9' })).toEqual({
+        tenantId: 't1',
+        orderId: 'a9',
+        total: 42,
+      });
 
       // The PHYSICAL row key, read through the raw SDK: the composition is a
       // wire fact, not an internal detail, because an existing table's keys
@@ -252,194 +275,227 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
       // A scalar cannot say which of two fields it is.
       await expect(orders.findById('a9')).rejects.toThrow(/needs a record naming every field/);
       // And a value carrying the separator would collide with another key.
-      await expect(orders.create({ tenantId: 't#1', orderId: 'b', total: 1 }))
-        .rejects.toThrow(/contains the '#' separator/);
+      await expect(orders.create({ tenantId: 't#1', orderId: 'b', total: 1 })).rejects.toThrow(
+        /contains the '#' separator/,
+      );
     } finally {
       await adapter.disconnect();
     }
   });
 
-  it('honours the EXCLUSIVE range boundary the SDK shorthand gets wrong', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`range_${suffix}`, ['cf']);
-    const adapter = await connect({
-      Item: { table, rowKey: { fields: ['tenant', 'id'] } },
-    });
-    try {
-      const items = adapter.createDataSource('Item');
-      for (const tenant of ['t1', 't2']) {
-        for (const id of ['a', 'b']) await items.create({ tenant, id, n: `${tenant}-${id}` });
-      }
-      // The prefix range for `t1` ends at the EXCLUSIVE successor of `t1#`, so
-      // it must not spill into `t2`.
-      const rows = await items.findAll(query({ where: { tenant: 't1' } }));
-      expect(rows.map((r) => r.n)).toEqual(['t1-a', 't1-b']);
-
-      // And the boundary itself, pinned against the service. This is the P4
-      // trap in the sharpest form available: the SAME logical range, expressed
-      // through the SDK's `{ start, end }` SHORTHAND, returns one row too many
-      // because that form is inclusive at BOTH ends. The adapter never builds
-      // it, and this is what proves the explicit form is the one that works.
-      const loader = createLazyBigtableLoader({
-        projectId,
-        apiEndpoint: endpoint as string,
+  it(
+    'honours the EXCLUSIVE range boundary the SDK shorthand gets wrong',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`range_${suffix}`, ['cf']);
+      const adapter = await connect({
+        Item: { table, rowKey: { fields: ['tenant', 'id'] } },
       });
-      const facade = await loader.load();
       try {
-        const table_ = facade.instance(instanceId).table(table);
-        const exclusive = await table_.readRows({
-          ranges: [{
-            start: { value: 't1#a', inclusive: true },
-            end: { value: 't2#a', inclusive: false },
-          }],
-        });
-        expect(exclusive.map((row) => row.key)).toEqual(['t1#a', 't1#b']);
-        const inclusive = await table_.readRows({
-          ranges: [{
-            start: { value: 't1#a', inclusive: true },
-            end: { value: 't2#a', inclusive: true },
-          }],
-        });
-        expect(inclusive.map((row) => row.key)).toEqual(['t1#a', 't1#b', 't2#a']);
-      } finally {
-        await facade.close();
-      }
+        const items = adapter.createDataSource('Item');
+        for (const tenant of ['t1', 't2']) {
+          for (const id of ['a', 'b']) await items.create({ tenant, id, n: `${tenant}-${id}` });
+        }
+        // The prefix range for `t1` ends at the EXCLUSIVE successor of `t1#`, so
+        // it must not spill into `t2`.
+        const rows = await items.findAll(query({ where: { tenant: 't1' } }));
+        expect(rows.map((r) => r.n)).toEqual(['t1-a', 't1-b']);
 
+        // And the boundary itself, pinned against the service. This is the P4
+        // trap in the sharpest form available: the SAME logical range, expressed
+        // through the SDK's `{ start, end }` SHORTHAND, returns one row too many
+        // because that form is inclusive at BOTH ends. The adapter never builds
+        // it, and this is what proves the explicit form is the one that works.
+        const loader = createLazyBigtableLoader({
+          projectId,
+          apiEndpoint: endpoint as string,
+        });
+        const facade = await loader.load();
+        try {
+          const table_ = facade.instance(instanceId).table(table);
+          const exclusive = await table_.readRows({
+            ranges: [
+              {
+                start: { value: 't1#a', inclusive: true },
+                end: { value: 't2#a', inclusive: false },
+              },
+            ],
+          });
+          expect(exclusive.map((row) => row.key)).toEqual(['t1#a', 't1#b']);
+          const inclusive = await table_.readRows({
+            ranges: [
+              {
+                start: { value: 't1#a', inclusive: true },
+                end: { value: 't2#a', inclusive: true },
+              },
+            ],
+          });
+          expect(inclusive.map((row) => row.key)).toEqual(['t1#a', 't1#b', 't2#a']);
+        } finally {
+          await facade.close();
+        }
+
+        const raw = await rawClient();
+        try {
+          const [shorthand] = await raw.instance(instanceId).table(table).getRows({
+            start: 't1#a',
+            end: 't2#a',
+          });
+          // Three rows, not two: the shorthand's upper bound is inclusive.
+          expect(shorthand.map((row: { id: string }) => row.id)).toEqual(['t1#a', 't1#b', 't2#a']);
+        } finally {
+          await raw.close();
+        }
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
+
+  it(
+    'keeps a numeric key field a NUMBER by reading its cell, not the row key',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      // The row key is bytes and records no type, so the key field's CELL is what
+      // preserves it — which is why the projection always keeps the key
+      // qualifiers even when the caller's `select` names none.
+      //
+      // The key field is named `zid` deliberately: cells come back in
+      // lexicographic qualifier order, so a key sorting FIRST would be rescued by
+      // the projection's one-cell arm and the assertion would hold whether the
+      // key qualifiers were kept or not. Observable through
+      // the minted cursor, which carries the key values from the unprojected row.
+      const table = await provision(`numkey_${suffix}`, ['cf']);
+      const adapter = await connect({ Row: { table, rowKey: { fields: ['zid'] } } });
+      try {
+        const rows = adapter.createDataSource('Row');
+        await rows.create({ zid: 7, name: 'ada' });
+        await rows.create({ zid: 8, name: 'bob' });
+        const page = await rows.findPage?.(query({ limit: 1, select: ['name'] }));
+        expect(page?.rows).toEqual([{ name: 'ada' }]);
+        const decoded = decodeCursor(page?.nextCursor as string);
+        expect(decoded?.keyValues).toEqual([7]);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
+
+  it(
+    "excludes the row that sits exactly on a prefix range's exclusive end",
+    {
+      skip: skipReal,
+    },
+    async () => {
+      // The prefix range for `o/` ends at its successor, `o0` — and a row keyed
+      // exactly `o0` is the one row an inclusive upper bound would wrongly
+      // include. Planted through the raw SDK, because the mapped entity cannot
+      // compose that key itself.
+      const table = await provision(`bound_${suffix}`, ['cf']);
       const raw = await rawClient();
+      await raw
+        .instance(instanceId)
+        .table(table)
+        .insert([
+          { key: 'o/1', data: { cf: { id: 's:1' } } },
+          { key: 'o/2', data: { cf: { id: 's:2' } } },
+          { key: 'o0', data: { cf: { id: 's:outside' } } },
+        ]);
+      await raw.close();
+
+      const adapter = await connect({ Order: { table, rowKey: { fields: ['id'], prefix: 'o/' } } });
       try {
-        const [shorthand] = await raw.instance(instanceId).table(table).getRows({
-          start: 't1#a',
-          end: 't2#a',
-        });
-        // Three rows, not two: the shorthand's upper bound is inclusive.
-        expect(shorthand.map((row: { id: string }) => row.id))
-          .toEqual(['t1#a', 't1#b', 't2#a']);
+        const rows = await adapter.createDataSource('Order').findAll(query());
+        expect(rows.map((row) => row.id)).toEqual(['1', '2']);
       } finally {
-        await raw.close();
+        await adapter.disconnect();
       }
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+    },
+  );
 
-  it('keeps a numeric key field a NUMBER by reading its cell, not the row key', {
-    skip: skipReal,
-  }, async () => {
-    // The row key is bytes and records no type, so the key field's CELL is what
-    // preserves it — which is why the projection always keeps the key
-    // qualifiers even when the caller's `select` names none.
-    //
-    // The key field is named `zid` deliberately: cells come back in
-    // lexicographic qualifier order, so a key sorting FIRST would be rescued by
-    // the projection's one-cell arm and the assertion would hold whether the
-    // key qualifiers were kept or not. Observable through
-    // the minted cursor, which carries the key values from the unprojected row.
-    const table = await provision(`numkey_${suffix}`, ['cf']);
-    const adapter = await connect({ Row: { table, rowKey: { fields: ['zid'] } } });
-    try {
-      const rows = adapter.createDataSource('Row');
-      await rows.create({ zid: 7, name: 'ada' });
-      await rows.create({ zid: 8, name: 'bob' });
-      const page = await rows.findPage?.(query({ limit: 1, select: ['name'] }));
-      expect(page?.rows).toEqual([{ name: 'ada' }]);
-      const decoded = decodeCursor(page?.nextCursor as string);
-      expect(decoded?.keyValues).toEqual([7]);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'matches a value by EXACT BYTES, so a regex metacharacter is data',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`bytes_${suffix}`, ['cf']);
+      const adapter = await connect({ Code: { table } });
+      try {
+        const codes = adapter.createDataSource('Code');
+        await codes.create({ id: 'c1', pattern: 'a.*b' });
+        // The row a REGEX would also match. The SDK's string value form IS a
+        // regex — measured, `{ value: 'a.*b' }` matched both of these.
+        await codes.create({ id: 'c2', pattern: 'axxb' });
 
-  it("excludes the row that sits exactly on a prefix range's exclusive end", {
-    skip: skipReal,
-  }, async () => {
-    // The prefix range for `o/` ends at its successor, `o0` — and a row keyed
-    // exactly `o0` is the one row an inclusive upper bound would wrongly
-    // include. Planted through the raw SDK, because the mapped entity cannot
-    // compose that key itself.
-    const table = await provision(`bound_${suffix}`, ['cf']);
-    const raw = await rawClient();
-    await raw.instance(instanceId).table(table).insert([
-      { key: 'o/1', data: { cf: { id: 's:1' } } },
-      { key: 'o/2', data: { cf: { id: 's:2' } } },
-      { key: 'o0', data: { cf: { id: 's:outside' } } },
-    ]);
-    await raw.close();
+        const rows = await codes.findAll(query({ where: { pattern: 'a.*b' } }));
+        expect(rows.map((r) => r.id)).toEqual(['c1']);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
-    const adapter = await connect({ Order: { table, rowKey: { fields: ['id'], prefix: 'o/' } } });
-    try {
-      const rows = await adapter.createDataSource('Order').findAll(query());
-      expect(rows.map((row) => row.id)).toEqual(['1', '2']);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'answers a pushed-down predicate with the WHOLE row, not the matching cell',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`whole_${suffix}`, ['cf', 'meta']);
+      const adapter = await connect({
+        Person: { table, columns: { city: 'meta:city', tier: 'meta:tier' } },
+      });
+      try {
+        const people = adapter.createDataSource('Person');
+        await people.create({ id: 'p1', name: 'ada', city: 'london', tier: 'gold' });
+        await people.create({ id: 'p2', name: 'bob', city: 'paris', tier: 'gold' });
 
-  it('matches a value by EXACT BYTES, so a regex metacharacter is data', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`bytes_${suffix}`, ['cf']);
-    const adapter = await connect({ Code: { table } });
-    try {
-      const codes = adapter.createDataSource('Code');
-      await codes.create({ id: 'c1', pattern: 'a.*b' });
-      // The row a REGEX would also match. The SDK's string value form IS a
-      // regex — measured, `{ value: 'a.*b' }` matched both of these.
-      await codes.create({ id: 'c2', pattern: 'axxb' });
+        // A bare value chain would strip every non-matching cell and answer with
+        // `{ city }` alone; the `condition` wrapper is what returns the row.
+        const rows = await people.findAll(query({ where: { city: 'london' } }));
+        expect(rows).toEqual([{ id: 'p1', name: 'ada', city: 'london', tier: 'gold' }]);
 
-      const rows = await codes.findAll(query({ where: { pattern: 'a.*b' } }));
-      expect(rows.map((r) => r.id)).toEqual(['c1']);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+        // Two conjunctive equalities nest as two conditions and still return whole rows.
+        const both = await people.findAll(query({ where: { city: 'paris', tier: 'gold' } }));
+        expect(both).toEqual([{ id: 'p2', name: 'bob', city: 'paris', tier: 'gold' }]);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
-  it('answers a pushed-down predicate with the WHOLE row, not the matching cell', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`whole_${suffix}`, ['cf', 'meta']);
-    const adapter = await connect({
-      Person: { table, columns: { city: 'meta:city', tier: 'meta:tier' } },
-    });
-    try {
-      const people = adapter.createDataSource('Person');
-      await people.create({ id: 'p1', name: 'ada', city: 'london', tier: 'gold' });
-      await people.create({ id: 'p2', name: 'bob', city: 'paris', tier: 'gold' });
-
-      // A bare value chain would strip every non-matching cell and answer with
-      // `{ city }` alone; the `condition` wrapper is what returns the row.
-      const rows = await people.findAll(query({ where: { city: 'london' } }));
-      expect(rows).toEqual([{ id: 'p1', name: 'ada', city: 'london', tier: 'gold' }]);
-
-      // Two conjunctive equalities nest as two conditions and still return whole rows.
-      const both = await people.findAll(query({ where: { city: 'paris', tier: 'gold' } }));
-      expect(both).toEqual([{ id: 'p2', name: 'bob', city: 'paris', tier: 'gold' }]);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
-
-  it('projects across column families while keeping the key field', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`project_${suffix}`, ['cf', 'meta']);
-    const adapter = await connect({
-      Person: { table, columns: { city: 'meta:city' } },
-    });
-    try {
-      const people = adapter.createDataSource('Person');
-      await people.create({ id: 'p1', name: 'ada', city: 'london', age: 36 });
-      const rows = await people.findAll(query({
-        select: ['name', 'city'],
-        filter: { type: 'comparison', field: 'age', operator: 'gt', value: 30 },
-      }));
-      // `age` was READ (the client-side filter needs it) but not returned, and
-      // `id` was read so the key field's cell — not the row key — supplies it.
-      expect(rows).toEqual([{ name: 'ada', city: 'london' }]);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'projects across column families while keeping the key field',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`project_${suffix}`, ['cf', 'meta']);
+      const adapter = await connect({
+        Person: { table, columns: { city: 'meta:city' } },
+      });
+      try {
+        const people = adapter.createDataSource('Person');
+        await people.create({ id: 'p1', name: 'ada', city: 'london', age: 36 });
+        const rows = await people.findAll(
+          query({
+            select: ['name', 'city'],
+            filter: { type: 'comparison', field: 'age', operator: 'gt', value: 30 },
+          }),
+        );
+        // `age` was READ (the client-side filter needs it) but not returned, and
+        // `id` was read so the key field's cell — not the row key — supplies it.
+        expect(rows).toEqual([{ name: 'ada', city: 'london' }]);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
   it('keeps a row carrying NONE of the projected columns', { skip: skipReal }, async () => {
     // A filter that removes every cell of a row removes the ROW — measured, the
@@ -450,10 +506,13 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     // cell, so the rows are planted through the raw SDK.
     const table = await provision(`sparseproject_${suffix}`, ['cf']);
     const client = await rawClient();
-    await client.instance(instanceId).table(table).insert([
-      { key: 'o1', data: { cf: { name: 'ada' } } },
-      { key: 'o2', data: { cf: { other: 'x' } } },
-    ]);
+    await client
+      .instance(instanceId)
+      .table(table)
+      .insert([
+        { key: 'o1', data: { cf: { name: 'ada' } } },
+        { key: 'o2', data: { cf: { other: 'x' } } },
+      ]);
     await client.close();
 
     const adapter = await connect({ Order: { table, valueEncoding: 'raw' } });
@@ -465,22 +524,26 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('refuses to overwrite on create and to fabricate on update', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`conditional_${suffix}`, ['cf']);
-    const adapter = await connect({ User: { table } });
-    try {
-      const users = adapter.createDataSource('User');
-      await users.create({ id: 'u1', name: 'ada' });
-      await expect(users.create({ id: 'u1', name: 'bob' })).rejects.toThrow(/does not overwrite/);
-      expect((await users.findById('u1'))?.name).toBe('ada');
-      await expect(users.update('nope', { name: 'x' })).rejects.toThrow(/no row keyed 'nope'/);
-      expect(await users.findById('nope')).toBe(null);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'refuses to overwrite on create and to fabricate on update',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`conditional_${suffix}`, ['cf']);
+      const adapter = await connect({ User: { table } });
+      try {
+        const users = adapter.createDataSource('User');
+        await users.create({ id: 'u1', name: 'ada' });
+        await expect(users.create({ id: 'u1', name: 'bob' })).rejects.toThrow(/does not overwrite/);
+        expect((await users.findById('u1'))?.name).toBe('ada');
+        await expect(users.update('nope', { name: 'x' })).rejects.toThrow(/no row keyed 'nope'/);
+        expect(await users.findById('nope')).toBe(null);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
   it('walks a start-key cursor over deliberately TIED values', { skip: skipReal }, async () => {
     const table = await provision(`page_${suffix}`, ['cf']);
@@ -500,76 +563,90 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('reports a filtered page non-terminal even when it carries zero rows', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`sparse_${suffix}`, ['cf']);
-    const adapter = await connect({ Row: { table, rowKey: { fields: ['id'] } } });
-    try {
-      const rows = adapter.createDataSource('Row');
-      for (let i = 1; i <= 6; i += 1) await rows.create({ id: `r${i}`, rank: i });
-      // An ORDERED comparison is not pushed down, so the first raw batch can
-      // match nothing at all — the case a `rows.length`-derived cursor gets
-      // wrong.
-      const filter: FilterExpression = {
-        type: 'comparison',
-        field: 'rank',
-        operator: 'gt',
-        value: 5,
-      };
-      const seen = await walkPages(rows, { limit: 2, filter });
-      expect(seen).toEqual(['r6']);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
-
-  it('walks a key set whose keys carry non-BMP characters, in the SERVICE order', {
-    skip: skipReal,
-  }, async () => {
-    // Bigtable orders row keys as UTF-8 BYTES, and `'\u{1F600}y' < '\uFF21x'`
-    // is true in JavaScript while false as UTF-8. A cursor filtered with `>`
-    // therefore dropped the emoji-keyed row: the service placed it after the
-    // cursor and the comparison placed it before.
-    const table = await provision(`utf8_${suffix}`, ['cf']);
-    const adapter = await connect({ Row: { table } });
-    try {
-      const rows = adapter.createDataSource('Row');
-      for (const id of ['\uFF21x', '\u{1F600}y']) await rows.create({ id, n: id });
-      // The service's own order, for the record.
-      expect((await rows.findAll(query())).map((r) => r.id)).toEqual(['\uFF21x', '\u{1F600}y']);
-      const seen = await walkPages(rows, {
-        limit: 1,
-        filter: {
+  it(
+    'reports a filtered page non-terminal even when it carries zero rows',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`sparse_${suffix}`, ['cf']);
+      const adapter = await connect({ Row: { table, rowKey: { fields: ['id'] } } });
+      try {
+        const rows = adapter.createDataSource('Row');
+        for (let i = 1; i <= 6; i += 1) await rows.create({ id: `r${i}`, rank: i });
+        // An ORDERED comparison is not pushed down, so the first raw batch can
+        // match nothing at all — the case a `rows.length`-derived cursor gets
+        // wrong.
+        const filter: FilterExpression = {
           type: 'comparison',
-          field: 'id',
-          operator: 'in',
-          value: ['\uFF21x', '\u{1F600}y'],
-        },
-      });
-      expect(seen).toEqual(['\uFF21x', '\u{1F600}y']);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+          field: 'rank',
+          operator: 'gt',
+          value: 5,
+        };
+        const seen = await walkPages(rows, { limit: 2, filter });
+        expect(seen).toEqual(['r6']);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
-  it('expands an `in` on the final key field into an explicit key read', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`inlist_${suffix}`, ['cf']);
-    const adapter = await connect({ Item: { table, rowKey: { fields: ['tenant', 'id'] } } });
-    try {
-      const items = adapter.createDataSource('Item');
-      for (const id of ['a', 'b', 'c']) await items.create({ tenant: 't1', id, n: id });
-      const rows = await items.findAll(query({
-        where: { tenant: 't1' },
-        filter: { type: 'comparison', field: 'id', operator: 'in', value: ['a', 'c'] },
-      }));
-      expect(rows.map((r) => r.id)).toEqual(['a', 'c']);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'walks a key set whose keys carry non-BMP characters, in the SERVICE order',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      // Bigtable orders row keys as UTF-8 BYTES, and `'\u{1F600}y' < '\uFF21x'`
+      // is true in JavaScript while false as UTF-8. A cursor filtered with `>`
+      // therefore dropped the emoji-keyed row: the service placed it after the
+      // cursor and the comparison placed it before.
+      const table = await provision(`utf8_${suffix}`, ['cf']);
+      const adapter = await connect({ Row: { table } });
+      try {
+        const rows = adapter.createDataSource('Row');
+        for (const id of ['\uFF21x', '\u{1F600}y']) await rows.create({ id, n: id });
+        // The service's own order, for the record.
+        expect((await rows.findAll(query())).map((r) => r.id)).toEqual(['\uFF21x', '\u{1F600}y']);
+        const seen = await walkPages(rows, {
+          limit: 1,
+          filter: {
+            type: 'comparison',
+            field: 'id',
+            operator: 'in',
+            value: ['\uFF21x', '\u{1F600}y'],
+          },
+        });
+        expect(seen).toEqual(['\uFF21x', '\u{1F600}y']);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
+
+  it(
+    'expands an `in` on the final key field into an explicit key read',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`inlist_${suffix}`, ['cf']);
+      const adapter = await connect({ Item: { table, rowKey: { fields: ['tenant', 'id'] } } });
+      try {
+        const items = adapter.createDataSource('Item');
+        for (const id of ['a', 'b', 'c']) await items.create({ tenant: 't1', id, n: id });
+        const rows = await items.findAll(
+          query({
+            where: { tenant: 't1' },
+            filter: { type: 'comparison', field: 'id', operator: 'in', value: ['a', 'c'] },
+          }),
+        );
+        expect(rows.map((r) => r.id)).toEqual(['a', 'c']);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
   it('commits delete-then-write as ONE atomic mutation list', { skip: skipReal }, async () => {
     const table = await provision(`tx_${suffix}`, ['cf']);
@@ -592,74 +669,86 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
-  it('rolls back without sending anything, and refuses a second row', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`txscope_${suffix}`, ['cf']);
-    const adapter = await connect({ User: { table } });
-    try {
-      const users = adapter.createDataSource('User');
+  it(
+    'rolls back without sending anything, and refuses a second row',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`txscope_${suffix}`, ['cf']);
+      const adapter = await connect({ User: { table } });
+      try {
+        const users = adapter.createDataSource('User');
 
-      const rolled = await adapter.beginTransaction();
-      await rolled.createDataSource('User').create({ id: 'r1', name: 'ada' });
-      await rolled.rollback();
-      expect(await users.findById('r1')).toBe(null);
+        const rolled = await adapter.beginTransaction();
+        await rolled.createDataSource('User').create({ id: 'r1', name: 'ada' });
+        await rolled.rollback();
+        expect(await users.findById('r1')).toBe(null);
 
-      const scoped = await adapter.beginTransaction();
-      const source = scoped.createDataSource('User');
-      await source.create({ id: 's1' });
-      await expect(source.create({ id: 's2' })).rejects.toThrow(BigtableTransactionScopeError);
-      await scoped.commit();
-      expect(await users.findById('s1')).toEqual({ id: 's1' });
-      expect(await users.findById('s2')).toBe(null);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+        const scoped = await adapter.beginTransaction();
+        const source = scoped.createDataSource('User');
+        await source.create({ id: 's1' });
+        await expect(source.create({ id: 's2' })).rejects.toThrow(BigtableTransactionScopeError);
+        await scoped.commit();
+        expect(await users.findById('s1')).toEqual({ id: 's1' });
+        expect(await users.findById('s2')).toBe(null);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
-  it('refuses a buffered update whose row is deleted before commit', {
-    skip: skipReal,
-  }, async () => {
-    // The commit used to apply its mutations on BOTH CheckAndMutateRow
-    // branches, so a row deleted after the pre-read was RECREATED through
-    // `onNoMatch` — a transaction-scoped update degrading to an upsert exactly
-    // where the non-transactional path refuses.
-    const table = await provision(`txupsert_${suffix}`, ['cf']);
-    const adapter = await connect({ User: { table } });
-    try {
-      const users = adapter.createDataSource('User');
-      await users.create({ id: 'u1', name: 'ada' });
-      const tx = await adapter.beginTransaction();
-      await tx.createDataSource('User').update('u1', { name: 'bob' });
-      // The concurrent delete, through the committed data source.
-      expect(await users.delete('u1')).toBe(true);
-      await expect(tx.commit()).rejects.toThrow(/no longer exists/);
-      expect(await users.findById('u1')).toBe(null);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'refuses a buffered update whose row is deleted before commit',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      // The commit used to apply its mutations on BOTH CheckAndMutateRow
+      // branches, so a row deleted after the pre-read was RECREATED through
+      // `onNoMatch` — a transaction-scoped update degrading to an upsert exactly
+      // where the non-transactional path refuses.
+      const table = await provision(`txupsert_${suffix}`, ['cf']);
+      const adapter = await connect({ User: { table } });
+      try {
+        const users = adapter.createDataSource('User');
+        await users.create({ id: 'u1', name: 'ada' });
+        const tx = await adapter.beginTransaction();
+        await tx.createDataSource('User').update('u1', { name: 'bob' });
+        // The concurrent delete, through the committed data source.
+        expect(await users.delete('u1')).toBe(true);
+        await expect(tx.commit()).rejects.toThrow(/no longer exists/);
+        expect(await users.findById('u1')).toBe(null);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
-  it('round-trips a non-finite number and refuses a relabelling write', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`shapes_${suffix}`, ['cf']);
-    const adapter = await connect({ Row: { table, columns: { foo: 'cf:bar' } } });
-    try {
-      const rows = adapter.createDataSource('Row');
-      // `String(NaN)` is `'NaN'`, which the decoder refused — so a stored NaN
-      // came back as the STRING 'n:NaN'.
-      await rows.create({ id: 'r1', ratio: Number.NaN, cap: Number.POSITIVE_INFINITY });
-      const read = await rows.findById('r1');
-      expect(read?.ratio).toBeNaN();
-      expect(read?.cap).toBe(Number.POSITIVE_INFINITY);
-      // An unmapped `bar` lands on the address the mapping reserves for `foo`,
-      // so it would have been read back under the wrong field name.
-      await expect(rows.create({ id: 'r2', bar: 'x' })).rejects.toThrow(/reserves for 'foo'/);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'round-trips a non-finite number and refuses a relabelling write',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`shapes_${suffix}`, ['cf']);
+      const adapter = await connect({ Row: { table, columns: { foo: 'cf:bar' } } });
+      try {
+        const rows = adapter.createDataSource('Row');
+        // `String(NaN)` is `'NaN'`, which the decoder refused — so a stored NaN
+        // came back as the STRING 'n:NaN'.
+        await rows.create({ id: 'r1', ratio: Number.NaN, cap: Number.POSITIVE_INFINITY });
+        const read = await rows.findById('r1');
+        expect(read?.ratio).toBeNaN();
+        expect(read?.cap).toBe(Number.POSITIVE_INFINITY);
+        // An unmapped `bar` lands on the address the mapping reserves for `foo`,
+        // so it would have been read back under the wrong field name.
+        await expect(rows.create({ id: 'r2', bar: 'x' })).rejects.toThrow(/reserves for 'foo'/);
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
   it('counts with and without a residual predicate', { skip: skipReal }, async () => {
     const table = await provision(`count_${suffix}`, ['cf']);
@@ -669,40 +758,46 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
       for (let i = 1; i <= 4; i += 1) await rows.create({ id: `r${i}`, rank: i });
       // No predicate: the read strips every cell value and counts rows.
       expect(await rows.count({})).toBe(4);
-      expect(await rows.count({}, { type: 'comparison', field: 'rank', operator: 'gt', value: 2 }))
-        .toBe(2);
+      expect(
+        await rows.count({}, { type: 'comparison', field: 'rank', operator: 'gt', value: 2 }),
+      ).toBe(2);
       expect(await rows.count({ rank: 1 })).toBe(1);
     } finally {
       await adapter.disconnect();
     }
   });
 
-  it('reads a row written by the RAW SDK, recovering key fields from the row key', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`interop_${suffix}`, ['cf']);
-    // The interop shape: untagged values, and no key cell at all.
-    const client = await rawClient();
-    await client.instance(instanceId).table(table).insert([
-      { key: 't1#o9', data: { cf: { total: '42', label: 'legacy' } } },
-    ]);
-    await client.close();
+  it(
+    'reads a row written by the RAW SDK, recovering key fields from the row key',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`interop_${suffix}`, ['cf']);
+      // The interop shape: untagged values, and no key cell at all.
+      const client = await rawClient();
+      await client
+        .instance(instanceId)
+        .table(table)
+        .insert([{ key: 't1#o9', data: { cf: { total: '42', label: 'legacy' } } }]);
+      await client.close();
 
-    const adapter = await connect({
-      Order: { table, rowKey: { fields: ['tenantId', 'orderId'] }, valueEncoding: 'raw' },
-    });
-    try {
-      const orders = adapter.createDataSource('Order');
-      expect(await orders.findById({ tenantId: 't1', orderId: 'o9' })).toEqual({
-        tenantId: 't1',
-        orderId: 'o9',
-        total: '42',
-        label: 'legacy',
+      const adapter = await connect({
+        Order: { table, rowKey: { fields: ['tenantId', 'orderId'] }, valueEncoding: 'raw' },
       });
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+      try {
+        const orders = adapter.createDataSource('Order');
+        expect(await orders.findById({ tenantId: 't1', orderId: 'o9' })).toEqual({
+          tenantId: 't1',
+          orderId: 'o9',
+          total: '42',
+          label: 'legacy',
+        });
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
   it('refuses by name what Bigtable cannot serve', { skip: skipReal }, async () => {
     const table = await provision(`refuse_${suffix}`, ['cf']);
@@ -714,88 +809,99 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
       // Descending is refused rather than shipped on `reversed: true`, which
       // this emulator SILENTLY IGNORES — measured, it answered ascending with
       // no error, so a descending path could never be verified here.
-      await expect(rows.findAll(query({ orderBy: { id: 'desc' } })))
-        .rejects.toThrow(UnsupportedQueryFeatureError);
-      await expect(rows.findAll(query({ orderBy: { name: 'asc' } })))
-        .rejects.toThrow(/only be ordered by its row key/);
+      await expect(rows.findAll(query({ orderBy: { id: 'desc' } }))).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(rows.findAll(query({ orderBy: { name: 'asc' } }))).rejects.toThrow(
+        /only be ordered by its row key/,
+      );
       await expect(rows.findAll(query({ offset: 1 }))).rejects.toThrow(/no row offset/);
       await expect(adapter.rawQuery('SELECT 1')).rejects.toThrow(UnsupportedRawQueryError);
 
       // The full key ascending IS the scan order and is honoured.
-      expect((await rows.findAll(query({ orderBy: { id: 'asc' } }))).map((r) => r.id))
-        .toEqual(['r1']);
+      expect((await rows.findAll(query({ orderBy: { id: 'asc' } }))).map((r) => r.id)).toEqual([
+        'r1',
+      ]);
     } finally {
       await adapter.disconnect();
     }
   });
 
-  it('names a missing table rather than failing with a bare error', {
-    skip: skipReal,
-  }, async () => {
-    // No connect-time probe exists precisely because this diagnostic already
-    // quotes the full resource path — and an admin probe would refuse a
-    // data-plane service account that cannot list tables.
-    const adapter = await connect({ Ghost: { table: `absent_${suffix}` } });
-    try {
-      let caught: unknown;
+  it(
+    'names a missing table rather than failing with a bare error',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      // No connect-time probe exists precisely because this diagnostic already
+      // quotes the full resource path — and an admin probe would refuse a
+      // data-plane service account that cannot list tables.
+      const adapter = await connect({ Ghost: { table: `absent_${suffix}` } });
       try {
-        await adapter.createDataSource('Ghost').findById('x');
-      } catch (error) {
-        caught = error;
+        let caught: unknown;
+        try {
+          await adapter.createDataSource('Ghost').findById('x');
+        } catch (error) {
+          caught = error;
+        }
+        expect(String((caught as Error).message)).toContain(`absent_${suffix}`);
+      } finally {
+        await adapter.disconnect();
       }
-      expect(String((caught as Error).message)).toContain(`absent_${suffix}`);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+    },
+  );
 
-  it('agrees with the memory reference on every portable filter operator', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`conform_${suffix}`, ['cf']);
-    const adapter = await connect({ Row: { table } });
-    try {
-      const rows = adapter.createDataSource('Row');
-      const seed = [
-        { id: 'r1', name: '50% off bracket', rank: 1 },
-        { id: 'r2', name: '50x off', rank: 2 },
-        { id: 'r3', name: 'a.*b glob', rank: 3 },
-        { id: 'r4', name: 'axxb glob', rank: 4 },
-        { id: 'r5', name: 'plain text', rank: 5 },
-      ];
-      for (const row of seed) await rows.create(row);
+  it(
+    'agrees with the memory reference on every portable filter operator',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`conform_${suffix}`, ['cf']);
+      const adapter = await connect({ Row: { table } });
+      try {
+        const rows = adapter.createDataSource('Row');
+        const seed = [
+          { id: 'r1', name: '50% off bracket', rank: 1 },
+          { id: 'r2', name: '50x off', rank: 2 },
+          { id: 'r3', name: 'a.*b glob', rank: 3 },
+          { id: 'r4', name: 'axxb glob', rank: 4 },
+          { id: 'r5', name: 'plain text', rank: 5 },
+        ];
+        for (const row of seed) await rows.create(row);
 
-      const cases: FilterExpression[] = [
-        { type: 'comparison', field: 'name', operator: 'eq', value: 'a.*b glob' },
-        { type: 'comparison', field: 'name', operator: 'contains', value: '50% off' },
-        { type: 'comparison', field: 'rank', operator: 'gt', value: 3 },
-        { type: 'comparison', field: 'rank', operator: 'lte', value: 2 },
-        { type: 'comparison', field: 'id', operator: 'in', value: ['r1', 'r5'] },
-        { type: 'comparison', field: 'id', operator: 'in', value: [] },
-        {
-          type: 'or',
-          filters: [
-            { type: 'comparison', field: 'rank', operator: 'eq', value: 1 },
-            { type: 'comparison', field: 'name', operator: 'contains', value: 'plain' },
-          ],
-        },
-        {
-          type: 'and',
-          filters: [
-            { type: 'comparison', field: 'rank', operator: 'gte', value: 2 },
-            { type: 'comparison', field: 'rank', operator: 'lt', value: 4 },
-          ],
-        },
-      ];
-      for (const filter of cases) {
-        const expected = seed.filter((row) => matchesFilter(row, filter)).map((row) => row.id);
-        const actual = (await rows.findAll(query({ filter }))).map((row) => String(row.id));
-        expect(actual.sort(), JSON.stringify(filter)).toEqual([...expected].sort());
+        const cases: FilterExpression[] = [
+          { type: 'comparison', field: 'name', operator: 'eq', value: 'a.*b glob' },
+          { type: 'comparison', field: 'name', operator: 'contains', value: '50% off' },
+          { type: 'comparison', field: 'rank', operator: 'gt', value: 3 },
+          { type: 'comparison', field: 'rank', operator: 'lte', value: 2 },
+          { type: 'comparison', field: 'id', operator: 'in', value: ['r1', 'r5'] },
+          { type: 'comparison', field: 'id', operator: 'in', value: [] },
+          {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'rank', operator: 'eq', value: 1 },
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'plain' },
+            ],
+          },
+          {
+            type: 'and',
+            filters: [
+              { type: 'comparison', field: 'rank', operator: 'gte', value: 2 },
+              { type: 'comparison', field: 'rank', operator: 'lt', value: 4 },
+            ],
+          },
+        ];
+        for (const filter of cases) {
+          const expected = seed.filter((row) => matchesFilter(row, filter)).map((row) => row.id);
+          const actual = (await rows.findAll(query({ filter }))).map((row) => String(row.id));
+          expect(actual.sort(), JSON.stringify(filter)).toEqual([...expected].sort());
+        }
+      } finally {
+        await adapter.disconnect();
       }
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+    },
+  );
 });
 
 /**
@@ -805,17 +911,16 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
  * @param base - The page query, minus the cursor
  * @returns Every id, in page order
  */
-async function walkPages(
-  source: IDataSource,
-  base: Partial<NormalizedQuery>,
-): Promise<string[]> {
+async function walkPages(source: IDataSource, base: Partial<NormalizedQuery>): Promise<string[]> {
   const ids: string[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 25; page += 1) {
-    const result = await (source.findPage as (q: NormalizedQuery) => Promise<{
-      rows: Record<string, unknown>[];
-      nextCursor: string | null;
-    }>)(query(cursor === undefined ? base : { ...base, cursor }));
+    const result = await (
+      source.findPage as (q: NormalizedQuery) => Promise<{
+        rows: Record<string, unknown>[];
+        nextCursor: string | null;
+      }>
+    )(query(cursor === undefined ? base : { ...base, cursor }));
     ids.push(...result.rows.map((row) => String(row.id)));
     if (result.nextCursor === null) return ids;
     cursor = result.nextCursor;
@@ -824,27 +929,33 @@ async function walkPages(
 }
 
 describe('BigtableAdapter against a real emulator — duplicate key', () => {
-  it('a create on an existing row is a DuplicateKeyError, directly and at commit', {
-    skip: skipReal,
-  }, async () => {
-    const table = await provision(`dupkey_${suffix}`, ['cf']);
-    const adapter = await connect({ User: { table } });
-    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'bigtable');
-    try {
-      const repo = service.getRepository('User');
-      await repo.create({ id: 'u1', name: 'ada' });
+  it(
+    'a create on an existing row is a DuplicateKeyError, directly and at commit',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const table = await provision(`dupkey_${suffix}`, ['cf']);
+      const adapter = await connect({ User: { table } });
+      const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'bigtable');
+      try {
+        const repo = service.getRepository('User');
+        await repo.create({ id: 'u1', name: 'ada' });
 
-      const direct = await repo.create({ id: 'u1', name: 'eve' }).catch((e: unknown) => e);
-      expect(direct).toBeInstanceOf(DuplicateKeyError);
-      expect((direct as DuplicateKeyError).entity).toBe('User');
+        const direct = await repo.create({ id: 'u1', name: 'eve' }).catch((e: unknown) => e);
+        expect(direct).toBeInstanceOf(DuplicateKeyError);
+        expect((direct as DuplicateKeyError).entity).toBe('User');
 
-      const atCommit = await service.transaction(async (uow) => {
-        await uow.getRepository('User').create({ id: 'u1', name: 'bob' });
-      }).catch((e: unknown) => e);
-      expect(atCommit).toBeInstanceOf(DuplicateKeyError);
-      expect(await repo.findById('u1')).toMatchObject({ name: 'ada' });
-    } finally {
-      await service.close();
-    }
-  });
+        const atCommit = await service
+          .transaction(async (uow) => {
+            await uow.getRepository('User').create({ id: 'u1', name: 'bob' });
+          })
+          .catch((e: unknown) => e);
+        expect(atCommit).toBeInstanceOf(DuplicateKeyError);
+        expect(await repo.findById('u1')).toMatchObject({ name: 'ada' });
+      } finally {
+        await service.close();
+      }
+    },
+  );
 });

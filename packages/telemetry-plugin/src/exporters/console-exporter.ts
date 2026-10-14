@@ -16,9 +16,7 @@
  * const Exporter = await loadConsoleExporter();
  * ```
  */
-export async function loadConsoleExporter(): Promise<
-  new () => unknown
-> {
+export async function loadConsoleExporter(): Promise<new () => unknown> {
   const mod = await import('@opentelemetry/sdk-trace-base');
   return mod.ConsoleSpanExporter;
 }

@@ -50,9 +50,7 @@ export function scanPolicyGuards(
     }
   }
   if (problems.length > 0) {
-    throw new AuthPluginConfigurationError(
-      `auth-plugin: ${problems.join('; ')}.`,
-    );
+    throw new AuthPluginConfigurationError(`auth-plugin: ${problems.join('; ')}.`);
   }
 }
 
@@ -73,22 +71,26 @@ function checkAbility(
     // application registered, so the generic "register it through
     // AuthPlugin({ policies })" advice would send the reader the wrong way.
     return registered === undefined
-      ? `route ${route.method} ${route.path} uses a scoped guard naming ${
-        JSON.stringify(ability)
-      }, which is not in the scoped RBAC catalogue — configure AuthPlugin({ scopedRbac }) with ` +
-        'an rbac role granting it'
+      ? `route ${route.method} ${route.path} uses a scoped guard naming ${JSON.stringify(
+          ability,
+        )}, which is not in the scoped RBAC catalogue — configure AuthPlugin({ scopedRbac }) with ` +
+          'an rbac role granting it'
       : undefined;
   }
-  const where = `route ${route.method} ${route.path} uses requirePolicy(${
-    JSON.stringify(policy)
-  }, ${JSON.stringify(ability)})`;
+  const where = `route ${route.method} ${route.path} uses requirePolicy(${JSON.stringify(
+    policy,
+  )}, ${JSON.stringify(ability)})`;
   if (registered === undefined) {
-    return `${where}, but no such policy ability is registered — register the policy through ` +
-      'AuthPlugin({ policies }) or DecoratorPlugin({ policies })';
+    return (
+      `${where}, but no such policy ability is registered — register the policy through ` +
+      'AuthPlugin({ policies }) or DecoratorPlugin({ policies })'
+    );
   }
   if (registered.anonymous !== anonymous) {
-    return `${where}, but the registered ${JSON.stringify(policy)} policy declares that ` +
-      'ability differently — a different policy is registered under the same name';
+    return (
+      `${where}, but the registered ${JSON.stringify(policy)} policy declares that ` +
+      'ability differently — a different policy is registered under the same name'
+    );
   }
   return undefined;
 }

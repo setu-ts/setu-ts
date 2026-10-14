@@ -4,9 +4,9 @@ import { expect } from '@std/expect';
 
 function injectionFences(markdown: string): readonly string[] {
   const matches = [...markdown.matchAll(/```typescript\n([\s\S]*?)```/g)];
-  return matches.map((match) => match[1] ?? '').filter((code) =>
-    code.includes("import { inject } from '@setu-ts/testing';")
-  );
+  return matches
+    .map((match) => match[1] ?? '')
+    .filter((code) => code.includes("import { inject } from '@setu-ts/testing';"));
 }
 
 describe('programmatic API injection examples', () => {

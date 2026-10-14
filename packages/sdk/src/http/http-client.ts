@@ -59,8 +59,9 @@ function isJsonMediaType(contentType: string): boolean {
  * than by `instanceof DOMException` alone.
  */
 function isAbortError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'name' in error &&
-    error.name === 'AbortError';
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+  );
 }
 
 // Origin-keyed breaker and limiter maps.
@@ -164,9 +165,7 @@ export class HttpClient implements IHttpClient {
       throw new Error('ClientRequest.path must be relative (no leading slash).');
     }
     if (ABSOLUTE_URL.test(req.path)) {
-      throw new Error(
-        `ClientRequest.path must be relative, received absolute URL: ${req.path}`,
-      );
+      throw new Error(`ClientRequest.path must be relative, received absolute URL: ${req.path}`);
     }
     const url = new URL(req.path, this.#baseUrl);
 
@@ -337,10 +336,10 @@ export class HttpClient implements IHttpClient {
       let result: ClientResponse<TResponse> = clientResponse as ClientResponse<TResponse>;
       for (const interceptor of this.#responseInterceptors) {
         try {
-          result = await interceptor(
+          result = (await interceptor(
             result as ClientResponse<unknown>,
             requestContext,
-          ) as ClientResponse<TResponse>;
+          )) as ClientResponse<TResponse>;
         } catch (error) {
           // The server executed; a keyed non-safe method must not repeat it.
           throw markExecuted(error);

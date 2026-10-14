@@ -11,23 +11,24 @@ describe('resilience-plugin barrel', () => {
 
   it('does not leak internal implementation symbols', () => {
     const keys = Object.keys(mod);
-    for (
-      const internal of [
-        'ResilienceService',
-        'CircuitBreaker',
-        'Bulkhead',
-        'runWithRetry',
-        'runWithTimeout',
-        'computeBackoffMs',
-      ]
-    ) {
+    for (const internal of [
+      'ResilienceService',
+      'CircuitBreaker',
+      'Bulkhead',
+      'runWithRetry',
+      'runWithTimeout',
+      'computeBackoffMs',
+    ]) {
       expect(keys.includes(internal)).toBe(false);
     }
   });
 
   it('exports exactly the intended runtime symbols', () => {
-    expect(Object.keys(mod).sort()).toEqual(
-      ['BulkheadFullError', 'CircuitOpenError', 'ResiliencePlugin', 'TimeoutError'],
-    );
+    expect(Object.keys(mod).sort()).toEqual([
+      'BulkheadFullError',
+      'CircuitOpenError',
+      'ResiliencePlugin',
+      'TimeoutError',
+    ]);
   });
 });

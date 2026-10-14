@@ -27,18 +27,22 @@ const ZERO_SPAN_ID = '0000000000000000';
  * @returns A request interceptor
  * @since 0.9.0
  */
-export function createTraceContextInterceptor(
-  source: { readonly activeSpanContext?: () => SpanContext | undefined },
-): ClientRequestInterceptor {
+export function createTraceContextInterceptor(source: {
+  readonly activeSpanContext?: () => SpanContext | undefined;
+}): ClientRequestInterceptor {
   return (ctx): void => {
     if (ctx.headers.has('traceparent')) return;
     const active = source.activeSpanContext?.();
     if (active === undefined) return;
     const { traceId, spanId, traceFlags } = active;
     if (
-      !TRACE_ID_RE.test(traceId) || !SPAN_ID_RE.test(spanId) ||
-      !TRACE_FLAGS_RE.test(traceFlags) || traceId === ZERO_TRACE_ID || spanId === ZERO_SPAN_ID
-    ) return;
+      !TRACE_ID_RE.test(traceId) ||
+      !SPAN_ID_RE.test(spanId) ||
+      !TRACE_FLAGS_RE.test(traceFlags) ||
+      traceId === ZERO_TRACE_ID ||
+      spanId === ZERO_SPAN_ID
+    )
+      return;
     ctx.headers.set('traceparent', `00-${traceId}-${spanId}-${traceFlags}`);
   };
 }

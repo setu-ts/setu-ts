@@ -12,9 +12,7 @@ export interface FakeContextOptions {
   startTime?: number;
 }
 
-export function createFakeContext(
-  opts?: FakeContextOptions,
-): IRequestContext {
+export function createFakeContext(opts?: FakeContextOptions): IRequestContext {
   const request = createFakeRequest(opts?.tenant ? { tenant: opts.tenant } : undefined);
   const state = new Map<string, unknown>();
 

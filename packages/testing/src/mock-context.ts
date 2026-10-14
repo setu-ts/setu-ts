@@ -250,9 +250,9 @@ class MockRequest implements IRequest {
    * opposite of the framework's contract.
    */
   formData(): Promise<FormBody> {
-    return this.#form ??= this.bytes().then((body) =>
-      parseFormBody(body, this.headers.get('content-type'))
-    );
+    return (this.#form ??= this.bytes().then((body) =>
+      parseFormBody(body, this.headers.get('content-type')),
+    ));
   }
 }
 

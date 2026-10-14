@@ -21,7 +21,8 @@ describe('adopt entry rewrite', () => {
         ...fs,
         async writeFile(path, bytes) {
           if (
-            path === ENTRY_PATH && new TextDecoder().decode(bytes).includes('SERVICE_PORT') &&
+            path === ENTRY_PATH &&
+            new TextDecoder().decode(bytes).includes('SERVICE_PORT') &&
             !failed
           ) {
             failed = true;

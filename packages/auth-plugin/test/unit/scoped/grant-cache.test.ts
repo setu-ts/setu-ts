@@ -59,18 +59,16 @@ describe('per-request memo', () => {
         kind: 'permission',
         name: 'invoices:read',
       }),
-    )
-      .toBe(false);
+    ).toBe(false);
     expect(
       await scoped.evaluator.allows(principal(), target, {
         kind: 'permission',
         name: 'invoices:read',
       }),
-    )
-      .toBe(false);
+    ).toBe(false);
     expect(calls.length).toBe(1);
-    const denials = scoped.logger.records.filter((r) =>
-      r.message === 'Scoped authorization denied'
+    const denials = scoped.logger.records.filter(
+      (r) => r.message === 'Scoped authorization denied',
     );
     expect(denials.length).toBe(1);
     // A new request asks again: a failure is never carried across requests.
@@ -204,17 +202,18 @@ describe("'sign-in' timing", () => {
       dropped: 0,
     });
     scoped.resolver.useStoredGrants((_ctx, who) =>
-      who.id === 'u1' ? [{ role: 'viewer', scope: T1 }] : null
+      who.id === 'u1' ? [{ role: 'viewer', scope: T1 }] : null,
     );
     expect(await scoped.resolver.grantsFor(principal(), CHAIN, requestContext())).toEqual({
       ok: true,
       grants: [{ role: 'viewer', scope: T1 }],
       dropped: 0,
     });
-    expect(await scoped.resolver.grantsFor(principal('other'), CHAIN, requestContext()))
-      .toMatchObject({
-        grants: [],
-      });
+    expect(
+      await scoped.resolver.grantsFor(principal('other'), CHAIN, requestContext()),
+    ).toMatchObject({
+      grants: [],
+    });
     expect(await scoped.resolver.grantsFor(principal(), CHAIN, undefined)).toMatchObject({
       grants: [],
     });
@@ -280,7 +279,10 @@ describe('claims sources are read per credential, never shared', () => {
     const [fromBroad, fromNarrow] = await both;
     expect(fromBroad).toMatchObject({
       ok: true,
-      grants: [{ role: 'viewer', scope: T1 }, { role: 'viewer', scope: O1 }],
+      grants: [
+        { role: 'viewer', scope: T1 },
+        { role: 'viewer', scope: O1 },
+      ],
     });
     expect(fromNarrow).toMatchObject({ ok: true, grants: [{ role: 'viewer', scope: T1 }] });
     // The custom source is still shared: one call for both.

@@ -31,7 +31,7 @@ function createRuntime(): IRuntimeServices {
     now: () => 1000,
     setTimeout: (fn: () => void, ms?: number) => setTimeout(fn, ms),
     clearTimeout: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
-    setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
     clearInterval: () => {},
     randomBytes: () => new Uint8Array(16),
     subtle: undefined,
@@ -57,10 +57,14 @@ function brokerWith(isHealthy: IServiceBusTransport['isHealthy']): ServiceBusBro
     close: () => Promise.resolve(),
     isHealthy,
   } as unknown as IServiceBusTransport;
-  return new ServiceBusBroker(createRuntime(), {
-    serialize: (v: unknown) => JSON.stringify(v),
-    deserialize: (s: string) => JSON.parse(s),
-  }, { client: transport });
+  return new ServiceBusBroker(
+    createRuntime(),
+    {
+      serialize: (v: unknown) => JSON.stringify(v),
+      deserialize: (s: string) => JSON.parse(s),
+    },
+    { client: transport },
+  );
 }
 
 describe('service-bus reachability is tri-state (V5-2)', () => {

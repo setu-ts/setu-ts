@@ -29,11 +29,14 @@ describe('Redis Streams redelivery', () => {
   it('keeps hostile thrown values within retry classification and continues the batch', async () => {
     for (const retryable of [true, false]) {
       for (const revoked of [true, false]) {
-        const hostile = Proxy.revocable({}, {
-          getPrototypeOf() {
-            throw Error('hostile prototype trap');
+        const hostile = Proxy.revocable(
+          {},
+          {
+            getPrototypeOf() {
+              throw Error('hostile prototype trap');
+            },
           },
-        });
+        );
         if (revoked) hostile.revoke();
         const { clock, client, broker, logs } = setup({
           consumerRetry: {
@@ -58,16 +61,16 @@ describe('Redis Streams redelivery', () => {
         expect(delivered).toEqual(['healthy']);
         expect(failedCalls).toBe(1);
         expect(logs.some((m) => m.startsWith('Poll error:'))).toBe(false);
-        expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10'))
-          .toHaveLength(retryable ? 1 : 0);
+        expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toHaveLength(
+          retryable ? 1 : 0,
+        );
         if (retryable) await clock.advance(30);
         expect(failedCalls).toBe(retryable ? 2 : 1);
         expect(
-          client.calls.filter((c) =>
-            c.method === 'xadd' && c.args[0] === 't.dead.messaging-consumers'
+          client.calls.filter(
+            (c) => c.method === 'xadd' && c.args[0] === 't.dead.messaging-consumers',
           ),
-        )
-          .toHaveLength(1);
+        ).toHaveLength(1);
         expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([]);
         await broker.disconnect();
       }
@@ -105,7 +108,7 @@ describe('Redis Streams redelivery', () => {
       await broker.subscribe('t', () => {
         entered = true;
         return new Promise<void>((resolve, reject) => {
-          finish = () => rejects ? reject(Error('late')) : resolve();
+          finish = () => (rejects ? reject(Error('late')) : resolve());
         });
       });
       await broker.publish('t', 'm1');
@@ -192,8 +195,9 @@ describe('Redis Streams redelivery', () => {
     client.xclaim = claim;
     await clock.advance(10);
     expect(client.calls.filter((c) => c.method === 'xack').map((c) => c.args[2])).toEqual(['0-0']);
-    expect((await client.xpending('t', 'messaging-consumers', '-', '+', '10')).map((p) => p[0]))
-      .toEqual(['0-1']);
+    expect(
+      (await client.xpending('t', 'messaging-consumers', '-', '+', '10')).map((p) => p[0]),
+    ).toEqual(['0-1']);
     await broker.disconnect();
   });
 
@@ -292,12 +296,9 @@ describe('Redis Streams redelivery', () => {
     );
     await clock.advance(5);
     expect(seen).toHaveLength(1);
-    expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([[
-      '0-0',
-      'fake-uuid-0',
-      0,
-      1,
-    ]]);
+    expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([
+      ['0-0', 'fake-uuid-0', 0, 1],
+    ]);
     await clock.advance(24);
     expect(seen).toHaveLength(1);
     await clock.advance(1);
@@ -320,10 +321,14 @@ describe('Redis Streams redelivery', () => {
     const { clock, client, broker } = setup({ deadLetterMaxLen: 7 });
     await broker.connect();
     let calls = 0;
-    await broker.subscribe('t', () => {
-      calls++;
-      throw Error('always');
-    }, { queue: 'g' });
+    await broker.subscribe(
+      't',
+      () => {
+        calls++;
+        throw Error('always');
+      },
+      { queue: 'g' },
+    );
     await broker.publishWithHeaders('t', { m: 'm1' }, { traceparent: 'tp' });
     await clock.advance(75);
     expect(calls).toBe(3);
@@ -419,8 +424,8 @@ describe('Redis Streams redelivery', () => {
       expect(handled).toBe(kind === 'missing' || kind === 'malformed' ? 0 : 1);
       expect(classified).toBe(handled);
       expect(
-        client.calls.filter((c) =>
-          c.method === 'xadd' && c.args[0] === 't.dead.messaging-consumers'
+        client.calls.filter(
+          (c) => c.method === 'xadd' && c.args[0] === 't.dead.messaging-consumers',
         ),
       ).toHaveLength(1);
       expect(await client.xpending('t', 'messaging-consumers', '-', '+', '10')).toEqual([]);
@@ -534,21 +539,18 @@ describe('Redis Streams redelivery', () => {
     const clock = clockRuntime();
     const construct = (options: RedisStreamsOptions) =>
       new RedisStreamsBroker(clock.runtime, new JsonSerializer(), options);
-    for (
-      const bad of [
-        NaN,
-        Infinity,
-        -Infinity,
-        0,
-        -1,
-        1.5,
-        Number.MAX_SAFE_INTEGER + 1,
-        '5' as unknown as number,
-      ]
-    ) {
-      for (
-        const name of ['reclaimIntervalMs', 'deadLetterMaxLen', 'consumerIdleSweepMs'] as const
-      ) expect(() => construct({ [name]: bad })).toThrow(RangeError);
+    for (const bad of [
+      NaN,
+      Infinity,
+      -Infinity,
+      0,
+      -1,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      '5' as unknown as number,
+    ]) {
+      for (const name of ['reclaimIntervalMs', 'deadLetterMaxLen', 'consumerIdleSweepMs'] as const)
+        expect(() => construct({ [name]: bad })).toThrow(RangeError);
       expect(() => construct({ consumerRetry: { maxAttempts: bad } })).toThrow(RangeError);
       expect(() => construct({ consumerRetry: { delaysMs: [bad] } })).toThrow(RangeError);
     }

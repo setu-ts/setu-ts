@@ -303,9 +303,7 @@ describe('client resilience composition', () => {
       timing,
       fetch: () => {
         attempts++;
-        return Promise.resolve(
-          new Response('', { status: 429, headers: { 'Retry-After': '60' } }),
-        );
+        return Promise.resolve(new Response('', { status: 429, headers: { 'Retry-After': '60' } }));
       },
       retry,
     });

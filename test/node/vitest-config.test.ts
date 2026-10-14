@@ -63,8 +63,8 @@ it('lowers a TC39 decorator and JSX before the runner parses the module', async 
   expect(output?.code).toContain('__decorateElement');
   const jsx = await lower('export const element = <div />;', `${root}/.tmp/proof.tsx`);
   expect(jsx?.code).toContain('hono/jsx/jsx-runtime');
-  const resolver = config.plugins?.find((p) =>
-    p && 'name' in p && p.name === 'setu-source-exports'
+  const resolver = config.plugins?.find(
+    (p) => p && 'name' in p && p.name === 'setu-source-exports',
   );
   if (!resolver || !('resolveId' in resolver) || typeof resolver.resolveId !== 'function') {
     throw new Error('missing resolver');

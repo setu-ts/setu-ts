@@ -25,7 +25,10 @@ describe('inspect-local-diagnostics demo', () => {
     expect(code).toEqual(0);
     // Deno.serve prints its startup banner to stderr; that is the only
     // line stderr may carry (it names the port, never a credential).
-    const errorLines = errors.trim().split('\n').filter((line) => line.length > 0);
+    const errorLines = errors
+      .trim()
+      .split('\n')
+      .filter((line) => line.length > 0);
     expect(errorLines.length).toBeLessThanOrEqual(1);
     for (const line of errorLines) {
       expect(line).toMatch(/^Listening on http:\/\/127\.0\.0\.1:\d+\/$/);

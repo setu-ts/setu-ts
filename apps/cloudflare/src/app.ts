@@ -25,27 +25,20 @@ function MessagingSubscriptions(): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-      const bindings = ctx.services.get<ICloudflareBindings>(
-        CAPABILITIES.CLOUDFLARE,
-      );
+      const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
 
-      await broker.subscribe<{ note: string }>(
-        'audit.logged',
-        async (message) => {
-          // Written to KV so the smoke can observe a delivery that happened in a
-          // DIFFERENT invocation of this Worker.
-          await bindings.kv('EXAMPLE_KV').put('last-audit', message.note);
-        },
-      );
+      await broker.subscribe<{ note: string }>('audit.logged', async (message) => {
+        // Written to KV so the smoke can observe a delivery that happened in a
+        // DIFFERENT invocation of this Worker.
+        await bindings.kv('EXAMPLE_KV').put('last-audit', message.note);
+      });
       await broker.respond<number, number>('double', (n) => n * 2);
     },
   };
 }
 
 /** Creates a Worker-compatible application with an injected KV binding. */
-export function createCloudflareApp(
-  env: CloudflareWorkerEnv,
-): IKernelApplication {
+export function createCloudflareApp(env: CloudflareWorkerEnv): IKernelApplication {
   const app = createApplication({
     plugins: [
       CloudflareRuntimePlugin(env),
@@ -88,27 +81,21 @@ export function createCloudflareApp(
   });
 
   app.router.get('/double/:n', async (ctx) => {
-    const answer = await broker().request<number, number>(
-      'double',
-      Number(ctx.params.n),
-      { timeoutMs: 20_000 },
-    );
+    const answer = await broker().request<number, number>('double', Number(ctx.params.n), {
+      timeoutMs: 20_000,
+    });
     return ctx.response.json({ answer });
   });
 
   app.router.post('/value/:key', async (ctx) => {
-    const bindings = ctx.services.get<ICloudflareBindings>(
-      CAPABILITIES.CLOUDFLARE,
-    );
+    const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
     const kv: IKvNamespace = bindings.kv('EXAMPLE_KV');
     const input = await ctx.request.json<{ value: string }>();
     await kv.put(ctx.params.key, input.value);
     return ctx.response.status(204).send();
   });
   app.router.get('/value/:key', async (ctx) => {
-    const bindings = ctx.services.get<ICloudflareBindings>(
-      CAPABILITIES.CLOUDFLARE,
-    );
+    const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
     const value = await bindings.kv('EXAMPLE_KV').get(ctx.params.key);
     return value === null
       ? ctx.response.status(404).json({ error: 'not found' })

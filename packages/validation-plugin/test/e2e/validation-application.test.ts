@@ -16,9 +16,7 @@ import { validateBody, validateQuery, ValidationPlugin } from '../../src/index.t
 // Test runtime plugin (provides CAPABILITIES.RUNTIME)
 // ---------------------------------------------------------------------------
 
-function createTestRuntimePlugin(
-  opts: { env?: Record<string, string | undefined> } = {},
-): IPlugin {
+function createTestRuntimePlugin(opts: { env?: Record<string, string | undefined> } = {}): IPlugin {
   const runtime: IRuntimeServices = {
     platform: () => 'deno',
     version: () => '2.0.0-test',
@@ -57,10 +55,7 @@ function createTestRuntimePlugin(
 describe('ValidationPlugin E2E — with real application', () => {
   it('passing request: validateBody stores validated data and handler runs', async () => {
     const app = createApplication({
-      plugins: [
-        createTestRuntimePlugin(),
-        ValidationPlugin({ errorFormat: 'default' }),
-      ],
+      plugins: [createTestRuntimePlugin(), ValidationPlugin({ errorFormat: 'default' })],
     });
 
     await app.start();
@@ -108,10 +103,7 @@ describe('ValidationPlugin E2E — with real application', () => {
 
   it('failing request: validateBody short-circuits with 400 validation error', async () => {
     const app = createApplication({
-      plugins: [
-        createTestRuntimePlugin(),
-        ValidationPlugin({ errorFormat: 'default' }),
-      ],
+      plugins: [createTestRuntimePlugin(), ValidationPlugin({ errorFormat: 'default' })],
     });
 
     await app.start();
@@ -163,10 +155,7 @@ describe('ValidationPlugin E2E — with real application', () => {
 
   it('rfc9457 format: E2E response has type/instance, no message', async () => {
     const app = createApplication({
-      plugins: [
-        createTestRuntimePlugin(),
-        ValidationPlugin({ errorFormat: 'rfc9457' }),
-      ],
+      plugins: [createTestRuntimePlugin(), ValidationPlugin({ errorFormat: 'rfc9457' })],
     });
 
     await app.start();
@@ -213,10 +202,7 @@ describe('ValidationPlugin E2E — with real application', () => {
 
   it('validateQuery helper works through real pipeline', async () => {
     const app = createApplication({
-      plugins: [
-        createTestRuntimePlugin(),
-        ValidationPlugin(),
-      ],
+      plugins: [createTestRuntimePlugin(), ValidationPlugin()],
     });
 
     await app.start();
@@ -263,10 +249,7 @@ describe('ValidationPlugin E2E — with real application', () => {
 
   it('invalid JSON body returns 400 without throwing', async () => {
     const app = createApplication({
-      plugins: [
-        createTestRuntimePlugin(),
-        ValidationPlugin(),
-      ],
+      plugins: [createTestRuntimePlugin(), ValidationPlugin()],
     });
 
     await app.start();

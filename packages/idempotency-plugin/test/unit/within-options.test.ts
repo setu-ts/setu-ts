@@ -88,8 +88,9 @@ describe('validateWithinOptionShape (M109b §3.13)', () => {
   });
 
   it('refuses a non-object option set', () => {
-    expect(() => validateWithinOptionShape(undefined as unknown as IdempotentWithinOptions))
-      .toThrow(IdempotencyConfigurationError);
+    expect(() =>
+      validateWithinOptionShape(undefined as unknown as IdempotentWithinOptions),
+    ).toThrow(IdempotencyConfigurationError);
   });
 });
 
@@ -100,10 +101,7 @@ describe('resolveWithinOptions defaults and pass-through (M109b §3.13)', () => 
   });
 
   it('carries the namespace, scope and fingerprint through', () => {
-    const resolved = resolveWithinOptions(
-      options({ fingerprint: { a: 1 } }),
-      DEFAULTS,
-    );
+    const resolved = resolveWithinOptions(options({ fingerprint: { a: 1 } }), DEFAULTS);
     expect(resolved.namespace).toBe('orders.create');
     expect(resolved.scope).toBe('t1:u1');
     expect(resolved.fingerprint).toEqual({ a: 1 });

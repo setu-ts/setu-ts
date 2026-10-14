@@ -124,9 +124,12 @@ interface CloseObservable {
  * @returns `true` when both members are functions
  */
 function isCloseObservable(channel: unknown): channel is CloseObservable {
-  return typeof channel === 'object' && channel !== null &&
+  return (
+    typeof channel === 'object' &&
+    channel !== null &&
     typeof (channel as { on?: unknown }).on === 'function' &&
-    typeof (channel as { off?: unknown }).off === 'function';
+    typeof (channel as { off?: unknown }).off === 'function'
+  );
 }
 
 /**
@@ -273,9 +276,7 @@ export class RabbitMqQueue implements QueueAdapter {
       );
     }
     this.#persistentMessages = options?.persistentMessages ?? true;
-    this.#publishTimeoutMs = resolvePublishTimeoutMs(
-      options?.publishTimeoutMs,
-    );
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#reportWarning = options?.reportWarning;
     this.#processing = new Map();
     this.#recurringJobs = new Map();
@@ -317,7 +318,7 @@ export class RabbitMqQueue implements QueueAdapter {
    */
   jobNameProblem(name: string): string | null {
     return fitsAmqpShortString(this.#readyQueue(name)) &&
-        fitsAmqpShortString(this.#delayQueue(name))
+      fitsAmqpShortString(this.#delayQueue(name))
       ? null
       : "RabbitMqQueue cannot use the job name: its queue names exceed AMQP's 255 UTF-8 byte limit";
   }

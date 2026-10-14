@@ -164,14 +164,14 @@ export class OutboxCollector implements OutboxRelayObserver {
         topic === undefined
           ? { [OUTBOX_LABEL]: this.#instance, [TOPIC_LABEL]: INVALID_ROW_TOPIC_LABEL }
           : this.#topicLabels(topic),
-      )
+      ),
     );
   }
 
   /** @inheritdoc */
   overlap(kind: 'fenced' | 'claim-lost' | 'duplicate'): void {
     this.#guard(() =>
-      this.#overlaps.inc(1, { [OUTBOX_LABEL]: this.#instance, [KIND_LABEL]: kind })
+      this.#overlaps.inc(1, { [OUTBOX_LABEL]: this.#instance, [KIND_LABEL]: kind }),
     );
   }
 

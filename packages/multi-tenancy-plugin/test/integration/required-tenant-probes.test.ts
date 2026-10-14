@@ -31,10 +31,8 @@ describe('required tenant + operational probes (X4-2) — real kernel app', () =
           name: 'test-business-route',
           version: '1.0.0',
           register(ctx: IPluginContext): void {
-            ctx.router.get(
-              '/api/orders',
-              (c: IRequestContext) =>
-                c.response.json({ ok: true, tenant: c.request.tenant?.id ?? 'none' }),
+            ctx.router.get('/api/orders', (c: IRequestContext) =>
+              c.response.json({ ok: true, tenant: c.request.tenant?.id ?? 'none' }),
             );
           },
         },

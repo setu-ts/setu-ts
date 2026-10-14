@@ -23,13 +23,15 @@ import type {
 } from '../../src/interfaces/graphql-runtime.ts';
 
 /** Build a fake runtime with a controllable operation AST and parse/validate. */
-function createRuntime(opts: {
-  operation?: { operation: string } | null;
-  /** When set, the SECOND `getOperationAST` call returns this (null included). */
-  operationSecond?: { operation: string } | null;
-  parseThrows?: boolean;
-  validationErrors?: unknown[];
-} = {}): GraphqlRuntime {
+function createRuntime(
+  opts: {
+    operation?: { operation: string } | null;
+    /** When set, the SECOND `getOperationAST` call returns this (null included). */
+    operationSecond?: { operation: string } | null;
+    parseThrows?: boolean;
+    validationErrors?: unknown[];
+  } = {},
+): GraphqlRuntime {
   let astCallCount = 0;
   return {
     parse: (_src: string) => {
@@ -39,16 +41,16 @@ function createRuntime(opts: {
     validate: () => (opts.validationErrors ?? []) as never,
     execute: () => Promise.resolve({ data: { ok: true } }),
     subscribe: () => Promise.resolve({ data: {} }),
-    buildSchema: (_src: string) => ({} as unknown as GraphqlSchemaLike),
+    buildSchema: (_src: string) => ({}) as unknown as GraphqlSchemaLike,
     validateSchema: () => [],
     getOperationAST: () => {
       astCallCount++;
       if (astCallCount === 1) return (opts.operation ?? null) as GraphqlDefinitionNodeLike;
       // Distinguish "not provided" from "explicitly null": `null ?? x` would
       // otherwise coalesce back to `operation`.
-      return (opts.operationSecond !== undefined
-        ? opts.operationSecond
-        : (opts.operation ?? null)) as GraphqlDefinitionNodeLike;
+      return (
+        opts.operationSecond !== undefined ? opts.operationSecond : (opts.operation ?? null)
+      ) as GraphqlDefinitionNodeLike;
     },
     GraphQLError: class extends Error {
       override name = 'GraphQLError';

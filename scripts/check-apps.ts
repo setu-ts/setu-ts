@@ -10,9 +10,7 @@ interface AppConfig {
 export type SmokeOutcome = 'passed' | 'skipped' | 'failed';
 
 /** Classifies a smoke command result so skip handling is explicit and testable. */
-export function classifySmokeExitCode(
-  status: Deno.CommandStatus,
-): SmokeOutcome {
+export function classifySmokeExitCode(status: Deno.CommandStatus): SmokeOutcome {
   if (status.code === SKIP_EXIT_CODE) return 'skipped';
   return status.success ? 'passed' : 'failed';
 }
@@ -61,10 +59,7 @@ export function prerequisiteTask(
  * Returns a human-readable message for a malformed application directory, or
  * `null` when the error should be rethrown.
  */
-export function malformedAppDirMessage(
-  directory: string,
-  error: unknown,
-): string | null {
+export function malformedAppDirMessage(directory: string, error: unknown): string | null {
   if (error instanceof Deno.errors.NotFound) {
     return `${directory}: missing deno.json — malformed application directory`;
   }
@@ -78,10 +73,7 @@ async function readAppConfig(path: string): Promise<AppConfig> {
   return JSON.parse(await Deno.readTextFile(path)) as AppConfig;
 }
 
-async function run(
-  command: readonly string[],
-  cwd: string,
-): Promise<Deno.CommandStatus> {
+async function run(command: readonly string[], cwd: string): Promise<Deno.CommandStatus> {
   return await new Deno.Command(command[0], {
     args: [...command.slice(1)],
     cwd,
@@ -118,9 +110,7 @@ async function checkApps(): Promise<boolean> {
     }
 
     if (!config.tasks?.start || !config.tasks.smoke) {
-      console.error(
-        `${directory}: every example must declare start and smoke tasks.`,
-      );
+      console.error(`${directory}: every example must declare start and smoke tasks.`);
       failed = true;
       continue;
     }
@@ -157,9 +147,7 @@ async function checkApps(): Promise<boolean> {
     const outcome = classifySmokeExitCode(smoked);
     if (outcome === 'skipped') {
       skipped.push(directory);
-      console.warn(
-        `${directory}: smoke skipped (external prerequisite unavailable).`,
-      );
+      console.warn(`${directory}: smoke skipped (external prerequisite unavailable).`);
     } else if (outcome === 'failed') {
       failed = true;
     }
@@ -181,12 +169,13 @@ async function checkApps(): Promise<boolean> {
   // ALLOW_SKIP enforcement
   const allowRaw = Deno.env.get('ALLOW_SKIP');
   if (allowRaw !== undefined) {
-    const allowList = allowRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const allowList = allowRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     const unexpected = unexpectedSkips(skipped, allowList);
     if (unexpected.length > 0) {
-      console.error(
-        `Unexpected skips (not in ALLOW_SKIP=${allowRaw}): ${unexpected.join(', ')}`,
-      );
+      console.error(`Unexpected skips (not in ALLOW_SKIP=${allowRaw}): ${unexpected.join(', ')}`);
       failed = true;
     }
   }
@@ -194,6 +183,6 @@ async function checkApps(): Promise<boolean> {
   return failed;
 }
 
-if (import.meta.main && await checkApps()) {
+if (import.meta.main && (await checkApps())) {
   Deno.exit(1);
 }

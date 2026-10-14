@@ -74,9 +74,8 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
   // construction, so an invalid option refuses before any application
   // exists. `null` when `diagnostics` is absent — the inert, disabled source
   // is registered instead, and dispatch stays byte-identical.
-  const diagnosticsPolicy = opts.diagnostics === undefined
-    ? null
-    : compileEventsDiagnosticsPolicy(opts.diagnostics);
+  const diagnosticsPolicy =
+    opts.diagnostics === undefined ? null : compileEventsDiagnosticsPolicy(opts.diagnostics);
 
   // Split the two arms once, at plugin construction. Instances keep their
   // `register()` timing (byte-identical to the pre-factory behaviour);
@@ -96,7 +95,9 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
   const factories = handlers
     .map((entry, index) => ({ entry, index }))
     .filter(
-      (slot): slot is {
+      (
+        slot,
+      ): slot is {
         entry: {
           readonly type: string;
           readonly handler: RegistryFactory<IEventHandler<unknown>>;
@@ -152,9 +153,10 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // the runtime's monotonic clock. Attachment goes through the internal
       // WeakMap helper — the bus constructor signature is unchanged, and an
       // application-constructed bus is never observed.
-      const collector = diagnosticsPolicy === null
-        ? null
-        : new EventObservationCollector(diagnosticsPolicy, ctx.runtime);
+      const collector =
+        diagnosticsPolicy === null
+          ? null
+          : new EventObservationCollector(diagnosticsPolicy, ctx.runtime);
       attachEventObserver(bus, collector);
 
       // Register the bus under CAPABILITIES.EVENTS.
@@ -166,11 +168,9 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // cannot collide with each other. An unconfigured instance contributes
       // the inert `disabled` source, which observes nothing.
       const source: IEventDiagnosticsSource = collector ?? createDisabledEventSource();
-      ctx.services.register<IEventDiagnosticsSource>(
-        CAPABILITIES.EVENTS_DIAGNOSTICS,
-        source,
-        { multi: true },
-      );
+      ctx.services.register<IEventDiagnosticsSource>(CAPABILITIES.EVENTS_DIAGNOSTICS, source, {
+        multi: true,
+      });
 
       // Subscribe the declaratively-supplied handler INSTANCES, through the
       // SAME `subscribeHandler` a caller would use by hand — so the option and

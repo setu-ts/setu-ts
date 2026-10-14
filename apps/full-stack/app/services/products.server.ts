@@ -57,7 +57,5 @@ export async function seedProducts(database: IDatabaseService): Promise<readonly
 export async function listProducts(context: AppLoadContext): Promise<readonly Product[]> {
   getLogger(context).debug('products: listing');
 
-  return await getDatabase(context)
-    .getRepository<Product>(PRODUCTS_ENTITY)
-    .findAll();
+  return await getDatabase(context).getRepository<Product>(PRODUCTS_ENTITY).findAll();
 }

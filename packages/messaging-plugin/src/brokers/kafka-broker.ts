@@ -340,11 +340,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @param serializer - Serializer for message payloads
    * @param options - Kafka connection and configuration options
    */
-  constructor(
-    runtime: IRuntimeServices,
-    serializer: ISerializer,
-    options?: KafkaOptions,
-  ) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: KafkaOptions) {
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#brokers = options?.brokers ?? ['localhost:9092'];
@@ -391,9 +387,13 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @returns The open inbox, addressed at the shared reply topic
    */
   async #openReplyInbox(onReply: (message: unknown) => void): Promise<ReplyInbox> {
-    const subscription = await this.subscribe(this.#replyTopic, (message) => {
-      onReply(message);
-    }, { queue: `${REPLY_GROUP_PREFIX}${this.#runtime.uuid()}` });
+    const subscription = await this.subscribe(
+      this.#replyTopic,
+      (message) => {
+        onReply(message);
+      },
+      { queue: `${REPLY_GROUP_PREFIX}${this.#runtime.uuid()}` },
+    );
 
     return {
       address: this.#replyTopic,
@@ -539,8 +539,8 @@ export class KafkaBroker implements MessageBrokerAdapter {
     return (): void => {
       const p = this.#producer as
         | (IKafkaEventEmitter & {
-          off?: (event: string, listener: (...args: unknown[]) => void) => void;
-        })
+            off?: (event: string, listener: (...args: unknown[]) => void) => void;
+          })
         | null;
       if (p !== null && typeof p.off === 'function') {
         p.off(event, listener);
@@ -581,13 +581,15 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
     await realProducer.send({
       topic,
-      messages: [{
-        value: serialized,
-        // Kafka's native mapping: the message key decides the partition, so the
-        // same ordering key reaches one partition and stays in publish order.
-        ...(validated.orderingKey !== undefined ? { key: validated.orderingKey } : {}),
-        headers: wireHeaders,
-      }],
+      messages: [
+        {
+          value: serialized,
+          // Kafka's native mapping: the message key decides the partition, so the
+          // same ordering key reaches one partition and stays in publish order.
+          ...(validated.orderingKey !== undefined ? { key: validated.orderingKey } : {}),
+          headers: wireHeaders,
+        },
+      ],
     });
   }
 
@@ -618,12 +620,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
     // Create consumer unconditionally from the resolved factory
     const realFactory = this.#factory as unknown as {
-      consumer(
-        options: {
-          groupId: string;
-          retry: { retries: number; restartOnFailure(error: Error): Promise<boolean> };
-        },
-      ): unknown;
+      consumer(options: {
+        groupId: string;
+        retry: { retries: number; restartOnFailure(error: Error): Promise<boolean> };
+      }): unknown;
     };
     // The broker owns crash restarts
     // (M101b security audit N2): kafkajs consults `restartOnFailure` only for
@@ -650,13 +650,13 @@ export class KafkaBroker implements MessageBrokerAdapter {
     const consumerTyped = realConsumer as unknown as {
       connect(): Promise<void>;
       subscribe(options: { topic: string; fromBeginning?: boolean }): Promise<void>;
-      run(
-        options: {
-          eachMessage: (
-            data: { topic: string; partition: number; message: unknown },
-          ) => Promise<void>;
-        },
-      ): Promise<void>;
+      run(options: {
+        eachMessage: (data: {
+          topic: string;
+          partition: number;
+          message: unknown;
+        }) => Promise<void>;
+      }): Promise<void>;
       stop(): Promise<void>;
       disconnect(): Promise<void>;
     };
@@ -691,9 +691,14 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // documented `partition:offset` identity degrades to `"undefined:<offset>"`
     // — colliding across partitions and breaking the de-duplication the
     // identity exists for (90d verification, Finding 1).
-    const eachMessage = async (
-      { partition, message }: { topic: string; partition: number; message: unknown },
-    ): Promise<void> => {
+    const eachMessage = async ({
+      partition,
+      message,
+    }: {
+      topic: string;
+      partition: number;
+      message: unknown;
+    }): Promise<void> => {
       // A released consumer handles nothing (M101b security audit N2): a join
       // that settles after its release delivers before the deferred
       // disconnect stops it. Throwing leaves the offset uncommitted, so the
@@ -744,14 +749,17 @@ export class KafkaBroker implements MessageBrokerAdapter {
       // process. It is reported and the consumer marked stopped instead.
       run: () => {
         const runPromise = consumerTyped.run({ eachMessage });
-        activeConsumer.started = runPromise.then(() => {}, () => {});
+        activeConsumer.started = runPromise.then(
+          () => {},
+          () => {},
+        );
         runPromise.catch((err: unknown) => {
           activeConsumer.running = false;
           try {
             this.#logger?.error(
-              `Kafka consumer for topic ${JSON.stringify(topic)} (group ${
-                JSON.stringify(groupId)
-              }) stopped: ${describeError(err)}`,
+              `Kafka consumer for topic ${JSON.stringify(topic)} (group ${JSON.stringify(
+                groupId,
+              )}) stopped: ${describeError(err)}`,
             );
           } catch {
             // The logger is the last-resort sink; its own failure is swallowed.
@@ -885,7 +893,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
   ): Promise<void> {
     const budget = this.#subscribeRetry;
     let delay = budget.initialRetryTime;
-    for (let attempt = 0;; attempt++) {
+    for (let attempt = 0; ; attempt++) {
       try {
         await consumer.subscribe({ topic, fromBeginning: false });
         return;

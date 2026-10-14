@@ -236,8 +236,13 @@ export function validateTraceReadArgs(
   }
   const effective = limit === undefined ? MAX_READ_LIMIT : limit;
   if (
-    typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0 || after > current ||
-    typeof effective !== 'number' || !Number.isInteger(effective) || effective < 1 ||
+    typeof after !== 'number' ||
+    !Number.isSafeInteger(after) ||
+    after < 0 ||
+    after > current ||
+    typeof effective !== 'number' ||
+    !Number.isInteger(effective) ||
+    effective < 1 ||
     effective > MAX_READ_LIMIT
   ) {
     throw new RangeError(TRACE_COLLECTOR_ERRORS.badCursor);
@@ -380,18 +385,24 @@ export class SpanObservationCollector implements ITraceDiagnosticsSource, SpanOb
     // checked these; a replaceable sink contract and a future caller are why
     // the boundary is enforced here too.
     if (
-      !isAliasValue(candidate.serviceAlias) || !isAliasValue(candidate.operationAlias) ||
-      !isTraceId(candidate.traceId) || !isSpanId(candidate.spanId) ||
-      !SPAN_KINDS.has(candidate.kind) || !TRACE_OUTCOMES.has(candidate.outcome) ||
+      !isAliasValue(candidate.serviceAlias) ||
+      !isAliasValue(candidate.operationAlias) ||
+      !isTraceId(candidate.traceId) ||
+      !isSpanId(candidate.spanId) ||
+      !SPAN_KINDS.has(candidate.kind) ||
+      !TRACE_OUTCOMES.has(candidate.outcome) ||
       !PARENT_VISIBILITIES.has(candidate.parentVisibility) ||
-      typeof candidate.durationMs !== 'number' || !Number.isFinite(candidate.durationMs) ||
-      candidate.durationMs < 0 || !Array.isArray(candidate.links) ||
+      typeof candidate.durationMs !== 'number' ||
+      !Number.isFinite(candidate.durationMs) ||
+      candidate.durationMs < 0 ||
+      !Array.isArray(candidate.links) ||
       candidate.links.length > MAX_LINKS
     ) {
       this.#droppedSpans = saturatingNext(this.#droppedSpans);
       return;
     }
-    const parentKnown = candidate.parentVisibility === 'observed' ||
+    const parentKnown =
+      candidate.parentVisibility === 'observed' ||
       candidate.parentVisibility === 'remote-or-unobserved';
     if (parentKnown !== (candidate.parentSpanId !== undefined)) {
       this.#droppedSpans = saturatingNext(this.#droppedSpans);
@@ -402,9 +413,7 @@ export class SpanObservationCollector implements ITraceDiagnosticsSource, SpanOb
       return;
     }
     for (const link of candidate.links) {
-      if (
-        !isPlainRecord(link) || !isTraceId(link.traceId) || !isSpanId(link.spanId)
-      ) {
+      if (!isPlainRecord(link) || !isTraceId(link.traceId) || !isSpanId(link.spanId)) {
         this.#droppedSpans = saturatingNext(this.#droppedSpans);
         return;
       }
@@ -412,10 +421,10 @@ export class SpanObservationCollector implements ITraceDiagnosticsSource, SpanOb
     this.#sequence = saturatingNext(this.#sequence);
     const retained: RetainedSpan = {
       ...candidate,
-      links: Array.from(
-        candidate.links,
-        (link) => ({ traceId: link.traceId, spanId: link.spanId }),
-      ),
+      links: Array.from(candidate.links, (link) => ({
+        traceId: link.traceId,
+        spanId: link.spanId,
+      })),
       sequence: this.#sequence,
       retainedAtMs: this.#clock.hrtime(),
     };
@@ -550,8 +559,12 @@ function parentKey(traceId: string, spanId: string): string {
 
 /** Validates one alias value without throwing (the collector's read path). */
 function isAliasValue(value: unknown): value is string {
-  return typeof value === 'string' && ENCODER.encode(value).length >= 1 &&
-    ENCODER.encode(value).length <= MAX_ALIAS_BYTES && !hasForbiddenAliasCharacter(value);
+  return (
+    typeof value === 'string' &&
+    ENCODER.encode(value).length >= 1 &&
+    ENCODER.encode(value).length <= MAX_ALIAS_BYTES &&
+    !hasForbiddenAliasCharacter(value)
+  );
 }
 
 /**

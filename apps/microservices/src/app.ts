@@ -13,10 +13,7 @@ export function createServiceB(redisUrl?: string): IKernelApplication {
     plugins.push(MessagingPlugin({ broker: 'redis-streams', url: redisUrl }));
   }
   const app = createApplication({ plugins });
-  app.router.get(
-    '/hello',
-    (ctx) => ctx.response.json({ greeting: 'Hello, service-a!' }),
-  );
+  app.router.get('/hello', (ctx) => ctx.response.json({ greeting: 'Hello, service-a!' }));
   return app;
 }
 
@@ -37,16 +34,14 @@ export function createServiceA(serviceBPort: number, redisUrl?: string): IKernel
 
 /** Resolves service B then calls its independent HTTP endpoint. */
 export async function callServiceB(app: IKernelApplication): Promise<string> {
-  const discovery = app.services.get<IServiceDiscovery>(
-    CAPABILITIES.SERVICE_DISCOVERY,
-  );
+  const discovery = app.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
   const url = await discovery.resolveUrl('service-b', '/hello');
   if (url === null) throw new Error('Service discovery did not resolve service B.');
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Service B returned ${response.status} at ${url}.`);
   }
-  const body = await response.json() as { greeting?: string };
+  const body = (await response.json()) as { greeting?: string };
   if (body.greeting === undefined) {
     throw new Error('Service B returned no greeting.');
   }
@@ -61,20 +56,14 @@ export async function registerGreetingResponder(
   const subscription = await broker.respond<
     { readonly name: string },
     { readonly greeting: string }
-  >(
-    'service-b.greet',
-    (request) => ({ greeting: `Hello, ${request.name}!` }),
-  );
+  >('service-b.greet', (request) => ({ greeting: `Hello, ${request.name}!` }));
   return () => subscription.unsubscribe();
 }
 
 /** Asks service B for a greeting through service A's networked broker. */
 export async function brokeredGreeting(app: IKernelApplication): Promise<string> {
   const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-  const reply = await broker.request<
-    { readonly name: string },
-    { readonly greeting: string }
-  >(
+  const reply = await broker.request<{ readonly name: string }, { readonly greeting: string }>(
     'service-b.greet',
     { name: 'service-a' },
   );

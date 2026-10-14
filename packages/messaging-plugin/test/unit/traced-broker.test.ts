@@ -17,9 +17,9 @@ describe('TracedBroker', () => {
     let publishedHeaders: Readonly<Record<string, string>> = {};
     let delivery:
       | ((
-        message: unknown,
-        metadata: { topic: string; headers?: Readonly<Record<string, string>> },
-      ) => void | Promise<void>)
+          message: unknown,
+          metadata: { topic: string; headers?: Readonly<Record<string, string>> },
+        ) => void | Promise<void>)
       | undefined;
     const inner: MessageBrokerAdapter = {
       connect: async () => {},
@@ -148,9 +148,13 @@ describe('TracedBroker', () => {
   it('creates a responder consumer span from request metadata', async () => {
     let responder:
       | ((
-        message: unknown,
-        metadata: { topic: string; messageId?: string; headers?: Readonly<Record<string, string>> },
-      ) => Promise<unknown>)
+          message: unknown,
+          metadata: {
+            topic: string;
+            messageId?: string;
+            headers?: Readonly<Record<string, string>>;
+          },
+        ) => Promise<unknown>)
       | undefined;
     const inner = {
       connect: () => Promise.resolve(),
@@ -208,13 +212,13 @@ function recordingInner(): {
   // `undefined` for an optional property.
   deliver:
     | ((
-      message: unknown,
-      metadata: {
-        topic: string;
-        messageId?: string;
-        headers?: Readonly<Record<string, string>>;
-      },
-    ) => void | Promise<void>)
+        message: unknown,
+        metadata: {
+          topic: string;
+          messageId?: string;
+          headers?: Readonly<Record<string, string>>;
+        },
+      ) => void | Promise<void>)
     | undefined;
   headers: () => Readonly<Record<string, string>>;
 } {
@@ -330,13 +334,7 @@ describe('TracedBroker branch coverage', () => {
     expect(await broker.isHealthy()).toBe(false);
     await broker.disconnect();
 
-    expect(inner.calls).toEqual([
-      'connect',
-      'isReady',
-      'reachability',
-      'isHealthy',
-      'disconnect',
-    ]);
+    expect(inner.calls).toEqual(['connect', 'isReady', 'reachability', 'isHealthy', 'disconnect']);
   });
 
   it('traces a delivery that carries neither headers nor a message id', async () => {
@@ -383,13 +381,13 @@ describe('TracedBroker branch coverage', () => {
     // absent-metadata arms of the RPC consumer span unexercised.
     let responder:
       | ((
-        message: unknown,
-        metadata: {
-          topic: string;
-          messageId?: string;
-          headers?: Readonly<Record<string, string>>;
-        },
-      ) => Promise<unknown>)
+          message: unknown,
+          metadata: {
+            topic: string;
+            messageId?: string;
+            headers?: Readonly<Record<string, string>>;
+          },
+        ) => Promise<unknown>)
       | undefined;
     const inner = {
       ...recordingInner().broker,

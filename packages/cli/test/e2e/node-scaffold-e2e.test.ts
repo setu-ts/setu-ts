@@ -146,8 +146,9 @@ async function run(args: readonly string[]): Promise<number> {
 async function advertisedPaths(project: string): Promise<string[]> {
   const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
   const section = readme.split('## What it serves')[1]?.split('\n## ')[0] ?? '';
-  return [...section.matchAll(/^- `([^`]+)`/gm)]
-    .map((match) => (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'));
+  return [...section.matchAll(/^- `([^`]+)`/gm)].map((match) =>
+    (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'),
+  );
 }
 
 /** Scaffolds and installs one host, failing with npm's output when it cannot. */
@@ -167,39 +168,43 @@ describe('a scaffolded npm project runs its own scripts', () => {
   });
 
   for (const [label, args, boots] of HOSTS) {
-    it(`installs, checks, lints, formats, tests${boots ? ' and serves' : ''}: ${label}`, {
-      timeout: INSTALL_TIMEOUT_MS,
-    }, async () => {
-      const project = await scaffoldAndInstall(args);
+    it(
+      `installs, checks, lints, formats, tests${boots ? ' and serves' : ''}: ${label}`,
+      {
+        timeout: INSTALL_TIMEOUT_MS,
+      },
+      async () => {
+        const project = await scaffoldAndInstall(args);
 
-      // A socket target carries a composition-root smoke test (M101g); a Workers
-      // project serves no socket and carries none.
-      const scripts = ['check', 'lint', 'format:check', ...(boots ? ['test'] : [])];
-      const manifest = JSON.parse(await nodeFs.readFile(`${project}/package.json`, 'utf8')) as {
-        scripts?: Record<string, string>;
-      };
-      expect(Object.keys(manifest.scripts ?? {})).toEqual(expect.arrayContaining(scripts));
-      for (const script of scripts) {
-        const result = await npmRun(project, script);
-        expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
-      }
-      if (!boots) return;
+        // A socket target carries a composition-root smoke test (M101g); a Workers
+        // project serves no socket and carries none.
+        const scripts = ['check', 'lint', 'format:check', ...(boots ? ['test'] : [])];
+        const manifest = JSON.parse(await nodeFs.readFile(`${project}/package.json`, 'utf8')) as {
+          scripts?: Record<string, string>;
+        };
+        expect(Object.keys(manifest.scripts ?? {})).toEqual(expect.arrayContaining(scripts));
+        for (const script of scripts) {
+          const result = await npmRun(project, script);
+          expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
+        }
+        if (!boots) return;
 
-      const advertised = await advertisedPaths(project);
-      // Vacuity guard: every host lists at least `/`.
-      expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(1);
-      const served: Record<string, Served> = {};
-      const { output } = await withNodeServer(project, async (origin) => {
-        for (const path of advertised) served[path] = await fetchServed(origin, path);
-      });
-      for (const path of advertised) {
-        expect({ path, ...served[path] }, output).toEqual({
-          path,
-          ...served[path],
-          ...expectedFor(path, label),
+        const advertised = await advertisedPaths(project);
+        // Vacuity guard: every host lists at least `/`.
+        expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(1);
+        const served: Record<string, Served> = {};
+        const { output } = await withNodeServer(project, async (origin) => {
+          for (const path of advertised) served[path] = await fetchServed(origin, path);
         });
-      }
-    });
+        for (const path of advertised) {
+          expect({ path, ...served[path] }, output).toEqual({
+            path,
+            ...served[path],
+            ...expectedFor(path, label),
+          });
+        }
+      },
+    );
   }
 
   // Generated code is formatted with the project's own Prettier settings and
@@ -207,36 +212,47 @@ describe('a scaffolded npm project runs its own scripts', () => {
   // module lists its service in `providers` and constructs it in its test, so a
   // type-only import there compiles nowhere and boots nowhere — the M111d
   // review found exactly that in output no Node gate had ever generated.
-  for (
-    const [style, args] of [
-      ['class-based', ['--template', 'class-based']],
-      ['functional', ['--template', 'rest']],
-    ] as const
-  ) {
-    it(`generates code that checks, lints, formats, tests and serves: ${style}`, {
-      timeout: INSTALL_TIMEOUT_MS,
-    }, async () => {
-      expect(await run(['new', 'shop', ...args])).toBe(0);
-      const project = `${root}/shop`;
-      for (
-        const artifact of [['module', 'widget'], ['service', 'billing'], ['middleware', 'audit']]
-      ) {
-        expect(await run(['generate', ...artifact, '--dir', project]), artifact.join(' ')).toBe(0);
-      }
-      const install = await npmInstall(project, overlay);
-      expect(install.code, install.output).toBe(0);
-      for (const script of ['check', 'lint', 'format:check', 'test']) {
-        const result = await npmRun(project, script);
-        expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
-      }
-      const { result, output } = await withNodeServer(
-        project,
-        async (origin) => await fetchServed(origin, '/widget'),
-      );
-      // The generated module's own list route answers the stub service's empty
-      // list as JSON — not merely some 200 a catch-all could also return.
-      expect(result, output).toEqual({ ...result, status: 200, json: true, body: '{"items":[]}' });
-    });
+  for (const [style, args] of [
+    ['class-based', ['--template', 'class-based']],
+    ['functional', ['--template', 'rest']],
+  ] as const) {
+    it(
+      `generates code that checks, lints, formats, tests and serves: ${style}`,
+      {
+        timeout: INSTALL_TIMEOUT_MS,
+      },
+      async () => {
+        expect(await run(['new', 'shop', ...args])).toBe(0);
+        const project = `${root}/shop`;
+        for (const artifact of [
+          ['module', 'widget'],
+          ['service', 'billing'],
+          ['middleware', 'audit'],
+        ]) {
+          expect(await run(['generate', ...artifact, '--dir', project]), artifact.join(' ')).toBe(
+            0,
+          );
+        }
+        const install = await npmInstall(project, overlay);
+        expect(install.code, install.output).toBe(0);
+        for (const script of ['check', 'lint', 'format:check', 'test']) {
+          const result = await npmRun(project, script);
+          expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
+        }
+        const { result, output } = await withNodeServer(
+          project,
+          async (origin) => await fetchServed(origin, '/widget'),
+        );
+        // The generated module's own list route answers the stub service's empty
+        // list as JSON — not merely some 200 a catch-all could also return.
+        expect(result, output).toEqual({
+          ...result,
+          status: 200,
+          json: true,
+          body: '{"items":[]}',
+        });
+      },
+    );
   }
 
   // `--broker redis` declares the client its plugin loads: a package manager

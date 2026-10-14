@@ -79,9 +79,9 @@ describe('SendGridProvider', () => {
       http,
     });
     await provider.connect();
-    await expect(
-      provider.send({ from: 'me@x.com', to: 'a@x.com', subject: 'Hi' }),
-    ).rejects.toThrow('SendGrid send failed: HTTP 401');
+    await expect(provider.send({ from: 'me@x.com', to: 'a@x.com', subject: 'Hi' })).rejects.toThrow(
+      'SendGrid send failed: HTTP 401',
+    );
     expect(calls[0]?.url).toBe('https://eu.sendgrid.example/send');
   });
 
@@ -91,12 +91,18 @@ describe('SendGridProvider', () => {
     const { http, calls } = fakeHttp();
     const provider = new SendGridProvider({ apiKey: 'k', http });
     const message: OutgoingMail = { from: 'me@x.com', to: 'a@x.com', subject: 'Hi' };
-    const before = await provider.send(message).then(() => 'resolved', (e: Error) => e.message);
+    const before = await provider.send(message).then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    );
     expect(before).toBe('SendGridProvider is not connected');
 
     await provider.connect();
     await provider.disconnect();
-    const after = await provider.send(message).then(() => 'resolved', (e: Error) => e.message);
+    const after = await provider.send(message).then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    );
     expect(after).toBe('SendGridProvider is not connected');
 
     expect(calls).toHaveLength(0);

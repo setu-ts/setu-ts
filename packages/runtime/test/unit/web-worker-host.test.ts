@@ -20,7 +20,10 @@ class FakeWebWorker implements WebWorkerLike {
   /** Listeners registered through `addEventListener`, keyed by event type. */
   readonly listeners = new Map<string, ((event: unknown) => void)[]>();
 
-  constructor(readonly specifier: string, readonly options: { type: 'module' }) {
+  constructor(
+    readonly specifier: string,
+    readonly options: { type: 'module' },
+  ) {
     FakeWebWorker.instances.push(this);
   }
 

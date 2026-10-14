@@ -28,8 +28,8 @@ import type {
  * (mutually assignable in the identity sense), so each pinned shape below
  * fails on any added, removed, or re-typed member.
  */
-type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
-  : false;
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 // Compile-time: the envelope is pinned to exactly the members below, all
 // readonly, with `attempt`, `headers` and `consumer` OPTIONAL
@@ -61,10 +61,8 @@ const keySetPinned: Equals<
 > = true;
 
 // Compile-time: the kind union is pinned to exactly the four ingress paths.
-const kindUnionPinned: Equals<
-  IngressKind,
-  'queue' | 'scheduler' | 'messaging' | 'websocket'
-> = true;
+const kindUnionPinned: Equals<IngressKind, 'queue' | 'scheduler' | 'messaging' | 'websocket'> =
+  true;
 
 // Compile-time: under `exactOptionalPropertyTypes` a type whose `attempt` is
 // REQUIRED and admits `undefined` is NOT assignable to the envelope's optional
@@ -114,9 +112,7 @@ function acceptsPipelineBehavior(
 
 // The same proof for the ingress sibling: any `IIngressBehavior` is accepted
 // where a `BehaviorLike<IngressContext, void>` is required.
-function acceptsIngressBehavior(
-  behavior: IIngressBehavior,
-): BehaviorLike<IngressContext, void> {
+function acceptsIngressBehavior(behavior: IIngressBehavior): BehaviorLike<IngressContext, void> {
   return behavior;
 }
 

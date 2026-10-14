@@ -51,9 +51,7 @@ export default {
  * @returns The `vite.config.ts` contents
  */
 function renderViteConfig(frameworkPackages: readonly string[]): string {
-  const externals = frameworkPackages
-    .map((pkg) => `\n  '@setu-ts/${pkg}',`)
-    .join('');
+  const externals = frameworkPackages.map((pkg) => `\n  '@setu-ts/${pkg}',`).join('');
 
   return `import { readdirSync, readFileSync } from 'node:fs';
 import { reactRouter } from '@react-router/dev/vite';

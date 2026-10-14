@@ -40,9 +40,10 @@ describe('Cosmos guarded conditional writes', () => {
           _etag: 'recreated',
         });
       });
-      const result = operation === 'update'
-        ? await fixture.source.updateWhere!('a', { role: 'owner' }, { name: 'bad' })
-        : await fixture.source.deleteWhere!('a', { role: 'owner' });
+      const result =
+        operation === 'update'
+          ? await fixture.source.updateWhere!('a', { role: 'owner' }, { name: 'bad' })
+          : await fixture.source.deleteWhere!('a', { role: 'owner' });
       expect(result).toBe(operation === 'update' ? null : false);
       expect(await fixture.source.findById('a')).toMatchObject({ role: 'other', name: 'secret' });
     });
@@ -51,9 +52,10 @@ describe('Cosmos guarded conditional writes', () => {
       const fixture = setup(() => {
         if (++n === 1) fixture.fake.documents.get('User|"a"|a')!._etag = 'concurrent';
       });
-      const result = operation === 'update'
-        ? await fixture.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })
-        : await fixture.source.deleteWhere!('a', { role: 'owner' });
+      const result =
+        operation === 'update'
+          ? await fixture.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })
+          : await fixture.source.deleteWhere!('a', { role: 'owner' });
       expect(result).toBeTruthy();
       expect(n).toBe(2);
       expect(await fixture.source.findById('a')).toEqual(
@@ -71,9 +73,10 @@ describe('Cosmos guarded conditional writes', () => {
       const fixture = setup(() => {
         fixture.fake.documents.get('User|"a"|a')!._etag = `edit-${++reads}`;
       });
-      const promise = operation === 'update'
-        ? fixture.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })
-        : fixture.source.deleteWhere!('a', { role: 'owner' });
+      const promise =
+        operation === 'update'
+          ? fixture.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })
+          : fixture.source.deleteWhere!('a', { role: 'owner' });
       await expect(promise).rejects.toBeInstanceOf(CosmosConcurrentModificationError);
       expect(reads).toBe(3);
     });
@@ -113,9 +116,10 @@ describe('Cosmos guarded conditional writes', () => {
         delete: () => Promise.reject(new FakeCosmosError(code, 'fault')),
       });
       for (const operation of ['update', 'delete'] as const) {
-        const promise = operation === 'update'
-          ? current.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })
-          : current.source.deleteWhere!('a', { role: 'owner' });
+        const promise =
+          operation === 'update'
+            ? current.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })
+            : current.source.deleteWhere!('a', { role: 'owner' });
         if (code === 404) expect(await promise).toBeFalsy();
         else await expect(promise).rejects.toThrow('fault');
       }

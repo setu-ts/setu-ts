@@ -39,9 +39,7 @@ export interface RecordedCall {
 // ---------------------------------------------------------------------------
 
 function createNotFoundError(model: string, id: unknown): Error {
-  const error = new Error(
-    `Record ${model} with id ${id} does not exist.`,
-  );
+  const error = new Error(`Record ${model} with id ${id} does not exist.`);
   (error as unknown as Record<string, unknown>).code = 'P2025';
   return error;
 }
@@ -78,7 +76,7 @@ const OPERATOR_KEYS: ReadonlySet<string> = new Set([
  */
 function clausesOf(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value)
-    ? value as Record<string, unknown>[]
+    ? (value as Record<string, unknown>[])
     : [value as Record<string, unknown>];
 }
 
@@ -95,10 +93,7 @@ function clausesOf(value: unknown): Record<string, unknown>[] {
  * @param where - The `where` input a real Prisma client would receive
  * @returns `true` when the row matches every clause
  */
-function matchesPrismaWhere(
-  row: Record<string, unknown>,
-  where: Record<string, unknown>,
-): boolean {
+function matchesPrismaWhere(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
   for (const [key, val] of Object.entries(where)) {
     if (key === 'AND') {
       if (!clausesOf(val).every((clause) => matchesPrismaWhere(row, clause))) return false;
@@ -204,8 +199,9 @@ function compareOperator(actual: unknown, op: string, expected: unknown): boolea
     case 'lte':
       return compareScalar(actual, expected) <= 0;
     case 'contains':
-      return typeof actual === 'string' && typeof expected === 'string' &&
-        actual.includes(expected);
+      return (
+        typeof actual === 'string' && typeof expected === 'string' && actual.includes(expected)
+      );
     case 'in':
       return Array.isArray(expected) && expected.includes(actual);
     default:
@@ -248,7 +244,7 @@ function createDelegate(
         if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
           const compound = val as Record<string, unknown>;
           const found = Array.from(store.records.values()).find((row) =>
-            Object.entries(compound).every(([k, v]) => row[k] === v)
+            Object.entries(compound).every(([k, v]) => row[k] === v),
           );
           return found ?? null;
         }
@@ -384,9 +380,7 @@ function createDelegate(
 // Forward-declared type to avoid self-referential implicit 'any' on `const client = { ... }`
 type FakePrismaClient = ReturnType<typeof createFakePrismaClient>;
 
-export function createFakePrismaClient(
-  options: { activeProvider?: string } = {},
-): {
+export function createFakePrismaClient(options: { activeProvider?: string } = {}): {
   $connect: () => Promise<void>;
   $disconnect: () => Promise<void>;
   $transaction: <T>(
@@ -417,8 +411,7 @@ export function createFakePrismaClient(
   let connected = false;
   let disconnected = false;
   let transactionOptions:
-    | { maxWait?: number; timeout?: number; isolationLevel?: string }
-    | undefined;
+    { maxWait?: number; timeout?: number; isolationLevel?: string } | undefined;
   const recordedCalls: RecordedCall[] = [];
   const activeProvider = options.activeProvider ?? 'postgresql';
   const stores: Record<string, Store> = {

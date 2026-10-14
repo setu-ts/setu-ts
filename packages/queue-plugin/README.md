@@ -23,10 +23,12 @@ app.register(QueuePlugin({ adapter: 'memory' }));
 ```typescript
 import { QueuePlugin } from '@setu-ts/queue-plugin';
 
-app.register(QueuePlugin({
-  adapter: 'redis',
-  url: 'redis://localhost:6379',
-}));
+app.register(
+  QueuePlugin({
+    adapter: 'redis',
+    url: 'redis://localhost:6379',
+  }),
+);
 ```
 
 Connection errors of the `ioredis` client the adapter builds go to the application logger — the
@@ -39,13 +41,15 @@ listener: it belongs to the caller.
 ```typescript
 import { QueuePlugin } from '@setu-ts/queue-plugin';
 
-app.register(QueuePlugin({
-  adapter: 'rabbitmq',
-  url: 'amqp://localhost:5672',
-  // Queue names are derived per job name from this prefix
-  // (`<prefix>.<name>.ready` / `.delay` / `.dead`); there is no `queues` map.
-  prefix: 'he.queue',
-}));
+app.register(
+  QueuePlugin({
+    adapter: 'rabbitmq',
+    url: 'amqp://localhost:5672',
+    // Queue names are derived per job name from this prefix
+    // (`<prefix>.<name>.ready` / `.delay` / `.dead`); there is no `queues` map.
+    prefix: 'he.queue',
+  }),
+);
 ```
 
 Every job is published **persistent** through a **confirm channel**. The ready, delay and dead
@@ -76,13 +80,15 @@ whose enqueue failed stays due and is retried on the next tick.
 ```typescript
 import { QueuePlugin } from '@setu-ts/queue-plugin';
 
-app.register(QueuePlugin({
-  adapter: 'sqs',
-  sqs: {
-    region: 'us-east-1',
-    queues: { default: 'https://sqs.us-east-1.amazonaws.com/123456789012/tasks' },
-  },
-}));
+app.register(
+  QueuePlugin({
+    adapter: 'sqs',
+    sqs: {
+      region: 'us-east-1',
+      queues: { default: 'https://sqs.us-east-1.amazonaws.com/123456789012/tasks' },
+    },
+  }),
+);
 ```
 
 ### Named Instances
@@ -131,16 +137,20 @@ interface SendEmail {
   to: string;
 }
 
-queue.process<SendEmail>('send-email', async (job) => {
-  await mailer.send({ to: job.data.to, subject: 'Welcome', text: 'Hello' });
-}, {
-  concurrency: 3,
-  // Invoked once when a job has exhausted its attempts, immediately before it
-  // is dead-lettered — the only programmatic notice that work was abandoned.
-  onFailed: (job, error) => {
-    logger.error('job dead-lettered', { id: job.id, name: job.name, error: String(error) });
+queue.process<SendEmail>(
+  'send-email',
+  async (job) => {
+    await mailer.send({ to: job.data.to, subject: 'Welcome', text: 'Hello' });
   },
-});
+  {
+    concurrency: 3,
+    // Invoked once when a job has exhausted its attempts, immediately before it
+    // is dead-lettered — the only programmatic notice that work was abandoned.
+    onFailed: (job, error) => {
+      logger.error('job dead-lettered', { id: job.id, name: job.name, error: String(error) });
+    },
+  },
+);
 ```
 
 ### Recurring Jobs
@@ -203,17 +213,19 @@ processor, a retry, `onFailed`, or a settlement.
 ```typescript
 import { QueuePlugin } from '@setu-ts/queue-plugin';
 
-app.register(QueuePlugin({
-  adapter: 'memory',
-  diagnostics: {
-    enabled: true,
-    instanceAlias: 'mailer',
-    // Exact job-name -> display-alias allowlist; unlisted names are neither observed nor counted.
-    queues: { 'send-welcome-email': 'welcome-emails' },
-    // Optional, separately bounded depth counting; absent by default.
-    depths: { intervalMs: 30000, timeoutMs: 2000, concurrency: 2 },
-  },
-}));
+app.register(
+  QueuePlugin({
+    adapter: 'memory',
+    diagnostics: {
+      enabled: true,
+      instanceAlias: 'mailer',
+      // Exact job-name -> display-alias allowlist; unlisted names are neither observed nor counted.
+      queues: { 'send-welcome-email': 'welcome-emails' },
+      // Optional, separately bounded depth counting; absent by default.
+      depths: { intervalMs: 30000, timeoutMs: 2000, concurrency: 2 },
+    },
+  }),
+);
 ```
 
 Every instance — named or not, observed or not — registers one source under
@@ -364,11 +376,13 @@ import { QueuePlugin } from '@setu-ts/queue-plugin';
 import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 import { CAPABILITIES, type IQueue } from '@setu-ts/common';
 
-app.register(TelemetryPlugin({
-  serviceName: 'orders',
-  exporter: 'otlp',
-  endpoint: 'http://localhost:4318/v1/traces',
-}));
+app.register(
+  TelemetryPlugin({
+    serviceName: 'orders',
+    exporter: 'otlp',
+    endpoint: 'http://localhost:4318/v1/traces',
+  }),
+);
 app.register(QueuePlugin({ adapter: 'redis', url: 'redis://localhost:6379' }));
 
 app.router.post('/orders', async (ctx) => {

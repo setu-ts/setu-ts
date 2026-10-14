@@ -89,10 +89,9 @@ describe('IdempotencyPlugin (M109a §3.14)', () => {
       release: () => Promise.resolve('lost' as const),
     };
     const { ctx, close } = fakeContext({ failHealth: true });
-    await expect(IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx)).rejects
-      .toThrow(
-        'health registration failed',
-      );
+    await expect(
+      IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx),
+    ).rejects.toThrow('health registration failed');
     await close();
     expect(disconnected).toBe(true);
   });
@@ -111,8 +110,9 @@ describe('IdempotencyPlugin (M109a §3.14)', () => {
       release: () => Promise.resolve('lost' as const),
     };
     const { ctx, registered, indicators } = fakeContext();
-    await expect(IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx)).rejects
-      .toThrow('connect refused');
+    await expect(
+      IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx),
+    ).rejects.toThrow('connect refused');
     expect(disconnects).toBe(1);
     expect(registered.has(CAPABILITIES.IDEMPOTENCY)).toBe(false);
     expect(indicators.has('idempotency')).toBe(false);
@@ -127,8 +127,9 @@ describe('IdempotencyPlugin (M109a §3.14)', () => {
       release: () => Promise.resolve('lost' as const),
     };
     const { ctx } = fakeContext();
-    await expect(IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx)).rejects
-      .toThrow('connect refused');
+    await expect(
+      IdempotencyPlugin({ store: { type: 'custom', store } }).register(ctx),
+    ).rejects.toThrow('connect refused');
   });
 
   it('registers a service that builds a middleware and a behavior', async () => {

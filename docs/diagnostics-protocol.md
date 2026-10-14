@@ -401,8 +401,7 @@ configuration error, never a silent drop). Sources are read only after the reque
 
 A snapshot is exactly `{ state, alias, coverage: 'owned-instance', records, dropped }`; `alias` is
 `null` when the plugin was not opted in (`state: 'disabled'`). A record is exactly
-`{ alias, operation, count, lastDurationMs, ageMs, succeeded, failed, hits, misses, present, absent,
-removed, notRemoved }`
+`{ alias, operation, count, lastDurationMs, ageMs, succeeded, failed, hits, misses, present, absent, removed, notRemoved }`
 for one of the five backend operations `get`, `set`, `delete`, `has`, `clear` (a `getOrSet` is
 counted as its internal `get`/`set` calls). Every settled call increments `count` and exactly one of
 `succeeded`/`failed`; the detail counters count only successful calls of their operation. There is
@@ -436,8 +435,7 @@ authenticated; `sourceId` is the session-local `s1`…`s16`.
 A snapshot is exactly `{ state, alias, coverage: 'owned-instance', records, dropped }`; `alias` is
 the configured SOURCE alias, `null` when the plugin was not opted in (`state: 'disabled'`). A record
 is exactly
-`{ alias, operation, count, lastDurationMs, ageMs, started, succeeded, failed,
-contended, lockFailed, retryAttempts, lastLatenessMs }`
+`{ alias, operation, count, lastDurationMs, ageMs, started, succeeded, failed, contended, lockFailed, retryAttempts, lastLatenessMs }`
 for one of the two observations `fire` and `attempt`, keyed by (job alias, operation) — at most 64
 tuples per source. A NEW tuple at capacity first reclaims every expired slot; only when none is free
 is it ignored, counting ONE saturating `dropped` per ignored observation (a refused attempt is one
@@ -497,8 +495,7 @@ DATA properties is admitted, each field read once through its descriptor (a gett
 invoked), lists read by index, at most 6 records, exact keys and enums, unique operations,
 non-negative safe-integer counters, and the per-operation nullability above. A source that throws or
 fails any check is reported as a fixed
-`{ state: 'collection-failed', alias: null, records: [],
-dropped: 0 }` — no error text. Duplicate
+`{ state: 'collection-failed', alias: null, records: [], dropped: 0 }` — no error text. Duplicate
 non-null aliases across sources, or a response over 256 KiB, collapse the whole response to
 `{ state: 'collection-failed', sources: [] }`; a partial document is never produced. The aggregate
 `state` is `unsupported` with no source, otherwise the first of `ready`, `collection-failed`,

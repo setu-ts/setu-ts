@@ -189,8 +189,9 @@ describe('mayBeSkipped', () => {
 
 describe('lineStandIn', () => {
   it("picks the line's last prerelease, ignoring other lines", () => {
-    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2', '0.1.0-alpha.10', '0.1.0-alpha.9', '0.2.0']))
-      .toBe('0.1.0-alpha.10');
+    expect(
+      lineStandIn('0.1.0', ['0.1.0-alpha.2', '0.1.0-alpha.10', '0.1.0-alpha.9', '0.2.0']),
+    ).toBe('0.1.0-alpha.10');
   });
 
   it('answers null when the line shipped no prerelease', () => {
@@ -198,8 +199,7 @@ describe('lineStandIn', () => {
   });
 
   it('picks the later prerelease when one carries build metadata', () => {
-    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2+ci.1', '0.1.0-alpha.10']))
-      .toBe('0.1.0-alpha.10');
+    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2+ci.1', '0.1.0-alpha.10'])).toBe('0.1.0-alpha.10');
   });
 
   it('answers null for a tag that is itself a prerelease', () => {
@@ -209,8 +209,9 @@ describe('lineStandIn', () => {
 
 describe('registry URLs and package names', () => {
   it('builds the file URL for a version', () => {
-    expect(registryFileUrl('https://jsr.io', '@setu-ts/common', '0.5.0', 'src/form/form-body.ts'))
-      .toBe('https://jsr.io/@setu-ts/common/0.5.0/src/form/form-body.ts');
+    expect(
+      registryFileUrl('https://jsr.io', '@setu-ts/common', '0.5.0', 'src/form/form-body.ts'),
+    ).toBe('https://jsr.io/@setu-ts/common/0.5.0/src/form/form-body.ts');
   });
 
   it('derives the scoped name from a member path, starters included', () => {
@@ -324,7 +325,9 @@ function options(
     listSourceFiles: (member: string) => {
       const prefix = `${member.replace(/^\.\//, '')}/`;
       return Promise.resolve(
-        Object.keys(FILES).filter((f) => f.startsWith(prefix)).sort(),
+        Object.keys(FILES)
+          .filter((f) => f.startsWith(prefix))
+          .sort(),
       );
     },
     fetchImpl: fakeFetch(
@@ -391,7 +394,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
     });
     expect(result.skipped.find((s) => s.file === file)).toBeUndefined();
@@ -412,20 +415,23 @@ describe('run', () => {
     const calls: string[] = [];
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
-      fetchImpl: fakeFetch({
-        'https://jsr.io/@setu-ts/mock/meta.json': {
-          status: 200,
-          body: JSON.stringify({
-            versions: { '0.1.0-alpha.9': {}, '0.1.0-alpha.10': {}, '0.2.0': {} },
-          }),
+      fetchImpl: fakeFetch(
+        {
+          'https://jsr.io/@setu-ts/mock/meta.json': {
+            status: 200,
+            body: JSON.stringify({
+              versions: { '0.1.0-alpha.9': {}, '0.1.0-alpha.10': {}, '0.2.0': {} },
+            }),
+          },
+          'https://jsr.io/@setu-ts/mock/0.1.0-alpha.10/src/first.ts': {
+            status: 200,
+            body: 'export const First = true;\n',
+          },
         },
-        'https://jsr.io/@setu-ts/mock/0.1.0-alpha.10/src/first.ts': {
-          status: 200,
-          body: 'export const First = true;\n',
-        },
-      }, calls),
+        calls,
+      ),
     });
     expect(result.findings).toHaveLength(0);
     expect(result.skipped.find((s) => s.file === file)).toBeUndefined();
@@ -440,7 +446,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
       fetchImpl: fakeFetch({
         'https://jsr.io/@setu-ts/mock/meta.json': {
@@ -467,7 +473,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
       fetchImpl: fakeFetch({
         'https://jsr.io/@setu-ts/mock/meta.json': {
@@ -488,7 +494,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
       fetchImpl: fakeFetch({
         'https://jsr.io/@setu-ts/mock/meta.json': {
@@ -507,18 +513,22 @@ describe('run', () => {
     // on a transient fault — and this gate issues roughly 200 requests a run,
     // so 429 is a realistic answer rather than a hypothetical one.
     for (const status of [429, 503]) {
-      const result = await run(options({
-        'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': { status, body: '' },
-      }));
+      const result = await run(
+        options({
+          'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': { status, body: '' },
+        }),
+      );
       expect(result.findings.filter((f) => f.file.endsWith('gadget.ts'))).toEqual([]);
       expect(result.skipped.some((k) => k.file.endsWith('gadget.ts'))).toBe(true);
     }
   });
 
   it('treats a non-404 meta response as unreachable, not as an unpublished package', async () => {
-    const result = await run(options({
-      'https://jsr.io/@setu-ts/mock/meta.json': { status: 503, body: '' },
-    }));
+    const result = await run(
+      options({
+        'https://jsr.io/@setu-ts/mock/meta.json': { status: 503, body: '' },
+      }),
+    );
     expect(result.findings).toEqual([]);
     expect(result.skipped.some((k) => k.reason.includes('could not be reached'))).toBe(true);
   });
@@ -538,16 +548,16 @@ describe('run', () => {
     expect(
       calls.filter((url) => url === 'https://jsr.io/@setu-ts/mock/0.6.0/src/pair.ts'),
     ).toHaveLength(1);
-    expect(
-      calls.filter((url) => url === 'https://jsr.io/@setu-ts/mock/meta.json'),
-    ).toHaveLength(1);
+    expect(calls.filter((url) => url === 'https://jsr.io/@setu-ts/mock/meta.json')).toHaveLength(1);
   });
 
   it('fails the run when a fetch rejects, as a skip the operator can see', async () => {
-    const result = await run(options({
-      'https://jsr.io/@setu-ts/mock/meta.json': 'throw',
-      'https://registry.npmjs.org/@setu-ts%2fmock': 'throw',
-    }));
+    const result = await run(
+      options({
+        'https://jsr.io/@setu-ts/mock/meta.json': 'throw',
+        'https://registry.npmjs.org/@setu-ts%2fmock': 'throw',
+      }),
+    );
     expect(result.findings).toEqual([]);
     expect(result.verified).toBe(0);
     expect(result.skipped.length).toBeGreaterThan(0);
@@ -560,9 +570,11 @@ describe('run', () => {
   });
 
   it('skips a tag whose file fetch fails mid-run', async () => {
-    const result = await run(options({
-      'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': 'throw',
-    }));
+    const result = await run(
+      options({
+        'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': 'throw',
+      }),
+    );
     const skip = result.skipped.find((s) => s.file.endsWith('gadget.ts'));
     expect(skip?.reason).toContain('fetch failed');
     expect(result.verified).toBe(2); // the pair still verified
@@ -815,9 +827,12 @@ describe('npm source tarballs after the JSR line', () => {
   }
 
   it('reports an absent source file in an otherwise valid archive', async () => {
-    const { result } = await drive({
-      'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;',
-    }, []);
+    const { result } = await drive(
+      {
+        'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;',
+      },
+      [],
+    );
     expect(result.findings[0].kind).toBe('file-absent');
   });
 });

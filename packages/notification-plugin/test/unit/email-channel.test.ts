@@ -68,8 +68,6 @@ describe('EmailChannel', () => {
       body: 'Body text',
     };
 
-    await expect(channel.send(notification)).rejects.toThrow(
-      'Email channel requires "to.email"',
-    );
+    await expect(channel.send(notification)).rejects.toThrow('Email channel requires "to.email"');
   });
 });

@@ -87,10 +87,7 @@ type ErrorResponderBranded = { [ERROR_RESPONDER_BRAND]?: IErrorResponder };
  * @param responder - The resolved error responder
  * @since 0.1.0
  */
-export function brandErrorResponder(
-  middleware: object,
-  responder: IErrorResponder,
-): void {
+export function brandErrorResponder(middleware: object, responder: IErrorResponder): void {
   Object.defineProperty(middleware, ERROR_RESPONDER_BRAND, {
     value: responder,
     enumerable: false,
@@ -346,10 +343,12 @@ function reportUnserveableStatus(status: number, target: ErrorResponderTarget): 
   if (typeof services?.has !== 'function') return;
   try {
     if (!services.has(CAPABILITIES.LOGGER)) return;
-    services.get<ILogger>(CAPABILITIES.LOGGER).error(
-      'An error response carried an unserveable status; answering 500 instead.',
-      { status, clampedTo: CLAMPED_STATUS },
-    );
+    services
+      .get<ILogger>(CAPABILITIES.LOGGER)
+      .error('An error response carried an unserveable status; answering 500 instead.', {
+        status,
+        clampedTo: CLAMPED_STATUS,
+      });
   } catch {
     // Reporting is best-effort: a throwing logger, or a malformed registry
     // whose `get` is not callable, must never turn the error response this

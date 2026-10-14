@@ -114,19 +114,15 @@ describe('Distributed tracing observations (M98g) — end to end', () => {
       // identifiers — the shape of a propagated traceparent hop. Both apps
       // now hold records sharing ONE trace id; neither can see the other's
       // instance, and the second's parent is unobserved LOCALLY.
-      await second.telemetry.withSpan(
-        APPROVED_NAME,
-        async () => {},
-        {
-          kind: 'server',
-          parentContext: {
-            _opaque: TELEMETRY_CONTEXT_OPAQUE,
-            traceId: root.traceId,
-            spanId: root.spanId,
-            traceFlags: '01',
-          } as TelemetryContext,
-        },
-      );
+      await second.telemetry.withSpan(APPROVED_NAME, async () => {}, {
+        kind: 'server',
+        parentContext: {
+          _opaque: TELEMETRY_CONTEXT_OPAQUE,
+          traceId: root.traceId,
+          spanId: root.spanId,
+          traceFlags: '01',
+        } as TelemetryContext,
+      });
       const secondBatch = await second.client.traces(0);
       expect(secondBatch.records.length).toBe(1);
       const hop = secondBatch.records[0]!;
@@ -224,10 +220,12 @@ describe('Distributed tracing observations (M98g) — end to end', () => {
       app.router.get('/broken', (ctx) => ctx.response.status(503).json({ ok: false }));
       app.router.get('/orders/:id', (ctx) => ctx.response.json({ id: ctx.params.id }));
 
-      expect((await app.inject({ method: 'GET', url: 'http://localhost/orders' })).statusCode)
-        .toBe(200);
-      expect((await app.inject({ method: 'GET', url: 'http://localhost/broken' })).statusCode)
-        .toBe(503);
+      expect((await app.inject({ method: 'GET', url: 'http://localhost/orders' })).statusCode).toBe(
+        200,
+      );
+      expect((await app.inject({ method: 'GET', url: 'http://localhost/broken' })).statusCode).toBe(
+        503,
+      );
       await app.inject({ method: 'GET', url: 'http://localhost/orders/CANARY-ID-7' });
       for (let i = 0; i < 200 && processed === 0; i++) {
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -298,33 +296,28 @@ describe('Distributed tracing observations (M98g) — end to end', () => {
       // Pairing first: a healthy read proves the connector is up.
       await client.traces(0);
       // A traces request with malformed headers is refused invalid-request.
-      const unsigned = await fetch(
-        `http://127.0.0.1:${connectorPort}/v1/traces?after=0&limit=1`,
-        { headers: { host: `127.0.0.1:${connectorPort}` } },
-      );
+      const unsigned = await fetch(`http://127.0.0.1:${connectorPort}/v1/traces?after=0&limit=1`, {
+        headers: { host: `127.0.0.1:${connectorPort}` },
+      });
       expect(unsigned.status).toBe(400);
       const body = (await unsigned.json()) as { error: string };
       expect(body.error).toBe('invalid-request');
       // A WELL-FORMED session id that is not the paired one is unauthorized.
-      const foreign = await fetch(
-        `http://127.0.0.1:${connectorPort}/v1/traces?after=0&limit=1`,
-        {
-          headers: {
-            host: `127.0.0.1:${connectorPort}`,
-            'x-setu-session': 'b'.repeat(32),
-            'x-setu-sequence': '2',
-            'x-setu-instance': '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
-            'x-setu-mac': 'f'.repeat(64),
-          },
+      const foreign = await fetch(`http://127.0.0.1:${connectorPort}/v1/traces?after=0&limit=1`, {
+        headers: {
+          host: `127.0.0.1:${connectorPort}`,
+          'x-setu-session': 'b'.repeat(32),
+          'x-setu-sequence': '2',
+          'x-setu-instance': '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
+          'x-setu-mac': 'f'.repeat(64),
         },
-      );
+      });
       expect(foreign.status).toBe(401);
       expect(((await foreign.json()) as { error: string }).error).toBe('unauthorized');
       // Non-GET never reaches the handler slots.
-      const post = await fetch(
-        `http://127.0.0.1:${connectorPort}/v1/traces?after=0&limit=1`,
-        { method: 'POST' },
-      );
+      const post = await fetch(`http://127.0.0.1:${connectorPort}/v1/traces?after=0&limit=1`, {
+        method: 'POST',
+      });
       expect(post.status).toBe(400);
     } finally {
       client.close();

@@ -70,7 +70,7 @@ describe('write positions through the service', () => {
     h.clock.advanceWall(-60_000);
     await h.write({ key: 'k', n: 2 });
     const stored = await rows(h.db);
-    expect(stored.map((r) => (JSON.parse(r.envelope as string).data.n))).toEqual([1, 2]);
+    expect(stored.map((r) => JSON.parse(r.envelope as string).data.n)).toEqual([1, 2]);
     // The second row's createdAt is the real (stepped-back) time; only position is clamped.
     expect(stored[1]!.createdAt).toBe((stored[0]!.createdAt as number) - 60_000);
     // Until the wall clock passes the first row's availableAt it reads as in

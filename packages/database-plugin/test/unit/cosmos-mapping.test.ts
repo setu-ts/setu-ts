@@ -39,8 +39,9 @@ describe('resolveCosmosTarget', () => {
   });
 
   it('leaves an unmapped entity on its defaults when other entities are mapped', () => {
-    expect(resolveCosmosTarget('Other', { Order: { container: 'orders' } }).container)
-      .toBe('Other');
+    expect(resolveCosmosTarget('Other', { Order: { container: 'orders' } }).container).toBe(
+      'Other',
+    );
   });
 });
 
@@ -79,15 +80,18 @@ describe('fromDocument', () => {
   const target = resolveCosmosTarget('Order', { Order: { primaryKey: 'orderId' } });
 
   it('strips every system property', () => {
-    const row = fromDocument({
-      id: 'o1',
-      total: 3,
-      _rid: 'r',
-      _self: 's',
-      _etag: 'e',
-      _attachments: 'a',
-      _ts: 1,
-    }, target);
+    const row = fromDocument(
+      {
+        id: 'o1',
+        total: 3,
+        _rid: 'r',
+        _self: 's',
+        _etag: 'e',
+        _attachments: 'a',
+        _ts: 1,
+      },
+      target,
+    );
     expect(row).toEqual({ orderId: 'o1', total: 3 });
   });
 
@@ -136,7 +140,8 @@ describe('the fake store distinguishes an absent partition key from a null one',
     await items.create({ id: 'a', pk: null });
     const second = await items.create({ id: 'a' });
     expect(second.statusCode).toBe(201);
-    expect((await fake.client.database('db').container('orders').item('a', null).read()).resource)
-      .toMatchObject({ id: 'a', pk: null });
+    expect(
+      (await fake.client.database('db').container('orders').item('a', null).read()).resource,
+    ).toMatchObject({ id: 'a', pk: null });
   });
 });

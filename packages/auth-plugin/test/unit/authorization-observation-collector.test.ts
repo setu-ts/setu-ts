@@ -73,7 +73,7 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
         enabled: false,
         roles: {},
         permissions: {},
-      } as never)
+      } as never),
     ).toThrow('literal true');
   });
 
@@ -87,7 +87,7 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
         enabled: true,
         roles,
         permissions: {},
-      })
+      }),
     ).toThrow('more than 128');
   });
 
@@ -97,14 +97,14 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
         enabled: true,
         roles: { admin: '' },
         permissions: {},
-      })
+      }),
     ).toThrow('1 to 64');
     expect(() =>
       compileAuthorizationDiagnosticsOptions({
         enabled: true,
         roles: { admin: 'x'.repeat(65) },
         permissions: {},
-      })
+      }),
     ).toThrow('1 to 64');
   });
 
@@ -114,7 +114,7 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
         enabled: true,
         roles: { admin: 'a\u202eb' },
         permissions: {},
-      })
+      }),
     ).toThrow('control, format or line-separator character');
   });
 
@@ -124,7 +124,7 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
         enabled: true,
         roles: { admin: 'A', editor: 'A' },
         permissions: {},
-      })
+      }),
     ).toThrow('not unique');
   });
 
@@ -135,7 +135,7 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
         roles: {},
         permissions: {},
         policyRevision: '',
-      })
+      }),
     ).toThrow('policyRevision');
   });
 });
@@ -147,7 +147,12 @@ describe('AuthorizationObservationCollector (M98h)', () => {
     // collection-failed.
     const { collector, rbac } = makeCollector();
     attachAuthorizationObserver(rbac, collector);
-    expect(rbac.hasAnyRole(nobody, Array.from({ length: 129 }, () => 'admin'))).toBe(false);
+    expect(
+      rbac.hasAnyRole(
+        nobody,
+        Array.from({ length: 129 }, () => 'admin'),
+      ),
+    ).toBe(false);
     expect(
       rbac.hasAllPermissions(admin, [
         ...Array.from({ length: 130 }, () => 'posts.read'),
@@ -157,8 +162,11 @@ describe('AuthorizationObservationCollector (M98h)', () => {
     ).toBe(true);
     const [anyRole, allPermissions] = collector.read('instance', 0).decisions;
     expect(anyRole!.ruleAliases).toEqual(['A']);
-    expect([anyRole!.stepsEvaluated, anyRole!.stepsTruncated, anyRole!.steps.length])
-      .toEqual([129, true, 16]);
+    expect([anyRole!.stepsEvaluated, anyRole!.stepsTruncated, anyRole!.steps.length]).toEqual([
+      129,
+      true,
+      16,
+    ]);
     expect(allPermissions!.ruleAliases).toEqual(['R', 'W']);
     expect(allPermissions!.stepsEvaluated).toBe(132);
   });
@@ -195,11 +203,13 @@ describe('AuthorizationObservationCollector (M98h)', () => {
     expect(decision.result).toBe(true);
     expect(decision.reason).toBe('inherited-role');
     expect(decision.viaRoleAlias).toBe('A');
-    expect(decision.steps).toEqual([{
-      ruleAlias: 'E',
-      reason: 'inherited-role',
-      viaRoleAlias: 'A',
-    }]);
+    expect(decision.steps).toEqual([
+      {
+        ruleAlias: 'E',
+        reason: 'inherited-role',
+        viaRoleAlias: 'A',
+      },
+    ]);
   });
 
   it('reports a denied check with the not-held reason and no via role', () => {
@@ -221,11 +231,13 @@ describe('AuthorizationObservationCollector (M98h)', () => {
     expect(decision.operation).toBe('permission');
     expect(decision.reason).toBe('role-permission');
     expect(decision.viaRoleAlias).toBe('A');
-    expect(decision.steps).toEqual([{
-      ruleAlias: 'W',
-      reason: 'role-permission',
-      viaRoleAlias: 'A',
-    }]);
+    expect(decision.steps).toEqual([
+      {
+        ruleAlias: 'W',
+        reason: 'role-permission',
+        viaRoleAlias: 'A',
+      },
+    ]);
   });
 
   it('drops and counts a decision whose requested rule is not approved', () => {
@@ -487,11 +499,13 @@ describe('AuthorizationObservationCollector (M98h)', () => {
     // The grant is attributed to the PRINCIPAL'S role that reaches the
     // permission (`owner`), not to the leaf role (`worker`) that lists it:
     // the evaluator names one identifiable granting principal role.
-    expect(decision.steps).toEqual([{
-      ruleAlias: 'J',
-      reason: 'role-permission',
-      viaRoleAlias: 'O',
-    }]);
+    expect(decision.steps).toEqual([
+      {
+        ruleAlias: 'J',
+        reason: 'role-permission',
+        viaRoleAlias: 'O',
+      },
+    ]);
   });
 
   it('reports the true count when an all-permissions evaluation short-circuits on its first step', () => {

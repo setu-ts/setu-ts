@@ -51,7 +51,7 @@ describe('EventsPlugin', () => {
       },
       config: {
         get: () => {},
-        getOrThrow: () => ({} as never),
+        getOrThrow: () => ({}) as never,
         has: () => false,
       },
       environment: {

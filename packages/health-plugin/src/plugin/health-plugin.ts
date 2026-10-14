@@ -112,9 +112,8 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
   // same reason: an invalid option — including `enabled: false` from a
   // caller the literal type cannot reach — refuses before any application
   // exists, with a fixed, value-free message.
-  const diagnosticsPolicy = options?.diagnostics === undefined
-    ? null
-    : compileHealthDiagnosticsPolicy(options.diagnostics);
+  const diagnosticsPolicy =
+    options?.diagnostics === undefined ? null : compileHealthDiagnosticsPolicy(options.diagnostics);
 
   // Split the two arms once, at plugin construction, so `register` and the
   // `onInit` hook each read a single list. Instances keep their pre-factory
@@ -126,13 +125,14 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
   // position among the factories: the index is the only thing the error label
   // has to point a developer at the failing entry, and filtering first made it
   // name a different — working — entry whenever the two arms were mixed.
-  const instances = indicators.filter((entry): entry is IHealthIndicator =>
-    typeof entry !== 'function'
+  const instances = indicators.filter(
+    (entry): entry is IHealthIndicator => typeof entry !== 'function',
   );
   const factories = indicators
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: RegistryFactory<IHealthIndicator>; index: number } =>
-      typeof slot.entry === 'function'
+    .filter(
+      (slot): slot is { entry: RegistryFactory<IHealthIndicator>; index: number } =>
+        typeof slot.entry === 'function',
     );
 
   return {
@@ -169,16 +169,11 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       // runner reports each settled indicator, and registers the active source
       // under CAPABILITIES.HEALTH_DIAGNOSTICS.
       if (diagnosticsPolicy !== null) {
-        const collector = new HealthObservationCollector(
-          diagnosticsPolicy,
-          runtime,
-          { run: (name) => runIndicatorRaw(service, name) },
-        );
+        const collector = new HealthObservationCollector(diagnosticsPolicy, runtime, {
+          run: (name) => runIndicatorRaw(service, name),
+        });
         attachHealthObservation(service, collector);
-        ctx.services.register<IHealthDiagnosticsSource>(
-          CAPABILITIES.HEALTH_DIAGNOSTICS,
-          collector,
-        );
+        ctx.services.register<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS, collector);
         ctx.lifecycle.onBootstrap(() => {
           // Every indicator — instance, factory, contribution — is registered
           // by now. An approved name no indicator carries would stay

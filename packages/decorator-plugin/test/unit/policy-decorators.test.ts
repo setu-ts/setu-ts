@@ -60,7 +60,10 @@ describe('@Policy and @Ability', () => {
   it('records the policy name and each ability with its anonymous flag', () => {
     const meta = metadataStore.getPolicyClass(PostPolicy);
     expect(meta?.name).toBe('post');
-    expect([...(meta?.abilities ?? [])]).toEqual([['update', false], ['read', true]]);
+    expect([...(meta?.abilities ?? [])]).toEqual([
+      ['update', false],
+      ['read', true],
+    ]);
   });
 
   it('records nothing for a class without either decorator', () => {

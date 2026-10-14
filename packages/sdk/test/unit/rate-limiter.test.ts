@@ -209,8 +209,9 @@ describe('createRateLimiter', () => {
 
 it('supplies AbortError for an aborted host signal without a reason', async () => {
   const limiter = createRateLimiter(1, 10, { now: () => 0, sleep: () => Promise.resolve() });
-  await expect(limiter.acquire({ aborted: true, reason: undefined } as AbortSignal)).rejects
-    .toMatchObject({ name: 'AbortError' });
+  await expect(
+    limiter.acquire({ aborted: true, reason: undefined } as AbortSignal),
+  ).rejects.toMatchObject({ name: 'AbortError' });
 });
 
 it('propagates a timing failure and preserves an abort reason while queued', async () => {

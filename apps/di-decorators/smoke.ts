@@ -21,7 +21,9 @@ try {
     scopesAreDistinct: boolean;
   }>();
   if (
-    lifetimes.statusCode !== 200 || !result.singletonShared || !result.scopeRetainsInstance ||
+    lifetimes.statusCode !== 200 ||
+    !result.singletonShared ||
+    !result.scopeRetainsInstance ||
     !result.scopesAreDistinct
   ) {
     throw new Error('The DI container did not preserve singleton and scoped lifetimes.');

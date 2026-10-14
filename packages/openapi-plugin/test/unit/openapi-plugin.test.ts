@@ -43,9 +43,7 @@ class Router {
   }
 
   match(method: string, path: string): unknown | null {
-    const route = this.routes.find(
-      (r) => r.method === method && r.path === path,
-    );
+    const route = this.routes.find((r) => r.method === method && r.path === path);
     return route?.handler ?? null;
   }
 }

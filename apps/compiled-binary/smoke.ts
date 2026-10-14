@@ -26,7 +26,7 @@ let cleanupError: unknown;
 try {
   await new Promise((resolve) => setTimeout(resolve, 300));
   const response = await fetch(`http://127.0.0.1:${port}/health`);
-  if (!response.ok || (await response.json() as { status: string }).status !== 'ok') {
+  if (!response.ok || ((await response.json()) as { status: string }).status !== 'ok') {
     throw new Error('The compiled binary did not serve GET /health.');
   }
 } finally {

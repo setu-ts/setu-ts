@@ -244,7 +244,7 @@ export async function createLazyClientLoader(
   endpoint: string,
   key: string,
 ): Promise<CosmosClientLoader> {
-  const mod = await import('@azure/cosmos') as unknown as CosmosSdkModule;
+  const mod = (await import('@azure/cosmos')) as unknown as CosmosSdkModule;
   return {
     createClient: (): Promise<ICosmosClient> =>
       Promise.resolve(new mod.CosmosClient({ endpoint, key })),

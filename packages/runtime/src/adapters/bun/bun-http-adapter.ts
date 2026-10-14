@@ -79,10 +79,7 @@ export interface BunServer {
    * @param options - Per-socket data and response headers for the handshake
    * @returns `true` when the upgrade succeeded and no response should be sent
    */
-  upgrade?(
-    request: Request,
-    options: { data: BunSocketData; headers?: Headers },
-  ): boolean;
+  upgrade?(request: Request, options: { data: BunSocketData; headers?: Headers }): boolean;
 }
 
 /**

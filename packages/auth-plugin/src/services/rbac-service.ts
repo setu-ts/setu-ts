@@ -161,7 +161,7 @@ export class RbacService implements IAuthorizationService {
     const observer = authorizationObserverOf(this);
     if (observer !== undefined) {
       this.#emit(() =>
-        observer.onPermission(permission, outcome.result, outcome.reason, outcome.viaRole)
+        observer.onPermission(permission, outcome.result, outcome.reason, outcome.viaRole),
       );
     }
     return outcome.result;

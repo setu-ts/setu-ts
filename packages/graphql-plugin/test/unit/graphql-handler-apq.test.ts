@@ -24,11 +24,13 @@ const createFakeRuntime = (): GraphqlRuntime =>
   ({
     parse: (_src: string) => ({
       kind: 'Document',
-      definitions: [{
-        kind: 'OperationDefinition',
-        operation: 'query',
-        selectionSet: { kind: 'SelectionSet', selections: [] },
-      }],
+      definitions: [
+        {
+          kind: 'OperationDefinition',
+          operation: 'query',
+          selectionSet: { kind: 'SelectionSet', selections: [] },
+        },
+      ],
     }),
     validate: () => [],
     execute: () => Promise.resolve({ data: { hello: 'world' } }),
@@ -370,9 +372,10 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
       await post(ctx);
 
       expect(captures.status).toBe(200);
-      const results = JSON.parse(dec(captures.body!)) as Array<
-        { errors?: unknown[]; data?: unknown }
-      >;
+      const results = JSON.parse(dec(captures.body!)) as Array<{
+        errors?: unknown[];
+        data?: unknown;
+      }>;
       expect(results.length).toBe(2);
       expect(results[1]!.errors).toBeDefined();
       expect(results[1]!.data).toBeUndefined();
@@ -514,12 +517,10 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
     const STRICT_ACCEPT = 'application/graphql-response+json';
 
     it('single POST: 200 under application/json, 400 under graphql-response', async () => {
-      for (
-        const [accept, expected] of [
-          ['application/json', 200],
-          [STRICT_ACCEPT, 400],
-        ] as const
-      ) {
+      for (const [accept, expected] of [
+        ['application/json', 200],
+        [STRICT_ACCEPT, 400],
+      ] as const) {
         const { mock, captures } = createMockResponse();
         const { post } = createGraphqlHandler(makeService(), '/graphql', {
           graphiql: true,
@@ -583,12 +584,10 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
     it('GET: 200 under application/json, 400 under graphql-response', async () => {
       // GET requires a `query` param before APQ resolution (C6 verify path), so
       // the miss is a query+hash pair the resolver rejects.
-      for (
-        const [accept, expected] of [
-          ['application/json', 200],
-          [STRICT_ACCEPT, 400],
-        ] as const
-      ) {
+      for (const [accept, expected] of [
+        ['application/json', 200],
+        [STRICT_ACCEPT, 400],
+      ] as const) {
         const { mock, captures } = createMockResponse();
         const { get } = createGraphqlHandler(makeService(), '/graphql', {
           graphiql: true,

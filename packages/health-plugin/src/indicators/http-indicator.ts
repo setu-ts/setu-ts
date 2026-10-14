@@ -59,10 +59,7 @@ export interface HttpIndicatorOptions {
  *
  * @since 0.2.0
  */
-export function createHttpIndicator(
-  name: string,
-  options: HttpIndicatorOptions,
-): IHealthIndicator {
+export function createHttpIndicator(name: string, options: HttpIndicatorOptions): IHealthIndicator {
   const url = options.url;
   const timeoutMs = options.timeoutMs ?? 5000;
   const fetcher = options.fetcher ?? globalThis.fetch;

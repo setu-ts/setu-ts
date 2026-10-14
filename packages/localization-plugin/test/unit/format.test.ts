@@ -10,9 +10,7 @@ describe('format — placeholders', () => {
   });
 
   it('leaves a placeholder whose value is absent verbatim', () => {
-    expect(format('Hello {name}, {missing}', { name: 'Ada' }, 'en')).toBe(
-      'Hello Ada, {missing}',
-    );
+    expect(format('Hello {name}, {missing}', { name: 'Ada' }, 'en')).toBe('Hello Ada, {missing}');
   });
 
   it('never resolves a placeholder through the prototype chain', () => {

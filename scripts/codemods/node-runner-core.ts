@@ -11,13 +11,17 @@ export function selectMembers(
 ): string[] {
   if (selection.length === 0) return [...workspace];
   return [
-    ...new Set(selection.map((name) => {
-      const member = workspace.find((path) =>
-        path.replace(/^\.\//, '') === name.replace(/^\.\//, '') || path.split('/').pop() === name
-      );
-      if (member === undefined) throw new Error(`Unknown workspace member: ${name}`);
-      return member;
-    })),
+    ...new Set(
+      selection.map((name) => {
+        const member = workspace.find(
+          (path) =>
+            path.replace(/^\.\//, '') === name.replace(/^\.\//, '') ||
+            path.split('/').pop() === name,
+        );
+        if (member === undefined) throw new Error(`Unknown workspace member: ${name}`);
+        return member;
+      }),
+    ),
   ];
 }
 
@@ -38,17 +42,23 @@ export async function runTargets(
 
 /** Format every source row; callers reject missing reports instead of omitting a failed member. */
 export function coverageRows(
-  summary: Record<string, {
-    branches: { pct: number };
-    functions: { pct: number };
-    lines: { pct: number };
-  }>,
+  summary: Record<
+    string,
+    {
+      branches: { pct: number };
+      functions: { pct: number };
+      lines: { pct: number };
+    }
+  >,
   root: string,
 ): string[] {
-  return Object.entries(summary).filter(([path]) => path !== 'total').map(([path, row]) =>
-    `| ${
-      path.replace(root + '/', '')
-    } | ${row.branches.pct} | ${row.functions.pct} | ${row.lines.pct} |`
-  );
+  return Object.entries(summary)
+    .filter(([path]) => path !== 'total')
+    .map(
+      ([path, row]) =>
+        `| ${path.replace(
+          root + '/',
+          '',
+        )} | ${row.branches.pct} | ${row.functions.pct} | ${row.lines.pct} |`,
+    );
 }
-

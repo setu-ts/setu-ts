@@ -56,10 +56,7 @@ export const RETURN_TO_QUERY_PARAM = 'returnTo';
  * branch on them and a provider's own wording never reaches a URL.
  */
 export type SignInErrorCode =
-  | 'provider-denied'
-  | 'state-invalid'
-  | 'exchange-failed'
-  | 'profile-unavailable';
+  'provider-denied' | 'state-invalid' | 'exchange-failed' | 'profile-unavailable';
 
 /** The fixed detail a login route answers `503` with when endpoints are unavailable. */
 export const PROVIDER_UNAVAILABLE_DETAIL = 'provider-unavailable';
@@ -224,14 +221,16 @@ export const REDIRECT_STATE_KEY = 'auth-plugin:sign-in-redirect';
  */
 function flowRoute(flow: (ctx: IRequestContext) => Promise<FlowOutcome>): RouteDefinition {
   return {
-    middleware: [async (ctx, next) => {
-      const target = await flow(ctx);
-      if (target === null) {
-        return;
-      }
-      ctx.state.set(REDIRECT_STATE_KEY, target);
-      await next();
-    }],
+    middleware: [
+      async (ctx, next) => {
+        const target = await flow(ctx);
+        if (target === null) {
+          return;
+        }
+        ctx.state.set(REDIRECT_STATE_KEY, target);
+        await next();
+      },
+    ],
     handler: (ctx) => ctx.response.redirect(String(ctx.state.get(REDIRECT_STATE_KEY)), 302),
   };
 }
@@ -270,9 +269,10 @@ function registerLogin(
       const session = deps.sessionService.from(ctx);
       const state = encodeBase64Url(deps.runtime.randomBytes(ENTROPY_BYTES));
       const pkce = await createPkcePair(deps.runtime);
-      const nonce = provider.kind === 'oidc'
-        ? encodeBase64Url(deps.runtime.randomBytes(ENTROPY_BYTES))
-        : undefined;
+      const nonce =
+        provider.kind === 'oidc'
+          ? encodeBase64Url(deps.runtime.randomBytes(ENTROPY_BYTES))
+          : undefined;
       // `returnTo` is read HERE and stored in the entry; the callback never trusts a
       // value that arrived on its own URL, which is where an attacker could put one.
       const returnTo = safeReturnTo(ctx.query[RETURN_TO_QUERY_PARAM]);
@@ -397,7 +397,8 @@ function registerCallback(
       // the entry is consumed, so a mix-up attempt cannot be retried.
       const reportedIssuer = ctx.query.iss;
       if (
-        reportedIssuer !== undefined && provider.issuer !== undefined &&
+        reportedIssuer !== undefined &&
+        provider.issuer !== undefined &&
         reportedIssuer !== provider.issuer
       ) {
         deps.debug?.(`auth-plugin: signIn['${provider.name}'] callback refused (iss mismatch)`);
@@ -412,20 +413,17 @@ function registerCallback(
         return fail(provider, ctx, 'exchange-failed');
       }
 
-      const exchanged = await attempt(
-        deps.runtime,
-        PROVIDER_TIMEOUT_MS,
-        (signal) =>
-          exchangeCode(deps.http, {
-            tokenEndpoint: endpoints.tokenEndpoint,
-            clientId: provider.clientId,
-            ...(provider.clientSecret === undefined ? {} : { clientSecret: provider.clientSecret }),
-            auth: provider.tokenEndpointAuth,
-            code,
-            verifier: entry.verifier,
-            redirectUri: provider.redirectUri,
-            signal,
-          }),
+      const exchanged = await attempt(deps.runtime, PROVIDER_TIMEOUT_MS, (signal) =>
+        exchangeCode(deps.http, {
+          tokenEndpoint: endpoints.tokenEndpoint,
+          clientId: provider.clientId,
+          ...(provider.clientSecret === undefined ? {} : { clientSecret: provider.clientSecret }),
+          auth: provider.tokenEndpointAuth,
+          code,
+          verifier: entry.verifier,
+          redirectUri: provider.redirectUri,
+          signal,
+        }),
       );
       if (exchanged === null || exchanged.ok === false) {
         return fail(provider, ctx, 'exchange-failed');
@@ -446,15 +444,12 @@ function registerCallback(
         }
         claims = verified;
       } else {
-        const profile = await attempt(
-          deps.runtime,
-          PROVIDER_TIMEOUT_MS,
-          (signal) =>
-            fetchUserInfo(deps.http, {
-              userinfoEndpoint: provider.userinfoEndpoint ?? '',
-              accessToken: tokens.accessToken,
-              signal,
-            }),
+        const profile = await attempt(deps.runtime, PROVIDER_TIMEOUT_MS, (signal) =>
+          fetchUserInfo(deps.http, {
+            userinfoEndpoint: provider.userinfoEndpoint ?? '',
+            accessToken: tokens.accessToken,
+            signal,
+          }),
         );
         if (profile === null || profile.ok === false) {
           return fail(provider, ctx, 'profile-unavailable');
@@ -532,7 +527,9 @@ function registerLogout(router: IRouterApi, deps: SignInRouteDeps): void {
       // Only a session that actually signed in through the RP-logout provider is
       // sent there: a password user, a user of another provider, or an anonymous
       // POST ends the local session only.
-      const wantsRpLogout = provider !== null && provider.rpInitiatedLogout !== undefined &&
+      const wantsRpLogout =
+        provider !== null &&
+        provider.rpInitiatedLogout !== undefined &&
         session.get<string>(RP_PROVIDER_SESSION_KEY) === provider.name;
       const idTokenHint = wantsRpLogout ? session.get<string>(ID_TOKEN_SESSION_KEY) : undefined;
 

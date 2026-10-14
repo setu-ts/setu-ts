@@ -23,19 +23,22 @@ describe('awaitInterruptibly', () => {
   it('returns ordinary results with and without a signal and propagates failures', async () => {
     expect(await awaitInterruptibly(() => 7)).toBe(7);
     expect(await awaitInterruptibly(() => 8, new AbortController().signal)).toBe(8);
-    await expect(awaitInterruptibly(() => {
-      throw new Error('handler failed');
-    }, new AbortController().signal)).rejects.toThrow('handler failed');
+    await expect(
+      awaitInterruptibly(() => {
+        throw new Error('handler failed');
+      }, new AbortController().signal),
+    ).rejects.toThrow('handler failed');
   });
 
   it('does not start an already-interrupted operation', async () => {
     const controller = new AbortController();
     controller.abort();
     let ran = false;
-    await expect(awaitInterruptibly(() => {
-      ran = true;
-    }, controller.signal))
-      .rejects.toBeInstanceOf(InterruptedError);
+    await expect(
+      awaitInterruptibly(() => {
+        ran = true;
+      }, controller.signal),
+    ).rejects.toBeInstanceOf(InterruptedError);
     expect(ran).toBe(false);
   });
 
@@ -59,13 +62,15 @@ describe('interruptionMessage', () => {
   it('describes complete and incomplete interruption rollback', () => {
     const interrupted = new InterruptedError();
     expect(interruptionMessage(interrupted)).toContain('files this run wrote were removed');
-    expect(interruptionMessage(
-      new AggregateError(
-        [interrupted, new Error('/work/app: not empty')],
-        'rollback incomplete: /work/app: not empty',
-        { cause: interrupted },
+    expect(
+      interruptionMessage(
+        new AggregateError(
+          [interrupted, new Error('/work/app: not empty')],
+          'rollback incomplete: /work/app: not empty',
+          { cause: interrupted },
+        ),
       ),
-    )).toContain('/work/app: not empty');
+    ).toContain('/work/app: not empty');
     expect(interruptionMessage(new Error('ordinary failure'))).toBeUndefined();
   });
 });

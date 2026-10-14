@@ -83,12 +83,10 @@ export interface ${names.pascal}Result {
 }
 
 /** The ${names.pascal} command. */
-${
-    renderDeclarationHeader(
-      `export interface ${names.pascal}Command`,
-      `extends CqrsCommand<${names.pascal}Payload>`,
-    )
-  }
+${renderDeclarationHeader(
+  `export interface ${names.pascal}Command`,
+  `extends CqrsCommand<${names.pascal}Payload>`,
+)}
   readonly type: typeof ${names.screaming}_COMMAND;
 }
 
@@ -101,25 +99,21 @@ ${
  * The barrel references the factory below by name, so the factory is the single
  * construction site.
  */
-${
-    renderDeclarationHeader(
-      `export class ${names.pascal}CommandHandler`,
-      `implements ICommandHandler<${names.pascal}Command, ${names.pascal}Result>`,
-    )
-  }
+${renderDeclarationHeader(
+  `export class ${names.pascal}CommandHandler`,
+  `implements ICommandHandler<${names.pascal}Command, ${names.pascal}Result>`,
+)}
   /**
    * Executes the command.
    *
    * @param command - The command to handle
    * @returns The command result
    */
-${
-    renderMethodSignature(
-      'handle',
-      [`command: ${names.pascal}Command`],
-      `Promise<${names.pascal}Result>`,
-    )
-  }
+${renderMethodSignature(
+  'handle',
+  [`command: ${names.pascal}Command`],
+  `Promise<${names.pascal}Result>`,
+)}
     // Replace with the real write.
     return Promise.resolve({ id: command.data.id });
   }

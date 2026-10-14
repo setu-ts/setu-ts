@@ -111,22 +111,14 @@ describe('a --broker scaffold', () => {
     // was added to prevent.
     const readme = h.fs.read('/work/svc/README.md');
     expect(readme).toContain('docker compose -f docker/compose.yaml up -d');
-    expect(readme.indexOf('## Local transport services')).toBeLessThan(
-      readme.indexOf('## Run'),
-    );
+    expect(readme.indexOf('## Local transport services')).toBeLessThan(readme.indexOf('## Run'));
 
     // Every broker arm declares a backing service — a selection without one
     // would scaffold a project that cannot boot.
     for (const name of listBrokers()) {
       if (name === 'memory') continue;
       const h2 = harness();
-      const code = await h2.run([
-        'svc',
-        '--template',
-        'microservice',
-        '--broker',
-        name,
-      ]);
+      const code = await h2.run(['svc', '--template', 'microservice', '--broker', name]);
       expect(code).toBe(0);
       expect(h2.fs.read('/work/svc/docker/compose.yaml')).toContain('services:');
     }

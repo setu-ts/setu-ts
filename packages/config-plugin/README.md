@@ -146,14 +146,16 @@ the whole flat snapshot, while the former receives only its declared, prefix-str
 `diagnostics` is the explicit opt-in to value-free provenance for the approved keys only:
 
 ```typescript
-app.register(ConfigPlugin({
-  envFilePath: ['.env.local', '.env'],
-  diagnostics: {
-    enabled: true, // the literal true: an acknowledgement, not a toggle
-    keys: { PORT: 'port', DATABASE_URL: 'database' },
-    files: { '.env.local': 'dotenv-local', '.env': 'dotenv' },
-  },
-}));
+app.register(
+  ConfigPlugin({
+    envFilePath: ['.env.local', '.env'],
+    diagnostics: {
+      enabled: true, // the literal true: an acknowledgement, not a toggle
+      keys: { PORT: 'port', DATABASE_URL: 'database' },
+      files: { '.env.local': 'dotenv-local', '.env': 'dotenv' },
+    },
+  }),
+);
 ```
 
 During the ONE load already performed — never a second pass — the loader records where each approved

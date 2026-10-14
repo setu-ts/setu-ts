@@ -62,11 +62,9 @@ describe('challenge handling', () => {
     const registrationBody = await authenticator.registrationResult({
       challenge: registration!.challenge,
     });
-    const registered = await harness.ceremonies.verifyRegistration(
-      harness.ctx,
-      registrationBody,
-      { id: 'alice' },
-    );
+    const registered = await harness.ceremonies.verifyRegistration(harness.ctx, registrationBody, {
+      id: 'alice',
+    });
     expect(registered.ok).toBe(true);
     authenticator.userHandle = fromBase64Url(registration!.user.id);
     const optionsJson = await harness.ceremonies.authenticationOptions(harness.ctx);

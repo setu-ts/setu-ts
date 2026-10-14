@@ -82,9 +82,9 @@ export function devtoolRunnerRefusal(
   if (existing === undefined) return undefined;
   if (DEVTOOL_ENV_NAMES.every((name) => existing.includes(name))) return undefined;
   return (
-    `${
-      escapeName(path)
-    } predates the devtool: it starts every member with that member's \`start\`` +
+    `${escapeName(
+      path,
+    )} predates the devtool: it starts every member with that member's \`start\`` +
     ` task and passes no per-child environment, so the development entry would never run` +
     ` and the launcher would meet a closed port. It also hands every member the runner's` +
     ` whole environment, which is how a sibling would come to hold this session's` +
@@ -127,7 +127,8 @@ const LEGACY_FACTORY_SHAPES: readonly string[] = [
 ];
 
 /** The exact factory signature the refusal tells a developer to write. */
-const EXPECTED_SIGNATURE = `export function createApp(\n` +
+const EXPECTED_SIGNATURE =
+  `export function createApp(\n` +
   `  _env?: Readonly<Record<string, unknown>>,\n` +
   `  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n` +
   `): IKernelApplication {`;
@@ -319,7 +320,7 @@ export async function standaloneDevtoolPort(
   probe?: (port: number) => Promise<boolean>,
 ): Promise<number | undefined> {
   for (let port = DEFAULT_DEVTOOL_PORT; port <= DEFAULT_DEVTOOL_PORT + 100; port++) {
-    if (probe === undefined || await probe(port)) return port;
+    if (probe === undefined || (await probe(port))) return port;
   }
   return undefined;
 }

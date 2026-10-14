@@ -35,7 +35,10 @@ interface Refusal {
  * A context that records the status and Problem Details title of any refusal,
  * and whether the handler downstream ever ran.
  */
-function makeCtx(body: Uint8Array, contentLength?: number): {
+function makeCtx(
+  body: Uint8Array,
+  contentLength?: number,
+): {
   ctx: IRequestContext;
   refusals: Refusal[];
 } {
@@ -142,11 +145,7 @@ describe('createUploadMiddleware — the register probe matrix (X8-3)', () => {
   it('row 2: a 100 MB limit no longer lets an oversized body through', async () => {
     // The bound is now the 50 MB ceiling rather than 200 MB, so a body above it
     // is refused instead of being handed to the handler.
-    const { refusal, handlerRan } = await run(
-      { maxSize: 100 * MB },
-      new Uint8Array(0),
-      60 * MB,
-    );
+    const { refusal, handlerRan } = await run({ maxSize: 100 * MB }, new Uint8Array(0), 60 * MB);
 
     expect(handlerRan).toBe(false);
     expect(refusal).toEqual({ status: 413, title: 'Request entity too large' });

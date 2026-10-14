@@ -67,14 +67,12 @@ describe('IdempotencyObjectCore (M109a §3.15)', () => {
 
   it('answers 400 for a malformed body with NO storage access', async () => {
     const { core, storage } = build();
-    for (
-      const body of [
-        {},
-        { token: 't' },
-        { token: 't', fingerprint: 'f', leaseMs: 0, ttlMs: 1 },
-        'x',
-      ]
-    ) {
+    for (const body of [
+      {},
+      { token: 't' },
+      { token: 't', fingerprint: 'f', leaseMs: 0, ttlMs: 1 },
+      'x',
+    ]) {
       expect((await post(core, '/claim', body)).status).toBe(400);
     }
     expect(storage.map.size).toBe(0);
@@ -83,12 +81,14 @@ describe('IdempotencyObjectCore (M109a §3.15)', () => {
 
   it('claims a fresh key and arms the alarm', async () => {
     const { core, storage } = build(1_000);
-    const answer = await (await post(core, '/claim', {
-      token: 't1',
-      fingerprint: 'f',
-      leaseMs: 100,
-      ttlMs: 5_000,
-    })).json();
+    const answer = await (
+      await post(core, '/claim', {
+        token: 't1',
+        fingerprint: 'f',
+        leaseMs: 100,
+        ttlMs: 5_000,
+      })
+    ).json();
     expect(answer).toEqual({ outcome: 'claimed', takeover: false });
     expect(storage.alarms).toEqual([6_000]);
   });
@@ -97,38 +97,41 @@ describe('IdempotencyObjectCore (M109a §3.15)', () => {
     const { core } = build();
     await post(core, '/claim', { token: 't1', fingerprint: 'f', leaseMs: 100, ttlMs: 5_000 });
     expect(
-      await (await post(core, '/claim', {
-        token: 't2',
-        fingerprint: 'g',
-        leaseMs: 100,
-        ttlMs: 5_000,
-      })).json(),
-    )
-      .toEqual({ outcome: 'fingerprint-mismatch' });
+      await (
+        await post(core, '/claim', {
+          token: 't2',
+          fingerprint: 'g',
+          leaseMs: 100,
+          ttlMs: 5_000,
+        })
+      ).json(),
+    ).toEqual({ outcome: 'fingerprint-mismatch' });
   });
 
   it('answers in-progress inside the lease and takes over a lapsed one', async () => {
     const { core, storage, advance } = build(0);
     await post(core, '/claim', { token: 't1', fingerprint: 'f', leaseMs: 100, ttlMs: 5_000 });
     expect(
-      await (await post(core, '/claim', {
-        token: 't2',
-        fingerprint: 'f',
-        leaseMs: 100,
-        ttlMs: 5_000,
-      })).json(),
-    )
-      .toEqual({ outcome: 'in-progress' });
+      await (
+        await post(core, '/claim', {
+          token: 't2',
+          fingerprint: 'f',
+          leaseMs: 100,
+          ttlMs: 5_000,
+        })
+      ).json(),
+    ).toEqual({ outcome: 'in-progress' });
     advance(150);
     expect(
-      await (await post(core, '/claim', {
-        token: 't2',
-        fingerprint: 'f',
-        leaseMs: 100,
-        ttlMs: 5_000,
-      })).json(),
-    )
-      .toEqual({ outcome: 'claimed', takeover: true });
+      await (
+        await post(core, '/claim', {
+          token: 't2',
+          fingerprint: 'f',
+          leaseMs: 100,
+          ttlMs: 5_000,
+        })
+      ).json(),
+    ).toEqual({ outcome: 'claimed', takeover: true });
     // A new claim and a takeover each arm the alarm.
     expect(storage.alarms.length).toBeGreaterThanOrEqual(2);
   });
@@ -138,21 +141,20 @@ describe('IdempotencyObjectCore (M109a §3.15)', () => {
     await post(core, '/claim', { token: 't1', fingerprint: 'f', leaseMs: 100, ttlMs: 5_000 });
     expect(
       await (await post(core, '/complete', { token: 't1', record: 'rec', ttlMs: 5_000 })).json(),
-    )
-      .toEqual({ result: 'settled' });
+    ).toEqual({ result: 'settled' });
     expect(
       await (await post(core, '/complete', { token: 'nope', record: 'x', ttlMs: 5_000 })).json(),
-    )
-      .toEqual({ result: 'lost' });
+    ).toEqual({ result: 'lost' });
     expect(
-      await (await post(core, '/claim', {
-        token: 't2',
-        fingerprint: 'f',
-        leaseMs: 100,
-        ttlMs: 5_000,
-      })).json(),
-    )
-      .toEqual({ outcome: 'completed', record: 'rec' });
+      await (
+        await post(core, '/claim', {
+          token: 't2',
+          fingerprint: 'f',
+          leaseMs: 100,
+          ttlMs: 5_000,
+        })
+      ).json(),
+    ).toEqual({ outcome: 'completed', record: 'rec' });
     // A complete arms the alarm; a lost one does not add to it.
     const alarmsAfterComplete = storage.alarms.length;
     await post(core, '/complete', { token: 'nope', record: 'x', ttlMs: 5_000 });
@@ -178,10 +180,10 @@ describe('IdempotencyObjectCore (M109a §3.15)', () => {
     await post(core, '/claim', { token: 't1', fingerprint: 'f', leaseMs: 100, ttlMs: 50 });
     advance(100);
     expect(
-      await (await post(core, '/claim', { token: 't2', fingerprint: 'f', leaseMs: 100, ttlMs: 50 }))
-        .json(),
-    )
-      .toEqual({ outcome: 'claimed', takeover: false });
+      await (
+        await post(core, '/claim', { token: 't2', fingerprint: 'f', leaseMs: 100, ttlMs: 50 })
+      ).json(),
+    ).toEqual({ outcome: 'claimed', takeover: false });
   });
 
   it('alarm(): no-op with no record, deletes an expired one, re-arms an unexpired one', async () => {

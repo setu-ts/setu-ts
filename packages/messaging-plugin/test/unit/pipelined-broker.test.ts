@@ -62,10 +62,7 @@ interface FakeAdapter {
   readonly subscriptions: RecordedSubscription[];
   readonly responses: RecordedResponse[];
   /** Delivers one message to the first recorded subscription. */
-  deliver(
-    message: unknown,
-    metadata: MessageMetadata,
-  ): Promise<void>;
+  deliver(message: unknown, metadata: MessageMetadata): Promise<void>;
 }
 
 /**
@@ -263,12 +260,14 @@ describe('PipelinedBroker forwards every MessageBrokerAdapter member', () => {
     await wrapped.requestWithHeaders('pricing', message, { 'x-a': 'b' }, { timeoutMs: 5 });
 
     expect(fake.requests).toEqual([{ topic: 'pricing', message, options: { timeoutMs: 1234 } }]);
-    expect(fake.requestsWithHeaders).toEqual([{
-      topic: 'pricing',
-      message,
-      headers: { 'x-a': 'b' },
-      options: { timeoutMs: 5 },
-    }]);
+    expect(fake.requestsWithHeaders).toEqual([
+      {
+        topic: 'pricing',
+        message,
+        headers: { 'x-a': 'b' },
+        options: { timeoutMs: 5 },
+      },
+    ]);
   });
 
   it('routes subscribe through the underlying subscribeWithHeaders — the single insertion point', async () => {
@@ -285,9 +284,7 @@ describe('PipelinedBroker forwards every MessageBrokerAdapter member', () => {
   });
 
   it('is NOT exported from the package barrel', () => {
-    expect(
-      (messaging as unknown as Record<string, unknown>).PipelinedBroker,
-    ).toBeUndefined();
+    expect((messaging as unknown as Record<string, unknown>).PipelinedBroker).toBeUndefined();
   });
 });
 

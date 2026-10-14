@@ -477,59 +477,65 @@ export class DatabaseService implements IDatabaseService {
       // override below calls `ds.method(...)`, so a class-based data source
       // keeps its receiver and its private state (pinned by a test).
       ...ds,
-      ...(findPageImpl === undefined ? {} : {
-        async findPage(query: NormalizedQuery): Promise<PageResult> {
-          const start = now();
-          try {
-            const result = await findPageImpl(query);
-            if (enabled && logger !== undefined) {
-              const accessPath = accessPathOf(ds);
-              logger.debug(`[${entity}] findPage`, {
-                operation: 'findPage',
-                durationMs: now() - start,
-                ...(accessPath === undefined ? {} : { accessPath }),
-              });
-            }
-            return result;
-          } catch (error) {
-            throw classifiedOrOriginal(error, adapterType, entity);
-          }
-        },
-      }),
-      ...(updateWhereImpl === undefined ? {} : {
-        async updateWhere(id, where, data) {
-          const start = now();
-          try {
-            const result = await updateWhereImpl(id, where, data);
-            if (enabled && logger !== undefined) {
-              logger.debug(`[${entity}] updateWhere`, {
-                operation: 'updateWhere',
-                durationMs: now() - start,
-              });
-            }
-            return result;
-          } catch (error) {
-            throw classifiedOrOriginal(error, adapterType, entity);
-          }
-        },
-      }),
-      ...(deleteWhereImpl === undefined ? {} : {
-        async deleteWhere(id, where) {
-          const start = now();
-          try {
-            const result = await deleteWhereImpl(id, where);
-            if (enabled && logger !== undefined) {
-              logger.debug(`[${entity}] deleteWhere`, {
-                operation: 'deleteWhere',
-                durationMs: now() - start,
-              });
-            }
-            return result;
-          } catch (error) {
-            throw classifiedOrOriginal(error, adapterType, entity);
-          }
-        },
-      }),
+      ...(findPageImpl === undefined
+        ? {}
+        : {
+            async findPage(query: NormalizedQuery): Promise<PageResult> {
+              const start = now();
+              try {
+                const result = await findPageImpl(query);
+                if (enabled && logger !== undefined) {
+                  const accessPath = accessPathOf(ds);
+                  logger.debug(`[${entity}] findPage`, {
+                    operation: 'findPage',
+                    durationMs: now() - start,
+                    ...(accessPath === undefined ? {} : { accessPath }),
+                  });
+                }
+                return result;
+              } catch (error) {
+                throw classifiedOrOriginal(error, adapterType, entity);
+              }
+            },
+          }),
+      ...(updateWhereImpl === undefined
+        ? {}
+        : {
+            async updateWhere(id, where, data) {
+              const start = now();
+              try {
+                const result = await updateWhereImpl(id, where, data);
+                if (enabled && logger !== undefined) {
+                  logger.debug(`[${entity}] updateWhere`, {
+                    operation: 'updateWhere',
+                    durationMs: now() - start,
+                  });
+                }
+                return result;
+              } catch (error) {
+                throw classifiedOrOriginal(error, adapterType, entity);
+              }
+            },
+          }),
+      ...(deleteWhereImpl === undefined
+        ? {}
+        : {
+            async deleteWhere(id, where) {
+              const start = now();
+              try {
+                const result = await deleteWhereImpl(id, where);
+                if (enabled && logger !== undefined) {
+                  logger.debug(`[${entity}] deleteWhere`, {
+                    operation: 'deleteWhere',
+                    durationMs: now() - start,
+                  });
+                }
+                return result;
+              } catch (error) {
+                throw classifiedOrOriginal(error, adapterType, entity);
+              }
+            },
+          }),
       async findAll(query) {
         const start = now();
         try {

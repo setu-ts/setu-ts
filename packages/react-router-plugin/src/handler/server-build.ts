@@ -30,12 +30,8 @@ type RouterContextProviderConstructor = new () => RouterLoadContext;
  * @throws {Error} When the module exposes no `RouterContextProvider` export
  * @since 0.2.0
  */
-export function createLoadContextFactory(
-  rr: Record<string, unknown>,
-): () => RouterLoadContext {
-  const Provider = rr.RouterContextProvider as
-    | RouterContextProviderConstructor
-    | undefined;
+export function createLoadContextFactory(rr: Record<string, unknown>): () => RouterLoadContext {
+  const Provider = rr.RouterContextProvider as RouterContextProviderConstructor | undefined;
 
   if (typeof Provider !== 'function') {
     throw new Error(
@@ -182,10 +178,7 @@ export async function loadRequestHandler(
     );
   }
 
-  const createRequestHandler = rr.createRequestHandler as (
-    build: unknown,
-    mode: string,
-  ) => unknown;
+  const createRequestHandler = rr.createRequestHandler as (build: unknown, mode: string) => unknown;
 
   return {
     handler: assembleHandler(build, createRequestHandler, mode),

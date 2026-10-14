@@ -36,27 +36,22 @@ const JOB: StoredJob = {
  * read private fields, which throw `Receiver must be an instance of` on a
  * derived object.
  */
-function withoutCommands(
-  client: FakeRedisClient,
-  omit: readonly string[],
-): IRedisQueueClient {
+function withoutCommands(client: FakeRedisClient, omit: readonly string[]): IRedisQueueClient {
   const delegate: Record<string, unknown> = {};
-  for (
-    const key of [
-      'zadd',
-      'zrangebyscore',
-      'zrem',
-      'hset',
-      'hget',
-      'hdel',
-      'del',
-      'quit',
-      'connect',
-      'ping',
-      'zcard',
-      'expire',
-    ]
-  ) {
+  for (const key of [
+    'zadd',
+    'zrangebyscore',
+    'zrem',
+    'hset',
+    'hget',
+    'hdel',
+    'del',
+    'quit',
+    'connect',
+    'ping',
+    'zcard',
+    'expire',
+  ]) {
     if (omit.includes(key)) continue;
     const method = (client as unknown as Record<string, unknown>)[key];
     if (typeof method === 'function') {
@@ -81,22 +76,20 @@ function stallFirstHget(
   const parked = new Promise<void>((resolve) => (announce = resolve));
   let stalled = false;
   const delegate: Record<string, unknown> = {};
-  for (
-    const key of [
-      'zadd',
-      'zrangebyscore',
-      'zrem',
-      'hset',
-      'hget',
-      'hdel',
-      'del',
-      'quit',
-      'connect',
-      'ping',
-      'zcard',
-      'expire',
-    ]
-  ) {
+  for (const key of [
+    'zadd',
+    'zrangebyscore',
+    'zrem',
+    'hset',
+    'hget',
+    'hdel',
+    'del',
+    'quit',
+    'connect',
+    'ping',
+    'zcard',
+    'expire',
+  ]) {
     const method = (client as unknown as Record<string, unknown>)[key];
     if (typeof method !== 'function') continue;
     delegate[key] = async (...args: unknown[]) => {
@@ -412,7 +405,6 @@ describe('RedisQueue dead-letter retention is enforced per payload', () => {
     // The payload survives WITH its dead-set member, so the next sweep can
     // still collect it. Payload present but member gone is the leak.
     expect(await client.hget('queue:thumbnail:dead:jobs', 'stalled')).not.toBeNull();
-    expect(await client.zrangebyscore('queue:thumbnail:dead', 0, t0 + 10_000))
-      .toContain('stalled');
+    expect(await client.zrangebyscore('queue:thumbnail:dead', 0, t0 + 10_000)).toContain('stalled');
   });
 });

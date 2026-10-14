@@ -23,10 +23,7 @@ export function isPrerelease(version: string): boolean {
  * number, so the caller never has to know what shipped before this one — the
  * release workflow knows only the tag it was triggered by.
  */
-export function extractReleaseNotes(
-  changelog: string,
-  version: string,
-): string | null {
+export function extractReleaseNotes(changelog: string, version: string): string | null {
   const lines = changelog.split('\n');
   const heading = `## [${version}]`;
   const start = lines.findIndex((line) => line.startsWith(heading));

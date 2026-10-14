@@ -25,9 +25,7 @@ import { allRows, ENTITY, memoryService } from '../../fixtures/inbox-store.ts';
 
 /** The error the real `mongodb` driver raises inside a transaction on a standalone server. */
 function mongoStandaloneError(): Error {
-  const error = new Error(
-    'Transaction numbers are only allowed on a replica set member or mongos',
-  );
+  const error = new Error('Transaction numbers are only allowed on a replica set member or mongos');
   error.name = 'MongoServerError';
   Object.assign(error, { code: 20, codeName: 'IllegalOperation' });
   return error;
@@ -100,12 +98,10 @@ describe('DatabaseInboxStore.verify', () => {
   it('refuses a shipped Cosmos or Bigtable adapter handed to the custom arm, by class', async () => {
     const memory = new MemoryAdapter();
     await memory.connect();
-    for (
-      const [prototype, reason] of [
-        [CosmosAdapter.prototype, 'cosmos-unsupported'],
-        [BigtableAdapter.prototype, 'bigtable-unsupported'],
-      ] as const
-    ) {
+    for (const [prototype, reason] of [
+      [CosmosAdapter.prototype, 'cosmos-unsupported'],
+      [BigtableAdapter.prototype, 'bigtable-unsupported'],
+    ] as const) {
       // An instance of the class without a backend: `verify` must refuse it
       // before any I/O, so nothing on it is ever called.
       const adapter = Object.create(prototype) as CosmosAdapter;
@@ -123,8 +119,9 @@ describe('DatabaseInboxStore.verify', () => {
 
   it('refuses a standalone MongoDB through the probe, through a wrapped cause too', async () => {
     const raw = mongoStandaloneError();
-    expect((await refusalOf(failingService(await memoryService(), { firstCreate: raw }))).reason)
-      .toBe('mongodb-standalone');
+    expect(
+      (await refusalOf(failingService(await memoryService(), { firstCreate: raw }))).reason,
+    ).toBe('mongodb-standalone');
     const wrapped = new Error('wrapped', { cause: raw });
     expect(
       (await refusalOf(failingService(await memoryService(), { firstCreate: wrapped }))).reason,
@@ -137,8 +134,9 @@ describe('DatabaseInboxStore.verify', () => {
     expect(unreadable.reason).toBe('entity-unavailable');
     expect(unreadable.cause).toBe(missing);
     const other = { code: 'weird' };
-    expect((await refusalOf(failingService(await memoryService(), { firstCreate: other }))).reason)
-      .toBe('entity-unavailable');
+    expect(
+      (await refusalOf(failingService(await memoryService(), { firstCreate: other }))).reason,
+    ).toBe('entity-unavailable');
   });
 
   it('a cause whose code getter throws is not a MongoDB refusal', async () => {
@@ -150,8 +148,7 @@ describe('DatabaseInboxStore.verify', () => {
     });
     expect(
       (await refusalOf(failingService(await memoryService(), { firstCreate: hostile }))).reason,
-    )
-      .toBe('entity-unavailable');
+    ).toBe('entity-unavailable');
   });
 
   it('skips the adapter-type check for an IDatabaseService that is not DatabaseService', async () => {
@@ -190,10 +187,12 @@ describe('createDatabaseInboxStore', () => {
     const service = await memoryService();
     await createDatabaseInboxStore()(registry('database', service)).verify();
     await createDatabaseInboxStore({ database: 'default' })(registry('database', service)).verify();
-    await createDatabaseInboxStore({ database: 'billing' })(registry('database.billing', service))
-      .verify();
-    expect(() => createDatabaseInboxStore({ database: 'billing' })(registry('database', service)))
-      .toThrow('missing database.billing');
+    await createDatabaseInboxStore({ database: 'billing' })(
+      registry('database.billing', service),
+    ).verify();
+    expect(() =>
+      createDatabaseInboxStore({ database: 'billing' })(registry('database', service)),
+    ).toThrow('missing database.billing');
   });
 
   it('writes to the configured entity', async () => {

@@ -39,8 +39,9 @@ describe('renderDevEntry', () => {
     expect(warning).toContain('SETU_DEVTOOL_SESSION_ID');
     expect(warning).toContain('SETU_DEVTOOL_SESSION_KEY');
     // The warning precedes the reads it warns about.
-    expect(entry.indexOf('// The two variable names'))
-      .toBeLessThan(entry.indexOf("Deno.env.get('SETU_DEVTOOL_SESSION_ID')"));
+    expect(entry.indexOf('// The two variable names')).toBeLessThan(
+      entry.indexOf("Deno.env.get('SETU_DEVTOOL_SESSION_ID')"),
+    );
   });
 
   it('refuses an absent or malformed session id, naming it and never printing a value', () => {

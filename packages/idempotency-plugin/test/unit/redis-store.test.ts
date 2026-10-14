@@ -38,14 +38,16 @@ function recordingLogger(): { logger: () => ILogger; warnings: string[]; errors:
 }
 
 /** Builds a fake injected client. */
-function fakeClient(options: {
-  evalReply?: unknown;
-  evalError?: Error;
-  pingReply?: string;
-  pingError?: boolean;
-  callReply?: unknown;
-  callError?: Error;
-} = {}): {
+function fakeClient(
+  options: {
+    evalReply?: unknown;
+    evalError?: Error;
+    pingReply?: string;
+    pingError?: boolean;
+    callReply?: unknown;
+    callError?: Error;
+  } = {},
+): {
   client: IRedisIdempotencyClient;
   calls: { script: string; numkeys: number; args: (string | number)[] }[];
 } {
@@ -63,10 +65,9 @@ function fakeClient(options: {
         : Promise.resolve(options.pingReply ?? 'PONG'),
     quit: () => Promise.resolve('OK'),
     call: () =>
-      options.callError ? Promise.reject(options.callError) : Promise.resolve(
-        options.callReply ??
-          ['maxmemory-policy', 'noeviction'],
-      ),
+      options.callError
+        ? Promise.reject(options.callError)
+        : Promise.resolve(options.callReply ?? ['maxmemory-policy', 'noeviction']),
   };
   return { client, calls };
 }

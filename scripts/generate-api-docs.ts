@@ -167,7 +167,8 @@ export function evaluateBaselineRatchet(
     return {
       comparable: false,
       findings: [],
-      report: `API JSDoc ratchet SKIPPED: not comparable on this toolchain. ` +
+      report:
+        `API JSDoc ratchet SKIPPED: not comparable on this toolchain. ` +
         `This run is Deno ${denoVersion} and produced ${totalDiagnostics} ` +
         `diagnostic(s); the baseline of ${baseline} was measured on Deno ` +
         `${baselineDenoVersion}, and \`deno doc --lint\` output differs by ` +
@@ -182,9 +183,7 @@ export function evaluateBaselineRatchet(
   if (totalDiagnostics > baseline) {
     return {
       comparable: true,
-      findings: [
-        `Total JSDoc diagnostics (${totalDiagnostics}) exceeds baseline (${baseline}).`,
-      ],
+      findings: [`Total JSDoc diagnostics (${totalDiagnostics}) exceeds baseline (${baseline}).`],
       report: `API JSDoc lint failed: ${totalDiagnostics} exceeds baseline ${baseline}.`,
     };
   }
@@ -203,7 +202,8 @@ export function evaluateBaselineRatchet(
   return {
     comparable: true,
     findings: [],
-    report: `API JSDoc lint passed: ${totalDiagnostics} known diagnostic(s) at baseline ` +
+    report:
+      `API JSDoc lint passed: ${totalDiagnostics} known diagnostic(s) at baseline ` +
       `${baseline}, 0 in the ${CLEAN_PACKAGES.size} clean package(s).`,
   };
 }
@@ -220,16 +220,16 @@ export interface DocLintDiagnostic {
  * Reads the root deno.json and extracts the workspace array as the authoritative
  * workspace set. Returns paths relative to the repo root (e.g. "packages/common").
  */
-export async function readWorkspaceMembers(
-  fs: { readTextFile: (path: string) => Promise<string> },
-): Promise<string[]> {
+export async function readWorkspaceMembers(fs: {
+  readTextFile: (path: string) => Promise<string>;
+}): Promise<string[]> {
   const content = await fs.readTextFile('deno.json');
   const root = JSON.parse(content) as { workspace?: string[] };
   if (!root.workspace) {
     throw new Error('deno.json has no "workspace" field');
   }
   // Normalize: strip leading "./" if present
-  return root.workspace.map((p) => p.startsWith('./') ? p.slice(2) : p).sort();
+  return root.workspace.map((p) => (p.startsWith('./') ? p.slice(2) : p)).sort();
 }
 
 /**
@@ -241,7 +241,7 @@ export function workspaceName(path: string): string {
   const match = path.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
   const first = match?.[1];
   const second = match?.[2];
-  return (first === 'starters' && second) ? second : (first ?? path);
+  return first === 'starters' && second ? second : (first ?? path);
 }
 
 /**
@@ -295,9 +295,7 @@ export type ManifestReadFailure =
 export async function readManifestExports(
   manifestPath: string,
   fs: { readTextFile: (path: string) => Promise<string> },
-): Promise<
-  { ok: true; targets: string[] } | { ok: false; failure: ManifestReadFailure }
-> {
+): Promise<{ ok: true; targets: string[] } | { ok: false; failure: ManifestReadFailure }> {
   let content: string;
   try {
     content = await fs.readTextFile(manifestPath);
@@ -323,8 +321,7 @@ export async function readManifestExports(
   if (
     manifest.exports === undefined ||
     manifest.exports === null ||
-    (typeof manifest.exports !== 'string' &&
-      typeof manifest.exports !== 'object')
+    (typeof manifest.exports !== 'string' && typeof manifest.exports !== 'object')
   ) {
     return {
       ok: false,
@@ -405,31 +402,24 @@ export function expandExportTargets(exports: unknown): string[] {
  * @param fs - File system abstraction
  * @returns Sorted targets and package mapping
  */
-export async function collectApiEntrypoints(
-  fs: {
-    readTextFile: (path: string) => Promise<string>;
-    readDir: (path: string) => AsyncIterable<Deno.DirEntry>;
-    stat: (path: string) => Promise<Deno.FileInfo>;
-  },
-): Promise<
-  {
-    targets: string[];
-    targetsWithPackage: Array<{ target: string; pkg: string }>;
-  }
-> {
+export async function collectApiEntrypoints(fs: {
+  readTextFile: (path: string) => Promise<string>;
+  readDir: (path: string) => AsyncIterable<Deno.DirEntry>;
+  stat: (path: string) => Promise<Deno.FileInfo>;
+}): Promise<{
+  targets: string[];
+  targetsWithPackage: Array<{ target: string; pkg: string }>;
+}> {
   // Read authoritative workspace from root deno.json
   const workspace = await readWorkspaceMembers(fs);
 
   // Independent reconciliation
-  const reconciliation = reconcileWorkspaceVsPublication(
-    workspace,
-    PUBLISHED_PACKAGES,
-  );
+  const reconciliation = reconcileWorkspaceVsPublication(workspace, PUBLISHED_PACKAGES);
   if (reconciliation.missingInPublication.length > 0) {
     throw new Error(
-      `Workspace members missing from PUBLISHED_PACKAGES: ${
-        reconciliation.missingInPublication.join(', ')
-      }`,
+      `Workspace members missing from PUBLISHED_PACKAGES: ${reconciliation.missingInPublication.join(
+        ', ',
+      )}`,
     );
   }
   if (reconciliation.missingInWorkspace.length > 0) {
@@ -468,9 +458,7 @@ export async function collectApiEntrypoints(
             `Manifest ${failure.path} has an invalid exports map (must be a string or object)`,
           );
         case 'no-export-targets':
-          throw new Error(
-            `Package ${pkgPath} has no export targets in its deno.json manifest`,
-          );
+          throw new Error(`Package ${pkgPath} has no export targets in its deno.json manifest`);
         case 'missing-target':
           throw new Error(
             `Export target ${failure.target} declared in ${failure.path} does not exist on disk`,
@@ -489,9 +477,7 @@ export async function collectApiEntrypoints(
         await fs.stat(workspaceTarget);
         allTargets.push(workspaceTarget);
       } catch {
-        throw new Error(
-          `Export target ${workspaceTarget} does not exist on disk`,
-        );
+        throw new Error(`Export target ${workspaceTarget} does not exist on disk`);
       }
     }
 
@@ -569,10 +555,7 @@ export function parseDocLintDiagnostics(output: string): DocLintDiagnostic[] {
   const diagnostics: DocLintDiagnostic[] = [];
   // Strip ANSI escape codes before parsing
   // Use a function that avoids control characters in the regex literal
-  const ansiStripRe = new RegExp(
-    String.fromCharCode(0x1b) + '\\[[0-9;]*m',
-    'g',
-  );
+  const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
   const stripped = output.replace(ansiStripRe, '');
   const lines = stripped.split('\n');
 
@@ -644,9 +627,7 @@ export function normalizeDiagnosticPath(path: string): string {
  * @param diagnostics - Parsed diagnostics from parseDocLintDiagnostics
  * @returns Partitioned diagnostics
  */
-export function partitionDiagnostics(
-  diagnostics: readonly DocLintDiagnostic[],
-): {
+export function partitionDiagnostics(diagnostics: readonly DocLintDiagnostic[]): {
   readonly cleanPackageFindings: readonly DocLintDiagnostic[];
   readonly knownDebt: readonly DocLintDiagnostic[];
 } {
@@ -768,10 +749,7 @@ export function classifyChildResult(
   stdoutStripped: string;
   stderrStripped: string;
 } {
-  const ansiStripRe = new RegExp(
-    String.fromCharCode(0x1b) + '\\[[0-9;]*m',
-    'g',
-  );
+  const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
   const stdoutStripped = stdout.replace(ansiStripRe, '');
   const stderrStripped = stderr.replace(ansiStripRe, '');
 
@@ -820,7 +798,8 @@ export function classifyChildResult(
       }
       if (
         inDiagnostic &&
-        (line.trim().length === 0 || LINT_LOCATION_PATTERN.test(line) ||
+        (line.trim().length === 0 ||
+          LINT_LOCATION_PATTERN.test(line) ||
           LINT_CODE_CONTEXT_PATTERN.test(line) ||
           LINT_HINT_PATTERN.test(line) ||
           LINT_INFO_PATTERN.test(line) ||
@@ -880,9 +859,7 @@ export async function runApiDocs(
     mkdir: (path: string, options?: { recursive: boolean }) => Promise<void>;
   },
   cmd: {
-    run: (
-      args: string[],
-    ) => Promise<{ code: number; stdout: string; stderr: string }>;
+    run: (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
   },
   denoVersion: string = Deno.version.deno,
 ): Promise<{ code: number; findings: string[] }> {
@@ -913,11 +890,7 @@ export async function runApiDocs(
     // structurally: only the lint-debt shape is ratchet-eligible; every
     // unexpected nonzero code (including code 2) or any independent
     // fatal/error/stack output in either ANSI-stripped stream is fatal.
-    const classification = classifyChildResult(
-      result.code,
-      result.stdout,
-      result.stderr,
-    );
+    const classification = classifyChildResult(result.code, result.stdout, result.stderr);
 
     if (classification.kind === 'success') {
       return { code: 0, findings };
@@ -947,13 +920,9 @@ export async function runApiDocs(
     const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
 
     if (cleanPackageFindings.length > 0) {
-      findings.push(
-        `Found ${cleanPackageFindings.length} JSDoc diagnostic(s) in CLEAN packages:`,
-      );
+      findings.push(`Found ${cleanPackageFindings.length} JSDoc diagnostic(s) in CLEAN packages:`);
       for (const diag of cleanPackageFindings) {
-        findings.push(
-          `  - [${diag.rule}] ${diag.path}:${diag.line} ${diag.message}`,
-        );
+        findings.push(`  - [${diag.rule}] ${diag.path}:${diag.line} ${diag.message}`);
       }
     }
 

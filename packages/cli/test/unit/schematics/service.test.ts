@@ -28,15 +28,14 @@ describe('service schematic', () => {
         'src/services/index.ts',
       ]);
       // Managed, so a second `g service` rewrites it rather than refusing.
-      expect(files.filter((f) => f.managed === true).map((f) => f.path))
-        .toEqual(['src/services/index.ts']);
+      expect(files.filter((f) => f.managed === true).map((f) => f.path)).toEqual([
+        'src/services/index.ts',
+      ]);
     });
 
     it('re-exports the function, and registers nothing', () => {
       const barrel = files[1].contents;
-      expect(barrel).toContain(
-        "export { describeOrderItem } from './order-item.service.ts';",
-      );
+      expect(barrel).toContain("export { describeOrderItem } from './order-item.service.ts';");
       // A plain function has no registration site, and the barrel must not imply
       // one: `APP_SERVICES` is the class barrel's export, read by DecoratorPlugin.
       expect(barrel).not.toContain('APP_SERVICES');

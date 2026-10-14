@@ -81,9 +81,8 @@ describe('DrizzleAdapter', () => {
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
     adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        fakeDb,
-        (database, work) => database.transaction(work),
+      drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+        database.transaction(work),
       ),
       drizzleTables: { user: USER_TABLE, post: POST_TABLE },
     });
@@ -172,9 +171,8 @@ describe('DrizzleAdapter', () => {
 
     it('validates drizzleTables at connect', async () => {
       const adapter = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          fakeDb,
-          (database, work) => database.transaction(work),
+        drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+          database.transaction(work),
         ),
         drizzleTables: { user: USER_TABLE },
       });
@@ -190,9 +188,8 @@ describe('DrizzleAdapter', () => {
         delete: fakeDb.delete,
         transaction: fakeDb.transaction,
       };
-      const database = createDrizzleDatabase(
-        noExecute,
-        (configured, work) => configured.transaction(work),
+      const database = createDrizzleDatabase(noExecute, (configured, work) =>
+        configured.transaction(work),
       );
       const noExecuteAdapter = new DrizzleAdapter({
         drizzleInstance: database,
@@ -460,12 +457,15 @@ describe('DrizzleAdapter', () => {
     });
 
     it('counts through a portable expression', async () => {
-      await ds.count({ role: 'admin' }, {
-        type: 'comparison',
-        field: 'name',
-        operator: 'gte',
-        value: 'A',
-      });
+      await ds.count(
+        { role: 'admin' },
+        {
+          type: 'comparison',
+          field: 'name',
+          operator: 'gte',
+          value: 'A',
+        },
+      );
 
       expect(
         fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1)?.args.expression,
@@ -479,13 +479,18 @@ describe('DrizzleAdapter', () => {
     });
 
     it('refuses a filter when the required operators were not supplied', async () => {
-      const bare = createDrizzleDataSource(fakeDb, 'user', { user: USER_TABLE }, {
-        eq: OPERATORS.eq,
-        and: OPERATORS.and,
-        asc: OPERATORS.asc,
-        desc: OPERATORS.desc,
-        count: OPERATORS.count,
-      });
+      const bare = createDrizzleDataSource(
+        fakeDb,
+        'user',
+        { user: USER_TABLE },
+        {
+          eq: OPERATORS.eq,
+          and: OPERATORS.and,
+          asc: OPERATORS.asc,
+          desc: OPERATORS.desc,
+          count: OPERATORS.count,
+        },
+      );
 
       await expect(
         bare.findAll(
@@ -549,9 +554,8 @@ describe('DrizzleAdapter', () => {
           Promise.reject(driverFailure),
       };
       const failing = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          database,
-          (configured, work) => configured.transaction(work),
+        drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+          configured.transaction(work),
         ),
         drizzleTables: { user: USER_TABLE },
       });
@@ -579,9 +583,8 @@ describe('DrizzleAdapter', () => {
         },
       };
       const wrapping = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          database,
-          (configured, work) => configured.transaction(work),
+        drizzleInstance: createDrizzleDatabase(database, (configured, work) =>
+          configured.transaction(work),
         ),
         drizzleTables: { user: USER_TABLE },
       });

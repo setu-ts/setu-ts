@@ -50,7 +50,9 @@ describe('createGraphqlHandler', () => {
     }
     const def = document.definitions[0];
     if (
-      def.operation === 'mutation' || def.operation === 'subscription' || def.operation === 'query'
+      def.operation === 'mutation' ||
+      def.operation === 'subscription' ||
+      def.operation === 'query'
     ) {
       return {
         kind: 'OperationDefinition',

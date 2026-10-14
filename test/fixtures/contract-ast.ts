@@ -40,12 +40,15 @@ interface DocProperty {
 interface DocType {
   readonly repr?: string;
   readonly kind?: string;
-  readonly value?: string | readonly DocType[] | {
-    readonly typeParams?: readonly DocType[];
-    readonly params?: readonly DocParameter[];
-    readonly tsType?: DocType;
-    readonly operator?: string;
-  };
+  readonly value?:
+    | string
+    | readonly DocType[]
+    | {
+        readonly typeParams?: readonly DocType[];
+        readonly params?: readonly DocParameter[];
+        readonly tsType?: DocType;
+        readonly operator?: string;
+      };
 }
 
 interface DocTypeValue {
@@ -56,9 +59,7 @@ interface DocTypeValue {
 }
 
 interface DocJson {
-  readonly nodes: Readonly<
-    Record<string, { readonly symbols: readonly DocNode[] }>
-  >;
+  readonly nodes: Readonly<Record<string, { readonly symbols: readonly DocNode[] }>>;
 }
 
 export interface ContractMember {
@@ -77,10 +78,10 @@ function normalizeType(type: DocType): string {
   if (type.kind === 'union' && Array.isArray(type.value)) {
     return type.value.map(normalizeType).join('|');
   }
-  const value: DocTypeValue | undefined = typeof type.value === 'object' &&
-      !Array.isArray(type.value)
-    ? type.value as DocTypeValue
-    : undefined;
+  const value: DocTypeValue | undefined =
+    typeof type.value === 'object' && !Array.isArray(type.value)
+      ? (type.value as DocTypeValue)
+      : undefined;
   if (type.kind === 'array' && value?.tsType !== undefined) {
     return `${normalizeType(value.tsType)}[]`;
   }
@@ -88,10 +89,14 @@ function normalizeType(type: DocType): string {
     return `${value.operator ?? ''} ${normalizeType(value.tsType)}`.trim();
   }
   if (type.kind === 'fnOrConstructor' && value?.tsType !== undefined) {
-    const params = value.params?.map((parameter) =>
-      `${parameter.name}${parameter.optional === true ? '?' : ''}:` +
-      (parameter.tsType === undefined ? 'unknown' : normalizeType(parameter.tsType))
-    ).join(',') ?? '';
+    const params =
+      value.params
+        ?.map(
+          (parameter) =>
+            `${parameter.name}${parameter.optional === true ? '?' : ''}:` +
+            (parameter.tsType === undefined ? 'unknown' : normalizeType(parameter.tsType)),
+        )
+        .join(',') ?? '';
     return `(${params})=>${normalizeType(value.tsType)}`;
   }
   if (type.repr === undefined) {
@@ -107,35 +112,38 @@ function astFromJson(json: string, interfaceName: string): ContractAst {
   const symbols = Object.values(parsed.nodes).flatMap((node) => node.symbols);
   const matches = symbols.filter((symbol) => symbol.name === interfaceName);
   if (matches.length !== 1) {
-    throw new Error(
-      `Expected exactly one interface ${interfaceName}, found ${matches.length}`,
-    );
+    throw new Error(`Expected exactly one interface ${interfaceName}, found ${matches.length}`);
   }
   const declarations =
     matches[0]?.declarations.filter((declaration) => declaration.kind === 'interface') ?? [];
   if (declarations.length !== 1 || declarations[0]?.def === undefined) {
-    throw new Error(
-      `Expected exactly one interface declaration for ${interfaceName}`,
-    );
+    throw new Error(`Expected exactly one interface declaration for ${interfaceName}`);
   }
   const def = declarations[0].def;
   const members: ContractMember[] = [];
   for (const method of def.methods ?? []) {
-    const typeParams = method.typeParams?.map((parameter) =>
-      parameter.default === undefined
-        ? parameter.name
-        : `${parameter.name}=${parameter.default.repr.replace(/\s+/g, ' ').trim()}`
-    ).join(',') ?? '';
-    const params = method.params.map((parameter) =>
-      `${parameter.name}${parameter.optional === true ? '?' : ''}:` +
-      (parameter.tsType === undefined ? 'unknown' : normalizeType(parameter.tsType))
-    ).join(',');
+    const typeParams =
+      method.typeParams
+        ?.map((parameter) =>
+          parameter.default === undefined
+            ? parameter.name
+            : `${parameter.name}=${parameter.default.repr.replace(/\s+/g, ' ').trim()}`,
+        )
+        .join(',') ?? '';
+    const params = method.params
+      .map(
+        (parameter) =>
+          `${parameter.name}${parameter.optional === true ? '?' : ''}:` +
+          (parameter.tsType === undefined ? 'unknown' : normalizeType(parameter.tsType)),
+      )
+      .join(',');
     members.push({
       kind: 'method',
       name: method.name,
       readonly: false,
       optional: method.optional === true,
-      signature: `${method.name}${method.optional === true ? '?' : ''}` +
+      signature:
+        `${method.name}${method.optional === true ? '?' : ''}` +
         `${typeParams === '' ? '' : `<${typeParams}>`}(${params}):` +
         normalizeType(method.returnType),
     });
@@ -146,12 +154,13 @@ function astFromJson(json: string, interfaceName: string): ContractAst {
       name: property.name,
       readonly: property.readonly === true,
       optional: property.optional === true,
-      signature: `${property.readonly === true ? 'readonly ' : ''}${property.name}` +
+      signature:
+        `${property.readonly === true ? 'readonly ' : ''}${property.name}` +
         `${property.optional === true ? '?' : ''}:${normalizeType(property.tsType)}`,
     });
   }
-  members.sort((left, right) =>
-    left.name.localeCompare(right.name) || left.kind.localeCompare(right.kind)
+  members.sort(
+    (left, right) => left.name.localeCompare(right.name) || left.kind.localeCompare(right.kind),
   );
   const keys = members.map((member) => `${member.kind}:${member.name}`);
   if (new Set(keys).size !== keys.length) {
@@ -187,16 +196,8 @@ export async function contractsMatch(
 ): Promise<boolean> {
   try {
     const actualSource = source.replace(/^import[^;]+;\s*$/gm, '');
-    const actual = await contractAst(
-      actualSource,
-      interfaceName,
-      `${scratchName}-actual`,
-    );
-    const guide = await contractAst(
-      documented,
-      interfaceName,
-      `${scratchName}-guide`,
-    );
+    const actual = await contractAst(actualSource, interfaceName, `${scratchName}-actual`);
+    const guide = await contractAst(documented, interfaceName, `${scratchName}-guide`);
     return JSON.stringify(guide) === JSON.stringify(actual);
   } catch {
     return false;

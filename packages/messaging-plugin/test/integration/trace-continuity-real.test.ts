@@ -58,9 +58,9 @@ async function realOtel(): Promise<RealOtel | null> {
 
   setOtelApi(api as never);
   const exporter = new sdk.InMemorySpanExporter();
-  const provider = new sdk.BasicTracerProvider(
-    { spanProcessors: [new sdk.SimpleSpanProcessor(exporter)] } as never,
-  );
+  const provider = new sdk.BasicTracerProvider({
+    spanProcessors: [new sdk.SimpleSpanProcessor(exporter)],
+  } as never);
   const tracer = provider.getTracer('m75-continuity');
 
   const host: TracerHost = {
@@ -93,7 +93,7 @@ async function realOtel(): Promise<RealOtel | null> {
     activate<T>(span: unknown, fn: () => Promise<T>): Promise<T> {
       return api.context.with(api.trace.setSpan(api.context.active(), span as never), fn);
     },
-    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') } as TelemetryContext),
+    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') }) as TelemetryContext,
     injectContext: () => ({}),
     shutdown: () => provider.shutdown(),
     forceFlush: () => provider.forceFlush(),
@@ -135,9 +135,13 @@ describe('real-OTel trace continuity across the broker', () => {
 
     // Stand in for the request-span middleware, then publish from "inside the
     // handler" — the shape every application has.
-    await telemetry.withSpan('POST /orders', async () => {
-      await broker.publish('order.created', { id: 'o1' });
-    }, { kind: 'server' } as SpanOptions);
+    await telemetry.withSpan(
+      'POST /orders',
+      async () => {
+        await broker.publish('order.created', { id: 'o1' });
+      },
+      { kind: 'server' } as SpanOptions,
+    );
 
     const spans = await otel.finished();
     const byName = new Map(spans.map((s) => [s.name, s]));
@@ -205,9 +209,13 @@ describe('real-OTel trace continuity across the broker', () => {
     await producer.connect();
 
     const before = (await otel.finished()).length;
-    await telemetry.withSpan('POST /orders', async () => {
-      await producer.publish('order.shipped', { id: 'o2' });
-    }, { kind: 'server' } as SpanOptions);
+    await telemetry.withSpan(
+      'POST /orders',
+      async () => {
+        await producer.publish('order.shipped', { id: 'o2' });
+      },
+      { kind: 'server' } as SpanOptions,
+    );
 
     // A separate "consumer process": a second broker, delivered from a clean
     // context with no active span anywhere.

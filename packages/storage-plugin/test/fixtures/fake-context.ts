@@ -38,10 +38,7 @@ export function createFakeContext(
   platform: 'deno' | 'node' | 'bun' | 'cloudflare-workers' = 'deno',
 ): FakeStorageContext {
   const registered = new Map<string, unknown>();
-  const healthIndicators = new Map<
-    string,
-    () => Promise<{ status: string; data?: unknown }>
-  >();
+  const healthIndicators = new Map<string, () => Promise<{ status: string; data?: unknown }>>();
   const onCloseHandlers: Array<() => Promise<void> | void> = [];
   const logs: LogCall[] = [];
 

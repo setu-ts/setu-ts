@@ -83,12 +83,7 @@ describe('runJob', () => {
         adapter.ackCalled = true;
         return Promise.resolve();
       },
-      requeue: (
-        name: string,
-        id: string,
-        availableAtMs: number,
-        attempts: number,
-      ) => {
+      requeue: (name: string, id: string, availableAtMs: number, attempts: number) => {
         adapter.requeueCalls.push({ name, id, availableAtMs, attempts });
         return Promise.resolve();
       },
@@ -420,13 +415,20 @@ describe('runJob — outcome versus settlement (M98f)', () => {
   it('reports a throwing observer through the sink and still settles', async () => {
     const reported: string[] = [];
     const log: string[] = [];
-    await runJob(runtime, settlingAdapter(log), job(1), () => {}, (message) => {
-      reported.push(message);
-    }, {
-      onAttemptSettled: () => {
-        throw new Error('observer canary');
+    await runJob(
+      runtime,
+      settlingAdapter(log),
+      job(1),
+      () => {},
+      (message) => {
+        reported.push(message);
       },
-    });
+      {
+        onAttemptSettled: () => {
+          throw new Error('observer canary');
+        },
+      },
+    );
     expect(log).toEqual(['ack:called', 'ack:settled']);
     expect(reported).toEqual(['queue diagnostics observer threw']);
   });

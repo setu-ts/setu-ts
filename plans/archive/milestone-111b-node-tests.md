@@ -59,13 +59,13 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                              | Resolution (picked side)                                                                                  | Doc deliverable (same PR)                                                                                                                                         |
-| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1 | ROADMAP 111b says Vitest's transformer handles TC39 decorators because "esbuild does"; Vitest 5 transforms with oxc, which does not.                  | Measurement: a pre-transform esbuild plugin is required (§3.3).                                           | ROADMAP 111b "To probe first" bullet replaced with the measured result.                                                                                           |
-| C2 | ROADMAP 111b scopes the codemod to "~1,520 import-only files" and implies the whole suite moves; root `test/` exercises Deno scripts.                 | Package tests move here; root `test/` moves with the scripts in 111e (§3.1).                              | ROADMAP 111b and 111e bullets name the split.                                                                                                                     |
-| C3 | AI_GUIDELINES §6.4 mandates `deno test` + `@std/testing/bdd` + `@std/expect`; CLAUDE.md "Key conventions → Tests" says the same and bans `Deno.test`. | Vitest (`describe`/`it`/`expect` from `vitest`) for package tests; the root-suite rule stands until 111e. | AI_GUIDELINES §6.4, §6.9, §17.2 coverage row; CLAUDE.md Verification, Key conventions, Common pitfalls (the "exits 0 with a file under the bar" caveat, retired). |
-| C4 | CLAUDE.md says a targeted per-package coverage FAIL "is not authoritative — another package's tests may cover those lines".                           | Per-package measurement is now THE gate (§3.6): a file is covered by its own package's tests or it fails. | CLAUDE.md Verification paragraph rewritten.                                                                                                                       |
-| C5 | ROADMAP 111b: "the guarded real-backend suites keep their `ignore`/skip guards"; Vitest has no `ignore` option.                                       | The guard stays, spelled `skip:`; the env block and CI pins are unchanged in meaning.                     | `test/apps-gate.test.ts` pins updated; ROADMAP wording.                                                                                                           |
+| #   | Conflict                                                                                                                                              | Resolution (picked side)                                                                                  | Doc deliverable (same PR)                                                                                                                                         |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | ROADMAP 111b says Vitest's transformer handles TC39 decorators because "esbuild does"; Vitest 5 transforms with oxc, which does not.                  | Measurement: a pre-transform esbuild plugin is required (§3.3).                                           | ROADMAP 111b "To probe first" bullet replaced with the measured result.                                                                                           |
+| C2  | ROADMAP 111b scopes the codemod to "~1,520 import-only files" and implies the whole suite moves; root `test/` exercises Deno scripts.                 | Package tests move here; root `test/` moves with the scripts in 111e (§3.1).                              | ROADMAP 111b and 111e bullets name the split.                                                                                                                     |
+| C3  | AI_GUIDELINES §6.4 mandates `deno test` + `@std/testing/bdd` + `@std/expect`; CLAUDE.md "Key conventions → Tests" says the same and bans `Deno.test`. | Vitest (`describe`/`it`/`expect` from `vitest`) for package tests; the root-suite rule stands until 111e. | AI_GUIDELINES §6.4, §6.9, §17.2 coverage row; CLAUDE.md Verification, Key conventions, Common pitfalls (the "exits 0 with a file under the bar" caveat, retired). |
+| C4  | CLAUDE.md says a targeted per-package coverage FAIL "is not authoritative — another package's tests may cover those lines".                           | Per-package measurement is now THE gate (§3.6): a file is covered by its own package's tests or it fails. | CLAUDE.md Verification paragraph rewritten.                                                                                                                       |
+| C5  | ROADMAP 111b: "the guarded real-backend suites keep their `ignore`/skip guards"; Vitest has no `ignore` option.                                       | The guard stays, spelled `skip:`; the env block and CI pins are unchanged in meaning.                     | `test/apps-gate.test.ts` pins updated; ROADMAP wording.                                                                                                           |
 
 ## 3. Design decisions
 
@@ -102,6 +102,7 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
   hand: `@std/testing/types` → `expectTypeOf`, `@std/testing/mock` `spy` → `vi.fn`/`vi.spyOn`.
   `scripts/codemods/` is excluded from `deno check` and `deno lint` (it imports `typescript` and
   `vitest`, which the Deno toolchain does not resolve here); 111d's ESLint covers it.
+
 - **Why:** the ROADMAP requires the change to be reproducible; the measured load errors (§1) show
   the prepared scope missed helpers and test-side specifiers.
 - **Test home:** `scripts/codemods/std-to-vitest.test.ts` (Vitest, the tooling target of §3.6 — not
@@ -114,10 +115,8 @@ and esbuild 0.28.2 — not carried over from the pre-111a prep.
 
 - **Decision:** the Vitest config carries an `enforce: 'pre'` Vite plugin that transforms every
   workspace `.ts`/`.tsx` module (outside `node_modules`) with esbuild's `transform`,
-  `target:
-  'es2022'`, `jsx: 'automatic'`, `jsxImportSource: 'hono/jsx'`, with source maps.
-  `esbuild` becomes a root `devDependency` pinned to `0.28.2`, and `allowBuilds` gains
-  `esbuild: true`.
+  `target: 'es2022'`, `jsx: 'automatic'`, `jsxImportSource: 'hono/jsx'`, with source maps. `esbuild`
+  becomes a root `devDependency` pinned to `0.28.2`, and `allowBuilds` gains `esbuild: true`.
 - **Why:** measured (§1): oxc leaves standard decorators untransformed. esbuild writes metadata
   under `Symbol.for('Symbol.metadata')`, the key the M111a carrier installs, so decorator metadata
   is read identically under the test transform and the published `tsc` output.

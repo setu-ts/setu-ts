@@ -44,9 +44,9 @@ function toScope(type: string, id: unknown): ScopeRef | undefined {
 function assertScopeType(type: unknown, factory: string): asserts type is string {
   if (!isScopeType(type)) {
     throw new TypeError(
-      `${factory}: the scope type must be lowercase kebab-case, received ${
-        JSON.stringify(typeof type === 'string' ? type : `[${typeof type}]`)
-      }`,
+      `${factory}: the scope type must be lowercase kebab-case, received ${JSON.stringify(
+        typeof type === 'string' ? type : `[${typeof type}]`,
+      )}`,
     );
   }
 }
@@ -65,9 +65,7 @@ function assertScopeType(type: unknown, factory: string): asserts type is string
  * ```
  * @since 0.9.0
  */
-export function scopeFromTenant(
-  type = 'tenant',
-): (ctx: IRequestContext) => ScopeRef | undefined {
+export function scopeFromTenant(type = 'tenant'): (ctx: IRequestContext) => ScopeRef | undefined {
   assertScopeType(type, 'scopeFromTenant');
   return (ctx) => toScope(type, ctx.request.tenant?.id);
 }

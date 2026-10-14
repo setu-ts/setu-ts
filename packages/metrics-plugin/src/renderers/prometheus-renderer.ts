@@ -13,10 +13,7 @@ import type { MetricSnapshot, MetricValue } from '../interfaces/index.ts';
  */
 function escapeLabelValue(value: string): string {
   return replaceUnescapableControls(
-    value
-      .replace(/\\/g, '\\\\')
-      .replace(/\n/g, '\\n')
-      .replace(/"/g, '\\"'),
+    value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"'),
   );
 }
 
@@ -67,11 +64,7 @@ function replaceUnescapableControls(text: string): string {
  * @returns The escaped help text
  */
 function escapeHelp(help: string): string {
-  return replaceUnescapableControls(
-    help
-      .replace(/\\/g, '\\\\')
-      .replace(/\n/g, '\\n'),
-  );
+  return replaceUnescapableControls(help.replace(/\\/g, '\\\\').replace(/\n/g, '\\n'));
 }
 
 /**

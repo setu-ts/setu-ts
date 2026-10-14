@@ -16,7 +16,9 @@ import { UserList } from '../fixtures/users.tsx';
 
 /** An `html`-tag component authored in a plain .ts file. */
 function TaggedPage(props: { readonly users: readonly string[] }) {
-  return html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+  return html`<ul>
+    ${props.users.map((user) => html`<li>${user}</li>`)}
+  </ul>`;
 }
 
 describe('escaping', () => {
@@ -27,9 +29,7 @@ describe('escaping', () => {
 
     // The entities are written with unicode escapes so the expectation
     // cannot silently decay into the raw characters it must never be.
-    expect(result).toBe(
-      '<ul><li>Ada \u0026lt;script\u0026gt;</li><li>Grace</li></ul>',
-    );
+    expect(result).toBe('<ul><li>Ada \u0026lt;script\u0026gt;</li><li>Grace</li></ul>');
   });
 
   it("the hono-html arm escapes 'Ada <script>' to literal entities", async () => {
@@ -37,9 +37,7 @@ describe('escaping', () => {
       users: ['Ada <script>', 'Grace'],
     });
 
-    expect(result).toBe(
-      '<ul><li>Ada \u0026lt;script\u0026gt;</li><li>Grace</li></ul>',
-    );
+    expect(result).toBe('<ul><li>Ada \u0026lt;script\u0026gt;</li><li>Grace</li></ul>');
   });
 
   it('raw() passes markup through unescaped — the documented opt-out', () => {

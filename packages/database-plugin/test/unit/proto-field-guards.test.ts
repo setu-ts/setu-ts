@@ -77,12 +77,10 @@ describe('Cosmos DB and DynamoDB __proto__ payload fields (M105)', () => {
     it(`${name}: create and update refuse an own __proto__ field without an echo`, async () => {
       const source = sources.find((entry) => entry.name === name)!.make();
       await source.create({ id: 'a', name: 'old' });
-      for (
-        const attempt of [
-          () => source.create({ ...protoPayload(), id: 'b' }),
-          () => source.update('a', protoPayload()),
-        ]
-      ) {
+      for (const attempt of [
+        () => source.create({ ...protoPayload(), id: 'b' }),
+        () => source.update('a', protoPayload()),
+      ]) {
         const outcome = await settle(attempt);
         expect(outcome.sync).toBe(false);
         expect(outcome.message).toMatch(/__proto__/);

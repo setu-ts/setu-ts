@@ -27,9 +27,9 @@ async function seed(
   entity: string,
   rows: readonly Record<string, unknown>[],
 ): Promise<void> {
-  const repo = target.services.get<IDatabaseService>(CAPABILITIES.DATABASE).getRepository<
-    Record<string, unknown>
-  >(entity);
+  const repo = target.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>>(entity);
   for (const row of rows) {
     await repo.create(row);
   }
@@ -71,13 +71,10 @@ describe('Scenario A — tenant scope, platform-wide grants, parent-to-child del
     app = await start();
     expect(
       await status(app, '/invoices/approve', { 'x-user': 'ann', 'x-tenant-id': 'acme-eu' }, 'POST'),
-    )
-      .toBe(200);
+    ).toBe(200);
     expect(
       await status(app, '/invoices/approve', { 'x-user': 'ann', 'x-tenant-id': 'acme' }, 'POST'),
-    ).toBe(
-      200,
-    );
+    ).toBe(200);
   });
 
   it('a platform-wide grant applies in every tenant', async () => {
@@ -89,13 +86,10 @@ describe('Scenario A — tenant scope, platform-wide grants, parent-to-child del
     app = await start();
     expect(
       await status(app, '/invoices/approve', { 'x-user': 'ann', 'x-tenant-id': 'globex' }, 'POST'),
-    )
-      .toBe(403);
+    ).toBe(403);
     expect(
       await status(app, '/invoices/approve', { 'x-user': 'pat', 'x-tenant-id': 'acme' }, 'POST'),
-    ).toBe(
-      403,
-    );
+    ).toBe(403);
   });
 
   it('NEGATIVE: a request with no tenant resolved is denied, never treated as any scope', async () => {
@@ -118,13 +112,15 @@ describe('Scenario C — organisation → team → project, a grant descends', (
     return await startScopedApp({
       auth: {
         scopedRbac: {
-          sources: [{
-            kind: 'static',
-            grants: [
-              { subject: 'lead', role: 'approver', scope: ORG },
-              { subject: 'dev', role: 'approver', scope: { type: 'project', id: 'p1' } },
-            ],
-          }],
+          sources: [
+            {
+              kind: 'static',
+              grants: [
+                { subject: 'lead', role: 'approver', scope: ORG },
+                { subject: 'dev', role: 'approver', scope: { type: 'project', id: 'p1' } },
+              ],
+            },
+          ],
           inheritsFrom: (scope) => {
             const parent = UP[`${scope.type}/${scope.id}`];
             return parent === undefined ? [] : [parent];
@@ -167,25 +163,30 @@ describe('Scenario D — grants carried in token claims, no store', () => {
     return await startScopedApp({
       auth: {
         scopedRbac: {
-          sources: [{
-            kind: 'claims',
-            map: (claims) => {
-              const orgs = claims.orgs;
-              if (typeof orgs !== 'object' || orgs === null) {
-                return [];
-              }
-              return Object.entries(orgs as Record<string, readonly string[]>).flatMap((
-                [id, roles],
-              ) => roles.map((role) => ({ role, scope: { type: 'organisation', id } })));
+          sources: [
+            {
+              kind: 'claims',
+              map: (claims) => {
+                const orgs = claims.orgs;
+                if (typeof orgs !== 'object' || orgs === null) {
+                  return [];
+                }
+                return Object.entries(orgs as Record<string, readonly string[]>).flatMap(
+                  ([id, roles]) =>
+                    roles.map((role) => ({ role, scope: { type: 'organisation', id } })),
+                );
+              },
             },
-          }],
+          ],
         },
       },
-      routes: [{
-        method: 'get',
-        path: '/orgs/:orgId/admin',
-        guard: requireScopedRole('approver', { scope: scopeFromParam('orgId', 'organisation') }),
-      }],
+      routes: [
+        {
+          method: 'get',
+          path: '/orgs/:orgId/admin',
+          guard: requireScopedRole('approver', { scope: scopeFromParam('orgId', 'organisation') }),
+        },
+      ],
     });
   }
 
@@ -214,11 +215,13 @@ describe('Scenario E — per-tenant custom roles', () => {
           customRoles: createDatabaseRoleSource({ entity: 'Role' }),
         },
       },
-      routes: [{
-        method: 'post',
-        path: '/invoices/approve',
-        guard: requireScopedPermission('invoices:approve'),
-      }],
+      routes: [
+        {
+          method: 'post',
+          path: '/invoices/approve',
+          guard: requireScopedPermission('invoices:approve'),
+        },
+      ],
     });
     await seed(started, 'Role', [
       {
@@ -247,20 +250,23 @@ describe('Scenario E — per-tenant custom roles', () => {
 
   it('a custom role defined in tenant X grants its permission in X', async () => {
     app = await start();
-    expect(await status(app, '/invoices/approve', { 'x-user': 'ann', 'x-tenant-id': 'x' }, 'POST'))
-      .toBe(200);
+    expect(
+      await status(app, '/invoices/approve', { 'x-user': 'ann', 'x-tenant-id': 'x' }, 'POST'),
+    ).toBe(200);
   });
 
   it('NEGATIVE: the same role name granted in tenant Y, which does not define it, grants nothing', async () => {
     app = await start();
-    expect(await status(app, '/invoices/approve', { 'x-user': 'bob', 'x-tenant-id': 'y' }, 'POST'))
-      .toBe(403);
+    expect(
+      await status(app, '/invoices/approve', { 'x-user': 'bob', 'x-tenant-id': 'y' }, 'POST'),
+    ).toBe(403);
   });
 
   it('NEGATIVE: a custom role cannot shadow a catalogue role', async () => {
     app = await start();
-    expect(await status(app, '/invoices/approve', { 'x-user': 'vic', 'x-tenant-id': 'x' }, 'POST'))
-      .toBe(403);
+    expect(
+      await status(app, '/invoices/approve', { 'x-user': 'vic', 'x-tenant-id': 'x' }, 'POST'),
+    ).toBe(403);
   });
 });
 

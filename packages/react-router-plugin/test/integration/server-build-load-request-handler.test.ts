@@ -74,9 +74,9 @@ export const entry = { module: { default: async () => {} } };
   it('throws with meaningful message when the server build file cannot be loaded', async () => {
     const nonExistentPath = `${tmpDir}/does-not-exist.mjs`;
 
-    await expect(
-      loadRequestHandler(nonExistentPath, 'production'),
-    ).rejects.toThrow('Failed to load React Router server build');
+    await expect(loadRequestHandler(nonExistentPath, 'production')).rejects.toThrow(
+      'Failed to load React Router server build',
+    );
   });
 
   it('throws with meaningful message when react-router import fails', async () => {

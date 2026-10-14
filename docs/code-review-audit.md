@@ -40,21 +40,21 @@ review tooling lands), never on a milestone `feat/…` branch.
 Foundational packages first — a bug there infects every plugin — then security-critical, then
 historically fragile, then the rest.
 
-| #  | Package(s)                                        | Milestone(s) | Reviewer | Effort | Status     | Findings | Fix branch/PR |
-| -- | ------------------------------------------------- | ------------ | -------- | ------ | ---------- | -------- | ------------- |
-| 1  | `common`                                          | M1           | Claude   | high   | ⬜ pending | —        | —             |
-| 2  | `kernel`                                          | M2           | Claude   | high   | ⬜ pending | —        | —             |
-| 3  | `runtime`                                         | M3, M39      | Claude   | high   | ⬜ pending | —        | —             |
-| 4  | `database-plugin`                                 | M10          | Roo      | high   | ⬜ pending | —        | —             |
-| 5  | `auth-plugin`                                     | M16, M16b    | Roo      | high   | ⬜ pending | —        | —             |
-| 6  | `http-security-plugin`                            | M17          | Roo      | high   | ⬜ pending | —        | —             |
-| 7  | `decorator-plugin`                                | M9           | Roo      | high   | ⬜ pending | —        | —             |
-| 8  | `messaging-plugin`                                | M14, M14b    | Roo      | high   | ⬜ pending | —        | —             |
-| 9  | `queue-plugin`                                    | M15, M15b    | Roo      | high   | ⬜ pending | —        | —             |
-| 10 | `cache-plugin`                                    | M11          | Roo      | medium | ⬜ pending | —        | —             |
-| 11 | `validation-plugin` + `exceptions`                | M6, M7       | Roo      | medium | ⬜ pending | —        | —             |
-| 12 | `di-plugin` + `config-plugin`                     | M8, M5       | Roo      | medium | ⬜ pending | —        | —             |
-| 13 | `logger-plugin` + `events-plugin` + `cqrs-plugin` | M4, M12, M13 | Roo      | medium | ⬜ pending | —        | —             |
+| #   | Package(s)                                        | Milestone(s) | Reviewer | Effort | Status     | Findings | Fix branch/PR |
+| --- | ------------------------------------------------- | ------------ | -------- | ------ | ---------- | -------- | ------------- |
+| 1   | `common`                                          | M1           | Claude   | high   | ⬜ pending | —        | —             |
+| 2   | `kernel`                                          | M2           | Claude   | high   | ⬜ pending | —        | —             |
+| 3   | `runtime`                                         | M3, M39      | Claude   | high   | ⬜ pending | —        | —             |
+| 4   | `database-plugin`                                 | M10          | Roo      | high   | ⬜ pending | —        | —             |
+| 5   | `auth-plugin`                                     | M16, M16b    | Roo      | high   | ⬜ pending | —        | —             |
+| 6   | `http-security-plugin`                            | M17          | Roo      | high   | ⬜ pending | —        | —             |
+| 7   | `decorator-plugin`                                | M9           | Roo      | high   | ⬜ pending | —        | —             |
+| 8   | `messaging-plugin`                                | M14, M14b    | Roo      | high   | ⬜ pending | —        | —             |
+| 9   | `queue-plugin`                                    | M15, M15b    | Roo      | high   | ⬜ pending | —        | —             |
+| 10  | `cache-plugin`                                    | M11          | Roo      | medium | ⬜ pending | —        | —             |
+| 11  | `validation-plugin` + `exceptions`                | M6, M7       | Roo      | medium | ⬜ pending | —        | —             |
+| 12  | `di-plugin` + `config-plugin`                     | M8, M5       | Roo      | medium | ⬜ pending | —        | —             |
+| 13  | `logger-plugin` + `events-plugin` + `cqrs-plugin` | M4, M12, M13 | Roo      | medium | ⬜ pending | —        | —             |
 
 Status legend: ⬜ pending · 🔵 reviewing · 🟡 findings logged (fix pending) · 🟢 fixed & verified.
 

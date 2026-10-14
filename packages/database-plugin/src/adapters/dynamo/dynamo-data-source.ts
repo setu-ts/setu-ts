@@ -136,9 +136,8 @@ export function createDynamoDataSource(
         `DynamoDB entity '${entity}' ${operation} requires key columns '${columns.join("', '")}'.`,
       );
     }
-    const values = typeof id === 'string' || typeof id === 'number'
-      ? { [columns[0] ?? 'id']: id }
-      : id;
+    const values =
+      typeof id === 'string' || typeof id === 'number' ? { [columns[0] ?? 'id']: id } : id;
     const result: Record<string, ReturnType<typeof marshalDynamoValue>> = {};
     for (const column of columns) {
       const value = values[column];
@@ -235,8 +234,8 @@ export function createDynamoDataSource(
     async update(id, data): Promise<Record<string, unknown>> {
       const identifier = key(id, 'update');
       for (const name of Object.keys(data)) assertWritableAttributeName(name);
-      const entries = Object.entries(data).filter(([name, value]) =>
-        value !== undefined && !target.keyColumns.includes(name)
+      const entries = Object.entries(data).filter(
+        ([name, value]) => value !== undefined && !target.keyColumns.includes(name),
       );
       if (entries.length === 0) {
         throw new UnsupportedQueryFeatureError(
@@ -246,8 +245,9 @@ export function createDynamoDataSource(
         );
       }
       const builder = createDynamoExpressionBuilder();
-      const updates = entries.map(([name, value]) =>
-        `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`
+      const updates = entries.map(
+        ([name, value]) =>
+          `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`,
       );
       const exists = builder.aliasPath(target.partitionKey);
       const update = {
@@ -296,9 +296,12 @@ export function createDynamoDataSource(
       if (transactionBuffer !== undefined) {
         const existing = await client.getItem({ TableName: target.table, Key: identifier });
         if (existing.Item === undefined) return false;
-        transactionBuffer.add({
-          Delete: { TableName: target.table, Key: identifier },
-        }, identifier);
+        transactionBuffer.add(
+          {
+            Delete: { TableName: target.table, Key: identifier },
+          },
+          identifier,
+        );
         return true;
       }
       const output = await client.deleteItem({
@@ -308,81 +311,94 @@ export function createDynamoDataSource(
       });
       return output.Attributes !== undefined;
     },
-    ...(transactionBuffer !== undefined ? {} : {
-      async updateWhere(id, where, data) {
-        const checked = checkWritePrecondition(where, data);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
-        }
-        where = checked.where;
-        data = checked.data;
-        const identifier = key(id, 'updateWhere');
-        const entries = Object.entries(data).filter(([name, value]) =>
-          value !== undefined && !target.keyColumns.includes(name)
-        );
-        if (entries.length === 0) {
-          throw new UnsupportedQueryFeatureError(
-            'update',
-            ADAPTER,
-            `DynamoDB entity '${entity}' update requires at least one non-key value.`,
-          );
-        }
-        const builder = createDynamoExpressionBuilder();
-        const updates = entries.map(([name, value]) =>
-          `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`
-        );
-        const conditions = Object.entries(where).map(([name, value]) =>
-          `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`
-        );
-        const exists = builder.aliasPath(target.partitionKey);
-        try {
-          const output = await client.updateItem({
-            TableName: target.table,
-            Key: identifier,
-            UpdateExpression: `SET ${updates.join(', ')}`,
-            ConditionExpression: `attribute_exists(${exists}) AND ${conditions.join(' AND ')}`,
-            ...builder.expressionAttributes(),
-            ReturnValues: 'ALL_NEW',
-          });
-          if (output.Attributes === undefined) {
-            throw new Error(`DynamoDB entity '${entity}' conditional update returned no row.`);
-          }
-          return unmarshalDynamoItem(output.Attributes);
-        } catch (error) {
-          if (error instanceof Error && error.name === 'ConditionalCheckFailedException') {
-            return null;
-          }
-          throw error;
-        }
-      },
-      async deleteWhere(id, where) {
-        const checked = checkWritePrecondition(where);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
-        }
-        where = checked.where;
-        const identifier = key(id, 'deleteWhere');
-        const builder = createDynamoExpressionBuilder();
-        const conditions = Object.entries(where).map(([name, value]) =>
-          `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`
-        );
-        const exists = builder.aliasPath(target.partitionKey);
-        try {
-          await client.deleteItem({
-            TableName: target.table,
-            Key: identifier,
-            ConditionExpression: `attribute_exists(${exists}) AND ${conditions.join(' AND ')}`,
-            ...builder.expressionAttributes(),
-          });
-          return true;
-        } catch (error) {
-          if (error instanceof Error && error.name === 'ConditionalCheckFailedException') {
-            return false;
-          }
-          throw error;
-        }
-      },
-    } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>),
+    ...(transactionBuffer !== undefined
+      ? {}
+      : ({
+          async updateWhere(id, where, data) {
+            const checked = checkWritePrecondition(where, data);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                ADAPTER,
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            data = checked.data;
+            const identifier = key(id, 'updateWhere');
+            const entries = Object.entries(data).filter(
+              ([name, value]) => value !== undefined && !target.keyColumns.includes(name),
+            );
+            if (entries.length === 0) {
+              throw new UnsupportedQueryFeatureError(
+                'update',
+                ADAPTER,
+                `DynamoDB entity '${entity}' update requires at least one non-key value.`,
+              );
+            }
+            const builder = createDynamoExpressionBuilder();
+            const updates = entries.map(
+              ([name, value]) =>
+                `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`,
+            );
+            const conditions = Object.entries(where).map(
+              ([name, value]) =>
+                `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`,
+            );
+            const exists = builder.aliasPath(target.partitionKey);
+            try {
+              const output = await client.updateItem({
+                TableName: target.table,
+                Key: identifier,
+                UpdateExpression: `SET ${updates.join(', ')}`,
+                ConditionExpression: `attribute_exists(${exists}) AND ${conditions.join(' AND ')}`,
+                ...builder.expressionAttributes(),
+                ReturnValues: 'ALL_NEW',
+              });
+              if (output.Attributes === undefined) {
+                throw new Error(`DynamoDB entity '${entity}' conditional update returned no row.`);
+              }
+              return unmarshalDynamoItem(output.Attributes);
+            } catch (error) {
+              if (error instanceof Error && error.name === 'ConditionalCheckFailedException') {
+                return null;
+              }
+              throw error;
+            }
+          },
+          async deleteWhere(id, where) {
+            const checked = checkWritePrecondition(where);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                ADAPTER,
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            const identifier = key(id, 'deleteWhere');
+            const builder = createDynamoExpressionBuilder();
+            const conditions = Object.entries(where).map(
+              ([name, value]) =>
+                `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`,
+            );
+            const exists = builder.aliasPath(target.partitionKey);
+            try {
+              await client.deleteItem({
+                TableName: target.table,
+                Key: identifier,
+                ConditionExpression: `attribute_exists(${exists}) AND ${conditions.join(' AND ')}`,
+                ...builder.expressionAttributes(),
+              });
+              return true;
+            } catch (error) {
+              if (error instanceof Error && error.name === 'ConditionalCheckFailedException') {
+                return false;
+              }
+              throw error;
+            }
+          },
+        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
     async count(where, filter): Promise<number> {
       const query: NormalizedQuery = {
         where,
@@ -419,7 +435,8 @@ export function createDynamoDataSource(
       if (query.cursor !== undefined) {
         const decoded = decodeCursor(query.cursor);
         if (
-          decoded === null || decoded.sortFingerprint !== fingerprint ||
+          decoded === null ||
+          decoded.sortFingerprint !== fingerprint ||
           decoded.keyValues.length !== path.cursorKeyColumns.length
         ) {
           throw new UnsupportedQueryFeatureError(
@@ -464,7 +481,8 @@ export function createDynamoDataSource(
         start = last;
         fetches += 1;
       } while (
-        last !== undefined && (unlimited || rows.length < query.limit) &&
+        last !== undefined &&
+        (unlimited || rows.length < query.limit) &&
         fetches < maxPageFetches
       );
       const pageRows = query.limit > 0 ? rows.slice(0, query.limit) : rows;

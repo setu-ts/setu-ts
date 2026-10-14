@@ -138,9 +138,9 @@ describe('SesProvider', () => {
 
   it('rejects when used before connect', async () => {
     const provider = new SesProvider({ client: new FakeSesClient() });
-    await expect(
-      provider.send({ from: 'me@x.com', to: 'a@x.com', subject: 'Hi' }),
-    ).rejects.toThrow('not connected');
+    await expect(provider.send({ from: 'me@x.com', to: 'a@x.com', subject: 'Hi' })).rejects.toThrow(
+      'not connected',
+    );
   });
 
   // Guarded real-import: enters the lazy SDK import without constructing a client.

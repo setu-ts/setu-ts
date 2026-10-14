@@ -167,16 +167,20 @@ function createTestRuntimePlugin(logs: string[]): IPlugin {
 }
 
 /** The composite-key table the Drizzle arm drives over real SQLite. */
-const enrollments = sqliteTable('enrollments', {
-  tenantId: sqliteText('tenant_id').notNull(),
-  userId: sqliteText('user_id').notNull(),
-  course: sqliteText('course').notNull(),
-}, (table) => [
-  // ONE composite primary key. Calling `.primaryKey()` on each column declares
-  // two separate single-column keys, which is a different schema from the one
-  // the adapter is configured for — and SQLite would reject its DDL.
-  primaryKey({ columns: [table.tenantId, table.userId] }),
-]);
+const enrollments = sqliteTable(
+  'enrollments',
+  {
+    tenantId: sqliteText('tenant_id').notNull(),
+    userId: sqliteText('user_id').notNull(),
+    course: sqliteText('course').notNull(),
+  },
+  (table) => [
+    // ONE composite primary key. Calling `.primaryKey()` on each column declares
+    // two separate single-column keys, which is a different schema from the one
+    // the adapter is configured for — and SQLite would reject its DDL.
+    primaryKey({ columns: [table.tenantId, table.userId] }),
+  ],
+);
 
 interface ArrayReturningStatement {
   run(...params: SQLInputValue[]): unknown;
@@ -413,9 +417,8 @@ describe('DatabasePlugin integration', () => {
       // stays and is asserted below, because a JavaScript caller and a caller
       // who suppresses the error both still reach it.
       options: {
-        drizzleInstance: createDrizzleDatabase(
-          fakeDrizzle,
-          (database, work) => database.transaction(work),
+        drizzleInstance: createDrizzleDatabase(fakeDrizzle, (database, work) =>
+          database.transaction(work),
         ),
       },
     });
@@ -429,9 +432,8 @@ describe('DatabasePlugin integration', () => {
     const plugin = DatabasePlugin({
       type: 'drizzle',
       options: {
-        drizzleInstance: createDrizzleDatabase(
-          fakeDrizzle,
-          (database, work) => database.transaction(work),
+        drizzleInstance: createDrizzleDatabase(fakeDrizzle, (database, work) =>
+          database.transaction(work),
         ),
         drizzleTables: { users: createFakeDrizzleTable('users') },
       },
@@ -531,8 +533,7 @@ describe('DatabasePlugin integration', () => {
     it('returns every page, not just the first', async () => {
       const repo = await seeded();
       const page = async (offset: number) =>
-        (await repo.findAll({ orderBy: { n: 'asc' }, limit: 3, offset }))
-          .map((r) => r.n);
+        (await repo.findAll({ orderBy: { n: 'asc' }, limit: 3, offset })).map((r) => r.n);
 
       expect(await page(0)).toEqual([1, 2, 3]);
       expect(await page(3)).toEqual([4, 5, 6]);
@@ -572,7 +573,7 @@ describe('DatabasePlugin integration', () => {
           'PRIMARY KEY (tenant_id, user_id))',
       );
       const drizzleDb = sqliteDrizzle((statement, params, method) =>
-        executeSqlite(engine, statement, params, method)
+        executeSqlite(engine, statement, params, method),
       );
       const app = createApplication({
         plugins: [
@@ -580,9 +581,8 @@ describe('DatabasePlugin integration', () => {
           DatabasePlugin({
             type: 'drizzle',
             options: {
-              drizzleInstance: createDrizzleDatabase(
-                drizzleDb,
-                (configured, work) => configured.transaction(work),
+              drizzleInstance: createDrizzleDatabase(drizzleDb, (configured, work) =>
+                configured.transaction(work),
               ),
               drizzleTables: { Enrollment: enrollments },
               entities: { Enrollment: { primaryKey: ['tenantId', 'userId'] } },
@@ -608,9 +608,12 @@ describe('DatabasePlugin integration', () => {
       expect(found?.course).toBe('biology');
 
       // Update through the composite key; the other key half is untouched.
-      const updated = await repo.update({ tenantId: 'acme', userId: 'u2' }, {
-        course: 'chemistry',
-      });
+      const updated = await repo.update(
+        { tenantId: 'acme', userId: 'u2' },
+        {
+          course: 'chemistry',
+        },
+      );
       expect(updated.course).toBe('chemistry');
       expect((await repo.findById({ tenantId: 'acme', userId: 'u1' }))?.course).toBe('algebra');
 
@@ -630,10 +633,7 @@ describe('DatabasePlugin integration', () => {
       // would refuse by name) and while logging the operation.
       const logs: string[] = [];
       const app = createApplication({
-        plugins: [
-          createTestRuntimePlugin(logs),
-          DatabasePlugin({ options: { logQueries: true } }),
-        ],
+        plugins: [createTestRuntimePlugin(logs), DatabasePlugin({ options: { logQueries: true } })],
       });
       await app.start();
 
@@ -754,9 +754,9 @@ describe("DatabasePlugin — the 'cosmos' arm", () => {
     const plugin = DatabasePlugin({ type: 'custom', adapter });
     await plugin.register!(ctx);
     const indicator = healthChecks.get('database')!;
-    expect((await indicator() as { status: string }).status).toBe('up');
+    expect(((await indicator()) as { status: string }).status).toBe('up');
     await ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE).close();
-    expect((await indicator() as { status: string }).status).toBe('down');
+    expect(((await indicator()) as { status: string }).status).toBe('down');
     expect(adapter.isReady()).toBe(false);
   });
 });

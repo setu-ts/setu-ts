@@ -23,9 +23,12 @@ function harness(members: readonly WorkspaceMember[]) {
     }),
     '/ws/deno.json': '{"workspace":["./apps/*"]}',
     ...Object.fromEntries(
-      members.filter((member) => member.devtoolPort !== undefined).map((
-        member,
-      ) => [`/ws/apps/${member.name}/main.dev.ts`, devEntryVariants(member.devtoolPort!)[0]]),
+      members
+        .filter((member) => member.devtoolPort !== undefined)
+        .map((member) => [
+          `/ws/apps/${member.name}/main.dev.ts`,
+          devEntryVariants(member.devtoolPort!)[0],
+        ]),
     ),
     ...Object.fromEntries(members.map((member) => [`/ws/apps/${member.name}/.setu-member`, ''])),
   });

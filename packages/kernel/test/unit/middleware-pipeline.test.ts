@@ -11,18 +11,27 @@ describe('MiddlewarePipeline', () => {
     const pipeline = new MiddlewarePipeline();
     const order: number[] = [];
 
-    pipeline.add((_ctx, next) => {
-      order.push(300);
-      next();
-    }, { priority: 300 });
-    pipeline.add((_ctx, next) => {
-      order.push(100);
-      next();
-    }, { priority: 100 });
-    pipeline.add((_ctx, next) => {
-      order.push(200);
-      next();
-    }, { priority: 200 });
+    pipeline.add(
+      (_ctx, next) => {
+        order.push(300);
+        next();
+      },
+      { priority: 300 },
+    );
+    pipeline.add(
+      (_ctx, next) => {
+        order.push(100);
+        next();
+      },
+      { priority: 100 },
+    );
+    pipeline.add(
+      (_ctx, next) => {
+        order.push(200);
+        next();
+      },
+      { priority: 200 },
+    );
 
     await pipeline.execute(emptyCtx(), async () => {});
     expect(order).toEqual([100, 200, 300]);
@@ -36,10 +45,13 @@ describe('MiddlewarePipeline', () => {
       order.push(500);
       next();
     });
-    pipeline.add((_ctx, next) => {
-      order.push(100);
-      next();
-    }, { priority: 100 });
+    pipeline.add(
+      (_ctx, next) => {
+        order.push(100);
+        next();
+      },
+      { priority: 100 },
+    );
 
     await pipeline.execute(emptyCtx(), async () => {});
     expect(order).toEqual([100, 500]);
@@ -86,12 +98,15 @@ describe('MiddlewarePipeline', () => {
 
   it('names the offending stage from MiddlewareOptions.name on double next()', async () => {
     const pipeline = new MiddlewarePipeline();
-    pipeline.add((_ctx, next) => {
-      next();
-      // `MiddlewareOptions.name` was stored and never read before this: the
-      // message used `fn.name`, which is '' for an anonymous arrow.
-      expect(() => next()).toThrow('next() called multiple times in middleware auth-guard');
-    }, { name: 'auth-guard' });
+    pipeline.add(
+      (_ctx, next) => {
+        next();
+        // `MiddlewareOptions.name` was stored and never read before this: the
+        // message used `fn.name`, which is '' for an anonymous arrow.
+        expect(() => next()).toThrow('next() called multiple times in middleware auth-guard');
+      },
+      { name: 'auth-guard' },
+    );
 
     await pipeline.execute(emptyCtx(), async () => {});
   });
@@ -99,12 +114,10 @@ describe('MiddlewarePipeline', () => {
   it('falls back to <anonymous> when neither a registered nor a function name exists', async () => {
     const pipeline = new MiddlewarePipeline();
     // No `name` option, and an anonymous arrow assigned inline has `fn.name === ''`.
-    pipeline.add(
-      ((_ctx: IRequestContext, next: NextFunction) => {
-        next();
-        expect(() => next()).toThrow('next() called multiple times in middleware <anonymous-0>');
-      }) as MiddlewareFunction,
-    );
+    pipeline.add(((_ctx: IRequestContext, next: NextFunction) => {
+      next();
+      expect(() => next()).toThrow('next() called multiple times in middleware <anonymous-0>');
+    }) as MiddlewareFunction);
 
     await pipeline.execute(emptyCtx(), async () => {});
   });

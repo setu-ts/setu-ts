@@ -48,9 +48,7 @@ describe('RabbitMqBroker', () => {
     // must round-trip back to the original serialized payload.
     const content = publishCall?.args[2];
     expect(Buffer.isBuffer(content)).toBe(true);
-    const decoded = serializer.deserialize<typeof message>(
-      (content as Buffer).toString('utf8'),
-    );
+    const decoded = serializer.deserialize<typeof message>((content as Buffer).toString('utf8'));
     expect(decoded).toEqual(message);
 
     await broker.disconnect();
@@ -73,8 +71,10 @@ describe('RabbitMqBroker', () => {
       await broker.connect();
       await expect(act(broker)).rejects.toThrow(`the ${label} exceeds AMQP's 255 UTF-8 byte`);
       const channel = await fakeConnection.createChannel();
-      expect({ label, publishes: channel.calls.filter((c) => c.method === 'publish').length })
-        .toEqual({ label, publishes: 0 });
+      expect({
+        label,
+        publishes: channel.calls.filter((c) => c.method === 'publish').length,
+      }).toEqual({ label, publishes: 0 });
       await broker.disconnect();
     }
     // Exactly 255 bytes everywhere is accepted: the bound is the protocol's.
@@ -84,9 +84,13 @@ describe('RabbitMqBroker', () => {
       exchangeName: 'e'.repeat(255),
     });
     await broker.connect();
-    await broker.publishWithHeaders('t'.repeat(255), { messageId: 'm'.repeat(255) }, {
-      ['h'.repeat(255)]: 'v',
-    });
+    await broker.publishWithHeaders(
+      't'.repeat(255),
+      { messageId: 'm'.repeat(255) },
+      {
+        ['h'.repeat(255)]: 'v',
+      },
+    );
     const channel = await fakeConnection.createChannel();
     expect(channel.calls.filter((c) => c.method === 'publish')).toHaveLength(1);
     await broker.disconnect();
@@ -215,9 +219,9 @@ describe('RabbitMqBroker', () => {
     const broker = new RabbitMqBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.publish('test', { data: 'test' }),
-    ).rejects.toThrow('RabbitMqBroker is not connected');
+    await expect(broker.publish('test', { data: 'test' })).rejects.toThrow(
+      'RabbitMqBroker is not connected',
+    );
   });
 
   it('subscribe throws when not connected', async () => {
@@ -226,9 +230,9 @@ describe('RabbitMqBroker', () => {
     const broker = new RabbitMqBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.subscribe('test', async () => {}),
-    ).rejects.toThrow('RabbitMqBroker is not connected');
+    await expect(broker.subscribe('test', async () => {})).rejects.toThrow(
+      'RabbitMqBroker is not connected',
+    );
   });
 
   it('isReady returns false before connect', () => {

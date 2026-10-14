@@ -83,10 +83,7 @@ export interface IQueryHandler<TQuery extends CqrsQuery = CqrsQuery, TResult = u
  * @typeParam TResult - The result type
  * @since 0.1.0
  */
-export interface IPipelineBehavior<
-  TRequest extends CqrsRequest = CqrsRequest,
-  TResult = unknown,
-> {
+export interface IPipelineBehavior<TRequest extends CqrsRequest = CqrsRequest, TResult = unknown> {
   /**
    * Wraps the next handler in the pipeline.
    *

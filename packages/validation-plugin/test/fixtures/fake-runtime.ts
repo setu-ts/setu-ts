@@ -167,9 +167,7 @@ export function createFakeResponse(): FakeResponseResult {
 // ---------------------------------------------------------------------------
 
 /** Create a Map-backed fake IServiceRegistry. */
-export function createFakeServiceRegistry(
-  map: Map<string, unknown> = new Map(),
-): IServiceRegistry {
+export function createFakeServiceRegistry(map: Map<string, unknown> = new Map()): IServiceRegistry {
   return {
     register<T>(key: string, service: T): void {
       map.set(key, service);

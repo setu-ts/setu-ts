@@ -126,13 +126,15 @@ describe('isQueueEnvelope', () => {
 
 describe('isRequestEnvelope', () => {
   it('rejects a request missing its correlation id', () => {
-    expect(isRequestEnvelope({ v: 1, kind: 'rpc-req', topic: 't', id: 'i', replyTo: 'a' }))
-      .toBe(false);
+    expect(isRequestEnvelope({ v: 1, kind: 'rpc-req', topic: 't', id: 'i', replyTo: 'a' })).toBe(
+      false,
+    );
   });
 
   it('rejects a request missing its reply address', () => {
-    expect(isRequestEnvelope({ v: 1, kind: 'rpc-req', topic: 't', id: 'i', correlationId: 'c' }))
-      .toBe(false);
+    expect(
+      isRequestEnvelope({ v: 1, kind: 'rpc-req', topic: 't', id: 'i', correlationId: 'c' }),
+    ).toBe(false);
   });
 
   it('rejects a request whose reply address is not a string', () => {

@@ -18,21 +18,23 @@
  * @typeParam T - The resolved work value
  * @internal
  */
-export type CoalescedResult<T> = {
-  /** Whether this caller joined work another caller had already started. */
-  readonly joined: boolean;
-  /** Discriminates a successful leader from a rejected one. */
-  readonly ok: true;
-  /** The value produced by the shared work. */
-  readonly value: T;
-} | {
-  /** Whether this caller joined work another caller had already started. */
-  readonly joined: boolean;
-  /** Discriminates a rejected leader from a successful one. */
-  readonly ok: false;
-  /** The error produced by the leader. */
-  readonly error: unknown;
-};
+export type CoalescedResult<T> =
+  | {
+      /** Whether this caller joined work another caller had already started. */
+      readonly joined: boolean;
+      /** Discriminates a successful leader from a rejected one. */
+      readonly ok: true;
+      /** The value produced by the shared work. */
+      readonly value: T;
+    }
+  | {
+      /** Whether this caller joined work another caller had already started. */
+      readonly joined: boolean;
+      /** Discriminates a rejected leader from a successful one. */
+      readonly ok: false;
+      /** The error produced by the leader. */
+      readonly error: unknown;
+    };
 
 /**
  * A keyed, process-local in-flight work registry.
@@ -53,11 +55,7 @@ export interface Coalescer {
    * @param work - The asynchronous work to run for the leader
    * @returns The value and whether this caller joined existing work
    */
-  run<T>(
-    owner: object,
-    key: string,
-    work: () => Promise<T>,
-  ): Promise<CoalescedResult<T>>;
+  run<T>(owner: object, key: string, work: () => Promise<T>): Promise<CoalescedResult<T>>;
 }
 
 /**
@@ -71,11 +69,7 @@ export function createCoalescer(): Coalescer {
   const inFlightByStore = new WeakMap<object, Map<string, Promise<CoalescedResult<unknown>>>>();
 
   return {
-    run<T>(
-      owner: object,
-      key: string,
-      work: () => Promise<T>,
-    ): Promise<CoalescedResult<T>> {
+    run<T>(owner: object, key: string, work: () => Promise<T>): Promise<CoalescedResult<T>> {
       let inFlight = inFlightByStore.get(owner);
       if (inFlight === undefined) {
         inFlight = new Map();
@@ -87,16 +81,18 @@ export function createCoalescer(): Coalescer {
         // A cache key has one value type by contract, just as ICacheStore.get
         // does. The registry erases that type only to keep heterogeneous keys
         // in one per-store map; it is restored at the typed call boundary.
-        return existing.then((result) => ({ ...result, joined: true } as CoalescedResult<T>));
+        return existing.then((result) => ({ ...result, joined: true }) as CoalescedResult<T>);
       }
 
       // A failed leader is data rather than a rejected shared promise. The
       // caller needs to know whether it led (rethrow) or joined (run its own
       // origin), which a bare rejection cannot retain.
-      const running: Promise<CoalescedResult<T>> = Promise.resolve().then(work).then(
-        (value) => ({ joined: false, ok: true, value }),
-        (error: unknown) => ({ joined: false, ok: false, error }),
-      );
+      const running: Promise<CoalescedResult<T>> = Promise.resolve()
+        .then(work)
+        .then(
+          (value) => ({ joined: false, ok: true, value }),
+          (error: unknown) => ({ joined: false, ok: false, error }),
+        );
       inFlight.set(key, running);
 
       // This is the only removal, and until it runs every run() for `key`

@@ -1306,8 +1306,7 @@ default.
 
 - `setu new <name>` - Create a new project (`--template rest|microservice|class-based|full-stack`,
   `--style functional|class-based`, `--runtime node|deno|bun|cloudflare-workers`, Node by default);
-  `--style
-  class-based` opts into decorators and dependency injection together on `rest` and
+  `--style class-based` opts into decorators and dependency injection together on `rest` and
   `microservice`, and `--template class-based` is a byte-identical alias of
   `--template rest --style class-based`
 - `setu new <name> --workspace` - Create a monorepo root (`--port`, `--transport`)

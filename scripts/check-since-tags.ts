@@ -79,10 +79,7 @@ export interface SinceSkip {
 }
 
 /** Why a tag failed. */
-export type SinceFindingKind =
-  | 'file-absent'
-  | 'symbol-absent'
-  | 'version-absent';
+export type SinceFindingKind = 'file-absent' | 'symbol-absent' | 'version-absent';
 
 /** A tag whose claim the registry disproves. */
 export interface SinceFinding {
@@ -496,9 +493,7 @@ function modulePathFor(member: string, file: string): string {
  * @param member - The workspace member path
  * @returns `.ts` paths, sorted
  */
-export async function defaultListSourceFiles(
-  member: string,
-): Promise<readonly string[]> {
+export async function defaultListSourceFiles(member: string): Promise<readonly string[]> {
   const found: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries: Deno.DirEntry[];
@@ -534,8 +529,8 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
   const fetchImpl = options.fetchImpl ?? ((url: string) => fetch(url));
   const readFile = options.readFile ?? ((path: string) => Deno.readTextFile(path));
   const listSourceFiles = options.listSourceFiles ?? defaultListSourceFiles;
-  const manifest: WorkspaceManifest = options.manifest ??
-    JSON.parse(await readFile('deno.json')) as WorkspaceManifest;
+  const manifest: WorkspaceManifest =
+    options.manifest ?? (JSON.parse(await readFile('deno.json')) as WorkspaceManifest);
   const members = (manifest.workspace ?? []).map(normalizeMember);
 
   const findings: SinceFinding[] = [];
@@ -546,10 +541,12 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
   const metaCache = new Map<
     string,
     Promise<
-      { readonly kind: 'ok'; readonly versions: readonly string[] } | {
-        readonly kind: 'unreachable';
-        readonly reason: string;
-      } | { readonly kind: 'unpublished' }
+      | { readonly kind: 'ok'; readonly versions: readonly string[] }
+      | {
+          readonly kind: 'unreachable';
+          readonly reason: string;
+        }
+      | { readonly kind: 'unpublished' }
     >
   >();
 
@@ -702,7 +699,8 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
               line: tag.line,
               version: tag.version,
               kind: 'version-absent',
-              message: `${packageName} has no ${tag.version} — the tag names a version that ` +
+              message:
+                `${packageName} has no ${tag.version} — the tag names a version that ` +
                 `was never published, and is older than one that was, so it can never appear. ` +
                 `Name the release that ships the symbol.`,
             });
@@ -711,16 +709,17 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
         }
         // When the line shipped only as prereleases, the message names both
         // the claimed version and the release actually read.
-        const checkedLabel = checked === tag.version
-          ? tag.version
-          : `${checked} (the last release of the ${tag.version} line)`;
+        const checkedLabel =
+          checked === tag.version
+            ? tag.version
+            : `${checked} (the last release of the ${tag.version} line)`;
         let content: string | null;
         try {
           content = npm
             ? await npmFileFor(packageName, checked, modulePathFor(member, file))
             : await fileFor(
-              registryFileUrl(registryBase, packageName, checked, modulePathFor(member, file)),
-            );
+                registryFileUrl(registryBase, packageName, checked, modulePathFor(member, file)),
+              );
         } catch (error) {
           pushSkip(tag, String(error));
           continue;
@@ -731,7 +730,8 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
             line: tag.line,
             version: tag.version,
             kind: 'file-absent',
-            message: `${packageName}@${checkedLabel} does not contain ` +
+            message:
+              `${packageName}@${checkedLabel} does not contain ` +
               `${modulePathFor(member, file)} — the tag names a release that does not ` +
               `ship the file the symbol lives in.`,
           });
@@ -746,7 +746,8 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           line: tag.line,
           version: tag.version,
           kind: 'symbol-absent',
-          message: `${tag.symbol} is absent from ${packageName}@${checkedLabel}'s ` +
+          message:
+            `${tag.symbol} is absent from ${packageName}@${checkedLabel}'s ` +
             `${modulePathFor(member, file)} — the tag names a release that does not ` +
             `ship the symbol it sits on.`,
         });
@@ -760,9 +761,7 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
 if (import.meta.main) {
   const { findings, skipped, verified } = await run();
   for (const skip of skipped) {
-    console.error(
-      `  skipped ${skip.file}:${skip.line} (@since ${skip.version}) — ${skip.reason}`,
-    );
+    console.error(`  skipped ${skip.file}:${skip.line} (@since ${skip.version}) — ${skip.reason}`);
   }
   if (findings.length > 0) {
     console.error(

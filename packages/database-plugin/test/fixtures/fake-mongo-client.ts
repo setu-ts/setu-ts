@@ -55,9 +55,7 @@ export const fakeObjectIdCtor = Object.assign(
     // `isValid` accepts. Reproducing the throw is what lets this double fail
     // when the adapter converts something it should have passed through.
     if (value !== undefined && !HEX24.test(String(value))) {
-      throw new Error(
-        'input must be a 24 character hex string, 12 byte Uint8Array, or an integer',
-      );
+      throw new Error('input must be a 24 character hex string, 12 byte Uint8Array, or an integer');
     }
     return new FakeObjectId(value);
   },
@@ -246,13 +244,14 @@ export class FakeMongoCollection implements IMongoCollection {
     // gates the slice.
     if (options?.limit !== undefined && options.limit > 0) rows = rows.slice(0, options.limit);
     const projection = options?.projection;
-    const result = projection !== undefined
-      ? rows.map((r) => project(r, projection))
-      : rows.map((r) => {
-        const out: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(r)) out[k] = v;
-        return out;
-      });
+    const result =
+      projection !== undefined
+        ? rows.map((r) => project(r, projection))
+        : rows.map((r) => {
+            const out: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(r)) out[k] = v;
+            return out;
+          });
     return { toArray: (): Promise<Record<string, unknown>[]> => Promise.resolve(result) };
   }
 
@@ -288,10 +287,7 @@ export class FakeMongoCollection implements IMongoCollection {
   }
 
   // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async countDocuments(
-    filter: Record<string, unknown>,
-    _options?: MongoOptions,
-  ): Promise<number> {
+  async countDocuments(filter: Record<string, unknown>, _options?: MongoOptions): Promise<number> {
     this.calls.push({ method: 'countDocuments', args: [filter, _options] });
     return this.#docs.filter((d) => matchFilter(d, filter)).length;
   }

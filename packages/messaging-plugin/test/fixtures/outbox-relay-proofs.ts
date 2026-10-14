@@ -88,7 +88,7 @@ export function describeOutboxRelayProofs(
         });
         for (let n = 0; n < 200; n++) {
           await backend.db.transaction((uow) =>
-            services[0]!.write(uow, orderPlaced, { key: `K${n % 10}`, n }, { tenantId: 't1' })
+            services[0]!.write(uow, orderPlaced, { key: `K${n % 10}`, n }, { tenantId: 't1' }),
           );
         }
         for (let round = 0; round < 40 && (await backend.store.stats()).pending > 0; round++) {
@@ -99,10 +99,10 @@ export function describeOutboxRelayProofs(
         expect(new Set(broker.published.map((p) => p.message.id)).size).toBe(200);
         for (let k = 0; k < 10; k++) {
           expect(
-            broker.published.filter((p) => p.options?.orderingKey === `K${k}`)
+            broker.published
+              .filter((p) => p.options?.orderingKey === `K${k}`)
               .map((p) => (p.message.data as { n: number }).n),
-          )
-            .toEqual(Array.from({ length: 20 }, (_, index) => k + index * 10));
+          ).toEqual(Array.from({ length: 20 }, (_, index) => k + index * 10));
         }
         expect(claims).toBeGreaterThanOrEqual(200);
         // The ratio is test evidence, deliberately absent from shipped metrics.
@@ -126,8 +126,7 @@ export function describeOutboxRelayProofs(
               claimVersion: version,
               leaseUntil: WALL_START + 30000,
             }),
-          )
-            .toEqual({ outcome: 'applied' });
+          ).toEqual({ outcome: 'applied' });
           expect(await row(backend.db, id)).toMatchObject({
             claimVersion: version + 1,
             leaseUntil: WALL_START + 30000,

@@ -140,9 +140,11 @@ describe('webauthn differential', () => {
         origin: ORIGIN,
       });
       expect(
-        (await harness.ceremonies.verifyRegistration(harness.ctx, registrationBody, {
-          id: 'alice',
-        })).ok,
+        (
+          await harness.ceremonies.verifyRegistration(harness.ctx, registrationBody, {
+            id: 'alice',
+          })
+        ).ok,
       ).toBe(true);
       // The authenticator now holds the handle the server issued.
       authenticator.userHandle = fromBase64Url(registration!.user.id);
@@ -177,9 +179,11 @@ describe('webauthn differential', () => {
         origin: ORIGIN,
       });
       expect(
-        (await harness.ceremonies.verifyRegistration(harness.ctx, registrationBody, {
-          id: 'alice',
-        })).ok,
+        (
+          await harness.ceremonies.verifyRegistration(harness.ctx, registrationBody, {
+            id: 'alice',
+          })
+        ).ok,
       ).toBe(true);
       authenticator.userHandle = fromBase64Url(registration!.user.id);
       // First authentication at counter 1: accepted, stored counter 1.
@@ -190,9 +194,7 @@ describe('webauthn differential', () => {
         origin: ORIGIN,
         counter: 1,
       });
-      expect((await harness.ceremonies.verifyAuthentication(harness.ctx, firstBody)).ok).toBe(
-        true,
-      );
+      expect((await harness.ceremonies.verifyAuthentication(harness.ctx, firstBody)).ok).toBe(true);
       // Second authentication still at counter 1: refused by both.
       const second = await harness.ceremonies.authenticationOptions(harness.ctx);
       const secondBody = await authenticator.assertionResult({
@@ -225,9 +227,11 @@ describe('webauthn differential', () => {
         origin: ORIGIN,
       });
       expect(
-        (await harness.ceremonies.verifyRegistration(harness.ctx, registrationBody, {
-          id: 'alice',
-        })).ok,
+        (
+          await harness.ceremonies.verifyRegistration(harness.ctx, registrationBody, {
+            id: 'alice',
+          })
+        ).ok,
       ).toBe(true);
       authenticator.userHandle = fromBase64Url(registration!.user.id);
       const options = await harness.ceremonies.authenticationOptions(harness.ctx);

@@ -21,9 +21,7 @@ import type {
  * @returns An {@linkcode IDiscoveryHttp} over `fetch`
  * @since 0.2.0
  */
-export function createDefaultDiscoveryHttp(
-  fetchImpl: typeof fetch = fetch,
-): IDiscoveryHttp {
+export function createDefaultDiscoveryHttp(fetchImpl: typeof fetch = fetch): IDiscoveryHttp {
   return {
     async request(url: string, init?: RequestInit): Promise<DiscoveryHttpResponse> {
       const response = await fetchImpl(url, init);

@@ -21,14 +21,14 @@ function websocketPlugin(accept: boolean): IPlugin {
       return Promise.resolve(
         accept
           ? {
-            accept: true,
-            sink: {
-              onOpen: () => {},
-              onMessage: () => {},
-              onClose: () => {},
-              onError: () => {},
-            },
-          }
+              accept: true,
+              sink: {
+                onOpen: () => {},
+                onMessage: () => {},
+                onClose: () => {},
+                onError: () => {},
+              },
+            }
           : { accept: false, status: 403 },
       );
     },
@@ -91,9 +91,9 @@ describe('diagnostics protocol boundaries', () => {
     await app.start();
     const response = await app.inject({ method: 'POST', url: '/grpc/pkg.Svc/Method' });
     expect(response.statusCode).toBe(400);
-    const boundary = app.diagnostics!.read(0).events.find(
-      (event) => event.stage === 'grpc-dispatch',
-    );
+    const boundary = app
+      .diagnostics!.read(0)
+      .events.find((event) => event.stage === 'grpc-dispatch');
     expect(boundary?.kind).toBe('handler');
     expect(boundary?.outcome).toBe('ok');
     expect(boundary?.statusCode).toBe(400);
@@ -119,9 +119,11 @@ describe('diagnostics protocol boundaries', () => {
     await app.start();
     // No upgrade headers and no gRPC claims: both boundaries decline and
     // neither records an executed record.
-    const before = app.diagnostics!.read(0).events.filter(
-      (event) => event.stage === 'websocket-upgrade' || event.stage === 'grpc-dispatch',
-    );
+    const before = app
+      .diagnostics!.read(0)
+      .events.filter(
+        (event) => event.stage === 'websocket-upgrade' || event.stage === 'grpc-dispatch',
+      );
     await app.inject({ method: 'GET', url: '/plain' });
     const events = app.diagnostics!.read(0).events;
     expect(before).toEqual([]);
@@ -156,9 +158,9 @@ describe('diagnostics protocol boundaries', () => {
     const response = await app.inject({ method: 'POST', url: '/grpc/pkg.Svc/Method' });
     // The rejection reached the kernel's own fallback, unchanged by observation.
     expect(response.statusCode).toBe(500);
-    const boundary = app.diagnostics!.read(0).events.find(
-      (event) => event.stage === 'grpc-dispatch',
-    );
+    const boundary = app
+      .diagnostics!.read(0)
+      .events.find((event) => event.stage === 'grpc-dispatch');
     expect(boundary?.outcome).toBe('error');
     // A thrown boundary produced no response of its own, so it claims none.
     expect(boundary?.statusCode).toBeUndefined();
@@ -201,9 +203,9 @@ describe('diagnostics protocol boundaries', () => {
       },
     });
     expect(response.statusCode).toBe(500);
-    const boundary = app.diagnostics!.read(0).events.find(
-      (event) => event.stage === 'websocket-upgrade',
-    );
+    const boundary = app
+      .diagnostics!.read(0)
+      .events.find((event) => event.stage === 'websocket-upgrade');
     expect(boundary?.outcome).toBe('ok');
     expect(boundary?.statusCode).toBe(500);
     await app.stop();

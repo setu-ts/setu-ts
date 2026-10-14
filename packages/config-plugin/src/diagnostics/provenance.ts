@@ -272,24 +272,26 @@ export function buildConfigProvenanceEntries(
     const schemaEffect = !schemaConfigured
       ? 'not-configured'
       : observation !== undefined && outputPresent
-      ? 'validated'
-      : observation === undefined && outputPresent
-      ? 'introduced'
-      : 'removed';
+        ? 'validated'
+        : observation === undefined && outputPresent
+          ? 'introduced'
+          : 'removed';
     const referenceAliases = expansions.get(key);
     const overriddenSourceAliases = (observation?.overriddenSourceAliases ?? []).slice(
       0,
       MAX_OVERRIDDEN_ALIASES,
     );
-    entries.push(deepFreeze({
-      keyAlias: alias,
-      origin: observation === undefined ? 'unknown' : observation.origin,
-      ...(observation?.sourceAlias === undefined ? {} : { sourceAlias: observation.sourceAlias }),
-      overriddenSourceAliases: Object.freeze(overriddenSourceAliases),
-      expanded: referenceAliases !== undefined,
-      referenceAliases: Object.freeze([...(referenceAliases ?? [])]),
-      schemaEffect,
-    }));
+    entries.push(
+      deepFreeze({
+        keyAlias: alias,
+        origin: observation === undefined ? 'unknown' : observation.origin,
+        ...(observation?.sourceAlias === undefined ? {} : { sourceAlias: observation.sourceAlias }),
+        overriddenSourceAliases: Object.freeze(overriddenSourceAliases),
+        expanded: referenceAliases !== undefined,
+        referenceAliases: Object.freeze([...(referenceAliases ?? [])]),
+        schemaEffect,
+      }),
+    );
   }
   return Object.freeze(entries);
 }
@@ -431,7 +433,8 @@ export function createConfigDiagnosticsSource(
         });
       }
       const adopted = adoptConfigProvenance(config);
-      const entries = adopted ??
+      const entries =
+        adopted ??
         [...policy.aliasByKey.values()].map((alias) =>
           deepFreeze({
             keyAlias: alias,
@@ -440,7 +443,7 @@ export function createConfigDiagnosticsSource(
             expanded: false,
             referenceAliases: Object.freeze([]),
             schemaEffect: 'unknown' as const,
-          })
+          }),
         );
       const state = entries.length === 0 ? 'no-data' : 'ready';
       return deepFreeze(applyConfigSnapshotBudget({ instanceId, state }, entries));

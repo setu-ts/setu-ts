@@ -34,10 +34,12 @@ import { createApplication } from '../packages/kernel/src/index.ts';
 import type { IKernelApplication } from '../packages/kernel/src/index.ts';
 import { createFakeRuntime } from '../packages/kernel/test/fixtures/fake-runtime.ts';
 
-const args = new Map(Deno.args.map((arg) => {
-  const [key, value] = arg.replace(/^--/, '').split('=');
-  return [key, value];
-}));
+const args = new Map(
+  Deno.args.map((arg) => {
+    const [key, value] = arg.replace(/^--/, '').split('=');
+    return [key, value];
+  }),
+);
 const mode = args.get('mode') ?? 'disabled';
 if (mode !== 'disabled' && mode !== 'enabled') {
   console.error(`unknown mode '${mode}': expected --mode=disabled or --mode=enabled`);

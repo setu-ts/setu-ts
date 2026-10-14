@@ -103,10 +103,10 @@ async function current(
   name: string,
 ): Promise<{ description: string; runtimeCompat: RuntimeCompat } | undefined> {
   const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
-    headers: token === undefined ? {} : { 'Authorization': `Bearer ${token}` },
+    headers: token === undefined ? {} : { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) return undefined;
-  return await response.json() as { description: string; runtimeCompat: RuntimeCompat };
+  return (await response.json()) as { description: string; runtimeCompat: RuntimeCompat };
 }
 
 /** Whether the live compat flags already equal the intended ones. */
@@ -128,7 +128,7 @@ async function patch(
   const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
     method: 'PATCH',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -171,11 +171,12 @@ for (const [index, name] of names.entries()) {
   // One request per field: the endpoint accepts a single enum variant.
   const failure =
     (needsDescription ? await patch(name, { description: want.description }) : undefined) ??
-      (needsCompat ? await patch(name, { runtimeCompat: want.runtimeCompat }) : undefined);
+    (needsCompat ? await patch(name, { runtimeCompat: want.runtimeCompat }) : undefined);
 
   if (failure === undefined) {
     const what = [needsDescription ? 'description' : null, needsCompat ? 'compat' : null]
-      .filter((s) => s !== null).join(' + ');
+      .filter((s) => s !== null)
+      .join(' + ');
     console.log(`${position} setting  @${SCOPE}/${name} (${what})`);
     updated.push(name);
     continue;

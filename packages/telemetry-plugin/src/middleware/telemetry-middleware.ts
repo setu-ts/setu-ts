@@ -46,9 +46,7 @@ export function telemetryMiddleware(
     const spanName = `${request.method} ${request.path}`;
 
     // Extract incoming parent context via TracerHost.
-    const parentContext: TelemetryContext = tracerHost.extractContext(
-      request.headers,
-    );
+    const parentContext: TelemetryContext = tracerHost.extractContext(request.headers);
 
     // N4 fix: pass parentContext directly (no bridge).
     // Capture the span's context synchronously by returning it from withSpan.

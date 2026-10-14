@@ -12,9 +12,7 @@ export interface RecordingFakeStoreOptions {
   omitUseIsolation?: boolean;
 }
 
-export function createRecordingFakeStore(
-  opts?: RecordingFakeStoreOptions,
-): ITenantDataStore & {
+export function createRecordingFakeStore(opts?: RecordingFakeStoreOptions): ITenantDataStore & {
   calls: Array<{ method: string; args: unknown[] }>;
   isolationStrategy: ITenantIsolationStrategy | null;
 } {
@@ -40,7 +38,7 @@ export function createRecordingFakeStore(
       calls.push({ method: 'find', args: [_tenantId, _entity, _filter] });
       const entities = data[_tenantId]?.[_entity] ?? [];
       const filtered = entities.filter((e) =>
-        Object.entries(_filter).every(([k, v]) => e[k] === v)
+        Object.entries(_filter).every(([k, v]) => e[k] === v),
       );
       return Promise.resolve(filtered as readonly E[]);
     },

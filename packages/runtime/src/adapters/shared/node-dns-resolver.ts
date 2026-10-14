@@ -79,10 +79,7 @@ export function createNodeDnsResolver(dns: NodeDnsModule = nodeDns): IDnsResolve
       }));
     },
     async resolveHost(hostname: string): Promise<readonly string[]> {
-      const results = await Promise.allSettled([
-        dns.resolve4(hostname),
-        dns.resolve6(hostname),
-      ]);
+      const results = await Promise.allSettled([dns.resolve4(hostname), dns.resolve6(hostname)]);
       return combineAddressFamilies(results, hostname);
     },
   };

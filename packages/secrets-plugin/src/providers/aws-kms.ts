@@ -70,12 +70,7 @@ export function adaptAwsModule(
   options: AwsKmsProviderOptions,
 ): IAwsSecretsClient {
   const client = new mod.SecretsManagerClient(
-    buildAwsConfig(
-      options.region,
-      options.accessKeyId,
-      options.secretAccessKey,
-      options.endpoint,
-    ),
+    buildAwsConfig(options.region, options.accessKeyId, options.secretAccessKey, options.endpoint),
   );
   return {
     async getSecretValue(secretId: string): Promise<string | null> {
@@ -102,7 +97,7 @@ export function adaptAwsModule(
  * @throws {Error} If `@aws-sdk/client-secrets-manager` cannot be resolved
  */
 export async function loadAwsModule(): Promise<AwsSdkModule> {
-  return await import('@aws-sdk/client-secrets-manager') as unknown as AwsSdkModule;
+  return (await import('@aws-sdk/client-secrets-manager')) as unknown as AwsSdkModule;
 }
 
 /**

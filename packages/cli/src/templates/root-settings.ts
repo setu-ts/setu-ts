@@ -56,13 +56,14 @@ const MIN_DEP_AGE_NOTE =
  * @returns The keys to merge into the emitted `deno.json`, in a fixed order so
  * the generated file is byte-identical across runs
  */
-export function rootManifestSettings(
-  buildOutputDir?: string,
-): Readonly<Record<string, unknown>> {
-  const exclude = buildOutputDir === undefined ? {} : {
-    fmt: { ...FMT_SETTINGS, exclude: [buildOutputDir] },
-    lint: { exclude: [buildOutputDir] },
-  };
+export function rootManifestSettings(buildOutputDir?: string): Readonly<Record<string, unknown>> {
+  const exclude =
+    buildOutputDir === undefined
+      ? {}
+      : {
+          fmt: { ...FMT_SETTINGS, exclude: [buildOutputDir] },
+          lint: { exclude: [buildOutputDir] },
+        };
   return {
     '//minimumDependencyAge': MIN_DEP_AGE_NOTE,
     minimumDependencyAge: 0,

@@ -64,9 +64,7 @@ describe('RealtimeBackplanePlugin', () => {
     const harness = createContext();
     await RealtimeBackplanePlugin().register(harness.ctx);
 
-    const backplane = harness.registered.get(
-      CAPABILITIES.REALTIME_BACKPLANE,
-    ) as IRealtimeBackplane;
+    const backplane = harness.registered.get(CAPABILITIES.REALTIME_BACKPLANE) as IRealtimeBackplane;
     expect(backplane).toBeDefined();
     expect(backplane.origin).toBe('uuid-1');
   });

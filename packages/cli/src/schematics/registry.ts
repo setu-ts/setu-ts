@@ -154,13 +154,16 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
   ['command-handler', { factory: generateCommandHandler, requiresPlugin: 'cqrs-plugin' }],
   ['query-handler', { factory: generateQueryHandler, requiresPlugin: 'cqrs-plugin' }],
   ['event-handler', { factory: generateEventHandler, requiresPlugin: 'events-plugin' }],
-  ['job', {
-    factory: generateJob,
-    requiresPluginWhen: (installed) =>
-      generatorMode(installed) === 'class-based' && !installed.has('queue-plugin')
-        ? 'queue-plugin'
-        : undefined,
-  }],
+  [
+    'job',
+    {
+      factory: generateJob,
+      requiresPluginWhen: (installed) =>
+        generatorMode(installed) === 'class-based' && !installed.has('queue-plugin')
+          ? 'queue-plugin'
+          : undefined,
+    },
+  ],
   ['migration', { factory: generateMigration, requiresPlugin: 'database-plugin' }],
   ['ws-route', { factory: generateWsRoute, requiresPlugin: 'websocket-plugin' }],
   ['sse', { factory: generateSse, requiresPlugin: 'sse-plugin' }],

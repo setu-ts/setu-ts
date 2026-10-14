@@ -153,8 +153,8 @@ function startServer(project: string, port: number): StartedServer {
   let output = '';
   child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
   child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
-  const status = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-    (resolve) => child.once('close', (code, signal) => resolve({ code, signal })),
+  const status = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+    child.once('close', (code, signal) => resolve({ code, signal })),
   );
   return {
     status,
@@ -195,10 +195,7 @@ export async function withNodeServer<T>(
   const port = await unusedPort();
   const server = startServer(project, port);
   const origin = `http://127.0.0.1:${port}`;
-  const served = await Promise.race([
-    waitForServer(origin),
-    server.status.then(() => false),
-  ]);
+  const served = await Promise.race([waitForServer(origin), server.status.then(() => false)]);
   let result: T | undefined;
   let failure: unknown;
   try {
@@ -245,8 +242,8 @@ export async function nodeBootAndSignal(
   let output = '';
   child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
   child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
-  const status = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-    (resolve) => child.once('close', (code, ended) => resolve({ code, signal: ended })),
+  const status = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+    child.once('close', (code, ended) => resolve({ code, signal: ended })),
   );
   const served = await Promise.race([
     waitForServer(`http://127.0.0.1:${port}`),

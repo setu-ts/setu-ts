@@ -256,9 +256,10 @@ export async function readArtifactNames(
     // Only for a barrel that registers something. A re-export barrel has no
     // registration to duplicate, and the symbol in the config is the developer
     // consuming the barrel exactly as its header documents.
-    const wired = wiring === undefined || spec.exports.length === 0
-      ? undefined
-      : symbols.find((symbol) => mentionsSymbol(wiring.source, symbol));
+    const wired =
+      wiring === undefined || spec.exports.length === 0
+        ? undefined
+        : symbols.find((symbol) => mentionsSymbol(wiring.source, symbol));
     if (wired !== undefined) {
       manual.push({ path: relative, symbol: wired, wiredIn: wiring!.path });
       continue;
@@ -269,7 +270,8 @@ export async function readArtifactNames(
     // "now registered" wording would be false, and since a fresh functional scaffold
     // never writes that barrel, the claim repeated on every generate.
     if (
-      spec.exports.length > 0 && !symbols.some((symbol) => mentionsSymbol(barrelSource, symbol))
+      spec.exports.length > 0 &&
+      !symbols.some((symbol) => mentionsSymbol(barrelSource, symbol))
     ) {
       adopted.push({ path: relative, barrel: spec.barrel });
     }

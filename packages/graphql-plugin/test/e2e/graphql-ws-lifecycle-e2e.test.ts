@@ -87,7 +87,10 @@ async function startApp(options?: {
 }
 
 /** Opens a socket and collects every inbound frame as raw text. */
-function openSocket(url: string, protocols?: string | string[]): {
+function openSocket(
+  url: string,
+  protocols?: string | string[],
+): {
   socket: WebSocket;
   frames: string[];
   opened: Promise<void>;
@@ -119,26 +122,29 @@ async function until(predicate: () => boolean, ms = 5000): Promise<boolean> {
 describe('GraphQL WS lifecycle (real socket)', () => {
   it('multiplexes two subscriptions on one socket without cross-talk', async () => {
     const { app, port } = await startApp();
-    const { socket, frames, opened, closed } = openSocket(
-      `ws://127.0.0.1:${port}/graphql/ws`,
-      ['graphql-transport-ws'],
-    );
+    const { socket, frames, opened, closed } = openSocket(`ws://127.0.0.1:${port}/graphql/ws`, [
+      'graphql-transport-ws',
+    ]);
     try {
       await opened;
       socket.send(encodeFrame({ type: GQL_CONNECTION_INIT }));
       await until(() => frames.some((f) => f.includes(GQL_CONNECTION_ACK)));
 
       // Two operations, two ids, started back to back so their events interleave.
-      socket.send(encodeFrame({
-        type: GQL_SUBSCRIBE,
-        id: 'a',
-        payload: { query: 'subscription { ticks(label: "A", count: 3) }' },
-      }));
-      socket.send(encodeFrame({
-        type: GQL_SUBSCRIBE,
-        id: 'b',
-        payload: { query: 'subscription { ticks(label: "B", count: 3) }' },
-      }));
+      socket.send(
+        encodeFrame({
+          type: GQL_SUBSCRIBE,
+          id: 'a',
+          payload: { query: 'subscription { ticks(label: "A", count: 3) }' },
+        }),
+      );
+      socket.send(
+        encodeFrame({
+          type: GQL_SUBSCRIBE,
+          id: 'b',
+          payload: { query: 'subscription { ticks(label: "B", count: 3) }' },
+        }),
+      );
 
       const completes = () =>
         frames.map(decodeFrame).filter((f) => f?.type === GQL_COMPLETE).length;
@@ -154,8 +160,12 @@ describe('GraphQL WS lifecycle (real socket)', () => {
       expect(nextFor('a')).toEqual(['A-0', 'A-1', 'A-2']);
       expect(nextFor('b')).toEqual(['B-0', 'B-1', 'B-2']);
       // And each is terminated separately.
-      expect(decoded.filter((f) => f.type === GQL_COMPLETE).map((f) => f.id).sort())
-        .toEqual(['a', 'b']);
+      expect(
+        decoded
+          .filter((f) => f.type === GQL_COMPLETE)
+          .map((f) => f.id)
+          .sort(),
+      ).toEqual(['a', 'b']);
     } finally {
       socket.close();
       await closed;
@@ -165,25 +175,28 @@ describe('GraphQL WS lifecycle (real socket)', () => {
 
   it('completing one subscription leaves the other streaming', async () => {
     const { app, port } = await startApp();
-    const { socket, frames, opened, closed } = openSocket(
-      `ws://127.0.0.1:${port}/graphql/ws`,
-      ['graphql-transport-ws'],
-    );
+    const { socket, frames, opened, closed } = openSocket(`ws://127.0.0.1:${port}/graphql/ws`, [
+      'graphql-transport-ws',
+    ]);
     try {
       await opened;
       socket.send(encodeFrame({ type: GQL_CONNECTION_INIT }));
       await until(() => frames.some((f) => f.includes(GQL_CONNECTION_ACK)));
 
-      socket.send(encodeFrame({
-        type: GQL_SUBSCRIBE,
-        id: 'short',
-        payload: { query: 'subscription { ticks(label: "S", count: 12) }' },
-      }));
-      socket.send(encodeFrame({
-        type: GQL_SUBSCRIBE,
-        id: 'long',
-        payload: { query: 'subscription { ticks(label: "L", count: 12) }' },
-      }));
+      socket.send(
+        encodeFrame({
+          type: GQL_SUBSCRIBE,
+          id: 'short',
+          payload: { query: 'subscription { ticks(label: "S", count: 12) }' },
+        }),
+      );
+      socket.send(
+        encodeFrame({
+          type: GQL_SUBSCRIBE,
+          id: 'long',
+          payload: { query: 'subscription { ticks(label: "L", count: 12) }' },
+        }),
+      );
 
       const seen = (id: string) =>
         frames.map(decodeFrame).filter((f) => f?.type === GQL_NEXT && f?.id === id).length;
@@ -221,9 +234,7 @@ describe('GraphQL WS lifecycle (real socket)', () => {
     const accepted = openSocket(`ws://127.0.0.1:${port}/graphql/ws`, ['graphql-transport-ws']);
     try {
       await refused.opened;
-      refused.socket.send(
-        encodeFrame({ type: GQL_CONNECTION_INIT, payload: { token: 'wrong' } }),
-      );
+      refused.socket.send(encodeFrame({ type: GQL_CONNECTION_INIT, payload: { token: 'wrong' } }));
       const event = await refused.closed;
       expect(event.code).toBe(4403);
       // The refusal must land instead of an ack, not alongside one.
@@ -232,9 +243,7 @@ describe('GraphQL WS lifecycle (real socket)', () => {
       // Control: the same hook accepts a valid token, so 4403 is a decision
       // rather than the route being broken.
       await accepted.opened;
-      accepted.socket.send(
-        encodeFrame({ type: GQL_CONNECTION_INIT, payload: { token: 'good' } }),
-      );
+      accepted.socket.send(encodeFrame({ type: GQL_CONNECTION_INIT, payload: { token: 'good' } }));
       await until(() => accepted.frames.some((f) => f.includes(GQL_CONNECTION_ACK)));
       expect(accepted.frames.some((f) => f.includes(GQL_CONNECTION_ACK))).toBe(true);
     } finally {
@@ -257,10 +266,7 @@ describe('GraphQL WS lifecycle (real socket)', () => {
     ws.route('/plain', {});
 
     const control = openSocket(`ws://127.0.0.1:${port}/plain`);
-    const graphql = openSocket(
-      `ws://127.0.0.1:${port}/graphql/ws`,
-      ['graphql-transport-ws'],
-    );
+    const graphql = openSocket(`ws://127.0.0.1:${port}/graphql/ws`, ['graphql-transport-ws']);
     try {
       await control.opened;
       await graphql.opened;
@@ -269,11 +275,13 @@ describe('GraphQL WS lifecycle (real socket)', () => {
       await until(() => graphql.frames.some((f) => f.includes(GQL_CONNECTION_ACK)));
       // A listen-only subscriber: it sends nothing after subscribing, which is
       // exactly what `idleTimeoutMs` evicts on an ordinary route.
-      graphql.socket.send(encodeFrame({
-        type: GQL_SUBSCRIBE,
-        id: '1',
-        payload: { query: 'subscription { ticks(label: "T", count: 40) }' },
-      }));
+      graphql.socket.send(
+        encodeFrame({
+          type: GQL_SUBSCRIBE,
+          id: '1',
+          payload: { query: 'subscription { ticks(label: "T", count: 40) }' },
+        }),
+      );
 
       // The control proves the sweeper is alive: it receives the raw payload,
       // and is then evicted for inbound silence with 1001.

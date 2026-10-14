@@ -45,10 +45,7 @@ export const SESSION_TENANT_BINDING_KEY = '__setu_tenant';
  *   one resolved for the request
  * @since 0.9.0
  */
-export function tenantBindingMismatch(
-  session: ISession,
-  tenantId: string | undefined,
-): boolean {
+export function tenantBindingMismatch(session: ISession, tenantId: string | undefined): boolean {
   const value = session.get(SESSION_TENANT_BINDING_KEY);
   const bound = typeof value === 'string' ? value : undefined;
   return bound !== undefined && tenantId !== undefined && bound !== tenantId;

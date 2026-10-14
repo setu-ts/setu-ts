@@ -98,9 +98,8 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
     }
   }
 
-  const diagnosticsPolicy = options?.diagnostics === undefined
-    ? null
-    : compileQueueDiagnosticsPolicy(options.diagnostics);
+  const diagnosticsPolicy =
+    options?.diagnostics === undefined ? null : compileQueueDiagnosticsPolicy(options.diagnostics);
 
   // The registration arms are split ONCE, here at plugin construction, so
   // `register` and the `onInit` hook each read a single list (the M70d arm
@@ -114,21 +113,23 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   const processors: readonly QueueProcessorEntry[] = options?.processors ?? [];
   const behaviors: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[] =
     options?.behaviors ?? [];
-  const processorInstances = processors.filter((entry): entry is QueueProcessorDefinition =>
-    typeof entry !== 'function'
+  const processorInstances = processors.filter(
+    (entry): entry is QueueProcessorDefinition => typeof entry !== 'function',
   );
   const processorFactories = processors
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: RegistryFactory<QueueProcessorDefinition>; index: number } =>
-      typeof slot.entry === 'function'
+    .filter(
+      (slot): slot is { entry: RegistryFactory<QueueProcessorDefinition>; index: number } =>
+        typeof slot.entry === 'function',
     );
-  const behaviorInstances = behaviors.filter((entry): entry is IIngressBehavior =>
-    typeof entry !== 'function'
+  const behaviorInstances = behaviors.filter(
+    (entry): entry is IIngressBehavior => typeof entry !== 'function',
   );
   const behaviorFactories = behaviors
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
-      typeof slot.entry === 'function'
+    .filter(
+      (slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
+        typeof slot.entry === 'function',
     );
   // The LIVE behaviour list the chain reads on every delivery. Instances are
   // available at registration; when factories exist, `onInit` replaces it
@@ -222,11 +223,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             throw new Error('SQS adapter requires options.sqs configuration');
           }
           const sqsLogger = resolveLogger(ctx);
-          adapter = new SqsQueue(
-            ctx.runtime,
-            options.sqs,
-            sqsLogger ?? undefined,
-          );
+          adapter = new SqsQueue(ctx.runtime, options.sqs, sqsLogger ?? undefined);
           break;
         }
         default:
@@ -243,14 +240,14 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // Present only when the application registered the metrics capability.
       const collector = ctx.services.has(CAPABILITIES.METRICS)
         ? new QueueCollector(
-          ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
-          // Read through `ctx` at CALL time, never captured here: a logger
-          // registered after this plugin would otherwise be missed for the life
-          // of the application (the M52b `waitUntil` lesson).
-          (error: Error): void => {
-            ctx.logger?.warn('queue metrics write failed', { error: error.message });
-          },
-        )
+            ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
+            // Read through `ctx` at CALL time, never captured here: a logger
+            // registered after this plugin would otherwise be missed for the life
+            // of the application (the M52b `waitUntil` lesson).
+            (error: Error): void => {
+              ctx.logger?.warn('queue metrics write failed', { error: error.message });
+            },
+          )
         : undefined;
       // M98f: a collector exists only when observation was opted in. Its
       // settlement evidence is the adapter's own property, known here because
@@ -259,11 +256,14 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // confirmed since 0.9.0, its acks cannot be), and SQS absorbs a lapsed
       // claim or a failed dead-letter send, so a completed call there is
       // recorded `unknown`.
-      const observation = diagnosticsPolicy === null ? null : new QueueObservationCollector(
-        diagnosticsPolicy,
-        runtime,
-        adapterType === 'memory' || adapterType === 'redis',
-      );
+      const observation =
+        diagnosticsPolicy === null
+          ? null
+          : new QueueObservationCollector(
+              diagnosticsPolicy,
+              runtime,
+              adapterType === 'memory' || adapterType === 'redis',
+            );
       const serviceOptions = {
         defaultMaxAttempts,
         pollIntervalMs,
@@ -278,12 +278,12 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // calls — through the ingress behaviour chain.
       const service = declaredBehaviors
         ? new BehaviorChainQueueService(
-          adapter,
-          runtime,
-          serviceOptions,
-          behaviorChain,
-          behaviorFactories.length === 0 ? undefined : chainReady,
-        )
+            adapter,
+            runtime,
+            serviceOptions,
+            behaviorChain,
+            behaviorFactories.length === 0 ? undefined : chainReady,
+          )
         : new QueueService(adapter, runtime, serviceOptions);
 
       // Connect the service
@@ -302,10 +302,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // orders a telemetry provider ahead of this plugin. Absent telemetry the
       // registrar IS the service and every path is byte-identical to before.
       const registrar: IQueue = ctx.services.has(CAPABILITIES.TELEMETRY)
-        ? new TracedQueue(
-          service,
-          ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY),
-        )
+        ? new TracedQueue(service, ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY))
         : service;
 
       // Register the service
@@ -348,9 +345,8 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
         { multi: true },
       );
       if (observation !== null) {
-        const scope: QueueDepthScope = adapterType === 'memory'
-          ? 'process-local'
-          : 'shared-backend';
+        const scope: QueueDepthScope =
+          adapterType === 'memory' ? 'process-local' : 'shared-backend';
         // Bootstrap, not register: every processor — instance, factory, or a
         // later plugin's imperative registration — exists by now, and the
         // depth cycle counts only approved names that have one.
@@ -384,11 +380,11 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
               ...behaviors.map((entry, index) =>
                 typeof entry === 'function'
                   ? resolveRegistryEntry(
-                    entry,
-                    ctx.services,
-                    `QueuePlugin({ behaviors })[${index}]`,
-                  )
-                  : entry
+                      entry,
+                      ctx.services,
+                      `QueuePlugin({ behaviors })[${index}]`,
+                    )
+                  : entry,
               ),
             );
 
@@ -396,13 +392,14 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             // factories — so the last entry for a job name wins, as documented.
             if (processorFactories.length > 0) {
               processors.forEach((entry, index) => {
-                const definition = typeof entry === 'function'
-                  ? resolveRegistryEntry(
-                    entry,
-                    ctx.services,
-                    `QueuePlugin({ processors })[${index}]`,
-                  )
-                  : entry;
+                const definition =
+                  typeof entry === 'function'
+                    ? resolveRegistryEntry(
+                        entry,
+                        ctx.services,
+                        `QueuePlugin({ processors })[${index}]`,
+                      )
+                    : entry;
                 registrar.process(definition.name, definition.processor, definition.options);
               });
             }

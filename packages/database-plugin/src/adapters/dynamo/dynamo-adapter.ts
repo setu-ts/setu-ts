@@ -382,9 +382,9 @@ class DynamoTransaction implements IAdapterTransaction {
       } catch (error) {
         throw failedCreateGuard(error, writes)
           ? new DuplicateKeyError(
-            'DynamoDB transaction was cancelled: a create in it would duplicate an existing key.',
-            { cause: error },
-          )
+              'DynamoDB transaction was cancelled: a create in it would duplicate an existing key.',
+              { cause: error },
+            )
           : error;
       }
     }
@@ -437,8 +437,9 @@ export function failedCreateGuard(
   if (!(error instanceof Error) || error.name !== 'TransactionCanceledException') return false;
   const reasons = (error as Error & { CancellationReasons?: unknown }).CancellationReasons;
   if (!Array.isArray(reasons)) return false;
-  return reasons.some((reason, index) =>
-    (reason as { Code?: unknown } | null)?.Code === 'ConditionalCheckFailed' &&
-    writes[index]?.Put !== undefined
+  return reasons.some(
+    (reason, index) =>
+      (reason as { Code?: unknown } | null)?.Code === 'ConditionalCheckFailed' &&
+      writes[index]?.Put !== undefined,
   );
 }

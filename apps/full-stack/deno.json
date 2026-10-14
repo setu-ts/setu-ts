@@ -20,11 +20,7 @@
     "useUnknownInCatchVariables": true,
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "lib": [
-      "deno.window",
-      "dom",
-      "dom.iterable"
-    ]
+    "lib": ["deno.window", "dom", "dom.iterable"]
   },
   "imports": {
     "@std/expect": "jsr:@std/expect@^1.0.20",

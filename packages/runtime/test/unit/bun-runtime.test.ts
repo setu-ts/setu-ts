@@ -235,9 +235,7 @@ describe('createBunRuntimeServices', () => {
       }),
     );
     // A synchronous throw here would bypass a caller's `.catch` / `try { await }`.
-    await expect(services.fs!.writeFile('/tmp/x', new Uint8Array([1]))).rejects.toThrow(
-      'EACCES',
-    );
+    await expect(services.fs!.writeFile('/tmp/x', new Uint8Array([1]))).rejects.toThrow('EACCES');
   });
 });
 
@@ -436,13 +434,9 @@ describe('Bun runtime readStream branches', () => {
   });
 
   it('throws when the host cannot open the path', async () => {
-    const fs = createBunRuntimeServices(
-      createFakeBunHost({ createReadStream: () => null }),
-    ).fs;
+    const fs = createBunRuntimeServices(createFakeBunHost({ createReadStream: () => null })).fs;
 
-    await expect(fs!.readStream!('/tmp/missing')).rejects.toThrow(
-      'Failed to create read stream',
-    );
+    await expect(fs!.readStream!('/tmp/missing')).rejects.toThrow('Failed to create read stream');
   });
 
   it('converts an injected Node Readable into a web stream', async () => {

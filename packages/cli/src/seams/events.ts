@@ -60,7 +60,9 @@ function renderEventsBarrel(artifacts: SeamArtifacts): string {
   const imports = [
     `import type { EventHandlerRegistration } from '@setu-ts/events-plugin';`,
     renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.event-handler.ts`),
-  ].filter((line) => line !== '').join('\n\n');
+  ]
+    .filter((line) => line !== '')
+    .join('\n\n');
 
   // The handler is the artifact's factory BY NAME, not `new <Class>()`: the
   // barrel writes no `new` anywhere, and the factory is the single construction
@@ -75,7 +77,7 @@ function renderEventsBarrel(artifacts: SeamArtifacts): string {
 
   return assembleSeamBarrel(header, imports, [
     `/** Every generated event handler, for \`EventsPlugin({ handlers })\`. */\n` +
-    renderExportedArray(EVENT_HANDLERS_EXPORT, 'EventHandlerRegistration', entries),
+      renderExportedArray(EVENT_HANDLERS_EXPORT, 'EventHandlerRegistration', entries),
   ]);
 }
 

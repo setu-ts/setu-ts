@@ -39,10 +39,7 @@ export function lengthPrefixed(segments: readonly string[]): Uint8Array {
  * @param parts - The byte parts to hash, in order
  * @returns 64 lower-case hex characters
  */
-export async function sha256Hex(
-  subtle: SubtleCrypto,
-  ...parts: Uint8Array[]
-): Promise<string> {
+export async function sha256Hex(subtle: SubtleCrypto, ...parts: Uint8Array[]): Promise<string> {
   let total = 0;
   for (const part of parts) total += part.byteLength;
   const merged = new Uint8Array(total);

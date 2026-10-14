@@ -30,8 +30,11 @@ import { GraphqlSchemaError } from '../errors/graphql-errors.ts';
  * graphql can stream from.
  */
 function isSubscriptionResolver(entry: unknown): entry is SubscriptionResolver {
-  return typeof entry === 'object' && entry !== null &&
-    typeof (entry as SubscriptionResolver).subscribe === 'function';
+  return (
+    typeof entry === 'object' &&
+    entry !== null &&
+    typeof (entry as SubscriptionResolver).subscribe === 'function'
+  );
 }
 
 /**
@@ -44,24 +47,17 @@ function isSubscriptionResolver(entry: unknown): entry is SubscriptionResolver {
  * @param resolverMap - The resolver map
  * @throws {GraphqlSchemaError} If resolver attachment fails
  */
-export function attachResolvers(
-  schema: GraphqlSchemaLike,
-  resolverMap: ResolverMap,
-): void {
+export function attachResolvers(schema: GraphqlSchemaLike, resolverMap: ResolverMap): void {
   for (const [typeName, fieldResolvers] of Object.entries(resolverMap)) {
     // Skip types that only have __resolveType — handled in the second loop
-    const hasFieldResolvers = Object.keys(fieldResolvers).some(
-      (k) => k !== '__resolveType',
-    );
+    const hasFieldResolvers = Object.keys(fieldResolvers).some((k) => k !== '__resolveType');
     if (!hasFieldResolvers) {
       continue;
     }
 
     const type = schema.getType(typeName);
     if (!type) {
-      throw new GraphqlSchemaError(
-        `Resolver map references unknown type: "${typeName}"`,
-      );
+      throw new GraphqlSchemaError(`Resolver map references unknown type: "${typeName}"`);
     }
 
     // Check if it's an object type, scalar, or enum.
@@ -71,7 +67,8 @@ export function attachResolvers(
     const objectType = type as GraphqlObjectTypeLike;
     const scalarType = type as GraphqlScalarTypeLike;
     const isObject = typeof objectType.getFields === 'function';
-    const isScalar = typeof scalarType.serialize === 'function' ||
+    const isScalar =
+      typeof scalarType.serialize === 'function' ||
       typeof scalarType.parseValue === 'function' ||
       typeof scalarType.parseLiteral === 'function';
     const isEnum = 'values' in scalarType;

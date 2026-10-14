@@ -157,9 +157,7 @@ export type DrizzleOperators = {
    * `%` and `_` a caller searches for stay wildcards on SQLite (which has no
    * default escape character) — a literal search then matches nothing.
    */
-  sql?:
-    & ((strings: TemplateStringsArray, ...values: unknown[]) => unknown)
-    & RawStatementTag;
+  sql?: ((strings: TemplateStringsArray, ...values: unknown[]) => unknown) & RawStatementTag;
   /**
    * Drizzle's `SQL` constructor. `rawQuery` needs it because `execute()` takes
    * an `SQLWrapper` — an object carrying `getSQL()` — and a chunk list is the
@@ -234,9 +232,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
   private _transactionBridge:
     | ((
-      work: (transaction: unknown) => Promise<void>,
-      options?: TransactionOptions,
-    ) => Promise<void>)
+        work: (transaction: unknown) => Promise<void>,
+        options?: TransactionOptions,
+      ) => Promise<void>)
     | null = null;
   private _supportsIsolation = false;
   private _connected = false;
@@ -289,10 +287,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       // names it. Drizzle publishes no dialect discriminant, so the class name
       // is the only signal — which is why the option exists, and why an
       // unrecognised name refuses a nested path instead of guessing.
-      const jsonDialect = (this._options as DrizzleAdapterOptions | undefined)?.dialect ??
+      const jsonDialect =
+        (this._options as DrizzleAdapterOptions | undefined)?.dialect ??
         dialectFromDrizzleClassName(
-          (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)
-            ?.dialect?.constructor?.name,
+          (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)?.dialect
+            ?.constructor?.name,
         );
       const operators: DrizzleOperators = {
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
@@ -336,16 +335,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error(
         `Failed to load Drizzle query operators: ${
           error instanceof Error ? error.message : String(error)
-        }. ` +
-          'Install drizzle-orm alongside the injected drizzleInstance.',
+        }. ` + 'Install drizzle-orm alongside the injected drizzleInstance.',
         { cause: error },
       );
     }
 
     // A usable Drizzle adapter must know how entity names map to real tables.
-    const tables =
-      (this._options as DatabaseAdapterOptions & { drizzleTables?: Record<string, unknown> })
-        .drizzleTables;
+    const tables = (
+      this._options as DatabaseAdapterOptions & { drizzleTables?: Record<string, unknown> }
+    ).drizzleTables;
     if (tables === undefined || Object.keys(tables).length === 0) {
       throw new Error(
         'DrizzleAdapter requires options.drizzleTables with at least one real Drizzle table definition.',
@@ -523,7 +521,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const statement = new sqlClass(bindRawStatement(sql, params ?? [], tag));
     const result = await execute.call(this._db, statement);
     this.#completedQueries++;
-    return (result as { rows?: T[] }).rows ?? result as T[];
+    return (result as { rows?: T[] }).rows ?? (result as T[]);
   }
 
   /**
@@ -536,13 +534,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
     const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
-    return this.#countingCompletions(createDrizzleDataSourceInner(
-      this._db,
-      entity,
-      this.resolveTables(),
-      this._operators!,
-      entities,
-    ));
+    return this.#countingCompletions(
+      createDrizzleDataSourceInner(
+        this._db,
+        entity,
+        this.resolveTables(),
+        this._operators!,
+        entities,
+      ),
+    );
   }
 
   /**
@@ -693,7 +693,7 @@ function createDrizzleDataSourceInner(
     async findById(id) {
       const values = keyValues(id, keyColumns, `findById on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+        operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await instance.select().from(drizzleTable).where(predicate);
@@ -721,14 +721,7 @@ function createDrizzleDataSourceInner(
     },
 
     findPage: (query) =>
-      findDrizzlePage(
-        instance,
-        drizzleTable,
-        entity,
-        query,
-        operators,
-        keyColumns,
-      ),
+      findDrizzlePage(instance, drizzleTable, entity, query, operators, keyColumns),
 
     async create(data) {
       const rows = await returningRows(
@@ -742,7 +735,7 @@ function createDrizzleDataSourceInner(
     async update(id, data) {
       const values = keyValues(id, keyColumns, `update on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+        operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
@@ -756,7 +749,7 @@ function createDrizzleDataSourceInner(
     async delete(id) {
       const values = keyValues(id, keyColumns, `delete on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+        operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
@@ -777,7 +770,7 @@ function createDrizzleDataSourceInner(
       assertPreconditionColumns(drizzleTable, where);
       const values = keyValues(id, keyColumns, `updateWhere on '${entity}'`);
       const keyPredicates = keyColumns.map((col, index) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+        operators.eq(columnFor(drizzleTable, entity, col), values[index]),
       );
       const predicate = operators.and(
         ...keyPredicates,
@@ -799,7 +792,7 @@ function createDrizzleDataSourceInner(
       assertPreconditionColumns(drizzleTable, where);
       const values = keyValues(id, keyColumns, `deleteWhere on '${entity}'`);
       const keyPredicates = keyColumns.map((col, index) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+        operators.eq(columnFor(drizzleTable, entity, col), values[index]),
       );
       const predicate = operators.and(
         ...keyPredicates,
@@ -925,16 +918,18 @@ async function findDrizzlePage(
   // sorting by `orderBy` alone leaves tied rows in an order the backend
   // picks freely and the predicate skips or repeats them.
   const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
-  const keyset = decoded === null
-    ? undefined
-    : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
+  const keyset =
+    decoded === null
+      ? undefined
+      : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
 
   // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
   //    position replaces offset (and §3.10 refused the two together).
   const probeLimit = normalized.limit > 0 ? normalized.limit + 1 : normalized.limit;
-  const internalSelect = normalized.select.length > 0
-    ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
-    : [];
+  const internalSelect =
+    normalized.select.length > 0
+      ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+      : [];
   const where = predicateFor(
     table,
     entity,
@@ -942,9 +937,7 @@ async function findDrizzlePage(
     operators,
     conjoinFilters(normalized.filter, keyset),
   );
-  let builder = instance.select(
-    selectedColumns(table, entity, internalSelect),
-  ).from(table);
+  let builder = instance.select(selectedColumns(table, entity, internalSelect)).from(table);
   if (where !== undefined) {
     builder = builder.where(where);
   }
@@ -961,20 +954,15 @@ async function findDrizzlePage(
   //    LAST returned row mints the cursor; otherwise the page is terminal.
   const hasMore = normalized.limit > 0 && found.length > normalized.limit;
   const pageRows = hasMore ? found.slice(0, normalized.limit) : found;
-  const nextCursor = mintNextCursor(
-    pageRows,
-    normalized.orderBy,
-    keyColumns,
-    fingerprint,
-    hasMore,
-  );
+  const nextCursor = mintNextCursor(pageRows, normalized.orderBy, keyColumns, fingerprint, hasMore);
 
   // 7. The caller's projection is what comes back — the key columns and the
   //    ordered fields joined the internal select only for the probe and the
   //    cursor minting, and are stripped here.
-  const rows = internalSelect.length > 0
-    ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
-    : pageRows;
+  const rows =
+    internalSelect.length > 0
+      ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
+      : pageRows;
   return { rows, nextCursor };
 }
 
@@ -982,9 +970,12 @@ async function findDrizzlePage(
 const COUNT_ALIAS = 'value';
 
 function hasColumn(value: unknown, field: string): boolean {
-  return value !== null && typeof value === 'object' &&
+  return (
+    value !== null &&
+    typeof value === 'object' &&
     Object.prototype.hasOwnProperty.call(value, field) &&
-    (value as Record<string, unknown>)[field] !== undefined;
+    (value as Record<string, unknown>)[field] !== undefined
+  );
 }
 
 /**
@@ -1021,7 +1012,7 @@ function predicateFor(
   filter?: FilterExpression,
 ): unknown | undefined {
   const predicates = Object.entries(where).map(([field, value]) =>
-    operators.eq(columnFor(table, entity, field), value)
+    operators.eq(columnFor(table, entity, field), value),
   );
   if (filter !== undefined) {
     const filterPredicate = filterPredicateFor(table, entity, filter, operators);
@@ -1066,8 +1057,7 @@ function filterPredicateFor(
     throw new UnsupportedQueryFeatureError(
       'nested-path',
       'drizzle',
-      `Filter on entity '${entity}' carries an empty field path. ` +
-        'Name at least one column.',
+      `Filter on entity '${entity}' carries an empty field path. ` + 'Name at least one column.',
     );
   }
   const baseColumn = columnFor(table, entity, segments[0]);
@@ -1093,9 +1083,9 @@ function filterPredicateFor(
       // defines no default escape character, so without the clause the
       // backslashes below are matched literally and a search for a value
       // holding `%` or `_` returns nothing at all.
-      return filterOperators.sql`${baseColumn} like ${`%${
-        escapeLikePattern(filter.value)
-      }%`} escape '\\'`;
+      return filterOperators.sql`${baseColumn} like ${`%${escapeLikePattern(
+        filter.value,
+      )}%`} escape '\\'`;
     case 'gt':
       return filterOperators.gt(baseColumn, filter.value);
     case 'gte':
@@ -1180,10 +1170,9 @@ function jsonPathPredicate(
       case 'postgresql':
         return ops.sql`(${column} #>> ${postgresPathArray(path)})::numeric`;
       case 'mysql':
-        return ops
-          .sql`CAST(JSON_UNQUOTE(JSON_EXTRACT(${column}, ${
-          jsonPathString(path)
-        })) AS DECIMAL(65,30))`;
+        return ops.sql`CAST(JSON_UNQUOTE(JSON_EXTRACT(${column}, ${jsonPathString(
+          path,
+        )})) AS DECIMAL(65,30))`;
       case 'sqlite':
         return ops.sql`json_extract(${column}, ${jsonPathString(path)})`;
     }
@@ -1227,10 +1216,7 @@ function jsonPathPredicate(
 }
 
 type FilterOperators = Required<
-  Pick<
-    DrizzleOperators,
-    'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'isNull' | 'sql'
-  >
+  Pick<DrizzleOperators, 'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'isNull' | 'sql'>
 >;
 
 /** Ensure a directly-created source has the native operators its filter needs. */

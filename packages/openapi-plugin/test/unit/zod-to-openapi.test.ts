@@ -182,10 +182,7 @@ describe('ZodToOpenApi', () => {
     });
 
     it('should transform ZodIntersection', () => {
-      const schema = z.intersection(
-        z.object({ name: z.string() }),
-        z.object({ age: z.number() }),
-      );
+      const schema = z.intersection(z.object({ name: z.string() }), z.object({ age: z.number() }));
       const result = transformer.transform(schema);
 
       expect(result).toEqual({
@@ -405,9 +402,11 @@ describe('transformObject edge cases', () => {
   const transformer = new ZodToOpenApi();
 
   it('should handle object with passthrough', () => {
-    const schema = z.object({
-      name: z.string(),
-    }).passthrough();
+    const schema = z
+      .object({
+        name: z.string(),
+      })
+      .passthrough();
     const result = transformer.transform(schema);
 
     expect(result.additionalProperties).toBe(true);
@@ -666,7 +665,10 @@ it('projects legacy object-form checks and ignores malformed or absent numeric c
     const schema = {
       _def: {
         typeName: kind,
-        checks: [{ kind: 'min', value: { value: 2 } }, { kind: 'max', value: { value: 9 } }],
+        checks: [
+          { kind: 'min', value: { value: 2 } },
+          { kind: 'max', value: { value: 9 } },
+        ],
       },
     } as unknown as Parameters<ZodToOpenApi['transform']>[0];
     expect(transformer.transform(schema)).toEqual(

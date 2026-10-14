@@ -18,20 +18,18 @@ describe('safeReturnTo', () => {
   });
 
   it('rejects protocol-relative, backslash, absolute and scheme targets', () => {
-    for (
-      const value of [
-        '//evil.test',
-        '/\\evil.test',
-        '/a/\\..\\..//evil.test',
-        'https://evil.test',
-        'http://evil.test/a',
-        'javascript:alert(1)',
-        'JavaScript:alert(1)',
-        'data:text/html,x',
-        'evil.test/a',
-        ' /a',
-      ]
-    ) {
+    for (const value of [
+      '//evil.test',
+      '/\\evil.test',
+      '/a/\\..\\..//evil.test',
+      'https://evil.test',
+      'http://evil.test/a',
+      'javascript:alert(1)',
+      'JavaScript:alert(1)',
+      'data:text/html,x',
+      'evil.test/a',
+      ' /a',
+    ]) {
       expect(safeReturnTo(value), value).toBe('/');
     }
   });

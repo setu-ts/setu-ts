@@ -23,45 +23,49 @@ import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('RabbitMqBroker against RabbitMQ 4 (X10-1)', () => {
-  it('a group subscriber and a private subscriber both receive a published message', {
-    skip: process.env['RABBITMQ_URL'] === undefined,
-  }, async () => {
-    const url = process.env['RABBITMQ_URL'];
-    if (url === undefined) throw new Error('Backend guard failed');
+  it(
+    'a group subscriber and a private subscriber both receive a published message',
+    {
+      skip: process.env['RABBITMQ_URL'] === undefined,
+    },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
-      url,
-      // A unique exchange per run so concurrent suites never cross-talk.
-      exchangeName: `m70l-decl-${crypto.randomUUID()}`,
-    });
-    await broker.connect();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        url,
+        // A unique exchange per run so concurrent suites never cross-talk.
+        exchangeName: `m70l-decl-${crypto.randomUUID()}`,
+      });
+      await broker.connect();
 
-    const received: string[] = [];
-    const group = await broker.subscribe(
-      'm70l.declaration',
-      (message: unknown, _meta: MessageMetadata) => {
-        received.push((message as { kind: string }).kind);
-      },
-      { queue: `m70l-group-${crypto.randomUUID()}` }, // durable consumer-group shape
-    );
-    const priv = await broker.subscribe(
-      'm70l.declaration',
-      (message: unknown, _meta: MessageMetadata) => {
-        received.push((message as { kind: string }).kind);
-      }, // private per-subscriber queue: exclusive + autoDelete
-    );
+      const received: string[] = [];
+      const group = await broker.subscribe(
+        'm70l.declaration',
+        (message: unknown, _meta: MessageMetadata) => {
+          received.push((message as { kind: string }).kind);
+        },
+        { queue: `m70l-group-${crypto.randomUUID()}` }, // durable consumer-group shape
+      );
+      const priv = await broker.subscribe(
+        'm70l.declaration',
+        (message: unknown, _meta: MessageMetadata) => {
+          received.push((message as { kind: string }).kind);
+        }, // private per-subscriber queue: exclusive + autoDelete
+      );
 
-    // Let the subscriptions settle server-side before publishing.
-    await new Promise((r) => setTimeout(r, 200));
-    await broker.publish('m70l.declaration', { kind: 'both' });
-    await new Promise((r) => setTimeout(r, 300));
+      // Let the subscriptions settle server-side before publishing.
+      await new Promise((r) => setTimeout(r, 200));
+      await broker.publish('m70l.declaration', { kind: 'both' });
+      await new Promise((r) => setTimeout(r, 300));
 
-    expect(received.sort()).toEqual(['both', 'both']);
+      expect(received.sort()).toEqual(['both', 'both']);
 
-    await group.unsubscribe();
-    await priv.unsubscribe();
-    await broker.disconnect();
-  });
+      await group.unsubscribe();
+      await priv.unsubscribe();
+      await broker.disconnect();
+    },
+  );
 
   it(
     'completes an RPC round trip',
@@ -76,16 +80,14 @@ describe('RabbitMqBroker against RabbitMQ 4 (X10-1)', () => {
       });
       await broker.connect();
 
-      await broker.respond<{ ping: number }, { pong: number }>(
-        'm70l.rpc',
-        (request) => Promise.resolve({ pong: request.ping + 1 }),
+      await broker.respond<{ ping: number }, { pong: number }>('m70l.rpc', (request) =>
+        Promise.resolve({ pong: request.ping + 1 }),
       );
       await new Promise((r) => setTimeout(r, 200));
 
-      const reply = await broker.request<{ ping: number }, { pong: number }>(
-        'm70l.rpc',
-        { ping: 41 },
-      );
+      const reply = await broker.request<{ ping: number }, { pong: number }>('m70l.rpc', {
+        ping: 41,
+      });
       expect(reply).toEqual({ pong: 42 });
 
       await broker.disconnect();

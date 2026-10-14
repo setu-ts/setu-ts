@@ -125,10 +125,7 @@ function buildS3Config(options: S3ProviderOptions): Record<string, unknown> {
  * @param options - S3 connection options
  * @returns The facade wrapping an `S3Client`
  */
-export function adaptAwsS3Module(
-  mod: AwsStorageSdkModule,
-  options: S3ProviderOptions,
-): IS3Backend {
+export function adaptAwsS3Module(mod: AwsStorageSdkModule, options: S3ProviderOptions): IS3Backend {
   const bucket = options.bucket;
   const s3Mod = mod.s3;
   const presignerMod = mod.presigner;

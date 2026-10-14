@@ -85,10 +85,7 @@ export const PROTO_IMPORTS: Readonly<Record<string, string>> = {
  * @param packageName - The proto package, e.g. `orders.v1`
  * @returns The files to create, relative to the member root
  */
-export function protoToolchainFiles(
-  packageName: string,
-  onDeno = true,
-): readonly GeneratedFile[] {
+export function protoToolchainFiles(packageName: string, onDeno = true): readonly GeneratedFile[] {
   const directory = packageName.replaceAll('.', '/');
   const run = onDeno ? `deno task ${PROTO_TASK}` : `npm run ${PROTO_TASK}`;
 

@@ -103,7 +103,9 @@ describe('TraceEnrichedLogger', () => {
     // trace_id from precisely the records X34-2 most wants joined.
     const captured = captureConsole();
     try {
-      subject(() => reporting(SPAN)).child({ requestId: 'r-1' }).info('m');
+      subject(() => reporting(SPAN))
+        .child({ requestId: 'r-1' })
+        .info('m');
     } finally {
       captured.restore();
     }

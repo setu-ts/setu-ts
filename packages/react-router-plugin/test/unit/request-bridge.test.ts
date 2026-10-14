@@ -46,14 +46,7 @@ describe('request-bridge', () => {
       ctx: {
         id: 'r1',
         request: {
-          method: method as
-            | 'GET'
-            | 'POST'
-            | 'PUT'
-            | 'PATCH'
-            | 'DELETE'
-            | 'HEAD'
-            | 'OPTIONS',
+          method: method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS',
           url: 'http://localhost/',
           path: '/',
           headers: new Headers(),

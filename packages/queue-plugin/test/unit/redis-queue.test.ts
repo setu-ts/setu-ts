@@ -155,9 +155,9 @@ describe('RedisQueue', () => {
 
     it('throws when not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.ack('test', '1'),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.ack('test', '1')).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('ack emits ZREM processing + HDEL', async () => {
@@ -370,9 +370,9 @@ describe('RedisQueue', () => {
 
     it('throws when not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.deadLetter('test', '1', Date.now()),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.deadLetter('test', '1', Date.now())).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('deadLetter emits ZREM processing + ZADD dead', async () => {
@@ -420,16 +420,16 @@ describe('RedisQueue', () => {
 
     it('throws when fetchRecurringDue not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.fetchRecurringDue(Date.now()),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.fetchRecurringDue(Date.now())).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('throws when advanceRecurring not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.advanceRecurring('r1', Date.now()),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.advanceRecurring('r1', Date.now())).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('storeRecurring stores in recurring hashes', async () => {

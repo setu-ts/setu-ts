@@ -63,8 +63,9 @@ describe('setu generate module', () => {
       '/app/src/modules/user/index.ts',
       '/app/src/modules/index.ts',
     ]);
-    expect(h.fs.read('/app/src/modules/user/user.controller.ts'))
-      .toContain('export class UserController');
+    expect(h.fs.read('/app/src/modules/user/user.controller.ts')).toContain(
+      'export class UserController',
+    );
     expect(h.fs.read('/app/src/modules/user/user.module.ts')).toContain('@Module({');
     expect(h.fs.read('/app/src/modules/index.ts')).toContain('UserModule');
   });

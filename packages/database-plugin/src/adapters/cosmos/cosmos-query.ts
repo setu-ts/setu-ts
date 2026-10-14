@@ -89,13 +89,11 @@ export function normalizeValue(value: unknown): unknown {
  *   string literal
  * @since 0.2.0
  */
-export function fieldExpression(
-  field: string | readonly string[],
-  target: CosmosTarget,
-): string {
-  const segments = typeof field === 'string' ? [documentField(field, target)] : field.map(
-    (segment, index) => (index === 0 ? documentField(segment, target) : segment),
-  );
+export function fieldExpression(field: string | readonly string[], target: CosmosTarget): string {
+  const segments =
+    typeof field === 'string'
+      ? [documentField(field, target)]
+      : field.map((segment, index) => (index === 0 ? documentField(segment, target) : segment));
   return segments.reduce<string>((expression, segment) => {
     // Cosmos SQL treats a backslash as an ESCAPE character inside a quoted
     // accessor, so a segment ending in one escapes the closing quote and the

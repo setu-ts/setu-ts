@@ -16,14 +16,12 @@ import { CAPABILITIES } from '@setu-ts/common';
 describe('worker sizing', () => {
   it('refuses a non-number maxWorkers with the documented RangeError, Symbol included', () => {
     // A template literal throws TypeError for a Symbol before the RangeError is built.
-    for (
-      const [value, rendered] of [
-        [Symbol('cap'), 'Symbol(cap)'],
-        ['4', '"4"'], // strings are quoted, so control characters are escaped
-        [4n, '4'],
-        [null, 'null'],
-      ] as const
-    ) {
+    for (const [value, rendered] of [
+      [Symbol('cap'), 'Symbol(cap)'],
+      ['4', '"4"'], // strings are quoted, so control characters are escaped
+      [4n, '4'],
+      [null, 'null'],
+    ] as const) {
       const options = { maxWorkers: value } as unknown as WorkerPoolPluginOptions;
       expect(() => validateSizingOptions(options)).toThrow(RangeError);
       expect(() => validateSizingOptions(options)).toThrow(`received ${rendered}`);
@@ -59,7 +57,7 @@ describe('worker sizing', () => {
         return poolReads === 1 ? 50 : -1;
       },
     };
-    const inherited = Object.create({ 'inherited': { taskTimeoutMs: NaN } });
+    const inherited = Object.create({ inherited: { taskTimeoutMs: NaN } });
     const options = { host, pools: Object.assign(inherited, { m: pool }) };
     const service = new WorkerPoolService(options, createFakeRuntime(timers));
     expect(poolReads).toBe(1);
@@ -117,9 +115,8 @@ describe('worker sizing', () => {
       },
     };
     expect(() =>
-      validateSizingOptions({ maxWorkers: hostile } as unknown as WorkerPoolPluginOptions)
-    )
-      .toThrow('received [unprintable object]');
+      validateSizingOptions({ maxWorkers: hostile } as unknown as WorkerPoolPluginOptions),
+    ).toThrow('received [unprintable object]');
   });
 
   it('reads each option once, so an accessor cannot change the validated value', () => {
@@ -142,36 +139,39 @@ describe('worker sizing', () => {
       expect(() => WorkerPoolPlugin(options)).toThrow(
         `startupTimeoutMs must be a positive integer no greater than 2147483647; received ${value}`,
       );
-      expect(() => new WorkerPoolService(options, createFakeRuntime(new FakeTimers())))
-        .toThrow(RangeError);
+      expect(() => new WorkerPoolService(options, createFakeRuntime(new FakeTimers()))).toThrow(
+        RangeError,
+      );
     });
   }
 
   for (const value of [NaN, -1, 1.5, 2 ** 31, Infinity]) {
     it(`refuses taskTimeoutMs ${value} plugin-wide and per pool, at both entry points`, () => {
       // Before: NaN and negatives silently disabled the timeout; 2^31+ fired at ~1 ms.
-      const message = `must be 0 (disabled) or a positive integer no greater than 2147483647; ` +
+      const message =
+        `must be 0 (disabled) or a positive integer no greater than 2147483647; ` +
         `received ${value}`;
-      for (
-        const options of [
-          { taskTimeoutMs: value },
-          { pools: { 'file:///t.ts': { taskTimeoutMs: value } } },
-        ]
-      ) {
+      for (const options of [
+        { taskTimeoutMs: value },
+        { pools: { 'file:///t.ts': { taskTimeoutMs: value } } },
+      ]) {
         expect(() => WorkerPoolPlugin(options)).toThrow(RangeError);
         expect(() => WorkerPoolPlugin(options)).toThrow(message);
-        expect(() => new WorkerPoolService(options, createFakeRuntime(new FakeTimers())))
-          .toThrow(message);
+        expect(() => new WorkerPoolService(options, createFakeRuntime(new FakeTimers()))).toThrow(
+          message,
+        );
       }
-      expect(() => WorkerPoolPlugin({ pools: { 'file:///t.ts': { taskTimeoutMs: value } } }))
-        .toThrow('pools["file:///t.ts"].taskTimeoutMs');
+      expect(() =>
+        WorkerPoolPlugin({ pools: { 'file:///t.ts': { taskTimeoutMs: value } } }),
+      ).toThrow('pools["file:///t.ts"].taskTimeoutMs');
     });
   }
 
   it('accepts 0, 1 and the largest timer delay for taskTimeoutMs', () => {
     for (const taskTimeoutMs of [0, 1, 2_147_483_647]) {
-      expect(() => readSizingOptions({ taskTimeoutMs, pools: { a: { taskTimeoutMs } } }))
-        .not.toThrow();
+      expect(() =>
+        readSizingOptions({ taskTimeoutMs, pools: { a: { taskTimeoutMs } } }),
+      ).not.toThrow();
     }
   });
 
@@ -193,8 +193,9 @@ describe('worker sizing', () => {
     expect(readSizingOptions().startupTimeoutMs).toBe(10_000);
     expect(readSizingOptions({ startupTimeoutMs: 250 }).startupTimeoutMs).toBe(250);
     // The largest delay a runtime timer honours; one more overflows to ~1 ms.
-    expect(readSizingOptions({ startupTimeoutMs: 2_147_483_647 }).startupTimeoutMs)
-      .toBe(2_147_483_647);
+    expect(readSizingOptions({ startupTimeoutMs: 2_147_483_647 }).startupTimeoutMs).toBe(
+      2_147_483_647,
+    );
   });
 
   it('does not let an Infinity legacy pool size make the derived budget unbounded', () => {
@@ -205,13 +206,11 @@ describe('worker sizing', () => {
   for (const value of [NaN, 0, -1, 1.5, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     it(`refuses maxWorkers ${value} at both entry points`, () => {
       const options = { maxWorkers: value };
-      for (
-        const construct of [
-          () => validateSizingOptions(options),
-          () => WorkerPoolPlugin(options),
-          () => new WorkerPoolService(options, createFakeRuntime(new FakeTimers())),
-        ]
-      ) {
+      for (const construct of [
+        () => validateSizingOptions(options),
+        () => WorkerPoolPlugin(options),
+        () => new WorkerPoolService(options, createFakeRuntime(new FakeTimers())),
+      ]) {
         expect(construct).toThrow(RangeError);
         expect(construct).toThrow(`received ${value}`);
       }
@@ -226,17 +225,12 @@ describe('worker sizing', () => {
   });
   it('resolves parallelism, default size, sum of listed sizes and explicit limits', () => {
     expect(resolveMaxWorkers(readSizingOptions(undefined), 4)).toBe(4);
-    expect(resolveMaxWorkers(readSizingOptions({ defaultPoolSize: 8 }), 4))
-      .toBe(8);
+    expect(resolveMaxWorkers(readSizingOptions({ defaultPoolSize: 8 }), 4)).toBe(8);
     expect(
       resolveMaxWorkers(readSizingOptions({ pools: { a: { size: 6 }, b: { size: 7 }, c: {} } }), 4),
     ).toBe(13);
-    expect(
-      resolveMaxWorkers(readSizingOptions({ maxWorkers: 1, defaultPoolSize: 8 }), 4),
-    ).toBe(1);
-    expect(
-      resolveMaxWorkers(readSizingOptions({ maxWorkers: Infinity }), 4),
-    ).toBe(Infinity);
+    expect(resolveMaxWorkers(readSizingOptions({ maxWorkers: 1, defaultPoolSize: 8 }), 4)).toBe(1);
+    expect(resolveMaxWorkers(readSizingOptions({ maxWorkers: Infinity }), 4)).toBe(Infinity);
   });
   for (const entry of ['factory', 'service']) {
     it(`keeps valid modules usable with NaN legacy sizes through ${entry}`, async () => {
@@ -248,9 +242,10 @@ describe('worker sizing', () => {
       };
       const app = createApplication({ plugins: [RuntimePlugin(), WorkerPoolPlugin(options)] });
       if (entry === 'factory') await app.start();
-      const pool: IWorkerPool = entry === 'factory'
-        ? app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL)
-        : new WorkerPoolService(options, createFakeRuntime(new FakeTimers()));
+      const pool: IWorkerPool =
+        entry === 'factory'
+          ? app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL)
+          : new WorkerPoolService(options, createFakeRuntime(new FakeTimers()));
       try {
         const task = pool.run('good', 42).then(
           (result) => ({ result }),

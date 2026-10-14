@@ -118,22 +118,22 @@ export interface WebSocketEventSink {
  */
 export type WebSocketUpgradeDecision =
   | {
-    /** Complete the handshake. */
-    readonly accept: true;
-    /** The sink the adapter binds its native socket events into. */
-    readonly sink: WebSocketEventSink;
-    /**
-     * The negotiated subprotocol to echo back, when one was selected. Omit to
-     * echo none — never echo a protocol the client did not request.
-     */
-    readonly protocol?: string;
-  }
+      /** Complete the handshake. */
+      readonly accept: true;
+      /** The sink the adapter binds its native socket events into. */
+      readonly sink: WebSocketEventSink;
+      /**
+       * The negotiated subprotocol to echo back, when one was selected. Omit to
+       * echo none — never echo a protocol the client did not request.
+       */
+      readonly protocol?: string;
+    }
   | {
-    /** Refuse the handshake. */
-    readonly accept: false;
-    /** The HTTP status to answer with (e.g. `503` at capacity, `400` on a bad subprotocol). */
-    readonly status: number;
-  };
+      /** Refuse the handshake. */
+      readonly accept: false;
+      /** The HTTP status to answer with (e.g. `503` at capacity, `400` on a bad subprotocol). */
+      readonly status: number;
+    };
 
 /**
  * Consulted by an HTTP adapter for every inbound WebSocket upgrade request.
@@ -148,9 +148,7 @@ export type WebSocketUpgradeDecision =
  * @returns The decision, or `null` to fall through to the HTTP pipeline
  * @since 0.2.0
  */
-export type WebSocketUpgradeRouter = (
-  request: Request,
-) => Promise<WebSocketUpgradeDecision | null>;
+export type WebSocketUpgradeRouter = (request: Request) => Promise<WebSocketUpgradeDecision | null>;
 
 /**
  * A live WebSocket connection, as seen by application code.
@@ -294,9 +292,9 @@ export interface WebSocketConnectionContext {
 export type WebSocketGuardDecision =
   | true
   | {
-    /** The HTTP status to answer with when refusing the upgrade. */
-    readonly status: number;
-  };
+      /** The HTTP status to answer with when refusing the upgrade. */
+      readonly status: number;
+    };
 
 /**
  * A route-scoped predicate evaluated before a WebSocket handshake is accepted.

@@ -38,10 +38,7 @@ describe('inject — integration through real started app', () => {
     const stringRes = await inject(app, '/users');
     expect(stringRes.statusCode).toBe(200);
 
-    const requestRes = await inject(
-      app,
-      new Request('http://localhost/users'),
-    );
+    const requestRes = await inject(app, new Request('http://localhost/users'));
     expect(requestRes.statusCode).toBe(200);
     expect(stringRes.json()).toEqual(requestRes.json());
 

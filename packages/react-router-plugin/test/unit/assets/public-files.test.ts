@@ -51,10 +51,7 @@ async function streamText(stream: ReadableStream<Uint8Array>): Promise<string> {
   return new TextDecoder().decode(bytes);
 }
 
-function buildMockCtx(
-  path: string,
-  mockResp: MockResponse,
-): Parameters<RouteHandler>[0] {
+function buildMockCtx(path: string, mockResp: MockResponse): Parameters<RouteHandler>[0] {
   const controller = new AbortController();
   return {
     id: 'r1',
@@ -132,10 +129,7 @@ function makeMapFs(
 describe('createPublicFileHandler', () => {
   const encoder = new TextEncoder();
 
-  function makeHandler(
-    fileMap: Record<string, Uint8Array>,
-    realPathMap?: Record<string, string>,
-  ) {
+  function makeHandler(fileMap: Record<string, Uint8Array>, realPathMap?: Record<string, string>) {
     return createPublicFileHandler({
       fs: makeMapFs(fileMap, realPathMap),
       assetsDir: '/client',
@@ -153,9 +147,7 @@ describe('createPublicFileHandler', () => {
     expect(mockResp.status).toBe(200);
     expect(mockResp.headers.get('Content-Type')).toBe('text/plain');
     expect(mockResp.headers.get('Cache-Control')).toBe(MUST_REVALIDATE);
-    expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe(
-      'User-agent: *',
-    );
+    expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe('User-agent: *');
   });
 
   it('returns undefined for a miss so the caller falls through to SSR', async () => {
@@ -268,11 +260,14 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
         const plugin = ReactRouterPlugin(options as never);
         await plugin.register({
           runtime: { uuid: () => 'id', fs: makeMapFs(fileMap) },
-          logger: warnings === undefined ? undefined : {
-            warn: (message: string, meta?: Record<string, unknown>): void => {
-              warnings.push(meta === undefined ? { message } : { message, meta });
-            },
-          },
+          logger:
+            warnings === undefined
+              ? undefined
+              : {
+                  warn: (message: string, meta?: Record<string, unknown>): void => {
+                    warnings.push(meta === undefined ? { message } : { message, meta });
+                  },
+                },
           services: {
             has: (t: string): boolean => registered.has(t),
             get: <T>(t: string): T => registered.get(t) as T,
@@ -322,9 +317,7 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
 
     expect(result).toEqual(mockResp.result);
     expect(mockResp.headers.get('Cache-Control')).toBe(MUST_REVALIDATE);
-    expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe(
-      'User-agent: *',
-    );
+    expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe('User-agent: *');
     // The hashed-asset route is unchanged.
     expect(harness.assetPatterns).toContain('/assets/*');
   });
@@ -410,9 +403,7 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
       const mockResp = buildMockResponse();
       await handler(buildMockCtx('/robots.txt', mockResp));
 
-      expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe(
-        'User-agent: *',
-      );
+      expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe('User-agent: *');
     });
   });
 
@@ -456,9 +447,10 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
     });
     await harness.register(baseOptions);
 
-    const assetRoute = harness.assetPatterns.length > 0
-      ? harness.getHandlers.find((r) => r.pattern === '/assets/*')
-      : undefined;
+    const assetRoute =
+      harness.assetPatterns.length > 0
+        ? harness.getHandlers.find((r) => r.pattern === '/assets/*')
+        : undefined;
     expect(assetRoute).toBeDefined();
 
     const mockResp = buildMockResponse();
@@ -466,11 +458,7 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
     await (assetRoute?.handler as RouteHandler)(ctx);
 
     expect(mockResp.sentBody).not.toBeNull();
-    expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe(
-      'console.log(1)',
-    );
-    expect(mockResp.headers.get('Cache-Control')).toBe(
-      'public, max-age=31536000, immutable',
-    );
+    expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe('console.log(1)');
+    expect(mockResp.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 });

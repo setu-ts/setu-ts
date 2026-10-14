@@ -101,11 +101,12 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         const reachable = await service.isHealthy();
         const everResolved = service.everResolved;
         const degraded = service.degraded;
-        const status = !everResolved && !reachable
-          ? 'down'
-          : degraded || (everResolved && !reachable)
-          ? 'degraded'
-          : 'up';
+        const status =
+          !everResolved && !reachable
+            ? 'down'
+            : degraded || (everResolved && !reachable)
+              ? 'degraded'
+              : 'up';
         return {
           status,
           data: {

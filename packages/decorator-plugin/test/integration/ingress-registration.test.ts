@@ -105,10 +105,11 @@ describe('decorated non-HTTP ingress through real plugins', () => {
     await app.start();
     const commands = app.services.get<ICommandBus>(CAPABILITIES.COMMAND_BUS);
     const queries = app.services.get<IQueryBus>(CAPABILITIES.QUERY_BUS);
-    await expect(commands.execute({ type: 'create-user', data: { id: 'user-1' } })).resolves
-      .toEqual({
-        id: 'user-1',
-      });
+    await expect(
+      commands.execute({ type: 'create-user', data: { id: 'user-1' } }),
+    ).resolves.toEqual({
+      id: 'user-1',
+    });
     await expect(queries.execute({ type: 'find-user', data: { id: 'user-2' } })).resolves.toEqual({
       id: 'user-2',
     });
@@ -132,11 +133,7 @@ describe('decorated non-HTTP ingress through real plugins', () => {
     }
 
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        MessagingPlugin(),
-        DecoratorPlugin({ ingress: [Subscribers] }),
-      ],
+      plugins: [RuntimePlugin(), MessagingPlugin(), DecoratorPlugin({ ingress: [Subscribers] })],
     });
     await app.start();
     const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);

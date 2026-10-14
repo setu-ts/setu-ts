@@ -77,7 +77,7 @@ describe('upload body cap E2E (V5-1)', () => {
       expect(body.length).toBeGreaterThan(MAX_BODY_BYTES);
 
       const res = await app.fetch(post(body));
-      const problem = await res.json() as { detail?: string; error?: string };
+      const problem = (await res.json()) as { detail?: string; error?: string };
 
       // Pre-fix this was 400 "Failed to parse multipart body".
       expect(res.status).toBe(413);

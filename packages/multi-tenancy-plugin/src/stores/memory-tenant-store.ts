@@ -63,18 +63,12 @@ export class MemoryTenantDataStore implements ITenantDataStore {
    * allocates a partition — otherwise arbitrary `x-tenant-id` headers would
    * grow the map unboundedly with zero writes.
    */
-  private peekEntityMap(
-    scope: ScopeKey,
-    entity: string,
-  ): Map<string, Row> | undefined {
+  private peekEntityMap(scope: ScopeKey, entity: string): Map<string, Row> | undefined {
     return this.store.get(scope)?.get(entity);
   }
 
   /** Look up an entity map, creating it on demand. Write paths only. */
-  private getEntityMap(
-    scope: ScopeKey,
-    entity: string,
-  ): Map<string, Row> {
+  private getEntityMap(scope: ScopeKey, entity: string): Map<string, Row> {
     let scopeMap = this.store.get(scope);
     if (!scopeMap) {
       scopeMap = new Map();
@@ -130,11 +124,7 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     return Promise.resolve(results as readonly E[]);
   }
 
-  create<E>(
-    tenantId: string,
-    entity: string,
-    data: Readonly<Record<string, unknown>>,
-  ): Promise<E> {
+  create<E>(tenantId: string, entity: string, data: Readonly<Record<string, unknown>>): Promise<E> {
     const scope = this.deriveScope(tenantId);
     const entityMap = this.getEntityMap(scope, entity);
 

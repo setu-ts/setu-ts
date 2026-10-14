@@ -70,7 +70,7 @@ function boot(plugin: ReturnType<typeof DatabasePlugin>, format: ErrorFormat = '
   app.router.post('/accounts', {
     handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
       const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-      const body = await ctx.request.json() as Record<string, unknown>;
+      const body = (await ctx.request.json()) as Record<string, unknown>;
       return ctx.response.status(201).json(await db.getRepository('Account').create(body));
     },
   });
@@ -89,10 +89,12 @@ const DETAIL =
 
 describe('a duplicate key answers 409 Conflict', () => {
   it('maps PostgreSQL 23505 to a Problem Details 409, field by field', async () => {
-    const app = boot(DatabasePlugin({
-      type: 'custom',
-      adapter: stubAdapter(refusingCreate(drizzleUniqueViolation())),
-    }));
+    const app = boot(
+      DatabasePlugin({
+        type: 'custom',
+        adapter: stubAdapter(refusingCreate(drizzleUniqueViolation())),
+      }),
+    );
     await app.start();
     try {
       const response = await app.inject({
@@ -169,10 +171,12 @@ describe('a duplicate key answers 409 Conflict', () => {
       'D1_ERROR: UNIQUE constraint failed: accounts.id: SQLITE_CONSTRAINT ' +
         '(extended: SQLITE_CONSTRAINT_PRIMARYKEY)',
     );
-    const app = boot(DatabasePlugin({
-      type: 'custom',
-      adapter: stubAdapter(refusingCreate(new Error('not reached')), d1Refusal),
-    }));
+    const app = boot(
+      DatabasePlugin({
+        type: 'custom',
+        adapter: stubAdapter(refusingCreate(new Error('not reached')), d1Refusal),
+      }),
+    );
     await app.start();
     try {
       const response = await app.inject({ method: 'POST', url: 'http://localhost/commit' });
@@ -189,10 +193,12 @@ describe('a duplicate key answers 409 Conflict', () => {
     const serialization = Object.assign(new Error('could not serialize access'), {
       code: '40001',
     });
-    const app = boot(DatabasePlugin({
-      type: 'custom',
-      adapter: stubAdapter(refusingCreate(new Error('not reached')), serialization),
-    }));
+    const app = boot(
+      DatabasePlugin({
+        type: 'custom',
+        adapter: stubAdapter(refusingCreate(new Error('not reached')), serialization),
+      }),
+    );
     await app.start();
     try {
       const response = await app.inject({ method: 'POST', url: 'http://localhost/commit' });

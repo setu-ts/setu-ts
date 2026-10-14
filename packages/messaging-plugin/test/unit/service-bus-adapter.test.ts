@@ -463,12 +463,12 @@ describe('adaptServiceBusModule', () => {
     it('B3: processError receives ProcessErrorArgs with .error field', async () => {
       let processErrorFn:
         | ((args: {
-          error: Error;
-          errorSource: string;
-          entityPath: string;
-          fullyQualifiedNamespace: string;
-          identifier: string;
-        }) => Promise<void>)
+            error: Error;
+            errorSource: string;
+            entityPath: string;
+            fullyQualifiedNamespace: string;
+            identifier: string;
+          }) => Promise<void>)
         | null = null;
       let loggedError: string | undefined;
 

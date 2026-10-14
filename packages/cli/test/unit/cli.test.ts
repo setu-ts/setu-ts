@@ -249,13 +249,15 @@ describe('runCli', () => {
       const waiting = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const app = createFakeApp([{
-        name: 'probe:run',
-        handler: () => {
-          controller.abort();
-          return waiting;
+      const app = createFakeApp([
+        {
+          name: 'probe:run',
+          handler: () => {
+            controller.abort();
+            return waiting;
+          },
         },
-      }]);
+      ]);
       const err = createRecorder();
       const code = await runCli(['probe:run'], {
         fs: createFakeFs({ '/work/setu.config.ts': 'x' }),
@@ -316,12 +318,14 @@ describe('runCli', () => {
 
     it('routes an unmatched first positional to the plugin commands', async () => {
       let ran = false;
-      const h = withApp([{
-        name: 'db:migrate',
-        handler: () => {
-          ran = true;
+      const h = withApp([
+        {
+          name: 'db:migrate',
+          handler: () => {
+            ran = true;
+          },
         },
-      }]);
+      ]);
       expect(await h.run(['db:migrate'])).toBe(0);
       expect(ran).toBe(true);
     });
@@ -340,12 +344,14 @@ describe('runCli', () => {
     describe('built-in precedence', () => {
       it('does not let a plugin shadow new', async () => {
         let shadowed = false;
-        const h = withApp([{
-          name: 'new',
-          handler: () => {
-            shadowed = true;
+        const h = withApp([
+          {
+            name: 'new',
+            handler: () => {
+              shadowed = true;
+            },
           },
-        }]);
+        ]);
         expect(await h.run(['new', 'app'])).toBe(0);
         expect(shadowed).toBe(false);
         expect(h.fs.has('/work/app/package.json')).toBe(true);
@@ -353,12 +359,14 @@ describe('runCli', () => {
 
       it('does not let a plugin shadow generate', async () => {
         let shadowed = false;
-        const h = withApp([{
-          name: 'generate',
-          handler: () => {
-            shadowed = true;
+        const h = withApp([
+          {
+            name: 'generate',
+            handler: () => {
+              shadowed = true;
+            },
           },
-        }]);
+        ]);
         expect(await h.run(['generate', 'service', 'billing'])).toBe(0);
         expect(shadowed).toBe(false);
       });

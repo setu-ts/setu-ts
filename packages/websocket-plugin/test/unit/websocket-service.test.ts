@@ -288,10 +288,12 @@ describe('WebSocketService', () => {
     ]);
 
     expect(decisions.filter((d) => d?.accept === true)).toHaveLength(2);
-    expect(decisions.filter((d) => d?.accept === false)).toEqual([{
-      accept: false,
-      status: 503,
-    }]);
+    expect(decisions.filter((d) => d?.accept === false)).toEqual([
+      {
+        accept: false,
+        status: 503,
+      },
+    ]);
   });
 
   it('frees a reserved slot when an accepted handshake never opens', async () => {

@@ -76,7 +76,8 @@ export function compileSamlProvider(
   // An empty certificate list verifies nothing — node-saml would refuse every
   // response, but only at the first login, with a message naming no option.
   if (
-    !Array.isArray(idp.certs) || idp.certs.length === 0 ||
+    !Array.isArray(idp.certs) ||
+    idp.certs.length === 0 ||
     idp.certs.some((cert) => !isNonEmptyString(cert))
   ) {
     refuse(name, 'idp.certs must be a non-empty array of PEM certificates');

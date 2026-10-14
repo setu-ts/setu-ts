@@ -131,7 +131,7 @@ export class UnknownPolicyError extends Error {
       boundedAbility === undefined
         ? `auth-plugin: no authorization policy named ${quote(boundedPolicy)} is registered`
         : `auth-plugin: authorization policy ${quote(boundedPolicy)} has no ability ` +
-          quote(boundedAbility),
+            quote(boundedAbility),
     );
     this.policy = boundedPolicy.value;
     this.ability = boundedAbility?.value;

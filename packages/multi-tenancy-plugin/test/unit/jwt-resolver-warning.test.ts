@@ -73,8 +73,9 @@ describe('jwt resolver warning (X18-4)', () => {
 
   it('is silent for every other resolver', () => {
     expect(warnsFor({ resolver: 'header' })).toHaveLength(0);
-    expect(warnsFor({ resolver: 'subdomain', subdomain: { baseDomain: 'example.com' } }))
-      .toHaveLength(0);
+    expect(
+      warnsFor({ resolver: 'subdomain', subdomain: { baseDomain: 'example.com' } }),
+    ).toHaveLength(0);
     expect(warnsFor({ resolver: 'path' })).toHaveLength(0);
   });
 });

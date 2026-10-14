@@ -176,7 +176,7 @@ describe('ONE multipart Blob through both request entry points (M99c V7-1)', () 
 
     const fetched = await app.fetch(platformRequest);
     expect(fetched.status).toBe(200);
-    const served = await fetched.json() as ParsedUpload;
+    const served = (await fetched.json()) as ParsedUpload;
 
     // A SECOND Blob, same shape: the entry points must agree on what one
     // upload means, not share mutable state.

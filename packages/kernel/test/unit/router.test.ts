@@ -4,40 +4,40 @@ import { Router } from '../../src/router/router.ts';
 describe('Router', () => {
   it('should register and match GET route', () => {
     const router = new Router();
-    router.get('/users', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users', { handler: () => ({ __handlerResult: true }) as never });
     const result = router.match('GET', '/users');
     expect(result).not.toBe(null);
   });
 
   it('should extract params from matched route', () => {
     const router = new Router();
-    router.get('/users/:id', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users/:id', { handler: () => ({ __handlerResult: true }) as never });
     const result = router.match('GET', '/users/123');
     expect(result?.params).toEqual({ id: '123' });
   });
 
   it('should return null for unmatched route', () => {
     const router = new Router();
-    router.get('/users', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users', { handler: () => ({ __handlerResult: true }) as never });
     const result = router.match('GET', '/posts');
     expect(result).toBe(null);
   });
 
   it('should return null for wrong method', () => {
     const router = new Router();
-    router.get('/users', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users', { handler: () => ({ __handlerResult: true }) as never });
     const result = router.match('POST', '/users');
     expect(result).toBe(null);
   });
 
   it('refuses a duplicate method and path without replacing the first route', () => {
     const router = new Router();
-    const first = () => ({ __handlerResult: true } as never);
+    const first = () => ({ __handlerResult: true }) as never;
     router.get('/users', first);
 
     // The message names the FIRST claimant (M70g/X5-6): the stack trace already
     // carries the second, and "who got there first" is the half a developer needs.
-    expect(() => router.get('/users', () => ({ __handlerResult: true } as never))).toThrow(
+    expect(() => router.get('/users', () => ({ __handlerResult: true }) as never)).toThrow(
       "Route 'GET /users' is already registered by the application.",
     );
     expect(router.match('GET', '/users')?.definition.handler).toBe(first);
@@ -45,10 +45,10 @@ describe('Router', () => {
 
   it('refuses a duplicate route registered through a group', () => {
     const router = new Router();
-    const first = () => ({ __handlerResult: true } as never);
+    const first = () => ({ __handlerResult: true }) as never;
     router.group('/api', (group) => group.get('/status', first));
 
-    expect(() => router.get('/api/status', () => ({ __handlerResult: true } as never))).toThrow(
+    expect(() => router.get('/api/status', () => ({ __handlerResult: true }) as never)).toThrow(
       "Route 'GET /api/status' is already registered by the application.",
     );
     expect(router.listRoutes()).toHaveLength(1);
@@ -57,8 +57,8 @@ describe('Router', () => {
 
   it('allows the same path under different HTTP methods', () => {
     const router = new Router();
-    router.get('/users', () => ({ __handlerResult: true } as never));
-    router.post('/users', () => ({ __handlerResult: true } as never));
+    router.get('/users', () => ({ __handlerResult: true }) as never);
+    router.post('/users', () => ({ __handlerResult: true }) as never);
 
     expect(router.listRoutes().map((route) => route.method)).toEqual(['GET', 'POST']);
   });
@@ -67,10 +67,10 @@ describe('Router', () => {
     let owner: string | undefined = 'health-plugin';
     const router = new Router(() => owner);
     router.group('/internal', (group) => {
-      group.get('/health', () => ({ __handlerResult: true } as never));
+      group.get('/health', () => ({ __handlerResult: true }) as never);
     });
     owner = undefined;
-    router.get('/application', () => ({ __handlerResult: true } as never));
+    router.get('/application', () => ({ __handlerResult: true }) as never);
 
     expect(router.listRoutes()).toEqual([
       expect.objectContaining({ method: 'GET', path: '/internal/health', owner: 'health-plugin' }),
@@ -81,13 +81,13 @@ describe('Router', () => {
 
   it('should support all 7 verbs', () => {
     const router = new Router();
-    router.get('/g', { handler: () => ({ __handlerResult: true } as never) });
-    router.post('/p', { handler: () => ({ __handlerResult: true } as never) });
-    router.put('/pu', { handler: () => ({ __handlerResult: true } as never) });
-    router.patch('/pa', { handler: () => ({ __handlerResult: true } as never) });
-    router.delete('/d', { handler: () => ({ __handlerResult: true } as never) });
-    router.head('/h', { handler: () => ({ __handlerResult: true } as never) });
-    router.options('/o', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/g', { handler: () => ({ __handlerResult: true }) as never });
+    router.post('/p', { handler: () => ({ __handlerResult: true }) as never });
+    router.put('/pu', { handler: () => ({ __handlerResult: true }) as never });
+    router.patch('/pa', { handler: () => ({ __handlerResult: true }) as never });
+    router.delete('/d', { handler: () => ({ __handlerResult: true }) as never });
+    router.head('/h', { handler: () => ({ __handlerResult: true }) as never });
+    router.options('/o', { handler: () => ({ __handlerResult: true }) as never });
 
     expect(router.match('GET', '/g')).not.toBe(null);
     expect(router.match('POST', '/p')).not.toBe(null);
@@ -100,8 +100,8 @@ describe('Router', () => {
 
   it('should prefer static segments over params', () => {
     const router = new Router();
-    router.get('/users/:id', { handler: () => ({ __handlerResult: true } as never) });
-    router.get('/users/me', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users/:id', { handler: () => ({ __handlerResult: true }) as never });
+    router.get('/users/me', { handler: () => ({ __handlerResult: true }) as never });
 
     const result = router.match('GET', '/users/me');
     expect(result?.params).toEqual({});
@@ -109,8 +109,8 @@ describe('Router', () => {
 
   it('should break ties with earliest registration', () => {
     const router = new Router();
-    router.get('/a/:x', { handler: () => ({ __handlerResult: true } as never) });
-    router.get('/a/:y', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/a/:x', { handler: () => ({ __handlerResult: true }) as never });
+    router.get('/a/:y', { handler: () => ({ __handlerResult: true }) as never });
 
     const result = router.match('GET', '/a/123');
     expect(result?.params).toEqual({ x: '123' });
@@ -119,7 +119,7 @@ describe('Router', () => {
   it('should support groups with prefix', () => {
     const router = new Router();
     router.group('/api', (r) => {
-      r.get('/users', { handler: () => ({ __handlerResult: true } as never) });
+      r.get('/users', { handler: () => ({ __handlerResult: true }) as never });
     });
 
     const result = router.match('GET', '/api/users');
@@ -130,7 +130,7 @@ describe('Router', () => {
     const router = new Router();
     router.group('/api', (r) => {
       r.group('/v1', (r2) => {
-        r2.get('/users', { handler: () => ({ __handlerResult: true } as never) });
+        r2.get('/users', { handler: () => ({ __handlerResult: true }) as never });
       });
     });
 
@@ -140,7 +140,7 @@ describe('Router', () => {
 
   it('should accept bare handler', () => {
     const router = new Router();
-    router.get('/bare', () => ({ __handlerResult: true } as never));
+    router.get('/bare', () => ({ __handlerResult: true }) as never);
     const result = router.match('GET', '/bare');
     expect(result).not.toBe(null);
     expect(result?.definition.middleware).toBe(undefined);
@@ -150,7 +150,7 @@ describe('Router', () => {
     const router = new Router();
     const mw = [() => {}];
     router.get('/with-mw', {
-      handler: () => ({ __handlerResult: true } as never),
+      handler: () => ({ __handlerResult: true }) as never,
       middleware: mw,
     });
     const result = router.match('GET', '/with-mw');
@@ -159,8 +159,8 @@ describe('Router', () => {
 
   it('should expose getAll for introspection', () => {
     const router = new Router();
-    router.get('/a', () => ({ __handlerResult: true } as never));
-    router.post('/b', () => ({ __handlerResult: true } as never));
+    router.get('/a', () => ({ __handlerResult: true }) as never);
+    router.post('/b', () => ({ __handlerResult: true }) as never);
     const all = router.getAll();
     expect(all.length).toBe(2);
     expect(all[0].method).toBe('GET');
@@ -170,7 +170,7 @@ describe('Router', () => {
   it('should handle group with root path inside', () => {
     const router = new Router();
     router.group('/api', (r) => {
-      r.get('/', () => ({ __handlerResult: true } as never));
+      r.get('/', () => ({ __handlerResult: true }) as never);
     });
     const result = router.match('GET', '/api');
     expect(result).not.toBe(null);
@@ -180,7 +180,7 @@ describe('Router', () => {
     const router = new Router();
     router.group('/api', (r) => {
       r.group('/v1', (r2) => {
-        r2.get('/', () => ({ __handlerResult: true } as never));
+        r2.get('/', () => ({ __handlerResult: true }) as never);
       });
     });
     const result = router.match('GET', '/api/v1');
@@ -189,15 +189,15 @@ describe('Router', () => {
 
   it('should match route with multiple params', () => {
     const router = new Router();
-    router.get('/users/:userId/posts/:postId', () => ({ __handlerResult: true } as never));
+    router.get('/users/:userId/posts/:postId', () => ({ __handlerResult: true }) as never);
     const result = router.match('GET', '/users/123/posts/456');
     expect(result?.params).toEqual({ userId: '123', postId: '456' });
   });
 
   it('should prefer route with more static segments', () => {
     const router = new Router();
-    router.get('/:a/:b/:c', () => ({ __handlerResult: true } as never));
-    router.get('/users/:id/profile', () => ({ __handlerResult: true } as never));
+    router.get('/:a/:b/:c', () => ({ __handlerResult: true }) as never);
+    router.get('/users/:id/profile', () => ({ __handlerResult: true }) as never);
     const result = router.match('GET', '/users/123/profile');
     expect(result?.params).toEqual({ id: '123' });
   });
@@ -205,11 +205,11 @@ describe('Router', () => {
   it('GroupRouter: every verb routes through the prefix', () => {
     const router = new Router();
     router.group('/api', (r) => {
-      r.put('/p', () => ({ __handlerResult: true } as never));
-      r.patch('/pa', () => ({ __handlerResult: true } as never));
-      r.delete('/d', () => ({ __handlerResult: true } as never));
-      r.head('/h', () => ({ __handlerResult: true } as never));
-      r.options('/o', () => ({ __handlerResult: true } as never));
+      r.put('/p', () => ({ __handlerResult: true }) as never);
+      r.patch('/pa', () => ({ __handlerResult: true }) as never);
+      r.delete('/d', () => ({ __handlerResult: true }) as never);
+      r.head('/h', () => ({ __handlerResult: true }) as never);
+      r.options('/o', () => ({ __handlerResult: true }) as never);
     });
     expect(router.match('PUT', '/api/p')).not.toBe(null);
     expect(router.match('PATCH', '/api/pa')).not.toBe(null);
@@ -222,13 +222,13 @@ describe('Router', () => {
     const router = new Router();
     router.group('/api', (r) => {
       r.group('/v1', (r2) => {
-        r2.get('/g', () => ({ __handlerResult: true } as never));
-        r2.post('/p', () => ({ __handlerResult: true } as never));
-        r2.put('/pu', () => ({ __handlerResult: true } as never));
-        r2.patch('/pa', () => ({ __handlerResult: true } as never));
-        r2.delete('/d', () => ({ __handlerResult: true } as never));
-        r2.head('/h', () => ({ __handlerResult: true } as never));
-        r2.options('/o', () => ({ __handlerResult: true } as never));
+        r2.get('/g', () => ({ __handlerResult: true }) as never);
+        r2.post('/p', () => ({ __handlerResult: true }) as never);
+        r2.put('/pu', () => ({ __handlerResult: true }) as never);
+        r2.patch('/pa', () => ({ __handlerResult: true }) as never);
+        r2.delete('/d', () => ({ __handlerResult: true }) as never);
+        r2.head('/h', () => ({ __handlerResult: true }) as never);
+        r2.options('/o', () => ({ __handlerResult: true }) as never);
       });
     });
     expect(router.match('GET', '/api/v1/g')).not.toBe(null);
@@ -243,17 +243,17 @@ describe('Router', () => {
   it('GroupRouter: group with "/" path resolves to the bare prefix', () => {
     const router = new Router();
     router.group('/api', (r) => {
-      r.get('/', () => ({ __handlerResult: true } as never));
+      r.get('/', () => ({ __handlerResult: true }) as never);
     });
     expect(router.match('GET', '/api')).not.toBe(null);
   });
 
   it('getAll returns every registered route with method and pattern', () => {
     const router = new Router();
-    router.get('/a', () => ({ __handlerResult: true } as never));
+    router.get('/a', () => ({ __handlerResult: true }) as never);
     router.group('/api', (r) => {
-      r.post('/b', () => ({ __handlerResult: true } as never));
-      r.put('/c', () => ({ __handlerResult: true } as never));
+      r.post('/b', () => ({ __handlerResult: true }) as never);
+      r.put('/c', () => ({ __handlerResult: true }) as never);
     });
     const all = router.getAll();
     expect(all.length).toBe(3);
@@ -267,10 +267,10 @@ describe('Router', () => {
   // M22 new cases — listRoutes() registration order with composed group paths
   it('listRoutes() returns routes in registration order with composed group paths', () => {
     const router = new Router();
-    router.get('/first', () => ({ __handlerResult: true } as never));
+    router.get('/first', () => ({ __handlerResult: true }) as never);
     router.group('/api', (r) => {
-      r.get('/users', () => ({ __handlerResult: true } as never));
-      r.post('/users', () => ({ __handlerResult: true } as never));
+      r.get('/users', () => ({ __handlerResult: true }) as never);
+      r.post('/users', () => ({ __handlerResult: true }) as never);
     });
     const routes = router.listRoutes();
     expect(routes.length).toBe(3);
@@ -284,9 +284,9 @@ describe('Router', () => {
   it('route registered after a group still appears in getAll', () => {
     const router = new Router();
     router.group('/api', (r) => {
-      r.get('/users', () => ({ __handlerResult: true } as never));
+      r.get('/users', () => ({ __handlerResult: true }) as never);
     });
-    router.get('/after-group', () => ({ __handlerResult: true } as never));
+    router.get('/after-group', () => ({ __handlerResult: true }) as never);
     const all = router.getAll();
     expect(all.length).toBe(2);
     expect(all[1].pattern).toBe('/after-group');
@@ -295,7 +295,7 @@ describe('Router', () => {
   // M22 coverage — parsePattern edge cases
   it('parsePattern handles bare "/" pattern', () => {
     const router = new Router();
-    router.get('/', () => ({ __handlerResult: true } as never));
+    router.get('/', () => ({ __handlerResult: true }) as never);
     const all = router.getAll();
     expect(all.length).toBe(1);
     expect(all[0].pattern).toBe('/');
@@ -305,7 +305,7 @@ describe('Router', () => {
   // M22 coverage — parsePattern edge cases (N1: test name corrected to match actual behavior)
   it('RouteEntry.pattern stores the raw path (trailing slashes preserved)', () => {
     const router = new Router();
-    router.get('/trailing//', () => ({ __handlerResult: true } as never));
+    router.get('/trailing//', () => ({ __handlerResult: true }) as never);
     const all = router.getAll();
     expect(all.length).toBe(1);
     // pattern stores the raw path; parsePattern strips trailing slashes only for segment counting
@@ -317,7 +317,7 @@ describe('Router', () => {
     const router = new Router();
     router.group('/api', (r) => {
       r.group('/v1', (inner) => {
-        inner.get('/resource', () => ({ __handlerResult: true } as never));
+        inner.get('/resource', () => ({ __handlerResult: true }) as never);
       });
     });
     const result = router.match('GET', '/api/v1/resource');
@@ -326,9 +326,9 @@ describe('Router', () => {
 
   it('GroupRouter.listRoutes() delegates to parent', () => {
     const router = new Router();
-    router.get('/standalone', () => ({ __handlerResult: true } as never));
+    router.get('/standalone', () => ({ __handlerResult: true }) as never);
     router.group('/api', (r) => {
-      r.get('/items', () => ({ __handlerResult: true } as never));
+      r.get('/items', () => ({ __handlerResult: true }) as never);
     });
     const routes = router.listRoutes();
     expect(routes.length).toBe(2);
@@ -338,7 +338,7 @@ describe('Router', () => {
   // match() must decode them (the pre-M22 matcher decoded per segment).
   it('decodes percent-encoded param values (parity with pre-M22 matcher)', () => {
     const router = new Router();
-    router.get('/users/:id', () => ({ __handlerResult: true } as never));
+    router.get('/users/:id', () => ({ __handlerResult: true }) as never);
     expect(router.match('GET', '/users/a%20b')?.params).toEqual({ id: 'a b' });
     expect(router.match('GET', '/users/jos%C3%A9')?.params).toEqual({ id: 'josé' });
   });
@@ -348,15 +348,15 @@ describe('Router', () => {
   // direct callers of match()).
   it('match returns null when a param value is a malformed percent-escape', () => {
     const router = new Router();
-    router.get('/users/:id', () => ({ __handlerResult: true } as never));
+    router.get('/users/:id', () => ({ __handlerResult: true }) as never);
     expect(router.match('GET', '/users/%zz')).toBe(null);
   });
 
   // M22 coverage — tie-break: multiple candidates, statics differ
   it('tie-break: more static segments wins', () => {
     const router = new Router();
-    router.get('/a/b/c', () => ({ __handlerResult: true } as never));
-    router.get('/a/:x/:y', () => ({ __handlerResult: true } as never));
+    router.get('/a/b/c', () => ({ __handlerResult: true }) as never);
+    router.get('/a/:x/:y', () => ({ __handlerResult: true }) as never);
     // Matching /a/b/c triggers tie-break: both routes match, /a/b/c has 3 statics, /a/:x/:y has 0
     const result = router.match('GET', '/a/b/c');
     expect(result).not.toBe(null);
@@ -366,8 +366,8 @@ describe('Router', () => {
   // M22 coverage — tie-break: same statics, earliest registration wins
   it('tie-break: same statics → earliest registration wins', () => {
     const router = new Router();
-    router.get('/a/:x', () => ({ __handlerResult: true } as never));
-    router.get('/a/:y', () => ({ __handlerResult: true } as never));
+    router.get('/a/:x', () => ({ __handlerResult: true }) as never);
+    router.get('/a/:y', () => ({ __handlerResult: true }) as never);
     const result = router.match('GET', '/a/123');
     expect(result).not.toBe(null);
     expect(result?.params).toEqual({ x: '123' });
@@ -376,7 +376,7 @@ describe('Router', () => {
   // M22 coverage — statics counting for param segments
   it('staticSegmentCount returns 0 for all-param pattern', () => {
     const router = new Router();
-    router.get('/:a/:b/:c', () => ({ __handlerResult: true } as never));
+    router.get('/:a/:b/:c', () => ({ __handlerResult: true }) as never);
     const all = router.getAll();
     expect(all[0].statics).toBe(0);
   });
@@ -385,7 +385,7 @@ describe('Router', () => {
   it('GroupRouter resolves "/" path inside group to bare prefix', () => {
     const router = new Router();
     router.group('/prefix', (r) => {
-      r.get('/', () => ({ __handlerResult: true } as never));
+      r.get('/', () => ({ __handlerResult: true }) as never);
     });
     const result = router.match('GET', '/prefix');
     expect(result).not.toBe(null);

@@ -122,9 +122,7 @@ export function createStaticAssetHandler(options: {
     try {
       decodedPath = decodeURIComponent(ctx.request.path);
     } catch {
-      return ctx.response.status(400).send(
-        new TextEncoder().encode('Bad Request'),
-      );
+      return ctx.response.status(400).send(new TextEncoder().encode('Bad Request'));
     }
 
     // Strip the URL prefix to get the relative file path.
@@ -178,9 +176,7 @@ export function createPublicFileHandler(options: {
     try {
       decodedPath = decodeURIComponent(ctx.request.path);
     } catch {
-      return ctx.response.status(400).send(
-        new TextEncoder().encode('Bad Request'),
-      );
+      return ctx.response.status(400).send(new TextEncoder().encode('Bad Request'));
     }
 
     // The bare root is not a file; let SSR render whatever it maps to.

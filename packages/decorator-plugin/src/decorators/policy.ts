@@ -43,12 +43,12 @@ export interface AbilityOptions {
  * @typeParam C - The policy class
  * @since 0.9.0
  */
-export type PolicyClassAbility<C extends Constructor> =
-  & {
-    [K in keyof InstanceType<C>]: InstanceType<C>[K] extends (...args: never[]) => unknown ? K
-      : never;
-  }[keyof InstanceType<C>]
-  & string;
+export type PolicyClassAbility<C extends Constructor> = {
+  [K in keyof InstanceType<C>]: InstanceType<C>[K] extends (...args: never[]) => unknown
+    ? K
+    : never;
+}[keyof InstanceType<C>] &
+  string;
 
 /**
  * The target type a policy class's ability method receives, read off its
@@ -59,9 +59,12 @@ export type PolicyClassAbility<C extends Constructor> =
  * @typeParam K - The ability method name
  * @since 0.9.0
  */
-export type PolicyClassTarget<C extends Constructor, K extends keyof InstanceType<C>> =
-  InstanceType<C>[K] extends (principal: never, target: infer T) => unknown ? Exclude<T, undefined>
-    : unknown;
+export type PolicyClassTarget<
+  C extends Constructor,
+  K extends keyof InstanceType<C>,
+> = InstanceType<C>[K] extends (principal: never, target: infer T) => unknown
+  ? Exclude<T, undefined>
+  : unknown;
 
 /**
  * Marks a class as an authorization policy named `name`.

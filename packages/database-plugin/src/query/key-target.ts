@@ -27,9 +27,7 @@ import type { EntityKey } from '@setu-ts/common';
  * @returns The normalised column list
  * @since 0.2.0
  */
-export function resolveKeyColumns(
-  primaryKey: string | readonly string[],
-): readonly string[] {
+export function resolveKeyColumns(primaryKey: string | readonly string[]): readonly string[] {
   if (Array.isArray(primaryKey)) {
     // An EMPTY list is refused here rather than at the first query. It passes
     // every downstream shape check while producing no predicates at all, so a

@@ -158,16 +158,13 @@ describe('DatabaseService', () => {
 
     it('throws when service is closed', async () => {
       await service.close();
-      await expect(
-        service.transaction(async () => 'no'),
-      ).rejects.toThrow();
+      await expect(service.transaction(async () => 'no')).rejects.toThrow();
     });
 
     it('uses one Drizzle transaction for repositories and native access', async () => {
       const fakeDb = createFakeDrizzleInstance();
-      const database = createDrizzleDatabase(
-        fakeDb,
-        (database, work) => database.transaction(work),
+      const database = createDrizzleDatabase(fakeDb, (database, work) =>
+        database.transaction(work),
       );
       const drizzleAdapter = new DrizzleAdapter({
         drizzleInstance: database,
@@ -263,12 +260,7 @@ describe('DatabaseService', () => {
           },
         };
       };
-      const silentService = new DatabaseService(
-        silentAdapter,
-        silentCreateDs,
-        'memory',
-        {},
-      );
+      const silentService = new DatabaseService(silentAdapter, silentCreateDs, 'memory', {});
 
       const repo = silentService.getRepository('User');
       await repo.create({ name: 'Alice' });
@@ -451,9 +443,7 @@ describe('DatabaseService', () => {
       await expect(repo.findPage({ orderBy: { n: 'asc' } })).rejects.toThrow(
         UnsupportedQueryFeatureError,
       );
-      await expect(repo.findPage({ orderBy: { n: 'asc' } })).rejects.toThrow(
-        'no findPage member',
-      );
+      await expect(repo.findPage({ orderBy: { n: 'asc' } })).rejects.toThrow('no findPage member');
     });
   });
 });

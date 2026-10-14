@@ -289,9 +289,13 @@ describe('REAL NATS JetStream (guarded on NATS_URL)', { skip: natsUrl === undefi
 
       const orders: unknown[] = [];
       const payments: unknown[] = [];
-      await broker!.subscribe(ordersTopic, (m) => {
-        orders.push(m);
-      }, { queue: 'orders.eu' });
+      await broker!.subscribe(
+        ordersTopic,
+        (m) => {
+          orders.push(m);
+        },
+        { queue: 'orders.eu' },
+      );
       await broker!.subscribe(paymentsTopic, (m) => {
         payments.push(m);
       });
@@ -363,14 +367,20 @@ describe('REAL NATS JetStream (guarded on NATS_URL)', { skip: natsUrl === undefi
       await appA.start();
       await appB.start();
       const received: unknown[] = [];
-      await first!.subscribe(topic, (m) => {
-        received.push(m);
-      }, { queue: 'orders.eu' });
-
-      const err = await second!.subscribe(topic, () => {}, { queue: 'orders_2eeu' }).then(
-        () => null,
-        (e: unknown) => e,
+      await first!.subscribe(
+        topic,
+        (m) => {
+          received.push(m);
+        },
+        { queue: 'orders.eu' },
       );
+
+      const err = await second!
+        .subscribe(topic, () => {}, { queue: 'orders_2eeu' })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
       expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
       expect((err as NatsConsumerNameCollisionError).existingQueue).toBe('orders.eu');
 
@@ -446,10 +456,12 @@ describe('REAL NATS JetStream (guarded on NATS_URL)', { skip: natsUrl === undefi
     const jsm = await jsmConn.jetstreamManager();
     try {
       await app.start();
-      await expect(broker!.publish(topic, { id: 1 }, { headers: { 'Nats-Rollup': 'sub' } }))
-        .rejects.toThrow(RangeError);
-      await expect(broker!.publish(topic, { id: 1 }, { headers: { 'nats-rollup': 'sub' } }))
-        .rejects.toThrow(RangeError);
+      await expect(
+        broker!.publish(topic, { id: 1 }, { headers: { 'Nats-Rollup': 'sub' } }),
+      ).rejects.toThrow(RangeError);
+      await expect(
+        broker!.publish(topic, { id: 1 }, { headers: { 'nats-rollup': 'sub' } }),
+      ).rejects.toThrow(RangeError);
       // Nothing was appended: the server never saw the refused publish.
       expect((await jsm.streams.info(streamName)).state.messages).toBe(0);
     } finally {

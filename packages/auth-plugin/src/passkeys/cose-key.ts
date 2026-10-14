@@ -100,7 +100,7 @@ export function isOnP256(xBytes: Uint8Array, yBytes: Uint8Array): boolean {
     return false;
   }
   const left = (y * y) % P256_P;
-  const right = (((x * x % P256_P) * x - 3n * x + P256_B) % P256_P + P256_P) % P256_P;
+  const right = (((((x * x) % P256_P) * x - 3n * x + P256_B) % P256_P) + P256_P) % P256_P;
   return left === right;
 }
 
@@ -125,10 +125,7 @@ function isInt(value: CborValue | null, expected: number): boolean {
  * @param algorithm - The algorithm the credential declared
  * @returns The JWK, or `null` when the key is not one this verifier accepts
  */
-export function coseKeyToJwk(
-  cose: CborValue,
-  algorithm: PasskeyAlgorithm,
-): JsonWebKey | null {
+export function coseKeyToJwk(cose: CborValue, algorithm: PasskeyAlgorithm): JsonWebKey | null {
   if (!(cose instanceof Map)) {
     return null;
   }

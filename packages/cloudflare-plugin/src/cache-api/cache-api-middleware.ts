@@ -364,9 +364,8 @@ function buildStoredResponse(
   // ArrayBuffer-backed view: `snapshot().body` may be backed by a
   // SharedArrayBuffer, which `BodyInit` does not accept, and the stored copy
   // outlives the request that produced it either way.
-  const init: BodyInit | null = body === null
-    ? null
-    : (typeof body === 'string' ? body : new Uint8Array(body));
+  const init: BodyInit | null =
+    body === null ? null : typeof body === 'string' ? body : new Uint8Array(body);
 
   return new Response(init, { status, headers });
 }
@@ -413,8 +412,10 @@ async function store(
 function reportWriteFailure(ctx: IRequestContext, key: string, error: unknown): void {
   if (!ctx.services.has(CAPABILITIES.LOGGER)) return;
 
-  ctx.services.get<ILogger>(CAPABILITIES.LOGGER).error(
-    'cloudflare-cache-api: edge cache write failed, response served uncached',
-    { key, error: error instanceof Error ? error.message : String(error) },
-  );
+  ctx.services
+    .get<ILogger>(CAPABILITIES.LOGGER)
+    .error('cloudflare-cache-api: edge cache write failed, response served uncached', {
+      key,
+      error: error instanceof Error ? error.message : String(error),
+    });
 }

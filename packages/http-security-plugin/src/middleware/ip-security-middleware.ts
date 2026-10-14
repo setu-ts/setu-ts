@@ -143,16 +143,14 @@ function compileTrustedProxy(entry: string): (candidate: string) => boolean {
     }
     const bits = width.length <= 2 ? Number(width) : Number.NaN;
     const networkValue = ipv4ToNumber(network);
-    if (
-      networkValue !== null && Number.isInteger(bits) && bits >= 0 && bits <= 32
-    ) {
+    if (networkValue !== null && Number.isInteger(bits) && bits >= 0 && bits <= 32) {
       // `>>> 0` keeps the mask unsigned; a /0 shift of 32 is undefined in JS,
       // so it is handled as "match everything".
-      const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0;
+      const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
       const base = (networkValue & mask) >>> 0;
       return (candidate: string): boolean => {
         const value = ipv4ToNumber(candidate);
-        return value !== null && ((value & mask) >>> 0) === base;
+        return value !== null && (value & mask) >>> 0 === base;
       };
     }
   }
@@ -213,10 +211,7 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
   // `'anonymous'` bucket with no signal anywhere. `Number()` of an unset
   // environment variable is `NaN`, so this is a plausible input rather than a
   // hypothetical one.
-  if (
-    proxyHops !== undefined &&
-    (!Number.isSafeInteger(proxyHops) || proxyHops < 0)
-  ) {
+  if (proxyHops !== undefined && (!Number.isSafeInteger(proxyHops) || proxyHops < 0)) {
     throw new Error(
       `ipSecurityMiddleware: proxyHops must be a non-negative integer, ` +
         `received ${String(proxyHops)}. 0 selects the rightmost entry.`,
@@ -226,10 +221,7 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
   // Compiled once at registration, never per request.
   const trustedMatchers = trustedProxies?.map(compileTrustedProxy);
 
-  return async (
-    ctx: IRequestContext,
-    next: () => Promise<void>,
-  ): Promise<void> => {
+  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     let ip: string | undefined;
 
     if (trustProxy) {

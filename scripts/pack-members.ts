@@ -62,7 +62,7 @@ async function filesUnder(dir: string, base: string): Promise<string[]> {
   }
   for (const entry of entries) {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...await filesUnder(path, base));
+    if (entry.isDirectory()) out.push(...(await filesUnder(path, base)));
     else if (entry.isFile()) out.push(relative(base, path));
   }
   return out.sort();
@@ -84,7 +84,7 @@ export async function packCacheKey(
 ): Promise<string> {
   const files: string[] = [...ROOT_INPUTS, relative(root, self)];
   for (const member of members) {
-    files.push(...await filesUnder(join(root, member, 'src'), root));
+    files.push(...(await filesUnder(join(root, member, 'src'), root)));
     // Every file a tarball carries besides `dist/` (built from the inputs above)
     // and `src/`: an edited README or licence is a different tarball.
     files.push(
@@ -132,9 +132,10 @@ export function packedEntrypoints(manifest: Readonly<Record<string, unknown>>): 
 async function tarballFiles(tarball: string): Promise<Set<string>> {
   const { stdout } = await run('tar', ['-tzf', tarball], { maxBuffer: 64 * 1024 * 1024 });
   return new Set(
-    stdout.split('\n').filter((line) => line.startsWith('package/')).map((line) =>
-      line.slice('package/'.length)
-    ),
+    stdout
+      .split('\n')
+      .filter((line) => line.startsWith('package/'))
+      .map((line) => line.slice('package/'.length)),
   );
 }
 
@@ -205,8 +206,8 @@ export async function packMembers(
   }
 
   const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ??
-    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const host = deps.hostname ?? hostname();
   await fs.mkdir(join(root, '.tmp', 'overlay'), { recursive: true });
   const lock = join(root, '.tmp', 'overlay', 'build.lock');
@@ -430,7 +431,11 @@ async function build(
         ['pack', '--ignore-scripts', '--pack-destination', staging],
         { cwd: join(root, member), maxBuffer: 16 * 1024 * 1024 },
       );
-      const tarballPath = stdout.trim().split('\n').reverse().find((line) => line.endsWith('.tgz'));
+      const tarballPath = stdout
+        .trim()
+        .split('\n')
+        .reverse()
+        .find((line) => line.endsWith('.tgz'));
       if (tarballPath === undefined) {
         refusals.push(`${member}: pnpm pack reported no tarball`);
         continue;

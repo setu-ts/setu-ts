@@ -36,8 +36,11 @@ if (import.meta.main) {
   });
   if (coverage) {
     console.log(
-      ['| File | Branch % | Function % | Line % |', '| --- | --- | --- | --- |', ...result.rows]
-        .join('\n'),
+      [
+        '| File | Branch % | Function % | Line % |',
+        '| --- | --- | --- | --- |',
+        ...result.rows,
+      ].join('\n'),
     );
   }
   Deno.exit(result.code);

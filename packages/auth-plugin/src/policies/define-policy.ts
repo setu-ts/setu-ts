@@ -31,7 +31,7 @@ function anonymousCheckOf(value: unknown): ((...args: never[]) => unknown) | und
     return undefined;
   }
   const check = arm.check;
-  return typeof check === 'function' ? check as (...args: never[]) => unknown : undefined;
+  return typeof check === 'function' ? (check as (...args: never[]) => unknown) : undefined;
 }
 
 /**
@@ -120,11 +120,13 @@ export function validatePolicyDefinition(definition: unknown): PolicyDefinition 
   }
   const frozenAbilities = Object.freeze(copy);
   return Object.freeze(
-    before === undefined ? { name, abilities: frozenAbilities } : {
-      name,
-      abilities: frozenAbilities,
-      before: before as NonNullable<PolicyDefinition['before']>,
-    },
+    before === undefined
+      ? { name, abilities: frozenAbilities }
+      : {
+          name,
+          abilities: frozenAbilities,
+          before: before as NonNullable<PolicyDefinition['before']>,
+        },
   );
 }
 

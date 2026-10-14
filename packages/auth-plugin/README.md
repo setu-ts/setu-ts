@@ -29,8 +29,7 @@ The authentication capability is named `CAPABILITIES.AUTH` (value `'authenticati
 
 Without `rbac`, the four authorization guards answer **`501 Not Implemented`** rather than throwing
 — see [Guards](#guards). A configured policy that the caller fails answers
-`403 Insufficient
-privileges`; it never names the required role or permission.
+`403 Insufficient privileges`; it never names the required role or permission.
 
 > **Refresh tokens and rate limiting ship in this package.** `IJwtService` itself exposes only
 > `sign` / `verify` / `decode`, but do not hand-roll a refresh token as `sign({ expiresIn: '7d' })`
@@ -48,28 +47,30 @@ deno add @setu-ts/auth-plugin
 ```typescript
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
-app.register(AuthPlugin({
-  jwt: {
-    secret: config.get('JWT_SECRET'), // HS256; use privateKey/publicKey PEMs for RS256
-    audience: 'my-app-users', // expected `aud`, enforced on verify
-    issuer: 'my-app', // expected `iss`, enforced on verify
-  },
-  apiKey: {
-    header: 'X-API-Key',
-    validate: (key) => apiKeyService.validate(key), // (key) => Promise<IPrincipal | null>
-  },
-  local: {
-    // (identifier, secret) => Promise<IPrincipal | null>
-    verify: (identifier, secret) => userService.checkPassword(identifier, secret),
-  },
-  rbac: {
-    roles: {
-      admin: { permissions: ['*'], inherits: ['manager'] },
-      manager: { permissions: ['users:read', 'users:write'], inherits: ['user'] },
-      user: { permissions: ['profile:read', 'profile:write'] },
+app.register(
+  AuthPlugin({
+    jwt: {
+      secret: config.get('JWT_SECRET'), // HS256; use privateKey/publicKey PEMs for RS256
+      audience: 'my-app-users', // expected `aud`, enforced on verify
+      issuer: 'my-app', // expected `iss`, enforced on verify
     },
-  },
-}));
+    apiKey: {
+      header: 'X-API-Key',
+      validate: (key) => apiKeyService.validate(key), // (key) => Promise<IPrincipal | null>
+    },
+    local: {
+      // (identifier, secret) => Promise<IPrincipal | null>
+      verify: (identifier, secret) => userService.checkPassword(identifier, secret),
+    },
+    rbac: {
+      roles: {
+        admin: { permissions: ['*'], inherits: ['manager'] },
+        manager: { permissions: ['users:read', 'users:write'], inherits: ['user'] },
+        user: { permissions: ['profile:read', 'profile:write'] },
+      },
+    },
+  }),
+);
 
 // AuthPlugin registers passive authentication globally at priority 300.
 ```
@@ -236,10 +237,12 @@ const app = createApplication({
         },
       },
       scopedRbac: {
-        sources: [{
-          kind: 'static',
-          grants: [{ subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } }],
-        }],
+        sources: [
+          {
+            kind: 'static',
+            grants: [{ subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } }],
+          },
+        ],
         // A child tenant inherits its parent's grants.
         inheritsFrom: (scope) => (scope.id === 'acme-eu' ? [{ type: 'tenant', id: 'acme' }] : []),
       },
@@ -412,20 +415,22 @@ whose `iss` names a configured provider is recognized by the issuer strategy nex
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
 AuthPlugin({
-  issuers: [{
-    name: 'keycloak',
-    issuer: 'https://id.example.com/realms/acme',
-    audience: 'orders-api',
-    keys: { discovery: true },
-    toPrincipal: (claims) =>
-      typeof claims.sub === 'string'
-        ? {
-          // Namespaced: `sub` is unique only within its issuer.
-          id: `${claims.iss}|${claims.sub}`,
-          roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [],
-        }
-        : null,
-  }],
+  issuers: [
+    {
+      name: 'keycloak',
+      issuer: 'https://id.example.com/realms/acme',
+      audience: 'orders-api',
+      keys: { discovery: true },
+      toPrincipal: (claims) =>
+        typeof claims.sub === 'string'
+          ? {
+              // Namespaced: `sub` is unique only within its issuer.
+              id: `${claims.iss}|${claims.sub}`,
+              roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [],
+            }
+          : null,
+    },
+  ],
 });
 ```
 
@@ -602,7 +607,8 @@ app.router.get('/account', (ctx) =>
   ctx.response.html(
     `<form method="post" action="/auth/logout">${csrfTokenField(ctx)}` +
       `<button>Sign out</button></form>`,
-  ));
+  ),
+);
 ```
 
 - **What sign-out revokes depends on the session strategy.** With `SessionPlugin({ store })` the
@@ -642,23 +648,25 @@ const app = createApplication({
     SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
     AuthPlugin({
       signIn: {
-        providers: [{
-          kind: 'saml',
-          name: 'corp',
-          entityId: 'https://app.example.com/saml',
-          idp: {
-            entityId: 'https://sts.example.com/acme',
-            ssoUrl: 'https://sts.example.com/acme/saml2',
-            // Several certificates let a signing-key rotation overlap.
-            certs: [idpSigningCert],
+        providers: [
+          {
+            kind: 'saml',
+            name: 'corp',
+            entityId: 'https://app.example.com/saml',
+            idp: {
+              entityId: 'https://sts.example.com/acme',
+              ssoUrl: 'https://sts.example.com/acme/saml2',
+              // Several certificates let a signing-key rotation overlap.
+              certs: [idpSigningCert],
+            },
+            acsUrl: 'https://app.example.com/auth/corp/acs',
+            // A NameID is unique only within its issuer: namespace it.
+            toPrincipal: (profile) => ({
+              id: `corp|${profile.nameID}`,
+              claims: { email: profile.attributes.email },
+            }),
           },
-          acsUrl: 'https://app.example.com/auth/corp/acs',
-          // A NameID is unique only within its issuer: namespace it.
-          toPrincipal: (profile) => ({
-            id: `corp|${profile.nameID}`,
-            claims: { email: profile.attributes.email },
-          }),
-        }],
+        ],
       },
     }),
   ],
@@ -1206,11 +1214,13 @@ import {
 
 // Keyed by the authenticated user. Absent a principal AND a client IP, every
 // caller shares ONE 'anonymous' bucket — see the key-resolution order above.
-app.middleware.add(rateLimitMiddleware({
-  windowMs: 60_000,
-  max: 100,
-  exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
-}));
+app.middleware.add(
+  rateLimitMiddleware({
+    windowMs: 60_000,
+    max: 100,
+    exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
+  }),
+);
 
 // Redis-backed, keyed by authenticated user
 rateLimitMiddleware({

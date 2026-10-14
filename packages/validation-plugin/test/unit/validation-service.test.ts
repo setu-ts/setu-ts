@@ -58,9 +58,7 @@ describe('ValidationService — validate', () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error).toEqual([
-        { path: 'name', message: 'Required', code: 'invalid_type' },
-      ]);
+      expect(result.error).toEqual([{ path: 'name', message: 'Required', code: 'invalid_type' }]);
     }
   });
 
@@ -209,8 +207,9 @@ describe('ValidationService — real Zod schema', () => {
     it('returns non-object schemas unchanged', () => {
       // A primitive or null can carry no `.strip()` / `.strict()`.
       expect(applySchemaPolicy(null, { whitelist: true })).toBeNull();
-      expect(applySchemaPolicy('not-a-schema', { forbidNonWhitelisted: true }))
-        .toBe('not-a-schema');
+      expect(applySchemaPolicy('not-a-schema', { forbidNonWhitelisted: true })).toBe(
+        'not-a-schema',
+      );
       expect(applySchemaPolicy(42, { whitelist: true })).toBe(42);
     });
 

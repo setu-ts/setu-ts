@@ -63,9 +63,9 @@ describe('MemoryAdapter — composite keys', () => {
       const ds = adapter.createDataSource('User', ['tenantId', 'userId']);
       await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
 
-      await expect(
-        ds.update({ tenantId: 't2', userId: 'u9' }, { name: 'X' }),
-      ).rejects.toThrow('not found');
+      await expect(ds.update({ tenantId: 't2', userId: 'u9' }, { name: 'X' })).rejects.toThrow(
+        'not found',
+      );
     });
 
     it('deleteEntity removes on composite key', async () => {
@@ -436,12 +436,16 @@ describe('memory findPage applies the caller where (outside-diff review, M79)', 
 
 describe('overlay keys are collision-free (outside-diff review, M79)', () => {
   /** Every row currently visible, whether inside a transaction or not. */
-  async function visible(
-    source: { findAll: (q: never) => Promise<Record<string, unknown>[]> },
-  ): Promise<Record<string, unknown>[]> {
-    return await source.findAll(
-      { where: {}, orderBy: {}, limit: -1, offset: 0, select: [] } as never,
-    );
+  async function visible(source: {
+    findAll: (q: never) => Promise<Record<string, unknown>[]>;
+  }): Promise<Record<string, unknown>[]> {
+    return await source.findAll({
+      where: {},
+      orderBy: {},
+      limit: -1,
+      offset: 0,
+      select: [],
+    } as never);
   }
 
   it('distinguishes a string key from the numerically equal number key', async () => {
@@ -517,12 +521,16 @@ describe('overlay keys are collision-free (outside-diff review, M79)', () => {
 
 describe('overlay mutations reach rows created in the same transaction (PR #218 review)', () => {
   /** Every row currently visible through the given source. */
-  async function tags(
-    source: { findAll: (q: never) => Promise<Record<string, unknown>[]> },
-  ): Promise<unknown[]> {
-    const found = await source.findAll(
-      { where: {}, orderBy: {}, limit: -1, offset: 0, select: [] } as never,
-    );
+  async function tags(source: {
+    findAll: (q: never) => Promise<Record<string, unknown>[]>;
+  }): Promise<unknown[]> {
+    const found = await source.findAll({
+      where: {},
+      orderBy: {},
+      limit: -1,
+      offset: 0,
+      select: [],
+    } as never);
     return found.map((r) => r.tag);
   }
 

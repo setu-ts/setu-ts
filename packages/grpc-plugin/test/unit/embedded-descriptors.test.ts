@@ -81,12 +81,10 @@ describe('EmbeddedDescriptors — revived with the real runtime', { skip: !runti
   it('both descriptor sets are self-contained (no imports to resolve)', () => {
     // This is why the single-argument createFileRegistry overload suffices and
     // no well-known-type files have to be bundled.
-    for (
-      const [base64, name] of [
-        [healthBase64, 'grpc.health.v1.Health'],
-        [reflectionBase64, 'grpc.reflection.v1.ServerReflection'],
-      ] as const
-    ) {
+    for (const [base64, name] of [
+      [healthBase64, 'grpc.health.v1.Health'],
+      [reflectionBase64, 'grpc.reflection.v1.ServerReflection'],
+    ] as const) {
       const file = serviceFrom(base64, name).file;
       expect(file).toBeDefined();
       expect(file!.dependencies).toEqual([]);

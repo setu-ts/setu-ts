@@ -77,16 +77,13 @@ async function listScopePackages(): Promise<readonly ScopePackage[]> {
   let page = 1;
 
   while (true) {
-    const response = await fetch(
-      `${API}/scopes/${SCOPE}/packages?limit=100&page=${page}`,
-      { headers: token ? { 'Authorization': `Bearer ${token}` } : {} },
-    );
+    const response = await fetch(`${API}/scopes/${SCOPE}/packages?limit=100&page=${page}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     if (!response.ok) {
-      throw new Error(
-        `Could not list @${SCOPE}: ${response.status} ${await response.text()}`,
-      );
+      throw new Error(`Could not list @${SCOPE}: ${response.status} ${await response.text()}`);
     }
-    const body = await response.json() as { items?: ScopePackage[] };
+    const body = (await response.json()) as { items?: ScopePackage[] };
     const items = body.items ?? [];
     collected.push(...items);
     if (items.length < 100) return collected;
@@ -132,7 +129,7 @@ for (const [index, pkg] of packages.entries()) {
   const response = await fetch(`${API}/scopes/${SCOPE}/packages/${pkg.name}`, {
     method: 'PATCH',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ isArchived: true }),

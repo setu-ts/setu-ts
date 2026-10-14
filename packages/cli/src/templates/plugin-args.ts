@@ -98,7 +98,7 @@ export function rewritePluginArgs(
   return {
     ...host,
     plugins: host.plugins.map((wiring) =>
-      wiring.pkg === pkg ? { ...wiring, args: wrapPluginArgs(render(connection)) } : wiring
+      wiring.pkg === pkg ? { ...wiring, args: wrapPluginArgs(render(connection)) } : wiring,
     ),
   };
 }

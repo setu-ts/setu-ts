@@ -27,9 +27,8 @@ export function StaticPlugin(options: StaticPluginOptions): IPlugin {
       const { root, urlPrefix = '/' } = options;
 
       // Normalize prefix: ensure it starts with / and has no trailing /
-      const normalizedPrefix = urlPrefix === '/'
-        ? '/'
-        : `/${urlPrefix.replace(/^\/+/, '').replace(/\/+$/, '')}`;
+      const normalizedPrefix =
+        urlPrefix === '/' ? '/' : `/${urlPrefix.replace(/^\/+/, '').replace(/\/+$/, '')}`;
 
       // Create the service with the real filesystem
       const serviceOptions: StaticPluginOptions = {

@@ -75,7 +75,7 @@ describe('RuntimePlugin maxBodyBytes (X32-4)', () => {
       expect(response.status).toBe(413);
       expect(response.headers.get('content-type')).toContain('application/problem+json');
 
-      const problem = await response.json() as Record<string, unknown>;
+      const problem = (await response.json()) as Record<string, unknown>;
       expect(problem.status).toBe(413);
       expect(problem.title).toBe('Payload Too Large');
       expect(problem.detail).toBe('Request body exceeds the maximum of 64 bytes.');

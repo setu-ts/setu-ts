@@ -40,14 +40,15 @@ describe('cf-http-adapter | setHandler/fetch', () => {
     // way, which is why the async arm below could not cover it.
     const adapter = new CloudflareWorkersHttpAdapter();
 
-    adapter.setHandler((_request) =>
-      ({
-        snapshot: () => ({
-          status: 201,
-          headers: new Headers({ 'x-sync': 'yes' }),
-          body: 'sync',
-        }),
-      }) as any
+    adapter.setHandler(
+      (_request) =>
+        ({
+          snapshot: () => ({
+            status: 201,
+            headers: new Headers({ 'x-sync': 'yes' }),
+            body: 'sync',
+          }),
+        }) as any,
     );
 
     const response = adapter.fetch(new Request('https://example.com/'));
@@ -61,10 +62,11 @@ describe('cf-http-adapter | setHandler/fetch', () => {
     const adapter = new CloudflareWorkersHttpAdapter();
 
     // deno-lint-ignore require-await
-    adapter.setHandler(async (_request) =>
-      ({
-        snapshot: () => ({ status: 202, headers: new Headers(), body: 'async' }),
-      }) as any
+    adapter.setHandler(
+      async (_request) =>
+        ({
+          snapshot: () => ({ status: 202, headers: new Headers(), body: 'async' }),
+        }) as any,
     );
 
     const response = adapter.fetch(new Request('https://example.com/'));
@@ -87,9 +89,7 @@ describe('cf-http-adapter | setHandler/fetch', () => {
 describe('cf-http-adapter | listen', () => {
   it('throws with CF Workers message', () => {
     const adapter = new CloudflareWorkersHttpAdapter();
-    expect(() => adapter.listen(8080)).toThrow(
-      'Cloudflare Workers has no listen(port) model',
-    );
+    expect(() => adapter.listen(8080)).toThrow('Cloudflare Workers has no listen(port) model');
   });
 });
 

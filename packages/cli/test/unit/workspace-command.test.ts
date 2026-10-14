@@ -60,7 +60,10 @@ describe('runWorkspaceCommand', () => {
         runtime: 'deno',
         basePort: 3000,
         transport: 'http',
-        members: [{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }],
+        members: [
+          { name: 'orders', port: 3000 },
+          { name: 'billing', port: 3001 },
+        ],
       }),
       '/ws/apps/orders/.setu-member': '',
       '/ws/apps/billing/.setu-member': '',

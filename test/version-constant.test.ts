@@ -21,7 +21,10 @@ async function members(): Promise<string[]> {
 async function membersWithConstant(): Promise<string[]> {
   const found: string[] = [];
   for (const dir of await members()) {
-    const exists = await Deno.stat(`${dir}/src/version.ts`).then(() => true, () => false);
+    const exists = await Deno.stat(`${dir}/src/version.ts`).then(
+      () => true,
+      () => false,
+    );
     if (exists) found.push(dir);
   }
   return found;
@@ -36,7 +39,7 @@ describe('src/version.ts agrees with deno.json and package.json', () => {
   it('every VERSION equals both manifest versions', async () => {
     const disagreements: string[] = [];
     for (const dir of await membersWithConstant()) {
-      const { VERSION } = await import(`../${dir}/src/version.ts`) as { VERSION: string };
+      const { VERSION } = (await import(`../${dir}/src/version.ts`)) as { VERSION: string };
       const deno = JSON.parse(await Deno.readTextFile(`${dir}/deno.json`)).version;
       const npm = JSON.parse(await Deno.readTextFile(`${dir}/package.json`)).version;
       if (VERSION !== deno || VERSION !== npm) {

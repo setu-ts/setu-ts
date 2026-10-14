@@ -243,10 +243,7 @@ export interface SlackChannelConfig {
  * @since 0.1.0
  */
 export type ChannelConfig =
-  | MailChannelConfig
-  | TwilioChannelConfig
-  | FcmChannelConfig
-  | SlackChannelConfig;
+  MailChannelConfig | TwilioChannelConfig | FcmChannelConfig | SlackChannelConfig;
 
 /**
  * Provider type selector — the `ChannelConfig` discriminant.

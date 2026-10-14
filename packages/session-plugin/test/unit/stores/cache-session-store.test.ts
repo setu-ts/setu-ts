@@ -101,11 +101,7 @@ describe('CacheSessionStore', () => {
     await store.read('s-1');
     await store.destroy('s-1');
 
-    expect(cache.calls).toEqual([
-      'set:app:sess:s-1:1',
-      'get:app:sess:s-1',
-      'delete:app:sess:s-1',
-    ]);
+    expect(cache.calls).toEqual(['set:app:sess:s-1:1', 'get:app:sess:s-1', 'delete:app:sess:s-1']);
   });
 
   it('returns null for an absent session', async () => {

@@ -116,7 +116,10 @@ describe('formatPlannedFiles', () => {
   it('formats with the scaffold options before a project exists', async () => {
     const fake = fakePrettier();
     const plan = await formatPlannedFiles(
-      [{ path: 'a.ts', contents: 'a' }, { path: '.env', contents: 'E=1' }],
+      [
+        { path: 'a.ts', contents: 'a' },
+        { path: '.env', contents: 'E=1' },
+      ],
       undefined,
       fake.load,
     );
@@ -161,7 +164,10 @@ describe('formatPlannedFiles', () => {
       '/shared/proj/b.ts': { file: '/shared/proj-other/.prettierrc', options: { semi: false } },
     });
     await formatPlannedFiles(
-      [{ path: 'a.ts', contents: 'a' }, { path: 'b.ts', contents: 'b' }],
+      [
+        { path: 'a.ts', contents: 'a' },
+        { path: 'b.ts', contents: 'b' },
+      ],
       '/shared/proj',
       fake.load,
     );
@@ -179,13 +185,14 @@ describe('formatPlannedFiles', () => {
   });
 
   it('keeps a file Prettier cannot parse as rendered and reports its first line', async () => {
-    const fake = fakePrettier(
-      {},
-      (source) =>
-        source === 'bad' ? new SyntaxError('Unexpected token (1:1)\n> 1 | bad') : undefined,
+    const fake = fakePrettier({}, (source) =>
+      source === 'bad' ? new SyntaxError('Unexpected token (1:1)\n> 1 | bad') : undefined,
     );
     const plan = await formatPlannedFiles(
-      [{ path: 'bad.ts', contents: 'bad' }, { path: 'ok.ts', contents: 'ok' }],
+      [
+        { path: 'bad.ts', contents: 'bad' },
+        { path: 'ok.ts', contents: 'ok' },
+      ],
       undefined,
       fake.load,
     );
@@ -215,7 +222,10 @@ describe('formatForTarget', () => {
     const fake = fakePrettier({}, (source) => (source === 'bad' ? new Error('nope') : undefined));
     const lines: string[] = [];
     const out = await formatForTarget(
-      [{ path: 'bad.ts', contents: 'bad' }, { path: 'ok.ts', contents: 'ok' }],
+      [
+        { path: 'bad.ts', contents: 'bad' },
+        { path: 'ok.ts', contents: 'ok' },
+      ],
       'node',
       undefined,
       (line) => lines.push(line),
@@ -235,7 +245,8 @@ describe('the real Prettier', () => {
     const outer = await nodeFs.mkdtemp(join(tmpdir(), 'setu-prettier-planted-'));
     const project = join(outer, 'proj');
     const canary = join(outer, 'CANARY');
-    const config = `import { writeFileSync } from 'node:fs';\n` +
+    const config =
+      `import { writeFileSync } from 'node:fs';\n` +
       `writeFileSync(${JSON.stringify(canary)}, 'ran');\n` +
       'export default { semi: false };\n';
     try {
@@ -257,9 +268,7 @@ describe('the real Prettier', () => {
   });
 
   it('formats with the scaffold options', async () => {
-    const plan = await formatPlannedFiles([
-      { path: 'a.ts', contents: 'const a = "x"' },
-    ]);
+    const plan = await formatPlannedFiles([{ path: 'a.ts', contents: 'const a = "x"' }]);
     expect(plan.files[0]!.contents).toBe("const a = 'x';\n");
   });
 

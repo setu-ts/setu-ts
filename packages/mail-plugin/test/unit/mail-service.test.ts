@@ -78,9 +78,9 @@ describe('MailService.sendTemplate', () => {
     const engine = new TemplateEngine({ welcome: { text: 'Hi {{ name }}' } });
     const svc = new MailService(provider, engine, { defaultFrom: 'x@x.com' });
 
-    await expect(
-      svc.sendTemplate('welcome', { to: 'u@x.com', subject: 'W' }, {}),
-    ).rejects.toThrow('Unknown template variable');
+    await expect(svc.sendTemplate('welcome', { to: 'u@x.com', subject: 'W' }, {})).rejects.toThrow(
+      'Unknown template variable',
+    );
     expect(provider.sent).toHaveLength(0);
   });
 });

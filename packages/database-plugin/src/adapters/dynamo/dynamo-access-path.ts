@@ -112,13 +112,17 @@ export function resolveDynamoAccessPath(
   const path = selectQueryPath(primaryPath, target.indexes, candidates);
   const order = resolveOrderBy(entity, path, query.orderBy);
   const folded = path === undefined ? [] : foldKeyComparisons(path, candidates);
-  const filter = remainingFilter(query, folded.map((entry) => entry.comparison));
+  const filter = remainingFilter(
+    query,
+    folded.map((entry) => entry.comparison),
+  );
   const builder = createDynamoExpressionBuilder();
 
   if (path === undefined) {
-    const filterExpression = filter === undefined
-      ? undefined
-      : translateDynamoFilter(filter, builder, target.dateAttributes);
+    const filterExpression =
+      filter === undefined
+        ? undefined
+        : translateDynamoFilter(filter, builder, target.dateAttributes);
     const projection = buildDynamoProjection(query.select, builder);
     const command: DynamoScanCommandInput = {
       TableName: target.table,
@@ -136,11 +140,12 @@ export function resolveDynamoAccessPath(
   }
 
   const keyCondition = folded.map((entry) =>
-    renderKeyComparison(entry, builder, target.dateAttributes)
+    renderKeyComparison(entry, builder, target.dateAttributes),
   );
-  const filterExpression = filter === undefined
-    ? undefined
-    : translateDynamoFilter(filter, builder, target.dateAttributes);
+  const filterExpression =
+    filter === undefined
+      ? undefined
+      : translateDynamoFilter(filter, builder, target.dateAttributes);
   const projection = buildDynamoProjection(query.select, builder);
   const command: DynamoQueryCommandInput = {
     TableName: target.table,
@@ -155,9 +160,8 @@ export function resolveDynamoAccessPath(
     command,
     commandType: 'Query',
     logPath: path.indexName ?? 'Query',
-    keyColumns: path.sortKey === undefined
-      ? [path.partitionKey]
-      : [path.partitionKey, path.sortKey],
+    keyColumns:
+      path.sortKey === undefined ? [path.partitionKey] : [path.partitionKey, path.sortKey],
     cursorKeyColumns: cursorKeyColumns(path, target.keyColumns),
   };
 }
@@ -173,9 +177,8 @@ function cursorKeyColumns(
   path: DynamoQueryPath,
   tableKeyColumns: readonly string[],
 ): readonly string[] {
-  const pathKeyColumns = path.sortKey === undefined
-    ? [path.partitionKey]
-    : [path.partitionKey, path.sortKey];
+  const pathKeyColumns =
+    path.sortKey === undefined ? [path.partitionKey] : [path.partitionKey, path.sortKey];
   if (path.indexName === undefined) return pathKeyColumns;
   return [
     ...pathKeyColumns,
@@ -225,8 +228,8 @@ function hasPartitionEquality(
   path: DynamoKeySchema,
   comparisons: readonly FilterComparison[],
 ): boolean {
-  return comparisons.some((comparison) =>
-    comparison.operator === 'eq' && comparison.field === path.partitionKey
+  return comparisons.some(
+    (comparison) => comparison.operator === 'eq' && comparison.field === path.partitionKey,
   );
 }
 
@@ -235,18 +238,21 @@ function foldKeyComparisons(
   path: DynamoQueryPath,
   comparisons: readonly FilterComparison[],
 ): readonly KeyComparison[] {
-  const partition = comparisons.find((comparison): comparison is DynamoKeyComparison =>
-    comparison.operator === 'eq' && comparison.field === path.partitionKey
+  const partition = comparisons.find(
+    (comparison): comparison is DynamoKeyComparison =>
+      comparison.operator === 'eq' && comparison.field === path.partitionKey,
   );
   // `selectQueryPath` calls this only after `hasPartitionEquality` succeeds.
   // The defensive guard keeps this helper total if that call order changes.
   if (partition === undefined) return [];
   const sortKey = path.sortKey;
-  const sort = sortKey === undefined
-    ? undefined
-    : comparisons.find((comparison): comparison is DynamoKeyComparison =>
-      comparison.field === sortKey && isKeySortOperator(comparison)
-    );
+  const sort =
+    sortKey === undefined
+      ? undefined
+      : comparisons.find(
+          (comparison): comparison is DynamoKeyComparison =>
+            comparison.field === sortKey && isKeySortOperator(comparison),
+        );
   if (sort === undefined || sortKey === undefined) {
     return [{ comparison: partition, field: path.partitionKey }];
   }
@@ -257,11 +263,14 @@ function foldKeyComparisons(
 }
 
 /** DynamoDB `Query` accepts these portable comparisons on its sort key. */
-function isKeySortOperator(
-  comparison: FilterComparison,
-): comparison is DynamoKeyComparison {
-  return comparison.operator === 'eq' || comparison.operator === 'gt' ||
-    comparison.operator === 'gte' || comparison.operator === 'lt' || comparison.operator === 'lte';
+function isKeySortOperator(comparison: FilterComparison): comparison is DynamoKeyComparison {
+  return (
+    comparison.operator === 'eq' ||
+    comparison.operator === 'gt' ||
+    comparison.operator === 'gte' ||
+    comparison.operator === 'lt' ||
+    comparison.operator === 'lte'
+  );
 }
 
 /** Renders one folded key comparison through the shared alias/value builder. */
@@ -301,9 +310,8 @@ function remainingFilter(
       value,
     }))
     .filter((comparison) => !hasEquivalentComparison(comparison, folded));
-  const filter = query.filter === undefined
-    ? undefined
-    : removeFoldedComparisons(query.filter, foldedSet);
+  const filter =
+    query.filter === undefined ? undefined : removeFoldedComparisons(query.filter, foldedSet);
   const filters = [...where, ...(filter === undefined ? [] : [filter])];
   if (filters.length === 0) return undefined;
   if (filters.length === 1 && filters[0] !== undefined) return filters[0];
@@ -315,9 +323,11 @@ function hasEquivalentComparison(
   comparison: FilterComparison,
   folded: readonly FilterComparison[],
 ): boolean {
-  return folded.some((entry) =>
-    entry.operator === comparison.operator && entry.field === comparison.field &&
-    Object.is(entry.value, comparison.value)
+  return folded.some(
+    (entry) =>
+      entry.operator === comparison.operator &&
+      entry.field === comparison.field &&
+      Object.is(entry.value, comparison.value),
   );
 }
 

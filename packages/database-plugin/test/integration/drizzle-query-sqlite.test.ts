@@ -66,9 +66,8 @@ function assertDrizzleScopeTypes(
   getDrizzleTransaction<ForgedDatabase<typeof drizzleDb>>(uow, database).batch;
 
   // @ts-expect-error Synchronous callback drivers cannot create a supported witness.
-  createDrizzleDatabase(
-    synchronousDatabase,
-    (configured, work) => Promise.resolve(configured.transaction(work)),
+  createDrizzleDatabase(synchronousDatabase, (configured, work) =>
+    Promise.resolve(configured.transaction(work)),
   );
 }
 void assertDrizzleScopeTypes;
@@ -107,11 +106,10 @@ describe('typed Drizzle query seam on real SQLite', () => {
     engine.exec("INSERT INTO teams VALUES ('t1', 'Research')");
 
     const drizzleDb = drizzle((statement, params, method) =>
-      executeSqlite(engine, statement, params, method)
+      executeSqlite(engine, statement, params, method),
     );
-    const database = createDrizzleDatabase(
-      drizzleDb,
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(drizzleDb, (configured, work) =>
+      configured.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: database,
@@ -168,15 +166,14 @@ describe('typed Drizzle query seam on real SQLite', () => {
     engine.exec("INSERT INTO teams VALUES ('t1', 'Research')");
 
     const drizzleDb = drizzle((statement, params, method) =>
-      executeSqlite(engine, statement, params, method)
+      executeSqlite(engine, statement, params, method),
     );
     // Measured, not assumed: the driver this whole file drives has no
     // `execute`, which is the branch the refusal guards.
     expect((drizzleDb as unknown as { execute?: unknown }).execute).toBeUndefined();
 
-    const database = createDrizzleDatabase(
-      drizzleDb,
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(drizzleDb, (configured, work) =>
+      configured.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: database,

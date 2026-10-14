@@ -146,11 +146,14 @@ export class SchedulerService implements IScheduler {
       timeoutMs,
       timing: this.#timing,
       onTimeout: () => {
-        pending?.then((late) => {
-          if (late !== null) {
-            void this.#releaseAbandoned(key, late, jobName);
-          }
-        }, () => {});
+        pending?.then(
+          (late) => {
+            if (late !== null) {
+              void this.#releaseAbandoned(key, late, jobName);
+            }
+          },
+          () => {},
+        );
         return new Error(`lock acquire did not settle within ${timeoutMs} ms`);
       },
     });
@@ -589,7 +592,7 @@ export class SchedulerService implements IScheduler {
     // unapproved job gets `undefined` and the executor allocates nothing.
     const observed = collector !== undefined && fireObs !== null;
     const attempts = observed
-      ? (collector as SchedulerObservationCollector).attemptObserver(entry.name) ?? undefined
+      ? ((collector as SchedulerObservationCollector).attemptObserver(entry.name) ?? undefined)
       : undefined;
     // Timed through the collector's guarded clock, never the runtime's
     // directly: a throwing clock latches collection-failed there and cannot
@@ -599,17 +602,11 @@ export class SchedulerService implements IScheduler {
       : null;
     try {
       const jobId = this.#runtime.uuid();
-      const runOptions = attempts === undefined
-        ? { runtime: this.#runtime, logger: this.#logger }
-        : { runtime: this.#runtime, logger: this.#logger, attempts };
-      await run(
-        jobId,
-        entry.name,
-        entry.handler,
-        entry.data,
-        entry.retry,
-        runOptions,
-      );
+      const runOptions =
+        attempts === undefined
+          ? { runtime: this.#runtime, logger: this.#logger }
+          : { runtime: this.#runtime, logger: this.#logger, attempts };
+      await run(jobId, entry.name, entry.handler, entry.data, entry.retry, runOptions);
       collector?.fireSettled(
         fireObs,
         'dispatched',
@@ -646,9 +643,10 @@ export class SchedulerService implements IScheduler {
     // M98k: observe the fire at its entry. The attachment check gates every
     // clock read — an unattached service reads no clock and derives no
     // label; an unapproved job resolves to `null` after one map lookup.
-    const fireObs = this.#collector === undefined
-      ? null
-      : this.#collector.fireBegin(entry.name, entry.nextRunAtMs);
+    const fireObs =
+      this.#collector === undefined
+        ? null
+        : this.#collector.fireBegin(entry.name, entry.nextRunAtMs);
 
     // The fire-slot lock — per-fire dedup across replicas (X10-2), distinct
     // from the per-handler overlap mutex below. The keying differs by kind
@@ -676,9 +674,7 @@ export class SchedulerService implements IScheduler {
       slotClaimed = entry.slotClaim === 'claimed';
       if (entry.slotClaim === 'contended') {
         // Another replica registered this delay first and will run it.
-        this.#logger?.debug(
-          `Job '${entry.name}': fire slot claimed by another instance, skipping`,
-        );
+        this.#logger?.debug(`Job '${entry.name}': fire slot claimed by another instance, skipping`);
         this.#collector?.fireSettled(fireObs, 'contended', null, null);
       } else if (entry.slotClaim === 'failed') {
         // The claim at registration could not reach the lock backend (logged

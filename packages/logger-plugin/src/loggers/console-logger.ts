@@ -251,9 +251,10 @@ export class ConsoleLogger implements ILogger {
 
   #prettyPrint(level: LogLevel, message: string, metadata: Record<string, unknown>): void {
     const ts = new Date(this.#runtime.now()).toISOString();
-    const meta = Object.keys(metadata).length > 0
-      ? ` ${safeStringify(metadata) ?? UNSERIALIZABLE_METADATA}`
-      : '';
+    const meta =
+      Object.keys(metadata).length > 0
+        ? ` ${safeStringify(metadata) ?? UNSERIALIZABLE_METADATA}`
+        : '';
     console.log(`${ts} [${level.toUpperCase()}] ${message}${meta}`);
   }
 }

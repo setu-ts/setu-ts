@@ -36,9 +36,7 @@ export const TENANT_CACHE_PREFIX_STATE_KEY = 'multi-tenancy-plugin:cache-prefix'
  * @param ctx - Must expose a `state: Map<string, unknown>` (satisfied by `IRequestContext`).
  * @returns The prefixed cache key, or `undefined` when not configured.
  */
-export function getTenantCachePrefix(
-  ctx: { state: Map<string, unknown> },
-): string | undefined {
+export function getTenantCachePrefix(ctx: { state: Map<string, unknown> }): string | undefined {
   const raw = ctx.state.get(TENANT_CACHE_PREFIX_STATE_KEY);
   return typeof raw === 'string' ? raw : undefined;
 }
@@ -133,10 +131,9 @@ export function tenantMiddleware({
       } catch (err) {
         // Throwing resolver → warn + treat as none → continue chain.
         if (logger) {
-          logger.warn(
-            `Tenant resolver at index ${i} threw, treating as none`,
-            { error: String(err) },
-          );
+          logger.warn(`Tenant resolver at index ${i} threw, treating as none`, {
+            error: String(err),
+          });
         }
       }
     }
@@ -161,7 +158,8 @@ export function tenantMiddleware({
       const parked = ctx.state.get(SESSION_STATE_KEY);
       if (
         ctx.state.get(SESSION_TENANT_BINDING_STATE_KEY) === true &&
-        typeof parked === 'object' && parked !== null &&
+        typeof parked === 'object' &&
+        parked !== null &&
         tenantBindingMismatch(parked as ISession, resolved.id)
       ) {
         respondWithError(ctx, {

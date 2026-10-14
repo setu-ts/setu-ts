@@ -36,7 +36,9 @@ export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647;
  */
 export function checkLockTimeout(name: string, value: number): number {
   if (
-    typeof value !== 'number' || !Number.isFinite(value) || value < 0 ||
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
     value > MAX_LOCK_TIMEOUT_MS
   ) {
     throw new RangeError(

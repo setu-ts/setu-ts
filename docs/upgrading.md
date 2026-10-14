@@ -437,8 +437,7 @@ Three defects were in generated output, so a project scaffolded before `0.9.0` k
 copy the fix from a fresh scaffold:
 
 - **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
-  `setu new --runtime
-  cloudflare-workers` project does (the old pair fails `npm install` with
+  `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
   `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
   new entry carries, so a bindings-only deploy is picked up.
 - **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
@@ -646,7 +645,11 @@ changed is the documentation. If you copied that shape, switch to either escapin
 ```tsx
 // JSX — what `ViewPlugin()` selects with no options.
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+  <ul>
+    {props.users.map((user) => (
+      <li>{user}</li>
+    ))}
+  </ul>
 );
 ```
 
@@ -655,7 +658,9 @@ const UserList = (props: { readonly users: readonly string[] }) => (
 import { html } from '@hono/hono/html';
 
 const UserList = (props: { readonly users: readonly string[] }) =>
-  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+  html`<ul>
+    ${props.users.map((user) => html`<li>${user}</li>`)}
+  </ul>`;
 ```
 
 `raw()` remains the documented opt-out when you genuinely intend to emit trusted markup.
@@ -689,7 +694,9 @@ Two ways forward, depending on what the part actually is:
 // It is a plain field: read it as one, which is now possible on any request.
 const form = await ctx.request.formData!();
 const note = form.get('note'); // string | FormFile | undefined
-if (typeof note === 'string') { /* … */ }
+if (typeof note === 'string') {
+  /* … */
+}
 ```
 
 Relatedly, a `multipart/form-data` content-type carrying no `boundary=` now passes through the
@@ -773,8 +780,7 @@ const client: IRedisClient = {
 
 `ioredis` already has it, so an application passing a real client needs no change. The probe treats
 a rejection as unreachability rather than an error, so a double that rejects reports
-`reachable:
-false` on `/health` and nothing else.
+`reachable: false` on `/health` and nothing else.
 
 ### Add `rotate` and `revokeFamily` to a custom `RefreshTokenStore`
 
@@ -791,13 +797,14 @@ class MyStore implements RefreshTokenStore {
    * stored — the loser of a race gets `{ record, rotated: false }`, which the
    * service reads as a replay.
    */
-  async rotate(
-    jti: string,
-    successor: RefreshTokenRecord,
-  ): Promise<IRefreshTokenRotation> {/* … */}
+  async rotate(jti: string, successor: RefreshTokenRecord): Promise<IRefreshTokenRotation> {
+    /* … */
+  }
 
   /** Revokes the token and every descendant, and RETURNS what it revoked. */
-  async revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]> {/* … */}
+  async revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]> {
+    /* … */
+  }
 }
 ```
 

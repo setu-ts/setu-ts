@@ -36,8 +36,9 @@ async function registeredPriorities(plugins: readonly IPlugin[]): Promise<number
   const app = createApplication({ plugins: [RuntimePlugin(), ...plugins], diagnostics: {} });
   await app.start();
   try {
-    return app.diagnostics!.snapshot().nodes
-      .filter((node) => node.kind === 'middleware')
+    return app
+      .diagnostics!.snapshot()
+      .nodes.filter((node) => node.kind === 'middleware')
       .map((node) => node.priority!)
       .sort((left, right) => left - right);
   } finally {
@@ -80,8 +81,9 @@ const COMPOSITIONS: Readonly<Record<string, () => readonly IPlugin[]>> = {
 
 describe('the generated middleware priority comment', () => {
   it('names a composition for every plugin-owned band', () => {
-    const owners = FRAMEWORK_MIDDLEWARE_BANDS.map((entry) => entry.owner)
-      .filter((owner) => owner !== 'error handler');
+    const owners = FRAMEWORK_MIDDLEWARE_BANDS.map((entry) => entry.owner).filter(
+      (owner) => owner !== 'error handler',
+    );
     expect(Object.keys(COMPOSITIONS).sort()).toEqual([...owners].sort());
   });
 
@@ -139,9 +141,10 @@ describe('the generated middleware priority comment', () => {
     app.middleware.add((_ctx, next) => next(), { priority: emitted, name: 'generated' });
     await app.start();
     try {
-      const middleware = app.diagnostics!.snapshot().nodes
-        .filter((node) => node.kind === 'middleware');
-      const last = middleware.reduce((max, node) => node.position! > max.position! ? node : max);
+      const middleware = app
+        .diagnostics!.snapshot()
+        .nodes.filter((node) => node.kind === 'middleware');
+      const last = middleware.reduce((max, node) => (node.position! > max.position! ? node : max));
       expect(last.priority).toBe(emitted);
     } finally {
       await app.stop();

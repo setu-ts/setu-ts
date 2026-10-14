@@ -14,10 +14,7 @@ export type { IRequestContext } from '@setu-ts/common';
  *
  * @since 0.1.0
  */
-export type SsrRequestHandler = (
-  request: Request,
-  loadContext: unknown,
-) => Promise<Response>;
+export type SsrRequestHandler = (request: Request, loadContext: unknown) => Promise<Response>;
 
 /**
  * A React Router context key, used by identity as the argument to
@@ -94,10 +91,7 @@ export interface SsrRuntime {
  *
  * @since 0.2.0
  */
-export type PopulateLoadContext = (
-  ctx: IRequestContext,
-  context: RouterLoadContext,
-) => void;
+export type PopulateLoadContext = (ctx: IRequestContext, context: RouterLoadContext) => void;
 
 /**
  * Options for the React Router plugin.
@@ -136,10 +130,7 @@ export interface ReactRouterPluginOptions {
    * so the context-provider constructor is sourced from the same `react-router`
    * module as the handler.
    */
-  readonly loadRequestHandler?: (
-    serverBuildPath: string,
-    mode: string,
-  ) => Promise<SsrRuntime>;
+  readonly loadRequestHandler?: (serverBuildPath: string, mode: string) => Promise<SsrRuntime>;
 
   /**
    * Filesystem root of the built client bundle. Omit to disable static-asset

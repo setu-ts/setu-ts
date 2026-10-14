@@ -90,9 +90,9 @@ export function createEnvelope<T>(
   // aggregate version it cannot use while the producer believes it sent one.
   if (metadata?.aggregateVersion !== undefined && !Number.isFinite(metadata.aggregateVersion)) {
     throw new TypeError(
-      `publishIntegrationEvent: "aggregateVersion" must be a finite number; received ${
-        String(metadata.aggregateVersion)
-      }`,
+      `publishIntegrationEvent: "aggregateVersion" must be a finite number; received ${String(
+        metadata.aggregateVersion,
+      )}`,
     );
   }
   return {

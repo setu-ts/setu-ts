@@ -46,13 +46,16 @@ describe('rewritePluginArgs', () => {
   }
 
   it('rewrites only the named package wiring', () => {
-    const host = resolveHost({
-      ...MINIMAL_HOST,
-      plugins: [
-        { pkg: 'messaging-plugin', symbol: 'MessagingPlugin' },
-        { pkg: 'queue-plugin', symbol: 'QueuePlugin' },
-      ],
-    }, 'deno');
+    const host = resolveHost(
+      {
+        ...MINIMAL_HOST,
+        plugins: [
+          { pkg: 'messaging-plugin', symbol: 'MessagingPlugin' },
+          { pkg: 'queue-plugin', symbol: 'QueuePlugin' },
+        ],
+      },
+      'deno',
+    );
     const next = rewritePluginArgs(
       host,
       'queue-plugin',

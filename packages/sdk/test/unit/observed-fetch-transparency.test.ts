@@ -365,9 +365,9 @@ describe('createObservedFetch — default transport', () => {
 describe('createObservedFetch — unhandled rejections', () => {
   it('reports a dropped rejection exactly once, identically wrapped and unwrapped', async () => {
     const script = `
-      import { createObservedFetch } from ${
-      JSON.stringify(new URL('../../src/http/observed-fetch.ts', import.meta.url).href)
-    };
+      import { createObservedFetch } from ${JSON.stringify(
+        new URL('../../src/http/observed-fetch.ts', import.meta.url).href,
+      )};
       const mode = process.argv[1];
       let reports = 0;
       process.on('unhandledRejection', (reason) => {
@@ -388,14 +388,7 @@ describe('createObservedFetch — unhandled rejections', () => {
     `;
     async function run(mode: string, handling: string): Promise<string> {
       const output = await runProcess(process.execPath, {
-        args: [
-          ...NODE_SOURCE_ARGS,
-          '--input-type=module',
-          '-e',
-          script,
-          mode,
-          handling,
-        ],
+        args: [...NODE_SOURCE_ARGS, '--input-type=module', '-e', script, mode, handling],
         stdout: 'piped',
         stderr: 'piped',
       });

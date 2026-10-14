@@ -20,7 +20,9 @@ interface PageProps {
 function Page(props: PageProps) {
   return html`
     <h1>${props.title}</h1>
-    <ul>${props.items.map((item) => html`<li>${item}</li>`)}</ul>
+    <ul>
+      ${props.items.map((item) => html`<li>${item}</li>`)}
+    </ul>
   `;
 }
 

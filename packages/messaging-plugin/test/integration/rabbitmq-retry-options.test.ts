@@ -24,13 +24,15 @@ describe('RabbitMQ retry options through MessagingPlugin', () => {
               return true;
             },
           },
-          subscriptions: [{
-            topic: 't',
-            options: { queue: 'q' },
-            handler: () => {
-              throw Error('blip');
+          subscriptions: [
+            {
+              topic: 't',
+              options: { queue: 'q' },
+              handler: () => {
+                throw Error('blip');
+              },
             },
-          }],
+          ],
         }),
       ],
     });
@@ -43,25 +45,25 @@ describe('RabbitMQ retry options through MessagingPlugin', () => {
       expect(channel.calls.find((c) => c.method === 'prefetch')?.args).toEqual([7]);
       expect(
         channel.calls.find((c) => c.method === 'assertQueue' && c.args[0] === 'q.dead')?.args[1],
-      )
-        .toEqual({ durable: true, arguments: { 'x-max-length': 9 } });
+      ).toEqual({ durable: true, arguments: { 'x-max-length': 9 } });
       expect(
         channel.calls.find((c) => c.method === 'assertQueue' && c.args[0] === 'q.retry.53ms')
           ?.args[1],
-      )
-        .toEqual({
-          durable: true,
-          arguments: {
-            'x-queue-type': 'quorum',
-            'x-dead-letter-strategy': 'at-least-once',
-            'x-overflow': 'reject-publish',
-            'x-message-ttl': 53,
-            'x-dead-letter-exchange': '',
-            'x-dead-letter-routing-key': 'q',
-          },
-        });
-      expect(channel.calls.filter((c) => c.method === 'publish').map((c) => c.args[1]))
-        .toEqual(['q.retry.17ms', 'q.dead']);
+      ).toEqual({
+        durable: true,
+        arguments: {
+          'x-queue-type': 'quorum',
+          'x-dead-letter-strategy': 'at-least-once',
+          'x-overflow': 'reject-publish',
+          'x-message-ttl': 53,
+          'x-dead-letter-exchange': '',
+          'x-dead-letter-routing-key': 'q',
+        },
+      });
+      expect(channel.calls.filter((c) => c.method === 'publish').map((c) => c.args[1])).toEqual([
+        'q.retry.17ms',
+        'q.dead',
+      ]);
     } finally {
       await app.stop();
     }
@@ -76,13 +78,15 @@ describe('RabbitMQ retry options through MessagingPlugin', () => {
           broker: 'rabbitmq',
           client,
           consumerRetry: false,
-          subscriptions: [{
-            topic: 't',
-            options: { queue: 'q' },
-            handler: () => {
-              throw Error('blip');
+          subscriptions: [
+            {
+              topic: 't',
+              options: { queue: 'q' },
+              handler: () => {
+                throw Error('blip');
+              },
             },
-          }],
+          ],
         }),
       ],
     });

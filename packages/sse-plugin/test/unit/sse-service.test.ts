@@ -133,12 +133,7 @@ describe('SseService opening the backplane transport on first connection', () =>
     const warnings: string[] = [];
     const logger = { warn: (message: string): void => void warnings.push(message) };
     const backplane = recordingBackplane(true);
-    const service = new SseService(
-      {},
-      runtime,
-      backplane,
-      logger as unknown as undefined,
-    );
+    const service = new SseService({}, runtime, backplane, logger as unknown as undefined);
 
     service.open(createFakeContext({ runtime }));
     await new Promise((resolve) => setTimeout(resolve, 0));

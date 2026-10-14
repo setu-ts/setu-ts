@@ -67,10 +67,10 @@ type TranslatedFilter =
   | { readonly kind: 'match-all' }
   | { readonly kind: 'match-nothing' }
   | {
-    readonly kind: 'condition';
-    /** Renders the condition text, registering aliases and values as it goes. */
-    readonly render: (builder: DynamoExpressionBuilder) => string;
-  };
+      readonly kind: 'condition';
+      /** Renders the condition text, registering aliases and values as it goes. */
+      readonly render: (builder: DynamoExpressionBuilder) => string;
+    };
 
 /** The boolean identity: matches every item, so no filter need be emitted. */
 const MATCH_ALL: TranslatedFilter = { kind: 'match-all' };
@@ -158,15 +158,17 @@ export function createDynamoExpressionBuilder(): DynamoExpressionBuilder {
           'DynamoDB adapter refused an empty path — a path array must carry at least one segment.',
         );
       }
-      return path.map((segment) => {
-        const existing = segmentAliases.get(segment);
-        if (existing !== undefined) return existing;
-        const placeholder = `#n${nameCount}`;
-        nameCount += 1;
-        segmentAliases.set(segment, placeholder);
-        names[placeholder] = segment;
-        return placeholder;
-      }).join('.');
+      return path
+        .map((segment) => {
+          const existing = segmentAliases.get(segment);
+          if (existing !== undefined) return existing;
+          const placeholder = `#n${nameCount}`;
+          nameCount += 1;
+          segmentAliases.set(segment, placeholder);
+          names[placeholder] = segment;
+          return placeholder;
+        })
+        .join('.');
     },
 
     addValue: (value: unknown, dateEncoding?: DynamoDateEncoding): string => {
@@ -238,25 +240,32 @@ function renderComparison(
   const path = builder.aliasPath(comparison.field);
   switch (comparison.operator) {
     case 'eq':
-      return `${path} = ${
-        comparisonValue(builder, comparison.field, comparison.value, dateAttributes)
-      }`;
+      return `${path} = ${comparisonValue(
+        builder,
+        comparison.field,
+        comparison.value,
+        dateAttributes,
+      )}`;
     case 'contains':
       // A native operator over an unparsed value — no escaping, unlike SQL
       // `LIKE` (M70b X12-1); the value travels verbatim in its placeholder.
-      return `contains(${path}, ${
-        comparisonValue(builder, comparison.field, comparison.value, dateAttributes)
-      })`;
+      return `contains(${path}, ${comparisonValue(
+        builder,
+        comparison.field,
+        comparison.value,
+        dateAttributes,
+      )})`;
     case 'in':
-      return `${path} IN (${
-        comparison.value
-          .map((element) => comparisonValue(builder, comparison.field, element, dateAttributes))
-          .join(', ')
-      })`;
+      return `${path} IN (${comparison.value
+        .map((element) => comparisonValue(builder, comparison.field, element, dateAttributes))
+        .join(', ')})`;
     default:
-      return `${path} ${COMPARATORS[comparison.operator]} ${
-        comparisonValue(builder, comparison.field, comparison.value, dateAttributes)
-      }`;
+      return `${path} ${COMPARATORS[comparison.operator]} ${comparisonValue(
+        builder,
+        comparison.field,
+        comparison.value,
+        dateAttributes,
+      )}`;
   }
 }
 
@@ -312,25 +321,39 @@ function translateFilter(
     const children = expression.filters.map((child) => translateFilter(child, dateAttributes));
     if (expression.type === 'and') {
       if (children.some((child) => child.kind === 'match-nothing')) return MATCH_NOTHING;
-      const conditions = children.filter((child): child is {
-        kind: 'condition';
-        render: (builder: DynamoExpressionBuilder) => string;
-      } => child.kind === 'condition');
+      const conditions = children.filter(
+        (
+          child,
+        ): child is {
+          kind: 'condition';
+          render: (builder: DynamoExpressionBuilder) => string;
+        } => child.kind === 'condition',
+      );
       if (conditions.length === 0) return MATCH_ALL;
       return {
         kind: 'condition',
-        render: joinConditions(conditions.map((child) => child.render), ' AND '),
+        render: joinConditions(
+          conditions.map((child) => child.render),
+          ' AND ',
+        ),
       };
     }
     if (children.some((child) => child.kind === 'match-all')) return MATCH_ALL;
-    const conditions = children.filter((child): child is {
-      kind: 'condition';
-      render: (builder: DynamoExpressionBuilder) => string;
-    } => child.kind === 'condition');
+    const conditions = children.filter(
+      (
+        child,
+      ): child is {
+        kind: 'condition';
+        render: (builder: DynamoExpressionBuilder) => string;
+      } => child.kind === 'condition',
+    );
     if (conditions.length === 0) return MATCH_NOTHING;
     return {
       kind: 'condition',
-      render: joinConditions(conditions.map((child) => child.render), ' OR '),
+      render: joinConditions(
+        conditions.map((child) => child.render),
+        ' OR ',
+      ),
     };
   }
   // An empty `in` never becomes a condition — `IN ()` is invalid syntax, and

@@ -75,11 +75,7 @@ export interface ILaunchDarklyClient {
    * @param defaultValue - Returned when the flag is absent or non-boolean
    * @returns The evaluated value
    */
-  boolVariation(
-    key: string,
-    context: LaunchDarklyContext,
-    defaultValue: boolean,
-  ): Promise<boolean>;
+  boolVariation(key: string, context: LaunchDarklyContext, defaultValue: boolean): Promise<boolean>;
   /**
    * Fetches a synchronously-queryable snapshot of every flag for a context.
    *

@@ -54,10 +54,13 @@ interface ConnectionState {
    * suppress its result — which the protocol requires and which is impossible
    * if only live streams are tracked.
    */
-  subscriptions: Map<string, {
-    iterator: AsyncIterator<unknown> | null;
-    suppressed: boolean;
-  }>;
+  subscriptions: Map<
+    string,
+    {
+      iterator: AsyncIterator<unknown> | null;
+      suppressed: boolean;
+    }
+  >;
   /** Init timeout handle. */
   initTimer: TimerHandle | null;
   /** Heartbeat interval handle. */
@@ -89,14 +92,13 @@ export function createWsHandlers(
   return {
     onOpen: (conn: IWebSocketConnection, context: WebSocketConnectionContext) => {
       // Build connection info
-      const baseConnectionInfo:
-        & Partial<GraphqlConnectionInfo>
-        & Pick<GraphqlConnectionInfo, 'id' | 'headers' | 'query' | 'data'> = {
-          id: conn.id,
-          headers: context.headers,
-          query: context.query,
-          data: conn.data,
-        };
+      const baseConnectionInfo: Partial<GraphqlConnectionInfo> &
+        Pick<GraphqlConnectionInfo, 'id' | 'headers' | 'query' | 'data'> = {
+        id: conn.id,
+        headers: context.headers,
+        query: context.query,
+        data: conn.data,
+      };
       const connectionInfo: GraphqlConnectionInfo = {
         ...baseConnectionInfo,
         ...(context.protocol !== undefined ? { protocol: context.protocol } : {}),
@@ -209,10 +211,7 @@ export function createWsHandlers(
           }
 
           if (state.subscriptions.has(frame.id)) {
-            conn.close(
-              CLOSE_DUPLICATE_SUBSCRIBE,
-              `Subscriber for ${frame.id} already exists`,
-            );
+            conn.close(CLOSE_DUPLICATE_SUBSCRIBE, `Subscriber for ${frame.id} already exists`);
             return;
           }
 
@@ -258,14 +257,18 @@ export function createWsHandlers(
             if (!apqResult.ok) {
               state.subscriptions.delete(id);
               if (!entry.suppressed && conn.isOpen) {
-                conn.send(encodeFrame({
-                  type: GQL_ERROR,
-                  id,
-                  payload: [{
-                    message: apqResult.message,
-                    extensions: { code: apqResult.code },
-                  }],
-                }));
+                conn.send(
+                  encodeFrame({
+                    type: GQL_ERROR,
+                    id,
+                    payload: [
+                      {
+                        message: apqResult.message,
+                        extensions: { code: apqResult.code },
+                      },
+                    ],
+                  }),
+                );
               }
               return;
             }
@@ -294,11 +297,13 @@ export function createWsHandlers(
             // Request error: emit `error` and NO `complete` — the protocol
             // states the error message terminates the operation on its own.
             state.subscriptions.delete(id);
-            conn.send(encodeFrame({
-              type: GQL_ERROR,
-              id,
-              payload: outcome.result.errors ?? [],
-            }));
+            conn.send(
+              encodeFrame({
+                type: GQL_ERROR,
+                id,
+                payload: outcome.result.errors ?? [],
+              }),
+            );
             return;
           }
 
@@ -402,11 +407,13 @@ async function pumpWsSubscription(
       }
 
       if (conn.isOpen) {
-        conn.send(encodeFrame({
-          type: GQL_NEXT,
-          id,
-          payload: value,
-        }));
+        conn.send(
+          encodeFrame({
+            type: GQL_NEXT,
+            id,
+            payload: value,
+          }),
+        );
       }
     }
   } catch {
@@ -416,14 +423,18 @@ async function pumpWsSubscription(
     // subscription path came to publish internals the HTTP path masks.
     if (conn.isOpen) {
       try {
-        conn.send(encodeFrame({
-          type: GQL_ERROR,
-          id,
-          payload: [{
-            message: 'Internal server error',
-            extensions: { code: 'INTERNAL_SERVER_ERROR' },
-          }],
-        }));
+        conn.send(
+          encodeFrame({
+            type: GQL_ERROR,
+            id,
+            payload: [
+              {
+                message: 'Internal server error',
+                extensions: { code: 'INTERNAL_SERVER_ERROR' },
+              },
+            ],
+          }),
+        );
       } catch {
         // send may throw after isOpen was true (race); swallow to avoid
         // an unhandled rejection.

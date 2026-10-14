@@ -78,11 +78,13 @@ function readTarget(target: unknown): ReadTarget {
     return { scope: 'invalid', context: undefined };
   }
   const { scope, context } = target as { readonly scope?: unknown; readonly context?: unknown };
-  const request = typeof context === 'object' && context !== null &&
-      (context as { readonly state?: unknown }).state instanceof Map &&
-      typeof (context as { readonly request?: unknown }).request === 'object'
-    ? context as IRequestContext
-    : undefined;
+  const request =
+    typeof context === 'object' &&
+    context !== null &&
+    (context as { readonly state?: unknown }).state instanceof Map &&
+    typeof (context as { readonly request?: unknown }).request === 'object'
+      ? (context as IRequestContext)
+      : undefined;
   if (scope === undefined) {
     return { scope: 'unresolved', context: request };
   }
@@ -207,11 +209,8 @@ export class ScopedEvaluator {
    * asking about one scope share a walk.
    */
   #chainFor(scope: ScopeRef, context: IRequestContext | undefined): Promise<ChainOutcome> {
-    return memoised(
-      context,
-      `chain:${scopeKey(scope)}`,
-      this.#chainsInflight,
-      () => walkScopeChain(scope, this.#config, this.#deps.bounded),
+    return memoised(context, `chain:${scopeKey(scope)}`, this.#chainsInflight, () =>
+      walkScopeChain(scope, this.#config, this.#deps.bounded),
     );
   }
 

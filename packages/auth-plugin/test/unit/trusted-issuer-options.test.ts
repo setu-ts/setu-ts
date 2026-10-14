@@ -82,10 +82,12 @@ describe('TrustedIssuer validation at construction', () => {
     const message = refusal([{ ...base, keySet: { fetchTimeoutMs: 3_000_000_000 } }]);
     expect(message).toContain('keySet.fetchTimeoutMs must not exceed 2147483647');
     expect(message).not.toContain('3000000000');
-    const [compiled] = compileIssuers([{
-      ...base,
-      keySet: { fetchTimeoutMs: 2_147_483_647, ttlMs: 1000, maxStaleMs: 1000 },
-    }]);
+    const [compiled] = compileIssuers([
+      {
+        ...base,
+        keySet: { fetchTimeoutMs: 2_147_483_647, ttlMs: 1000, maxStaleMs: 1000 },
+      },
+    ]);
     expect(compiled.timings.fetchTimeoutMs).toBe(2_147_483_647);
   });
 
@@ -93,9 +95,7 @@ describe('TrustedIssuer validation at construction', () => {
     expect(refusal([{ ...base, keySet: { ttlMs: 2000, maxStaleMs: 1000 } }])).toContain(
       'keySet.ttlMs must not exceed keySet.maxStaleMs',
     );
-    expect(refusal([{ ...base, keySet: { ttlMs: 48 * 3_600_000 } }])).toContain(
-      'must not exceed',
-    );
+    expect(refusal([{ ...base, keySet: { ttlMs: 48 * 3_600_000 } }])).toContain('must not exceed');
     const [compiled] = compileIssuers([{ ...base, keySet: { ttlMs: 1000, maxStaleMs: 1000 } }]);
     expect(compiled.timings.ttlMs).toBe(1000);
   });
@@ -126,22 +126,20 @@ describe('TrustedIssuer validation at construction', () => {
     expect(isAcceptableUrl('not a url')).toBe(false);
     // `new URL` strips these silently; the RAW string is what reaches a header
     // (audit N2 round 2, N1).
-    for (
-      const raw of [
-        'https://x.test/a\nb',
-        'https://x.test/\ta',
-        'https://x.test/\r',
-        ' https://x.test',
-        'https://x.test/\u007f',
-        // Round 3 R1: `Headers` refuses every code point above U+00FF, and
-        // Latin-1 would go out as a bare non-UTF-8 byte.
-        'https://x.test/\u65e5\u672c',
-        'https://\u65e5\u672c.test/authorize',
-        'https://x.test/a\u2028b',
-        'https://x.test/caf\u00e9',
-        'https://x.test/\u0085',
-      ]
-    ) {
+    for (const raw of [
+      'https://x.test/a\nb',
+      'https://x.test/\ta',
+      'https://x.test/\r',
+      ' https://x.test',
+      'https://x.test/\u007f',
+      // Round 3 R1: `Headers` refuses every code point above U+00FF, and
+      // Latin-1 would go out as a bare non-UTF-8 byte.
+      'https://x.test/\u65e5\u672c',
+      'https://\u65e5\u672c.test/authorize',
+      'https://x.test/a\u2028b',
+      'https://x.test/caf\u00e9',
+      'https://x.test/\u0085',
+    ]) {
       expect(new URL(raw).protocol).toBe('https:');
       expect(isAcceptableUrl(raw)).toBe(false);
     }

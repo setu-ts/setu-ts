@@ -52,8 +52,9 @@ describe('Drizzle isolation bridge', () => {
     });
     await adapter.connect();
 
-    await expect(adapter.beginTransaction({ isolation: 'read-committed' }))
-      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    await expect(adapter.beginTransaction({ isolation: 'read-committed' })).rejects.toBeInstanceOf(
+      UnsupportedIsolationLevelError,
+    );
     expect(opened).toBe(false);
   });
 

@@ -57,9 +57,10 @@ export function createRedisIdempotencyClient(
   commandTimeoutMs: number,
   reporter?: ConnectionErrorReporter,
 ): IBuiltRedisIdempotencyClient {
-  const client = commandTimeoutMs === 0
-    ? new RedisCtor(url, { lazyConnect: true })
-    : new RedisCtor(url, { lazyConnect: true, commandTimeout: commandTimeoutMs });
+  const client =
+    commandTimeoutMs === 0
+      ? new RedisCtor(url, { lazyConnect: true })
+      : new RedisCtor(url, { lazyConnect: true, commandTimeout: commandTimeoutMs });
   if (reporter !== undefined) {
     attachConnectionErrorReporter(client, reporter);
   }
@@ -75,7 +76,9 @@ export function createRedisIdempotencyClient(
  */
 export function validateInjectedClient(client: unknown): asserts client is IRedisIdempotencyClient {
   const candidate = client as Partial<Record<'eval' | 'ping' | 'quit' | 'call', unknown>> | null;
-  const ok = typeof client === 'object' && client !== null &&
+  const ok =
+    typeof client === 'object' &&
+    client !== null &&
     typeof candidate?.eval === 'function' &&
     typeof candidate?.ping === 'function' &&
     typeof candidate?.quit === 'function' &&

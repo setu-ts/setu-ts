@@ -288,10 +288,7 @@ describe('verifyCsrfToken', () => {
 
 describe('csrfFormMiddleware', () => {
   /** Runs the middleware and reports whether the handler was reached. */
-  async function run(
-    ctx: IRequestContext,
-    options: Parameters<typeof csrfFormMiddleware>[0] = {},
-  ) {
+  async function run(ctx: IRequestContext, options: Parameters<typeof csrfFormMiddleware>[0] = {}) {
     let handlerRan = false;
     const result = await csrfFormMiddleware(options)(ctx, () => {
       handlerRan = true;
@@ -341,8 +338,9 @@ describe('csrfFormMiddleware', () => {
       method: 'POST',
       url: 'http://localhost/grpc/example.Echo/Call',
     });
-    await expect(verifyCsrfToken(rpc.ctx, { exclude: [/^\/grpc(?:\/|$)/] })).resolves
-      .toBeUndefined();
+    await expect(
+      verifyCsrfToken(rpc.ctx, { exclude: [/^\/grpc(?:\/|$)/] }),
+    ).resolves.toBeUndefined();
   });
 
   it('lets mounted gRPC through the real pipeline while retaining CSRF on form posts', async () => {
@@ -441,13 +439,11 @@ describe('csrfFormMiddleware', () => {
     const harness = await withSession({ method: 'POST', headers: { 'content-type': FORM } });
     const token = getCsrfToken(harness.ctx);
 
-    for (
-      const [body, shouldPass] of [
-        [`_csrf=${encodeURIComponent(token)}`, true],
-        ['_csrf=wrong', false],
-        ['', false],
-      ] as const
-    ) {
+    for (const [body, shouldPass] of [
+      [`_csrf=${encodeURIComponent(token)}`, true],
+      ['_csrf=wrong', false],
+      ['', false],
+    ] as const) {
       const viaMiddleware = await withSession({
         method: 'POST',
         body,
@@ -462,8 +458,10 @@ describe('csrfFormMiddleware', () => {
         headers: { 'content-type': FORM },
       });
       viaFunction.session.set(CSRF_SESSION_KEY, token);
-      const functionPassed = await verifyCsrfToken(viaFunction.ctx)
-        .then(() => true, () => false);
+      const functionPassed = await verifyCsrfToken(viaFunction.ctx).then(
+        () => true,
+        () => false,
+      );
 
       expect(handlerRan).toBe(shouldPass);
       expect(functionPassed).toBe(shouldPass);

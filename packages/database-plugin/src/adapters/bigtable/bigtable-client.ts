@@ -131,7 +131,7 @@ export function createLazyBigtableLoader(
   return {
     owned: true,
     load: async (): Promise<IBigtableClient> => {
-      const module = await import('@google-cloud/bigtable') as unknown as BigtableSdkModule;
+      const module = (await import('@google-cloud/bigtable')) as unknown as BigtableSdkModule;
       return adaptBigtableSdkModule(module, configuration);
     },
   };
@@ -192,9 +192,10 @@ function adaptFilter(filter: BigtableFilter): unknown {
   if ('condition' in filter) {
     const { test, pass } = filter.condition;
     return {
-      condition: pass === undefined
-        ? { test: test.map(adaptFilter) }
-        : { test: test.map(adaptFilter), pass: pass.map(adaptFilter) },
+      condition:
+        pass === undefined
+          ? { test: test.map(adaptFilter) }
+          : { test: test.map(adaptFilter), pass: pass.map(adaptFilter) },
     };
   }
   return filter;

@@ -21,10 +21,12 @@ describe('the scaffolded application smoke test', () => {
         const test = files.find((file) => file.path === 'test/app.test.ts');
         if (runtime === 'cloudflare-workers') {
           expect(test).toBeUndefined();
-          expect(files.find((file) => file.path === 'deno.json')!.contents)
-            .toContain('deno test -A --permit-no-files');
-          expect(files.find((file) => file.path === 'README.md')!.contents)
-            .toContain('platform environment');
+          expect(files.find((file) => file.path === 'deno.json')!.contents).toContain(
+            'deno test -A --permit-no-files',
+          );
+          expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
+            'platform environment',
+          );
           return;
         }
         expect(test?.contents).toContain("import { createTestApp } from '@setu-ts/testing';");
@@ -40,8 +42,8 @@ describe('the scaffolded application smoke test', () => {
           );
           expect(test?.contents).toContain('expect(response.statusCode).toEqual(200)');
         }
-        const manifest = files.find((file) =>
-          file.path === (runtime === 'deno' ? 'deno.json' : 'package.json')
+        const manifest = files.find(
+          (file) => file.path === (runtime === 'deno' ? 'deno.json' : 'package.json'),
         )!.contents;
         expect(manifest).toContain(
           runtime === 'deno'
@@ -58,13 +60,11 @@ describe('the scaffolded application smoke test', () => {
           // A test-only package is a devDependency, where `setu add testing`
           // puts it; in `dependencies` it ships to production and gets pinned
           // twice by a later add.
-          expect(parsed.devDependencies['@setu-ts/testing'])
-            .toBe(`^${VERSION}`);
+          expect(parsed.devDependencies['@setu-ts/testing']).toBe(`^${VERSION}`);
           expect(parsed.dependencies['@setu-ts/testing']).toBeUndefined();
           expect(
             parsed.scripts.test.startsWith(`${runtime === 'bun' ? 'bun' : 'npm'} run build && `),
-          )
-            .toBe(buildsFirst);
+          ).toBe(buildsFirst);
         }
       });
     }
@@ -150,8 +150,9 @@ describe('microservice template', () => {
   });
 
   it('preserves rest ordering, so runtime still registers first', () => {
-    expect(symbols(MICROSERVICE_TEMPLATE.plugins).slice(0, REST_PLUGINS.length))
-      .toEqual(symbols(REST_PLUGINS));
+    expect(symbols(MICROSERVICE_TEMPLATE.plugins).slice(0, REST_PLUGINS.length)).toEqual(
+      symbols(REST_PLUGINS),
+    );
   });
 
   // `CqrsPlugin` and `EventsPlugin` are here because this is the only template that can
@@ -174,9 +175,7 @@ describe('microservice template', () => {
   it('is the only template hosting the cqrs and events seams', () => {
     const cqrs = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'CqrsPlugin');
     const events = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'EventsPlugin');
-    expect(cqrs?.args).toBe(
-      '{ commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }',
-    );
+    expect(cqrs?.args).toBe('{ commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }');
     expect(events?.args).toBe('{ handlers: EVENT_HANDLERS }');
     // And the barrels they read are emitted from scaffold time, so a fresh project is
     // wired before anything is generated.
@@ -189,8 +188,8 @@ describe('microservice template', () => {
     // The swap replaces only what the platform genuinely cannot serve. CQRS and
     // events are in-memory, so swapping them out would remove a capability
     // Workers supports perfectly well.
-    const removed = MICROSERVICE_TEMPLATE.runtimeSwaps?.['cloudflare-workers']?.removePackages ??
-      [];
+    const removed =
+      MICROSERVICE_TEMPLATE.runtimeSwaps?.['cloudflare-workers']?.removePackages ?? [];
 
     expect(removed).not.toContain('cqrs-plugin');
     expect(removed).not.toContain('events-plugin');
@@ -202,9 +201,7 @@ describe('microservice template', () => {
     // MUST carry args — a bare call does not type-check. The e2e drift gate is
     // what proves the string itself compiles against the real union; this pins
     // which arm was chosen and that the map is empty.
-    const wiring = MICROSERVICE_TEMPLATE.plugins.find(
-      (p) => p.symbol === 'ServiceDiscoveryPlugin',
-    );
+    const wiring = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'ServiceDiscoveryPlugin');
 
     expect(wiring?.pkg).toBe('service-discovery-plugin');
     expect(wiring?.args).toBe("{ provider: 'static', services: {} }");
@@ -296,10 +293,18 @@ describe('every template', () => {
 
 describe('packagesOf', () => {
   it('deduplicates across lists, preserving first-seen order', () => {
-    expect(packagesOf(
-      [{ pkg: 'runtime', symbol: 'A' }, { pkg: 'kernel', symbol: 'B' }],
-      [{ pkg: 'runtime', symbol: 'C' }, { pkg: 'exceptions', symbol: 'D' }],
-    )).toEqual(['runtime', 'kernel', 'exceptions']);
+    expect(
+      packagesOf(
+        [
+          { pkg: 'runtime', symbol: 'A' },
+          { pkg: 'kernel', symbol: 'B' },
+        ],
+        [
+          { pkg: 'runtime', symbol: 'C' },
+          { pkg: 'exceptions', symbol: 'D' },
+        ],
+      ),
+    ).toEqual(['runtime', 'kernel', 'exceptions']);
   });
 
   it('returns an empty list for no wirings', () => {
@@ -448,7 +453,10 @@ describe('class-based template', () => {
 
   it('hosts class seams without the microservice cqrs or events seams', () => {
     const seamPaths = (files: readonly { readonly path: string }[]) =>
-      files.map((f) => f.path).filter((p) => p.endsWith('/index.ts')).sort();
+      files
+        .map((f) => f.path)
+        .filter((p) => p.endsWith('/index.ts'))
+        .sort();
     expect(seamPaths(CLASS_BASED_TEMPLATE.files ?? [])).not.toContain('src/cqrs/index.ts');
     expect(seamPaths(REST_TEMPLATE.files ?? [])).not.toContain('src/events/index.ts');
   });

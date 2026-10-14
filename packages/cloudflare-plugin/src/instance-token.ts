@@ -41,10 +41,7 @@ const DEFAULT_INSTANCE = 'default';
  * ```
  * @internal
  */
-export function instanceToken(
-  base: CapabilityToken,
-  name: string | undefined,
-): CapabilityToken {
+export function instanceToken(base: CapabilityToken, name: string | undefined): CapabilityToken {
   const instance = name ?? DEFAULT_INSTANCE;
   return instance === DEFAULT_INSTANCE ? base : createCapabilityToken(`${base}.${instance}`);
 }

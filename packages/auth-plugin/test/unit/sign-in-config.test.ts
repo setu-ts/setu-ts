@@ -74,9 +74,7 @@ describe('compileSignIn', () => {
       compileSignIn(
         config([oidc({ redirectUri: 'https://app.test/signin/acme/callback' })], '/signin'),
       ).providers[0]?.loginPath,
-    ).toBe(
-      '/signin/acme/login',
-    );
+    ).toBe('/signin/acme/login');
     const root = compileSignIn(config([oidc()], '/'));
     expect(root.providers[0]?.loginPath).toBe('/acme/login');
     expect(root.logoutPath).toBe('/logout');
@@ -134,14 +132,14 @@ describe('compileSignIn', () => {
       refusal(config([oidc({ redirectUri: 'https://app.test/auth/acme/callback' })], '/signin')),
     ).toContain('path must end with /signin/acme/callback');
     expect(() =>
-      compileSignIn(config([oidc({ redirectUri: 'https://app.test/acme/callback' })], '/'))
+      compileSignIn(config([oidc({ redirectUri: 'https://app.test/acme/callback' })], '/')),
     ).not.toThrow();
     // Compared on the parsed path: a query does not defeat it, a mount prefix is allowed.
     expect(() =>
-      compileSignIn(config([oidc({ redirectUri: 'https://app.test/auth/acme/callback?x=1' })]))
+      compileSignIn(config([oidc({ redirectUri: 'https://app.test/auth/acme/callback?x=1' })])),
     ).not.toThrow();
     expect(() =>
-      compileSignIn(config([oidc({ redirectUri: 'https://app.test/api/auth/acme/callback' })]))
+      compileSignIn(config([oidc({ redirectUri: 'https://app.test/api/auth/acme/callback' })])),
     ).not.toThrow();
     expect(
       refusal(config([oidc({ redirectUri: 'http://app.test/auth/acme/callback' })])),
@@ -155,8 +153,7 @@ describe('compileSignIn', () => {
     );
     expect(
       compileSignIn(config([oidc({ failureRedirect: '/login' })])).providers[0]?.failureRedirect,
-    )
-      .toBe('/login');
+    ).toBe('/login');
   });
 
   it('applies the credential rules', () => {
@@ -208,8 +205,9 @@ describe('compileSignIn', () => {
   it('refuses an oidc provider whose scopes omit openid', () => {
     expect(refusal(config([oidc({ scopes: ['profile'] })]))).toContain('openid scope');
     expect(compileSignIn(config([oidc()])).providers[0]?.scopes).toEqual(['openid']);
-    expect(compileSignIn(config([oidc({ scopes: ['openid', 'email'] })])).providers[0]?.scopes)
-      .toEqual(['openid', 'email']);
+    expect(
+      compileSignIn(config([oidc({ scopes: ['openid', 'email'] })])).providers[0]?.scopes,
+    ).toEqual(['openid', 'email']);
   });
 
   it('compiles the oauth2 arm with its three endpoints and no issuer', () => {
@@ -222,13 +220,11 @@ describe('compileSignIn', () => {
   });
 
   it('refuses an oauth2 provider missing or holding an insecure endpoint', () => {
-    for (
-      const bad of [
-        oauth2({ tokenEndpoint: 'ftp://github.com/token' }),
-        oauth2({ userinfoEndpoint: 'http://api.github.com/user' }),
-        oauth2({ authorizationEndpoint: 'not-a-url' }),
-      ]
-    ) {
+    for (const bad of [
+      oauth2({ tokenEndpoint: 'ftp://github.com/token' }),
+      oauth2({ userinfoEndpoint: 'http://api.github.com/user' }),
+      oauth2({ authorizationEndpoint: 'not-a-url' }),
+    ]) {
       expect(refusal(config([bad]))).toContain('must be https');
     }
   });
@@ -238,28 +234,31 @@ describe('compileSignIn', () => {
     // because the logout route only knows how to end an OIDC session.
     expect(
       refusal(config([oauth2({ rpInitiatedLogout: { postLogoutRedirectUri: '/done' } } as never)])),
-    )
-      .toContain('only available on an oidc provider');
+    ).toContain('only available on an oidc provider');
   });
 
   it('compiles rpInitiatedLogout and refuses more than one provider claiming it', () => {
-    const compiled = compileSignIn(config([
-      oidc({
-        rpInitiatedLogout: { postLogoutRedirectUri: 'https://app.test/auth/logout/done' },
-      }),
-    ]));
+    const compiled = compileSignIn(
+      config([
+        oidc({
+          rpInitiatedLogout: { postLogoutRedirectUri: 'https://app.test/auth/logout/done' },
+        }),
+      ]),
+    );
     expect(compiled.rpLogoutProvider?.name).toBe('acme');
     expect(compiled.rpLogoutProvider?.rpInitiatedLogout?.idTokenHint).toBe(false);
 
     expect(
-      refusal(config([
-        oidc({ rpInitiatedLogout: { postLogoutRedirectUri: 'https://app.test/a' } }),
-        oidc({
-          name: 'other',
-          redirectUri: 'https://app.test/auth/other/callback',
-          rpInitiatedLogout: { postLogoutRedirectUri: 'https://app.test/b' },
-        }),
-      ])),
+      refusal(
+        config([
+          oidc({ rpInitiatedLogout: { postLogoutRedirectUri: 'https://app.test/a' } }),
+          oidc({
+            name: 'other',
+            redirectUri: 'https://app.test/auth/other/callback',
+            rpInitiatedLogout: { postLogoutRedirectUri: 'https://app.test/b' },
+          }),
+        ]),
+      ),
     ).toContain('only one signIn provider may set rpInitiatedLogout');
   });
 
@@ -282,8 +281,9 @@ describe('compileSignIn', () => {
       // NaN is what Number(env.X) yields for an unset variable, and every
       // comparison against it is false: the record would never expire.
       for (const pendingTtlMs of [Number.NaN, 0, -1, 1.5, Infinity]) {
-        expect(refusal(withMfa({ required, pendingTtlMs })), String(pendingTtlMs))
-          .toContain('pendingTtlMs');
+        expect(refusal(withMfa({ required, pendingTtlMs })), String(pendingTtlMs)).toContain(
+          'pendingTtlMs',
+        );
       }
     });
 
@@ -293,8 +293,9 @@ describe('compileSignIn', () => {
 
     it('refuses a challengePath that is not same-origin', () => {
       for (const challengePath of ['', '//evil.test', 'https://evil.test/', 'mfa', '/\\evil']) {
-        expect(refusal(withMfa({ required, challengePath })), challengePath)
-          .toContain('challengePath');
+        expect(refusal(withMfa({ required, challengePath })), challengePath).toContain(
+          'challengePath',
+        );
       }
     });
   });

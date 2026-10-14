@@ -61,13 +61,7 @@ export type {
  * @since 0.2.0
  */
 export type PrismaSqlProvider =
-  | 'postgresql'
-  | 'postgres'
-  | 'mysql'
-  | 'sqlserver'
-  | 'cockroachdb'
-  | 'mongodb'
-  | 'sqlite';
+  'postgresql' | 'postgres' | 'mysql' | 'sqlserver' | 'cockroachdb' | 'mongodb' | 'sqlite';
 
 /**
  * Generic repository providing CRUD operations over an entity type.
@@ -239,10 +233,7 @@ export interface IDatabaseService {
    * @throws {Error} If the work callback throws — transaction is rolled back
    * @since 0.1.0
    */
-  transaction<T>(
-    work: (uow: IUnitOfWork) => Promise<T>,
-    options?: TransactionOptions,
-  ): Promise<T>;
+  transaction<T>(work: (uow: IUnitOfWork) => Promise<T>, options?: TransactionOptions): Promise<T>;
 
   /**
    * Execute a raw SQL query and return results.
@@ -290,14 +281,7 @@ export interface IDatabaseService {
  * @since 0.1.0
  */
 export type DatabaseAdapterType =
-  | 'prisma'
-  | 'drizzle'
-  | 'memory'
-  | 'mongodb'
-  | 'dynamodb'
-  | 'cosmos'
-  | 'bigtable'
-  | 'custom';
+  'prisma' | 'drizzle' | 'memory' | 'mongodb' | 'dynamodb' | 'cosmos' | 'bigtable' | 'custom';
 
 // Re-export the Mongo structural types the `'mongodb'` arm carries, so an
 // application annotating its configuration reaches them from the package
@@ -918,27 +902,27 @@ export interface MongoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'l
  */
 export type MongoAdapterOptions =
   | (MongoAdapterOptionsBase & {
-    /**
-     * The connection string used to construct a client when none is injected.
-     *
-     * The database the collections live in is taken from `database` when
-     * present, otherwise the database encoded in this URI.
-     */
-    readonly url: string;
-    /** An already-constructed client; omit it to load the driver lazily. */
-    readonly client?: IMongoClient;
-  })
+      /**
+       * The connection string used to construct a client when none is injected.
+       *
+       * The database the collections live in is taken from `database` when
+       * present, otherwise the database encoded in this URI.
+       */
+      readonly url: string;
+      /** An already-constructed client; omit it to load the driver lazily. */
+      readonly client?: IMongoClient;
+    })
   | (MongoAdapterOptionsBase & {
-    /**
-     * An already-constructed `IMongoClient`.
-     *
-     * When present, the lazy `import('mongodb')` never runs — the
-     * seam that keeps the branching unit-testable.
-     */
-    readonly client: IMongoClient;
-    /** The connection string; unread once a client is injected. */
-    readonly url?: string;
-  });
+      /**
+       * An already-constructed `IMongoClient`.
+       *
+       * When present, the lazy `import('mongodb')` never runs — the
+       * seam that keeps the branching unit-testable.
+       */
+      readonly client: IMongoClient;
+      /** The connection string; unread once a client is injected. */
+      readonly url?: string;
+    });
 
 /**
  * The options both {@linkcode DynamoAdapterOptions} arms share — everything
@@ -1007,48 +991,48 @@ export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
  */
 export type DynamoAdapterOptions =
   | (DynamoAdapterOptionsBase & {
-    /**
-     * The AWS region supplied to the constructed `DynamoDBClient`.
-     *
-     * Required on the lazy arm: the SDK's signer needs a region even against
-     * DynamoDB Local, and M80's suite pins one (`'us-east-1'`) rather than
-     * letting it vary.
-     */
-    readonly region: string;
-    /**
-     * An optional custom endpoint, such as DynamoDB Local. Absent in
-     * production, where the region's own endpoint applies.
-     */
-    readonly endpoint?: string;
-    /**
-     * AWS credentials or an SDK-supported credential provider. Omitted in
-     * production so the SDK's own provider chain applies.
-     */
-    readonly credentials?: unknown;
-    /** An already-constructed client; omit it to load the SDK lazily. */
-    readonly client?: IDynamoClient;
-  })
+      /**
+       * The AWS region supplied to the constructed `DynamoDBClient`.
+       *
+       * Required on the lazy arm: the SDK's signer needs a region even against
+       * DynamoDB Local, and M80's suite pins one (`'us-east-1'`) rather than
+       * letting it vary.
+       */
+      readonly region: string;
+      /**
+       * An optional custom endpoint, such as DynamoDB Local. Absent in
+       * production, where the region's own endpoint applies.
+       */
+      readonly endpoint?: string;
+      /**
+       * AWS credentials or an SDK-supported credential provider. Omitted in
+       * production so the SDK's own provider chain applies.
+       */
+      readonly credentials?: unknown;
+      /** An already-constructed client; omit it to load the SDK lazily. */
+      readonly client?: IDynamoClient;
+    })
   | (DynamoAdapterOptionsBase & {
-    /**
-     * An already-constructed {@linkcode IDynamoClient}.
-     *
-     * When present, the lazy `import('@aws-sdk/client-dynamodb')`
-     * never runs — the seam that keeps the branching unit-testable — and the
-     * client is never destroyed on `disconnect()`, because it belongs to the
-     * application.
-     */
-    readonly client: IDynamoClient;
-    /** The AWS region; unread once a client is injected. */
-    readonly region?: string;
-    /**
-     * The custom endpoint; unread once a client is injected. It stays an
-     * optional member on both arms so the adapter reads `options.endpoint`
-     * without narrowing first — the `MongoAdapterOptions` shape.
-     */
-    readonly endpoint?: string;
-    /** AWS credentials; unread once a client is injected. */
-    readonly credentials?: unknown;
-  });
+      /**
+       * An already-constructed {@linkcode IDynamoClient}.
+       *
+       * When present, the lazy `import('@aws-sdk/client-dynamodb')`
+       * never runs — the seam that keeps the branching unit-testable — and the
+       * client is never destroyed on `disconnect()`, because it belongs to the
+       * application.
+       */
+      readonly client: IDynamoClient;
+      /** The AWS region; unread once a client is injected. */
+      readonly region?: string;
+      /**
+       * The custom endpoint; unread once a client is injected. It stays an
+       * optional member on both arms so the adapter reads `options.endpoint`
+       * without narrowing first — the `MongoAdapterOptions` shape.
+       */
+      readonly endpoint?: string;
+      /** AWS credentials; unread once a client is injected. */
+      readonly credentials?: unknown;
+    });
 
 /**
  * The arm selecting the DynamoDB adapter over the AWS SDK v3 client.
@@ -1173,26 +1157,26 @@ export interface CosmosAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
  */
 export type CosmosAdapterOptions =
   | (CosmosAdapterOptionsBase & {
-    /** The account endpoint, used to construct a client when none is injected. */
-    readonly endpoint: string;
-    /** The account key. */
-    readonly key: string;
-    /** An already-constructed client; omit it to load the SDK lazily. */
-    readonly client?: ICosmosClient;
-  })
+      /** The account endpoint, used to construct a client when none is injected. */
+      readonly endpoint: string;
+      /** The account key. */
+      readonly key: string;
+      /** An already-constructed client; omit it to load the SDK lazily. */
+      readonly client?: ICosmosClient;
+    })
   | (CosmosAdapterOptionsBase & {
-    /**
-     * An already-constructed `ICosmosClient`.
-     *
-     * When present, the lazy `import('@azure/cosmos')` never runs — the
-     * seam that keeps the branching unit-testable.
-     */
-    readonly client: ICosmosClient;
-    /** The account endpoint; unread once a client is injected. */
-    readonly endpoint?: string;
-    /** The account key; unread once a client is injected. */
-    readonly key?: string;
-  });
+      /**
+       * An already-constructed `ICosmosClient`.
+       *
+       * When present, the lazy `import('@azure/cosmos')` never runs — the
+       * seam that keeps the branching unit-testable.
+       */
+      readonly client: ICosmosClient;
+      /** The account endpoint; unread once a client is injected. */
+      readonly endpoint?: string;
+      /** The account key; unread once a client is injected. */
+      readonly key?: string;
+    });
 
 // Re-export the Bigtable structural types the `'bigtable'` arm carries. The
 // client facade is what an application implements to inject its own client;
@@ -1305,27 +1289,27 @@ export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions,
  */
 export type BigtableAdapterOptions =
   | (BigtableAdapterOptionsBase & {
-    /** The GCP project, used to construct a client when none is injected. */
-    readonly projectId: string;
-    /**
-     * An explicit API endpoint, such as `127.0.0.1:8086` for `cbtemulator`.
-     * Measured: an endpoint alone reaches the emulator with no
-     * `BIGTABLE_EMULATOR_HOST` and no credentials.
-     */
-    readonly apiEndpoint?: string;
-    /** An already-constructed client; omit it to load the SDK lazily. */
-    readonly client?: IBigtableClient;
-  })
+      /** The GCP project, used to construct a client when none is injected. */
+      readonly projectId: string;
+      /**
+       * An explicit API endpoint, such as `127.0.0.1:8086` for `cbtemulator`.
+       * Measured: an endpoint alone reaches the emulator with no
+       * `BIGTABLE_EMULATOR_HOST` and no credentials.
+       */
+      readonly apiEndpoint?: string;
+      /** An already-constructed client; omit it to load the SDK lazily. */
+      readonly client?: IBigtableClient;
+    })
   | (BigtableAdapterOptionsBase & {
-    /**
-     * An already-constructed `IBigtableClient`.
-     *
-     * When present, the lazy `import('@google-cloud/bigtable')` never
-     * runs — the seam that keeps the branching unit-testable.
-     */
-    readonly client: IBigtableClient;
-    /** The GCP project; unread once a client is injected. */
-    readonly projectId?: string;
-    /** The API endpoint; unread once a client is injected. */
-    readonly apiEndpoint?: string;
-  });
+      /**
+       * An already-constructed `IBigtableClient`.
+       *
+       * When present, the lazy `import('@google-cloud/bigtable')` never
+       * runs — the seam that keeps the branching unit-testable.
+       */
+      readonly client: IBigtableClient;
+      /** The GCP project; unread once a client is injected. */
+      readonly projectId?: string;
+      /** The API endpoint; unread once a client is injected. */
+      readonly apiEndpoint?: string;
+    });

@@ -63,8 +63,9 @@ describe('generateModule', () => {
     it('marks only the routes barrel managed', () => {
       // The module's own files are the developer's; the barrel is CLI-owned, and
       // that exemption is the only reason a second module does not refuse.
-      expect(files.filter((f) => f.managed === true).map((f) => f.path))
-        .toEqual(['src/controllers/index.ts']);
+      expect(files.filter((f) => f.managed === true).map((f) => f.path)).toEqual([
+        'src/controllers/index.ts',
+      ]);
     });
 
     it('lists the existing route modules alongside the new one', () => {
@@ -118,8 +119,9 @@ describe('generateModule', () => {
         expect(source).toContain(valueImport);
         expect(source).not.toContain(typeImport);
       }
-      expect(fileAt(files, 'src/modules/user-profile/user-profile.controller.ts'))
-        .toContain(typeImport);
+      expect(fileAt(files, 'src/modules/user-profile/user-profile.controller.ts')).toContain(
+        typeImport,
+      );
     });
 
     it('emits a module declaration alongside its other files', () => {
@@ -134,8 +136,9 @@ describe('generateModule', () => {
     });
 
     it('marks only the aggregate barrel managed', () => {
-      expect(files.filter((f) => f.managed === true).map((f) => f.path))
-        .toEqual(['src/modules/index.ts']);
+      expect(files.filter((f) => f.managed === true).map((f) => f.path)).toEqual([
+        'src/modules/index.ts',
+      ]);
     });
 
     it('injects the service into the controller by an explicit token', () => {

@@ -18,9 +18,7 @@ import { createApi as createParamsApi } from '../fixtures/params-client.ts';
 import * as redirectClient from '../fixtures/redirect-client.ts';
 import type { ClientResponse } from '../../src/index.ts';
 
-function makeFetch(
-  handler: (req: Request) => Response | Promise<Response>,
-) {
+function makeFetch(handler: (req: Request) => Response | Promise<Response>) {
   return (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init);
     return Promise.resolve(handler(req));
@@ -53,10 +51,13 @@ describe('generated-client e2e', () => {
     await app.start({ hostname: '127.0.0.1', port });
     try {
       const client = createClient({ baseUrl: `http://127.0.0.1:${port}` });
-      const error = await redirectClient.createApi(client).followRedirect().then(
-        () => undefined,
-        (e: unknown) => e,
-      );
+      const error = await redirectClient
+        .createApi(client)
+        .followRedirect()
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
       expect(redirectClient.isFollowRedirectError(error)).toBe(true);
       if (redirectClient.isFollowRedirectError(error)) expect(error.status).toBe(303);
     } finally {
@@ -111,11 +112,12 @@ describe('generated-client e2e', () => {
   it('propagates a non-2xx response as HttpClientError through generated code', async () => {
     const client = createClient({
       baseUrl: 'https://api.example.com',
-      fetch: makeFetch(() =>
-        new Response(JSON.stringify({ detail: 'not found' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        })
+      fetch: makeFetch(
+        () =>
+          new Response(JSON.stringify({ detail: 'not found' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ),
     });
 
@@ -199,11 +201,12 @@ describe('typed error responses (X11-7)', () => {
     // guard, where before this it was `unknown` for every declared 4xx.
     const client = createClient({
       baseUrl: 'https://api.example.com',
-      fetch: makeFetch(() =>
-        new Response(JSON.stringify({ code: 'gone', detail: 'no such user' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        })
+      fetch: makeFetch(
+        () =>
+          new Response(JSON.stringify({ code: 'gone', detail: 'no such user' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ),
     });
 
@@ -236,11 +239,12 @@ describe('typed error responses (X11-7)', () => {
   it('narrows the OTHER arm to its own body shape', async () => {
     const client = createClient({
       baseUrl: 'https://api.example.com',
-      fetch: makeFetch(() =>
-        new Response(JSON.stringify({ conflictingId: 'u2' }), {
-          status: 409,
-          headers: { 'Content-Type': 'application/json' },
-        })
+      fetch: makeFetch(
+        () =>
+          new Response(JSON.stringify({ conflictingId: 'u2' }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ),
     });
 

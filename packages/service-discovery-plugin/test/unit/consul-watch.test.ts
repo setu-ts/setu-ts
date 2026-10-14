@@ -171,9 +171,7 @@ describe('watchConsulService — signal hygiene', () => {
     let removed = 0;
     const originalAdd = AbortSignal.prototype.addEventListener;
     const originalRemove = AbortSignal.prototype.removeEventListener;
-    AbortSignal.prototype.addEventListener = function (
-      ...args: Parameters<typeof originalAdd>
-    ) {
+    AbortSignal.prototype.addEventListener = function (...args: Parameters<typeof originalAdd>) {
       if (args[0] === 'abort') added++;
       return originalAdd.apply(this, args);
     };

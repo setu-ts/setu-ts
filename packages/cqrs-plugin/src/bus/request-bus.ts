@@ -83,10 +83,8 @@ export class RequestBus {
       throw new HandlerNotFoundError(request.type);
     }
 
-    return await (composeBehaviorChain(
-      request,
-      this.behaviors,
-      () => handler(request),
+    return await (composeBehaviorChain(request, this.behaviors, () =>
+      handler(request),
     ) as Promise<TResult>);
   }
 

@@ -164,10 +164,7 @@ export class LocalStorageProvider implements StorageProvider {
         return joined;
       }
       // Containment check OUTSIDE the try/catch so traversal throws are not swallowed.
-      if (
-        resolvedRealPath !== realRoot &&
-        !resolvedRealPath.startsWith(realRoot + '/')
-      ) {
+      if (resolvedRealPath !== realRoot && !resolvedRealPath.startsWith(realRoot + '/')) {
         throw new Error(`Path traversal attempt blocked: ${path}`);
       }
       return resolvedRealPath;

@@ -36,20 +36,18 @@ interface SafeParseSchema {
    * @param data - The value to validate
    * @returns An object with a `success` discriminant
    */
-  safeParse(
-    data: unknown,
-  ):
+  safeParse(data: unknown):
     | { success: true; data: unknown }
     | {
-      success: false;
-      error: {
-        /**
-         * Validator-specific issue array. Each element is expected to carry
-         * at least a `message` and optionally a `path` and `code`.
-         */
-        issues: readonly SafeParseIssue[];
+        success: false;
+        error: {
+          /**
+           * Validator-specific issue array. Each element is expected to carry
+           * at least a `message` and optionally a `path` and `code`.
+           */
+          issues: readonly SafeParseIssue[];
+        };
       };
-    };
 }
 
 /**
@@ -218,7 +216,5 @@ function safeParseSchema(
     return { success: false, error: { issues: result.error.issues } };
   }
 
-  throw new TypeError(
-    'Schema must expose a `safeParse` method (Zod-compatible).',
-  );
+  throw new TypeError('Schema must expose a `safeParse` method (Zod-compatible).');
 }

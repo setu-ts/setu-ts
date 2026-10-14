@@ -118,9 +118,7 @@ export interface CachedProbeOptions<T = boolean> {
  * ```
  * @since 0.1.0
  */
-export function createCachedProbe(
-  options: CachedProbeOptions<boolean>,
-): () => Promise<boolean>;
+export function createCachedProbe(options: CachedProbeOptions<boolean>): () => Promise<boolean>;
 /**
  * Widened-outcome form: `fallback` is REQUIRED.
  *
@@ -136,9 +134,7 @@ export function createCachedProbe(
 export function createCachedProbe<T>(
   options: CachedProbeOptions<T> & { readonly fallback: T },
 ): () => Promise<T>;
-export function createCachedProbe<T = boolean>(
-  options: CachedProbeOptions<T>,
-): () => Promise<T> {
+export function createCachedProbe<T = boolean>(options: CachedProbeOptions<T>): () => Promise<T> {
   const ttlMs = options.ttlMs ?? 5000;
   const timeoutMs = options.timeoutMs ?? 2000;
   // `false` is the documented default and the only outcome this helper can
@@ -154,9 +150,11 @@ export function createCachedProbe<T = boolean>(
   // exact defect that widening exists to fix. Caught by that probe's own test.
   const fallback = ('fallback' in options ? options.fallback : false) as T;
   const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
-  const clearTimer = options.clearTimer ?? ((handle) => {
-    clearTimeout(handle as ReturnType<typeof setTimeout>);
-  });
+  const clearTimer =
+    options.clearTimer ??
+    ((handle) => {
+      clearTimeout(handle as ReturnType<typeof setTimeout>);
+    });
 
   let cached: { readonly value: T; readonly at: number } | null = null;
   let inFlight: Promise<T> | null = null;
@@ -170,7 +168,10 @@ export function createCachedProbe<T = boolean>(
     // not an error. The attempt therefore never rejects.
     const attempt = Promise.resolve()
       .then(() => options.probe())
-      .then((reachable) => reachable, () => fallback);
+      .then(
+        (reachable) => reachable,
+        () => fallback,
+      );
     return Promise.race([attempt, timeout]).finally(() => {
       clearTimer(timer);
     });

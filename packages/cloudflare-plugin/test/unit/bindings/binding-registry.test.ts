@@ -152,11 +152,7 @@ describe('BindingRegistry', () => {
   });
 
   it('accepts a binding carrying only a partial Durable Object shape as wrong', () => {
-    const bindings = new BindingRegistry(
-      { ROOMS: { idFromName: () => {} } },
-      {},
-      noopWaitUntil,
-    );
+    const bindings = new BindingRegistry({ ROOMS: { idFromName: () => {} } }, {}, noopWaitUntil);
 
     expect(() => bindings.durableObject('ROOMS')).toThrow(CloudflareBindingMissingError);
   });

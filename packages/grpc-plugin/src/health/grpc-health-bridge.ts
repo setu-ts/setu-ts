@@ -30,8 +30,8 @@ interface HealthCheckResponse {
  * `SERVICE_UNKNOWN = 3`.
  */
 const SERVING_STATUS: Record<GrpcServingStatus, number> = {
-  'unknown': 0,
-  'serving': 1,
+  unknown: 0,
+  serving: 1,
   'not-serving': 2,
   'service-unknown': 3,
 };

@@ -27,10 +27,7 @@ describe('server-build', () => {
       headers: { 'Content-Type': 'text/html' },
     });
 
-    const createRequestHandler = (
-      build: unknown,
-      mode?: string,
-    ): SsrRequestHandler => {
+    const createRequestHandler = (build: unknown, mode?: string): SsrRequestHandler => {
       factoryCalled = true;
       capturedBuild = build;
       capturedMode = mode;
@@ -38,11 +35,7 @@ describe('server-build', () => {
       return async (_request, _context) => fakeRRResponse;
     };
 
-    const handler = assembleHandler(
-      fakeBuild,
-      createRequestHandler,
-      'production',
-    );
+    const handler = assembleHandler(fakeBuild, createRequestHandler, 'production');
 
     // assembleHandler calls createRequestHandler immediately, so factoryCalled is true.
     expect(factoryCalled).toBe(true);
@@ -134,9 +127,7 @@ describe('server-build', () => {
   });
 
   it('createLoadContextFactory throws when RouterContextProvider is missing', () => {
-    expect(() => createLoadContextFactory({})).toThrow(
-      "exposes no 'RouterContextProvider' export",
-    );
+    expect(() => createLoadContextFactory({})).toThrow("exposes no 'RouterContextProvider' export");
   });
 
   it('createLoadContextFactory throws when RouterContextProvider is not callable', () => {
@@ -165,9 +156,7 @@ describe('server-build', () => {
   });
 
   it('assertSsrRuntime rejects an object missing createLoadContext and lists its keys', () => {
-    expect(() => assertSsrRuntime({ handler: () => {} })).toThrow(
-      'an object with keys [handler]',
-    );
+    expect(() => assertSsrRuntime({ handler: () => {} })).toThrow('an object with keys [handler]');
   });
 
   it('assertSsrRuntime rejects a runtime whose handler is not a function', () => {
@@ -204,8 +193,8 @@ describe('server-build', () => {
 
   it('loadRequestHandler rejects when server build path does not exist', async () => {
     const nonExistentPath = './__non_existent_build_path_for_test__';
-    await expect(
-      loadRequestHandler(nonExistentPath, 'production'),
-    ).rejects.toThrow('Failed to load React Router server build');
+    await expect(loadRequestHandler(nonExistentPath, 'production')).rejects.toThrow(
+      'Failed to load React Router server build',
+    );
   });
 });

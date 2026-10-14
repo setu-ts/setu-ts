@@ -11,7 +11,9 @@ describe('ServiceRegistry', () => {
 
   it('uses an installed explanation for a missing token', () => {
     const registry = new ServiceRegistry();
-    registry.setMissExplanation((token) => token === 'explained' ? 'Because reasons.' : undefined);
+    registry.setMissExplanation((token) =>
+      token === 'explained' ? 'Because reasons.' : undefined,
+    );
     expect(() => registry.get('explained')).toThrow(
       "No service registered for capability 'explained'. Because reasons.",
     );
@@ -27,9 +29,7 @@ describe('ServiceRegistry', () => {
 
   it('should throw when getting unregistered token', () => {
     const registry = new ServiceRegistry();
-    expect(() => registry.get('missing')).toThrow(
-      "No service registered for capability 'missing'",
-    );
+    expect(() => registry.get('missing')).toThrow("No service registered for capability 'missing'");
   });
 
   it('should support has()', () => {

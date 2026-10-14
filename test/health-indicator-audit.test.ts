@@ -77,9 +77,9 @@ describe('health-indicator audit (M70c §3.9)', () => {
     const missing = sites.filter((site) => !doc.includes(site));
     expect(
       missing,
-      `Unregistered health-indicator site(s) not present in docs/health-indicators.md — add a row:\n  ${
-        missing.join('\n  ')
-      }`,
+      `Unregistered health-indicator site(s) not present in docs/health-indicators.md — add a row:\n  ${missing.join(
+        '\n  ',
+      )}`,
     ).toEqual([]);
   });
 });

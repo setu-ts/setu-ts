@@ -346,7 +346,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
     const exclusive = options?.isolation === 'serializable';
     const generation = this._transactionGeneration;
     return this.acquireTransactionSlot(exclusive, generation).then((release) =>
-      this.createTransaction(release, generation)
+      this.createTransaction(release, generation),
     );
   }
 
@@ -513,7 +513,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       this._activeExclusiveTransaction ||
       this._activeSharedTransactions > 0 ||
       this._transactionAdmissions.length === 0
-    ) return;
+    )
+      return;
 
     const first = this._transactionAdmissions.shift();
     if (first === undefined) return;
@@ -571,8 +572,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
     /** The index in `overlay.creates` of this entity's buffered row keyed `id`, or `-1`. */
     const bufferedCreateIndex = (id: EntityKey): number => {
       const store = this.getStore(entity);
-      return overlay.creates.findIndex((c) =>
-        c.entity === entity && findRecordIndexForRecords([c.record], store, id) === 0
+      return overlay.creates.findIndex(
+        (c) => c.entity === entity && findRecordIndexForRecords([c.record], store, id) === 0,
       );
     };
 
@@ -649,10 +650,11 @@ export class MemoryAdapter implements IDatabaseAdapter {
           // A row this transaction created is edited in place, never shadowed.
           overlay.creates[buffered] = { entity, record: newRecord };
         } else {
-          overlay.shadows.set(
-            overlayKey(entity, id, store.primaryKey),
-            { entity, id, record: newRecord },
-          );
+          overlay.shadows.set(overlayKey(entity, id, store.primaryKey), {
+            entity,
+            id,
+            record: newRecord,
+          });
         }
         return Promise.resolve({ ...newRecord });
       },
@@ -766,10 +768,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * @param query - Normalized query options
    * @returns Matching entities
    */
-  queryEntities(
-    entity: string,
-    query: NormalizedQuery,
-  ): Promise<Record<string, unknown>[]> {
+  queryEntities(entity: string, query: NormalizedQuery): Promise<Record<string, unknown>[]> {
     const store = this.getStore(entity);
     const columnError = unknownColumnError(entity, store.records, query);
     if (columnError) return Promise.reject(columnError);
@@ -810,10 +809,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * @param id - Primary key value (scalar or composite record)
    * @returns The entity or `null`
    */
-  findEntityById(
-    entity: string,
-    id: EntityKey,
-  ): Promise<Record<string, unknown> | null> {
+  findEntityById(entity: string, id: EntityKey): Promise<Record<string, unknown> | null> {
     const store = this.getStore(entity);
     const idx = findRecordIndex(store, id);
     if (idx === -1) return Promise.resolve(null);
@@ -905,8 +901,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       return Promise.resolve(store.records.length);
     }
     return Promise.resolve(
-      store.records.filter((row) =>
-        matchesWhere(row, where) && (filter === undefined || matchesFilter(row, filter))
+      store.records.filter(
+        (row) => matchesWhere(row, where) && (filter === undefined || matchesFilter(row, filter)),
       ).length,
     );
   }
@@ -1043,9 +1039,10 @@ export class MemoryAdapter implements IDatabaseAdapter {
     );
 
     return Promise.resolve({
-      rows: query.select.length > 0
-        ? pageRows.map((r) => projectFields(r, query.select) as Record<string, unknown>)
-        : pageRows.map((r) => ({ ...r })),
+      rows:
+        query.select.length > 0
+          ? pageRows.map((r) => projectFields(r, query.select) as Record<string, unknown>)
+          : pageRows.map((r) => ({ ...r })),
       nextCursor,
     });
   }

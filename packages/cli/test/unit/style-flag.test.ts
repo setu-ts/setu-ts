@@ -192,7 +192,12 @@ describe('a workspace root refuses --style', () => {
     const h = harness();
     expect(await h.run(['ws', '--workspace', '--style', 'oop\r\nINJECTED: done'])).toBe(2);
     expect(h.errText().includes('\r') || h.errText().includes(String.fromCharCode(27))).toBe(false);
-    expect(h.errText().split('\n').filter((line) => line.includes('INJECTED'))).toHaveLength(1);
+    expect(
+      h
+        .errText()
+        .split('\n')
+        .filter((line) => line.includes('INJECTED')),
+    ).toHaveLength(1);
     expect(h.errText()).toContain('\\u000d\\u000a');
   });
 });

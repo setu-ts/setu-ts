@@ -220,11 +220,13 @@ exported constant to keep them:
 ```typescript
 import { DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, rateLimitMiddleware } from '@setu-ts/auth-plugin';
 
-app.middleware.add(rateLimitMiddleware({
-  windowMs: 60_000,
-  max: 100,
-  exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
-}));
+app.middleware.add(
+  rateLimitMiddleware({
+    windowMs: 60_000,
+    max: 100,
+    exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
+  }),
+);
 ```
 
 If you move the probes (`HealthPlugin({ endpoints })`) or add your own operational routes, add the
@@ -284,7 +286,8 @@ if (Deno.build.os !== 'windows') {
     Deno.addSignalListener(signal, () => {
       // A rejecting onShutdown hook makes stop() reject; without .catch the process dies with
       // an unhandled rejection instead of reporting why.
-      void app.stop()
+      void app
+        .stop()
         .then(() => Deno.exit(0))
         .catch((error: unknown) => {
           console.error('Graceful shutdown failed:', error);

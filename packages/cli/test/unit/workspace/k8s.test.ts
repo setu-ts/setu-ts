@@ -51,7 +51,10 @@ describe('workspaceK8sFiles', () => {
   });
 
   it('gives every member a Deployment and a Service on its allocated port', () => {
-    const yaml = objectsFor([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]);
+    const yaml = objectsFor([
+      { name: 'orders', port: 3000 },
+      { name: 'billing', port: 3001 },
+    ]);
     expect(yaml).toContain('kind: Deployment');
     expect(yaml).toContain('kind: Service');
     expect(yaml).toContain('name: orders');
@@ -82,7 +85,10 @@ describe('workspaceK8sFiles', () => {
   // An object whose namespace is left implicit applies into whichever one happens
   // to be current — which is how a RoleBinding ends up granting nothing.
   it('pins the namespace on every object', () => {
-    const yaml = objectsFor([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]);
+    const yaml = objectsFor([
+      { name: 'orders', port: 3000 },
+      { name: 'billing', port: 3001 },
+    ]);
     const namespaces = yaml.match(/namespace: /g) ?? [];
     // Two objects per member, two members.
     expect(namespaces.length).toBe(4);
@@ -142,7 +148,10 @@ describe('workspaceK8sFiles', () => {
   });
 
   it('sorts members so a reordered manifest is not a diff', () => {
-    const yaml = objectsFor([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]);
+    const yaml = objectsFor([
+      { name: 'orders', port: 3000 },
+      { name: 'billing', port: 3001 },
+    ]);
     expect(yaml.indexOf('# billing')).toBeLessThan(yaml.indexOf('# orders'));
   });
 });
@@ -191,9 +200,6 @@ describe('probe selection', () => {
     // A workspace created before M70h carries no such field. Falling back to the
     // TCP probe keeps those manifests working rather than pointing a probe at a
     // path the member may not serve.
-    expect(probeKinds(render({ name: 'orders', port: 3000 }))).toEqual([
-      'tcpSocket',
-      'tcpSocket',
-    ]);
+    expect(probeKinds(render({ name: 'orders', port: 3000 }))).toEqual(['tcpSocket', 'tcpSocket']);
   });
 });

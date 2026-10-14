@@ -63,7 +63,11 @@ import type { IRequestContext } from '@setu-ts/common';
 import { renderView } from '@setu-ts/view-plugin';
 
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+  <ul>
+    {props.users.map((user) => (
+      <li>{user}</li>
+    ))}
+  </ul>
 );
 
 export function usersRoute(ctx: IRequestContext) {
@@ -78,7 +82,11 @@ PROPS, and the framework answers with the rendered markup — never JSON:
 import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
 
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+  <ul>
+    {props.users.map((user) => (
+      <li>{user}</li>
+    ))}
+  </ul>
 );
 
 @Controller('/pages')
@@ -101,7 +109,9 @@ a plain `.ts` file:
 import { html } from 'hono/html';
 
 const UserList = (props: { readonly users: readonly string[] }) =>
-  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+  html`<ul>
+    ${props.users.map((user) => html`<li>${user}</li>`)}
+  </ul>`;
 ```
 
 Both escape every interpolation, and the same engine renders both — the arm names the authoring

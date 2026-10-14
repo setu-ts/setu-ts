@@ -13,7 +13,7 @@ describe('database filter public contract', () => {
     const applicationRoute: RouteInfo = {
       method: 'GET',
       path: '/health',
-      definition: { handler: () => ({ __handlerResult: true } as never) },
+      definition: { handler: () => ({ __handlerResult: true }) as never },
     };
 
     expect(filter.type).toBe('and');

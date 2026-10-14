@@ -96,27 +96,27 @@ export interface GenerationResult {
 
 /** The build tools every member carries, pinned identically (plan §3.6). */
 const BUILD_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
-  'typescript': '6.0.3',
+  typescript: '6.0.3',
   '@types/node': '^24',
 };
 
 /** The members whose `src` references the `Deno` global get its ambient types (plan §3.6). */
 const TEST_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
-  'vitest': '5.0.3',
+  vitest: '5.0.3',
   '@vitest/coverage-v8': '5.0.3',
-  'esbuild': '0.28.2',
+  esbuild: '0.28.2',
   '@hono/node-server': '^2.0.0',
 };
 
 /** The repository's formatter and linter, root-only and pinned like the test tools (M111e1 §3.5). */
 const LINT_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
-  'prettier': '3.9.10',
-  'eslint': '10.12.0',
+  prettier: '3.9.10',
+  eslint: '10.12.0',
   '@eslint/js': '10.0.1',
   '@eslint/compat': '2.1.1',
   '@eslint-community/eslint-plugin-eslint-comments': '4.8.1',
   'typescript-eslint': '8.71.2',
-  'globals': '17.13.0',
+  globals: '17.13.0',
 };
 
 const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
@@ -175,11 +175,7 @@ export function basePackageName(specifier: string): string {
 }
 
 /** The `EXTERNAL_RANGES` lookup, refusing an external the committed table does not carry. */
-export function lookupRange(
-  name: string,
-  file: string,
-  refusals: string[],
-): string | null {
+export function lookupRange(name: string, file: string, refusals: string[]): string | null {
   const range = EXTERNAL_RANGES[name];
   if (range === undefined) {
     refusals.push(
@@ -235,9 +231,7 @@ export function classifyMember(
       const depName = basePackageName(workspaceName(edge.specifier));
       const depDir = nameToDir.get(depName);
       if (depDir === undefined) {
-        refusals.push(
-          `${edge.file}: imports "${edge.specifier}", which is not a workspace member`,
-        );
+        refusals.push(`${edge.file}: imports "${edge.specifier}", which is not a workspace member`);
         continue;
       }
       dependencies.set(depName, 'workspace:^');
@@ -301,7 +295,8 @@ export function classifyMember(
   // Classification overrides, each applied only when the scan actually found the dependency;
   // an override whose target is absent is itself a refusal (the table cannot drift ahead of the code).
   for (const override of overridesFor(member.dir)) {
-    const scanned = dependencies.get(override.dependency) ??
+    const scanned =
+      dependencies.get(override.dependency) ??
       peerDependencies.get(override.dependency) ??
       devDependencies.get(override.dependency);
     if (scanned === undefined && override.kind === 'dev-dependency-types') {
@@ -419,9 +414,8 @@ function sortedRecord(map: ReadonlyMap<string, string>): Record<string, string> 
 export function renderPackageJson(member: MemberInput, classified: ClassifiedMember): string {
   const description = PACKAGE_METADATA[member.name.replace(/^@setu-ts\//, '')]?.description;
   if (description === undefined) throw new Error(`${member.name}: missing package description`);
-  const effects = Object.keys(SIDE_EFFECT_MODULES).filter((path) =>
-    path.startsWith(`${member.dir}/`)
-  )
+  const effects = Object.keys(SIDE_EFFECT_MODULES)
+    .filter((path) => path.startsWith(`${member.dir}/`))
     .map((path) => distPath(path.slice(member.dir.length + 1), '.js'));
   const exports: Record<string, { types: string; default: string }> = {};
   for (const entry of member.exports) {
@@ -504,13 +498,11 @@ export function renderTsconfig(member: MemberInput, classified: ClassifiedMember
 
 /** Renders the root solution `tsconfig.json` referencing every member. */
 export function renderSolutionTsconfig(dirs: readonly string[]): string {
-  return `${
-    JSON.stringify(
-      { files: [], references: dirs.map((dir) => ({ path: `./${dir}` })) },
-      null,
-      2,
-    )
-  }\n`;
+  return `${JSON.stringify(
+    { files: [], references: dirs.map((dir) => ({ path: `./${dir}` })) },
+    null,
+    2,
+  )}\n`;
 }
 
 /**
@@ -552,69 +544,64 @@ export function renderPnpmWorkspace(dirs: readonly string[]): string {
 
 /** Renders the root `package.json` (private workspace root, §3.2/§3.6). */
 export function renderRootPackageJson(dirs: readonly string[]): string {
-  return `${
-    JSON.stringify(
-      {
-        name: 'setu-ts',
-        private: true,
-        packageManager: 'pnpm@12.11.2',
-        engines: { node: '>=22' },
-        workspaces: dirs,
-        type: 'module',
-        scripts: {
-          test:
-            'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts',
-          'test:coverage':
-            'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts --coverage',
-          format: 'prettier --write .',
-          'format:check': 'prettier --check .',
-          lint: 'eslint .',
-        },
-        devDependencies: {
-          ...BUILD_DEV_DEPENDENCIES,
-          ...TEST_DEV_DEPENDENCIES,
-          ...LINT_DEV_DEPENDENCIES,
-        },
+  return `${JSON.stringify(
+    {
+      name: 'setu-ts',
+      private: true,
+      packageManager: 'pnpm@12.11.2',
+      engines: { node: '>=22' },
+      workspaces: dirs,
+      type: 'module',
+      scripts: {
+        test: 'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts',
+        'test:coverage':
+          'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts --coverage',
+        format: 'prettier --write .',
+        'format:check': 'prettier --check .',
+        lint: 'eslint .',
       },
-      null,
-      2,
-    )
-  }\n`;
+      devDependencies: {
+        ...BUILD_DEV_DEPENDENCIES,
+        ...TEST_DEV_DEPENDENCIES,
+        ...LINT_DEV_DEPENDENCIES,
+      },
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 /** Renders `tsconfig.base.json` — the eight strictness options verbatim plus the Node-build options (§3.6). */
 export function renderTsconfigBase(): string {
-  return `${
-    JSON.stringify(
-      {
-        compilerOptions: {
-          target: 'es2024',
-          lib: ['es2024', 'esnext.decorators', 'dom', 'dom.iterable'],
-          module: 'nodenext',
-          moduleResolution: 'nodenext',
-          strict: true,
-          noUnusedLocals: true,
-          noUnusedParameters: true,
-          noImplicitReturns: true,
-          noFallthroughCasesInSwitch: true,
-          noImplicitOverride: true,
-          exactOptionalPropertyTypes: true,
-          useUnknownInCatchVariables: true,
-          rewriteRelativeImportExtensions: true,
-          declaration: true,
-          declarationMap: true,
-          sourceMap: true,
-          isolatedDeclarations: true,
-          composite: true,
-          verbatimModuleSyntax: true,
-          skipLibCheck: true,
-          types: ['node'],
-        },
+  return `${JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'es2024',
+        lib: ['es2024', 'esnext.decorators', 'dom', 'dom.iterable'],
+        module: 'nodenext',
+        moduleResolution: 'nodenext',
+        strict: true,
+        noUnusedLocals: true,
+        noUnusedParameters: true,
+        noImplicitReturns: true,
+        noFallthroughCasesInSwitch: true,
+        noImplicitOverride: true,
+        exactOptionalPropertyTypes: true,
+        useUnknownInCatchVariables: true,
+        rewriteRelativeImportExtensions: true,
+        declaration: true,
+        declarationMap: true,
+        sourceMap: true,
+        isolatedDeclarations: true,
+        composite: true,
+        verbatimModuleSyntax: true,
+        skipLibCheck: true,
+        types: ['node'],
       },
-      null,
-      2,
-    )
-  }\n`;
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 /**
@@ -701,9 +688,10 @@ export function renderDenoJson(raw: string, aliases: ReadonlyMap<string, string>
   ].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   for (const [key, value] of entries) merged[key] = value;
 
-  const block = Object.keys(merged).length === 0
-    ? ''
-    : `"imports": ${JSON.stringify(merged, null, 2).replaceAll('\n', '\n  ')}`;
+  const block =
+    Object.keys(merged).length === 0
+      ? ''
+      : `"imports": ${JSON.stringify(merged, null, 2).replaceAll('\n', '\n  ')}`;
   const start = raw.search(/"imports"\s*:\s*\{/);
   if (start === -1) {
     if (block === '') return raw;
@@ -829,8 +817,8 @@ async function readMember(root: string, dir: string): Promise<MemberInput> {
       // No such directory: the member declares none.
     }
   }
-  const currentPackageJson = await Deno.readTextFile(`${root}/${dir}/package.json`).catch(() =>
-    null
+  const currentPackageJson = await Deno.readTextFile(`${root}/${dir}/package.json`).catch(
+    () => null,
   );
   return {
     dir,

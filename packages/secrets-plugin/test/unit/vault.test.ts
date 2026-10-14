@@ -30,9 +30,9 @@ describe('HashiCorpVaultProvider', () => {
     await expect(new HashiCorpVaultProvider({ token: 't' }).connect()).rejects.toThrow(
       'requires options.address',
     );
-    await expect(
-      new HashiCorpVaultProvider({ address: 'https://v' }).connect(),
-    ).rejects.toThrow('requires options.token');
+    await expect(new HashiCorpVaultProvider({ address: 'https://v' }).connect()).rejects.toThrow(
+      'requires options.token',
+    );
   });
 
   it('get builds the KV v2 URL, sends the token header, and returns the value', async () => {
@@ -46,9 +46,7 @@ describe('HashiCorpVaultProvider', () => {
 
     expect(await provider.get('database/password')).toBe('s3cret');
     // Trailing slash on address is trimmed; default mount is `secret`.
-    expect(calls[0].url).toBe(
-      'https://vault.example.com/v1/secret/data/database/password',
-    );
+    expect(calls[0].url).toBe('https://vault.example.com/v1/secret/data/database/password');
     const headers = calls[0].init?.headers as Record<string, string>;
     expect(headers['X-Vault-Token']).toBe('tok');
   });
@@ -219,7 +217,10 @@ describe('HashiCorpVaultProvider request bound (M101a V8-4)', () => {
     expect(timers.armed[0]?.ms).toBe(5000);
     timers.fire();
 
-    const error = await pending.then(() => undefined, (e: unknown) => e);
+    const error = await pending.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(SecretProviderUnavailableError);
     expect(httpStatusHintOf(error)?.status).toBe(503);
     expect((error as SecretProviderUnavailableError).provider).toBe('HashiCorpVaultProvider');
@@ -234,7 +235,10 @@ describe('HashiCorpVaultProvider request bound (M101a V8-4)', () => {
     });
     await provider.connect();
 
-    const error = await provider.set('a', 'b').then(() => undefined, (e: unknown) => e);
+    const error = await provider.set('a', 'b').then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(SecretProviderUnavailableError);
     expect((error as Error).cause).toBe(failure);
     // The served sentence is fixed; the driver text stays in the log.
@@ -274,7 +278,10 @@ describe('HashiCorpVaultProvider request bound (M101a V8-4)', () => {
     });
     await provider.connect();
 
-    const error = await provider.get('x').then(() => undefined, (e: unknown) => e);
+    const error = await provider.get('x').then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
   });
@@ -326,7 +333,10 @@ describe('HashiCorpVaultProvider body bound and address validation (M101a)', () 
     expect(timers.armed).toHaveLength(1);
     timers.fire();
 
-    const error = await pending.then(() => undefined, (e: unknown) => e);
+    const error = await pending.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(SecretProviderUnavailableError);
     expect(httpStatusHintOf(error)?.status).toBe(503);
   });
@@ -338,7 +348,10 @@ describe('HashiCorpVaultProvider body bound and address validation (M101a)', () 
     });
     await provider.connect();
 
-    const error = await provider.get('x').then(() => undefined, (e: unknown) => e);
+    const error = await provider.get('x').then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
   });
@@ -372,7 +385,10 @@ describe('HashiCorpVaultProvider body bound and address validation (M101a)', () 
     const write = provider.set('a', 'b');
     await flush();
     timers.fire();
-    const error = await write.then(() => undefined, (e: unknown) => e);
+    const error = await write.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(SecretProviderUnavailableError);
     expect(cancelled).toBe(2);
   });
@@ -381,7 +397,10 @@ describe('HashiCorpVaultProvider body bound and address validation (M101a)', () 
   for (const address of malformed) {
     it(`connect refuses the malformed address ${JSON.stringify(address)} without echoing it`, async () => {
       const provider = new HashiCorpVaultProvider({ address, token: 'tok' });
-      const error = await provider.connect().then(() => undefined, (e: unknown) => e);
+      const error = await provider.connect().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
       expect(error).toBeInstanceOf(Error);
       expect(error).not.toBeInstanceOf(SecretProviderUnavailableError);
       expect((error as Error).message).toContain('options.address');
@@ -426,9 +445,7 @@ describe('HashiCorpVaultProvider secret path and body size (M101a security audit
     await provider.connect();
     await provider.get('app db/pass?x=1#f');
     await provider.get('%2e%2e/a');
-    expect(calls[0].url).toBe(
-      'https://vault.example.com/v1/secret/data/app%20db/pass%3Fx%3D1%23f',
-    );
+    expect(calls[0].url).toBe('https://vault.example.com/v1/secret/data/app%20db/pass%3Fx%3D1%23f');
     expect(calls[1].url).toBe('https://vault.example.com/v1/secret/data/%252e%252e/a');
   });
 
@@ -466,19 +483,22 @@ describe('HashiCorpVaultProvider secret path and body size (M101a security audit
     const bytes = new TextEncoder().encode(text);
     const shared = new Uint8Array(65_536);
     let offset = 0;
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        if (offset >= bytes.byteLength) {
-          controller.close();
-          return;
-        }
-        const piece = bytes.subarray(offset, offset + 4);
-        shared.fill(0x7a);
-        shared.set(piece, 0);
-        offset += piece.byteLength;
-        controller.enqueue(new Uint8Array(shared.buffer, 0, piece.byteLength));
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (offset >= bytes.byteLength) {
+            controller.close();
+            return;
+          }
+          const piece = bytes.subarray(offset, offset + 4);
+          shared.fill(0x7a);
+          shared.set(piece, 0);
+          offset += piece.byteLength;
+          controller.enqueue(new Uint8Array(shared.buffer, 0, piece.byteLength));
+        },
       },
-    }, { highWaterMark: 0 }); // pull only on a pending read, so a chunk is consumed first
+      { highWaterMark: 0 },
+    ); // pull only on a pending read, so a chunk is consumed first
     const provider = new HashiCorpVaultProvider({
       ...base,
       http: () => Promise.resolve(new Response(body, { status: 200 })),

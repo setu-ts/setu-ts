@@ -259,12 +259,14 @@ function compileOidc(
     scopes,
     issuer: provider.issuer,
     compiledIssuer,
-    ...(rp === undefined ? {} : {
-      rpInitiatedLogout: {
-        postLogoutRedirectUri: rp.postLogoutRedirectUri,
-        idTokenHint: rp.idTokenHint === true,
-      },
-    }),
+    ...(rp === undefined
+      ? {}
+      : {
+          rpInitiatedLogout: {
+            postLogoutRedirectUri: rp.postLogoutRedirectUri,
+            idTokenHint: rp.idTokenHint === true,
+          },
+        }),
   };
 }
 
@@ -274,9 +276,7 @@ function compileOAuth2(
   base: Omit<CompiledProvider, 'kind'>,
 ): CompiledProvider {
   const name = base.name;
-  for (
-    const field of ['authorizationEndpoint', 'tokenEndpoint', 'userinfoEndpoint'] as const
-  ) {
+  for (const field of ['authorizationEndpoint', 'tokenEndpoint', 'userinfoEndpoint'] as const) {
     const value = provider[field];
     if (typeof value !== 'string' || !isAcceptableUrl(value)) {
       refuse(name, `${field} must be https, or http on a loopback host`);
@@ -319,11 +319,9 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   const configured = config.basePath ?? DEFAULT_SIGN_IN_BASE_PATH;
   if (configured !== '/' && !(BASE_PATH.test(configured) && !configured.endsWith('/'))) {
     throw new AuthPluginConfigurationError(
-      `auth-plugin: signIn.basePath must be / or kebab-case segments without a trailing slash, got '${
-        String(
-          config.basePath,
-        )
-      }'`,
+      `auth-plugin: signIn.basePath must be / or kebab-case segments without a trailing slash, got '${String(
+        config.basePath,
+      )}'`,
     );
   }
   // `/` means no prefix at all; keeping it literal would build `//acme/login`.
@@ -374,14 +372,14 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   // One logout route serves the whole plugin, so more than one provider claiming
   // RP-initiated logout is ambiguous: the route could not know whose
   // end-session endpoint to call.
-  const rpLogoutProviders = providers.filter((provider) =>
-    provider.rpInitiatedLogout !== undefined
+  const rpLogoutProviders = providers.filter(
+    (provider) => provider.rpInitiatedLogout !== undefined,
   );
   if (rpLogoutProviders.length > 1) {
     throw new AuthPluginConfigurationError(
-      `auth-plugin: only one signIn provider may set rpInitiatedLogout, got ${
-        rpLogoutProviders.map((provider) => provider.name).join(', ')
-      }`,
+      `auth-plugin: only one signIn provider may set rpInitiatedLogout, got ${rpLogoutProviders
+        .map((provider) => provider.name)
+        .join(', ')}`,
     );
   }
 

@@ -101,11 +101,13 @@ describe('decodeFrame', () => {
   });
 
   it('decodes valid frame with type, id, and payload', () => {
-    const frame = decodeFrame(JSON.stringify({
-      type: 'subscribe',
-      id: '1',
-      payload: { query: '{ hello }' },
-    }));
+    const frame = decodeFrame(
+      JSON.stringify({
+        type: 'subscribe',
+        id: '1',
+        payload: { query: '{ hello }' },
+      }),
+    );
     expect(frame).not.toBeNull();
     expect(frame!.type).toBe('subscribe');
     expect(frame!.id).toBe('1');

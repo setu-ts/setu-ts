@@ -142,7 +142,10 @@ describe('CloudflarePlugin messaging arm', () => {
 
     // Captured once rather than asserted twice: a second `start()` re-registers
     // the runtime capability and would fail on that instead, hiding this.
-    const error = await app.start().then(() => undefined, (e: unknown) => e);
+    const error = await app.start().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
 
     expect(error).toBeInstanceOf(CloudflareBindingMissingError);
     expect(String(error)).toContain('a Queues producer');
@@ -277,9 +280,7 @@ describe('CloudflarePlugin messaging arm', () => {
       new FakeQueueBatch('messages', [new FakeQueueMessage('m1', { foreign: true })]),
     );
 
-    expect(logger.messages()).toEqual([
-      'cloudflare-messaging: message not readable, retried',
-    ]);
+    expect(logger.messages()).toEqual(['cloudflare-messaging: message not readable, retried']);
 
     await app.stop();
   });

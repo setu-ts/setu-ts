@@ -27,12 +27,12 @@ function createRuntime(platform: string = 'node'): IRuntimeServices {
     uuid: () => `uuid-${++uuidCounter}`,
     now: () => 1000000,
     setTimeout: (fn: () => void, ms: number) => {
-      return (setTimeout(fn, ms) as unknown) as ReturnType<typeof setTimeout>;
+      return setTimeout(fn, ms) as unknown as ReturnType<typeof setTimeout>;
     },
     clearTimeout: (handle: ReturnType<typeof setTimeout>) => {
       clearTimeout(handle as unknown as number);
     },
-    setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
     clearInterval: () => {},
     randomBytes: () => new Uint8Array(16),
     subtle: undefined,
@@ -88,10 +88,14 @@ describe('ServiceBusBroker B6 lifecycle', () => {
         close: () => Promise.resolve(),
       };
 
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
 
@@ -155,10 +159,14 @@ describe('ServiceBusBroker B6 lifecycle', () => {
         close: () => Promise.resolve(),
       };
 
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
 
@@ -212,10 +220,14 @@ describe('ServiceBusBroker B6 lifecycle', () => {
         close: () => Promise.resolve(),
       };
 
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
 
@@ -288,10 +300,14 @@ describe('ServiceBusBroker B6 lifecycle', () => {
         },
       };
 
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
 

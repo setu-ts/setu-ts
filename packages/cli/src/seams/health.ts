@@ -106,8 +106,14 @@ function renderHealthBarrel(classBased: boolean): (artifacts: SeamArtifacts) => 
     const factory = classBased ? indicatorClassFactorySymbol : indicatorValueFactorySymbol;
     const imports = [
       `import type { HealthIndicatorEntry } from '@setu-ts/health-plugin';`,
-      renderSeamImports(names, (n) => [factory(n)], (kebab) => `./${kebab}.indicator.ts`),
-    ].filter((line) => line !== '').join('\n\n');
+      renderSeamImports(
+        names,
+        (n) => [factory(n)],
+        (kebab) => `./${kebab}.indicator.ts`,
+      ),
+    ]
+      .filter((line) => line !== '')
+      .join('\n\n');
 
     // Bare factory references, not `new`: the factory is the single construction
     // site, and it lives in the developer-owned artifact module, so a dependency
@@ -116,7 +122,7 @@ function renderHealthBarrel(classBased: boolean): (artifacts: SeamArtifacts) => 
 
     return assembleSeamBarrel(header, imports, [
       `/** Every generated health indicator, for \`HealthPlugin({ indicators })\`. */\n` +
-      renderExportedArray(HEALTH_INDICATORS_EXPORT, 'HealthIndicatorEntry', entries),
+        renderExportedArray(HEALTH_INDICATORS_EXPORT, 'HealthIndicatorEntry', entries),
     ]);
   };
 }

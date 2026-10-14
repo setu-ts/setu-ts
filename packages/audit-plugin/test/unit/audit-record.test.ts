@@ -177,8 +177,9 @@ describe('freezeAuditRecord', () => {
     }).toThrow();
 
     // The array inside metadata is also frozen at depth.
-    const tags = (frozen.metadata as Record<string, unknown[]>)
-      .tags as Array<string | Record<string, number>>;
+    const tags = (frozen.metadata as Record<string, unknown[]>).tags as Array<
+      string | Record<string, number>
+    >;
     expect(tags).toHaveLength(2);
 
     // Mutating a nested object inside the array should block.

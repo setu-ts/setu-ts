@@ -72,12 +72,7 @@ const CLASSIFIER_KEYS = [
 ] as const;
 
 type ErrorMember =
-  | 'name'
-  | 'message'
-  | 'stack'
-  | 'cause'
-  | 'errors'
-  | typeof CLASSIFIER_KEYS[number];
+  'name' | 'message' | 'stack' | 'cause' | 'errors' | (typeof CLASSIFIER_KEYS)[number];
 
 interface SerializationBudget {
   remainingNodes: number;
@@ -164,10 +159,12 @@ function isAggregateError(value: Error): value is AggregateError {
  */
 export function serializeError(value: unknown): SerializedError {
   const budget: SerializationBudget = { remainingNodes: MAX_SERIALIZED_ERROR_NODES };
-  return serializeValue(value, MAX_CAUSE_DEPTH, budget) ?? {
-    name: 'Error',
-    message: safeString(value),
-  };
+  return (
+    serializeValue(value, MAX_CAUSE_DEPTH, budget) ?? {
+      name: 'Error',
+      message: safeString(value),
+    }
+  );
 }
 
 /** Serializes a thrown value while consuming the shared node budget. */

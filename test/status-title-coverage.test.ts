@@ -31,7 +31,7 @@ async function sourceFiles(directory: string): Promise<string[]> {
   for await (const entry of Deno.readDir(directory)) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory) {
-      result.push(...await sourceFiles(path));
+      result.push(...(await sourceFiles(path)));
     } else if (entry.isFile && path.endsWith('.ts')) {
       result.push(path);
     }
@@ -60,8 +60,9 @@ function brandedStatuses(source: string): number[] {
 
 describe('STATUS_TITLES covers every status the framework brands', () => {
   it('names a canonical title for each branded status', async () => {
-    const packages = (await Array.fromAsync(Deno.readDir('packages')))
-      .filter((entry) => entry.isDirectory);
+    const packages = (await Array.fromAsync(Deno.readDir('packages'))).filter(
+      (entry) => entry.isDirectory,
+    );
 
     const statuses = new Set<number>();
     const origins = new Map<number, string>();

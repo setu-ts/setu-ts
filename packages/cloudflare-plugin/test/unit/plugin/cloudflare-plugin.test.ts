@@ -62,8 +62,9 @@ describe('CloudflarePlugin descriptor', () => {
 
   it('rejects an instance name the token grammar forbids', () => {
     // createCapabilityToken enforces lowercase kebab-case; a colon is illegal.
-    expect(() => CloudflarePlugin({ env: ENV, cache: { binding: 'K', name: 'Edge:1' } }))
-      .toThrow(TypeError);
+    expect(() => CloudflarePlugin({ env: ENV, cache: { binding: 'K', name: 'Edge:1' } })).toThrow(
+      TypeError,
+    );
   });
 
   it('claims the bare realtime-backplane token for the default instance', () => {
@@ -80,8 +81,6 @@ describe('CloudflarePlugin descriptor', () => {
   });
 
   it('provides nothing extra when the durableObject arm is omitted', () => {
-    expect(CloudflarePlugin({ env: ENV }).provides).not.toContain(
-      CAPABILITIES.REALTIME_BACKPLANE,
-    );
+    expect(CloudflarePlugin({ env: ENV }).provides).not.toContain(CAPABILITIES.REALTIME_BACKPLANE);
   });
 });

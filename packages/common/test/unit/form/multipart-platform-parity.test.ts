@@ -89,11 +89,7 @@ describe('multipart Content-Disposition — the §3.4 normative table', () => {
   });
 
   it('R9: an unquoted value runs to the next ";" or end of line and is then trimmed', () => {
-    const parts = parse([
-      'form-data; name=hello world',
-      'form-data; name=x;',
-      'form-data; name=y',
-    ]);
+    const parts = parse(['form-data; name=hello world', 'form-data; name=x;', 'form-data; name=y']);
     expect(parts.length).toBe(3);
     expect(parts[0].name).toBe('hello world');
     expect(parts[1].name).toBe('x');

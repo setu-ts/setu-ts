@@ -26,11 +26,13 @@ Reference config:
 The app is unchanged from any OTLP setup: emit one stream at the collector's `:4318`.
 
 ```typescript
-app.register(TelemetryPlugin({
-  serviceName: 'my-app',
-  exporter: 'otlp',
-  endpoint: 'http://otel-collector:4318/v1/traces',
-}));
+app.register(
+  TelemetryPlugin({
+    serviceName: 'my-app',
+    exporter: 'otlp',
+    endpoint: 'http://otel-collector:4318/v1/traces',
+  }),
+);
 ```
 
 That is the whole app-side change. The plugin uses OTLP/**HTTP**

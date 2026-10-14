@@ -213,16 +213,19 @@ describe('HealthPlugin integration (through the real kernel)', () => {
       const source = app.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS);
       const verdicts = () =>
         Object.fromEntries(
-          source.snapshot('instance').observations.map((o) => [
-            o.indicatorAlias,
-            o.state === 'reported' ? `reported:${o.status}` : o.state,
-          ]),
+          source
+            .snapshot('instance')
+            .observations.map((o) => [
+              o.indicatorAlias,
+              o.state === 'reported' ? `reported:${o.status}` : o.state,
+            ]),
         );
       // `onBootstrap` starts one scheduled cycle immediately.
       await new Promise((resolve) => setTimeout(resolve, 50));
       const scheduled = verdicts();
-      expect(source.snapshot('instance').observations.every((o) => o.origin === 'scheduled'))
-        .toBe(true);
+      expect(source.snapshot('instance').observations.every((o) => o.origin === 'scheduled')).toBe(
+        true,
+      );
       const ready = await app.inject({ method: 'GET', url: 'http://localhost/ready' });
       expect(ready.statusCode).toBe(503);
       expect(scheduled).toEqual(expected);

@@ -25,7 +25,11 @@ const UNWIRED = ['guard', 'migration'] as const;
 
 describe('seam registry', () => {
   it('declares the ten family seams plus the class-based ingress aggregate', () => {
-    expect(listSeamSpecs().map((spec) => spec.schematic).sort()).toEqual([
+    expect(
+      listSeamSpecs()
+        .map((spec) => spec.schematic)
+        .sort(),
+    ).toEqual([
       'command-handler',
       'controller',
       'event-handler',
@@ -85,9 +89,8 @@ describe('seam registry', () => {
   it('declares a dir and suffix matching the path its schematic writes', () => {
     for (const spec of listSeamSpecs()) {
       if (spec.schematic === 'ingress') continue;
-      const plugins = spec.schematic === 'controller' || spec.schematic === 'service'
-        ? ['decorator-plugin']
-        : [];
+      const plugins =
+        spec.schematic === 'controller' || spec.schematic === 'service' ? ['decorator-plugin'] : [];
       const files = getSchematic(spec.schematic)!.factory(deriveNames('order-item'), {
         runtime: 'deno',
         plugins: new Set(plugins),
@@ -147,10 +150,12 @@ describe('seam rendering helpers', () => {
   });
 
   it('renders an inline declaration until it would run long, then breaks it', () => {
-    expect(renderExportedArray('X', 'Constructor', []))
-      .toBe('export const X: readonly Constructor[] = [];');
-    expect(renderExportedArray('X', 'Constructor', ['A', 'B']))
-      .toBe('export const X: readonly Constructor[] = [A, B];');
+    expect(renderExportedArray('X', 'Constructor', [])).toBe(
+      'export const X: readonly Constructor[] = [];',
+    );
+    expect(renderExportedArray('X', 'Constructor', ['A', 'B'])).toBe(
+      'export const X: readonly Constructor[] = [A, B];',
+    );
 
     const long = ['A'.repeat(40), 'B'.repeat(40)];
     expect(renderExportedArray('X', 'Constructor', long)).toContain('\n  ');
@@ -212,7 +217,11 @@ describe('seam rendering helpers', () => {
     );
     expect(caseInsensitive).toBe("import { aZulu, bAlpha, Bbeta } from './widget.ts';");
 
-    const tie = renderSeamImports(['widget'], () => ['abc', 'ABC'], (k) => `./${k}.ts`);
+    const tie = renderSeamImports(
+      ['widget'],
+      () => ['abc', 'ABC'],
+      (k) => `./${k}.ts`,
+    );
     expect(tie).toBe("import { ABC, abc } from './widget.ts';");
 
     // The same order survives the wrapped form, which is a separate join.
@@ -225,40 +234,50 @@ describe('seam rendering helpers', () => {
   });
 
   it('renders no imports for an empty family', () => {
-    expect(renderSeamImports([], (n) => [n.pascal], (k) => `./${k}.ts`)).toBe('');
+    expect(
+      renderSeamImports(
+        [],
+        (n) => [n.pascal],
+        (k) => `./${k}.ts`,
+      ),
+    ).toBe('');
   });
 
   it('renders one import per name, in the order given', () => {
     expect(
-      renderSeamImports(['order-item', 'user'], (n) => [`${n.pascal}X`], (k) => `./${k}.ts`),
-    ).toBe(
-      `import { OrderItemX } from './order-item.ts';\nimport { UserX } from './user.ts';`,
-    );
+      renderSeamImports(
+        ['order-item', 'user'],
+        (n) => [`${n.pascal}X`],
+        (k) => `./${k}.ts`,
+      ),
+    ).toBe(`import { OrderItemX } from './order-item.ts';\nimport { UserX } from './user.ts';`);
   });
 
   it('names every symbol a spec declares on one import', () => {
     // The multi-symbol families (middleware, cqrs, events) depend on this, and it is the
     // same list the scanner requires the file to export.
     expect(
-      renderSeamImports(['user'], (n) => [`${n.screaming}_A`, `${n.camel}B`], (k) => `./${k}.ts`),
+      renderSeamImports(
+        ['user'],
+        (n) => [`${n.screaming}_A`, `${n.camel}B`],
+        (k) => `./${k}.ts`,
+      ),
     ).toBe(`import { USER_A, userB } from './user.ts';`);
   });
 });
 
 describe('exportsSymbol', () => {
   it('recognizes every declaration form the CLI emits', () => {
-    for (
-      const source of [
-        'export const X = 1;',
-        'export function X() {}',
-        'export class X {}',
-        'export interface X {}',
-        'export type X = 1;',
-        'export async function X() {}',
-        'export declare const X: number;',
-        'export abstract class X {}',
-      ]
-    ) {
+    for (const source of [
+      'export const X = 1;',
+      'export function X() {}',
+      'export class X {}',
+      'export interface X {}',
+      'export type X = 1;',
+      'export async function X() {}',
+      'export declare const X: number;',
+      'export abstract class X {}',
+    ]) {
       expect(exportsSymbol(source, 'X')).toBe(true);
     }
   });
@@ -272,16 +291,14 @@ describe('exportsSymbol', () => {
   it('does not mistake a mention for an export', () => {
     // A false positive would put an unresolvable import in the developer's barrel, so
     // every one of these must read as absent.
-    for (
-      const source of [
-        '// X is documented here',
-        'X();',
-        'const X = 1;',
-        'import { X } from "./other.ts";',
-        'export const XY = 1;',
-        'export const YX = 1;',
-      ]
-    ) {
+    for (const source of [
+      '// X is documented here',
+      'X();',
+      'const X = 1;',
+      'import { X } from "./other.ts";',
+      'export const XY = 1;',
+      'export const YX = 1;',
+    ]) {
       expect(exportsSymbol(source, 'X')).toBe(false);
     }
   });

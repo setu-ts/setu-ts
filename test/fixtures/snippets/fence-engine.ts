@@ -96,10 +96,7 @@ export const SNIPPET_CONFIG = 'test/fixtures/snippets/deno.json';
 
 /** The four explicit classifications a TypeScript/TSX fence may receive. */
 export type Classification =
-  | 'compile-complete'
-  | 'compile-fragment'
-  | 'external-source'
-  | 'non-runnable-pseudocode';
+  'compile-complete' | 'compile-fragment' | 'external-source' | 'non-runnable-pseudocode';
 
 /** The classification of a non-TypeScript fence (not subject to compilation). */
 export type SkipClassification = 'skip';
@@ -557,8 +554,7 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
  * Reports whether a fence imports from a `@setu-ts/` package.
  */
 export function importsFromSetuTs(code: string): boolean {
-  return /from\s+['"]@setu-ts\//.test(code) ||
-    /import\s+['"]@setu-ts\//.test(code);
+  return /from\s+['"]@setu-ts\//.test(code) || /import\s+['"]@setu-ts\//.test(code);
 }
 
 /**
@@ -693,11 +689,7 @@ function isPseudocodeAllowed(guide: string, line: number): boolean {
  * external-source. The migration guides pair every `### NestJS`/`### Fastify`
  * heading with a `### Setu-TS` counterpart; the Setu-TS side is compiled.
  */
-const EXTERNAL_HEADINGS = new Set([
-  '### NestJS',
-  '### NestJS (TypeORM)',
-  '### Fastify',
-]);
+const EXTERNAL_HEADINGS = new Set(['### NestJS', '### NestJS (TypeORM)', '### Fastify']);
 
 /**
  * Classifies a fence per the explicit policy. See the module doc for the four
@@ -743,8 +735,8 @@ export function classify(fence: Fence): ClassifiedFence {
   // 2. A TS fence that does NOT import @setu-ts/.
   //    Pseudocode allow-list (last resort, reviewed against source).
   if (isPseudocodeAllowed(fence.guide, fence.line)) {
-    const entry = PSEUDOCODE_ALLOWLIST.find((e) =>
-      e.guide === fence.guide && e.line === fence.line
+    const entry = PSEUDOCODE_ALLOWLIST.find(
+      (e) => e.guide === fence.guide && e.line === fence.line,
     )!;
     return {
       fence,
@@ -799,10 +791,7 @@ export function classify(fence: Fence): ClassifiedFence {
  * (the function is pure and the set of globals is closed). The id is the sorted
  * globals joined by `+`, with a `rel` suffix when a relative import is present.
  */
-function wrapperIdFor(
-  globals: readonly string[],
-  hasRelativeImport: boolean,
-): string {
+function wrapperIdFor(globals: readonly string[], hasRelativeImport: boolean): string {
   const sorted = [...globals].sort();
   const base = sorted.length === 0 ? 'none' : sorted.join('+');
   return hasRelativeImport ? `${base}+rel` : base;
@@ -828,8 +817,7 @@ function wrapperIdFor(
  * @returns The interface name to declare `app` as
  */
 export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' {
-  return /\bapp\.(?:inject|unregister|hasPlugin)\b/.test(code) ||
-      /\binject\s*\(\s*app\b/.test(code)
+  return /\bapp\.(?:inject|unregister|hasPlugin)\b/.test(code) || /\binject\s*\(\s*app\b/.test(code)
     ? 'IKernelApplication'
     : 'IApplication';
 }
@@ -854,14 +842,12 @@ export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' 
 export async function writeProjectStubs(scratchDir: string): Promise<void> {
   const parent = scratchDir.replace(/\/[^/]+$/, '');
   await Deno.mkdir(scratchDir, { recursive: true });
-  const source = "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
+  const source =
+    "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
     'export function createApp(): IKernelApplication {\n' +
     '  return createApplication({ plugins: [] });\n' +
     '}\n';
-  await Deno.writeTextFile(
-    `${parent}/setu.config.ts`,
-    source,
-  );
+  await Deno.writeTextFile(`${parent}/setu.config.ts`, source);
   await Deno.writeTextFile(`${scratchDir}/setu.config.ts`, source);
 }
 
@@ -907,7 +893,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     // import — that would be "Import declaration conflicts with local
     // declaration").
     if (
-      TYPE_EXPORTS[name] !== undefined && !importsIdentifier(code, name) &&
+      TYPE_EXPORTS[name] !== undefined &&
+      !importsIdentifier(code, name) &&
       !fenceDeclares(name)
     ) {
       typeNames.add(name);
@@ -919,10 +906,7 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // globals (they're not in FRAGMENT_GLOBALS but are still real type imports).
   for (const name of Object.keys(TYPE_EXPORTS)) {
     const wordRe = new RegExp(`\\b${name}\\b`);
-    if (
-      wordRe.test(code) && !importsIdentifier(code, name) &&
-      !fenceDeclares(name)
-    ) {
+    if (wordRe.test(code) && !importsIdentifier(code, name) && !fenceDeclares(name)) {
       typeNames.add(name);
     }
   }
@@ -945,7 +929,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // declare the global itself — a fence that declares `const app` provides its
   // own type and needs no prelude `app`).
   if (
-    present.has('app') && !fenceDeclares('app') &&
+    present.has('app') &&
+    !fenceDeclares('app') &&
     // Only the SELECTED type is suppressed. Testing both meant a fence that
     // imports `IApplication` for its own use while calling `app.inject` had
     // its `IKernelApplication` import dropped, leaving the declaration below
@@ -956,11 +941,9 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   }
   if (present.has('ctx') && !fenceDeclares('ctx')) {
     const pluginUse =
-      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/
-        .test(
-          code,
-        ) ||
-      /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
+      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/.test(
+        code,
+      ) || /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
     if (pluginUse) {
       if (!importsIdentifier(code, 'IPluginContext')) {
         typeNames.add('IPluginContext');
@@ -970,7 +953,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     }
   }
   if (
-    present.has('platform') && !fenceDeclares('platform') &&
+    present.has('platform') &&
+    !fenceDeclares('platform') &&
     !importsIdentifier(code, 'RuntimePlatform')
   ) {
     typeNames.add('RuntimePlatform');
@@ -1013,10 +997,7 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     }
     if (dominated) continue;
     const wordRe = new RegExp(`\\b${name}\\b`);
-    if (
-      wordRe.test(code) && !importsIdentifier(code, name) &&
-      !fenceDeclares(name)
-    ) {
+    if (wordRe.test(code) && !importsIdentifier(code, name) && !fenceDeclares(name)) {
       const pkg = VALUE_EXPORTS[name]!;
       const list = valByPkg.get(pkg) ?? [];
       list.push(name);
@@ -1041,14 +1022,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // against the real callback signature.
   if (present.has('ctx') && !fenceDeclares('ctx')) {
     const pluginUse =
-      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/
-        .test(
-          code,
-        ) ||
-      /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
-    lines.push(
-      `declare const ctx: ${pluginUse ? 'IPluginContext' : 'IRequestContext'};`,
-    );
+      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/.test(
+        code,
+      ) || /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
+    lines.push(`declare const ctx: ${pluginUse ? 'IPluginContext' : 'IRequestContext'};`);
   }
   // `platform` — a RuntimePlatform value.
   if (present.has('platform') && !fenceDeclares('platform')) {
@@ -1061,22 +1038,16 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // Test-harness globals (describe/it/expect) — the snippet import map does
   // not resolve @std/testing, so declare minimal signatures.
   if (present.has('describe')) {
-    lines.push(
-      'declare function describe(name: string, fn: () => void | Promise<void>): void;',
-    );
+    lines.push('declare function describe(name: string, fn: () => void | Promise<void>): void;');
   }
   if (present.has('it')) {
-    lines.push(
-      'declare function it(name: string, fn: () => void | Promise<void>): void;',
-    );
+    lines.push('declare function it(name: string, fn: () => void | Promise<void>): void;');
   }
   // The lifecycle hooks, which a fixture-management example reaches for as
   // readily as `describe`/`it` — same reason, same shape.
   for (const hook of ['beforeEach', 'afterEach', 'beforeAll', 'afterAll']) {
     if (present.has(hook)) {
-      lines.push(
-        `declare function ${hook}(fn: () => void | Promise<void>): void;`,
-      );
+      lines.push(`declare function ${hook}(fn: () => void | Promise<void>): void;`);
     }
   }
   if (present.has('expect')) {
@@ -1107,10 +1078,7 @@ export function buildPrelude(globals: readonly string[], code: string): string {
  * redeclares a name the fence defines and never re-imports a symbol the fence
  * already imports.
  */
-export function assembleSource(
-  fence: Fence,
-  classified: ClassifiedFence,
-): string {
+export function assembleSource(fence: Fence, classified: ClassifiedFence): string {
   if (classified.kind === 'compile-complete') return fence.code;
   if (classified.kind !== 'compile-fragment') return fence.code;
   const globals = referencesFragmentGlobal(fence.code);
@@ -1121,9 +1089,7 @@ export function assembleSource(
 /**
  * Invokes `deno check --config <config> <file>` and returns exit code + stderr.
  */
-export async function denoCheck(
-  filePath: string,
-): Promise<{ code: number; stderr: string }> {
+export async function denoCheck(filePath: string): Promise<{ code: number; stderr: string }> {
   const cmd = new Deno.Command('deno', {
     args: ['check', '--config', SNIPPET_CONFIG, filePath],
     stdout: 'null',

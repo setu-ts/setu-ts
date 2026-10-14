@@ -245,7 +245,7 @@ function fakeContext(opts: {
       headers: new Headers(),
       ...(opts.tenant !== undefined ? { tenant: opts.tenant } : {}),
       ...(opts.locale !== undefined ? { locale: opts.locale } : {}),
-      json: async <T = unknown>() => ({} as T),
+      json: async <T = unknown>() => ({}) as T,
       text: async () => '',
       bytes: async () => new Uint8Array(0),
     },

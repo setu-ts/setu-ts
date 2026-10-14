@@ -29,9 +29,9 @@ function fakeGcpModule(
   opts?: { stringData?: boolean; error?: unknown },
 ): GcpSdkModule {
   class Client {
-    accessSecretVersion(
-      request: { name: string },
-    ): Promise<[{ payload?: { data?: string | Uint8Array | null } }]> {
+    accessSecretVersion(request: {
+      name: string;
+    }): Promise<[{ payload?: { data?: string | Uint8Array | null } }]> {
       if (opts?.error !== undefined) {
         return Promise.reject(opts.error);
       }
@@ -43,9 +43,7 @@ function fakeGcpModule(
       const data = opts?.stringData ? value : new TextEncoder().encode(value);
       return Promise.resolve([{ payload: { data } }]);
     }
-    addSecretVersion(
-      request: { parent: string; payload: { data: Uint8Array } },
-    ): Promise<unknown> {
+    addSecretVersion(request: { parent: string; payload: { data: Uint8Array } }): Promise<unknown> {
       const short = request.parent.split('/secrets/')[1];
       store.set(short, new TextDecoder().decode(request.payload.data));
       return Promise.resolve({});

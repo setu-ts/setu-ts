@@ -98,10 +98,7 @@ class TokenBucket {
   tryTake(nowHr: number): boolean {
     const elapsedMs = Math.max(0, nowHr - this.#lastHr);
     this.#lastHr = nowHr;
-    this.#tokens = Math.min(
-      this.#burst,
-      this.#tokens + (elapsedMs / 1000) * this.#ratePerSecond,
-    );
+    this.#tokens = Math.min(this.#burst, this.#tokens + (elapsedMs / 1000) * this.#ratePerSecond);
     if (this.#tokens >= 1) {
       this.#tokens -= 1;
       return true;

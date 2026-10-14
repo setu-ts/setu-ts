@@ -105,10 +105,12 @@ describe('defineIntegrationEvent', () => {
   it('refuses a version beyond the safe-integer range', () => {
     // `Number.MAX_SAFE_INTEGER + 1` is not a safe integer, so its suffix
     // string cannot be trusted to identify a version.
-    expect(() => defineIntegrationEvent({ ...VALID, version: Number.MAX_SAFE_INTEGER + 1 }))
-      .toThrow(TypeError);
-    expect(() => defineIntegrationEvent({ ...VALID, version: Number.MAX_SAFE_INTEGER + 1 }))
-      .toThrow(/"version"/);
+    expect(() =>
+      defineIntegrationEvent({ ...VALID, version: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow(TypeError);
+    expect(() =>
+      defineIntegrationEvent({ ...VALID, version: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow(/"version"/);
   });
 
   it('refuses an absent parse', () => {
@@ -116,36 +118,38 @@ describe('defineIntegrationEvent', () => {
       defineIntegrationEvent({
         ...VALID,
         parse: undefined as unknown as (value: unknown) => OrderPlaced,
-      })
+      }),
     ).toThrow(TypeError);
     expect(() =>
       defineIntegrationEvent({
         ...VALID,
         parse: undefined as unknown as (value: unknown) => OrderPlaced,
-      })
+      }),
     ).toThrow(/"parse"/);
   });
 
   it('refuses a topic with no version suffix at all, naming the expected suffix', () => {
     expect(() => defineIntegrationEvent({ ...VALID, topic: 'orders.placed' })).toThrow(TypeError);
-    expect(() => defineIntegrationEvent({ ...VALID, topic: 'orders.placed' })).toThrow(
-      /\.v1/,
-    );
+    expect(() => defineIntegrationEvent({ ...VALID, topic: 'orders.placed' })).toThrow(/\.v1/);
   });
 
   it('refuses a topic whose suffix disagrees with the version', () => {
-    expect(() => defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v2' }))
-      .toThrow(TypeError);
-    expect(() => defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v2' }))
-      .toThrow(/\.v1/);
+    expect(() =>
+      defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v2' }),
+    ).toThrow(TypeError);
+    expect(() =>
+      defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v2' }),
+    ).toThrow(/\.v1/);
   });
 
   it('refuses the .v10 near-miss for version 1', () => {
     // A suffix check looser than the exact `.v${version}` string accepts this
     // definition and silently couples a v1 consumer to a v10 topic.
-    expect(() => defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v10' }))
-      .toThrow(TypeError);
-    expect(() => defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v10' }))
-      .toThrow(/\.v1/);
+    expect(() =>
+      defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v10' }),
+    ).toThrow(TypeError);
+    expect(() =>
+      defineIntegrationEvent({ ...VALID, version: 1, topic: 'orders.placed.v10' }),
+    ).toThrow(/\.v1/);
   });
 });

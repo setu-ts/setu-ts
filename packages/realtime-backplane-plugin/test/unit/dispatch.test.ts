@@ -63,12 +63,14 @@ describe('dispatchFrame', () => {
     // an escaping throw would be unhandled.
     expect(() =>
       dispatchFrame(
-        [() => {
-          throw new Error('boom');
-        }],
+        [
+          () => {
+            throw new Error('boom');
+          },
+        ],
         FRAME,
         () => {},
-      )
+      ),
     ).not.toThrow();
   });
 
@@ -94,9 +96,11 @@ describe('dispatchFrame', () => {
   it('coerces a non-Error throw for the reporter', () => {
     const errors: unknown[] = [];
     dispatchFrame(
-      [() => {
-        throw 'a string';
-      }],
+      [
+        () => {
+          throw 'a string';
+        },
+      ],
       FRAME,
       (error) => errors.push(error),
     );

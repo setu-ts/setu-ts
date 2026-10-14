@@ -16,7 +16,7 @@ async function snapshot(root: string): Promise<Record<string, number[] | null>> 
         entries[path] = null;
         await visit(path);
       } else {
-        entries[path] = [...await nodeFs.readFile(`${root}/${path}`)];
+        entries[path] = [...(await nodeFs.readFile(`${root}/${path}`))];
       }
     }
   }
@@ -66,29 +66,34 @@ describe('interrupted scaffolding on the real filesystem', () => {
         const controller = new AbortController();
         let triggered = false;
         let mainWrites = 0;
-        const interrupted = cli(project, {
-          ...fs,
-          async writeFile(path, data) {
-            await fs.writeFile(path, data);
-            if (path.endsWith('/apps/svc/main.ts')) mainWrites += 1;
-            const trigger = phase === 'copy'
-              ? path.includes('/apps/svc/')
-              : phase === 'root-write'
-              ? path === `${project}/setu.workspace.json`
-              : phase === 'entry-rewrite' && mainWrites === 2;
-            if (!triggered && trigger) {
-              triggered = true;
-              controller.abort();
-            }
+        const interrupted = cli(
+          project,
+          {
+            ...fs,
+            async writeFile(path, data) {
+              await fs.writeFile(path, data);
+              if (path.endsWith('/apps/svc/main.ts')) mainWrites += 1;
+              const trigger =
+                phase === 'copy'
+                  ? path.includes('/apps/svc/')
+                  : phase === 'root-write'
+                    ? path === `${project}/setu.workspace.json`
+                    : phase === 'entry-rewrite' && mainWrites === 2;
+              if (!triggered && trigger) {
+                triggered = true;
+                controller.abort();
+              }
+            },
+            async rm(path, options) {
+              await fs.rm(path, options);
+              if (!triggered && phase === 'delete' && path === `${project}/main.ts`) {
+                triggered = true;
+                controller.abort();
+              }
+            },
           },
-          async rm(path, options) {
-            await fs.rm(path, options);
-            if (!triggered && phase === 'delete' && path === `${project}/main.ts`) {
-              triggered = true;
-              controller.abort();
-            }
-          },
-        }, controller.signal);
+          controller.signal,
+        );
         expect(await interrupted.run(['adopt'])).toBe(130);
         expect(triggered).toBe(true);
         expect(interrupted.err.lines).toEqual([
@@ -104,14 +109,18 @@ describe('interrupted scaffolding on the real filesystem', () => {
     await fixture(async (root, fs) => {
       const controller = new AbortController();
       let writes = 0;
-      const interrupted = cli(root, {
-        ...fs,
-        async writeFile(path, data) {
-          await fs.writeFile(path, data);
-          writes += 1;
-          if (writes === 17) controller.abort();
+      const interrupted = cli(
+        root,
+        {
+          ...fs,
+          async writeFile(path, data) {
+            await fs.writeFile(path, data);
+            writes += 1;
+            if (writes === 17) controller.abort();
+          },
         },
-      }, controller.signal);
+        controller.signal,
+      );
 
       expect(await interrupted.run(['new', 'app', '--template', 'full-stack'])).toBe(130);
       expect(interrupted.err.text()).toContain('Interrupted;');
@@ -128,8 +137,9 @@ describe('interrupted scaffolding on the real filesystem', () => {
 
       expect(await retry.run(['new', 'app', '--template', 'rest'])).toBe(1);
       expect(retry.err.text()).toContain(`delete ${root}/app and run this again`);
-      expect(await nodeFs.readFile(`${root}/app/package.json`, 'utf8'))
-        .toBe('{ "partial": true }\n');
+      expect(await nodeFs.readFile(`${root}/app/package.json`, 'utf8')).toBe(
+        '{ "partial": true }\n',
+      );
     });
   });
 
@@ -172,7 +182,9 @@ describe('interrupted scaffolding on the real filesystem', () => {
       expect(Object.keys(before)).toContain('apps/first/src/discovery/services.ts');
       const dry = cli(workspace, fs);
       expect(await dry.run([...args, '--dry-run'])).toBe(0);
-      const last = dry.out.lines.filter((line) => line.startsWith('would create ')).at(-1)!
+      const last = dry.out.lines
+        .filter((line) => line.startsWith('would create '))
+        .at(-1)!
         .slice('would create '.length);
       expect(last.length).toBeGreaterThan(workspace.length);
       let failed = false;
@@ -191,8 +203,9 @@ describe('interrupted scaffolding on the real filesystem', () => {
       expect(failed).toBe(true);
       expect(await snapshot(workspace)).toEqual(before);
       expect(await ordinary.run(args)).toBe(0);
-      expect(await nodeFs.readFile(`${workspace}/apps/first/src/discovery/services.ts`, 'utf8'))
-        .toContain('third');
+      expect(
+        await nodeFs.readFile(`${workspace}/apps/first/src/discovery/services.ts`, 'utf8'),
+      ).toContain('third');
     });
   });
 
@@ -202,34 +215,26 @@ describe('interrupted scaffolding on the real filesystem', () => {
       expect(await setup.run(['new', 'acme', '--workspace'])).toBe(0);
       const workspace = `${root}/acme`;
       expect(
-        await cli(workspace, fs).run([
-          'generate',
-          'app',
-          'first',
-          '--template',
-          'microservice',
-        ]),
+        await cli(workspace, fs).run(['generate', 'app', 'first', '--template', 'microservice']),
       ).toBe(0);
       expect(
-        await cli(workspace, fs).run([
-          'generate',
-          'app',
-          'second',
-          '--template',
-          'microservice',
-        ]),
+        await cli(workspace, fs).run(['generate', 'app', 'second', '--template', 'microservice']),
       ).toBe(0);
       const before = await snapshot(workspace);
       const controller = new AbortController();
       let writes = 0;
-      const interrupted = cli(workspace, {
-        ...fs,
-        async writeFile(path, data) {
-          await fs.writeFile(path, data);
-          writes += 1;
-          if (writes === 3) controller.abort();
+      const interrupted = cli(
+        workspace,
+        {
+          ...fs,
+          async writeFile(path, data) {
+            await fs.writeFile(path, data);
+            writes += 1;
+            if (writes === 3) controller.abort();
+          },
         },
-      }, controller.signal);
+        controller.signal,
+      );
       const args = ['generate', 'app', 'third', '--template', 'microservice'];
       expect(await interrupted.run(args)).toBe(130);
       expect(await snapshot(workspace)).toEqual(before);

@@ -40,11 +40,13 @@ describe('SAML real import', () => {
       '/auth',
     );
     const pending = new Map([['_r1', new Date().toISOString()]]);
-    const saml = new SAML(buildLibraryConfig(provider, {
-      saveAsync: () => Promise.resolve(null),
-      getAsync: (id) => Promise.resolve(pending.get(id) ?? null),
-      removeAsync: (id) => Promise.resolve(id === null ? null : pending.get(id) ?? null),
-    }));
+    const saml = new SAML(
+      buildLibraryConfig(provider, {
+        saveAsync: () => Promise.resolve(null),
+        getAsync: (id) => Promise.resolve(pending.get(id) ?? null),
+        removeAsync: (id) => Promise.resolve(id === null ? null : (pending.get(id) ?? null)),
+      }),
+    );
     const result = await saml.validatePostResponseAsync({
       SAMLResponse: signedResponse(key, '_r1'),
     });

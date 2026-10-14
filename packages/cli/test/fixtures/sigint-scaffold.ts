@@ -41,16 +41,17 @@ if (onSignal === undefined) throw new Error('SIGINT fixture requires runtime sig
 const selected = mode === 'unhandled' ? unhandled : { ...unhandled, onSignal };
 
 const boundary = nodeProcess();
-const host = mode === 'prompt'
-  ? {
-    ...boundary,
-    args: ['new', 'app'],
-    isTerminal: () => true,
-    prompt: (message: string, signal?: AbortSignal) => {
-      console.log('PROMPTING');
-      return boundary.prompt(message, signal);
-    },
-  }
-  : { ...boundary, args: ['new', 'app', '--template', 'full-stack', '--yes'] };
+const host =
+  mode === 'prompt'
+    ? {
+        ...boundary,
+        args: ['new', 'app'],
+        isTerminal: () => true,
+        prompt: (message: string, signal?: AbortSignal) => {
+          console.log('PROMPTING');
+          return boundary.prompt(message, signal);
+        },
+      }
+    : { ...boundary, args: ['new', 'app', '--template', 'full-stack', '--yes'] };
 
 process.exitCode = await runMain(selected, { ...host, cwd: () => root, log: () => {} });

@@ -193,7 +193,10 @@ describe('review regression — Cache-Control follows the original resource', ()
   });
 
   it('keeps immutable on 304 for both compressed sidecars', async () => {
-    for (const [format, encoding] of [['br', 'br'], ['gz', 'gzip']] as const) {
+    for (const [format, encoding] of [
+      ['br', 'br'],
+      ['gz', 'gzip'],
+    ] as const) {
       const counters = { opened: 0, cancelled: 0, stats: 0 };
       const handler = createStaticHandler({
         fs: makeFs({ [HASHED]: { size: 10 }, [`${HASHED}.${format}`]: { size: 5 } }, counters),
@@ -256,10 +259,13 @@ describe('review regression — Cache-Control follows the original resource', ()
     const counters = { opened: 0, cancelled: 0, stats: 0 };
     const seen: string[] = [];
     const handler = createStaticHandler({
-      fs: makeFs({
-        '/srv/docs': { size: 0, isDirectory: true },
-        '/srv/docs/index.html': { size: 5 },
-      }, counters),
+      fs: makeFs(
+        {
+          '/srv/docs': { size: 0, isDirectory: true },
+          '/srv/docs/index.html': { size: 5 },
+        },
+        counters,
+      ),
       root: '/srv',
       urlPrefix: '/',
       index: 'index.html',
@@ -325,9 +331,11 @@ describe('review regression — an interrupted download actually resumes', () =>
   const MTIME = new Date('2026-01-01T00:00:00.000Z');
 
   /** A filesystem whose stat reports an mtime, as every real adapter does. */
-  function fsWithMtime(
-    counters: { opened: number; cancelled: number; stats: number },
-  ): IFileSystem {
+  function fsWithMtime(counters: {
+    opened: number;
+    cancelled: number;
+    stats: number;
+  }): IFileSystem {
     return {
       readFile: () => Promise.resolve(new Uint8Array(1000)),
       writeFile: () => Promise.resolve(),

@@ -52,10 +52,12 @@ function setup(
 }
 
 const slice = {
-  items: [{
-    endpoints: [{ addresses: ['10.1.0.1', '10.1.0.2'], conditions: { ready: true } }],
-    ports: [{ name: 'http', port: 8080 }],
-  }],
+  items: [
+    {
+      endpoints: [{ addresses: ['10.1.0.1', '10.1.0.2'], conditions: { ready: true } }],
+      ports: [{ name: 'http', port: 8080 }],
+    },
+  ],
   metadata: { resourceVersion: '100' },
 };
 
@@ -79,11 +81,7 @@ describe('KubernetesProvider — URL', () => {
 describe('KubernetesProvider — token resolution', () => {
   it('uses an explicit token verbatim and never touches the file system', async () => {
     const { fs, paths } = tokenFs(['from-disk']);
-    const { provider } = setup(
-      { token: 'explicit' },
-      createFakeHttp(),
-      createFakeRuntime({ fs }),
-    );
+    const { provider } = setup({ token: 'explicit' }, createFakeHttp(), createFakeRuntime({ fs }));
     expect(await provider.authHeader()).toBe('Bearer explicit');
     expect(paths).toEqual([]);
   });
@@ -147,13 +145,15 @@ describe('KubernetesProvider — EndpointSlice mapping', () => {
   it('excludes an endpoint whose conditions.ready is false', () => {
     const { provider } = setup();
     const body = {
-      items: [{
-        endpoints: [
-          { addresses: ['10.1.0.1'], conditions: { ready: false } },
-          { addresses: ['10.1.0.2'], conditions: { ready: true } },
-        ],
-        ports: [{ port: 8080 }],
-      }],
+      items: [
+        {
+          endpoints: [
+            { addresses: ['10.1.0.1'], conditions: { ready: false } },
+            { addresses: ['10.1.0.2'], conditions: { ready: true } },
+          ],
+          ports: [{ port: 8080 }],
+        },
+      ],
     };
     expect(provider.mapSlices(body, 'billing').map((i) => i.host)).toEqual(['10.1.0.2']);
   });
@@ -171,10 +171,15 @@ describe('KubernetesProvider — EndpointSlice mapping', () => {
   it('selects the named port when several exist', () => {
     const { provider } = setup({ portName: 'grpc' });
     const body = {
-      items: [{
-        endpoints: [{ addresses: ['10.1.0.1'] }],
-        ports: [{ name: 'http', port: 8080 }, { name: 'grpc', port: 9090 }],
-      }],
+      items: [
+        {
+          endpoints: [{ addresses: ['10.1.0.1'] }],
+          ports: [
+            { name: 'http', port: 8080 },
+            { name: 'grpc', port: 9090 },
+          ],
+        },
+      ],
     };
     expect(provider.mapSlices(body, 'billing')[0].port).toBe(9090);
   });
@@ -182,10 +187,15 @@ describe('KubernetesProvider — EndpointSlice mapping', () => {
   it('throws naming the available ports when several exist and none was named', () => {
     const { provider } = setup();
     const body = {
-      items: [{
-        endpoints: [{ addresses: ['10.1.0.1'] }],
-        ports: [{ name: 'http', port: 8080 }, { name: 'grpc', port: 9090 }],
-      }],
+      items: [
+        {
+          endpoints: [{ addresses: ['10.1.0.1'] }],
+          ports: [
+            { name: 'http', port: 8080 },
+            { name: 'grpc', port: 9090 },
+          ],
+        },
+      ],
     };
     expect(() => provider.mapSlices(body, 'billing')).toThrow(DiscoveryUnavailableError);
     expect(() => provider.mapSlices(body, 'billing')).toThrow('grpc');
@@ -194,10 +204,12 @@ describe('KubernetesProvider — EndpointSlice mapping', () => {
   it('names an unnamed port in the multi-port error', () => {
     const { provider } = setup();
     const body = {
-      items: [{
-        endpoints: [{ addresses: ['10.1.0.1'] }],
-        ports: [{ port: 8080 }, { port: 9090 }],
-      }],
+      items: [
+        {
+          endpoints: [{ addresses: ['10.1.0.1'] }],
+          ports: [{ port: 8080 }, { port: 9090 }],
+        },
+      ],
     };
     expect(() => provider.mapSlices(body, 'billing')).toThrow('<unnamed>');
   });
@@ -230,8 +242,10 @@ describe('KubernetesProvider — resolve', () => {
   it('reads and maps the list', async () => {
     const http = createFakeHttp([{ text: JSON.stringify(slice) }]);
     const { provider } = setup({ token: 't' }, http);
-    expect((await provider.resolve('billing')).map((i) => i.host))
-      .toEqual(['10.1.0.1', '10.1.0.2']);
+    expect((await provider.resolve('billing')).map((i) => i.host)).toEqual([
+      '10.1.0.1',
+      '10.1.0.2',
+    ]);
   });
 
   it('rejects on a non-2xx response', async () => {
@@ -247,15 +261,13 @@ describe('KubernetesProvider — resolve', () => {
 
 describe('KubernetesProvider — watch wiring', () => {
   it('LISTs through the provider and delivers mapped instances', async () => {
-    const http = createFakeHttp([
-      { text: JSON.stringify(slice) },
-      { chunks: [] },
-    ]);
+    const http = createFakeHttp([{ text: JSON.stringify(slice) }, { chunks: [] }]);
     const { provider } = setup({ token: 't' }, http);
 
     let unsubscribe: () => void = () => {};
     const seen = await new Promise<readonly { host: string }[]>((resolve) => {
-      void provider.watch('billing', (instances) => resolve(instances))
+      void provider
+        .watch('billing', (instances) => resolve(instances))
         .then((stop) => {
           unsubscribe = stop;
         });
@@ -268,10 +280,7 @@ describe('KubernetesProvider — watch wiring', () => {
   });
 
   it('watches from the resourceVersion the LIST reported', async () => {
-    const http = createFakeHttp([
-      { text: JSON.stringify(slice) },
-      { chunks: [] },
-    ]);
+    const http = createFakeHttp([{ text: JSON.stringify(slice) }, { chunks: [] }]);
     const { provider } = setup({ token: 't' }, http);
 
     const unsubscribe = await provider.watch('billing', () => {});
@@ -286,10 +295,7 @@ describe('KubernetesProvider — watch wiring', () => {
   });
 
   it('watches from an empty version when the LIST reports none', async () => {
-    const http = createFakeHttp([
-      { text: JSON.stringify({ items: [] }) },
-      { chunks: [] },
-    ]);
+    const http = createFakeHttp([{ text: JSON.stringify({ items: [] }) }, { chunks: [] }]);
     const { provider } = setup({ token: 't' }, http);
 
     const unsubscribe = await provider.watch('billing', () => {});

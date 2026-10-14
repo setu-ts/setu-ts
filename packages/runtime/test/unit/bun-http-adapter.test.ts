@@ -22,19 +22,13 @@ function createFakeHost(): {
   recorded: {
     port?: number;
     hostname?: string;
-    fetch?: (
-      r: Request,
-      server: BunServer,
-    ) => Response | undefined | Promise<Response | undefined>;
+    fetch?: (r: Request, server: BunServer) => Response | undefined | Promise<Response | undefined>;
   };
 } {
   const recorded: {
     port?: number;
     hostname?: string;
-    fetch?: (
-      r: Request,
-      server: BunServer,
-    ) => Response | undefined | Promise<Response | undefined>;
+    fetch?: (r: Request, server: BunServer) => Response | undefined | Promise<Response | undefined>;
   } = {};
 
   const host: BunServeHost = {

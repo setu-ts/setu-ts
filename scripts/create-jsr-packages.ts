@@ -69,7 +69,7 @@ for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
   const response = await fetch(`${API}/scopes/${SCOPE}/packages`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ package: name }),

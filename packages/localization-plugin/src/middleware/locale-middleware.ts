@@ -120,7 +120,8 @@ export function localeMiddleware(options: LocaleMiddlewareOptions): MiddlewareFu
     // Only a supported tag is written: an application can `replaceLocale` any
     // string, and a header value must never carry text nobody configured.
     if (
-      final !== undefined && supportedSet.has(final) &&
+      final !== undefined &&
+      supportedSet.has(final) &&
       !ctx.response.snapshot().headers.has('content-language')
     ) {
       ctx.response.header('Content-Language', final);

@@ -215,11 +215,14 @@ export function createDenoRuntimeServices(
   // reading `runtime.onSignal?.(…)` degrades instead of crashing at startup.
   // Callers must not read the presence of this key as "signals are supported":
   // read it as "this runtime can register one".
-  const signals = host.build.os === 'windows' ? {} : {
-    onSignal: (signal: RuntimeSignal, handler: () => void): void => {
-      host.addSignalListener(signal, handler);
-    },
-  };
+  const signals =
+    host.build.os === 'windows'
+      ? {}
+      : {
+          onSignal: (signal: RuntimeSignal, handler: () => void): void => {
+            host.addSignalListener(signal, handler);
+          },
+        };
 
   return mergeRuntimeServices({
     platform: () => 'deno',

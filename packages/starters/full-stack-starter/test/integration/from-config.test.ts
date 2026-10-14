@@ -37,7 +37,7 @@ describe('createFullStackAppFromConfig | configuration drives composition', () =
   it('a value from the environment reaches a gated plugin arm', async () => {
     await withEnv({ SETU_M36C_REALTIME: 'on' }, async () => {
       const app = await createFullStackAppFromConfig((config) =>
-        config.get<string>('SETU_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {}
+        config.get<string>('SETU_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {},
       );
       await app.start();
 
@@ -49,7 +49,7 @@ describe('createFullStackAppFromConfig | configuration drives composition', () =
     // The negative half: without it the assertion above would pass even if the
     // arm were registered unconditionally.
     const app = await createFullStackAppFromConfig((config) =>
-      config.get<string>('SETU_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {}
+      config.get<string>('SETU_M36C_REALTIME') === 'on' ? { realtime: { sse: {} } } : {},
     );
     await app.start();
 
@@ -61,10 +61,13 @@ describe('createFullStackAppFromConfig | configuration drives composition', () =
       { SETU_M36C_HOST: 'db.internal', SETU_M36C_URL: 'pg://${SETU_M36C_HOST}/x' },
       async () => {
         let seen: string | undefined;
-        const app = await createFullStackAppFromConfig((config) => {
-          seen = config.get<string>('SETU_M36C_URL');
-          return {};
-        }, { config: { expandVariables: false } });
+        const app = await createFullStackAppFromConfig(
+          (config) => {
+            seen = config.get<string>('SETU_M36C_URL');
+            return {};
+          },
+          { config: { expandVariables: false } },
+        );
         await app.start();
 
         // Non-default option honoured: the reference is left literal.
@@ -100,10 +103,13 @@ describe('createFullStackAppFromConfig | the env override', () => {
   it('reads configuration from the supplied env instead of the platform', async () => {
     let seen: string | undefined;
 
-    const app = await createFullStackAppFromConfig((config) => {
-      seen = config.get<string>('SETU_M36C_BINDING');
-      return {};
-    }, { env: { SETU_M36C_BINDING: 'from-the-binding' } });
+    const app = await createFullStackAppFromConfig(
+      (config) => {
+        seen = config.get<string>('SETU_M36C_BINDING');
+        return {};
+      },
+      { env: { SETU_M36C_BINDING: 'from-the-binding' } },
+    );
     await app.start();
 
     expect(seen).toBe('from-the-binding');
@@ -127,11 +133,14 @@ describe('createFullStackAppFromConfig | the env override', () => {
     let value: unknown;
     let hasBinding = false;
 
-    const app = await createFullStackAppFromConfig((config) => {
-      value = config.get('SETU_M36C_TEXT');
-      hasBinding = config.has('SETU_M36C_KV');
-      return {};
-    }, { env: { SETU_M36C_TEXT: 'kept', SETU_M36C_KV: { get: () => undefined } } });
+    const app = await createFullStackAppFromConfig(
+      (config) => {
+        value = config.get('SETU_M36C_TEXT');
+        hasBinding = config.has('SETU_M36C_KV');
+        return {};
+      },
+      { env: { SETU_M36C_TEXT: 'kept', SETU_M36C_KV: { get: () => undefined } } },
+    );
     await app.start();
 
     expect(value).toBe('kept');
@@ -158,10 +167,13 @@ describe('createFullStackAppFromConfig | the env override', () => {
     await withEnv({ SETU_M36C_PLATFORM: 'from-platform' }, async () => {
       let seen: string | undefined;
 
-      const app = await createFullStackAppFromConfig((config) => {
-        seen = config.get<string>('SETU_M36C_PLATFORM');
-        return {};
-      }, { env: { SOMETHING_ELSE: 'x' } });
+      const app = await createFullStackAppFromConfig(
+        (config) => {
+          seen = config.get<string>('SETU_M36C_PLATFORM');
+          return {};
+        },
+        { env: { SOMETHING_ELSE: 'x' } },
+      );
       await app.start();
 
       expect(seen).toBeUndefined();
@@ -187,9 +199,7 @@ describe('createFullStackAppFromConfig | one snapshot', () => {
   });
 
   it('throws the named error for an app built by another factory', () => {
-    expect(() => fullStackConfigOf(createFullStackApp())).toThrow(
-      FullStackConfigUnavailableError,
-    );
+    expect(() => fullStackConfigOf(createFullStackApp())).toThrow(FullStackConfigUnavailableError);
   });
 
   it('serves the composed value from the same snapshot at request time', async () => {
@@ -225,10 +235,13 @@ describe('createFullStackAppFromConfig | failure paths', () => {
     let resolverCalled = false;
 
     await expect(
-      createFullStackAppFromConfig(() => {
-        resolverCalled = true;
-        return {};
-      }, { config: { envFilePath: '/nonexistent/.env' } }),
+      createFullStackAppFromConfig(
+        () => {
+          resolverCalled = true;
+          return {};
+        },
+        { config: { envFilePath: '/nonexistent/.env' } },
+      ),
     ).rejects.toThrow();
 
     // Load failure precedes composition: the resolver never ran.

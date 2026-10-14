@@ -65,21 +65,25 @@ describe('custom schematic — real import()', () => {
 
   it('imports a module that only has a default export', async () => {
     const schematic = await loadCustomSchematic(root, 'defaulted');
-    expect(schematic(deriveNames('order-item'), {
-      runtime: 'deno',
-      plugins: new Set(),
-      now: () => 0,
-    })).toEqual([{ path: 'd/order-item.txt', contents: 'orderItem' }]);
+    expect(
+      schematic(deriveNames('order-item'), {
+        runtime: 'deno',
+        plugins: new Set(),
+        now: () => 0,
+      }),
+    ).toEqual([{ path: 'd/order-item.txt', contents: 'orderItem' }]);
   });
 
   it('throws for a real file that exports no schematic', async () => {
-    await expect(loadCustomSchematic(root, 'empty'))
-      .rejects.toThrow("must export a 'schematic' function");
+    await expect(loadCustomSchematic(root, 'empty')).rejects.toThrow(
+      "must export a 'schematic' function",
+    );
   });
 
   it('throws for a file that does not exist on disk', async () => {
-    await expect(loadCustomSchematic(root, 'absent'))
-      .rejects.toThrow('Cannot load custom schematic "absent"');
+    await expect(loadCustomSchematic(root, 'absent')).rejects.toThrow(
+      'Cannot load custom schematic "absent"',
+    );
   });
 
   it('importModule really resolves a module, not a stub', async () => {

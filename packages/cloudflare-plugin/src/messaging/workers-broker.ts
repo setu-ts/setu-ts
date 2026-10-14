@@ -322,11 +322,7 @@ export class WorkersBroker implements IMessageBroker {
    * @throws {CloudflareRequestTimeoutError} When no reply arrives in time
    * @throws {CloudflareRemoteHandlerError} When the responder threw
    */
-  async request<TReq, TRes>(
-    topic: string,
-    message: TReq,
-    options?: RequestOptions,
-  ): Promise<TRes> {
+  async request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
     const inboxBinding = this.#requireReplyInbox('request');
     const generation = this.#generation;
     const inbox = await this.#openInbox(inboxBinding);
@@ -336,8 +332,8 @@ export class WorkersBroker implements IMessageBroker {
     }
 
     const correlationId = this.#runtime.uuid();
-    const timeoutMs = options?.timeoutMs ?? inboxBinding.defaultTimeoutMs ??
-      DEFAULT_REQUEST_TIMEOUT_MS;
+    const timeoutMs =
+      options?.timeoutMs ?? inboxBinding.defaultTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
     // Registered BEFORE the publish, so a reply that arrives while `send` is
     // still settling finds its pending entry rather than being dropped as late.
@@ -345,13 +341,7 @@ export class WorkersBroker implements IMessageBroker {
 
     try {
       await this.#producer.send(
-        encodeRequestEnvelope(
-          topic,
-          this.#runtime.uuid(),
-          correlationId,
-          inbox.address,
-          message,
-        ),
+        encodeRequestEnvelope(topic, this.#runtime.uuid(), correlationId, inbox.address, message),
       );
     } catch (error: unknown) {
       // The caller receives this failure directly, so the pending entry would
@@ -425,13 +415,10 @@ export class WorkersBroker implements IMessageBroker {
       routable.push({ message, envelope: message.body });
     }
 
-    await runBounded(
-      routable,
-      DISPATCH_CONCURRENCY,
-      ({ message, envelope }) =>
-        isRequestEnvelope(envelope)
-          ? this.#dispatchRequest(batch.queue, message, envelope)
-          : this.#dispatchPublish(batch.queue, message, envelope),
+    await runBounded(routable, DISPATCH_CONCURRENCY, ({ message, envelope }) =>
+      isRequestEnvelope(envelope)
+        ? this.#dispatchRequest(batch.queue, message, envelope)
+        : this.#dispatchPublish(batch.queue, message, envelope),
     );
   }
 
@@ -544,10 +531,12 @@ export class WorkersBroker implements IMessageBroker {
   /** Posts one reply to the inbox object the request named. */
   async #sendReply(
     envelope: RequestEnvelope,
-    outcome: { readonly ok: true; readonly payload: unknown } | {
-      readonly ok: false;
-      readonly error: string;
-    },
+    outcome:
+      | { readonly ok: true; readonly payload: unknown }
+      | {
+          readonly ok: false;
+          readonly error: string;
+        },
   ): Promise<void> {
     const inbox = this.#replyInbox;
     if (inbox === undefined) {

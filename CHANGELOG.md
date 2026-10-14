@@ -546,9 +546,8 @@ All notable changes to this project are documented here. The format follows
 - **`IRequest.locale` and `replaceLocale` in `common` (M103).** The request's resolved BCP 47 tag is
   a first-class optional field on the `tenant` precedent, sealed by the same one-implicit-write
   guard (a second plain assignment throws naming `replaceLocale`), with
-  `replaceLocale(request,
-  tag)` as the deliberate escape — for example, to apply a signed-in
-  user's saved preference once authentication has run. Optional and source-compatible: no `IRequest`
+  `replaceLocale(request, tag)` as the deliberate escape — for example, to apply a signed-in user's
+  saved preference once authentication has run. Optional and source-compatible: no `IRequest`
   implementor breaks. A reader running below priority 45 sees `undefined`, exactly as one below 40
   sees no `tenant`.
 - **`@setu-ts/testing`'s `createTestContext` carries a seeded `request.locale` (M103)**, sealed as
@@ -664,8 +663,7 @@ All notable changes to this project are documented here. The format follows
 
 - **The memory adapter refuses a duplicate primary key (M101c).** A `create` whose caller-supplied
   primary key is already stored now rejects
-  (`Entity '<name>' already has a row with this primary
-  key`), in and out of a transaction — a
+  (`Entity '<name>' already has a row with this primary key`), in and out of a transaction — a
   commit re-checks its buffered creates against rows committed since and writes nothing on a
   collision — where it used to store a second row that no `findById`, `update` or `delete` could
   address. Every real backend already refuses this; a test that relied on inserting the same key
@@ -793,8 +791,7 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING: the log and SendGrid mail providers refuse a send while not connected.** Both accepted
   a send outside `connect()`..`disconnect()`, unlike the SMTP and SES providers: a send after
   `app.stop()` reported success on the log provider and still POSTed a real email through SendGrid.
-  Both now reject with `'LogProvider is not connected'` / `'SendGridProvider is not
-  connected'`.
+  Both now reject with `'LogProvider is not connected'` / `'SendGridProvider is not connected'`.
   Through `MailPlugin` nothing changes before `stop()`, since the plugin connects the provider
   during `register()`. A test constructing `LogProvider` directly must now call
   `await provider.connect()` before sending.
@@ -1413,10 +1410,9 @@ All notable changes to this project are documented here. The format follows
   (`SamlPendingRequest`) live in an `ISamlRequestStore` (`MemorySamlRequestStore` by default, single
   replica only) that is also the library's `cacheProvider`, are consumed exactly once, and are bound
   to the browser that started the login by a `__Host-setu-saml` cookie
-  (`SameSite=None; Secure; HttpOnly;
-  Path=/; Max-Age=600`) — because the IdP's cross-site POST
-  does not carry the `Lax` session cookie, and without the binding a posted foreign response would
-  sign the victim in as the attacker. Assertion ids are claimed once (`claimAssertionId`), so two
+  (`SameSite=None; Secure; HttpOnly; Path=/; Max-Age=600`) — because the IdP's cross-site POST does
+  not carry the `Lax` session cookie, and without the binding a posted foreign response would sign
+  the victim in as the attacker. Assertion ids are claimed once (`claimAssertionId`), so two
   concurrent posts of one captured response cannot both sign in. The checked `Issuer` and the
   `nameID` handed to `toPrincipal` are read from the assertion's own elements, never from
   attribute-overlaid profile fields. `MemorySamlRequestStore` caps its pending requests
@@ -1473,13 +1469,11 @@ All notable changes to this project are documented here. The format follows
   `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,
   30-second step, 6 digits, ±1 step window) from a base32 secret and verifies them against an
   `ITotpStore`; the shipped `MemoryTotpStore` is single-process.
-  `signIn.mfa.required(principal,
-  methods)` returns `true` to require a second factor; when it
-  does, `signIn` stores a `PendingSignIn` record (under a private session key, NOT the signed-in
-  key) and returns `second-factor-required` instead of signing the session in.
-  `TotpService.completeSignIn(ctx,
-  code)` and `completeSignInWithRecoveryCode(ctx, code)` complete
-  a pending sign-in, each appending `otp` so the principal ends up recorded with
+  `signIn.mfa.required(principal, methods)` returns `true` to require a second factor; when it does,
+  `signIn` stores a `PendingSignIn` record (under a private session key, NOT the signed-in key) and
+  returns `second-factor-required` instead of signing the session in.
+  `TotpService.completeSignIn(ctx, code)` and `completeSignInWithRecoveryCode(ctx, code)` complete a
+  pending sign-in, each appending `otp` so the principal ends up recorded with
   `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the session id rotated.
   `signIn.mfa.pendingTtlMs` (default 300 000 ms) is the single owner of how long a pending record
   survives; `TotpService` has no TTL option of its own, and it must be a positive integer (`NaN`,
@@ -1663,8 +1657,7 @@ All notable changes to this project are documented here. The format follows
 
 - **Scheduler execution observations (M98k): opt-in, minimized fire and attempt observations through
   the diagnostics connector.** `SchedulerPlugin` accepts
-  `diagnostics: { enabled: true, alias,
-  jobs }` (the new exported `SchedulerDiagnosticsOptions`,
+  `diagnostics: { enabled: true, alias, jobs }` (the new exported `SchedulerDiagnosticsOptions`,
   validated when `SchedulerPlugin(...)` is called; `jobs` is REQUIRED and maps exact job names to
   approved aliases, so an empty map approves nothing); the instance's own `SchedulerService` and
   executor then record each approved job's local timer fires — contended (slot or overlap lock held
@@ -1947,8 +1940,7 @@ All notable changes to this project are documented here. The format follows
   `AwsKmsProviderOptions.endpoint` and `GcpSecretManagerProviderOptions.endpoint` point the lazily
   loaded client at a non-default endpoint — LocalStack or a private endpoint for AWS, a private or
   regional host for GCP; both are ignored when a `client` is injected. The option is also available
-  through the plugin — `SecretsPlugin({ provider:
-  'aws-kms' | 'gcp', options: { endpoint } })` —
+  through the plugin — `SecretsPlugin({ provider: 'aws-kms' | 'gcp', options: { endpoint } })` —
   with `createProvider` forwarding it to the provider. The option is TRANSLATED per SDK: AWS's
   config object takes `endpoint`, while google-gax's `ClientOptions` declares `apiEndpoint` (and has
   no `endpoint` member — its `ClientStubOptions` index signature would let a verbatim `endpoint`
@@ -2016,8 +2008,7 @@ All notable changes to this project are documented here. The format follows
   40; 8 handler slots with 7 for unpaired lanes). Every refusal drops supplied input; the
   connector's projection copies M98a's exact field allowlist, so a hostile provider result cannot
   leak a canary. The connector announces its own bind through the application's logger —
-  `Setu devtool: local diagnostics connector
-  listening on http://127.0.0.1:<port>` — replacing the
+  `Setu devtool: local diagnostics connector listening on http://127.0.0.1:<port>` — replacing the
   runtime's bare `Listening on …` banner, which in an application that also binds a port reads as a
   second, unexplained application listener. `LocalDiagnosticsListenerOptions.onListen` carries it;
   omitted, the runtime's own banner stands, so a bind is never silent.
@@ -2089,14 +2080,12 @@ All notable changes to this project are documented here. The format follows
   `provider.kind` must handle `'saml'`; an unknown `kind` is now refused naming
   `'oidc', 'oauth2' or 'saml'`.
 - **`common` — `IAuthSessionService` gains a required `pending()` member and `SignInOutcome` widens
-  (M100d, breaking).** `IAuthSessionService` now requires `pending(ctx): PendingSignIn |
-  null`,
+  (M100d, breaking).** `IAuthSessionService` now requires `pending(ctx): PendingSignIn | null`,
   which reads the pending second-factor record (if any) for the session. `SignInOutcome` widens from
-  `{ status: 'signed-in' }` to `{ status: 'signed-in' } | { status:
-  'second-factor-required' }`,
-  so a sign-in that requires a second factor no longer returns `signed-in`. Applications that
-  implement `IAuthSessionService` by hand must add the `pending()` member; applications that consume
-  the outcome must handle the new `second-factor-required` arm. `@setu-ts/common` exports the new
+  `{ status: 'signed-in' }` to `{ status: 'signed-in' } | { status: 'second-factor-required' }`, so
+  a sign-in that requires a second factor no longer returns `signed-in`. Applications that implement
+  `IAuthSessionService` by hand must add the `pending()` member; applications that consume the
+  outcome must handle the new `second-factor-required` arm. `@setu-ts/common` exports the new
   `PendingSignIn` interface. With `signIn.mfa` unset the `auth-plugin`'s own `AuthSessionService`
   never returns `second-factor-required`, so existing consumers see no behavioral change.
 
@@ -2116,10 +2105,8 @@ All notable changes to this project are documented here. The format follows
   every plugin against state that survived the rollback — the registry (sealed, too, if the failure
   came after bootstrap), lifecycle hooks, routes and middleware — so in the ordinary case it failed
   with a misleading `Capability 'runtime' is already registered` (or
-  `Cannot register capability 'runtime'
-  after runBootstrap() has completed`). It now fails with
-  `Cannot retry start() after plugins have
-  registered … Create a new application instead.`, before
+  `Cannot register capability 'runtime' after runBootstrap() has completed`). It now fails with
+  `Cannot retry start() after plugins have registered … Create a new application instead.`, before
   anything runs again. **This also refuses a retry that used to succeed**: when the first plugin to
   run threw before writing any state — for example a runtime provider rejecting its options —
   nothing was left behind and the retry worked. It is refused now because the kernel cannot tell a
@@ -2420,16 +2407,15 @@ All notable changes to this project are documented here. The format follows
   (`getOrdersResponse200` → component `GetOrdersResponse200`); X11-9 made the generated client hoist
   an inline multi-line response body under the SAME derivation. One schema that is both reused (so
   it becomes that component) and rendered inline (so its body is hoisted) claimed the identical name
-  twice, and generation aborted with `Duplicate generated name
-  'GetOrdersResponse200'` — the
-  `0.6.0` SDK throws identically, so this is not a regression, only invisible until a document
-  carried the trigger. Neither entry above is rewritten: each rule is individually correct, and the
-  interaction is what changed. The component name is published surface of the document, so the
-  HOISTED ALIAS yields — it asks for its preferred name first (byte-identical output for every
-  document that generates today), takes `…Response<status>Body` when that is claimed, then an
-  allocated numeric suffix; and because an alias names an anonymous inline schema the document never
-  named, the same preference-and-fallback now resolves all four hoist sites (request body,
-  parameter, success response, error body) instead of moving the abort.
+  twice, and generation aborted with `Duplicate generated name 'GetOrdersResponse200'` — the `0.6.0`
+  SDK throws identically, so this is not a regression, only invisible until a document carried the
+  trigger. Neither entry above is rewritten: each rule is individually correct, and the interaction
+  is what changed. The component name is published surface of the document, so the HOISTED ALIAS
+  yields — it asks for its preferred name first (byte-identical output for every document that
+  generates today), takes `…Response<status>Body` when that is claimed, then an allocated numeric
+  suffix; and because an alias names an anonymous inline schema the document never named, the same
+  preference-and-fallback now resolves all four hoist sites (request body, parameter, success
+  response, error body) instead of moving the abort.
 - **`storage-plugin` — cancelling a download no longer crashes the process (S3, GCS, Azure).**
   `S3Provider.getStream` returned the SDK's node stream through Deno's `node:stream`-to-web adapter,
   which enqueues on `'data'` without checking whether the web controller was already closed: a
@@ -2966,8 +2952,7 @@ All notable changes to this project are documented here. The format follows
   accessor: all built-in request producers provide its memoized parser for URL-encoded and multipart
   bodies. Because custom `IRequest` implementations may omit the optional member, the copyable
   `readForm` helper now falls back to the same
-  `parseFormBody(await request.bytes(),
-  request.headers.get('content-type'))` path rather than
+  `parseFormBody(await request.bytes(), request.headers.get('content-type'))` path rather than
   silently returning an empty form. The guide gate executes both fallback encodings and the
   accessor-present path.
 - **`@setu-ts/view-plugin`, `@setu-ts/decorator-plugin` — the documented class-based view example
@@ -3020,6 +3005,7 @@ All notable changes to this project are documented here. The format follows
   file `0.6.0` does not contain, and four naming `0.6.1` across `kernel` and `session-plugin` — a
   version that was never released. All move to `0.7.0`. That is PR #286's named systematic cause
   repeating, which is the argument the gate was built on.
+
 - **The documentation now states what the code does at the three places a reader following it ended
   up wrong (M95d, X46-1 / X49-1 / X49-2).** `docs/mvc.md` §Escaping states the boundary — escaping
   protects HTML structure, not URL schemes, a difference BETWEEN rendering runtimes (React
@@ -3155,8 +3141,7 @@ All notable changes to this project are documented here. The format follows
   `@Render(Component)` (and its exported `RenderDecorator` type) in `@setu-ts/decorator-plugin`
   (type-checks the handler's return against the component's props; `CAPABILITIES.VIEW` joins its
   `optionalDependencies`; a rendered route with no provider fails at `register()` naming both
-  remedies) and the free `renderView(ctx, component,
-  props)`. Rendered output is a buffered
+  remedies) and the free `renderView(ctx, component, props)`. Rendered output is a buffered
   primitive string; a tree holding a pending `<Suspense>` boundary is refused with
   `UnresolvedSuspenseError` rather than served as its fallback forever (streaming resolution
   deferred to a follow-up milestone). Escaping stays in the rendering runtime; `raw()` is
@@ -3263,8 +3248,7 @@ All notable changes to this project are documented here. The format follows
   or answered `400`, disclosed here because the move that promoted the parser otherwise froze its
   behavior.
 - **BREAKING — `@setu-ts/kernel`: `IKernelApplication` gains a required
-  `unregister(name: string):
-  boolean`.** It removes a pending plugin before `start()`, returning
+  `unregister(name: string): boolean`.** It removes a pending plugin before `start()`, returning
   `true` when at least one carried that name and throwing once the application has started. It
   removes **every** pending plugin with the name, not the first: two may share one, since the kernel
   refuses duplicates at `start()` rather than at `register()`, so dropping only the first would
@@ -3369,8 +3353,7 @@ All notable changes to this project are documented here. The format follows
 - **`cli`** — a generated CQRS or event handler could fail the project's own `deno fmt --check`, and
   whether it did depended on how long the artifact's name happened to be. The three schematics
   hand-wrapped their `implements` clause UNCONDITIONALLY, so
-  `setu generate query-handler
-  find-order` emitted a wrap the formatter immediately rejoined (92
+  `setu generate query-handler find-order` emitted a wrap the formatter immediately rejoined (92
   characters, under the emitted `lineWidth: 100`) while `place-order` at 103 was correct (V5-3) —
   M63's D6 and M70h's X2-4 in a third place. Every such line is now rendered from its own measured
   length by one `renderDeclarationHeader`/`renderMethodSignature` pair, so the output no longer
@@ -3498,8 +3481,7 @@ All notable changes to this project are documented here. The format follows
   the literal `'anonymous'` for every unauthenticated caller unless `ipSecurityMiddleware` is
   registered with `trustProxy` — and a new test pins the resolved key rather than the comment. The
   session README gains the safe-request-then-mutation CSRF sequence, because its
-  `## Session
-  fixation` and `## Form CSRF` sections each compile and answer `403` when composed; a
+  `## Session fixation` and `## Form CSRF` sections each compile and answer `403` when composed; a
   new integration test drives the sequence and asserts the successful path first. The secrets README
   and `PUBLIC_API.md` gain a per-provider `set()`/`rotate()` table — Vault and Azure create on
   write, AWS and GCP require the secret to pre-exist, `env` refuses — each cell marked
@@ -3809,8 +3791,7 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/cli` — bare `setu generate` is informational, not an error.** With no
   schematic named it printed the available schematics through the normal output sink yet exited `2`
   — an error exit whose guidance read like help. It now lists the schematics and exits `0`, printing
-  exactly the text `setu generate --help` prints. No refusal moves: `generate
-  <schematic>` with a
+  exactly the text `setu generate --help` prints. No refusal moves: `generate <schematic>` with a
   missing name, `generate custom` with a missing name, an unknown schematic, and an over-arity
   invocation all keep exit `2` with nothing written. One addition: the `--runtime` validation every
   generating path runs now sits above the listing, so bare `setu generate --runtime deno2` refuses
@@ -3841,8 +3822,7 @@ All notable changes to this project are documented here. The format follows
   dispatcher before any command body runs, mirroring `add`'s existing refusal. Tokens after `--` are
   positionals ([`parseArgs`]) and refuse the same way. Valid arities are unchanged (`new app`,
   `generate <schematic> <name>`, `generate custom <schematic-name> <name>`,
-  `generate app|library
-  <name>`, and the bare `add`/`adopt`/`workspace ports`/`commands`/`help`
+  `generate app|library <name>`, and the bare `add`/`adopt`/`workspace ports`/`commands`/`help`
   forms), and plugin-registered commands still receive every positional. Migration: a script passing
   stray positionals today exits `0` and will now exit `2` — remove them.
 
@@ -3924,8 +3904,7 @@ All notable changes to this project are documented here. The format follows
   an `instanceof` branch to distinguish it from faults.
 
 - **BREAKING — `@setu-ts/resilience-plugin` — the shedding errors answer `503`/`503`/`504` (M90f /
-  X32-7).** `BulkheadFullError` and `CircuitOpenError` are answered `503 Service
-  Unavailable` and
+  X32-7).** `BulkheadFullError` and `CircuitOpenError` are answered `503 Service Unavailable` and
   `TimeoutError` is answered `504 Gateway Timeout` under `errorHandler`, where all three were masked
   `500`s that read as bugs in every dashboard. Shedding is the bulkhead's purpose, so the status is
   part of the contract. None carries `Retry-After` — the hint channel has no header, and no
@@ -4207,8 +4186,7 @@ live — see [Versioning](README.md#versioning).
   literal: `FlagGuardOptions.statusCode`, the multi-tenancy `rejectionStatus`, and a
   `WebSocketGuardDecision.status` are all authored by the application, so `4004` — a plausible typo
   for `404` — crashed every request to that route. A new exported
-  `resolveResponseStatus(status,
-  target)` clamps an unserveable status to `500` and reports it
+  `resolveResponseStatus(status, target)` clamps an unserveable status to `500` and reports it
   through the logger capability when the target carries one; `Number.isInteger` is checked before
   the range comparisons, because `NaN` satisfies neither `<` nor `>`. Both entry points sanitize
   before building their response, so the formatted body's status member and the written status
@@ -4451,12 +4429,11 @@ read the Changed section before upgrading.
   Bigtable inverts the DynamoDB problem: its row key is one lexicographically-sorted string, so
   `findById` needs no key object, while there is **no secondary index of any kind**. The per-entity
   `tables` mapping composes that row key from several logical fields
-  (`rowKey: { fields, separator?,
-  prefix? }`), names each field's `family:qualifier`, and chooses
-  a value encoding — `'tagged'` by default, so a number, boolean, `null`, `Date` or object
-  round-trips as itself, with an untagged cell decoding as its raw string so a table written outside
-  the framework stays readable, and `'raw'` for one that is entirely foreign. Key fields are written
-  as cells AND recovered from the row key, with the cells winning: a Bigtable row cannot exist with
+  (`rowKey: { fields, separator?, prefix? }`), names each field's `family:qualifier`, and chooses a
+  value encoding — `'tagged'` by default, so a number, boolean, `null`, `Date` or object round-trips
+  as itself, with an untagged cell decoding as its raw string so a table written outside the
+  framework stays readable, and `'raw'` for one that is entirely foreign. Key fields are written as
+  cells AND recovered from the row key, with the cells winning: a Bigtable row cannot exist with
   zero cells, and the row key records no type.
 
   Exactly three narrowings reach the server — the row set (an `eq` on the whole key is an exact key,
@@ -4584,8 +4561,7 @@ read the Changed section before upgrading.
   single-argument call is unchanged.
 
 - Added a native MongoDB backend to `@setu-ts/database-plugin`.
-  `DatabasePlugin({ type: 'mongodb',
-  options: { url } })` now provides repositories over the
+  `DatabasePlugin({ type: 'mongodb', options: { url } })` now provides repositories over the
   lazy-loaded MongoDB driver, including `_id` mapping, ObjectId-aware injected clients, query
   translation, and session transactions. `MongoAdapterOptions` is a union of two arms, so a
   registration supplying neither `url` nor `client` is a compile error rather than a `connect()`
@@ -4636,8 +4612,7 @@ read the Changed section before upgrading.
   module directories are reported when their declaration is missing, rather than silently omitted.
   The regenerated barrel retains deprecated controller/service arrays so an existing config keeps
   compiling while it migrates. Add
-  `@Module({ controllers: [<Name>Controller], providers:
-  [<Name>Service] })` to each legacy
+  `@Module({ controllers: [<Name>Controller], providers: [<Name>Service] })` to each legacy
   directory (or delete and regenerate it), then update `setu.config.ts` to import `MODULES` and pass
   `modules: [...MODULES]` to `DecoratorPlugin`.
 
@@ -4749,8 +4724,7 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 - **A multi-column `orderBy` failed outright on Prisma 7**, and had since the connector's `findMany`
   path was written. The adapter emitted one multi-key object (`{ a: 'asc', b: 'desc' }`), which
   Prisma 7 rejects with
-  `Argument 'orderBy': Invalid value provided. Expected …OrderByWithRelationInput[], provided
-  Object`
+  `Argument 'orderBy': Invalid value provided. Expected …OrderByWithRelationInput[], provided Object`
   — measured against 7.10 on live PostgreSQL, where a single-key object is accepted and an array of
   any length is accepted and honours element order as sort precedence. It now always emits an ARRAY
   of single-key objects, so no sort arity is a special case. Latent until this release, because a
@@ -4793,10 +4767,9 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 
   Every request-side position — `body`, `params`, `query`, `headers` — is now converted from the
   input side; `response` keeps the output side. A `z.strictObject` keeps
-  `additionalProperties:
-  false` under either view, so nothing a client may send is widened. This
-  was a consequence of the alpha.10 zod-v4 fix rather than a regression in it: before that, a v4
-  schema transformed to `{}`, so there was no `required` list to be wrong. **Zod v3 documents are
+  `additionalProperties: false` under either view, so nothing a client may send is widened. This was
+  a consequence of the alpha.10 zod-v4 fix rather than a regression in it: before that, a v4 schema
+  transformed to `{}`, so there was no `required` list to be wrong. **Zod v3 documents are
   unchanged** — that path has no `io` concept and already emitted the input view, which is what
   makes the two majors agree on a request body now.
 
@@ -4981,7 +4954,10 @@ Nothing else here requires an application change unless it is named **Breaking**
   @Injectable()
   @Inject('database', Optional('cache'))
   class Repo {
-    constructor(private db: Db, private cache?: ICacheStore) {}
+    constructor(
+      private db: Db,
+      private cache?: ICacheStore,
+    ) {}
   }
   ```
 
@@ -5246,8 +5222,7 @@ Nothing here requires an application change unless it is named **Breaking** belo
   are the return and parameter types of every exported storage class's `query` member, which were
   previously unnameable by any consumer (the M52c `NormalizedQuery` class).
 - **`SseMessage.data` accepts any JSON-serializable value** (M70n, X3-6):
-  `string | number | boolean
-  | null | readonly unknown[] | Record<string, unknown>`. The encoder
+  `string | number | boolean | null | readonly unknown[] | Record<string, unknown>`. The encoder
   already handled all of them; the type rejected what the implementation accepted, so named
   interfaces needed casts.
 - **A process-local notice on `RealtimeBackplanePlugin`** (M70n, X3-4). Registering bare defaults to
@@ -5347,8 +5322,7 @@ Nothing here requires an application change unless it is named **Breaking** belo
   See **Changed** for the compile-time requirement this introduces.
 
 - **A request-scoped error responder seam in `@setu-ts/common`** (M70f).
-  `respondWithError(ctx,
-  { status, title, detail?, details? })` and the `IErrorResponder` /
+  `respondWithError(ctx, { status, title, detail?, details? })` and the `IErrorResponder` /
   `ErrorResponseInit` / `ERROR_RESPONDER_STATE_KEY` types let a package that produces an error
   response — but may not import `@setu-ts/exceptions`, where every formatter lives — answer in the
   application's configured format. `errorHandler` publishes a responder (built from the formatter
@@ -5773,10 +5747,7 @@ Nothing here requires an application change unless it is named **Breaking** belo
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(
-        db,
-        (database, work) => database.transaction(work),
-      ),
+      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
       drizzleTables: { User: users },
     },
   });
@@ -5825,6 +5796,7 @@ Nothing here requires an application change unless it is named **Breaking** belo
   answer `{ error, detail }` (the disclosure moves from the non-standard `message` key to the RFC
   9457 `detail` key), and the feature-flag guard's bare `text/plain` `Not Found` is now the JSON
   fallback `{"error":"Not Found"}`.
+
 - **`IGrpcService.addService`'s `implementation` parameter is now `unknown`** (M70f). It was
   `Partial<ServiceImpl>`, an index-signature type that **rejects a class instance** — whose methods
   live on the prototype rather than as own properties — although Connect accepts one, so a
@@ -6159,9 +6131,8 @@ Nothing here requires an application change unless it is named **Breaking** belo
 - **The Redis backplane reachability probe reported `false` forever against a healthy Redis**
   (M70c). `RedisBackplane` captured `client.ping` and called it unbound; ioredis's `ping()` reads
   `this.options`, so the call threw
-  `TypeError: Cannot read properties of undefined (reading
-  'options')`, swallowed into `false` —
-  the indicator reported `degraded`/`reachable: false` for a healthy backplane, inverting the
+  `TypeError: Cannot read properties of undefined (reading 'options')`, swallowed into `false` — the
+  indicator reported `degraded`/`reachable: false` for a healthy backplane, inverting the
   milestone's purpose. The probe now calls `ping.call(client)` (the pattern `RedisStreamsBroker`
   already used).
 - **`RedisQueue.isHealthy()` reported `false` forever against a healthy Redis** (M70c). The same
@@ -6350,10 +6321,7 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
   DatabasePlugin({
     type: 'drizzle',
     options: {
-      drizzleInstance: createDrizzleDatabase(
-        db,
-        (database, work) => database.transaction(work),
-      ),
+      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
       drizzleTables: { User: users },
     },
   });
@@ -6447,8 +6415,7 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
   workspace, and all four passed the drift check that type-checks generated output:
 
   - `deno install` on a pristine project failed outright on release day —
-    `Could not find version of '@setu-ts/common' that matches '^…' … newer than the specified
-    minimum dependency age`.
+    `Could not find version of '@setu-ts/common' that matches '^…' … newer than the specified minimum dependency age`.
     Deno 2.9 refuses a dependency published in the last 24 hours and `setu new` pins projects to the
     CLI's own just-published version, so the window was guaranteed. The generated root now sets
     `minimumDependencyAge`.
@@ -6592,6 +6559,7 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
   every pod re-resolve from jsr.io at startup, and `helm template` defaults `.Release.Namespace`, so
   the RoleBinding named a ServiceAccount in the wrong namespace and granted nothing while applying
   cleanly.
+
 - **`--transport pubsub` and `--transport service-bus`.** Both were previously refused because each
   needs a value no scaffold can invent. Every transport with a connection value now reads it from
   the environment with a local fallback, and for these two that fallback is the vendor's own
@@ -6659,10 +6627,12 @@ migration.
   socket or a socket-bound SDK. A new `messaging` arm serves it from the platform itself.
 
   ```typescript
-  app.register(CloudflarePlugin({
-    env,
-    messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },
-  }));
+  app.register(
+    CloudflarePlugin({
+      env,
+      messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },
+    }),
+  );
 
   // Consuming is a MODULE export — no plugin option can declare one.
   export default { fetch: app.fetch, queue: createMessagingHandler(app) };
@@ -6713,9 +6683,8 @@ migration.
   ```
 
   A workspace is a **Deno workspace** whose root declares members by GLOB
-  (`"workspace":
-  ["./apps/*"]`), so adding a service creates a directory and rewrites no manifest
-  — no file you own is ever edited. Each member is an ordinary scaffolded project with its own
+  (`"workspace": ["./apps/*"]`), so adding a service creates a directory and rewrites no manifest —
+  no file you own is ever edited. Each member is an ordinary scaffolded project with its own
   framework pins, because plugin detection reads one directory's manifest and never walks up; two
   members may install different plugin sets.
 
@@ -6728,9 +6697,8 @@ migration.
   comes from a real backend (`consul`, `kubernetes`, `dns`).
 
   **The workspace chooses how its services talk.**
-  `--transport http|grpc|memory|redis|rabbitmq|
-  nats|kafka` is recorded in `setu.workspace.json`
-  and inherited by every member, because services can only meet on a bus they share; `generate app`
+  `--transport http|grpc|memory|redis|rabbitmq| nats|kafka` is recorded in `setu.workspace.json` and
+  inherited by every member, because services can only meet on a bus they share; `generate app`
   refuses the flag and names the workspace-level one. `http` stays the default, so an upgrade
   changes nothing. This closes a silent failure the workspace itself made reachable: the
   microservice template registers `MessagingPlugin()`, whose default broker is in-process, so two
@@ -6988,10 +6956,12 @@ migration.
   `@setu-ts/openapi-plugin` reads the brand off a route's middleware.
 
   ```typescript
-  app.register(OpenApiPlugin({
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
-    deriveSecurity: { scheme: 'bearerAuth' },
-  }));
+  app.register(
+    OpenApiPlugin({
+      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+      deriveSecurity: { scheme: 'bearerAuth' },
+    }),
+  );
 
   app.router.get('/todos/:id', { middleware: [requireAuth()], handler }); // → requires bearerAuth
   app.router.post('/login', { middleware: [publicRoute()], handler }); // → public
@@ -7019,12 +6989,14 @@ migration.
   optional, so existing routes and existing implementors are unaffected.
 
   ```typescript
-  app.register(OpenApiPlugin({
-    securitySchemes: {
-      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-    },
-    security: [{ bearerAuth: [] }], // document-level default
-  }));
+  app.register(
+    OpenApiPlugin({
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      },
+      security: [{ bearerAuth: [] }], // document-level default
+    }),
+  );
 
   app.router.post('/login', { schema: { security: [] }, handler }); // explicitly public
   ```
@@ -7259,6 +7231,7 @@ names, because they record what those releases actually shipped.
   install, <1 s build), so no `ServerBuild` fixture is committed and `full-stack` is deliberately
   not in `ALLOW_SKIP`. No published package changed; the frontend build remains an app-level,
   build-time concern outside every published dependency graph (AI_GUIDELINES §12.2).
+
 - **`@setu-ts/messaging-plugin`** — GCP Pub/Sub (`GcpPubSubBroker`) and Azure Service Bus
   (`ServiceBusBroker`) backends implementing `IMessageBroker` with request-reply over a shared reply
   topic + per-instance subscription. `MessagingPluginOptions` is now a **discriminated union on
@@ -7647,8 +7620,7 @@ form CSRF; and the starter and template work that makes all of it composable in 
   `await import(serverBuildPath)`, so a relative specifier resolves against the plugin's own module
   and can never find the application's build.
 - **`createFullStackAppFromConfig` in `@hono-enterprise/full-stack-starter`** (Milestone 36c) —
-  `(build: (config: IConfig) => FullStackStarterOptions, options?: FromConfigOptions) =>
-  Promise<IKernelApplication>`,
+  `(build: (config: IConfig) => FullStackStarterOptions, options?: FromConfigOptions) => Promise<IKernelApplication>`,
   where `FromConfigOptions` carries `config` (loading options) and `env`. **`env` is required on
   Cloudflare Workers**, where bindings arrive per request rather than process-wide, so without it
   the application composes from an empty configuration and fails on every request; the `full-stack`
@@ -7788,9 +7760,8 @@ form CSRF; and the starter and template work that makes all of it composable in 
 - **Every application failed to boot on Cloudflare Workers** — `packages/kernel`'s request-context
   factory built its never-aborting `ctx.signal` sentinel from a **module-scope**
   `new AbortController()`. workerd refuses that with
-  `Disallowed operation called within global
-  scope`, because an `AbortController` is bound to an
-  I/O context, so the isolate threw at import time and no handler ever ran. Introduced with
+  `Disallowed operation called within global scope`, because an `AbortController` is bound to an I/O
+  context, so the isolate threw at import time and no handler ever ran. Introduced with
   `IRequestContext.signal` in Milestone 42 and invisible to every gate: the whole suite runs on
   Deno, where a module-scope controller is legal, and the Workers path had only ever been exercised
   through `app.fetch` under Deno rather than under the real runtime. Found by driving the framework
@@ -7951,6 +7922,7 @@ gains a LaunchDarkly provider, and `resilience-plugin` timeouts finally cancel t
   > `'messaging'`. The memory-default caveat did appear two sentences later, but the headline is
   > what a reader acts on. The same looseness was corrected in the plugin log messages and both
   > plugin READMEs by PR #102; this was the last remaining copy.
+
 - **A LaunchDarkly provider** for `@hono-enterprise/feature-flags-plugin`
   (`provider: 'launchdarkly'`), plus an optional `IFeatureFlags.isEnabledAsync` for callers that can
   await an answer carrying no cold-context caveat.
@@ -7996,6 +7968,7 @@ gains a LaunchDarkly provider, and `resilience-plugin` timeouts finally cancel t
 
   A `push` channel using the default signer now needs `CAPABILITIES.RUNTIME` (for Web Crypto and the
   clock) and throws during `register` without it, rather than failing on the first notification.
+
 - **BREAKING (wire format): request-reply traffic moved to a derived channel.** `request(topic, …)`
   now publishes to, and `respond(topic, …)` subscribes to, `rr.req.<topic>` instead of `<topic>`. A
   `0.1.0-alpha.2` responder and a later requester **do not interoperate** — during an upgrade,
@@ -8039,8 +8012,7 @@ gains a LaunchDarkly provider, and `resilience-plugin` timeouts finally cancel t
   comes first and ends with `@module` replaces the whole page. Those six were the only
   description-first entrypoints. `deno task release:verify` now enforces `@module`-first, because
   nothing else sees this: the README ships in the tarball, so every gate and
-  `deno publish
-  --dry-run` stay green and the loss shows up only on jsr.io.
+  `deno publish --dry-run` stay green and the loss shows up only on jsr.io.
 
 ### Deprecated
 

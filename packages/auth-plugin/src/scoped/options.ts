@@ -38,10 +38,10 @@ export interface CatalogueRole {
 /** A compiled grant source. */
 export type CompiledSource =
   | {
-    readonly kind: 'static';
-    readonly name: string;
-    readonly bySubject: ReadonlyMap<string, readonly ScopedGrant[]>;
-  }
+      readonly kind: 'static';
+      readonly name: string;
+      readonly bySubject: ReadonlyMap<string, readonly ScopedGrant[]>;
+    }
   | { readonly kind: 'claims'; readonly name: string; readonly map: ClaimsGrantMapper }
   | { readonly kind: 'custom'; readonly source: IGrantSource | RegistryFactory<IGrantSource> };
 
@@ -159,9 +159,10 @@ function compileSource(entry: unknown, index: number): CompiledSource {
     }
     const bySubject = new Map<string, ScopedGrant[]>();
     grants.forEach((raw: unknown, at: number) => {
-      const subject = typeof raw === 'object' && raw !== null
-        ? readName((raw as { readonly subject?: unknown }).subject)
-        : undefined;
+      const subject =
+        typeof raw === 'object' && raw !== null
+          ? readName((raw as { readonly subject?: unknown }).subject)
+          : undefined;
       const grant = readGrant(raw);
       if (subject === undefined || grant === undefined) {
         refuse(`sources[${index}].grants[${at}] is not a valid grant`);
@@ -182,7 +183,9 @@ function compileSource(entry: unknown, index: number): CompiledSource {
   if (kind === 'custom') {
     const { source } = entry as { readonly source?: unknown };
     const isFactory = typeof source === 'function';
-    const isSource = typeof source === 'object' && source !== null &&
+    const isSource =
+      typeof source === 'object' &&
+      source !== null &&
       typeof (source as { readonly grantsFor?: unknown }).grantsFor === 'function';
     if (!isFactory && !isSource) {
       refuse(`sources[${index}].source must be an IGrantSource or a factory returning one`);
@@ -203,7 +206,8 @@ function compileTiming(timing: unknown): CompiledTiming {
     return { kind: 'sign-in' };
   }
   if (
-    typeof timing === 'object' && timing !== null &&
+    typeof timing === 'object' &&
+    timing !== null &&
     (timing as { readonly kind?: unknown }).kind === 'cache'
   ) {
     const { ttlMs, maxEntries } = timing as {
@@ -319,8 +323,10 @@ export function compileScopedRbac(
 
   const customRoles = options.customRoles;
   if (
-    customRoles !== undefined && typeof customRoles !== 'function' &&
-    (typeof customRoles !== 'object' || customRoles === null ||
+    customRoles !== undefined &&
+    typeof customRoles !== 'function' &&
+    (typeof customRoles !== 'object' ||
+      customRoles === null ||
       typeof (customRoles as { readonly rolesFor?: unknown }).rolesFor !== 'function')
   ) {
     refuse('customRoles must be an IScopedRoleSource or a factory returning one');

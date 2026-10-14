@@ -18,7 +18,10 @@ import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
 
 const SPEC = 'file:///tasks/echo.ts';
 
-function makePool(config?: Partial<TaskPoolConfig>, parallelism = 2): {
+function makePool(
+  config?: Partial<TaskPoolConfig>,
+  parallelism = 2,
+): {
   pool: TaskPool;
   host: FakeHost;
   timers: FakeTimers;

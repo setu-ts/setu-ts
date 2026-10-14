@@ -194,9 +194,9 @@ export async function runGenerateCommand(
   }
   if (typeof runtimeValue === 'string' && !isTargetRuntime(runtimeValue)) {
     deps.error(
-      `Unknown runtime "${escapeName(runtimeValue)}". Expected one of: ${
-        TARGET_RUNTIMES.join(', ')
-      }.`,
+      `Unknown runtime "${escapeName(runtimeValue)}". Expected one of: ${TARGET_RUNTIMES.join(
+        ', ',
+      )}.`,
     );
     return EXIT_USAGE;
   }
@@ -227,9 +227,9 @@ export async function runGenerateCommand(
     }
     if (!isCustomSchematicName(customName)) {
       deps.error(
-        `Invalid custom schematic name "${
-          escapeName(customName)
-        }": use letters, digits, "-" and "_" — it names a file in ${CUSTOM_SCHEMATIC_DIR}/`,
+        `Invalid custom schematic name "${escapeName(
+          customName,
+        )}": use letters, digits, "-" and "_" — it names a file in ${CUSTOM_SCHEMATIC_DIR}/`,
       );
       return EXIT_USAGE;
     }
@@ -257,26 +257,24 @@ export async function runGenerateCommand(
     // cannot begin an identifier would emit source that does not parse.
     // Quoting the name back as typed, so through `escapeName`: a control
     // character here would forge a standalone line in the rendered message.
-    deps.error(
-      `Invalid name "${escapeName(name)}": ${IDENTIFIER_NAME_RULE}`,
-    );
+    deps.error(`Invalid name "${escapeName(name)}": ${IDENTIFIER_NAME_RULE}`);
     return EXIT_USAGE;
   }
 
   const project = await detectProject(deps.fs, dir);
   if (project.kind === 'none') {
     deps.error(
-      `${
-        escapeName(dir)
-      } holds no deno.json, deno.jsonc or package.json — run this inside a project, or pass --dir.`,
+      `${escapeName(
+        dir,
+      )} holds no deno.json, deno.jsonc or package.json — run this inside a project, or pass --dir.`,
     );
     return EXIT_ERROR;
   }
   if (project.kind === 'workspace-root') {
     deps.error(
-      `${escapeName(dir)} is a workspace root (${
-        escapeName(project.marker)
-      }); generate inside a member instead.`,
+      `${escapeName(dir)} is a workspace root (${escapeName(
+        project.marker,
+      )}); generate inside a member instead.`,
     );
     deps.error(`  Pass --dir apps/<member>.`);
     return EXIT_USAGE;
@@ -305,9 +303,10 @@ export async function runGenerateCommand(
         `which is not installed in ${escapeName(dir)}.`,
     );
     deps.error(
-      `Run \`${PROGRAM_NAME} add ${
-        requiredPlugin.replace(/-plugin$/, '')
-      }\`, then this command again.`,
+      `Run \`${PROGRAM_NAME} add ${requiredPlugin.replace(
+        /-plugin$/,
+        '',
+      )}\`, then this command again.`,
     );
     return EXIT_ERROR;
   }
@@ -322,7 +321,7 @@ export async function runGenerateCommand(
   // schematic can be driven for another target deliberately.
   let runtime: TargetRuntime;
   try {
-    runtime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
+    runtime = runtimeFlag ?? (await detectTargetRuntime(deps.fs, dir));
   } catch (cause) {
     if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
     deps.error(cause.message);
@@ -337,15 +336,14 @@ export async function runGenerateCommand(
   const legacyModules = moduleScan.skipped.map((skip) => skip.name);
   for (const skip of moduleScan.skipped) {
     deps.error(
-      `Skipped ${escapeName(skip.path)}: it is missing ${
-        escapeName(String(skip.missing))
-      }, so it cannot be listed in ` +
-        'the MODULES activation barrel used by migrated configs.',
+      `Skipped ${escapeName(skip.path)}: it is missing ${escapeName(
+        String(skip.missing),
+      )}, so it cannot be listed in ` + 'the MODULES activation barrel used by migrated configs.',
     );
     deps.error(
-      `  Add ${
-        escapeName(String(skip.missing))
-      } with @Module(...) or delete and regenerate the module.`,
+      `  Add ${escapeName(
+        String(skip.missing),
+      )} with @Module(...) or delete and regenerate the module.`,
     );
   }
   // Same reasoning as `modules`: the migration runner lists every migration in
@@ -363,10 +361,9 @@ export async function runGenerateCommand(
   // compile, or one that quietly omits their work.
   for (const skip of scan.skipped) {
     deps.error(
-      `Skipped ${escapeName(skip.path)}: it does not export ${
-        escapeName(skip.missing.join(', '))
-      }, ` +
-        `so it cannot be listed in the generated barrel and nothing registers it.`,
+      `Skipped ${escapeName(skip.path)}: it does not export ${escapeName(
+        skip.missing.join(', '),
+      )}, ` + `so it cannot be listed in the generated barrel and nothing registers it.`,
     );
     // "Regenerate it" was the advice, and it could not be followed: the artifact
     // is not `managed`, so `setu generate` refuses to overwrite it and the
@@ -394,16 +391,14 @@ export async function runGenerateCommand(
   // success and leaving the application unable to start.
   for (const wired of scan.manual) {
     deps.error(
-      `Skipped ${escapeName(wired.path)}: ${
-        escapeName(wired.symbol)
-      } is already registered by hand in ` +
-        `${
-          escapeName(wired.wiredIn)
-        }, so listing it in the generated barrel would register it twice.`,
+      `Skipped ${escapeName(wired.path)}: ${escapeName(
+        wired.symbol,
+      )} is already registered by hand in ` +
+        `${escapeName(
+          wired.wiredIn,
+        )}, so listing it in the generated barrel would register it twice.`,
     );
-    deps.error(
-      `  Remove the manual registration to let the barrel own it, or leave it as it is.`,
-    );
+    deps.error(`  Remove the manual registration to let the barrel own it, or leave it as it is.`);
   }
 
   // E8 merged `src/routes/` into `src/controllers/`, and a project that predates the
@@ -426,19 +421,12 @@ export async function runGenerateCommand(
   // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
   // output cannot work is not a plan worth printing. Both collisions this catches were
   // observed as real failures against a booted application — see `name-conflicts.ts`.
-  const conflict = findNameConflict(
-    schematicName,
-    names.kebab,
-    installed,
-    scan.artifacts,
-    modules,
-  );
+  const conflict = findNameConflict(schematicName, names.kebab, installed, scan.artifacts, modules);
   if (conflict !== undefined) {
     deps.error(
-      `Cannot generate ${escapeName(schematicName)} "${names.kebab}": ${
-        escapeName(conflict.resource)
-      } is already ` +
-        `claimed by ${escapeName(conflict.claimedBy)}.`,
+      `Cannot generate ${escapeName(schematicName)} "${names.kebab}": ${escapeName(
+        conflict.resource,
+      )} is already ` + `claimed by ${escapeName(conflict.claimedBy)}.`,
     );
     deps.error(`If both existed, ${escapeName(conflict.consequence)}.`);
     deps.error(`Choose a different name, or ${escapeName(conflict.remedy)}.`);
@@ -460,9 +448,9 @@ export async function runGenerateCommand(
     generated = schematic(names, options);
   } catch (cause) {
     deps.error(
-      `Schematic "${escapeName(schematicName)}" failed: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      `Schematic "${escapeName(schematicName)}" failed: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
     );
     return EXIT_ERROR;
   }
@@ -504,9 +492,8 @@ export async function runGenerateCommand(
   // custom schematic is excluded outright: a matching path says nothing about what
   // it wrote there, so the CLI cannot vouch that its barrel registers the file.
   const planned = new Set(generated.map((file) => file.path));
-  const adoptions = customName === undefined
-    ? scan.adopted.filter((claim) => planned.has(claim.barrel))
-    : [];
+  const adoptions =
+    customName === undefined ? scan.adopted.filter((claim) => planned.has(claim.barrel)) : [];
 
   if (args.flags['dry-run'] === true) {
     for (const file of files) deps.log(`would create ${escapeName(file.path)}`);

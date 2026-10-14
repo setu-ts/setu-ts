@@ -69,11 +69,7 @@ class WithinFnError {
 }
 
 /** Runs one store call under the store timeout, as a `'store-failed'` on expiry. */
-function bounded<T>(
-  deps: WithinDeps,
-  run: () => Promise<T>,
-  what: string,
-): Promise<T> {
+function bounded<T>(deps: WithinDeps, run: () => Promise<T>, what: string): Promise<T> {
   return withDeadline(() => run(), {
     timeoutMs: deps.storeTimeoutMs,
     onTimeout: () =>
@@ -148,10 +144,7 @@ async function recover<R>(
   const record = await readRecord(deps, id);
   if (record !== undefined) return replay<R>(record, fingerprint);
   if (isConflict(failure)) {
-    throw new IdempotencyWithinError(
-      'conflict',
-      'idempotency: another call holds this key; retry',
-    );
+    throw new IdempotencyWithinError('conflict', 'idempotency: another call holds this key; retry');
   }
   safeLog(deps.logger, 'warn', 'idempotency: the within store write failed', {
     errorKind: errorKind(failure),

@@ -1458,7 +1458,10 @@ describe('adaptAwsS3Module getStream — SDK node-body wrapping', () => {
       return new ReadableStream();
     };
     body.on('error', () => {}); // pipeline-owned; a post-destroy write raises one
-    const facade = adaptAwsS3Module(sdkModuleReturning(() => body), { bucket: 'b' });
+    const facade = adaptAwsS3Module(
+      sdkModuleReturning(() => body),
+      { bucket: 'b' },
+    );
     const stream = await facade.getStream('k');
     body.write(new Uint8Array([1, 2]));
     const reader = (stream as ReadableStream<Uint8Array>).getReader();
@@ -1484,7 +1487,10 @@ describe('adaptAwsS3Module getStream — SDK node-body wrapping', () => {
       },
     });
     const body = { transformToWebStream: () => adapted };
-    const facade = adaptAwsS3Module(sdkModuleReturning(() => body), { bucket: 'b' });
+    const facade = adaptAwsS3Module(
+      sdkModuleReturning(() => body),
+      { bucket: 'b' },
+    );
     const stream = await facade.getStream('k');
     expect(stream).toBe(adapted);
   });

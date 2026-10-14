@@ -55,9 +55,10 @@ export function composeFullStackPlugins(
   options: FullStackStarterOptions,
   platform: RuntimePlatform,
 ): IPlugin[] {
-  const scheduler = platform === 'cloudflare-workers' && options.scheduler === undefined
-    ? []
-    : [SchedulerPlugin(options.scheduler)];
+  const scheduler =
+    platform === 'cloudflare-workers' && options.scheduler === undefined
+      ? []
+      : [SchedulerPlugin(options.scheduler)];
   // Start with the microservice base set
   const plugins: IPlugin[] = [
     ...buildMicroservicePlugins(options),

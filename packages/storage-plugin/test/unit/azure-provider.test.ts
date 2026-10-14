@@ -57,10 +57,9 @@ describe('canSign', () => {
   });
 
   it('returns true when connection string has AccountKey', () => {
-    expect(canSign({ connectionString: 'AccountName=foo;AccountKey=bar;', containerName: 'c' }))
-      .toBe(
-        true,
-      );
+    expect(
+      canSign({ connectionString: 'AccountName=foo;AccountKey=bar;', containerName: 'c' }),
+    ).toBe(true);
   });
 
   it('returns false for account-name-only config', () => {
@@ -78,8 +77,7 @@ describe('canSign', () => {
         connectionString: 'DefaultEndpointsProtocol=https;AccountName=foo;',
         containerName: 'c',
       }),
-    )
-      .toBe(false);
+    ).toBe(false);
   });
 
   it('returns false for connection string without AccountName', () => {
@@ -88,8 +86,7 @@ describe('canSign', () => {
         connectionString: 'DefaultEndpointsProtocol=https;AccountKey=bar;',
         containerName: 'c',
       }),
-    )
-      .toBe(false);
+    ).toBe(false);
   });
 
   it('returns false for empty connection string', () => {
@@ -97,12 +94,14 @@ describe('canSign', () => {
   });
 
   it('prefers accountName/accountKey over connectionString extraction', () => {
-    expect(canSign({
-      accountName: 'explicit',
-      accountKey: 'key',
-      connectionString: 'AccountName=ignored;AccountKey=ignored;',
-      containerName: 'c',
-    })).toBe(true);
+    expect(
+      canSign({
+        accountName: 'explicit',
+        accountKey: 'key',
+        connectionString: 'AccountName=ignored;AccountKey=ignored;',
+        containerName: 'c',
+      }),
+    ).toBe(true);
   });
 });
 
@@ -164,7 +163,10 @@ describe('adaptAzureModule', () => {
           }
         },
         StorageSharedKeyCredential: class {
-          constructor(public accountName: string, public accountKey: string) {}
+          constructor(
+            public accountName: string,
+            public accountKey: string,
+          ) {}
         },
         // C2 fix: real SDK signature is synchronous: generateBlobSASQueryParameters(values, credential)
         generateBlobSASQueryParameters(
@@ -273,7 +275,10 @@ describe('adaptAzureModule', () => {
         }
       },
       StorageSharedKeyCredential: class {
-        constructor(public accountName: string, public accountKey: string) {}
+        constructor(
+          public accountName: string,
+          public accountKey: string,
+        ) {}
       },
       generateBlobSASQueryParameters(_params: unknown): Promise<{ toString(): string }> {
         return Promise.resolve({
@@ -292,8 +297,9 @@ describe('adaptAzureModule', () => {
       accountKey: 'key',
     }) as IAzureBlobClient & { canSign: boolean };
     // deno-lint-ignore no-explicit-any
-    const blob = ((adapterResult as any).getContainerClient('errRecover') as any)
-      .getBlockBlobClient('gone.bin');
+    const blob = (
+      (adapterResult as any).getContainerClient('errRecover') as any
+    ).getBlockBlobClient('gone.bin');
     const downloadResult = await blob.download();
     expect(downloadResult.deleted).toBe(true);
     expect(downloadResult.contentLength).toBe(0);
@@ -321,7 +327,7 @@ describe('adaptAzureModule', () => {
       adaptAzureModule(mod, {
         containerName: 'mycontainer',
         accountName: 'fakeaccount',
-      })
+      }),
     ).toThrow('accountName + options.accountKey');
   });
 
@@ -332,8 +338,9 @@ describe('adaptAzureModule', () => {
       accountName: 'fakeaccount',
       accountKey: 'key',
     });
-    const url = await (facade as { getSignedUrl: (p: string, e: number) => Promise<string> })
-      .getSignedUrl('blob.txt', 3600);
+    const url = await (
+      facade as { getSignedUrl: (p: string, e: number) => Promise<string> }
+    ).getSignedUrl('blob.txt', 3600);
     expect(url).toContain('sas-token-signed');
   });
 
@@ -385,7 +392,10 @@ describe('adaptAzureModule', () => {
         }
       },
       StorageSharedKeyCredential: class {
-        constructor(public accountName: string, public accountKey: string) {}
+        constructor(
+          public accountName: string,
+          public accountKey: string,
+        ) {}
       },
       generateBlobSASQueryParameters: () => ({ toString: () => 'x' }),
     } as unknown as import('../../src/providers/azure-provider.ts').AzureSdkModule;
@@ -413,7 +423,10 @@ describe('adaptAzureModule', () => {
         }
       },
       StorageSharedKeyCredential: class {
-        constructor(public accountName: string, public accountKey: string) {}
+        constructor(
+          public accountName: string,
+          public accountKey: string,
+        ) {}
       },
       generateBlobSASQueryParameters: () => ({ toString: () => 'x' }),
     } as unknown as import('../../src/providers/azure-provider.ts').AzureSdkModule;
@@ -440,7 +453,7 @@ describe('adaptAzureModule', () => {
       (facade as { getSignedUrl: (p: string, e: number) => Promise<string> }).getSignedUrl(
         'b',
         3600,
-      )
+      ),
     ).toThrow('requires an account key');
   });
 });

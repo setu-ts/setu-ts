@@ -63,31 +63,34 @@ function renderMiddlewareBarrel(artifacts: SeamArtifacts): string {
   const imports = [
     `import type { MiddlewareFunction } from '@setu-ts/common';`,
     renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.middleware.ts`),
-  ].filter((line) => line !== '').join('\n\n');
+  ]
+    .filter((line) => line !== '')
+    .join('\n\n');
 
   const entries = names.map((name) => {
     const n = deriveNames(name);
-    return `{\n    name: '${n.kebab}',\n    priority: ${
-      middlewarePriorityExport(n.screaming)
-    },\n    middleware: ${n.camel}Middleware(),\n  }`;
+    return `{\n    name: '${n.kebab}',\n    priority: ${middlewarePriorityExport(
+      n.screaming,
+    )},\n    middleware: ${n.camel}Middleware(),\n  }`;
   });
 
   return assembleSeamBarrel(header, imports, [
     `/** One generated middleware and the pipeline position its own module declares. */\n` +
-    `export interface GeneratedMiddleware {\n` +
-    `  /** Diagnostic name shown in pipeline introspection. */\n` +
-    `  readonly name: string;\n` +
-    `  /** Execution priority — lower runs earlier, so lower is outermost. */\n` +
-    `  readonly priority: number;\n` +
-    `  /** The middleware itself. */\n` +
-    `  readonly middleware: MiddlewareFunction;\n` +
-    `}`,
+      `export interface GeneratedMiddleware {\n` +
+      `  /** Diagnostic name shown in pipeline introspection. */\n` +
+      `  readonly name: string;\n` +
+      `  /** Execution priority — lower runs earlier, so lower is outermost. */\n` +
+      `  readonly priority: number;\n` +
+      `  /** The middleware itself. */\n` +
+      `  readonly middleware: MiddlewareFunction;\n` +
+      `}`,
     `/** Every generated middleware, for \`app.middleware.add(...)\`. */\n` +
-    `export const ${GENERATED_MIDDLEWARE_EXPORT}: readonly GeneratedMiddleware[] = [${
-      // Always broken across lines, never `renderList`: each entry is a multi-line
-      // object literal, so the single-line form the shared helper prefers would emit
-      // source `deno fmt` immediately rewrites.
-      entries.length === 0 ? '' : `\n  ${entries.join(',\n  ')},\n`}];`,
+      `export const ${GENERATED_MIDDLEWARE_EXPORT}: readonly GeneratedMiddleware[] = [${
+        // Always broken across lines, never `renderList`: each entry is a multi-line
+        // object literal, so the single-line form the shared helper prefers would emit
+        // source `deno fmt` immediately rewrites.
+        entries.length === 0 ? '' : `\n  ${entries.join(',\n  ')},\n`
+      }];`,
   ]);
 }
 

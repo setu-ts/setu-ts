@@ -74,8 +74,7 @@ describe('SchedulerService fire-slot deduplication', () => {
       runs.push('B');
     });
 
-    expect(await serviceB.getNextRun('nightly'))
-      .not.toBe(await serviceA.getNextRun('nightly'));
+    expect(await serviceB.getNextRun('nightly')).not.toBe(await serviceA.getNextRun('nightly'));
 
     await runtimeA.advance(3000);
     await runtimeB.advance(3000);

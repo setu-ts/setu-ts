@@ -99,9 +99,9 @@ export class DecoratorMetadataUnavailableError extends Error {
  * @throws {DecoratorMetadataUnavailableError} When the carrier is absent
  * @since 0.9.0
  */
-export function requireDecoratorMetadata(
-  context: { readonly metadata?: MetadataCarrier },
-): MetadataCarrier {
+export function requireDecoratorMetadata(context: {
+  readonly metadata?: MetadataCarrier;
+}): MetadataCarrier {
   const carrier = context.metadata;
   if (carrier === undefined || carrier === null) {
     throw new DecoratorMetadataUnavailableError();

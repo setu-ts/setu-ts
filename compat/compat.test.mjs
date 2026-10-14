@@ -112,9 +112,7 @@ console.log(`Setu-TS compat suite — ${host}`);
 //    package to the repo covers it on Deno and nowhere else, and the suite
 //    would keep reporting green over a shrinking fraction of the framework.
 const expected = workspacePackageNames();
-const declared = Object.keys(
-  JSON.parse(readFileSync('package.json', 'utf8')).dependencies ?? {},
-);
+const declared = Object.keys(JSON.parse(readFileSync('package.json', 'utf8')).dependencies ?? {});
 const uncovered = expected.filter(
   (name) => !declared.includes(name) && !PENDING_FIRST_PUBLISH.includes(name),
 );
@@ -333,11 +331,9 @@ function listJsFiles(dir) {
   return out;
 }
 
-for (
-  const name of Object.keys(JSON.parse(readFileSync('package.json', 'utf8')).dependencies).filter((
-    name,
-  ) => name.startsWith('@setu-ts/'))
-) {
+for (const name of Object.keys(
+  JSON.parse(readFileSync('package.json', 'utf8')).dependencies,
+).filter((name) => name.startsWith('@setu-ts/'))) {
   const pkgDir = `node_modules/${name}`;
   let version;
   try {

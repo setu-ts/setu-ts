@@ -63,16 +63,16 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
     register(ctx: IPluginContext): void {
       const collector = ctx.services.has(CAPABILITIES.METRICS)
         ? new WorkerPoolCollector(
-          ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
-          // Read through `ctx` at CALL time, never captured here: a logger
-          // registered after this plugin would otherwise be missed for the
-          // life of the application (the M52b `waitUntil` lesson).
-          (error: Error): void => {
-            ctx.logger?.warn('worker-pool metrics write failed', {
-              error: error.message,
-            });
-          },
-        )
+            ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
+            // Read through `ctx` at CALL time, never captured here: a logger
+            // registered after this plugin would otherwise be missed for the
+            // life of the application (the M52b `waitUntil` lesson).
+            (error: Error): void => {
+              ctx.logger?.warn('worker-pool metrics write failed', {
+                error: error.message,
+              });
+            },
+          )
         : undefined;
       const service = new WorkerPoolService(options, ctx.runtime, collector);
       // A worker error that settles no task (an idle worker crashing) rejects
@@ -114,26 +114,23 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
       // cumulative, so any status derived from it would need a threshold this
       // plugin cannot choose for an application (the M45b/M90b rule that
       // saturation is published, never judged).
-      ctx.health.register(
-        'worker-pool',
-        (): Promise<HealthCheckResult> => {
-          const pools = service.stats();
-          const limit = budgetLimitOf(service);
-          return Promise.resolve({
-            status: available ? 'up' : 'degraded',
-            data: {
-              available,
-              exitDetection,
-              pools,
-              budget: {
-                maxWorkers: limit === Infinity ? null : limit,
-                workers: pools.reduce((sum, pool) => sum + pool.workers, 0),
-              },
-              ...(available ? {} : { reason: WORKERS_UNSUPPORTED_REASON }),
+      ctx.health.register('worker-pool', (): Promise<HealthCheckResult> => {
+        const pools = service.stats();
+        const limit = budgetLimitOf(service);
+        return Promise.resolve({
+          status: available ? 'up' : 'degraded',
+          data: {
+            available,
+            exitDetection,
+            pools,
+            budget: {
+              maxWorkers: limit === Infinity ? null : limit,
+              workers: pools.reduce((sum, pool) => sum + pool.workers, 0),
             },
-          });
-        },
-      );
+            ...(available ? {} : { reason: WORKERS_UNSUPPORTED_REASON }),
+          },
+        });
+      });
 
       ctx.lifecycle.onClose(async () => {
         await service.shutdown();

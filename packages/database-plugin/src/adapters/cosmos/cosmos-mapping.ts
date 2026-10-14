@@ -31,13 +31,7 @@ const DEFAULT_PRIMARY_KEY = 'id';
  *
  * Measured on a real read: `_rid`, `_self`, `_etag`, `_attachments`, `_ts`.
  */
-const SYSTEM_PROPERTIES: readonly string[] = [
-  '_rid',
-  '_self',
-  '_etag',
-  '_attachments',
-  '_ts',
-];
+const SYSTEM_PROPERTIES: readonly string[] = ['_rid', '_self', '_etag', '_attachments', '_ts'];
 
 /** The property carrying the optimistic-concurrency tag. */
 export const ETAG_PROPERTY = '_etag';
@@ -182,10 +176,7 @@ export function renderPartitionKeyPath(segments: readonly string[]): string {
  * @returns The value, or `undefined` when any segment is absent
  * @since 0.2.0
  */
-export function readPath(
-  row: Record<string, unknown>,
-  segments: readonly string[],
-): unknown {
+export function readPath(row: Record<string, unknown>, segments: readonly string[]): unknown {
   let current: unknown = row;
   for (const segment of segments) {
     if (current === null || typeof current !== 'object') return undefined;

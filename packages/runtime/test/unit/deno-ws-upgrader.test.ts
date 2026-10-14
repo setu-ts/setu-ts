@@ -110,16 +110,18 @@ describe('DenoHttpAdapter WebSocket upgrade (post-M70a)', () => {
 
     const host: DenoServeHost = {
       serve: () => ({ shutdown: () => Promise.resolve() }),
-      ...(options?.omitUpgrade === true ? {} : {
-        upgradeWebSocket: (request: Request, opts?: { protocol?: string }) => {
-          if (options?.upgradeThrows !== undefined) throw options.upgradeThrows;
-          upgradeCalls.push({
-            request,
-            ...(opts?.protocol !== undefined && { protocol: opts.protocol }),
-          });
-          return { socket, response };
-        },
-      }),
+      ...(options?.omitUpgrade === true
+        ? {}
+        : {
+            upgradeWebSocket: (request: Request, opts?: { protocol?: string }) => {
+              if (options?.upgradeThrows !== undefined) throw options.upgradeThrows;
+              upgradeCalls.push({
+                request,
+                ...(opts?.protocol !== undefined && { protocol: opts.protocol }),
+              });
+              return { socket, response };
+            },
+          }),
     };
 
     const adapter = new DenoHttpAdapter(host);

@@ -71,9 +71,13 @@ describe('Mail component templates through a real kernel app (M102)', () => {
     const app = await startApp(sent);
     const mailer = app.services.get<IMailer>('mail');
 
-    await mailer.sendTemplate('welcome', { to: 'u@example.com', subject: 'Welcome' }, {
-      name: '<script>alert(1)</script>',
-    });
+    await mailer.sendTemplate(
+      'welcome',
+      { to: 'u@example.com', subject: 'Welcome' },
+      {
+        name: '<script>alert(1)</script>',
+      },
+    );
 
     expect(sent).toHaveLength(1);
     expect(sent[0]?.from).toBe('noreply@myapp.com');
@@ -112,7 +116,8 @@ describe('Mail component templates through a real kernel app (M102)', () => {
     const app = await startApp(sent);
     const mailer = app.services.get<IMailer>('mail');
     let caught: unknown;
-    await mailer.sendTemplate('broken', { to: 'u@example.com', subject: 'x' }, { name: 'a' })
+    await mailer
+      .sendTemplate('broken', { to: 'u@example.com', subject: 'x' }, { name: 'a' })
       .catch((e: unknown) => {
         caught = e;
       });

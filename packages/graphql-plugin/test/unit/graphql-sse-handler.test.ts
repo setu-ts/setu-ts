@@ -34,7 +34,7 @@ async function drain(stream: ReadableStream<Uint8Array>): Promise<string> {
     const read = await Promise.race([
       reader.read(),
       new Promise<{ done: true; value: undefined }>((resolve) =>
-        setTimeout(() => resolve({ done: true, value: undefined }), 500)
+        setTimeout(() => resolve({ done: true, value: undefined }), 500),
       ),
     ]);
     if (read.done) break;
@@ -97,7 +97,7 @@ function createMockResponse() {
     json: () => mock,
     html: () => mock,
     text: () => mock,
-    snapshot: () => ({ streaming: false, body: null, status: captures.status ?? 200 } as const),
+    snapshot: () => ({ streaming: false, body: null, status: captures.status ?? 200 }) as const,
   } as unknown as IResponse;
   return { mock, captures };
 }
@@ -120,11 +120,12 @@ function createMockRequest(opts: MockRequestOpts = {}) {
   const q = opts.query ?? {};
   return {
     request: {
-      json: opts.jsonRejectsWith !== undefined
-        ? () => Promise.reject(opts.jsonRejectsWith)
-        : opts.jsonThrows
-        ? () => Promise.reject(new Error('bad json'))
-        : () => Promise.resolve(opts.body),
+      json:
+        opts.jsonRejectsWith !== undefined
+          ? () => Promise.reject(opts.jsonRejectsWith)
+          : opts.jsonThrows
+            ? () => Promise.reject(new Error('bad json'))
+            : () => Promise.resolve(opts.body),
       headers: new Headers({ 'content-type': 'application/json' }),
     } as unknown as IRequest,
     query: q,

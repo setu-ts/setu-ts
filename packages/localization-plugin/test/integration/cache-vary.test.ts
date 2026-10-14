@@ -26,8 +26,7 @@ afterEach(async () => {
 });
 
 type Placement =
-  | { readonly kind: 'route' }
-  | { readonly kind: 'global'; readonly priority: number };
+  { readonly kind: 'route' } | { readonly kind: 'global'; readonly priority: number };
 
 interface Setup {
   readonly placement: Placement;

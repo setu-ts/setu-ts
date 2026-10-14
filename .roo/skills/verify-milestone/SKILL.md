@@ -1,6 +1,10 @@
 ---
 name: verify-milestone
-description: Verify a completed milestone's changes end-to-end — gates, ANSI-stripped per-file coverage, forbidden-construct grep, contract fidelity against common/PUBLIC_API, a real behavioral exercise of the new code, and tracking-table checks. Use when asked to verify, review, or audit a milestone (or its feat/… branch) before the PR merges.
+description:
+  Verify a completed milestone's changes end-to-end — gates, ANSI-stripped per-file coverage,
+  forbidden-construct grep, contract fidelity against common/PUBLIC_API, a real behavioral exercise
+  of the new code, and tracking-table checks. Use when asked to verify, review, or audit a milestone
+  (or its feat/… branch) before the PR merges.
 ---
 
 # Verify Milestone

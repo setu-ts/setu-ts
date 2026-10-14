@@ -210,9 +210,7 @@ export function withPluginOptionSeams(
  * @param seams - The host's consumable seams
  * @returns Controller, service, and ingress identifier lists, either possibly empty
  */
-export function decoratorSeamExtras(
-  seams: readonly SeamSpec[],
-): {
+export function decoratorSeamExtras(seams: readonly SeamSpec[]): {
   readonly controllers: readonly string[];
   readonly services: readonly string[];
   readonly ingress: readonly string[];

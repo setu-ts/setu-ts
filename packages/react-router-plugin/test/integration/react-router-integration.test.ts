@@ -64,9 +64,7 @@ describe('react-router integration (real socket)', () => {
         new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
-              controller.enqueue(
-                new TextEncoder().encode('<html><body>SSR</body></html>'),
-              );
+              controller.enqueue(new TextEncoder().encode('<html><body>SSR</body></html>'));
               controller.close();
             },
           }),
@@ -174,7 +172,7 @@ describe('react-router integration (real socket)', () => {
       const api = await fetch(`http://127.0.0.1:${port}/api/refused`);
       expect(api.status).toBe(403);
       expect(api.headers.get('content-type')).toContain('application/problem+json');
-      expect((await api.json() as { title: string }).title).toBe('Forbidden');
+      expect(((await api.json()) as { title: string }).title).toBe('Forbidden');
     } finally {
       await app.stop();
     }

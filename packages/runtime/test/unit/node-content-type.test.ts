@@ -40,7 +40,7 @@ function recordingOutgoing(): NodeOutgoing & { calls: unknown[][] } {
       calls.push([
         status,
         ...rest.map((arg) =>
-          typeof arg === 'object' && arg !== null && !Array.isArray(arg) ? { ...arg } : arg
+          typeof arg === 'object' && arg !== null && !Array.isArray(arg) ? { ...arg } : arg,
         ),
       ]);
       return this;

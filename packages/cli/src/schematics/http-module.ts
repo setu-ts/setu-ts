@@ -35,13 +35,14 @@ export type HttpModuleKind = 'controller' | 'routes';
  * @returns The module contents
  */
 export function renderHttpModule(names: DerivedNames, kind: HttpModuleKind): string {
-  const framing = kind === 'controller'
-    ? ` * This project has no \`decorator-plugin\`, so a controller is a function that\n` +
-      ` * registers its own routes. Install the plugin and regenerate to get the\n` +
-      ` * decorated class form instead.\n`
-    : ` * A \`.routes.ts\` module is the imperative escape hatch, and stays correct in\n` +
-      ` * both generator modes: a \`@Controller\` has no wildcard decorator and cannot\n` +
-      ` * compute routes in a loop, so a proxy or a computed route table belongs here.\n`;
+  const framing =
+    kind === 'controller'
+      ? ` * This project has no \`decorator-plugin\`, so a controller is a function that\n` +
+        ` * registers its own routes. Install the plugin and regenerate to get the\n` +
+        ` * decorated class form instead.\n`
+      : ` * A \`.routes.ts\` module is the imperative escape hatch, and stays correct in\n` +
+        ` * both generator modes: a \`@Controller\` has no wildcard decorator and cannot\n` +
+        ` * compute routes in a loop, so a proxy or a computed route table belongs here.\n`;
 
   return `import type { IRouterApi, IServiceRegistry } from '@setu-ts/common';
 

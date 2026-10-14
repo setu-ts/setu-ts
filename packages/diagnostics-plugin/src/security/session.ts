@@ -188,10 +188,7 @@ export class DiagnosticsSessionState {
     if (this.#revoked || maxExpiresAtHr === null || now >= this.#expiresAtHr) {
       return null;
     }
-    this.#expiresAtHr = Math.max(
-      this.#expiresAtHr,
-      Math.min(now + this.#ttlMs, maxExpiresAtHr),
-    );
+    this.#expiresAtHr = Math.max(this.#expiresAtHr, Math.min(now + this.#ttlMs, maxExpiresAtHr));
     return this.#readLifetime(now, maxExpiresAtHr);
   }
 

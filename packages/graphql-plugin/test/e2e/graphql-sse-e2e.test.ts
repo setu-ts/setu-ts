@@ -27,7 +27,7 @@ async function drainStream(stream: ReadableStream<Uint8Array>): Promise<string> 
     const read = await Promise.race([
       reader.read(),
       new Promise<{ done: true; value: undefined }>((resolve) =>
-        setTimeout(() => resolve({ done: true, value: undefined }), 5000)
+        setTimeout(() => resolve({ done: true, value: undefined }), 5000),
       ),
     ]);
     if (read.done) break;
@@ -113,9 +113,7 @@ describe('GraphQL SSE e2e (app.fetch)', () => {
     await app.start({ port: 0 });
 
     try {
-      const res = await app.fetch(
-        new Request('http://localhost/graphql/stream?query={hello}'),
-      );
+      const res = await app.fetch(new Request('http://localhost/graphql/stream?query={hello}'));
 
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('text/event-stream');
@@ -138,9 +136,7 @@ describe('GraphQL SSE e2e (app.fetch)', () => {
     await app.start({ port: 0 });
 
     try {
-      const res = await app.fetch(
-        new Request('http://localhost/graphql/stream'),
-      );
+      const res = await app.fetch(new Request('http://localhost/graphql/stream'));
 
       // No query → transport failure, buffered HTTP error (no stream opened).
       expect(res.status).toBe(400);

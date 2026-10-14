@@ -127,10 +127,7 @@ function isGcsNotFound(error: unknown): boolean {
  * @param options - GCS connection options
  * @returns The facade wrapping a `Storage` client
  */
-export function adaptGcsModule(
-  mod: GcsSdkModule,
-  options: GcsProviderOptions,
-): IGcsClient {
+export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): IGcsClient {
   const storageConfig: { projectId?: string } = {};
   if (options.projectId !== undefined) storageConfig.projectId = options.projectId;
   const storage = new mod.Storage(storageConfig);
@@ -146,16 +143,16 @@ export function adaptGcsModule(
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               return new Promise<[Record<string, unknown>]>((resolve, reject) => {
                 const fileHandle = b.file(name);
-                (fileHandle as {
-                  getMetadata: (
-                    cb: (err: Error | null, metadata: Record<string, unknown>) => void,
-                  ) => void;
-                }).getMetadata(
-                  (err: Error | null, metadata: Record<string, unknown>) => {
-                    if (err) reject(err);
-                    else resolve([metadata]);
-                  },
-                );
+                (
+                  fileHandle as {
+                    getMetadata: (
+                      cb: (err: Error | null, metadata: Record<string, unknown>) => void,
+                    ) => void;
+                  }
+                ).getMetadata((err: Error | null, metadata: Record<string, unknown>) => {
+                  if (err) reject(err);
+                  else resolve([metadata]);
+                });
               });
             },
             download() {
@@ -163,9 +160,11 @@ export function adaptGcsModule(
               return new Promise<{ body: Uint8Array | NodeJS.ReadableStream }>(
                 (resolve, reject) => {
                   const fileHandle = b.file(name);
-                  (fileHandle as {
-                    download: (cb: (err: Error | null, data: Uint8Array) => void) => void;
-                  }).download((err: Error | null, data: Uint8Array) => {
+                  (
+                    fileHandle as {
+                      download: (cb: (err: Error | null, data: Uint8Array) => void) => void;
+                    }
+                  ).download((err: Error | null, data: Uint8Array) => {
                     if (err) reject(err);
                     else resolve({ body: data });
                   });
@@ -178,13 +177,15 @@ export function adaptGcsModule(
               cb: (error: Error | null) => void,
             ) {
               const fileHandle = b.file(name);
-              (fileHandle as {
-                save: (
-                  data: Uint8Array,
-                  options: Record<string, unknown>,
-                  cb: (error: Error | null) => void,
-                ) => void;
-              }).save(data, options, cb);
+              (
+                fileHandle as {
+                  save: (
+                    data: Uint8Array,
+                    options: Record<string, unknown>,
+                    cb: (error: Error | null) => void,
+                  ) => void;
+                }
+              ).save(data, options, cb);
             },
             delete() {
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -202,20 +203,23 @@ export function adaptGcsModule(
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
               return new Promise<[string]>((resolve, reject) => {
                 const fileHandle = b.file(name);
-                (fileHandle as {
-                  getSignedUrl: (
-                    config: { action: string; expires: number },
-                    cb: (err: Error | null, url: string) => void,
-                  ) => void;
-                }).getSignedUrl(config, (err: Error | null, url: string) => {
+                (
+                  fileHandle as {
+                    getSignedUrl: (
+                      config: { action: string; expires: number },
+                      cb: (err: Error | null, url: string) => void,
+                    ) => void;
+                  }
+                ).getSignedUrl(config, (err: Error | null, url: string) => {
                   if (err) reject(err);
                   else resolve([url]);
                 });
               });
             },
             createReadStream() {
-              return (b.file(name) as { createReadStream(): NodeJS.ReadableStream })
-                .createReadStream();
+              return (
+                b.file(name) as { createReadStream(): NodeJS.ReadableStream }
+              ).createReadStream();
             },
           };
         },
@@ -231,7 +235,7 @@ export function adaptGcsModule(
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadGcsModule(): Promise<GcsSdkModule> {
-  return await import('@google-cloud/storage') as unknown as GcsSdkModule;
+  return (await import('@google-cloud/storage')) as unknown as GcsSdkModule;
 }
 
 /**
@@ -276,9 +280,7 @@ export class GcsProvider implements StorageProvider {
     const injected = this.#options.client;
     if (injected !== undefined) {
       if (!validateGcsClient(injected)) {
-        throw new Error(
-          'Injected GCS client is missing required method (bucket)',
-        );
+        throw new Error('Injected GCS client is missing required method (bucket)');
       }
       this.#client = injected;
     } else {

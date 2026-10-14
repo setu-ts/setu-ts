@@ -18,9 +18,11 @@ function createRecordingLogger() {
     message: string;
     metadata?: Record<string, unknown> | undefined;
   }> = [];
-  const record = (level: string) => (message: string, metadata?: Record<string, unknown>): void => {
-    lines.push({ level, message, metadata });
-  };
+  const record =
+    (level: string) =>
+    (message: string, metadata?: Record<string, unknown>): void => {
+      lines.push({ level, message, metadata });
+    };
   return {
     lines,
     logger: {
@@ -588,8 +590,9 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
 
     await TelemetryPlugin({ serviceName: 'test', queryParameters: 'redact' }).register(mock.ctx);
 
-    expect(lines.some((line) => line.level === 'warn' && line.message.includes('query-parameter')))
-      .toBe(true);
+    expect(
+      lines.some((line) => line.level === 'warn' && line.message.includes('query-parameter')),
+    ).toBe(true);
   });
 
   it('accepts policy and service redaction option arms', async () => {
@@ -709,7 +712,7 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
 function createFakeTracerHost() {
   return {
     startSpan: () => ({}),
-    extractContext: () => ({ _opaque: Symbol.for('test') } as never),
+    extractContext: () => ({ _opaque: Symbol.for('test') }) as never,
     injectContext: () => ({}),
     shutdown: () => Promise.resolve(),
     forceFlush: () => Promise.resolve(),
@@ -809,7 +812,7 @@ function createMockContext(): MockResult {
       hrtime: () => performance.now(),
       setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
       clearTimeout: () => {},
-      setInterval: () => ({} as never),
+      setInterval: () => ({}) as never,
       clearInterval: () => {},
       env: {},
       exit: () => {
@@ -986,7 +989,7 @@ function createMockContextWithMiddlewareCapture(): MockResultWithMiddlewareCaptu
       hrtime: () => performance.now(),
       setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
       clearTimeout: () => {},
-      setInterval: () => ({} as never),
+      setInterval: () => ({}) as never,
       clearInterval: () => {},
       env: {},
       exit: () => {
@@ -1080,9 +1083,7 @@ describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () =>
     const mock = createMockContext();
     await TelemetryPlugin({ serviceName: 'test' }).register(mock.ctx);
     expect(mock.registeredTokens).toContain(CAPABILITIES.TRACE_DIAGNOSTICS);
-    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
-      CAPABILITIES.TRACE_DIAGNOSTICS,
-    );
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS);
     const batch = source.read('instance-1', 0);
     expect(batch.state).toBe('disabled');
     expect(batch.coverage).toBe('noop-no-provider');
@@ -1096,9 +1097,7 @@ describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () =>
       serviceName: 'test',
       diagnostics: { enabled: true, serviceAlias: 'orders', operations: { span: 'op' } },
     }).register(mock.ctx);
-    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
-      CAPABILITIES.TRACE_DIAGNOSTICS,
-    );
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS);
     const batch = source.read('instance-1', 0);
     expect(batch.state).toBe('unsupported');
     expect(batch.coverage).toBe('noop-no-provider');
@@ -1112,9 +1111,7 @@ describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () =>
       tracerProviderFactory: async () => createFakeTracerHost(),
       diagnostics: { enabled: true, serviceAlias: 'orders', operations: { span: 'op' } },
     }).register(mock.ctx);
-    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
-      CAPABILITIES.TRACE_DIAGNOSTICS,
-    );
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS);
     const batch = source.read('instance-1', 0);
     expect(batch.state).toBe('unsupported');
     expect(batch.coverage).toBe('custom-provider');
@@ -1125,13 +1122,13 @@ describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () =>
       TelemetryPlugin({
         serviceName: 'test',
         diagnostics: { enabled: false as never, serviceAlias: 'orders', operations: {} },
-      })
+      }),
     ).toThrow();
     expect(() =>
       TelemetryPlugin({
         serviceName: 'test',
         diagnostics: { enabled: true, serviceAlias: '', operations: {} },
-      })
+      }),
     ).toThrow();
   });
 
@@ -1150,9 +1147,7 @@ describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () =>
         operations: { 'approved-op': 'approved-alias' },
       },
     }).register(mock.ctx);
-    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
-      CAPABILITIES.TRACE_DIAGNOSTICS,
-    );
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS);
     const telemetry = mock.ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY);
     // An approved span completes through the framework service and is retained.
     await telemetry.withSpan('approved-op', async () => {});
@@ -1187,15 +1182,16 @@ it('reports bounded or unknown sampler ratios from the configured provider', asy
       sampling: { type: 'traceidratio', ...(ratio === undefined ? {} : { ratio }) } as never,
       diagnostics: { enabled: true, serviceAlias: 'sampling', operations: {} },
     }).register(mock.ctx);
-    const batch = mock.ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS)
+    const batch = mock.ctx.services
+      .get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS)
       .read('instance', 0);
     expect(batch.sampler).toEqual(
-      typeof ratio !== 'number' && ratio !== undefined || Number.isNaN(ratio)
+      (typeof ratio !== 'number' && ratio !== undefined) || Number.isNaN(ratio)
         ? { kind: 'unknown' }
         : {
-          kind: 'traceidratio',
-          ratio: ratio === undefined ? 1 : Math.min(Math.max(ratio as number, 0), 1),
-        },
+            kind: 'traceidratio',
+            ratio: ratio === undefined ? 1 : Math.min(Math.max(ratio as number, 0), 1),
+          },
     );
     await mock.shutdownHooks[0]!();
   }

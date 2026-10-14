@@ -31,9 +31,9 @@ export class InboxNotConfiguredError extends Error {
     super(
       reason === 'unregistered'
         ? `inbox: no '${token}' capability is registered — configure ` +
-          'MessagingPlugin({ inbox: { store } }) for this messaging instance'
+            'MessagingPlugin({ inbox: { store } }) for this messaging instance'
         : `inbox: the '${token}' provider is not the messaging plugin's inbox, so an ` +
-          'inbox subscription cannot run against it',
+            'inbox subscription cannot run against it',
     );
     this.name = 'InboxNotConfiguredError';
     this.token = token;
@@ -91,7 +91,7 @@ export class InboxNotReadyError extends Error {
     super(
       state === 'not-started'
         ? 'inbox: not ready — the store is resolved and verified during application start(); ' +
-          'resolve an inbox subscription at or after onInit'
+            'resolve an inbox subscription at or after onInit'
         : 'inbox: closed — the application is stopping',
     );
     this.name = 'InboxNotReadyError';
@@ -180,8 +180,8 @@ export class InboxRowStateError extends Error {
       outcome === 'invalid-id'
         ? 'inbox: a row id is 64 lowercase hexadecimal characters, as IInbox.parked() lists it'
         : outcome === 'missing'
-        ? 'inbox: no inbox marker has that id'
-        : `inbox: the marker is ${status ?? 'not parked'}, so it cannot be released`,
+          ? 'inbox: no inbox marker has that id'
+          : `inbox: the marker is ${status ?? 'not parked'}, so it cannot be released`,
     );
     this.name = 'InboxRowStateError';
     this.outcome = outcome;

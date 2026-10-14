@@ -44,7 +44,7 @@ describe('createBearerAuthInterceptor', () => {
 
   it('propagates provider rejection', async () => {
     const interceptor = createBearerAuthInterceptor(() =>
-      Promise.reject(new Error('provider failed'))
+      Promise.reject(new Error('provider failed')),
     );
     await expect(interceptor(makeCtx())).rejects.toThrow('provider failed');
   });

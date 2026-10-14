@@ -104,8 +104,9 @@ describe('inbox subscription resolution', () => {
     const service = activeService();
     const services = registry({ inbox: service });
     onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'payroll' } })(services);
-    expect(() => onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'payroll' } })(services))
-      .toThrow(InboxConsumerConflictError);
+    expect(() =>
+      onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'payroll' } })(services),
+    ).toThrow(InboxConsumerConflictError);
     onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'billing' } })(services);
     const other = { ...hired, topic: 'people.left.v1' };
     onIntegrationEvent(other, () => {}, { inbox: { consumer: 'payroll' } })(services);
@@ -126,7 +127,7 @@ describe('inbox subscription resolution', () => {
 
   it('refuses a malformed instance name at the call', () => {
     expect(() =>
-      onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'p', instance: 'Bad:Name' } })
+      onIntegrationEvent(hired, () => {}, { inbox: { consumer: 'p', instance: 'Bad:Name' } }),
     ).toThrow();
   });
 });

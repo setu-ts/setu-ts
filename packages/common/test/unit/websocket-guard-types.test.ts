@@ -15,8 +15,8 @@ import type {
 } from '../../src/services/websocket.ts';
 
 /** Strict identity check for compile-time contract assertions. */
-type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
-  : false;
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 type ExpectedRouteUpgrade = (
   request: Request,
@@ -35,7 +35,7 @@ const existingRouteOptions: WebSocketRouteOptions = {
 
 const guard: WebSocketUpgradeGuard = (
   context: WebSocketConnectionContext,
-): WebSocketGuardDecision => context.user === undefined ? { status: 401 } : true;
+): WebSocketGuardDecision => (context.user === undefined ? { status: 401 } : true);
 
 describe('WebSocket upgrade-guard contracts', () => {
   it('accepts true as an upgrade decision', () => {

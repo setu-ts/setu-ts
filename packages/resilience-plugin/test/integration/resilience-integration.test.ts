@@ -36,16 +36,22 @@ describe('ResiliencePlugin integration', () => {
       register(ctx) {
         const resilience = ctx.services.get<IResilienceService>(CAPABILITIES.RESILIENCE);
 
-        retryGuarded = resilience.wrap(() => {
-          attempts++;
-          if (attempts < 3) return Promise.reject(new Error('transient'));
-          return Promise.resolve('recovered');
-        }, { retry: true, timeout: 1000 });
+        retryGuarded = resilience.wrap(
+          () => {
+            attempts++;
+            if (attempts < 3) return Promise.reject(new Error('transient'));
+            return Promise.resolve('recovered');
+          },
+          { retry: true, timeout: 1000 },
+        );
 
-        breakerGuarded = resilience.wrap(() => {
-          failCalls++;
-          return Promise.reject(new Error('down'));
-        }, { circuitBreaker: { threshold: 2, timeout: 60_000, resetTimeout: 60_000 } });
+        breakerGuarded = resilience.wrap(
+          () => {
+            failCalls++;
+            return Promise.reject(new Error('down'));
+          },
+          { circuitBreaker: { threshold: 2, timeout: 60_000, resetTimeout: 60_000 } },
+        );
       },
     });
 

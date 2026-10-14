@@ -15,8 +15,7 @@ export function generateWsRoute(
     return [
       {
         path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
-        contents:
-          `import type { IWebSocketConnection, WebSocketConnectionContext } from '@setu-ts/common';
+        contents: `import type { IWebSocketConnection, WebSocketConnectionContext } from '@setu-ts/common';
 import { Gateway, OnMessage, OnOpen } from '@setu-ts/decorator-plugin';
 
 /** Decorated WebSocket gateway, registered through the ingress barrel. */

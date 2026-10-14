@@ -102,16 +102,18 @@ describe('auth-session strategy', () => {
         AuthPlugin({
           apiKey: { validate: () => Promise.resolve(null) },
           signIn: {
-            providers: [{
-              kind: 'oauth2',
-              name: 'gh',
-              clientId: 'c',
-              authorizationEndpoint: 'https://gh.test/a',
-              tokenEndpoint: 'https://gh.test/t',
-              userinfoEndpoint: 'https://gh.test/u',
-              redirectUri: 'https://app.test/auth/gh/callback',
-              toPrincipal: () => null,
-            }],
+            providers: [
+              {
+                kind: 'oauth2',
+                name: 'gh',
+                clientId: 'c',
+                authorizationEndpoint: 'https://gh.test/a',
+                tokenEndpoint: 'https://gh.test/t',
+                userinfoEndpoint: 'https://gh.test/u',
+                redirectUri: 'https://app.test/auth/gh/callback',
+                toPrincipal: () => null,
+              },
+            ],
           },
         }),
       ],
@@ -154,8 +156,9 @@ describe('AuthSessionStrategy edge cases', () => {
   });
 
   it('is anonymous for a corrupted record', async () => {
-    expect(await strategy({ [AUTH_SESSION_KEY]: { principal: { id: 7 } } }).authenticate(request))
-      .toBeNull();
+    expect(
+      await strategy({ [AUTH_SESSION_KEY]: { principal: { id: 7 } } }).authenticate(request),
+    ).toBeNull();
   });
 
   it('freezes the principal it returns so no later code can upgrade its amr', async () => {

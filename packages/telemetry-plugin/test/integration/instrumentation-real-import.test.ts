@@ -48,31 +48,25 @@ describe('Auto-instrumentation real-imports', () => {
   ];
 
   for (const { kind, load } of loaders) {
-    it(
-      `should load ${kind} through the default importer`,
-      async () => {
-        const { instance } = await load();
-        // The instance is a construction of the module's expected export, so a
-        // successful construction proves the default importer resolved it.
-        expect(instance).toBeInstanceOf(Object);
-        // The constructed instance must expose the OTel instrumentation surface.
-        expect(typeof (instance as { setTracerProvider?: unknown }).setTracerProvider).toBe(
-          'function',
-        );
-        expect(typeof (instance as { enable?: unknown }).enable).toBe('function');
-        expect(typeof (instance as { disable?: unknown }).disable).toBe('function');
-      },
-    );
+    it(`should load ${kind} through the default importer`, async () => {
+      const { instance } = await load();
+      // The instance is a construction of the module's expected export, so a
+      // successful construction proves the default importer resolved it.
+      expect(instance).toBeInstanceOf(Object);
+      // The constructed instance must expose the OTel instrumentation surface.
+      expect(typeof (instance as { setTracerProvider?: unknown }).setTracerProvider).toBe(
+        'function',
+      );
+      expect(typeof (instance as { enable?: unknown }).enable).toBe('function');
+      expect(typeof (instance as { disable?: unknown }).disable).toBe('function');
+    });
   }
 
-  it(
-    'should construct BatchSpanProcessor and SimpleSpanProcessor from sdk-trace-base',
-    async () => {
-      const sdkMod = await import('@opentelemetry/sdk-trace-base');
-      expect(sdkMod.BatchSpanProcessor).toBeDefined();
-      expect(sdkMod.SimpleSpanProcessor).toBeDefined();
-      expect(typeof sdkMod.BatchSpanProcessor).toBe('function');
-      expect(typeof sdkMod.SimpleSpanProcessor).toBe('function');
-    },
-  );
+  it('should construct BatchSpanProcessor and SimpleSpanProcessor from sdk-trace-base', async () => {
+    const sdkMod = await import('@opentelemetry/sdk-trace-base');
+    expect(sdkMod.BatchSpanProcessor).toBeDefined();
+    expect(sdkMod.SimpleSpanProcessor).toBeDefined();
+    expect(typeof sdkMod.BatchSpanProcessor).toBe('function');
+    expect(typeof sdkMod.SimpleSpanProcessor).toBe('function');
+  });
 });

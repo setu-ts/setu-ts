@@ -213,7 +213,10 @@ describe('Application.unregister', () => {
     // resolver's job. Its message names the DEPENDENT and the unsatisfied
     // CAPABILITY; it does NOT name the plugin that was removed, which is what
     // the docs now say rather than claiming it "names both plugins".
-    const error = await app.start().then(() => null, (e: Error) => e);
+    const error = await app.start().then(
+      () => null,
+      (e: Error) => e,
+    );
     expect(error?.message).toBe(
       "Plugin 'orders' depends on capability 'database', but no registered plugin provides it.",
     );

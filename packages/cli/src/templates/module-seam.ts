@@ -90,7 +90,7 @@ export function withModuleSeam(
   return wirings.map((wiring) =>
     wiring.pkg === 'decorator-plugin'
       ? { ...wiring, args: renderDecoratorArgs(controllers, services, ingress) }
-      : wiring
+      : wiring,
   );
 }
 
@@ -117,7 +117,9 @@ function renderDecoratorArgs(controllers: string, services: string, ingress: str
     `modules: [...${MODULES_EXPORT}] }`;
   // 6 spaces of array indent + `DecoratorPlugin(` + `),` is 24 characters of overhead.
   if (inline.length <= 76) return inline;
-  return `{\n        controllers: [${controllers}],\n        services: [${services}],\n` +
+  return (
+    `{\n        controllers: [${controllers}],\n        services: [${services}],\n` +
     `        ingress: [${ingress}],\n` +
-    `        modules: [...${MODULES_EXPORT}],\n      }`;
+    `        modules: [...${MODULES_EXPORT}],\n      }`
+  );
 }

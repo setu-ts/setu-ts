@@ -141,9 +141,7 @@ describe('static-assets — real files', () => {
 
     expect(mockResp.status).toBe(200);
     expect(mockResp.headers.get('Content-Type')).toBe('text/javascript');
-    expect(mockResp.headers.get('Cache-Control')).toBe(
-      'public, max-age=31536000, immutable',
-    );
+    expect(mockResp.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
     expect(mockResp.sentBody).not.toBeNull();
   });
 

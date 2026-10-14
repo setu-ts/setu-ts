@@ -57,9 +57,7 @@ export interface CoercedInjectBody {
  * @throws {TypeError} When the body is outside the {@linkcode InjectBody} union
  * @since 0.7.0
  */
-export async function coerceInjectBody(
-  body: InjectBody | undefined,
-): Promise<CoercedInjectBody> {
+export async function coerceInjectBody(body: InjectBody | undefined): Promise<CoercedInjectBody> {
   if (body === undefined) {
     return { bytes: undefined, defaultContentType: undefined };
   }
@@ -116,12 +114,13 @@ function isPlainObject(value: object): boolean {
 
 /** Names the received value in the refusal, so the caller sees what was wrong. */
 function refusalMessage(value: unknown): string {
-  const received = value === null
-    ? 'null'
-    : typeof value === 'object'
-    ? (Object.getPrototypeOf(value) as { constructor?: { name?: string } } | null)?.constructor
-      ?.name ?? 'object'
-    : typeof value;
+  const received =
+    value === null
+      ? 'null'
+      : typeof value === 'object'
+        ? ((Object.getPrototypeOf(value) as { constructor?: { name?: string } } | null)?.constructor
+            ?.name ?? 'object')
+        : typeof value;
   return (
     `inject() body must be a string, Uint8Array, ArrayBuffer, Blob, URLSearchParams, or a ` +
     `plain object; received ${received}. The previous behaviour silently JSON-stringified ` +

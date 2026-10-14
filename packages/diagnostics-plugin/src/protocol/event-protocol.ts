@@ -56,10 +56,7 @@ const SOURCE_STATES: ReadonlySet<string> = new Set<EventDiagnosticsState>([
   'stale',
   'collection-failed',
 ]);
-const OPERATIONS: ReadonlySet<string> = new Set<EventObservationOperation>([
-  'publish',
-  'handler',
-]);
+const OPERATIONS: ReadonlySet<string> = new Set<EventObservationOperation>(['publish', 'handler']);
 const INSPECTOR_STATES: ReadonlySet<string> = new Set<DiagnosticsInspectorState>([
   'unsupported',
   'disabled',
@@ -115,8 +112,12 @@ function readRecord(value: Record<string, unknown>): EventDiagnosticsRecord | nu
     ageMs,
   } = value;
   if (
-    !isDisplayAlias(alias) || !isOneOf(operation, OPERATIONS) ||
-    !isCount(count) || !isCount(started) || !isCount(succeeded) || !isCount(failed) ||
+    !isDisplayAlias(alias) ||
+    !isOneOf(operation, OPERATIONS) ||
+    !isCount(count) ||
+    !isCount(started) ||
+    !isCount(succeeded) ||
+    !isCount(failed) ||
     !isCount(noSubscribers) ||
     (lastDurationMs !== null && !isMs(lastDurationMs)) ||
     !isMs(ageMs)
@@ -154,9 +155,7 @@ function readRecord(value: Record<string, unknown>): EventDiagnosticsRecord | nu
  * @returns The validated copy, or `null` for any violation
  * @internal
  */
-export function readEventSourceSnapshot(
-  value: unknown,
-): EventDiagnosticsSnapshot | null {
+export function readEventSourceSnapshot(value: unknown): EventDiagnosticsSnapshot | null {
   try {
     const copy = copyOwnData(value, SNAPSHOT_KEYS);
     if (copy === null) {
@@ -263,12 +262,7 @@ export function projectEventSource(
   };
 }
 
-const RESPONSE_KEYS: readonly string[] = [
-  'version',
-  'instanceId',
-  'state',
-  'sources',
-];
+const RESPONSE_KEYS: readonly string[] = ['version', 'instanceId', 'state', 'sources'];
 const SOURCE_ENTRY_KEYS: readonly string[] = ['sourceId', 'snapshot'];
 /**
  * Validates one projected per-source entry against the exact M98j DTO. The
@@ -284,27 +278,30 @@ function isSourceEntryProjection(value: unknown, index: number): boolean {
   }
   const snapshot = value.snapshot;
   if (
-    !isRecord(snapshot) || !hasExactKeys(snapshot, SNAPSHOT_KEYS) ||
+    !isRecord(snapshot) ||
+    !hasExactKeys(snapshot, SNAPSHOT_KEYS) ||
     !isOneOf(snapshot.state, SOURCE_STATES)
   ) {
     return false;
   }
   // Mirror the source validator's alias rule exactly: required display alias
   // when enabled, `null` when disabled, either when collection-failed.
-  const aliasOk = snapshot.state === 'disabled'
-    ? snapshot.alias === null
-    : snapshot.state === 'collection-failed'
-    ? snapshot.alias === null || isDisplayAlias(snapshot.alias)
-    : isDisplayAlias(snapshot.alias);
+  const aliasOk =
+    snapshot.state === 'disabled'
+      ? snapshot.alias === null
+      : snapshot.state === 'collection-failed'
+        ? snapshot.alias === null || isDisplayAlias(snapshot.alias)
+        : isDisplayAlias(snapshot.alias);
   if (
     !aliasOk ||
     snapshot.coverage !== 'owned-instance' ||
-    !Array.isArray(snapshot.records) || snapshot.records.length > MAX_EVENT_RECORDS ||
+    !Array.isArray(snapshot.records) ||
+    snapshot.records.length > MAX_EVENT_RECORDS ||
     !isCount(snapshot.dropped)
   ) {
     return false;
   }
-  if ((snapshot.state === 'disabled' || snapshot.state === 'collection-failed')) {
+  if (snapshot.state === 'disabled' || snapshot.state === 'collection-failed') {
     if ((snapshot.records as unknown[]).length > 0) {
       return false;
     }
@@ -313,12 +310,17 @@ function isSourceEntryProjection(value: unknown, index: number): boolean {
     if (!isRecord(record) || !hasExactKeys(record, RECORD_KEYS)) {
       return false;
     }
-    return isDisplayAlias(record.alias) &&
+    return (
+      isDisplayAlias(record.alias) &&
       isOneOf(record.operation, OPERATIONS) &&
-      isCount(record.count) && isCount(record.started) && isCount(record.succeeded) &&
-      isCount(record.failed) && isCount(record.noSubscribers) &&
+      isCount(record.count) &&
+      isCount(record.started) &&
+      isCount(record.succeeded) &&
+      isCount(record.failed) &&
+      isCount(record.noSubscribers) &&
       (record.lastDurationMs === null || isMs(record.lastDurationMs)) &&
-      isMs(record.ageMs);
+      isMs(record.ageMs)
+    );
   });
 }
 
@@ -352,6 +354,6 @@ export function isEventResponseProjection(value: unknown): value is EventDiagnos
     return false;
   }
   return (value.sources as unknown[]).every((entry, index) =>
-    isSourceEntryProjection(entry, index)
+    isSourceEntryProjection(entry, index),
   );
 }

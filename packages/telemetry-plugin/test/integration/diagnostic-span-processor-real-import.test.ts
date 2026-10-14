@@ -30,12 +30,9 @@ import {
 describe('DiagnosticSpanProcessor — real locked OTel SDK', () => {
   it('drives every lifecycle method; the exporter still receives the span', async () => {
     // Real locked modules, loaded the way loadOtelTracerProvider loads them.
-    const sdkMod = await import(
-      '@opentelemetry/sdk-trace-base'
-    ) as unknown as OtelSdkModule;
-    const resourcesMod = await import(
-      '@opentelemetry/resources'
-    ) as unknown as OtelResourcesModule;
+    const sdkMod = (await import('@opentelemetry/sdk-trace-base')) as unknown as OtelSdkModule;
+    const resourcesMod =
+      (await import('@opentelemetry/resources')) as unknown as OtelResourcesModule;
 
     // A recording exporter: the stand-in proves the exporter processor still
     // sees the span after the diagnostic processor was appended.
@@ -60,10 +57,9 @@ describe('DiagnosticSpanProcessor — real locked OTel SDK', () => {
       instrumentation: () => [],
       sampler: { kind: 'always-on' as const },
     };
-    const collector = new SpanObservationCollector(
-      availability,
-      { hrtime: () => 0 } as unknown as Pick<IRuntimeServices, 'hrtime'>,
-    );
+    const collector = new SpanObservationCollector(availability, {
+      hrtime: () => 0,
+    } as unknown as Pick<IRuntimeServices, 'hrtime'>);
 
     const host = await buildTracerHost({
       sdkMod,
@@ -97,12 +93,9 @@ describe('DiagnosticSpanProcessor — real locked OTel SDK', () => {
     // setStatus a bare string, which real OTel records as status `{}`. The
     // diagnostic processor then dropped every span that set a status — every
     // HTTP server span. Only the real SDK can show either.
-    const sdkMod = await import(
-      '@opentelemetry/sdk-trace-base'
-    ) as unknown as OtelSdkModule;
-    const resourcesMod = await import(
-      '@opentelemetry/resources'
-    ) as unknown as OtelResourcesModule;
+    const sdkMod = (await import('@opentelemetry/sdk-trace-base')) as unknown as OtelSdkModule;
+    const resourcesMod =
+      (await import('@opentelemetry/resources')) as unknown as OtelResourcesModule;
     const exported: Array<{ name: string; kind: number; status: { code?: number } }> = [];
     class RecordingExporter {
       export(
@@ -152,7 +145,8 @@ describe('DiagnosticSpanProcessor — real locked OTel SDK', () => {
     await service.withSpan('status.ok', async (span) => span.setStatus('ok'));
     // deno-lint-ignore require-await
     await service.withSpan('status.error', async (span) => span.setStatus('error'));
-    await service.withSpan('status.thrown', () => Promise.reject(new Error('boom')))
+    await service
+      .withSpan('status.thrown', () => Promise.reject(new Error('boom')))
       .catch(() => undefined);
     await host.forceFlush();
 

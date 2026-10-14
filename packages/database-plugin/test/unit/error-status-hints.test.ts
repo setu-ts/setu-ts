@@ -160,21 +160,19 @@ describe('database error status hints', () => {
   it('brands every caller-caused query-shape feature', () => {
     // The nine `feature` values that describe the query or payload the
     // application just sent. Each is answered `501`.
-    for (
-      const feature of [
-        'attribute-value',
-        'composite-key',
-        'cursor-pagination',
-        'key',
-        'nested-path',
-        'offset',
-        // Both spellings ship: dynamo says `orderBy`, bigtable says `order-by`.
-        'order-by',
-        'orderBy',
-        'row-key',
-        'update',
-      ]
-    ) {
+    for (const feature of [
+      'attribute-value',
+      'composite-key',
+      'cursor-pagination',
+      'key',
+      'nested-path',
+      'offset',
+      // Both spellings ship: dynamo says `orderBy`, bigtable says `order-by`.
+      'order-by',
+      'orderBy',
+      'row-key',
+      'update',
+    ]) {
       const hint = httpStatusHintOf(
         new UnsupportedQueryFeatureError(feature, 'dynamodb', DIAGNOSTIC),
       );

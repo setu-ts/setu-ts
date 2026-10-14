@@ -124,7 +124,7 @@ async function projectConfig(
   const file = await prettier.resolveConfigFile(path);
   const root = resolve(projectRoot);
   if (file === null || !resolve(file).startsWith(`${root}${sep}`)) return PRETTIER_OPTIONS;
-  return await prettier.resolveConfig(path, { config: file }) ?? PRETTIER_OPTIONS;
+  return (await prettier.resolveConfig(path, { config: file })) ?? PRETTIER_OPTIONS;
 }
 
 /** One file Prettier could not format, kept as rendered. */
@@ -173,15 +173,16 @@ export async function formatPlannedFiles(
     try {
       // Resolved for EACH destination, so an `overrides` entry or a nested
       // config file applies exactly as the project's own `format:check` reads it.
-      const config = projectRoot === undefined
-        ? PRETTIER_OPTIONS
-        : await projectConfig(prettier, projectRoot, destination(projectRoot, file.path));
+      const config =
+        projectRoot === undefined
+          ? PRETTIER_OPTIONS
+          : await projectConfig(prettier, projectRoot, destination(projectRoot, file.path));
       out.push({ ...file, contents: await prettier.format(file.contents, { ...config, parser }) });
     } catch (cause) {
       out.push(file);
       skipped.push({
         path: file.path,
-        reason: cause instanceof Error ? cause.message.split('\n')[0] ?? '' : String(cause),
+        reason: cause instanceof Error ? (cause.message.split('\n')[0] ?? '') : String(cause),
       });
     }
   }

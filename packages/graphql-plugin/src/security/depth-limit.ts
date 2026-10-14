@@ -23,12 +23,7 @@ interface ValidationRuleContext {
  * empty visitor, which contributes nothing to the traversal.
  */
 interface DepthLimitVisitor {
-  Field?(
-    node: GraphqlSelectionNodeLike,
-    parent: unknown,
-    key: unknown,
-    ancestors: unknown[],
-  ): void;
+  Field?(node: GraphqlSelectionNodeLike, parent: unknown, key: unknown, ancestors: unknown[]): void;
 }
 
 /**

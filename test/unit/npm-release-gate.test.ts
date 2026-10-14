@@ -15,9 +15,11 @@ import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
  * manifest, never written as a literal: the release bump leaves test trees
  * alone, so a literal here goes stale at every cut (it did at v0.9.0).
  */
-const WORKSPACE_VERSION = (JSON.parse(
-  await Deno.readTextFile(new URL('../../packages/kernel/package.json', import.meta.url)),
-) as { version: string }).version;
+const WORKSPACE_VERSION = (
+  JSON.parse(
+    await Deno.readTextFile(new URL('../../packages/kernel/package.json', import.meta.url)),
+  ) as { version: string }
+).version;
 
 const valid = {
   name: '@setu-ts/kernel',
@@ -40,24 +42,23 @@ describe('npm release rules', () => {
     ).toEqual([]);
   });
   it('refuses each broken field, including every shipped dependency field', () => {
-    for (
-      const bad of [
-        null,
-        [],
-        { ...valid, name: 'outside' },
-        { ...valid, version: '0.7.0' },
-        { ...valid, repository: null },
-        { ...valid, publishConfig: {} },
-        { ...valid, license: '' },
-        { ...valid, license: 1 },
-        { ...valid, files: ['dist'] },
-        { ...valid, files: undefined },
-        ...['dependencies', 'peerDependencies', 'optionalDependencies'].flatMap((field) => [
-          { ...valid, [field]: { '@setu-ts/common': '^0.7.0' } },
-          { ...valid, [field]: { external: 'workspace:^' } },
-        ]),
-      ]
-    ) expect(packedManifestProblems(bad, '0.8.0').length).toBeGreaterThan(0);
+    for (const bad of [
+      null,
+      [],
+      { ...valid, name: 'outside' },
+      { ...valid, version: '0.7.0' },
+      { ...valid, repository: null },
+      { ...valid, publishConfig: {} },
+      { ...valid, license: '' },
+      { ...valid, license: 1 },
+      { ...valid, files: ['dist'] },
+      { ...valid, files: undefined },
+      ...['dependencies', 'peerDependencies', 'optionalDependencies'].flatMap((field) => [
+        { ...valid, [field]: { '@setu-ts/common': '^0.7.0' } },
+        { ...valid, [field]: { external: 'workspace:^' } },
+      ]),
+    ])
+      expect(packedManifestProblems(bad, '0.8.0').length).toBeGreaterThan(0);
     expect(packedManifestProblems({ ...valid, dependencies: null }, '0.8.0')).toEqual([]);
     expect(packedManifestProblems(valid, '0.8.0', true)).toContain(
       'dependencies: @setu-ts/common must equal workspace:^',
@@ -65,9 +66,13 @@ describe('npm release rules', () => {
   });
   it('uses own registry versions and explicit release tags', () => {
     expect(packumentHasVersion({ versions: { '0.8.0': {} } }, '0.8.0')).toBe(true);
-    for (
-      const packument of [null, {}, { versions: [] }, { versions: Object.create({ '0.8.0': {} }) }]
-    ) expect(packumentHasVersion(packument, '0.8.0')).toBe(false);
+    for (const packument of [
+      null,
+      {},
+      { versions: [] },
+      { versions: Object.create({ '0.8.0': {} }) },
+    ])
+      expect(packumentHasVersion(packument, '0.8.0')).toBe(false);
     expect(distTagFor('0.8.0')).toBe('latest');
     expect(distTagFor('0.9.0-beta.1')).toBe('next');
     expect(distTagFor('0.9.0+build-test')).toBe('latest');
@@ -118,7 +123,7 @@ describe('npm release rules', () => {
     });
     expect(events).toEqual(
       PUBLISHED_PACKAGES.flatMap((dir) =>
-        ['pack', 'check', 'lookup', 'publish'].map((step) => `${step}:${dir}`)
+        ['pack', 'check', 'lookup', 'publish'].map((step) => `${step}:${dir}`),
       ),
     );
   });

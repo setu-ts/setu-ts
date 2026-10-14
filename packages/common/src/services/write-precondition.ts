@@ -108,11 +108,15 @@ export function checkWritePrecondition(
     // object a backend rebuilds by assignment (the MongoDB filter, Prisma's
     // serialized query), so the predicate would silently lose a condition.
     if (
-      field.length === 0 || field.startsWith('$') || field.includes('.') || field === '__proto__'
+      field.length === 0 ||
+      field.startsWith('$') ||
+      field.includes('.') ||
+      field === '__proto__'
     ) {
       return {
         ok: false,
-        problem: 'Write precondition field names must be non-empty, without operators, dotted ' +
+        problem:
+          'Write precondition field names must be non-empty, without operators, dotted ' +
           'paths or __proto__.',
       };
     }

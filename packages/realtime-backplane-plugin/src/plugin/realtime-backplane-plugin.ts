@@ -63,9 +63,8 @@ export function RealtimeBackplanePlugin(
   // M98l: validated here, before any application exists. The `'custom'` arm
   // carries no `diagnostics` option: its transport is never observed.
   const diagnosticsOption = options.transport === 'custom' ? undefined : options.diagnostics;
-  const diagnosticsAlias = diagnosticsOption === undefined
-    ? null
-    : compileRealtimeDiagnosticsAlias(diagnosticsOption);
+  const diagnosticsAlias =
+    diagnosticsOption === undefined ? null : compileRealtimeDiagnosticsAlias(diagnosticsOption);
 
   return {
     name: PLUGIN_NAME,
@@ -101,12 +100,12 @@ export function RealtimeBackplanePlugin(
       const resolved: RealtimeBackplanePluginOptions =
         options.transport === 'redis' && options.connectionErrorReporter === undefined
           ? {
-            ...options,
-            connectionErrorReporter: createConnectionErrorReporter({
-              source: 'realtime-backplane-plugin: redis transport',
-              logger: () => ctx.logger,
-            }),
-          }
+              ...options,
+              connectionErrorReporter: createConnectionErrorReporter({
+                source: 'realtime-backplane-plugin: redis transport',
+                logger: () => ctx.logger,
+              }),
+            }
           : options;
       const backplane = createBackplane(resolved, ctx.services, ctx.runtime.uuid());
 

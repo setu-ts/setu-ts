@@ -182,9 +182,8 @@ describe('registration ceremony', () => {
     const harness = createCeremoniesHarness();
     const authenticator = await VirtualAuthenticator.create('ES256');
     // A COSE key labelled ES384 (-47), which this verifier does not accept.
-    const { encodeMap, encodeUint, encodeNegative, encodeByteString } = await import(
-      '../fixtures/virtual-authenticator.ts'
-    );
+    const { encodeMap, encodeUint, encodeNegative, encodeByteString } =
+      await import('../fixtures/virtual-authenticator.ts');
     const es384Key = encodeMap([
       [encodeUint(1), encodeUint(2)],
       [encodeUint(3), encodeNegative(-47)],
@@ -268,18 +267,21 @@ describe('registration ceremony', () => {
   it('caps the credentials one principal may hold', async () => {
     const harness = createCeremoniesHarness();
     for (let i = 0; i < MAX_CREDENTIALS_PER_PRINCIPAL; i++) {
-      await harness.store.save({
-        id: `seed-${i}`,
-        principalId: 'alice',
-        userHandle: 'h',
-        publicKey: { kty: 'OKP', crv: 'Ed25519', x: 'x' },
-        algorithm: -8,
-        counter: 0,
-        backedUp: false,
-        transports: [],
-        attestation: 'unverified',
-        createdAt: 0,
-      }, { maxPerPrincipal: 100 });
+      await harness.store.save(
+        {
+          id: `seed-${i}`,
+          principalId: 'alice',
+          userHandle: 'h',
+          publicKey: { kty: 'OKP', crv: 'Ed25519', x: 'x' },
+          algorithm: -8,
+          counter: 0,
+          backedUp: false,
+          transports: [],
+          attestation: 'unverified',
+          createdAt: 0,
+        },
+        { maxPerPrincipal: 100 },
+      );
     }
     expect(await harness.ceremonies.registrationOptions(harness.ctx)).toBe('credential-limit');
     const authenticator = await VirtualAuthenticator.create('ES256');

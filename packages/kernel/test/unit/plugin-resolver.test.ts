@@ -81,18 +81,14 @@ describe('resolvePluginOrder', () => {
   it('should throw on missing dependency', () => {
     const runtime = plugin('runtime', { provides: [CAPABILITIES.RUNTIME] });
     const a = plugin('a', { dependencies: ['missing'] });
-    expect(() => resolvePluginOrder([runtime, a])).toThrow(
-      "depends on capability 'missing'",
-    );
+    expect(() => resolvePluginOrder([runtime, a])).toThrow("depends on capability 'missing'");
   });
 
   it('should throw on duplicate plugin names', () => {
     const runtime = plugin('runtime', { provides: [CAPABILITIES.RUNTIME] });
     const a = plugin('dup');
     const b = plugin('dup');
-    expect(() => resolvePluginOrder([runtime, a, b])).toThrow(
-      "Duplicate plugin name 'dup'",
-    );
+    expect(() => resolvePluginOrder([runtime, a, b])).toThrow("Duplicate plugin name 'dup'");
   });
 
   it('should allow optional dependencies when absent', () => {
@@ -114,9 +110,7 @@ describe('resolvePluginOrder', () => {
   it('should throw on duplicate capability providers', () => {
     const a = plugin('a', { provides: ['shared'] });
     const b = plugin('b', { provides: ['shared'] });
-    expect(() => resolvePluginOrder([a, b])).toThrow(
-      "Capability 'shared' is provided by both",
-    );
+    expect(() => resolvePluginOrder([a, b])).toThrow("Capability 'shared' is provided by both");
   });
 });
 

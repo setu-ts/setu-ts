@@ -35,7 +35,10 @@ class FakeRepository implements IRepository<Record<string, unknown>, EntityKey> 
   /** Rows by their primary key. */
   readonly rows = new Map<string, Record<string, unknown>>();
 
-  constructor(private readonly out: Record<string, unknown>[], keyField = 'id') {
+  constructor(
+    private readonly out: Record<string, unknown>[],
+    keyField = 'id',
+  ) {
     for (const row of this.out) {
       this.rows.set(String(row[keyField]), row);
     }
@@ -48,9 +51,9 @@ class FakeRepository implements IRepository<Record<string, unknown>, EntityKey> 
   }
 
   // deno-lint-ignore require-await
-  async findOne(
-    options?: { where?: Record<string, unknown> },
-  ): Promise<Record<string, unknown> | null> {
+  async findOne(options?: {
+    where?: Record<string, unknown>;
+  }): Promise<Record<string, unknown> | null> {
     this.calls.push({ method: 'findOne', arg: options });
     const where = options?.where;
     if (where === undefined) return null;
@@ -112,9 +115,7 @@ class FakeDatabaseService implements IDatabaseService {
   readonly repos = new Map<string, FakeRepository>();
   readonly service = this;
 
-  getRepository<Entity, Id extends EntityKey = string>(
-    entity: string,
-  ): IRepository<Entity, Id> {
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {
     let repo = this.repos.get(entity);
     if (repo === undefined) {
       repo = new FakeRepository([]);
@@ -151,7 +152,10 @@ const ROWS = [
   { id: '2', name: 'beta', tenant_id: 'b' },
 ];
 
-function storeWith(rows: Record<string, unknown>[] = ROWS, tenantColumn?: string): {
+function storeWith(
+  rows: Record<string, unknown>[] = ROWS,
+  tenantColumn?: string,
+): {
   store: DatabaseTenantDataStore;
   service: FakeDatabaseService;
   repo: () => FakeRepository;
@@ -181,17 +185,20 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
         fake.calls.push({ method: 'deleteWhere', arg: { id, where } });
         const row = fake.rows.get(String(id));
         return Promise.resolve(
-          row !== undefined && Object.entries(where).every(([key, value]) => row[key] === value) &&
+          row !== undefined &&
+            Object.entries(where).every(([key, value]) => row[key] === value) &&
             fake.rows.delete(String(id)),
         );
       };
       expect(await store.update('a', 'Patient', '1', { name: 'new', [column]: 'b' })).toMatchObject(
         { name: 'new', [column]: 'a' },
       );
-      expect(fake.calls).toEqual([{
-        method: 'updateWhere',
-        arg: { id: '1', where: { [column]: 'a' }, data: { name: 'new' } },
-      }]);
+      expect(fake.calls).toEqual([
+        {
+          method: 'updateWhere',
+          arg: { id: '1', where: { [column]: 'a' }, data: { name: 'new' } },
+        },
+      ]);
       expect(await store.update('b', 'Patient', '1', { name: 'bad' })).toBeNull();
       expect(await store.delete('b', 'Patient', '1')).toBe(false);
       expect(await store.delete('a', 'Patient', '1')).toBe(true);
@@ -300,9 +307,11 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
 
   it('find refuses operator-shaped filters and accepts scalar equality', async () => {
     const { store, repo } = storeWith();
-    for (
-      const filter of [{ $where: 'sleep(1) || true' }, { name: { $ne: null } }, { name: ['a'] }]
-    ) {
+    for (const filter of [
+      { $where: 'sleep(1) || true' },
+      { name: { $ne: null } },
+      { name: ['a'] },
+    ]) {
       await expect(store.find('a', 'Patient', filter)).rejects.toThrow(TypeError);
     }
     expect(repo().calls).toEqual([]); // nothing reached the backend
@@ -377,14 +386,16 @@ describe('DatabaseTenantDataStore.useIsolation — the strategy table (M101c, §
 
   it('a column strategy naming a different column than tenantColumn throws naming both', () => {
     const { store } = storeWith(ROWS, 'org_id');
-    expect(() => store.useIsolation({ kind: 'column', getTenantColumn: () => 'tenant_id' }))
-      .toThrow(/org_id.*tenant_id|tenant_id.*org_id/);
+    expect(() =>
+      store.useIsolation({ kind: 'column', getTenantColumn: () => 'tenant_id' }),
+    ).toThrow(/org_id.*tenant_id|tenant_id.*org_id/);
   });
 
   it('a column strategy agreeing with tenantColumn adopts cleanly', () => {
     const { store } = storeWith(ROWS, 'tenant_id');
-    expect(() => store.useIsolation({ kind: 'column', getTenantColumn: () => 'tenant_id' })).not
-      .toThrow();
+    expect(() =>
+      store.useIsolation({ kind: 'column', getTenantColumn: () => 'tenant_id' }),
+    ).not.toThrow();
   });
 });
 

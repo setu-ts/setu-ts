@@ -294,7 +294,7 @@ describe('a three-service workspace — end to end', () => {
         cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
-      })
+      }),
     );
 
     try {
@@ -318,7 +318,7 @@ describe('a three-service workspace — end to end', () => {
         expect(ready, `${peer} never bound ${url}`).toBe(true);
       }
 
-      const result = await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE) as Record<
+      const result = (await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE)) as Record<
         string,
         { url: string; status: number; body: string }
       >;
@@ -357,11 +357,11 @@ describe('a three-service workspace — end to end', () => {
         cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
-      })
+      }),
     );
 
     try {
-      const result = await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE) as Record<
+      const result = (await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE)) as Record<
         string,
         { status: number; body: string }
       >;
@@ -508,7 +508,7 @@ console.log('__PROBE_RESULT__' + JSON.stringify(out));
 await app.stop();
 Deno.exit(0);
 `;
-    const result = await bootAndProbe(project, probe) as Record<
+    const result = (await bootAndProbe(project, probe)) as Record<
       string,
       { status: number; body: string }
     >;

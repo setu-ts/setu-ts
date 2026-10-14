@@ -15,10 +15,16 @@ import { hasMethods } from './shape.ts';
 
 /** Shape of the Azure Blob SDK module. */
 export interface AzureSdkModule {
-  BlobServiceClient: new (urlOrConnectionString: string, cred?: unknown) => {
+  BlobServiceClient: new (
+    urlOrConnectionString: string,
+    cred?: unknown,
+  ) => {
     getContainerClient(containerName: string): AzureContainer;
   };
-  StorageSharedKeyCredential: new (accountName: string, accountKey: string) => {
+  StorageSharedKeyCredential: new (
+    accountName: string,
+    accountKey: string,
+  ) => {
     accountName: string;
     accountKey: string;
   };
@@ -55,7 +61,10 @@ export interface AzureContainer {
 /** Shape of an Azure block blob handle. */
 export interface AzureBlob {
   uploadData(data: Uint8Array, options?: Record<string, unknown>): Promise<unknown>;
-  download(offset?: number, length?: number): Promise<{
+  download(
+    offset?: number,
+    length?: number,
+  ): Promise<{
     deleted: boolean;
     readableStreamBody: NodeJS.ReadableStream;
     contentLength: number;
@@ -129,8 +138,11 @@ const HTTP_NOT_FOUND = 404;
 
 /** Reports whether a caught error is an HTTP 404. */
 export function isAzureNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null &&
-    (error as { statusCode?: unknown }).statusCode === HTTP_NOT_FOUND;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === HTTP_NOT_FOUND
+  );
 }
 
 // ── Shared-key credential resolver ────────────────────────────────────────
@@ -191,10 +203,10 @@ export function adaptAzureModule(
     if (options.connectionString) {
       return new mod.BlobServiceClient(options.connectionString);
     } else if (options.accountName && options.accountKey) {
-      const cred = new mod.StorageSharedKeyCredential(
-        options.accountName,
-        options.accountKey,
-      ) as { accountName: string; accountKey: string };
+      const cred = new mod.StorageSharedKeyCredential(options.accountName, options.accountKey) as {
+        accountName: string;
+        accountKey: string;
+      };
       return new mod.BlobServiceClient(
         `https://${options.accountName}.blob.core.windows.net`,
         cred,
@@ -210,30 +222,36 @@ export function adaptAzureModule(
 
   return {
     getContainerClient(name: string): unknown {
-      const container = (serviceClient as { getContainerClient: (n: string) => unknown })
-        .getContainerClient(name);
+      const container = (
+        serviceClient as { getContainerClient: (n: string) => unknown }
+      ).getContainerClient(name);
       return {
         getBlockBlobClient(blobName: string) {
-          const blob = (container as { getBlockBlobClient: (b: string) => unknown })
-            .getBlockBlobClient(blobName);
+          const blob = (
+            container as { getBlockBlobClient: (b: string) => unknown }
+          ).getBlockBlobClient(blobName);
           return {
             uploadData(data: Uint8Array, opts?: Record<string, unknown>): Promise<void> {
-              return (blob as {
-                uploadData: (d: Uint8Array, o?: Record<string, unknown>) => Promise<void>;
-              }).uploadData(data, opts);
+              return (
+                blob as {
+                  uploadData: (d: Uint8Array, o?: Record<string, unknown>) => Promise<void>;
+                }
+              ).uploadData(data, opts);
             },
             async download(offset?: number, length?: number) {
               try {
-                return await (blob as {
-                  download: (
-                    o?: number,
-                    l?: number,
-                  ) => Promise<{
-                    deleted: boolean;
-                    readableStreamBody: NodeJS.ReadableStream;
-                    contentLength: number;
-                  }>;
-                }).download(offset, length);
+                return await (
+                  blob as {
+                    download: (
+                      o?: number,
+                      l?: number,
+                    ) => Promise<{
+                      deleted: boolean;
+                      readableStreamBody: NodeJS.ReadableStream;
+                      contentLength: number;
+                    }>;
+                  }
+                ).download(offset, length);
               } catch (error) {
                 if (isAzureNotFound(error)) {
                   return {
@@ -297,7 +315,7 @@ export function adaptAzureModule(
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadAzureModule(): Promise<AzureSdkModule> {
-  return await import('@azure/storage-blob') as unknown as AzureSdkModule;
+  return (await import('@azure/storage-blob')) as unknown as AzureSdkModule;
 }
 
 /**
@@ -308,7 +326,7 @@ export async function loadAzureModule(): Promise<AzureSdkModule> {
  * @since 0.1.0
  */
 export class AzureBlobProvider implements StorageProvider {
-  #client: IAzureBlobClient & { canSign: boolean } | null = null;
+  #client: (IAzureBlobClient & { canSign: boolean }) | null = null;
   readonly #options: AzureBlobProviderOptions;
   readonly #now: () => number;
   /**
@@ -341,9 +359,7 @@ export class AzureBlobProvider implements StorageProvider {
     if (injected !== undefined) {
       if (!validateAzureBlobClient(injected)) {
         return Promise.reject(
-          new Error(
-            'Injected Azure client is missing required method (getContainerClient)',
-          ),
+          new Error('Injected Azure client is missing required method (getContainerClient)'),
         );
       }
       this.#client = { ...injected, canSign: true } as IAzureBlobClient & {

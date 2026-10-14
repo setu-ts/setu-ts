@@ -77,7 +77,8 @@ describe('setu generate, with seams', () => {
     // new-shape (class + factory), which is what the scanner now requires.
     const h = harness({
       ...WIRED,
-      '/app/src/health/billing.indicator.ts': 'export class BillingHealthIndicator {}\n' +
+      '/app/src/health/billing.indicator.ts':
+        'export class BillingHealthIndicator {}\n' +
         'export function createBillingHealthIndicator() { return new BillingHealthIndicator(); }',
     });
 
@@ -248,9 +249,7 @@ describe('setu generate, with seams', () => {
       );
 
       expect(await h.run(['middleware', 'another'])).toBe(0);
-      expect(h.fs.read('/app/src/middleware/index.ts')).toContain(
-        'AUDIT_LOG_MIDDLEWARE_PRIORITY',
-      );
+      expect(h.fs.read('/app/src/middleware/index.ts')).toContain('AUDIT_LOG_MIDDLEWARE_PRIORITY');
     });
   });
 
@@ -261,7 +260,8 @@ describe('setu generate, with seams', () => {
   describe('an artifact predating the factory arm (M70d)', () => {
     const PRE_M70D = {
       '/app/deno.json': manifest('cqrs-plugin'),
-      '/app/src/cqrs/legacy.command-handler.ts': 'export const LEGACY_COMMAND = "Legacy";\n' +
+      '/app/src/cqrs/legacy.command-handler.ts':
+        'export const LEGACY_COMMAND = "Legacy";\n' +
         'export class LegacyCommandHandler { handle() { return Promise.resolve({ id: "x" }); } }',
     };
 
@@ -306,10 +306,12 @@ describe('setu generate, with seams', () => {
   it('roots the scan at --dir, so scan and write cannot disagree', async () => {
     const fs = createFakeFs({
       '/other/deno.json': manifest('decorator-plugin', 'health-plugin'),
-      '/other/src/health/billing.indicator.ts': 'export class BillingHealthIndicator {}\n' +
+      '/other/src/health/billing.indicator.ts':
+        'export class BillingHealthIndicator {}\n' +
         'export function createBillingHealthIndicator() { return new BillingHealthIndicator(); }',
       // Same-named artifact under the CWD, which must be invisible.
-      '/app/src/health/ignored.indicator.ts': 'export class IgnoredHealthIndicator {}\n' +
+      '/app/src/health/ignored.indicator.ts':
+        'export class IgnoredHealthIndicator {}\n' +
         'export function createIgnoredHealthIndicator() { return new IgnoredHealthIndicator(); }',
     });
     const err = createRecorder();

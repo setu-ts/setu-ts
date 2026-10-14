@@ -75,10 +75,7 @@ export function throwIfAborted(signal: AbortSignal | undefined): void {
  * @param controller - The per-attempt controller to abort
  * @returns A disposer removing the listener
  */
-export function linkAbort(
-  outer: AbortSignal | undefined,
-  controller: AbortController,
-): () => void {
+export function linkAbort(outer: AbortSignal | undefined, controller: AbortController): () => void {
   if (outer === undefined) {
     return () => {};
   }

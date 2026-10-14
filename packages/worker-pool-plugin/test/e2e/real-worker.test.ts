@@ -58,10 +58,9 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
     await app.start();
     try {
       const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
-      const result = await pool.run<{ n: number }, { doubled: number; from: string }>(
-        echoTaskUrl,
-        { n: 21 },
-      );
+      const result = await pool.run<{ n: number }, { doubled: number; from: string }>(echoTaskUrl, {
+        n: 21,
+      });
       expect(result).toEqual({ doubled: 42, from: 'worker' });
       expect(pool.stats()[0]).toMatchObject({ taskModule: echoTaskUrl, completed: 1 });
     } finally {
@@ -71,10 +70,7 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
 
   it('should complete concurrent tasks on a size-2 pool', async () => {
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        WorkerPoolPlugin({ pools: { [echoTaskUrl]: { size: 2 } } }),
-      ],
+      plugins: [RuntimePlugin(), WorkerPoolPlugin({ pools: { [echoTaskUrl]: { size: 2 } } })],
     });
     await app.start();
     try {

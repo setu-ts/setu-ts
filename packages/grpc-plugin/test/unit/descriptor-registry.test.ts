@@ -117,15 +117,13 @@ describe('buildReflectionRegistry', () => {
     });
     const registry = buildReflectionRegistry(runtime, [file], []);
 
-    for (
-      const symbol of [
-        'pkg.Outer',
-        'pkg.Outer.Inner',
-        'pkg.Outer.Inner.E',
-        'pkg.Outer.E',
-        'pkg.TopEnum',
-      ]
-    ) {
+    for (const symbol of [
+      'pkg.Outer',
+      'pkg.Outer.Inner',
+      'pkg.Outer.Inner.E',
+      'pkg.Outer.E',
+      'pkg.TopEnum',
+    ]) {
       expect(decode(registry.getFileContainingSymbol(symbol))).toBe('fd:pkg/types.proto');
     }
   });

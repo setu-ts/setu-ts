@@ -15,9 +15,10 @@ interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
-  run(argv: readonly string[], load?: (url: string) => Promise<Record<string, unknown>>): Promise<
-    number
-  >;
+  run(
+    argv: readonly string[],
+    load?: (url: string) => Promise<Record<string, unknown>>,
+  ): Promise<number>;
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}): Harness {
@@ -103,8 +104,9 @@ describe('runGenerateCommand', () => {
       '/app/src/services/user-profile.service.ts',
       '/app/src/services/index.ts',
     ]);
-    expect(h.fs.read('/app/src/services/user-profile.service.ts'))
-      .toContain('export function describeUserProfile');
+    expect(h.fs.read('/app/src/services/user-profile.service.ts')).toContain(
+      'export function describeUserProfile',
+    );
     expect(h.out.text()).toContain('created /app/src/services/user-profile.service.ts');
   });
 
@@ -468,10 +470,7 @@ describe('runGenerateCommand', () => {
       let seen: string | undefined;
       const load = () =>
         Promise.resolve({
-          schematic: (
-            _names: unknown,
-            options: { runtime: string },
-          ): readonly GeneratedFile[] => {
+          schematic: (_names: unknown, options: { runtime: string }): readonly GeneratedFile[] => {
             seen = options.runtime;
             return [{ path: 'x.txt', contents: 'x' }];
           },
@@ -617,8 +616,9 @@ describe('runGenerateCommand', () => {
     it('accepts a reserved word, which schematics always affix', async () => {
       const h = harness();
       expect(await h.run(['route', 'class'])).toBe(0);
-      expect(h.fs.read('/app/src/controllers/class.routes.ts'))
-        .toContain('export function registerClassRoutes');
+      expect(h.fs.read('/app/src/controllers/class.routes.ts')).toContain(
+        'export function registerClassRoutes',
+      );
     });
   });
 

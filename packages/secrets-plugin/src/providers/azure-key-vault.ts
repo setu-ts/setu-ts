@@ -20,7 +20,10 @@ type AzureCredential = object;
 
 /** The subset of the Azure SDKs the adapter uses. */
 export interface AzureSdkModule {
-  SecretClient: new (vaultUrl: string, credential: AzureCredential) => {
+  SecretClient: new (
+    vaultUrl: string,
+    credential: AzureCredential,
+  ) => {
     getSecret(name: string): Promise<{ value?: string | undefined }>;
     setSecret(name: string, value: string): Promise<unknown>;
   };
@@ -51,8 +54,11 @@ export function validateAzureClient(client: unknown): client is IAzureSecretsCli
 
 /** Reports whether a caught error is an HTTP 404. */
 export function isAzureNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null &&
-    (error as { statusCode?: unknown }).statusCode === HTTP_NOT_FOUND;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === HTTP_NOT_FOUND
+  );
 }
 
 /**
@@ -138,9 +144,7 @@ export class AzureKeyVaultProvider implements SecretProvider {
     const injected = this.#options.client;
     if (injected !== undefined) {
       if (!validateAzureClient(injected)) {
-        throw new Error(
-          'Injected Azure client is missing required methods (getSecret, setSecret)',
-        );
+        throw new Error('Injected Azure client is missing required methods (getSecret, setSecret)');
       }
       this.#client = injected;
       this.#attachProbe(injected);

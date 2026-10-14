@@ -126,34 +126,38 @@ async function fillGroupQueue(
 }
 
 describe('REAL RabbitMQ message durability', () => {
-  it('persistent messages survive a broker restart; the transient control does not', {
-    skip: rabbitUrl === undefined,
-  }, async () => {
-    const url = toIpv4(rabbitUrl!);
-    const amqp = await import('amqplib');
-    const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
+  it(
+    'persistent messages survive a broker restart; the transient control does not',
+    {
+      skip: rabbitUrl === undefined,
+    },
+    async () => {
+      const url = toIpv4(rabbitUrl!);
+      const amqp = await import('amqplib');
+      const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
 
-    const run = crypto.randomUUID().slice(0, 8);
-    const persistentQueue = `durability-persistent-${run}`;
-    const transientQueue = `durability-transient-${run}`;
-    await fillGroupQueue(url, true, `durability.persistent.${run}`, persistentQueue, 5);
-    await fillGroupQueue(url, false, `durability.transient.${run}`, transientQueue, 5);
+      const run = crypto.randomUUID().slice(0, 8);
+      const persistentQueue = `durability-persistent-${run}`;
+      const transientQueue = `durability-transient-${run}`;
+      await fillGroupQueue(url, true, `durability.persistent.${run}`, persistentQueue, 5);
+      await fillGroupQueue(url, false, `durability.transient.${run}`, transientQueue, 5);
 
-    try {
-      expect(await depths(amqp, url, [persistentQueue, transientQueue])).toEqual([5, 5]);
+      try {
+        expect(await depths(amqp, url, [persistentQueue, transientQueue])).toEqual([5, 5]);
 
-      await docker(['restart', containerId]);
-      await waitForBroker(amqp, url);
+        await docker(['restart', containerId]);
+        await waitForBroker(amqp, url);
 
-      // Both queues are durable, so both survive; only persistent messages do.
-      expect(await depths(amqp, url, [persistentQueue, transientQueue])).toEqual([5, 0]);
-    } finally {
-      const connection = await amqp.connect(url);
-      const channel = await connection.createChannel();
-      await channel.deleteQueue(persistentQueue);
-      await channel.deleteQueue(transientQueue);
-      await connection.close();
-    }
-  });
+        // Both queues are durable, so both survive; only persistent messages do.
+        expect(await depths(amqp, url, [persistentQueue, transientQueue])).toEqual([5, 0]);
+      } finally {
+        const connection = await amqp.connect(url);
+        const channel = await connection.createChannel();
+        await channel.deleteQueue(persistentQueue);
+        await channel.deleteQueue(transientQueue);
+        await connection.close();
+      }
+    },
+  );
 });

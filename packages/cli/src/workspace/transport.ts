@@ -416,9 +416,9 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     description: 'Kafka broker shared by every member',
     plugins: [],
     messagingArgs: (connection) =>
-      `{\n        broker: 'kafka',\n        brokers: [\n          ${
-        nestConnection(connection)
-      },\n        ],\n      }`,
+      `{\n        broker: 'kafka',\n        brokers: [\n          ${nestConnection(
+        connection,
+      )},\n        ],\n      }`,
     connection: {
       variable: 'KAFKA_BROKERS',
       localDefault: '127.0.0.1:9092',
@@ -473,7 +473,8 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
       variable: 'PUBSUB_PROJECT_ID',
       localDefault: 'setu-local',
       urlOverridable: false,
-      note: 'Point the SDK at the emulator by exporting PUBSUB_EMULATOR_HOST=127.0.0.1:8085 — it ' +
+      note:
+        'Point the SDK at the emulator by exporting PUBSUB_EMULATOR_HOST=127.0.0.1:8085 — it ' +
         'honours that variable natively and skips authentication when it is set. Topics are NOT ' +
         'created for you: `publish` posts to an existing topic and `subscribe` creates only the ' +
         'subscription, so create each topic before publishing to it (`curl -X PUT ' +
@@ -552,36 +553,43 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
       dependsOn: ['servicebus'],
       condition: 'service_started',
       memberEnv: {
-        SERVICE_BUS_CONNECTION_STRING: 'Endpoint=sb://servicebus;' +
+        SERVICE_BUS_CONNECTION_STRING:
+          'Endpoint=sb://servicebus;' +
           'SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;' +
           'UseDevelopmentEmulator=true;',
       },
-      files: [{
-        path: 'docker/servicebus-config.json',
-        contents: `${
-          JSON.stringify(
+      files: [
+        {
+          path: 'docker/servicebus-config.json',
+          contents: `${JSON.stringify(
             {
               UserConfig: {
-                Namespaces: [{
-                  Name: 'sbemulatorns',
-                  Queues: [],
-                  Topics: [{
-                    Name: 'orders.created',
-                    Properties: { DefaultMessageTimeToLive: 'PT1H' },
-                    Subscriptions: [{
-                      Name: DEFAULT_BROKER_SUBSCRIPTION,
-                      Properties: { LockDuration: 'PT1M', MaxDeliveryCount: 10 },
-                    }],
-                  }],
-                }],
+                Namespaces: [
+                  {
+                    Name: 'sbemulatorns',
+                    Queues: [],
+                    Topics: [
+                      {
+                        Name: 'orders.created',
+                        Properties: { DefaultMessageTimeToLive: 'PT1H' },
+                        Subscriptions: [
+                          {
+                            Name: DEFAULT_BROKER_SUBSCRIPTION,
+                            Properties: { LockDuration: 'PT1M', MaxDeliveryCount: 10 },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
                 Logging: { Type: 'File' },
               },
             },
             null,
             2,
-          )
-        }\n`,
-      }],
+          )}\n`,
+        },
+      ],
     },
   },
 };
@@ -659,8 +667,8 @@ export function listTransports(): readonly TransportSpec[] {
  * @returns Each accepted broker name, in registry order
  */
 export function listBrokers(): readonly TransportName[] {
-  return TRANSPORTS.filter((name) =>
-    name === 'memory' || TRANSPORT_SPECS[name].messagingArgs !== undefined
+  return TRANSPORTS.filter(
+    (name) => name === 'memory' || TRANSPORT_SPECS[name].messagingArgs !== undefined,
   );
 }
 
@@ -674,8 +682,8 @@ export function listBrokers(): readonly TransportName[] {
  * @returns Each accepted queue backend name, in registry order
  */
 export function listQueues(): readonly TransportName[] {
-  return TRANSPORTS.filter((name) =>
-    name === 'memory' || TRANSPORT_SPECS[name].queueArgs !== undefined
+  return TRANSPORTS.filter(
+    (name) => name === 'memory' || TRANSPORT_SPECS[name].queueArgs !== undefined,
   );
 }
 

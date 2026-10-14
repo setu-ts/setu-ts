@@ -105,13 +105,11 @@ describe('inbox delivery', () => {
     expect(seen).toEqual([{ personId: 'p-2' }, { personId: 'p-2' }, 'e-1']);
   });
 
-  for (
-    const [label, error] of [
-      ['a commit-time duplicate', new DuplicateKeyError('dup at commit')],
-      ['a write conflict', Object.assign(new Error('WriteConflict'), { code: 112 })],
-      ['an unclassified error', new Error('TransactionCanceledException')],
-    ] as const
-  ) {
+  for (const [label, error] of [
+    ['a commit-time duplicate', new DuplicateKeyError('dup at commit')],
+    ['a write conflict', Object.assign(new Error('WriteConflict'), { code: 112 })],
+    ['an unclassified error', new Error('TransactionCanceledException')],
+  ] as const) {
     it(`acknowledges ${label} when the re-read finds the marker`, async () => {
       const { store, service, subscription } = harness({ maxAttempts: 3 });
       // Another delivery commits the marker while this one's transaction is open.

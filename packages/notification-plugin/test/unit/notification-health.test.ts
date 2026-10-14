@@ -66,7 +66,10 @@ function registerWith(mailer: IMailer): {
  * Registers N email channels over ONE mailer, so several probes are in flight
  * at once — the shape that exposes serial awaiting.
  */
-function registerWithAliases(mailer: IMailer, aliases: readonly string[]): {
+function registerWithAliases(
+  mailer: IMailer,
+  aliases: readonly string[],
+): {
   indicator: () => Promise<HealthCheckResult>;
 } {
   const fake = createFakeContext({ [CAPABILITIES.MAIL]: mailer });
@@ -95,8 +98,8 @@ describe('notification health — probe concurrency', () => {
     // the property. The probe is stalled for 150ms rather than the real 2s so
     // the test stays fast; serial execution of five would take 750ms+.
     const stallMs = 150;
-    const mailer = mailerReporting(() =>
-      new Promise((resolve) => setTimeout(() => resolve(true), stallMs))
+    const mailer = mailerReporting(
+      () => new Promise((resolve) => setTimeout(() => resolve(true), stallMs)),
     );
     const { indicator } = registerWithAliases(mailer, [
       'email',
@@ -166,16 +169,14 @@ describe('notification health — reachability (H-70c-4)', () => {
     const { indicator } = registerWith(mailerReporting(() => Promise.resolve(undefined)));
     const result = await indicator();
     expect(result.status).toBe('up');
-    expect((result.data as { reachable: Record<string, unknown> }).reachable.email)
-      .toBe('unknown');
+    expect((result.data as { reachable: Record<string, unknown> }).reachable.email).toBe('unknown');
   });
 
   it("reports 'unknown' when the injected mailer implements no probe at all", async () => {
     const { indicator } = registerWith(mailerReporting());
     const result = await indicator();
     expect(result.status).toBe('up');
-    expect((result.data as { reachable: Record<string, unknown> }).reachable.email)
-      .toBe('unknown');
+    expect((result.data as { reachable: Record<string, unknown> }).reachable.email).toBe('unknown');
   });
 
   it('counts a rejecting probe as unreachable, not as unknown', async () => {
@@ -186,8 +187,7 @@ describe('notification health — reachability (H-70c-4)', () => {
     );
     const result = await indicator();
     expect(result.status).toBe('down');
-    expect((result.data as { reachable: Record<string, unknown> }).reachable.email)
-      .toBe(false);
+    expect((result.data as { reachable: Record<string, unknown> }).reachable.email).toBe(false);
   });
 
   it('caches the probe, so scraping health never turns into transport load', async () => {

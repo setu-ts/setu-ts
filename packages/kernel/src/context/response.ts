@@ -198,11 +198,7 @@ class BufferedResponseSnapshot implements Extract<ResponseSnapshot, { readonly s
   readonly status: number;
   readonly body: Uint8Array | string | null;
 
-  constructor(
-    response: ResponseBuilder,
-    status: number,
-    body: Uint8Array | string | null,
-  ) {
+  constructor(response: ResponseBuilder, status: number, body: Uint8Array | string | null) {
     this.#response = response;
     this.status = status;
     this.body = body;
@@ -224,11 +220,7 @@ class StreamingResponseSnapshot implements Extract<ResponseSnapshot, { readonly 
   readonly status: number;
   readonly body: ReadableStream<Uint8Array>;
 
-  constructor(
-    response: ResponseBuilder,
-    status: number,
-    body: ReadableStream<Uint8Array>,
-  ) {
+  constructor(response: ResponseBuilder, status: number, body: ReadableStream<Uint8Array>) {
     this.#response = response;
     this.status = status;
     this.body = body;

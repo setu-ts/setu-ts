@@ -25,9 +25,16 @@ describe('DatabaseService conditional members', () => {
       delete plain.deleteWhere;
       const source = Object.assign(new Source(), plain);
       const logs: { message: string; context: unknown }[] = [];
-      const service = new DatabaseService(adapter, () => source, 'memory', { logQueries }, {
-        debug: (message, context) => logs.push({ message, context }),
-      }, () => 42);
+      const service = new DatabaseService(
+        adapter,
+        () => source,
+        'memory',
+        { logQueries },
+        {
+          debug: (message, context) => logs.push({ message, context }),
+        },
+        () => 42,
+      );
       await inner.create({ id: 'a', name: 'secret' });
       const repo = service.getRepository('User');
       expect(await repo.updateWhere!('a', { name: 'secret' }, { name: 'private' })).toMatchObject({

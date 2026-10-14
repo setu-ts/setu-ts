@@ -121,11 +121,13 @@ describe('createWsHandlers', () => {
 
     handlers.onOpen!(conn, mockContext);
 
-    const state = conn.data.get('__wsState') as {
-      initialized: boolean;
-      acknowledged: boolean;
-      connectionInfo: GraphqlConnectionInfo;
-    } | undefined;
+    const state = conn.data.get('__wsState') as
+      | {
+          initialized: boolean;
+          acknowledged: boolean;
+          connectionInfo: GraphqlConnectionInfo;
+        }
+      | undefined;
     expect(state).toBeDefined();
     expect(state!.initialized).toBe(false);
     expect(state!.acknowledged).toBe(false);
@@ -255,8 +257,9 @@ describe('createWsHandlers', () => {
     // Close the connection so conn.isOpen is false.
     (conn as unknown as { isOpen: boolean }).isOpen = false;
     // This should not throw even though the connection is closed.
-    await expect(handlers.onMessage!(conn, encodeFrame({ type: GQL_PING }))).resolves
-      .toBeUndefined();
+    await expect(
+      handlers.onMessage!(conn, encodeFrame({ type: GQL_PING })),
+    ).resolves.toBeUndefined();
   });
 
   it('pong is accepted as a no-op', async () => {
@@ -547,11 +550,15 @@ describe('createWsHandlers', () => {
       status: 200,
       result: { data: {} },
     }));
-    const handlers = createWsHandlers(service, {
-      onConnect: () => {
-        throw new Error('auth service down');
+    const handlers = createWsHandlers(
+      service,
+      {
+        onConnect: () => {
+          throw new Error('auth service down');
+        },
       },
-    }, createFakeRuntime().runtime);
+      createFakeRuntime().runtime,
+    );
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
@@ -763,10 +770,7 @@ describe('createWsHandlers', () => {
     const conn = createMockConnection();
 
     handlers.onOpen!(conn, mockContext);
-    await handlers.onMessage!(
-      conn,
-      encodeFrame({ type: GQL_CONNECTION_INIT }),
-    );
+    await handlers.onMessage!(conn, encodeFrame({ type: GQL_CONNECTION_INIT }));
     await handlers.onMessage!(
       conn,
       encodeFrame({ type: GQL_SUBSCRIBE, id: '1', payload: { query: 'subscription { tick }' } }),
@@ -838,9 +842,10 @@ describe('createWsHandlers', () => {
     const errorFrame = decodeFrame(conn.sent[1]);
     expect(errorFrame!.type).toBe(GQL_ERROR);
     expect(errorFrame!.id).toBe('1');
-    const payload = errorFrame!.payload as unknown as Array<
-      { message: string; extensions?: { code: string } }
-    >;
+    const payload = errorFrame!.payload as unknown as Array<{
+      message: string;
+      extensions?: { code: string };
+    }>;
     expect(payload[0].message).toBe('PersistedQueryNotFound');
     expect(payload[0].extensions?.code).toBe('PERSISTED_QUERY_NOT_FOUND');
     expect(resolveCallCount).toBe(1);
@@ -848,12 +853,14 @@ describe('createWsHandlers', () => {
 
   // C6: WS APQ path — retry with query+hash succeeds and query is passed through.
   it('WS APQ: retry with query+hash persists and passes query to service', async () => {
-    let receivedParams: {
-      query?: string;
-      operationName?: string;
-      variables?: Record<string, unknown>;
-      extensions?: Record<string, unknown>;
-    } | undefined;
+    let receivedParams:
+      | {
+          query?: string;
+          operationName?: string;
+          variables?: Record<string, unknown>;
+          extensions?: Record<string, unknown>;
+        }
+      | undefined;
     const service = createMockService((params) => {
       receivedParams = params;
       return { kind: 'single', status: 200, result: { data: { hello: 'world' } } };

@@ -168,9 +168,8 @@ export async function createFullStackAppFromConfig(
   // will run against — except on Workers, where the environment is per-request
   // and must be handed in.
   const detected = createRuntimeServices();
-  const runtime = options?.env === undefined
-    ? detected
-    : { ...detected, env: toStringEnv(options.env) };
+  const runtime =
+    options?.env === undefined ? detected : { ...detected, env: toStringEnv(options.env) };
 
   const config = await loadConfig(runtime, configOptions);
 

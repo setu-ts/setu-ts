@@ -182,15 +182,13 @@ describe('scoped guards — allow', () => {
         requireScopedPermission('invoices:read', { scope: T1 }),
         context(service, { user: principal('u1') }),
       ),
-    )
-      .toBe(true);
+    ).toBe(true);
     expect(
       await run(
         requireScopedPermission('invoices:read', { scope: null }),
         context(service, { user: principal('u1') }),
       ),
-    )
-      .toBe(true);
+    ).toBe(true);
   });
 
   it('is ANY-of for roles and stops at the first held', async () => {
@@ -206,8 +204,9 @@ describe('scoped guards — allow', () => {
     );
     expect(viewer.recorded.status).toBe(403);
     const approver = context(service, { user: principal('u1'), tenant: 't1' });
-    expect(await run(requireScopedPermission(['invoices:read', 'invoices:approve']), approver))
-      .toBe(true);
+    expect(
+      await run(requireScopedPermission(['invoices:read', 'invoices:approve']), approver),
+    ).toBe(true);
   });
 });
 

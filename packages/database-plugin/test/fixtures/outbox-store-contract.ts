@@ -61,9 +61,8 @@ export function describeOutboxStoreContract(
     it('claims by compare-and-set and guards both settlement paths with the held version', async () => {
       const store = await holding([record(1)]);
       const outcomes = await Promise.all(
-        Array.from(
-          { length: 8 },
-          () => store.claim('row-1', { claimVersion: 0, leaseUntil: 9000 }),
+        Array.from({ length: 8 }, () =>
+          store.claim('row-1', { claimVersion: 0, leaseUntil: 9000 }),
         ),
       );
       expect(outcomes.filter((r) => r.outcome === 'applied')).toHaveLength(1);
@@ -115,8 +114,10 @@ export function describeOutboxStoreContract(
           deleteNow: false,
         }),
       ).toEqual({ outcome: 'applied' });
-      expect(await store.claim('row-1', { claimVersion: 2, leaseUntil: 10000 }))
-        .toEqual({ outcome: 'not-pending', status: 'sent' });
+      expect(await store.claim('row-1', { claimVersion: 2, leaseUntil: 10000 })).toEqual({
+        outcome: 'not-pending',
+        status: 'sent',
+      });
       expect(await store.claim('nope', { claimVersion: 0, leaseUntil: 10000 })).toEqual({
         outcome: 'missing',
       });
@@ -149,9 +150,7 @@ export function describeOutboxStoreContract(
         'row-2',
         'row-3',
       ]);
-      expect((await store.scanPending(record(2).position, 10)).map((r) => r.id)).toEqual([
-        'row-3',
-      ]);
+      expect((await store.scanPending(record(2).position, 10)).map((r) => r.id)).toEqual(['row-3']);
     });
 
     it('a row transitions only from its expected status', async () => {
@@ -202,8 +201,7 @@ export function describeOutboxStoreContract(
           sentBy: 'r',
           deleteNow: false,
         }),
-      )
-        .toEqual({ outcome: 'missing' });
+      ).toEqual({ outcome: 'missing' });
       expect(
         await store.markFailure('nope', {
           claimVersion: 0,

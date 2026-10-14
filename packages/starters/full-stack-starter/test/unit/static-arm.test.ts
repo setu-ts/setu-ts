@@ -20,19 +20,16 @@ describe('full-stack-starter static arm', () => {
       (plugin) => plugin.name,
     );
 
-    expect(names.filter((name) => name === 'static-plugin')).toEqual([
-      'static-plugin',
-    ]);
+    expect(names.filter((name) => name === 'static-plugin')).toEqual(['static-plugin']);
   });
 
   it('adds the arm purely additively, preserving the baseline order', () => {
-    const withStatic = buildFullStackPlugins({ static: { root: './public' } })
-      .map((plugin) => plugin.name);
+    const withStatic = buildFullStackPlugins({ static: { root: './public' } }).map(
+      (plugin) => plugin.name,
+    );
 
     // Removing the arm's plugin reproduces the baseline list byte-for-byte.
-    expect(withStatic.filter((name) => name !== 'static-plugin')).toEqual(
-      baseline,
-    );
+    expect(withStatic.filter((name) => name !== 'static-plugin')).toEqual(baseline);
   });
 
   it('omits StaticPlugin when the arm is absent (byte-identical composition)', () => {

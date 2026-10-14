@@ -137,8 +137,9 @@ describe('WebSocketPlugin realtime observations (M98l)', () => {
     expect(() => WebSocketPlugin({ diagnostics: { enabled: true, alias: '' } })).toThrow(
       'Realtime diagnostics',
     );
-    expect(() => WebSocketPlugin({ diagnostics: { enabled: false } as unknown as typeof ENABLED }))
-      .toThrow('enabled must be the literal true');
+    expect(() =>
+      WebSocketPlugin({ diagnostics: { enabled: false } as unknown as typeof ENABLED }),
+    ).toThrow('enabled must be the literal true');
   });
 
   describe('disabled by default', () => {

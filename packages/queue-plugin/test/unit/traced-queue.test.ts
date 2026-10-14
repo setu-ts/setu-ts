@@ -78,10 +78,14 @@ describe('TracedQueue', () => {
     it("preserves the caller's own headers and merges the traceparent on top", async () => {
       const inner = new RecordingQueue();
       const { service } = fakeTelemetry();
-      await new TracedQueue(inner, service).add('orders', { id: 1 }, {
-        headers: { 'x-tenant': 't-1' },
-        maxAttempts: 7,
-      });
+      await new TracedQueue(inner, service).add(
+        'orders',
+        { id: 1 },
+        {
+          headers: { 'x-tenant': 't-1' },
+          maxAttempts: 7,
+        },
+      );
 
       const options = inner.added[0]?.options;
       expect(options?.headers?.['x-tenant']).toBe('t-1');
@@ -140,8 +144,7 @@ describe('TracedQueue', () => {
 
       expect(spans[0]?.name).toBe('process orders');
       expect(spans[0]?.options?.kind).toBe('consumer');
-      expect(spans[0]?.options?.parentContext?.traceId)
-        .toBe('4bf92f3577b34da6a3ce929d0e0e4736');
+      expect(spans[0]?.options?.parentContext?.traceId).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
       expect(spans[0]?.options?.parentContext?.spanId).toBe('00f067aa0ba902b7');
       expect(spans[0]?.options?.attributes?.['messaging.message.id']).toBe('j-1');
     });
@@ -154,9 +157,7 @@ describe('TracedQueue', () => {
         ran = true;
       });
 
-      await inner.processors.get('orders')?.(
-        { id: 'j-1', name: 'orders', data: {}, attempts: 1 },
-      );
+      await inner.processors.get('orders')?.({ id: 'j-1', name: 'orders', data: {}, attempts: 1 });
 
       expect(ran).toBe(true);
       expect(spans[0]?.options?.parentContext?.traceId).toBeUndefined();
@@ -196,9 +197,7 @@ describe('TracedQueue', () => {
       });
 
       await expect(
-        inner.processors.get('orders')?.(
-          { id: 'j-1', name: 'orders', data: {}, attempts: 1 },
-        ),
+        inner.processors.get('orders')?.({ id: 'j-1', name: 'orders', data: {}, attempts: 1 }),
       ).rejects.toThrow('handler exploded');
     });
   });

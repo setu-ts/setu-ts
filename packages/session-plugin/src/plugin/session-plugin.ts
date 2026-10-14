@@ -100,12 +100,17 @@ export function SessionPlugin(options: SessionPluginOptions = {}): IPlugin {
 
       const store = createStore(options.store, ctx, runtime);
 
-      const service = new SessionService(config, ring, {
-        subtle: runtime.subtle,
-        randomBytes: (length) => runtime.randomBytes(length),
-        now: () => runtime.now(),
-        uuid: () => runtime.uuid(),
-      }, store);
+      const service = new SessionService(
+        config,
+        ring,
+        {
+          subtle: runtime.subtle,
+          randomBytes: (length) => runtime.randomBytes(length),
+          now: () => runtime.now(),
+          uuid: () => runtime.uuid(),
+        },
+        store,
+      );
 
       // Registered before anything else that could throw. `createStore` may have
       // armed the memory store's sweep interval, and an uncleared interval keeps

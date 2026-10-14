@@ -87,11 +87,7 @@ export type AdoptPlan =
  * @param prefix - The relative prefix accumulated so far
  * @returns Relative paths of the files found
  */
-async function walk(
-  fs: IFileSystem,
-  root: string,
-  prefix: string,
-): Promise<readonly string[]> {
+async function walk(fs: IFileSystem, root: string, prefix: string): Promise<readonly string[]> {
   const found: string[] = [];
   for (const entry of await fs.readdir(joinPath(root, prefix))) {
     const relative = prefix === '' ? entry : joinPath(prefix, entry);
@@ -132,7 +128,8 @@ export async function planAdoption(
   } catch {
     return {
       ok: false,
-      message: `No ${CONFIG_MODULE} in ${escapeName(project)}, so this is not a Setu project. ` +
+      message:
+        `No ${CONFIG_MODULE} in ${escapeName(project)}, so this is not a Setu project. ` +
         `A conversion needs one: it becomes the first member's application factory.`,
     };
   }
@@ -169,9 +166,9 @@ export async function planAdoption(
     } catch (cause) {
       return {
         ok: false,
-        message: `Cannot read every file under ${escapeName(joinPath(project, entry))}: ${
-          escapeName((cause instanceof Error ? cause.message : String(cause)).replace(/\.$/, ''))
-        }. Fix or remove that entry, then run this again.`,
+        message: `Cannot read every file under ${escapeName(joinPath(project, entry))}: ${escapeName(
+          (cause instanceof Error ? cause.message : String(cause)).replace(/\.$/, ''),
+        )}. Fix or remove that entry, then run this again.`,
       };
     }
     for (const path of nested) {
@@ -183,9 +180,7 @@ export async function planAdoption(
 }
 
 /** What a single move did. */
-export type MoveOutcome =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly message: string };
+export type MoveOutcome = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
 /**
  * Moves one file: copy, verify, then delete the original.
@@ -221,7 +216,8 @@ export async function moveFile(
     if (written.byteLength !== bytes.byteLength) {
       return {
         ok: false,
-        message: `Copied ${escapeName(file.from)} to ${escapeName(file.to)} but the copy is ` +
+        message:
+          `Copied ${escapeName(file.from)} to ${escapeName(file.to)} but the copy is ` +
           `${written.byteLength} bytes against ${bytes.byteLength} — the original is untouched.`,
       };
     }
@@ -233,9 +229,9 @@ export async function moveFile(
   } catch (cause) {
     return {
       ok: false,
-      message: `Failed to move ${escapeName(file.from)}: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      message: `Failed to move ${escapeName(file.from)}: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
     };
   }
 }

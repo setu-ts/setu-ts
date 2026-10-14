@@ -31,23 +31,8 @@ describe('parseAuthenticatorData', () => {
   it('parses attested credential data with its COSE key', async () => {
     const credentialId = new Uint8Array([1, 2, 3, 4]);
     const coseKey = new Uint8Array([
-      0xa4,
-      0x01,
-      0x02,
-      0x03,
-      0x26,
-      0x20,
-      0x01,
-      0x21,
-      0x43,
-      0x01,
-      0x02,
-      0x03,
-      0x22,
-      0x43,
-      0x04,
-      0x05,
-      0x06,
+      0xa4, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x43, 0x01, 0x02, 0x03, 0x22, 0x43, 0x04,
+      0x05, 0x06,
     ]);
     const parsed = parseAuthenticatorData(
       await buildAuthData({ rpId: 'localhost', credentialId, coseKey, uv: true }),

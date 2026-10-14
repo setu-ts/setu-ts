@@ -36,9 +36,10 @@ describe('AuditPlugin integration (real kernel)', () => {
     });
 
     // Verify the health indicator was registered by the plugin.
-    const healthIndicators = app.services.getAll<
-      { name: string; check: () => Promise<{ status: string }> }
-    >(CAPABILITIES.HEALTH_INDICATOR);
+    const healthIndicators = app.services.getAll<{
+      name: string;
+      check: () => Promise<{ status: string }>;
+    }>(CAPABILITIES.HEALTH_INDICATOR);
     expect(healthIndicators.length).toBeGreaterThan(0);
     const auditHealth = healthIndicators.find((h) => h.name === 'audit');
     expect(auditHealth).toBeDefined();
@@ -143,10 +144,7 @@ describe('AuditPlugin integration (real kernel)', () => {
     const dir = await tempDir({ prefix: 'audit-plugin-test-' });
     const filePath = `${dir}/audit.log`;
     const fileApp = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        AuditPlugin({ storage: 'file', options: { path: filePath } }),
-      ],
+      plugins: [RuntimePlugin(), AuditPlugin({ storage: 'file', options: { path: filePath } })],
     });
     try {
       await fileApp.start();
@@ -187,10 +185,7 @@ describe('AuditPlugin integration (real kernel)', () => {
     // A path whose parent directories do NOT exist yet.
     const nestedPath = `${dir}/nested/deeper/audit.log`;
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        AuditPlugin({ storage: 'file', options: { path: nestedPath } }),
-      ],
+      plugins: [RuntimePlugin(), AuditPlugin({ storage: 'file', options: { path: nestedPath } })],
     });
     try {
       await app.start();

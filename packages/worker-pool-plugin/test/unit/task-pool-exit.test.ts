@@ -253,7 +253,10 @@ describe('TaskPool — a crash reports ONCE, not once per platform event', () =>
 
     // The bystander must still be queued — a fresh worker was spawned for it.
     let settled = false;
-    void second.then(() => settled = true, () => settled = true);
+    void second.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(settled).toBe(false);
     expect(pool.stats()).toMatchObject({ queued: 1 });

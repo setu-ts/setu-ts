@@ -20,10 +20,7 @@ import { servicesContext, userContext } from './context-keys.ts';
  * @param context - The React Router context provider to populate
  * @since 0.2.0
  */
-export function applyDefaultLoadContext(
-  ctx: IRequestContext,
-  context: RouterLoadContext,
-): void {
+export function applyDefaultLoadContext(ctx: IRequestContext, context: RouterLoadContext): void {
   context.set(servicesContext, ctx.services);
 
   if (ctx.request.user != null) {

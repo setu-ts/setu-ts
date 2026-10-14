@@ -225,11 +225,13 @@ describe('QueuePlugin behaviour chain (M86 §3.3a/§3.4)', () => {
     const plugin = QueuePlugin({
       adapter: 'memory',
       pollIntervalMs: POLL_MS,
-      behaviors: [{
-        handle(_ctx: IngressContext, _next: () => Promise<void>): void | Promise<void> {
-          // Return WITHOUT calling next(): the chain must stop here.
+      behaviors: [
+        {
+          handle(_ctx: IngressContext, _next: () => Promise<void>): void | Promise<void> {
+            // Return WITHOUT calling next(): the chain must stop here.
+          },
         },
-      }],
+      ],
     });
     await plugin.register(ctx);
 
@@ -255,24 +257,28 @@ describe('QueuePlugin behaviour chain (M86 §3.3a/§3.4)', () => {
     const plugin = QueuePlugin({
       adapter: 'memory',
       pollIntervalMs: POLL_MS,
-      behaviors: [{
-        handle(ctx: IngressContext, _next: () => Promise<void>): void | Promise<void> {
-          envelopes.push(ctx);
-          throw behaviourError;
-        },
-      }],
-      processors: [{
-        name: 'boom',
-        processor: () => {
-          processorRan = true;
-        },
-        options: {
-          onFailed: (job, error) => {
-            failedJobs.push(job);
-            failedErrors.push(error);
+      behaviors: [
+        {
+          handle(ctx: IngressContext, _next: () => Promise<void>): void | Promise<void> {
+            envelopes.push(ctx);
+            throw behaviourError;
           },
         },
-      }],
+      ],
+      processors: [
+        {
+          name: 'boom',
+          processor: () => {
+            processorRan = true;
+          },
+          options: {
+            onFailed: (job, error) => {
+              failedJobs.push(job);
+              failedErrors.push(error);
+            },
+          },
+        },
+      ],
     });
     await plugin.register(ctx);
 

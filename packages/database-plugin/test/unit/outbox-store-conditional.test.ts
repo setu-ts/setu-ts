@@ -11,17 +11,21 @@ describe('outbox conditional transitions', () => {
       const adapter = new MemoryAdapter();
       const source = adapter.createDataSource(ENTITY);
       await source.create({ ...record(1) });
-      const service = new DatabaseService(adapter, () => ({
-        ...source,
-        updateWhere: async (id, where, data) => {
-          await source.update(id, { claimVersion: 2, leaseUntil: 999 });
-          return source.updateWhere!(id, where, data);
-        },
-        deleteWhere: async (id, where) => {
-          await source.update(id, { claimVersion: 2, leaseUntil: 999 });
-          return source.deleteWhere!(id, where);
-        },
-      }), 'memory');
+      const service = new DatabaseService(
+        adapter,
+        () => ({
+          ...source,
+          updateWhere: async (id, where, data) => {
+            await source.update(id, { claimVersion: 2, leaseUntil: 999 });
+            return source.updateWhere!(id, where, data);
+          },
+          deleteWhere: async (id, where) => {
+            await source.update(id, { claimVersion: 2, leaseUntil: 999 });
+            return source.deleteWhere!(id, where);
+          },
+        }),
+        'memory',
+      );
       expect(
         await new DatabaseOutboxStore(service, ENTITY).markSent('row-1', {
           claimVersion: 1,
@@ -48,12 +52,14 @@ describe('outbox conditional transitions', () => {
     const service = new DatabaseService(adapter, () => unsupported, 'memory');
     const store = new DatabaseOutboxStore(service, ENTITY);
     for (const deleteNow of [false, true]) {
-      const refusal = await store.markSent('row-1', {
-        claimVersion: 0,
-        settledAt: 10,
-        sentBy: 'r',
-        deleteNow,
-      }).catch((error: unknown) => error);
+      const refusal = await store
+        .markSent('row-1', {
+          claimVersion: 0,
+          settledAt: 10,
+          sentBy: 'r',
+          deleteNow,
+        })
+        .catch((error: unknown) => error);
       expect(refusal).toBeInstanceOf(OutboxStoreUnavailableError);
       expect((refusal as OutboxStoreUnavailableError).reason).toBe(
         'conditional-writes-unsupported',
@@ -87,22 +93,23 @@ describe('outbox conditional transitions', () => {
         'memory',
       );
       const store = new DatabaseOutboxStore(service, ENTITY);
-      const result = operation === 'release'
-        ? await store.release('row-1', 'retry', 99)
-        : operation === 'failure'
-        ? await store.markFailure('row-1', {
-          claimVersion: 0,
-          attempts: 1,
-          lastError: 'late',
-          availableAt: 99,
-          status: 'failed',
-        })
-        : await store.markSent('row-1', {
-          claimVersion: 0,
-          settledAt: 99,
-          sentBy: 'loser',
-          deleteNow: operation === 'delete',
-        });
+      const result =
+        operation === 'release'
+          ? await store.release('row-1', 'retry', 99)
+          : operation === 'failure'
+            ? await store.markFailure('row-1', {
+                claimVersion: 0,
+                attempts: 1,
+                lastError: 'late',
+                availableAt: 99,
+                status: 'failed',
+              })
+            : await store.markSent('row-1', {
+                claimVersion: 0,
+                settledAt: 99,
+                sentBy: 'loser',
+                deleteNow: operation === 'delete',
+              });
       expect(result).toMatchObject({
         outcome: operation === 'release' ? 'not-failed' : 'not-pending',
         status: 'sent',
@@ -120,14 +127,18 @@ describe('outbox conditional transitions', () => {
       const source = adapter.createDataSource(ENTITY);
       await source.create({ ...record(1) });
       let calls = 0;
-      const service = new DatabaseService(adapter, () => ({
-        ...source,
-        updateWhere: async (id) => {
-          calls++;
-          if (vanished) await source.delete(id);
-          return null;
-        },
-      }), 'memory');
+      const service = new DatabaseService(
+        adapter,
+        () => ({
+          ...source,
+          updateWhere: async (id) => {
+            calls++;
+            if (vanished) await source.delete(id);
+            return null;
+          },
+        }),
+        'memory',
+      );
       const result = new DatabaseOutboxStore(service, ENTITY).markSent('row-1', {
         claimVersion: 0,
         settledAt: 99,

@@ -85,9 +85,8 @@ async function denoRun(
 
 /** A fresh valid credential pair, shaped exactly as the launcher would hand it over. */
 function credentials(): { sessionId: string; sessionKey: string; env: Record<string, string> } {
-  const sessionId = Array.from(
-    crypto.getRandomValues(new Uint8Array(16)),
-    (byte) => byte.toString(16).padStart(2, '0'),
+  const sessionId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
   ).join('');
   const keyBytes = crypto.getRandomValues(new Uint8Array(32));
   const sessionKey = Array.from(keyBytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -167,10 +166,7 @@ async function bootDev(
   };
   const deadline = performance.now() + 30_000;
   while (performance.now() < deadline) {
-    await Promise.race([
-      exiting,
-      new Promise((resolve) => setTimeout(resolve, 100)),
-    ]);
+    await Promise.race([exiting, new Promise((resolve) => setTimeout(resolve, 100))]);
     // A child that already exited (a refusal, or a crash the check task
     // cannot see) must be reported with its output, not polled.
     if (exited) throw new Error(`the development entry exited early: ${await outputOf()}`);
@@ -223,7 +219,8 @@ describe('a scaffolded devtool project, driven end to end', () => {
     const formatted = await denoRun(project, ['fmt', '--check']);
     expect(formatted.code, formatted.output).toBe(0);
     const configPath = `${project}/setu.config.ts`;
-    const config = "import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';\n" +
+    const config =
+      "import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';\n" +
       (await nodeFs.readFile(configPath, 'utf8')).replace(
         '  return app;',
         `  app.router.get('/cache-probe', async (ctx) => {
@@ -235,8 +232,7 @@ describe('a scaffolded devtool project, driven end to end', () => {
   return app;`,
       );
     await nodeFs.writeFile(configPath, config);
-    const probe =
-      `import { CAPABILITIES, type ICacheDiagnosticsSource, type IHealthDiagnosticsSource } from '@setu-ts/common';
+    const probe = `import { CAPABILITIES, type ICacheDiagnosticsSource, type IHealthDiagnosticsSource } from '@setu-ts/common';
 import { createApp } from './setu.config.ts';
 const app = createApp();
 await app.start();
@@ -328,10 +324,7 @@ const snapshot = await client.snapshot();`,
           '--devtool-port',
           String(await unusedPort()),
         ]),
-      )
-        .toBe(
-          0,
-        );
+      ).toBe(0);
       const project = `${root}/${dropped}`;
       await useWorkspacePackages(project);
       const path = `${project}/setu.config.ts`;
@@ -355,9 +348,11 @@ const snapshot = await client.snapshot();`,
           ? 'did not pass the devtool composition'
           : 'not created with kernel diagnostics enabled',
       );
-      expect(await fetch(`http://127.0.0.1:${appPort}/`).then(() => true).catch(() => false)).toBe(
-        false,
-      );
+      expect(
+        await fetch(`http://127.0.0.1:${appPort}/`)
+          .then(() => true)
+          .catch(() => false),
+      ).toBe(false);
     }
   });
 
@@ -408,7 +403,9 @@ const snapshot = await client.snapshot();`,
       expect(result.code, result.output).toBe(0);
       expect(JSON.parse(result.output.trim().split('\n').pop()!).instanceId).not.toBeNull();
       expect(
-        await fetch(`http://127.0.0.1:${oldPort}/v1/status`).then(() => true).catch(() => false),
+        await fetch(`http://127.0.0.1:${oldPort}/v1/status`)
+          .then(() => true)
+          .catch(() => false),
       ).toBe(false);
     } finally {
       await booted.stop();
@@ -430,9 +427,7 @@ const snapshot = await client.snapshot();`,
           '--devtool-port',
           String(devtoolPort),
         ]),
-      ).toBe(
-        0,
-      );
+      ).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
 
@@ -541,14 +536,13 @@ const snapshot = await client.snapshot();`,
     // The refusal: named, quoting the fix, writing NOTHING.
     const refused = await run(['devtool', 'enable', '--dir', project]);
     expect(refused).toBe(1);
-    expect(
-      await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8'),
-    ).toContain('export function createApp(): IApplication {');
+    expect(await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8')).toContain(
+      'export function createApp(): IApplication {',
+    );
     expect(
       (JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as { tasks: Record<string, string> })
         .tasks['dev'],
-    )
-      .toBeUndefined();
+    ).toBeUndefined();
 
     const signatureOnly = (await nodeFs.readFile(configPath, 'utf8')).replace(
       'export function createApp(): IApplication {',
@@ -606,8 +600,7 @@ const snapshot = await client.snapshot();`,
     );
     expect(
       await run(['devtool', 'enable', '--dir', project, '--devtool-port', String(devtoolPort)]),
-    )
-      .toBe(0);
+    ).toBe(0);
     const after = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
       tasks: Record<string, string>;
       imports: Record<string, string>;

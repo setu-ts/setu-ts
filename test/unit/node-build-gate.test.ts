@@ -33,15 +33,17 @@ describe('workspaceProtocolSpecifiers', () => {
   });
 
   it('accepts the rewritten form pnpm pack produces', () => {
-    expect(workspaceProtocolSpecifiers({ dependencies: { '@setu-ts/common': '^0.8.0' } }))
-      .toEqual([]);
+    expect(workspaceProtocolSpecifiers({ dependencies: { '@setu-ts/common': '^0.8.0' } })).toEqual(
+      [],
+    );
   });
 
   it('tolerates a non-object manifest and non-object or non-string fields', () => {
     expect(workspaceProtocolSpecifiers(null)).toEqual([]);
     expect(workspaceProtocolSpecifiers('x')).toEqual([]);
-    expect(workspaceProtocolSpecifiers({ dependencies: 'nope', peerDependencies: { a: 1 } }))
-      .toEqual([]);
+    expect(
+      workspaceProtocolSpecifiers({ dependencies: 'nope', peerDependencies: { a: 1 } }),
+    ).toEqual([]);
   });
 });
 

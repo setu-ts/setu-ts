@@ -27,7 +27,7 @@ const SECTIONS = [
 /** A plan with every required section, and the given text under §4. */
 function plan(surface: string): string {
   return SECTIONS.map((heading) =>
-    heading.startsWith('## 4.') ? `${heading}\n\n${surface}\n` : `${heading}\n\nText.\n`
+    heading.startsWith('## 4.') ? `${heading}\n\n${surface}\n` : `${heading}\n\nText.\n`,
   ).join('\n');
 }
 
@@ -43,8 +43,9 @@ describe('plan-lint compatibility statement', () => {
   });
 
   it('accepts `none` with a reason', () => {
-    expect(messages(plan('**Breaking for implementors:** none — every addition is optional.')))
-      .toEqual([]);
+    expect(
+      messages(plan('**Breaking for implementors:** none — every addition is optional.')),
+    ).toEqual([]);
   });
 
   it('accepts a break that names the minor carrying it, including across a reflowed line', () => {
@@ -59,8 +60,7 @@ describe('plan-lint compatibility statement', () => {
       messages(
         plan('**Breaking for implementors:** a required member; carried by the next minor.'),
       ),
-    )
-      .toEqual([]);
+    ).toEqual([]);
   });
 
   it('refuses a break that names no minor, at the statement line', () => {

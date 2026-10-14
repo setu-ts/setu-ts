@@ -57,7 +57,10 @@ describe('decodeCbor', () => {
     expect(emptyMap.ok && emptyMap.value instanceof Map).toBe(true);
     const map = decodeCbor(hex('a26161016162820203'));
     expect(map.ok && map.value).toEqual(
-      new Map<CborValue, CborValue>([['a', 1], ['b', [2, 3]]]),
+      new Map<CborValue, CborValue>([
+        ['a', 1],
+        ['b', [2, 3]],
+      ]),
     );
     const nested = decodeCbor(hex('826161a161626163'));
     expect(nested.ok && nested.value).toEqual(['a', new Map([['b', 'c']])]);

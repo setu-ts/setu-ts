@@ -115,13 +115,14 @@ function memberObjects(
             periodSeconds: 10`;
 
   const env = memberEnvironment(siblings, transport);
-  const envBlock = Object.keys(env).length === 0 ? '' : `
+  const envBlock =
+    Object.keys(env).length === 0
+      ? ''
+      : `
           env:
-${
-    Object.entries(env)
-      .map(([key, value]) => `            - name: ${key}\n              value: '${value}'`)
-      .join('\n')
-  }`;
+${Object.entries(env)
+  .map(([key, value]) => `            - name: ${key}\n              value: '${value}'`)
+  .join('\n')}`;
 
   // X10-6: Prometheus discovery annotations, emitted ONLY for a member the
   // manifest records as serving /metrics. Annotating a member that serves no
@@ -265,7 +266,7 @@ export function workspaceK8sFiles(
       transport,
       member.healthProbes === true,
       member.metricsEndpoint === true,
-    )
+    ),
   );
 
   const readme = `# Kubernetes
@@ -290,26 +291,22 @@ What this does NOT include, deliberately:
 
 - **An Ingress.** Which controller, which host, and which TLS issuer are cluster decisions, and a
   guessed Ingress is one that silently routes nothing.
-${
-    wrapProse(
-      `- **The transport's backing service.** ${
-        transport.compose === undefined
-          ? 'This workspace needs none.'
-          : `A ${transport.name} for a cluster is a managed service or a StatefulSet with ` +
-            `storage, not the single container the Compose stack runs for development.`
-      }`,
-      '  ',
-    )
-  }
-${
-    wrapProse(
-      '- **HTTP probes** for a template-less member. A member generated WITH a template ' +
-        'serves `/live` and `/ready`, so its probes are `httpGet`; one generated without ' +
-        'registers no HealthPlugin and keeps a `tcpSocket` probe, because pointing a probe at a ' +
-        '404 would make it permanently unready.',
-      '  ',
-    )
-  }
+${wrapProse(
+  `- **The transport's backing service.** ${
+    transport.compose === undefined
+      ? 'This workspace needs none.'
+      : `A ${transport.name} for a cluster is a managed service or a StatefulSet with ` +
+        `storage, not the single container the Compose stack runs for development.`
+  }`,
+  '  ',
+)}
+${wrapProse(
+  '- **HTTP probes** for a template-less member. A member generated WITH a template ' +
+    'serves `/live` and `/ready`, so its probes are `httpGet`; one generated without ' +
+    'registers no HealthPlugin and keeps a `tcpSocket` probe, because pointing a probe at a ' +
+    '404 would make it permanently unready.',
+  '  ',
+)}
 - **A discovery backend.** These objects make each member reachable by its Service name, which is
   what the generated map's \`<MEMBER>_HOST\` variables are set to here. For anything beyond a fixed
   list, use the plugin's \`kubernetes\` provider — it needs the RBAC documented in this repository's

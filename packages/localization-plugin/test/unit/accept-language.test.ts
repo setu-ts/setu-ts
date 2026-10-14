@@ -44,7 +44,7 @@ describe('parseAcceptLanguage', () => {
   });
 
   it('reads at most 16 ranges from a 64 KiB header', () => {
-    const header = Array.from({ length: 64 * 1024 / 4 }, () => 'de-x').join(',');
+    const header = Array.from({ length: (64 * 1024) / 4 }, () => 'de-x').join(',');
     expect(header.length).toBeGreaterThan(64 * 1000);
     const parsed = parseAcceptLanguage(header);
     expect(parsed.preferred.length + parsed.excluded.length).toBe(16);

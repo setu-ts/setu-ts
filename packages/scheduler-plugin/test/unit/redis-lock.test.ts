@@ -163,27 +163,19 @@ describe('validateClient', () => {
   });
 
   it('returns false for missing del', () => {
-    expect(
-      validateClient({ set: () => {}, get: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, get: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing get', () => {
-    expect(
-      validateClient({ set: () => {}, del: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, del: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing set', () => {
-    expect(
-      validateClient({ get: () => {}, del: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ get: () => {}, del: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing quit', () => {
-    expect(
-      validateClient({ set: () => {}, get: () => {}, del: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, get: () => {}, del: () => {} })).toBe(false);
   });
 
   it('returns false for undefined', () => {
@@ -305,9 +297,11 @@ describe('RedisLock N2 - error message', () => {
 describe('RedisLock command bound (M101a V8-24)', () => {
   /** Records the arguments each construction received. */
   function recordingCtor() {
-    const built: Array<
-      { url: string; options: RedisLockClientOptions | undefined; arity: number }
-    > = [];
+    const built: Array<{
+      url: string;
+      options: RedisLockClientOptions | undefined;
+      arity: number;
+    }> = [];
     class Ctor {
       constructor(url: string, options?: RedisLockClientOptions) {
         built.push({ url, options, arity: arguments.length });

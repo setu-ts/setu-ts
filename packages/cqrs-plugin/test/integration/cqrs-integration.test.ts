@@ -234,9 +234,7 @@ describe('CqrsPlugin integration', () => {
         plugins: [
           fakeRuntimePlugin(),
           CqrsPlugin({
-            commandHandlers: [
-              { type: 'TestCommand', handler: { handle: () => 'from options' } },
-            ],
+            commandHandlers: [{ type: 'TestCommand', handler: { handle: () => 'from options' } }],
           }),
         ],
       });
@@ -254,9 +252,7 @@ describe('CqrsPlugin integration', () => {
         plugins: [
           fakeRuntimePlugin(),
           CqrsPlugin({
-            queryHandlers: [
-              { type: 'TestQuery', handler: { handle: () => ({ found: true }) } },
-            ],
+            queryHandlers: [{ type: 'TestQuery', handler: { handle: () => ({ found: true }) } }],
           }),
         ],
       });

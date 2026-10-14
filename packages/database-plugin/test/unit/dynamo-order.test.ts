@@ -69,7 +69,7 @@ describe('resolveDynamoAccessPath — orderBy', () => {
 
   it('refuses a non-key orderBy by field and entity name', () => {
     const refusal = refusalOf(() =>
-      resolveDynamoAccessPath('Order', target(), query({ orderBy: { status: 'asc' } }))
+      resolveDynamoAccessPath('Order', target(), query({ orderBy: { status: 'asc' } })),
     );
 
     expect(refusal).toBeInstanceOf(UnsupportedQueryFeatureError);
@@ -87,7 +87,7 @@ describe('resolveDynamoAccessPath — orderBy', () => {
         'Order',
         target(),
         query({ orderBy: { createdAt: 'asc', status: 'desc' } }),
-      )
+      ),
     );
 
     expect(refusal).toBeInstanceOf(UnsupportedQueryFeatureError);

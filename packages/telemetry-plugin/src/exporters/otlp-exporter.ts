@@ -28,8 +28,6 @@ export async function loadOtlpExporter(
     throw new Error('OTLP exporter requires a `url` option');
   }
 
-  const mod = await import(
-    '@opentelemetry/exporter-trace-otlp-http'
-  );
+  const mod = await import('@opentelemetry/exporter-trace-otlp-http');
   return mod.OTLPTraceExporter;
 }

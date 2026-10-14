@@ -91,12 +91,7 @@ function isExecuted(error: unknown): boolean {
 
 /** Retryable status codes: 408, 425, 429, and 500–599 — plus `409` when keyed. */
 function isRetryableStatus(status: number): boolean {
-  return (
-    status === 408 ||
-    status === 425 ||
-    status === 429 ||
-    (status >= 500 && status <= 599)
-  );
+  return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 599);
 }
 
 /**
@@ -139,7 +134,8 @@ export async function runWithRetry<T>(
   const safeMethod = SAFE_METHODS.has(method.toUpperCase());
   // A keyed request may be repeated on ANY method (M109b §3.9).
   const canRetry = keyed || safeMethod;
-  const maxRetryAfterMs = policy.maxRetryAfterMs ??
+  const maxRetryAfterMs =
+    policy.maxRetryAfterMs ??
     (policy.backoff === 'exponential' ? policy.delay * 2 ** (policy.limit - 1) : policy.delay);
 
   for (let attempt = 1; attempt <= policy.limit; attempt++) {

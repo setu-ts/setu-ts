@@ -192,17 +192,22 @@ export function minimalBatch(
   return {
     version: 1,
     instanceId,
-    events: sequence === null ? [] : [{
-      sequence,
-      operationId: `op${sequence}`,
-      parentOperationId: null,
-      kind: 'request',
-      stage: 'request',
-      nodeId: null,
-      outcome: 'ok',
-      atMs: 12,
-      durationMs: 3,
-    }],
+    events:
+      sequence === null
+        ? []
+        : [
+            {
+              sequence,
+              operationId: `op${sequence}`,
+              parentOperationId: null,
+              kind: 'request',
+              stage: 'request',
+              nodeId: null,
+              outcome: 'ok',
+              atMs: 12,
+              durationMs: 3,
+            },
+          ],
     next: sequence ?? 0,
     lost: 0,
     closed: false,
@@ -367,15 +372,17 @@ export class ScriptedQueueSource implements IQueueDiagnosticsSource {
     return sourceBatch({
       instanceAlias: this.#alias,
       attempts,
-      depths: [{
-        queueAlias: 'emails',
-        ready: 2,
-        processing: 1,
-        dead: 0,
-        scope: 'shared-backend',
-        coverage: 'complete',
-        ageMs: 5,
-      }],
+      depths: [
+        {
+          queueAlias: 'emails',
+          ready: 2,
+          processing: 1,
+          dead: 0,
+          scope: 'shared-backend',
+          coverage: 'complete',
+          ageMs: 5,
+        },
+      ],
       next: attempts.length > 0 ? attempts[attempts.length - 1].sequence : after,
       lost: attempts.length > 0 ? start - after - 1 : 0,
     });

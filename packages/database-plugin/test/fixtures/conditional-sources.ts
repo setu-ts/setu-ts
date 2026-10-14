@@ -77,9 +77,14 @@ export const sources: readonly {
     name: 'drizzle',
     unknown: 'throws',
     make: () =>
-      createDrizzleDataSource(createFakeDrizzleInstance(), 'user', {
-        user: createFakeDrizzleTable('user'),
-      }, operators),
+      createDrizzleDataSource(
+        createFakeDrizzleInstance(),
+        'user',
+        {
+          user: createFakeDrizzleTable('user'),
+        },
+        operators,
+      ),
   },
   {
     name: 'mongodb',

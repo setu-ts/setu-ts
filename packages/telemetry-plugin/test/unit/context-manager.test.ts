@@ -28,9 +28,8 @@ describe('registerContextManager', () => {
     // context just as well, so activation IS available. The two cases must stay
     // distinguishable: collapsing them (the `|| true` form) makes the
     // setGlobalContextManager return value dead and the outcome unreadable.
-    const outcome = await registerContextManager(
-      { setGlobalContextManager: () => false },
-      () => Promise.resolve(fakeManager()),
+    const outcome = await registerContextManager({ setGlobalContextManager: () => false }, () =>
+      Promise.resolve(fakeManager()),
     );
 
     expect(outcome).toEqual({ activated: true, adopted: 'existing' });
@@ -59,9 +58,8 @@ describe('registerContextManager', () => {
   });
 
   it('names a non-Error rejection rather than reporting "undefined"', async () => {
-    const outcome = await registerContextManager(
-      { setGlobalContextManager: () => true },
-      () => Promise.reject('bare string'),
+    const outcome = await registerContextManager({ setGlobalContextManager: () => true }, () =>
+      Promise.reject('bare string'),
     );
 
     expect(outcome.activated).toBe(false);
@@ -87,11 +85,13 @@ describe('registerContextManager', () => {
 
 it('contains a host registration that throws a scalar reason', async () => {
   expect(
-    await registerContextManager({
-      setGlobalContextManager: () => {
-        throw 'host-refusal';
+    await registerContextManager(
+      {
+        setGlobalContextManager: () => {
+          throw 'host-refusal';
+        },
       },
-    }, () => Promise.resolve(fakeManager())),
-  )
-    .toEqual({ activated: false, reason: 'context manager registration failed: host-refusal' });
+      () => Promise.resolve(fakeManager()),
+    ),
+  ).toEqual({ activated: false, reason: 'context manager registration failed: host-refusal' });
 });

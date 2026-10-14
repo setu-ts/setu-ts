@@ -97,9 +97,8 @@ export async function mongoHarness(uri: string): Promise<BackendHarness> {
 }
 
 export async function dynamoHarness(endpoint: string): Promise<BackendHarness> {
-  const { DynamoDBClient, CreateTableCommand, DeleteTableCommand } = await import(
-    '@aws-sdk/client-dynamodb'
-  );
+  const { DynamoDBClient, CreateTableCommand, DeleteTableCommand } =
+    await import('@aws-sdk/client-dynamodb');
   const suffix = crypto.randomUUID().replaceAll('-', '');
   const options = {
     endpoint,
@@ -175,6 +174,6 @@ export async function writeBusiness(uow: IUnitOfWork, id: string): Promise<strin
 
 export function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>((r) => resolve = r);
+  const promise = new Promise<void>((r) => (resolve = r));
   return { promise, resolve };
 }

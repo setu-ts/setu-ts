@@ -46,8 +46,10 @@ export type DataSource = IDataSource;
  * @typeParam Id - Primary key type, constrained to {@linkcode EntityKey}
  * @since 0.1.0
  */
-export abstract class BaseRepository<Entity, Id extends EntityKey = string>
-  implements IRepository<Entity, Id> {
+export abstract class BaseRepository<Entity, Id extends EntityKey = string> implements IRepository<
+  Entity,
+  Id
+> {
   /**
    * Creates a new repository instance.
    *
@@ -134,11 +136,7 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
         'The bound data source lacks updateWhere.',
       );
     }
-    const row = await this._dataSource.updateWhere(
-      this.coerceId(id),
-      where,
-      checked.data,
-    );
+    const row = await this._dataSource.updateWhere(this.coerceId(id), where, checked.data);
     return row === null ? null : this.toEntity(row);
   }
 

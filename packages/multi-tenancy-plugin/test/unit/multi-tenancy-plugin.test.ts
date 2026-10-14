@@ -330,9 +330,8 @@ describe('multi tenancy plugin', () => {
         get: (token: string) => {
           if (token === CAPABILITIES.JWT) {
             return {
-              decode: (
-                _t: string,
-              ) => ({ tenant_id: 'jwt-from-capability' } as Record<string, unknown>),
+              decode: (_t: string) =>
+                ({ tenant_id: 'jwt-from-capability' }) as Record<string, unknown>,
             };
           }
           return regSvc.get(token) ?? null;
@@ -547,9 +546,7 @@ describe('multi tenancy plugin', () => {
     await plugin.register(ctxAsPlugin(ctx));
 
     expect(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY)).toBeTruthy();
-    const service = ctx.registeredServices.get(
-      CAPABILITIES.MULTI_TENANCY,
-    ) as MultiTenancyService;
+    const service = ctx.registeredServices.get(CAPABILITIES.MULTI_TENANCY) as MultiTenancyService;
     expect(service != null).toBeTruthy();
     // The service should use '/' as the separator
     expect(service.prefixCacheKey('t1', 'k')).toEqual('t1/k');
@@ -751,9 +748,7 @@ describe('multi tenancy plugin', () => {
     expect(regSvc.has(CAPABILITIES.MULTI_TENANCY)).toBeTruthy();
 
     // Get the service and call create() on the store to trigger generateId
-    const service = regSvc.get(
-      CAPABILITIES.MULTI_TENANCY,
-    ) as MultiTenancyService;
+    const service = regSvc.get(CAPABILITIES.MULTI_TENANCY) as MultiTenancyService;
     expect(service != null).toBeTruthy();
     // @ts-expect-error store is private but accessible for testing
     const mockStore = service.store;

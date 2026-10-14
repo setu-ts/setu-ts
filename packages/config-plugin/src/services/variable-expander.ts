@@ -58,10 +58,7 @@ export function expandVariables(
     }
 
     resolving.push(key);
-    const value = raw.replace(
-      REFERENCE_PATTERN,
-      (_match, reference: string) => resolve(reference),
-    );
+    const value = raw.replace(REFERENCE_PATTERN, (_match, reference: string) => resolve(reference));
     resolving.pop();
     expanded[key] = value;
     if (observer !== undefined && observer.keys.has(key)) {

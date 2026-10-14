@@ -22,10 +22,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    SessionPlugin({ secret: mySecret, csrf: {} }),
-  ],
+  plugins: [RuntimePlugin(), SessionPlugin({ secret: mySecret, csrf: {} })],
 });
 
 app.router.get('/me', (ctx) => {
@@ -237,10 +234,9 @@ import { raw } from '@setu-ts/view-plugin';
 // UNCHECKED-EXEMPT: LoginForm takes IRequestContext, so the gate never renders
 // it, and raw() wraps csrfTokenField(ctx) — trusted markup that escapes the
 // configured field name itself.
-const LoginForm = (ctx: IRequestContext) =>
-  html`
-    <form method="post">${raw(csrfTokenField(ctx))}<button>Sign in</button></form>
-  `;
+const LoginForm = (ctx: IRequestContext) => html`
+  <form method="post">${raw(csrfTokenField(ctx))}<button>Sign in</button></form>
+`;
 ```
 
 The `raw()` call is appropriate only because `csrfTokenField` generates this fixed markup and

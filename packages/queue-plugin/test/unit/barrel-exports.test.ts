@@ -45,13 +45,11 @@ describe('barrel exports', () => {
       depths,
     };
     expect(options.depths).toBe(depths);
-    for (
-      const internal of [
-        'QueueObservationCollector',
-        'compileQueueDiagnosticsPolicy',
-        'createDisabledQueueSource',
-      ]
-    ) {
+    for (const internal of [
+      'QueueObservationCollector',
+      'compileQueueDiagnosticsPolicy',
+      'createDisabledQueueSource',
+    ]) {
       expect(internal in exports).toBe(false);
     }
   });

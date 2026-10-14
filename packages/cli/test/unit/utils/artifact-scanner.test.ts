@@ -35,7 +35,8 @@ const MIDDLEWARE = seamSpecFor('middleware')!;
  * @returns Source declaring each required export
  */
 function wellFormed(spec: SeamSpec, name: string): string {
-  return spec.importSymbols(deriveNames(name))
+  return spec
+    .importSymbols(deriveNames(name))
     .map((symbol) => `export const ${symbol} = 1;`)
     .join('\n');
 }
@@ -57,7 +58,7 @@ function fsWith(
 ): IFileSystem {
   const { stats = {}, sources = {}, spec = ROUTES } = options;
   return {
-    readdir: () => entries instanceof Error ? Promise.reject(entries) : Promise.resolve(entries),
+    readdir: () => (entries instanceof Error ? Promise.reject(entries) : Promise.resolve(entries)),
     stat: (path: string) => {
       const entry = path.slice(path.lastIndexOf('/') + 1);
       const result = stats[entry];
@@ -129,11 +130,7 @@ describe('readArtifactNames', () => {
   });
 
   it('excludes a bare suffix, which would derive an empty symbol name', async () => {
-    const scan = await readArtifactNames(
-      fsWith(['.routes.ts', 'user.routes.ts']),
-      '/app',
-      ROUTES,
-    );
+    const scan = await readArtifactNames(fsWith(['.routes.ts', 'user.routes.ts']), '/app', ROUTES);
     expect(scan.names).toEqual(['user']);
   });
 
@@ -188,10 +185,12 @@ describe('readArtifactNames', () => {
       );
 
       expect(scan.names).toEqual(['request-id']);
-      expect(scan.skipped).toEqual([{
-        path: 'src/middleware/audit-log.middleware.ts',
-        missing: ['AUDIT_LOG_MIDDLEWARE_PRIORITY'],
-      }]);
+      expect(scan.skipped).toEqual([
+        {
+          path: 'src/middleware/audit-log.middleware.ts',
+          missing: ['AUDIT_LOG_MIDDLEWARE_PRIORITY'],
+        },
+      ]);
     });
 
     it('reports every missing symbol, not just the first', async () => {
@@ -204,10 +203,7 @@ describe('readArtifactNames', () => {
         MIDDLEWARE,
       );
 
-      expect(scan.skipped[0]?.missing).toEqual([
-        'ORDERS_MIDDLEWARE_PRIORITY',
-        'ordersMiddleware',
-      ]);
+      expect(scan.skipped[0]?.missing).toEqual(['ORDERS_MIDDLEWARE_PRIORITY', 'ordersMiddleware']);
     });
 
     it('skips an OLD-shape CQRS artifact (class only, no factory) and admits a new one', async () => {
@@ -276,7 +272,9 @@ describe('scanArtifacts', () => {
   it('keys every wired family, even the ones with no artifacts', async () => {
     const scan = await scanArtifacts(fsWith(MISSING), '/app', listSeamSpecs());
     expect(Object.keys(scan.artifacts).sort()).toEqual(
-      listSeamSpecs().map((s) => s.schematic).sort(),
+      listSeamSpecs()
+        .map((s) => s.schematic)
+        .sort(),
     );
     for (const names of Object.values(scan.artifacts)) expect(names).toEqual([]);
     expect(scan.skipped).toEqual([]);

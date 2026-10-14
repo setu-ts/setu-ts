@@ -15,11 +15,7 @@ export class GrpcRuntimeLoadError extends Error {
   readonly specifier: string;
 
   constructor(specifier: string, installCommand: string, options?: ErrorOptions) {
-    super(
-      `Cannot load Connect runtime module: ${specifier}. ` +
-        `Run: ${installCommand}`,
-      options,
-    );
+    super(`Cannot load Connect runtime module: ${specifier}. ` + `Run: ${installCommand}`, options);
     this.name = 'GrpcRuntimeLoadError';
     this.specifier = specifier;
   }

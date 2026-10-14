@@ -97,12 +97,11 @@ async function worker(retainSentMs?: number): Promise<WorkerHarness> {
   await app.start();
   const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
   const delivered: number[] = [];
-  await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING).subscribe(
-    orderPlaced.topic,
-    (message) => {
+  await app.services
+    .get<IMessageBroker>(CAPABILITIES.MESSAGING)
+    .subscribe(orderPlaced.topic, (message) => {
       delivered.push((message as { data: { n: number } }).data.n);
-    },
-  );
+    });
   const cron = new WorkersCron()
     .on(EVERY_MINUTE, async () => {
       await outbox.sweep();

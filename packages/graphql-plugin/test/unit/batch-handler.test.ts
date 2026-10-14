@@ -12,11 +12,13 @@ const createFakeRuntime = (): GraphqlRuntime =>
   ({
     parse: (_src: string) => ({
       kind: 'Document',
-      definitions: [{
-        kind: 'OperationDefinition',
-        operation: 'query',
-        selectionSet: { kind: 'SelectionSet', selections: [] },
-      }],
+      definitions: [
+        {
+          kind: 'OperationDefinition',
+          operation: 'query',
+          selectionSet: { kind: 'SelectionSet', selections: [] },
+        },
+      ],
     }),
     validate: () => [],
     execute: () => Promise.resolve({ data: { hello: 'world' } }),
@@ -87,7 +89,7 @@ const createMockContext = (body: unknown, accept = 'application/json') => {
       json: () => Promise.resolve(body),
       headers: new Headers({
         'content-type': 'application/json',
-        'accept': accept,
+        accept: accept,
       }),
     } as unknown as IRequest,
     response: {} as IResponse,
@@ -122,10 +124,7 @@ describe('batch handler', () => {
       apqResolver: null,
     });
 
-    const body = [
-      { query: '{ hello }' },
-      { query: '{ hello }' },
-    ];
+    const body = [{ query: '{ hello }' }, { query: '{ hello }' }];
     const ctx = createMockContext(body);
     // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
@@ -157,10 +156,7 @@ describe('batch handler', () => {
       apqResolver: null,
     });
 
-    const body = [
-      { query: '{ hello }' },
-      { query: '{ hello }' },
-    ];
+    const body = [{ query: '{ hello }' }, { query: '{ hello }' }];
     const ctx = createMockContext(body);
     // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
@@ -221,11 +217,7 @@ describe('batch handler', () => {
       apqResolver: null,
     });
 
-    const ctx = createMockContext([
-      { query: '{ a }' },
-      { query: '{ b }' },
-      { query: '{ c }' },
-    ]);
+    const ctx = createMockContext([{ query: '{ a }' }, { query: '{ b }' }, { query: '{ c }' }]);
     // @ts-ignore: readonly property for test mock
     (ctx as { response?: IResponse }).response = mock;
 

@@ -11,7 +11,9 @@
  */
 export function isMissingPath(cause: unknown): boolean {
   if (!(cause instanceof Error)) return false;
-  return cause.name === 'NotFound' ||
+  return (
+    cause.name === 'NotFound' ||
     ('code' in cause && cause.code === 'ENOENT') ||
-    cause.message.startsWith('ENOENT: no such file or directory, ');
+    cause.message.startsWith('ENOENT: no such file or directory, ')
+  );
 }

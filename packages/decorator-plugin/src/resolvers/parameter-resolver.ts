@@ -144,9 +144,7 @@ export function resolveParameter(
   ctx: IRequestContext,
   param: ParameterMetadata,
 ): unknown | Promise<unknown> {
-  if (
-    param.type === 'body' || param.type === 'query' || param.type === 'param'
-  ) {
+  if (param.type === 'body' || param.type === 'query' || param.type === 'param') {
     const key = validatedStateKey(VALIDATED_TARGETS[param.type]);
     if (ctx.state.has(key)) {
       const validated = ctx.state.get(key);
@@ -163,7 +161,7 @@ export function resolveParameter(
       // `Headers.get` answers `null` for an absent header; the source is typed
       // `string | undefined`, like a missing cookie or query parameter.
       return param.name !== undefined
-        ? ctx.request.headers.get(param.name) ?? undefined
+        ? (ctx.request.headers.get(param.name) ?? undefined)
         : undefined;
     case 'cookie': {
       const cookies = parseCookies(ctx.request.headers);

@@ -50,10 +50,7 @@ interface HandlerOptions {
  * @param mediaType - The negotiated response media type.
  * @param apqStatus - The status the APQ resolver reported for the refusal.
  */
-function apqRefusalStatus(
-  mediaType: 'json' | 'graphql-response',
-  apqStatus: number,
-): number {
+function apqRefusalStatus(mediaType: 'json' | 'graphql-response', apqStatus: number): number {
   return mediaType === 'graphql-response' ? apqStatus : 200;
 }
 
@@ -99,10 +96,15 @@ async function handleGraphqlPost(
   // Check content-type for POST
   const contentType = ctx.request.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    return sendGraphqlError(response, 415, {
-      message: 'Unsupported media type. Expected application/json',
-      extensions: { code: 'UNSUPPORTED_MEDIA_TYPE' },
-    }, mediaType);
+    return sendGraphqlError(
+      response,
+      415,
+      {
+        message: 'Unsupported media type. Expected application/json',
+        extensions: { code: 'UNSUPPORTED_MEDIA_TYPE' },
+      },
+      mediaType,
+    );
   }
 
   // Parse body
@@ -118,47 +120,77 @@ async function handleGraphqlPost(
     const refusal = bodyRefusalOf(e);
     if (refusal !== null) {
       logger?.error('Request body refused before parsing', e);
-      return sendGraphqlError(response, refusal.status, {
-        message: refusal.message,
-        extensions: { code: refusal.code },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        refusal.status,
+        {
+          message: refusal.message,
+          extensions: { code: refusal.code },
+        },
+        mediaType,
+      );
     }
     logger?.error('Failed to parse JSON body', e);
-    return sendGraphqlError(response, 400, {
-      message: 'Invalid JSON body',
-      extensions: { code: 'INVALID_JSON' },
-    }, mediaType);
+    return sendGraphqlError(
+      response,
+      400,
+      {
+        message: 'Invalid JSON body',
+        extensions: { code: 'INVALID_JSON' },
+      },
+      mediaType,
+    );
   }
 
   // Batching: detect array body before parsePostBody
   if (Array.isArray(body)) {
     if (maxBatchSize <= 0) {
-      return sendGraphqlError(response, 400, {
-        message: 'Batching is not enabled',
-        extensions: { code: 'BAD_REQUEST' },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        400,
+        {
+          message: 'Batching is not enabled',
+          extensions: { code: 'BAD_REQUEST' },
+        },
+        mediaType,
+      );
     }
 
     // Strict media type refuses batches
     if (mediaType === 'graphql-response') {
-      return sendGraphqlError(response, 400, {
-        message: 'Batching is not supported with application/graphql-response+json',
-        extensions: { code: 'BATCHING_NOT_SUPPORTED' },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        400,
+        {
+          message: 'Batching is not supported with application/graphql-response+json',
+          extensions: { code: 'BATCHING_NOT_SUPPORTED' },
+        },
+        mediaType,
+      );
     }
 
     if (body.length === 0) {
-      return sendGraphqlError(response, 400, {
-        message: 'Batch must contain at least one request',
-        extensions: { code: 'BAD_REQUEST' },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        400,
+        {
+          message: 'Batch must contain at least one request',
+          extensions: { code: 'BAD_REQUEST' },
+        },
+        mediaType,
+      );
     }
 
     if (body.length > maxBatchSize) {
-      return sendGraphqlError(response, 400, {
-        message: `Batch size exceeds limit of ${maxBatchSize}`,
-        extensions: { code: 'BATCH_TOO_LARGE' },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        400,
+        {
+          message: `Batch size exceeds limit of ${maxBatchSize}`,
+          extensions: { code: 'BATCH_TOO_LARGE' },
+        },
+        mediaType,
+      );
     }
 
     // Execute each element concurrently — APQ resolves per-element. A batch
@@ -200,7 +232,8 @@ async function handleGraphqlPost(
           params.operationName = obj.operationName;
         }
         if (
-          typeof obj.variables === 'object' && obj.variables !== null &&
+          typeof obj.variables === 'object' &&
+          obj.variables !== null &&
           !Array.isArray(obj.variables)
         ) {
           params.variables = obj.variables as Record<string, unknown>;
@@ -221,10 +254,15 @@ async function handleGraphqlPost(
 
   // Must be an object (not array, already handled)
   if (typeof body !== 'object' || body === null) {
-    return sendGraphqlError(response, 400, {
-      message: 'Request body must be a JSON object',
-      extensions: { code: 'BAD_REQUEST' },
-    }, mediaType);
+    return sendGraphqlError(
+      response,
+      400,
+      {
+        message: 'Request body must be a JSON object',
+        extensions: { code: 'BAD_REQUEST' },
+      },
+      mediaType,
+    );
   }
 
   const obj = body as Record<string, unknown>;
@@ -240,10 +278,15 @@ async function handleGraphqlPost(
     }
     const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      return sendGraphqlError(response, apqRefusalStatus(mediaType, apqResult.status), {
-        message: apqResult.message,
-        extensions: { code: apqResult.code },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        apqRefusalStatus(mediaType, apqResult.status),
+        {
+          message: apqResult.message,
+          extensions: { code: apqResult.code },
+        },
+        mediaType,
+      );
     }
     query = apqResult.query;
   }
@@ -252,10 +295,15 @@ async function handleGraphqlPost(
   // Validate that query is present (required by GraphQL spec)
   if (typeof query !== 'string') {
     logger?.error('Query parameter is required');
-    return sendGraphqlError(response, 400, {
-      message: 'Query parameter is required',
-      extensions: { code: 'BAD_REQUEST' },
-    }, mediaType);
+    return sendGraphqlError(
+      response,
+      400,
+      {
+        message: 'Query parameter is required',
+        extensions: { code: 'BAD_REQUEST' },
+      },
+      mediaType,
+    );
   }
 
   const params: GraphqlRequestParams = { query };
@@ -265,15 +313,21 @@ async function handleGraphqlPost(
   // Variables must be a JSON object (not array) — matches GET behavior
   if (obj.variables !== undefined) {
     if (
-      obj.variables !== null && (typeof obj.variables !== 'object' || Array.isArray(obj.variables))
+      obj.variables !== null &&
+      (typeof obj.variables !== 'object' || Array.isArray(obj.variables))
     ) {
       if (logger) {
         logger.error('Variables must be a JSON object');
       }
-      return sendGraphqlError(response, 400, {
-        message: 'Variables must be a JSON object',
-        extensions: { code: 'INVALID_VARIABLES' },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        400,
+        {
+          message: 'Variables must be a JSON object',
+          extensions: { code: 'INVALID_VARIABLES' },
+        },
+        mediaType,
+      );
     }
     if (obj.variables !== null) {
       params.variables = obj.variables as Record<string, unknown>;
@@ -314,10 +368,15 @@ async function handleGraphqlGet(
     }
 
     // No query, no HTML -> bad request
-    return sendGraphqlError(response, 400, {
-      message: 'Query parameter is required',
-      extensions: { code: 'BAD_REQUEST' },
-    }, mediaType);
+    return sendGraphqlError(
+      response,
+      400,
+      {
+        message: 'Query parameter is required',
+        extensions: { code: 'BAD_REQUEST' },
+      },
+      mediaType,
+    );
   }
 
   // Parse query params
@@ -332,10 +391,15 @@ async function handleGraphqlGet(
   } catch (e) {
     const err = e as ParseError;
     logger?.error('Failed to parse GraphQL request', err);
-    return sendGraphqlError(response, 400, {
-      message: err.message,
-      extensions: { code: err.code },
-    }, mediaType);
+    return sendGraphqlError(
+      response,
+      400,
+      {
+        message: err.message,
+        extensions: { code: err.code },
+      },
+      mediaType,
+    );
   }
 
   // C6: resolve APQ for GET so hash-only requests are served from cache.
@@ -347,10 +411,15 @@ async function handleGraphqlGet(
     }
     const apqResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      return sendGraphqlError(response, apqRefusalStatus(mediaType, apqResult.status), {
-        message: apqResult.message,
-        extensions: { code: apqResult.code },
-      }, mediaType);
+      return sendGraphqlError(
+        response,
+        apqRefusalStatus(mediaType, apqResult.status),
+        {
+          message: apqResult.message,
+          extensions: { code: apqResult.code },
+        },
+        mediaType,
+      );
     }
     params.query = apqResult.query;
   }

@@ -95,8 +95,9 @@ describe('MailService.isHealthy', () => {
   it('lets a rejecting probe propagate when no timing is injected', async () => {
     // With no clock there is nothing to cache or bound on, so the delegation
     // is bare and the caller decides what a thrown probe means.
-    await expect(serviceOver(new ProbingProvider(new Error('EHOSTUNREACH'))).isHealthy())
-      .rejects.toThrow('EHOSTUNREACH');
+    await expect(
+      serviceOver(new ProbingProvider(new Error('EHOSTUNREACH'))).isHealthy(),
+    ).rejects.toThrow('EHOSTUNREACH');
   });
 
   it('reports a rejecting probe as unreachable once bounded', async () => {
@@ -185,7 +186,7 @@ describe('the mail indicator and IMailer.isHealthy are one implementation', () =
     // transport that does not exist — and `SmtpProvider` reads a resolved
     // call as success, so such a double reports `up` for a dead server.
     const { indicator, capability } = await bothAnswers(() =>
-      Promise.reject(new Error('ECONNREFUSED 127.0.0.1:587'))
+      Promise.reject(new Error('ECONNREFUSED 127.0.0.1:587')),
     );
     expect(indicator).toEqual({ status: 'down', data: { provider: 'smtp', reachable: false } });
     expect(capability).toBe(false);

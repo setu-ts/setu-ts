@@ -107,26 +107,23 @@ export class MessagingBackplane implements IRealtimeBackplane {
     if (this.#subscription !== undefined) {
       return;
     }
-    this.#subscription = await this.#broker.subscribe<unknown>(
-      this.#topic,
-      (message): void => {
-        if (!isRealtimeFrame(message)) {
-          return;
-        }
-        if (message.origin === this.origin) {
-          return;
-        }
-        // Isolated per handler: the WebSocket and SSE plugins share this
-        // subscription, so one consumer throwing must not starve the other,
-        // and this loop runs inside the broker's delivery callback where
-        // nothing above would catch a throw.
-        const delivered = dispatchFrame(this.#handlers, message, (error) => {
-          this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
-        });
-        // M98l: counted only after the shape and own-origin filters.
-        realtimeObserverOf(this)?.observe('backplane-receive', delivered);
-      },
-    );
+    this.#subscription = await this.#broker.subscribe<unknown>(this.#topic, (message): void => {
+      if (!isRealtimeFrame(message)) {
+        return;
+      }
+      if (message.origin === this.origin) {
+        return;
+      }
+      // Isolated per handler: the WebSocket and SSE plugins share this
+      // subscription, so one consumer throwing must not starve the other,
+      // and this loop runs inside the broker's delivery callback where
+      // nothing above would catch a throw.
+      const delivered = dispatchFrame(this.#handlers, message, (error) => {
+        this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
+      });
+      // M98l: counted only after the shape and own-origin filters.
+      realtimeObserverOf(this)?.observe('backplane-receive', delivered);
+    });
   }
 
   publish(frame: RealtimeFrame): Promise<void> {

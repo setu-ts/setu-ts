@@ -207,11 +207,13 @@ describe('rewriteReferences', () => {
   it('moves the major.minor shorthand in a lockfile only, and only across a minor change', () => {
     const lock =
       '"@setu-ts/common@0.8": {}, "@setu-ts/common@0.8.0": {}, "@setu-ts/common@0.80": {}';
-    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.9.0').content)
-      .toBe('"@setu-ts/common@0.9": {}, "@setu-ts/common@0.9.0": {}, "@setu-ts/common@0.80": {}');
+    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.9.0').content).toBe(
+      '"@setu-ts/common@0.9": {}, "@setu-ts/common@0.9.0": {}, "@setu-ts/common@0.80": {}',
+    );
     // A patch bump leaves the shorthand alone — `0.8` still names 0.8.1.
-    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.8.1').content)
-      .toBe('"@setu-ts/common@0.8": {}, "@setu-ts/common@0.8.1": {}, "@setu-ts/common@0.80": {}');
+    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.8.1').content).toBe(
+      '"@setu-ts/common@0.8": {}, "@setu-ts/common@0.8.1": {}, "@setu-ts/common@0.80": {}',
+    );
     // Outside a lockfile the shorthand is not a reference.
     expect(rewriteReferences('x.md', '@setu-ts/common@0.8', '0.8.0', '0.9.0').replacements).toBe(0);
   });
@@ -360,7 +362,7 @@ describe('planBump', () => {
     expect(refusals).toEqual([
       'workspace member packages/common/deno.json is not a tracked file.',
       'packages/sdk/deno.json does not carry 0.8.0 where expected (the manifest) — the tree is ' +
-      'not all on 0.8.0.',
+        'not all on 0.8.0.',
     ]);
   });
 
@@ -372,9 +374,9 @@ describe('planBump', () => {
     });
     expect(planBump(files, OPTIONS).refusals).toEqual([
       'packages/common/src/version.ts does not carry 0.8.0 where expected (the version ' +
-      'constant) — the tree is not all on 0.8.0.',
+        'constant) — the tree is not all on 0.8.0.',
       'packages/common/package.json does not carry 0.8.0 where expected (the generated npm ' +
-      'manifest) — the tree is not all on 0.8.0.',
+        'manifest) — the tree is not all on 0.8.0.',
       'workspace member packages/sdk/package.json is not a tracked file.',
     ]);
   });
@@ -385,29 +387,29 @@ describe('planBump', () => {
   });
 
   it('refuses when a named site is absent or does not carry the old version', () => {
-    expect(planBump(tree({ 'k8s/chart/Chart.yaml': "appVersion: '0.7.0'\n" }), OPTIONS).refusals)
-      .toEqual(["k8s/chart/Chart.yaml does not carry appVersion: '0.8.0'."]);
+    expect(
+      planBump(tree({ 'k8s/chart/Chart.yaml': "appVersion: '0.7.0'\n" }), OPTIONS).refusals,
+    ).toEqual(["k8s/chart/Chart.yaml does not carry appVersion: '0.8.0'."]);
     expect(
       planBump(tree({ 'packages/sdk/src/http/observed-fetch.ts': undefined }), OPTIONS).refusals[0],
-    )
-      .toContain('packages/sdk/src/http/observed-fetch.ts is not a tracked file');
+    ).toContain('packages/sdk/src/http/observed-fetch.ts is not a tracked file');
   });
 
   it('refuses a changelog with no Unreleased heading, an empty one, or the version already cut', () => {
-    expect(planBump(tree({ 'CHANGELOG.md': '# Changelog\n\n## [0.8.0]\n- x\n' }), OPTIONS).refusals)
-      .toEqual(["CHANGELOG.md has no '## [Unreleased]' heading to rename."]);
+    expect(
+      planBump(tree({ 'CHANGELOG.md': '# Changelog\n\n## [0.8.0]\n- x\n' }), OPTIONS).refusals,
+    ).toEqual(["CHANGELOG.md has no '## [Unreleased]' heading to rename."]);
     expect(
       planBump(tree({ 'CHANGELOG.md': '## [Unreleased]\n\n## [0.8.0]\n- x\n' }), OPTIONS)
         .refusals[0],
-    )
-      .toContain("'## [Unreleased]' section is empty");
+    ).toContain("'## [Unreleased]' section is empty");
     expect(
       planBump(tree({ 'CHANGELOG.md': '## [Unreleased]\n- y\n\n## [0.9.0]\n- x\n' }), OPTIONS)
         .refusals,
-    )
-      .toEqual(["CHANGELOG.md already carries a '## [0.9.0]' section."]);
-    expect(planBump(tree({ 'CHANGELOG.md': undefined }), OPTIONS).refusals)
-      .toEqual(['CHANGELOG.md is not a tracked file.']);
+    ).toEqual(["CHANGELOG.md already carries a '## [0.9.0]' section."]);
+    expect(planBump(tree({ 'CHANGELOG.md': undefined }), OPTIONS).refusals).toEqual([
+      'CHANGELOG.md is not a tracked file.',
+    ]);
   });
 
   it('leaves an empty upgrading Unreleased heading and says what would belong under it', () => {
@@ -420,7 +422,7 @@ describe('planBump', () => {
     // And a tree without the guide at all is simply not asked about.
     expect(
       edited(tree({ 'docs/upgrading.md': undefined })).plan.residual.some((step) =>
-        step.includes('upgrading')
+        step.includes('upgrading'),
       ),
     ).toBe(false);
   });
@@ -435,9 +437,13 @@ describe('planBump', () => {
   it('always lists the operator steps it cannot take', () => {
     const { plan } = edited(tree());
     const steps = plan.residual.join('\n');
-    for (
-      const needle of ['check:docs', 'deploy:render', 'deno.lock', 'check 9', '>=0.9.0 <0.9.0']
-    ) {
+    for (const needle of [
+      'check:docs',
+      'deploy:render',
+      'deno.lock',
+      'check 9',
+      '>=0.9.0 <0.9.0',
+    ]) {
       expect(steps).toContain(needle);
     }
   });
@@ -521,8 +527,9 @@ describe('main (the command path, over injected I/O)', () => {
   it('re-runs the manifest generator after a real bump, never on a dry run (M111a §3.5)', async () => {
     let real = 0;
     const r = harness(realShape());
-    expect(await main(['0.9.0'], { ...r.deps, syncManifests: () => Promise.resolve(void real++) }))
-      .toBe(true);
+    expect(
+      await main(['0.9.0'], { ...r.deps, syncManifests: () => Promise.resolve(void real++) }),
+    ).toBe(true);
     expect(real).toBe(1);
 
     let dry = 0;
@@ -551,8 +558,7 @@ describe('main (the command path, over injected I/O)', () => {
     expect(await main(['0.9.0', '--dry-run'], h.deps)).toBe(false);
     expect(
       h.err.some((line) => line.includes('residual packages/sdk/src/x.ts:3 @setu-ts/common@0.7.0')),
-    )
-      .toBe(true);
+    ).toBe(true);
     expect(h.err.some((line) => line.includes('residual reference(s)'))).toBe(true);
   });
 
@@ -586,6 +592,6 @@ describe('the real seams', () => {
   });
 
   it('reports the working tree state as a boolean', async () => {
-    expect(typeof await workingTreeIsClean()).toBe('boolean');
+    expect(typeof (await workingTreeIsClean())).toBe('boolean');
   });
 });

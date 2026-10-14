@@ -9,7 +9,11 @@ import { createFlagGuard } from '../../src/middleware/feature-flag-middleware.ts
 import type { FlagContext, IFeatureFlags, IRequestContext, NextFunction } from '@setu-ts/common';
 
 describe('createFlagGuard', () => {
-  function buildCtx(flagOn: boolean, user?: { id: string }, capRegistered = true): {
+  function buildCtx(
+    flagOn: boolean,
+    user?: { id: string },
+    capRegistered = true,
+  ): {
     ctx: IRequestContext;
     redirectUrl: string | null;
     statusCode: number | null;
@@ -103,7 +107,10 @@ describe('createFlagGuard', () => {
   it('flag off + fallback ⇒ redirect, next() NOT called', async () => {
     const capture = buildCtx(false, { id: 'user1' });
     const guard = createFlagGuard('beta', { fallback: '/old' });
-    await guard(capture.ctx, capture.wrapNext(() => {}));
+    await guard(
+      capture.ctx,
+      capture.wrapNext(() => {}),
+    );
 
     expect(capture.redirectUrl).toBe('/old');
     expect(capture.nextCalled).toBe(false);
@@ -112,7 +119,10 @@ describe('createFlagGuard', () => {
   it('flag off + no fallback ⇒ 404, next() NOT called', async () => {
     const capture = buildCtx(false, { id: 'user1' });
     const guard = createFlagGuard('beta');
-    await guard(capture.ctx, capture.wrapNext(() => {}));
+    await guard(
+      capture.ctx,
+      capture.wrapNext(() => {}),
+    );
 
     expect(capture.statusCode).toBe(404);
     // M70f (X4-8): the flag-guard rejection converges on the responder's JSON
@@ -124,7 +134,10 @@ describe('createFlagGuard', () => {
   it('custom statusCode honored', async () => {
     const capture = buildCtx(false, { id: 'user1' });
     const guard = createFlagGuard('beta', { statusCode: 403 });
-    await guard(capture.ctx, capture.wrapNext(() => {}));
+    await guard(
+      capture.ctx,
+      capture.wrapNext(() => {}),
+    );
 
     expect(capture.statusCode).toBe(403);
     expect(capture.body).toBe('{"error":"Not Found"}');
@@ -306,7 +319,10 @@ describe('createFlagGuard', () => {
     const guard = createFlagGuard('beta');
     let errorThrown = false;
     try {
-      await guard(capture.ctx, capture.wrapNext(() => {}));
+      await guard(
+        capture.ctx,
+        capture.wrapNext(() => {}),
+      );
     } catch {
       errorThrown = true;
     }

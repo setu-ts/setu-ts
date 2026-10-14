@@ -26,10 +26,7 @@ import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';
 declare function provisionAccount(userId: string): Promise<void>;
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    MessagingPlugin({ broker: 'rabbitmq', url: 'amqp://localhost:5672' }),
-  ],
+  plugins: [RuntimePlugin(), MessagingPlugin({ broker: 'rabbitmq', url: 'amqp://localhost:5672' })],
 });
 
 // Plugins register during `start()`, so the capability is resolvable only after it.
@@ -636,9 +633,13 @@ const app = createApplication({
       subscriptions: [
         // Consumer: the handler receives the PARSED payload, the envelope, and
         // the transport metadata. A malformed envelope never reaches it.
-        onIntegrationEvent(orderPlaced, async (payload) => {
-          await provisionOrder(payload.orderId);
-        }, { queue: 'billing' }),
+        onIntegrationEvent(
+          orderPlaced,
+          async (payload) => {
+            await provisionOrder(payload.orderId);
+          },
+          { queue: 'billing' },
+        ),
       ],
     }),
   ],
@@ -867,10 +868,7 @@ function metadataFor(event: IDomainEvent): {
   return metadata;
 }
 
-async function publishPending(
-  runtime: IRuntimeServices,
-  broker: IMessageBroker,
-): Promise<void> {
+async function publishPending(runtime: IRuntimeServices, broker: IMessageBroker): Promise<void> {
   for (const event of events.pending()) {
     await publishIntegrationEvent(runtime, broker, orderPlaced, orderPlaced.parse(event.data), {
       ...metadataFor(event),
@@ -932,9 +930,14 @@ const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
 await db.transaction(async (uow) => {
   await uow.getRepository('Order').create({ id: 'o-1', total: 42 });
   // The SAME unit of work: the row commits or rolls back with the order.
-  await outbox.write(uow, orderPlaced, { orderId: 'o-1' }, {
-    metadata: { aggregateId: 'o-1', aggregateVersion: 1 },
-  });
+  await outbox.write(
+    uow,
+    orderPlaced,
+    { orderId: 'o-1' },
+    {
+      metadata: { aggregateId: 'o-1', aggregateVersion: 1 },
+    },
+  );
 });
 // Optional: request a sweep now instead of waiting for the next interval.
 outbox.dispatch();

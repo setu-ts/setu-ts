@@ -94,7 +94,8 @@ class LocalizerState {
 
   /** Looks a key up in `tag`, then in the default locale, and formats it. */
   translate(tag: string, key: string, values: FormatValues): string {
-    const message: LocalizationMessage | undefined = this.#store.messages.get(tag)?.get(key) ??
+    const message: LocalizationMessage | undefined =
+      this.#store.messages.get(tag)?.get(key) ??
       this.#store.messages.get(this.#defaultTag)?.get(key);
     if (message === undefined) {
       return this.#missing(tag, key);

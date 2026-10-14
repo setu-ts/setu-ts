@@ -172,14 +172,17 @@ describe('compileRealtimeDiagnosticsAlias', () => {
 describe('createRealtimeObservationCollector', () => {
   it('refuses an enabled websocket or sse collector without a gauge reader', () => {
     for (const kind of ['websocket', 'sse'] as const) {
-      expect(() => createRealtimeObservationCollector({ kind, alias: 'a', clock: () => 0 }))
-        .toThrow(REALTIME_DIAGNOSTICS_ERRORS.gauges);
+      expect(() =>
+        createRealtimeObservationCollector({ kind, alias: 'a', clock: () => 0 }),
+      ).toThrow(REALTIME_DIAGNOSTICS_ERRORS.gauges);
     }
     // A backplane has no gauges, and a disabled collector reads none.
-    expect(createRealtimeObservationCollector({ kind: 'backplane', alias: 'a', clock: () => 0 }))
-      .toBeDefined();
-    expect(createRealtimeObservationCollector({ kind: 'sse', alias: null, clock: () => 0 }))
-      .toBeDefined();
+    expect(
+      createRealtimeObservationCollector({ kind: 'backplane', alias: 'a', clock: () => 0 }),
+    ).toBeDefined();
+    expect(
+      createRealtimeObservationCollector({ kind: 'sse', alias: null, clock: () => 0 }),
+    ).toBeDefined();
   });
 
   describe('disabled (null alias)', () => {
@@ -404,7 +407,7 @@ describe('createRealtimeObservationCollector', () => {
       expect(() =>
         backplane.observePublish(() => {
           throw reason;
-        })
+        }),
       ).toThrow(reason);
       expect(record(backplane.snapshot(), 'backplane-publish')?.failed).toEqual(1);
     });
@@ -416,11 +419,9 @@ describe('createRealtimeObservationCollector', () => {
           '--input-type=module',
           '-e',
           `
-        import { createRealtimeObservationCollector } from ${
-            JSON.stringify(
-              new URL('../../src/diagnostics/realtime-observations.ts', import.meta.url).href,
-            )
-          };
+        import { createRealtimeObservationCollector } from ${JSON.stringify(
+          new URL('../../src/diagnostics/realtime-observations.ts', import.meta.url).href,
+        )};
         const backplane = createRealtimeObservationCollector({ kind: 'backplane', alias: 'rt', clock: () => 1000, gauges: () => ({ openConnections: 0, groups: 0 }) });
         const reason = new Error('unhandled');
         const events = [];
@@ -568,10 +569,11 @@ describe('createRealtimeObservationCollector', () => {
       ws.observe('open', true);
       let settle: (value: string) => void = () => {};
       const late = collector('backplane');
-      const pending = late.observePublish(() =>
-        new Promise<string>((resolve) => {
-          settle = resolve;
-        })
+      const pending = late.observePublish(
+        () =>
+          new Promise<string>((resolve) => {
+            settle = resolve;
+          }),
       );
       ws.close();
       ws.close();

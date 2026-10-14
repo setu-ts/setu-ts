@@ -199,12 +199,14 @@ const database = defineConfigSection({
   schema: z.object({ URL: z.string().url() }),
 });
 
-app.register(ConfigPlugin({
-  // Optional: also load a .env file (not available on edge platforms). Without
-  // it, configuration comes from the process environment only.
-  envFilePath: '.env',
-  sections: [database],
-}));
+app.register(
+  ConfigPlugin({
+    // Optional: also load a .env file (not available on edge platforms). Without
+    // it, configuration comes from the process environment only.
+    envFilePath: '.env',
+    sections: [database],
+  }),
+);
 
 await app.start({ port: 3000 });
 
@@ -221,9 +223,11 @@ On Deno, `envFilePath` also needs `--allow-read`.
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'memory', // In-memory, for development; swap the arm for a real backend later
-}));
+app.register(
+  DatabasePlugin({
+    type: 'memory', // In-memory, for development; swap the arm for a real backend later
+  }),
+);
 ```
 
 The [database plugin README](../packages/database-plugin/README.md) lists the other backends.
@@ -233,14 +237,16 @@ The [database plugin README](../packages/database-plugin/README.md) lists the ot
 ```typescript
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
-app.register(AuthPlugin({
-  jwt: {
-    // Read this from configuration in a real application — never commit it.
-    secret: 'your-secret-key',
-    // 'HS256' pairs with `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
-    algorithm: 'HS256',
-  },
-}));
+app.register(
+  AuthPlugin({
+    jwt: {
+      // Read this from configuration in a real application — never commit it.
+      secret: 'your-secret-key',
+      // 'HS256' pairs with `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
+      algorithm: 'HS256',
+    },
+  }),
+);
 ```
 
 Roles and permissions are an optional `rbac` arm; the
@@ -261,7 +267,8 @@ const runtime = createRuntimeServices();
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   // onSignal is absent where there is no signal to catch (Windows, Workers).
   runtime.onSignal?.(signal, () => {
-    void app.stop()
+    void app
+      .stop()
       .then(() => runtime.exit(0))
       .catch(() => runtime.exit(1));
   });

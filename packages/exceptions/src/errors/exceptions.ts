@@ -151,10 +151,7 @@ export function conflict(message: string): HttpError {
  * @returns A `422` {@linkcode HttpError}
  * @since 0.1.0
  */
-export function validationError(
-  errors: readonly ValidationError[],
-  message?: string,
-): HttpError {
+export function validationError(errors: readonly ValidationError[], message?: string): HttpError {
   const summary = message ?? `Validation failed with ${errors.length} error(s).`;
   return new HttpError(422, summary, { errors });
 }

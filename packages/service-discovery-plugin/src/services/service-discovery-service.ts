@@ -66,9 +66,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#runtime = runtime;
     this.#options = options;
     this.#balancer = createLoadBalancer(options.strategy, runtime);
-    this.#ejection = options.ejection === false
-      ? null
-      : new EjectionTracker(runtime, options.ejection);
+    this.#ejection =
+      options.ejection === false ? null : new EjectionTracker(runtime, options.ejection);
   }
 
   /** The backend id, for the health indicator. */

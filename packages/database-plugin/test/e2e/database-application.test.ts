@@ -165,9 +165,8 @@ function createDatabaseRoutesPlugin(): IPlugin {
 describe('DatabasePlugin E2E — with real application', () => {
   it('resolves typed Drizzle access through the public database capability', async () => {
     const drizzleInstance = createFakeDrizzleInstance();
-    const database = createDrizzleDatabase(
-      drizzleInstance,
-      (database, work) => database.transaction(work),
+    const database = createDrizzleDatabase(drizzleInstance, (database, work) =>
+      database.transaction(work),
     );
     const app = createApplication({
       plugins: [
@@ -193,9 +192,8 @@ describe('DatabasePlugin E2E — with real application', () => {
     });
     await app.start();
     const service = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    const database = createDrizzleDatabase(
-      createFakeDrizzleInstance(),
-      (database, work) => database.transaction(work),
+    const database = createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
+      database.transaction(work),
     );
     expect(() => getDrizzleDatabase(service, database)).toThrow(
       "Drizzle query access requires adapter 'drizzle'; configured adapter is 'memory'.",
@@ -250,12 +248,10 @@ describe('DatabasePlugin E2E — with real application', () => {
 
     await app.start();
 
-    for (
-      const user of [
-        { name: 'Alice', email: 'alice@example.com' },
-        { name: 'Bob', email: 'bob@example.com' },
-      ]
-    ) {
+    for (const user of [
+      { name: 'Alice', email: 'alice@example.com' },
+      { name: 'Bob', email: 'bob@example.com' },
+    ]) {
       expect(
         (await app.inject({ method: 'POST', url: 'http://localhost/users', body: user }))
           .statusCode,

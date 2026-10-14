@@ -143,14 +143,22 @@ describe('resolveDynamoTarget — blank identifiers', () => {
     ['table', 'table', { table: '  ' }],
     ['partitionKey', 'partitionKey', { partitionKey: '' }],
     ['sortKey', 'sortKey', { partitionKey: 'pk', sortKey: ' ' }],
-    ['a index partition key', 'indexes.byOwner.partitionKey', {
-      partitionKey: 'pk',
-      indexes: { byOwner: { partitionKey: '' } },
-    }],
-    ['a index sort key', 'indexes.byOwner.sortKey', {
-      partitionKey: 'pk',
-      indexes: { byOwner: { partitionKey: 'owner', sortKey: '\t' } },
-    }],
+    [
+      'a index partition key',
+      'indexes.byOwner.partitionKey',
+      {
+        partitionKey: 'pk',
+        indexes: { byOwner: { partitionKey: '' } },
+      },
+    ],
+    [
+      'a index sort key',
+      'indexes.byOwner.sortKey',
+      {
+        partitionKey: 'pk',
+        indexes: { byOwner: { partitionKey: 'owner', sortKey: '\t' } },
+      },
+    ],
   ];
 
   for (const [label, option, override] of cases) {

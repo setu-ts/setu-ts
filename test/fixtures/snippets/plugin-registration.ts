@@ -18,9 +18,7 @@ export function MyPlugin(options: MyPluginOptions = {}): IPlugin {
         greet: (name: string) => `${options.greeting ?? 'Hello'}, ${name}!`,
       });
       ctx.router.get('/greet/:name', async (ctx) => {
-        const service = ctx.services.get<{ greet: (n: string) => string }>(
-          'my-service',
-        );
+        const service = ctx.services.get<{ greet: (n: string) => string }>('my-service');
         return ctx.response.json({ message: service.greet(ctx.params.name) });
       });
     },

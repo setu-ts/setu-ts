@@ -31,17 +31,13 @@ export function buildSchema(
   const hasSchema = 'schema' in options && options.schema !== undefined;
 
   if (hasTypeDefs && hasSchema) {
-    throw new GraphqlSchemaError(
-      'Cannot provide both typeDefs and schema; choose one approach',
-    );
+    throw new GraphqlSchemaError('Cannot provide both typeDefs and schema; choose one approach');
   }
 
   // Schema-first arm
   if (hasTypeDefs) {
     if (!options.resolvers) {
-      throw new GraphqlSchemaError(
-        'Schema-first options require both typeDefs and resolvers',
-      );
+      throw new GraphqlSchemaError('Schema-first options require both typeDefs and resolvers');
     }
     try {
       schema = runtime.buildSchema(options.typeDefs);
@@ -66,10 +62,7 @@ export function buildSchema(
   const schemaErrors = runtime.validateSchema(schema);
   if (schemaErrors.length > 0) {
     const messages = schemaErrors.map((e) => e.message).join('; ');
-    throw new GraphqlSchemaError(
-      `Invalid schema: ${messages}`,
-      schemaErrors,
-    );
+    throw new GraphqlSchemaError(`Invalid schema: ${messages}`, schemaErrors);
   }
 
   return schema;

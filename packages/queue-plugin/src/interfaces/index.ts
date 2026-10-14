@@ -477,8 +477,7 @@ export interface QueueProcessorDefinition {
  * @since 0.3.0
  */
 export type QueueProcessorEntry =
-  | QueueProcessorDefinition
-  | RegistryFactory<QueueProcessorDefinition>;
+  QueueProcessorDefinition | RegistryFactory<QueueProcessorDefinition>;
 
 /**
  * Options for configuring RedisQueue.

@@ -22,7 +22,7 @@ describe('cacheMiddleware', () => {
       get: async <T>(key: string): Promise<T | null> => {
         calls.push({ method: 'get', args: [key] });
         const v = storeData.get(key);
-        return v === undefined ? null : v as T;
+        return v === undefined ? null : (v as T);
       },
       set: async <T>(key: string, value: T, ttl?: number): Promise<void> => {
         calls.push({ method: 'set', args: [key, value, ttl] });
@@ -44,11 +44,14 @@ describe('cacheMiddleware', () => {
     return { store, calls };
   }
 
-  function createContext(store: ICacheStore, opts?: {
-    method?: string;
-    url?: string;
-    tenant?: ITenant;
-  }): {
+  function createContext(
+    store: ICacheStore,
+    opts?: {
+      method?: string;
+      url?: string;
+      tenant?: ITenant;
+    },
+  ): {
     ctx: IRequestContext;
     nextCalled: boolean[];
     responseStatus: number[];
@@ -79,7 +82,7 @@ describe('cacheMiddleware', () => {
         path: '/test',
         headers: new Headers(),
         ...(opts?.tenant !== undefined ? { tenant: opts.tenant } : {}),
-        json: async <T = unknown>() => ({} as T),
+        json: async <T = unknown>() => ({}) as T,
         text: async () => '',
         bytes: async () => new Uint8Array(0),
       },
@@ -216,7 +219,11 @@ describe('cacheMiddleware', () => {
     it('replays base64-encoded body as bytes', async () => {
       const { store } = createFakeStore();
       const bytes = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
-      const base64 = btoa(Array.from(bytes).map((b) => String.fromCharCode(b)).join(''));
+      const base64 = btoa(
+        Array.from(bytes)
+          .map((b) => String.fromCharCode(b))
+          .join(''),
+      );
       await store.set('GET:http://localhost/bin', {
         status: 200,
         headers: [['content-type', 'application/octet-stream']],
@@ -464,7 +471,7 @@ describe('cacheMiddleware', () => {
           url: 'http://localhost/test',
           path: '/test',
           headers: new Headers(),
-          json: async <T = unknown>() => ({} as T),
+          json: async <T = unknown>() => ({}) as T,
           text: async () => '',
           bytes: async () => new Uint8Array(0),
         },
@@ -630,7 +637,7 @@ describe('cacheMiddleware', () => {
           url: 'http://localhost/stream',
           path: '/stream',
           headers: new Headers(),
-          json: async <T = unknown>() => ({} as T),
+          json: async <T = unknown>() => ({}) as T,
           text: async () => '',
           bytes: async () => new Uint8Array(0),
         },

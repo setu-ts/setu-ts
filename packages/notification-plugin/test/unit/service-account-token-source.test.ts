@@ -24,9 +24,9 @@ async function generateKeyPair(): Promise<{ pem: string; publicKey: CryptoKey }>
   );
   const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
   const base64 = btoa(String.fromCharCode(...pkcs8));
-  const pem = `-----BEGIN PRIVATE KEY-----\n${
-    base64.match(/.{1,64}/g)!.join('\n')
-  }\n-----END PRIVATE KEY-----`;
+  const pem = `-----BEGIN PRIVATE KEY-----\n${base64
+    .match(/.{1,64}/g)!
+    .join('\n')}\n-----END PRIVATE KEY-----`;
   return { pem, publicKey: pair.publicKey };
 }
 
@@ -49,7 +49,9 @@ function createClockRuntime(startMs = 1_700_000_000_000): {
 
 /** Decodes a base64url segment to bytes. */
 function fromBase64url(segment: string): Uint8Array {
-  const padded = segment.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = segment
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
     .padEnd(Math.ceil(segment.length / 4) * 4, '=');
   const binary = atob(padded);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -91,9 +93,9 @@ describe('ServiceAccountTokenSource', () => {
 
     await source.getAccessToken();
 
-    const assertion = new URLSearchParams(
-      http.callsMatching('oauth2.googleapis.com')[0].body,
-    ).get('assertion')!;
+    const assertion = new URLSearchParams(http.callsMatching('oauth2.googleapis.com')[0].body).get(
+      'assertion',
+    )!;
     const [headerB64, claimsB64, signatureB64] = assertion.split('.');
 
     const header = JSON.parse(new TextDecoder().decode(fromBase64url(headerB64)));

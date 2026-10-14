@@ -199,7 +199,7 @@ async function startCountingProxy(
     close: async () => {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((accept, reject) =>
-        listener.close((error) => error ? reject(error) : accept())
+        listener.close((error) => (error ? reject(error) : accept())),
       );
       await wait(100);
     },
@@ -228,9 +228,7 @@ async function ensureFixture(
     await client.send(new mod.CreateBucketCommand({ Bucket: bucket }));
   }
   try {
-    const head = await client.send(
-      new mod.HeadObjectCommand({ Bucket: bucket, Key: OBJECT_KEY }),
-    );
+    const head = await client.send(new mod.HeadObjectCommand({ Bucket: bucket, Key: OBJECT_KEY }));
     if (head.ContentLength === OBJECT_BYTES) return;
   } catch {
     // Absent — fall through and upload.
@@ -330,8 +328,7 @@ describe('REAL MinIO/S3 streaming backpressure (X45-1)', { skip: skip }, () => {
         // socket buffer stays put while the consumed total grows four-fold. The
         // slack is deliberately small — reusing the cap here would make this
         // assertion implied by the one above, and so unable to fail at all.
-        expect(lateReadAhead - earlyReadAhead, label)
-          .toBeLessThan(READ_AHEAD_SCALING_SLACK_BYTES);
+        expect(lateReadAhead - earlyReadAhead, label).toBeLessThan(READ_AHEAD_SCALING_SLACK_BYTES);
 
         await reader.cancel();
         await wait(300);

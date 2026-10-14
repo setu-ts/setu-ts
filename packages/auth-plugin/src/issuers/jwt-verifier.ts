@@ -49,7 +49,7 @@ export function decodeJsonSegment(segment: string): Record<string, unknown> | nu
   try {
     const value: unknown = JSON.parse(new TextDecoder().decode(decodeBase64Url(segment)));
     return typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? value as Record<string, unknown>
+      ? (value as Record<string, unknown>)
       : null;
   } catch {
     return null;
@@ -154,7 +154,7 @@ export class JwtVerifier {
       return { ok: false, reason: 'malformed-signature' };
     }
     const signingInput = TEXT.encode(`${segments[0]}.${segments[1]}`);
-    if (!await this.#signatureVerifier.verify(selected, family, signature, signingInput)) {
+    if (!(await this.#signatureVerifier.verify(selected, family, signature, signingInput))) {
       return { ok: false, reason: 'bad-signature' };
     }
 

@@ -55,32 +55,35 @@ describe('createProvider', () => {
     // Unreachable through the typed surface now that the options are
     // discriminated, so the cast stands in for a JavaScript caller.
     expect(() =>
-      createProvider(
-        { provider: 'invalid' } as unknown as StoragePluginOptions,
-        fakeRuntime,
-      )
+      createProvider({ provider: 'invalid' } as unknown as StoragePluginOptions, fakeRuntime),
     ).toThrow('Unsupported storage provider');
   });
 
   it('b2 type builds S3Provider with derived B2 endpoint', () => {
-    const p = createProvider({
-      provider: 'b2',
-      options: {
-        bucket: 'mybucket',
-        region: 'us-west-1',
-        accessKeyId: 'keyid',
-        secretAccessKey: 'secret',
+    const p = createProvider(
+      {
+        provider: 'b2',
+        options: {
+          bucket: 'mybucket',
+          region: 'us-west-1',
+          accessKeyId: 'keyid',
+          secretAccessKey: 'secret',
+        },
       },
-    }, fakeRuntime);
+      fakeRuntime,
+    );
     expect(p.isReady()).toBe(false);
   });
 
   it('b2 honors explicit endpoint override', () => {
     const customEndpoint = 'https://custom.endpoint.com';
-    const p = createProvider({
-      provider: 'b2',
-      options: { bucket: 'mybucket', endpoint: customEndpoint },
-    }, fakeRuntime);
+    const p = createProvider(
+      {
+        provider: 'b2',
+        options: { bucket: 'mybucket', endpoint: customEndpoint },
+      },
+      fakeRuntime,
+    );
     expect(p.isReady()).toBe(false);
   });
 });
@@ -121,9 +124,7 @@ describe('StoragePlugin', () => {
 
   it('unknown provider type at registration throws', async () => {
     const { ctx } = createFakeContext();
-    const plugin = StoragePlugin(
-      { provider: 'nonexistent' } as unknown as StoragePluginOptions,
-    );
+    const plugin = StoragePlugin({ provider: 'nonexistent' } as unknown as StoragePluginOptions);
     await expect(plugin.register!(ctx)).rejects.toThrow('Unsupported storage provider');
   });
 
@@ -138,14 +139,17 @@ describe('StoragePlugin', () => {
 
   it('azure provider can be wired', () => {
     const fakeRuntime = makeFakeRuntime();
-    const provider = createProvider({
-      provider: 'azure',
-      options: {
-        containerName: 'mycontainer',
-        accountName: 'fakeaccount',
-        accountKey: 'dGVzdGtleQ==',
+    const provider = createProvider(
+      {
+        provider: 'azure',
+        options: {
+          containerName: 'mycontainer',
+          accountName: 'fakeaccount',
+          accountKey: 'dGVzdGtleQ==',
+        },
       },
-    }, fakeRuntime);
+      fakeRuntime,
+    );
     expect(provider.isReady()).toBe(false);
   });
 

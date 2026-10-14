@@ -174,9 +174,9 @@ export function createMongoDataSource(
     if (typeof id === 'string' || typeof id === 'number') {
       return Promise.reject(
         new Error(
-          `MongoAdapter: ${operation} needs a composite record for multi-column key ${
-            columns.join(', ')
-          }, got a scalar.`,
+          `MongoAdapter: ${operation} needs a composite record for multi-column key ${columns.join(
+            ', ',
+          )}, got a scalar.`,
         ),
       );
     }
@@ -202,17 +202,22 @@ export function createMongoDataSource(
         mapQueryToDriver(query, target),
       );
       const filter = mapMongoIdValues(translatedFilter, target, objectIdCtor);
-      const projection = findOptions.projection === undefined ? undefined : mapProjection(
-        findOptions.projection,
-        target.primaryKey,
-        target.primaryKey.length === 1 || target.idType === 'compound',
-      );
-      const rows = await collection.find(
-        filter,
-        projection === undefined
-          ? { ...findOptions, ...options() }
-          : { ...findOptions, projection, ...options() },
-      ).toArray();
+      const projection =
+        findOptions.projection === undefined
+          ? undefined
+          : mapProjection(
+              findOptions.projection,
+              target.primaryKey,
+              target.primaryKey.length === 1 || target.idType === 'compound',
+            );
+      const rows = await collection
+        .find(
+          filter,
+          projection === undefined
+            ? { ...findOptions, ...options() }
+            : { ...findOptions, projection, ...options() },
+        )
+        .toArray();
       return rows.map((row) => fromDriverDocument(row, target));
     },
 
@@ -260,9 +265,9 @@ export function createMongoDataSource(
 
       const missing = (): Error =>
         new Error(
-          `MongoAdapter: no ${target.collection} row with ${target.primaryKey.join(', ')} '${
-            JSON.stringify(id)
-          }'`,
+          `MongoAdapter: no ${target.collection} row with ${target.primaryKey.join(', ')} '${JSON.stringify(
+            id,
+          )}'`,
         );
 
       // Stripping the key can leave nothing to set. Read the row instead of
@@ -310,12 +315,17 @@ export function createMongoDataSource(
       const patch = { ...data };
       for (const column of target.primaryKey) delete patch[column];
       delete patch._id;
-      const result = Object.keys(patch).length === 0
-        ? await collection.findOne(filter, options())
-        : await collection.findOneAndUpdate(filter, { $set: patch }, {
-          returnDocument: 'after',
-          ...options(),
-        });
+      const result =
+        Object.keys(patch).length === 0
+          ? await collection.findOne(filter, options())
+          : await collection.findOneAndUpdate(
+              filter,
+              { $set: patch },
+              {
+                returnDocument: 'after',
+                ...options(),
+              },
+            );
       return result == null ? null : fromDriverDocument(result, target);
     },
     async deleteWhere(id, where) {
@@ -334,10 +344,7 @@ export function createMongoDataSource(
       const result = await collection.deleteOne(filter, options());
       return (result.deletedCount ?? 0) > 0;
     },
-    count: async (
-      where: Record<string, unknown>,
-      filter?: FilterExpression,
-    ): Promise<number> => {
+    count: async (where: Record<string, unknown>, filter?: FilterExpression): Promise<number> => {
       const mapped = mapQueryToDriver(
         {
           where,
@@ -421,21 +428,25 @@ export function createMongoDataSource(
       // sorting by `orderBy` alone leaves tied rows in an order the backend
       // picks freely and the predicate skips or repeats them.
       const keysetSort = resolveKeysetSort(normalized.orderBy, target.primaryKey);
-      const keyset = decoded === null ? undefined : keysetPredicate(
-        decoded.orderedValues,
-        decoded.keyValues,
-        normalized.orderBy,
-        target.primaryKey,
-      );
+      const keyset =
+        decoded === null
+          ? undefined
+          : keysetPredicate(
+              decoded.orderedValues,
+              decoded.keyValues,
+              normalized.orderBy,
+              target.primaryKey,
+            );
       const keysetFilter = conjoinFilters(normalized.filter, keyset);
 
       // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
       //    position replaces offset (and §3.10 refused the two together). The
       //    `limit + 1` is folded directly into the driver `find` below.
       const keyColumns = target.primaryKey;
-      const internalSelect = normalized.select.length > 0
-        ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
-        : [];
+      const internalSelect =
+        normalized.select.length > 0
+          ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+          : [];
       const mapped = mapQueryToDriver(
         {
           ...normalized,
@@ -448,17 +459,22 @@ export function createMongoDataSource(
       );
       const { filter: translatedFilter, options: findOptions } = translateQuery(mapped);
       const filter = mapMongoIdValues(translatedFilter, target, objectIdCtor);
-      const projection = findOptions.projection === undefined ? undefined : mapProjection(
-        findOptions.projection,
-        keyColumns,
-        target.primaryKey.length === 1 || target.idType === 'compound',
-      );
-      const found = await collection.find(
-        filter,
-        projection === undefined
-          ? { ...findOptions, ...options() }
-          : { ...findOptions, projection, ...options() },
-      ).toArray();
+      const projection =
+        findOptions.projection === undefined
+          ? undefined
+          : mapProjection(
+              findOptions.projection,
+              keyColumns,
+              target.primaryKey.length === 1 || target.idType === 'compound',
+            );
+      const found = await collection
+        .find(
+          filter,
+          projection === undefined
+            ? { ...findOptions, ...options() }
+            : { ...findOptions, projection, ...options() },
+        )
+        .toArray();
 
       // The driver returns raw documents keyed by `_id`; the cursor minting
       // reads the repository primary-key columns and the caller expects
@@ -480,11 +496,10 @@ export function createMongoDataSource(
       // 7. The caller's projection is what comes back — the key columns and the
       //    ordered fields joined the internal select only for the probe and the
       //    cursor minting, and are stripped here.
-      const rows = internalSelect.length > 0
-        ? pageRows.map(
-          (row) => projectFields(row, normalized.select) as Record<string, unknown>,
-        )
-        : pageRows;
+      const rows =
+        internalSelect.length > 0
+          ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
+          : pageRows;
       return Promise.resolve({ rows, nextCursor });
     },
   };
@@ -509,10 +524,7 @@ function conjoinFilters(
 }
 
 /** Maps repository-visible primary-key fields onto Mongo's `_id` field. */
-function mapQueryToDriver(
-  query: NormalizedQuery,
-  target: MongoTarget,
-): NormalizedQuery {
+function mapQueryToDriver(query: NormalizedQuery, target: MongoTarget): NormalizedQuery {
   const columns = target.primaryKey;
   // Flat composite (multi-column, no compound _id) uses top-level fields.
   // Compound _id wraps the subdocument under _id.
@@ -544,10 +556,9 @@ function mapQueryToDriver(
       for (const col of present) where['_id.' + col] = query.where[col];
     }
     orderBy = Object.fromEntries(
-      columns.map((col) => [
-        '_id.' + col,
-        query.orderBy[col] as OrderDirection | undefined,
-      ]).filter(([, d]) => d !== undefined) as [string, OrderDirection][],
+      columns
+        .map((col) => ['_id.' + col, query.orderBy[col] as OrderDirection | undefined])
+        .filter(([, d]) => d !== undefined) as [string, OrderDirection][],
     );
   } else if (isFlatComposite) {
     // Flat composite: columns remain as top-level fields; no _id mapping.
@@ -607,7 +618,7 @@ function mapFilterToDriver(
     return {
       ...expression,
       filters: expression.filters.map((child) =>
-        mapFilterToDriver(child, columns, isCompound, isFlatComposite)
+        mapFilterToDriver(child, columns, isCompound, isFlatComposite),
       ),
     };
   }
@@ -637,7 +648,7 @@ function mapMongoIdValues(
   for (const [field, condition] of Object.entries(filter)) {
     if (field === '$and' || field === '$or') {
       mapped[field] = (condition as Record<string, unknown>[]).map((child) =>
-        mapMongoIdValues(child, target, objectIdCtor)
+        mapMongoIdValues(child, target, objectIdCtor),
       );
     } else if (field === '_id') {
       mapped[field] = mapMongoIdCondition(condition, mapValue);
@@ -649,10 +660,7 @@ function mapMongoIdValues(
 }
 
 /** Converts scalar and operator-document Mongo `_id` predicates. */
-function mapMongoIdCondition(
-  condition: unknown,
-  mapValue: (value: unknown) => unknown,
-): unknown {
+function mapMongoIdCondition(condition: unknown, mapValue: (value: unknown) => unknown): unknown {
   if (condition === null || typeof condition !== 'object' || Array.isArray(condition)) {
     return mapValue(condition);
   }
@@ -662,11 +670,12 @@ function mapMongoIdCondition(
   }
   const operators: Record<string, unknown> = {};
   for (const [operator, value] of entries) {
-    operators[operator] = operator === '$options' || operator === '$regex'
-      ? value
-      : operator === '$in' && Array.isArray(value)
-      ? value.map(mapValue)
-      : mapValue(value);
+    operators[operator] =
+      operator === '$options' || operator === '$regex'
+        ? value
+        : operator === '$in' && Array.isArray(value)
+          ? value.map(mapValue)
+          : mapValue(value);
   }
   return operators;
 }

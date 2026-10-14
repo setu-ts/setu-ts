@@ -131,9 +131,11 @@ export function withDeadline<T>(
     return call;
   }
   const setTimer = options.timing?.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
-  const clearTimer = options.timing?.clearTimer ?? ((handle: TimerHandle) => {
-    clearTimeout(handle as ReturnType<typeof setTimeout>);
-  });
+  const clearTimer =
+    options.timing?.clearTimer ??
+    ((handle: TimerHandle) => {
+      clearTimeout(handle as ReturnType<typeof setTimeout>);
+    });
   let timer: TimerHandle;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimer(() => {

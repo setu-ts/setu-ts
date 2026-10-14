@@ -73,8 +73,9 @@ export function isolationReason(path: string, source: string): string | null {
   // resource, which surfaces as a timeout in whichever suite is least patient.
   // `Deno.Command` also covers every suite that drives `docker`.
   if (
-    /Deno\.Command|node:child_process|\bspawnProcess\(|\brunProcess\(|\brun\(process\.execPath/
-      .test(source)
+    /Deno\.Command|node:child_process|\bspawnProcess\(|\brunProcess\(|\brun\(process\.execPath/.test(
+      source,
+    )
   ) {
     return 'spawns a subprocess';
   }
@@ -151,7 +152,7 @@ export async function discoverTestFiles(): Promise<readonly string[]> {
  * @returns The partition
  */
 export async function partitionTests(files?: readonly string[]): Promise<TestPartition> {
-  const paths = files ?? await discoverTestFiles();
+  const paths = files ?? (await discoverTestFiles());
   const isolated: string[] = [];
   const hermetic: string[] = [];
   const reasons = new Map<string, string>();

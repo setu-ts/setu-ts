@@ -110,7 +110,10 @@ describe('TaskPool security lifecycle regressions', () => {
   it('ignores duplicate startup errors and late callbacks from a dropped slot', async () => {
     const { host, a } = setup();
     const first = expect(a.run(1)).rejects.toThrow('first');
-    const second = a.run(2).then((result) => ({ result }), (error: Error) => ({ error }));
+    const second = a.run(2).then(
+      (result) => ({ result }),
+      (error: Error) => ({ error }),
+    );
     host.handles[0].emitWorkerError(new Error('first'));
     host.handles[0].emitWorkerError(new Error('duplicate'));
     host.handles[0].emitReady();

@@ -56,12 +56,10 @@ interface RealOtel {
 }
 
 /** The optional OTel modules, loaded once; `null` when not resolvable. */
-async function loadOtel(): Promise<
-  {
-    readonly sdk: typeof import('@opentelemetry/sdk-trace-base');
-    readonly resources: typeof import('@opentelemetry/resources');
-  } | null
-> {
+async function loadOtel(): Promise<{
+  readonly sdk: typeof import('@opentelemetry/sdk-trace-base');
+  readonly resources: typeof import('@opentelemetry/resources');
+} | null> {
   try {
     const api = await import('@opentelemetry/api');
     const sdk = await import('@opentelemetry/sdk-trace-base');
@@ -89,11 +87,11 @@ function realOtel(): RealOtel {
     resourcesMod: resources as never,
     pluginOptions: { serviceName: 'm107-outbox-trace', exporter: 'console' },
     // The console-exporter seam, handed the in-memory exporter.
-    consoleExporterCtor: (class {
+    consoleExporterCtor: class {
       constructor() {
         return exporter;
       }
-    }) as never,
+    } as never,
     validated: true,
     contextActivation: true,
   });
@@ -151,15 +149,17 @@ describe('outbox trace re-parenting (real OpenTelemetry)', { skip: modules === n
     try {
       const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
       const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
-      await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING)
+      await app.services
+        .get<IMessageBroker>(CAPABILITIES.MESSAGING)
         .subscribe(orderPlaced.topic, () => {});
       app.router.post('/orders', async (ctx) => {
         await db.transaction((uow) => outbox.write(uow, orderPlaced, { key: 'K', n: 1 }));
         return ctx.response.status(201).json({ ok: true });
       });
 
-      expect((await app.inject({ method: 'POST', url: 'http://localhost/orders' })).statusCode)
-        .toBe(201);
+      expect(
+        (await app.inject({ method: 'POST', url: 'http://localhost/orders' })).statusCode,
+      ).toBe(201);
       // The sweep runs OUTSIDE the request: no span is active here.
       expect((await outbox.sweep()).published).toBe(1);
 
@@ -193,14 +193,14 @@ describe('outbox trace re-parenting (real OpenTelemetry)', { skip: modules === n
       const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
       const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
       const telemetry = app.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY);
-      await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING)
+      await app.services
+        .get<IMessageBroker>(CAPABILITIES.MESSAGING)
         .subscribe(orderPlaced.topic, () => {});
       // Written with no span active: no traceparent stored.
       const traceless = await db.transaction((uow) => outbox.write(uow, orderPlaced, { n: 1 }));
       // Written inside a span, then its traceparent edited into an invalid value.
-      const edited = await telemetry.withSpan(
-        'writer',
-        () => db.transaction((uow) => outbox.write(uow, orderPlaced, { n: 2 })),
+      const edited = await telemetry.withSpan('writer', () =>
+        db.transaction((uow) => outbox.write(uow, orderPlaced, { n: 2 })),
       );
       await edit(db, edited, { traceparent: `00-${'0'.repeat(32)}-${'0'.repeat(16)}-01` });
       app.router.post('/kick', (ctx) => {
@@ -208,8 +208,9 @@ describe('outbox trace re-parenting (real OpenTelemetry)', { skip: modules === n
         return ctx.response.status(202).json({ ok: true });
       });
 
-      expect((await app.inject({ method: 'POST', url: 'http://localhost/kick' })).statusCode)
-        .toBe(202);
+      expect((await app.inject({ method: 'POST', url: 'http://localhost/kick' })).statusCode).toBe(
+        202,
+      );
       expect(sweeps.length).toBe(1);
       await sweeps[0];
 
@@ -248,7 +249,10 @@ describe('outbox trace re-parenting (real OpenTelemetry)', { skip: modules === n
       activeSpanContext: () => real.activeSpanContext(),
     };
 
-    for (const [label, telemetry] of [['honoured', real], ['dropped', droppingRoot]] as const) {
+    for (const [label, telemetry] of [
+      ['honoured', real],
+      ['dropped', droppingRoot],
+    ] as const) {
       const h = await outboxHarness({ telemetry });
       await h.write({ n: 1 });
       await real.withSpan(`request (${label})`, () => h.sweep());

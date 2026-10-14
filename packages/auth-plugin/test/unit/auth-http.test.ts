@@ -60,10 +60,11 @@ describe('createDefaultAuthHttp', () => {
 
   it('aborts through the signal', async () => {
     const controller = new AbortController();
-    const http = createDefaultAuthHttp((_url, init) =>
-      new Promise((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-      })
+    const http = createDefaultAuthHttp(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
     );
     const pending = http.get('https://x.test', { signal: controller.signal, maxBytes: 10 });
     controller.abort();

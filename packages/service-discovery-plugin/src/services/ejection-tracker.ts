@@ -108,10 +108,7 @@ export class EjectionTracker {
    * @param instances - The full known list
    * @returns The usable subset, or the full list when nothing would remain
    */
-  filter(
-    serviceName: string,
-    instances: readonly ServiceInstance[],
-  ): readonly ServiceInstance[] {
+  filter(serviceName: string, instances: readonly ServiceInstance[]): readonly ServiceInstance[] {
     const now = this.#runtime.hrtime();
     const usable = instances.filter((instance) => !this.#isEjected(serviceName, instance.id, now));
     return usable.length === 0 ? instances : usable;
@@ -139,9 +136,7 @@ export class EjectionTracker {
     const prefix = `${serviceName}\u0000`;
     let ejected = 0;
     for (const [key, state] of this.#states) {
-      if (
-        key.startsWith(prefix) && state.ejectedUntilMs !== null && state.ejectedUntilMs > now
-      ) {
+      if (key.startsWith(prefix) && state.ejectedUntilMs !== null && state.ejectedUntilMs > now) {
         ejected++;
       }
     }

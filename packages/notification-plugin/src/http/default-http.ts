@@ -13,9 +13,7 @@ import type { INotificationHttp, NotificationHttpResponse } from '../interfaces/
  * @returns The notification HTTP adapter
  * @since 0.1.0
  */
-export function createDefaultNotificationHttp(
-  fetchImpl: typeof fetch = fetch,
-): INotificationHttp {
+export function createDefaultNotificationHttp(fetchImpl: typeof fetch = fetch): INotificationHttp {
   return {
     async post(
       url: string,

@@ -168,9 +168,7 @@ describe('Pipeline runs for upgrade requests (M70a)', () => {
     expect(result.statusCode).toBe(400);
     // The router already accepted, so it may hold a reserved connection slot;
     // refusing without releasing it would leak one slot per malformed upgrade.
-    expect(probe.closes).toEqual([
-      { code: 1006, reason: 'Upgrade request carried a body' },
-    ]);
+    expect(probe.closes).toEqual([{ code: 1006, reason: 'Upgrade request carried a body' }]);
 
     await app.stop();
   });
@@ -271,7 +269,7 @@ describe('Pipeline runs for upgrade requests (M70a)', () => {
         wsPlugin((request) =>
           Promise.resolve(
             new URL(request.url).pathname === '/ws' ? { accept: true, sink: probe.sink } : null,
-          )
+          ),
         ),
       ],
     });

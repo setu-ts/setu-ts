@@ -407,8 +407,7 @@ describe('telemetryMiddleware', () => {
     // N4 fix: the middleware now passes parentContext directly (no bridge).
     expect(capturedOptions).toHaveLength(1);
     const pc = capturedOptions[0]!.parentContext as
-      | { traceId?: string; spanId?: string }
-      | undefined;
+      { traceId?: string; spanId?: string } | undefined;
     expect(pc).toBeDefined();
     expect(pc?.traceId).toBe('0af7651916cd43dd8448eb211c80319c');
     expect(pc?.spanId).toBe('b7ad6b7169203331');

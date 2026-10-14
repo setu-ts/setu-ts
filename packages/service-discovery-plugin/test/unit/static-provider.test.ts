@@ -32,14 +32,16 @@ describe('StaticProvider', () => {
   it('carries secure, weight, tags, and metadata through', async () => {
     const provider = new StaticProvider(
       {
-        billing: [{
-          host: 'svc',
-          port: 443,
-          secure: true,
-          weight: 5,
-          tags: ['primary'],
-          metadata: { zone: 'eu-1' },
-        }],
+        billing: [
+          {
+            host: 'svc',
+            port: 443,
+            secure: true,
+            weight: 5,
+            tags: ['primary'],
+            metadata: { zone: 'eu-1' },
+          },
+        ],
       },
       createFakeRuntime(),
     );
@@ -88,10 +90,7 @@ describe('StaticProvider', () => {
 
   it('watch fires once with the configured list and never again', async () => {
     const runtime = createFakeRuntime();
-    const provider = new StaticProvider(
-      { billing: [{ host: '10.0.0.1', port: 8080 }] },
-      runtime,
-    );
+    const provider = new StaticProvider({ billing: [{ host: '10.0.0.1', port: 8080 }] }, runtime);
     const seen: number[] = [];
     await provider.watch('billing', (list) => seen.push(list.length));
 
@@ -105,10 +104,7 @@ describe('StaticProvider', () => {
 
   it('unsubscribing before the timer fires suppresses the delivery', async () => {
     const runtime = createFakeRuntime();
-    const provider = new StaticProvider(
-      { billing: [{ host: '10.0.0.1', port: 8080 }] },
-      runtime,
-    );
+    const provider = new StaticProvider({ billing: [{ host: '10.0.0.1', port: 8080 }] }, runtime);
     const seen: number[] = [];
     const unsubscribe = await provider.watch('billing', (list) => seen.push(list.length));
 

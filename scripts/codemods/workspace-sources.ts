@@ -11,12 +11,15 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const workspace: string[] = JSON.parse(readFileSync(resolve(root, 'deno.json'), 'utf8')).workspace;
-const members = new Map(workspace.map((member) => {
-  const dir = resolve(root, member);
-  const manifest = JSON.parse(readFileSync(resolve(dir, 'deno.json'), 'utf8'));
-  const exports = typeof manifest.exports === 'string' ? { '.': manifest.exports } : manifest.exports;
-  return [manifest.name, { dir, exports: exports as Record<string, string> }] as const;
-}));
+const members = new Map(
+  workspace.map((member) => {
+    const dir = resolve(root, member);
+    const manifest = JSON.parse(readFileSync(resolve(dir, 'deno.json'), 'utf8'));
+    const exports =
+      typeof manifest.exports === 'string' ? { '.': manifest.exports } : manifest.exports;
+    return [manifest.name, { dir, exports: exports as Record<string, string> }] as const;
+  }),
+);
 
 /** Resolve package tests to the same source export map used by the Node build. */
 export function sourceExport(specifier: string): string | null {

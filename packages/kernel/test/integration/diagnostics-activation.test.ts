@@ -32,7 +32,7 @@ describe('diagnostics activation', () => {
       createApplication({
         plugins: [runtimePlugin()],
         diagnostics: { labels: { plugins: ['x'.repeat(500)] } },
-      })
+      }),
     ).toThrow(RangeError);
     let message = '';
     try {
@@ -92,23 +92,21 @@ describe('diagnostics activation', () => {
     // Exactly the contract's two methods, and the facade cannot be re-pointed.
     expect(Object.keys(reached!).sort()).toEqual(['read', 'snapshot']);
     expect(Object.isFrozen(reached)).toBe(true);
-    for (
-      const writer of [
-        'markClosed',
-        'markStartupFailed',
-        'markRunning',
-        'markStopping',
-        'safeObserve',
-        'initializeRuntime',
-        'pluginRegistered',
-        'routeRegistered',
-        'middlewareCompiled',
-        'beginRequestOperation',
-        'endRequestOperation',
-        'observeHandlerStage',
-        'observeLifecycleEvent',
-      ]
-    ) {
+    for (const writer of [
+      'markClosed',
+      'markStartupFailed',
+      'markRunning',
+      'markStopping',
+      'safeObserve',
+      'initializeRuntime',
+      'pluginRegistered',
+      'routeRegistered',
+      'middlewareCompiled',
+      'beginRequestOperation',
+      'endRequestOperation',
+      'observeHandlerStage',
+      'observeLifecycleEvent',
+    ]) {
       expect(typeof (reached as Record<string, unknown>)[writer]).toBe('undefined');
     }
     // Still a working reader, and the application is untouched.

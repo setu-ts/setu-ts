@@ -152,13 +152,15 @@ interface ActiveConsumer {
 function describePublishRefusal(topic: string, error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code;
   if (code === '503') {
-    return `NATS JetStream refused the message published to ${JSON.stringify(topic)}: no ` +
+    return (
+      `NATS JetStream refused the message published to ${JSON.stringify(topic)}: no ` +
       "stream captures this subject. Add it to the stream's subjects " +
-      '(NatsOptions.streamSubjects when the broker creates the stream).';
+      '(NatsOptions.streamSubjects when the broker creates the stream).'
+    );
   }
-  return `NATS JetStream did not acknowledge the message published to ${JSON.stringify(topic)}: ${
-    describeError(error)
-  }`;
+  return `NATS JetStream did not acknowledge the message published to ${JSON.stringify(topic)}: ${describeError(
+    error,
+  )}`;
 }
 
 /**
@@ -194,11 +196,7 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @param serializer - Serializer for message payloads
    * @param options - NATS connection and configuration options
    */
-  constructor(
-    runtime: IRuntimeServices,
-    serializer: ISerializer,
-    options?: NatsOptions,
-  ) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: NatsOptions) {
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#url = options?.url ?? 'nats://localhost:4222';
@@ -726,9 +724,11 @@ export class NatsBroker implements MessageBrokerAdapter {
 
           const handlerResult = handler(deserialized, metadata);
           if (handlerResult instanceof Promise) {
-            handlerResult.then(() => {
-              msgTyped.ack();
-            }).catch(fail);
+            handlerResult
+              .then(() => {
+                msgTyped.ack();
+              })
+              .catch(fail);
           } else {
             msgTyped.ack();
           }

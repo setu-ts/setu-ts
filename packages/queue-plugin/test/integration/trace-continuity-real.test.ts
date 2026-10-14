@@ -63,9 +63,9 @@ async function realOtel(): Promise<RealOtel | null> {
 
   setOtelApi(api as never);
   const exporter = new sdk.InMemorySpanExporter();
-  const provider = new sdk.BasicTracerProvider(
-    { spanProcessors: [new sdk.SimpleSpanProcessor(exporter)] } as never,
-  );
+  const provider = new sdk.BasicTracerProvider({
+    spanProcessors: [new sdk.SimpleSpanProcessor(exporter)],
+  } as never);
   const tracer = provider.getTracer('m90i-queue-continuity');
 
   const host: TracerHost = {
@@ -98,7 +98,7 @@ async function realOtel(): Promise<RealOtel | null> {
     activate<T>(span: unknown, fn: () => Promise<T>): Promise<T> {
       return api.context.with(api.trace.setSpan(api.context.active(), span as never), fn);
     },
-    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') } as TelemetryContext),
+    extractContext: () => ({ _opaque: Symbol.for('he.telemetry.context') }) as TelemetryContext,
     injectContext: () => ({}),
     shutdown: () => provider.shutdown(),
     forceFlush: () => provider.forceFlush(),
@@ -183,8 +183,7 @@ describe('real-OTel trace continuity across the queue hop', () => {
 
     // The join travels on the header, which is what makes it work across a
     // process boundary rather than through ambient context.
-    expect(delivered?.headers?.traceparent)
-      .toBe(`00-${requestTraceId}-${enqueue?.spanId}-01`);
+    expect(delivered?.headers?.traceparent).toBe(`00-${requestTraceId}-${enqueue?.spanId}-01`);
   });
 
   it('starts an honest ROOT for a job that carries no traceparent', async () => {

@@ -181,8 +181,9 @@ describe('@setu-ts/common barrel — M94b form body', () => {
       new TextEncoder().encode('a=1'),
       'application/x-www-form-urlencoded',
     );
-    const encoding: import('../../src/index.ts').FormEncoding | undefined = common
-      .formEncodingOf('application/x-www-form-urlencoded');
+    const encoding: import('../../src/index.ts').FormEncoding | undefined = common.formEncodingOf(
+      'application/x-www-form-urlencoded',
+    );
     const file: import('../../src/index.ts').FormFile = {
       filename: 'a.txt',
       mimeType: 'text/plain',
@@ -210,8 +211,8 @@ describe('@setu-ts/common barrel — M94b form body', () => {
  * (mutually assignable in the identity sense), so the pinned shape below fails
  * on any added, removed, or re-typed member.
  */
-type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
-  : false;
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 // Compile-time: `SessionView` resolves from the barrel and its shape is pinned
 // (M73). Dropping the re-export or widening the projection stops this file
@@ -292,7 +293,8 @@ describe('@setu-ts/common barrel — M86 ingress contracts', () => {
     // Type-level: both names resolve only from the public barrel. A dropped
     // type-only export is invisible to runtime assertions.
     const decision: WebSocketGuardDecision = { status: 401 };
-    const guard: WebSocketUpgradeGuard = (context) => context.user === undefined ? decision : true;
+    const guard: WebSocketUpgradeGuard = (context) =>
+      context.user === undefined ? decision : true;
 
     // Driven, not merely named: a guard the barrel's types cannot express
     // would fail to compile, and one that never runs proves only that.
@@ -331,8 +333,8 @@ describe('@setu-ts/common barrel — M89c IMultiTenancyService.getRepositoryFor'
       prefixCacheKey: (tenantId, key) => `${tenantId}:${key}`,
     };
 
-    const repo: import('../../src/index.ts').ITenantRepository<{ id: string }> = service
-      .getRepositoryFor('acme', 'Widget');
+    const repo: import('../../src/index.ts').ITenantRepository<{ id: string }> =
+      service.getRepositoryFor('acme', 'Widget');
     expect(typeof repo.findAll).toBe('function');
     expect(service.prefixCacheKey('acme', 'k')).toBe('acme:k');
   });
@@ -476,10 +478,7 @@ describe('@setu-ts/common barrel — M92 view contract', () => {
 // assertion, so the contract is declared against the barrel. Dropping the
 // re-export, renaming a member, or changing a signature fails `deno check`
 // here (the M56 defect class).
-const authMethodUnionPinned: Equals<
-  common.AuthMethod,
-  'pwd' | 'otp' | 'pop' | 'fed'
-> = true;
+const authMethodUnionPinned: Equals<common.AuthMethod, 'pwd' | 'otp' | 'pop' | 'fed'> = true;
 const signInOutcomePinned: Equals<
   common.SignInOutcome,
   { readonly status: 'signed-in' } | { readonly status: 'second-factor-required' }
@@ -572,7 +571,7 @@ describe('@setu-ts/common barrel — M101c identity composition', () => {
       // deno-lint-ignore require-await
       find: async () => [],
       // deno-lint-ignore require-await
-      create: async <E>(): Promise<E> => ({} as unknown as E),
+      create: async <E>(): Promise<E> => ({}) as unknown as E,
       // deno-lint-ignore require-await
       update: async () => null,
       // deno-lint-ignore require-await

@@ -46,10 +46,7 @@ const MAX_SCHEDULER_RECORDS = 64;
 /** The fixed response budget, in UTF-8 bytes of the compact JSON. */
 const MAX_SCHEDULER_RESPONSE_BYTES = 256 * 1024;
 
-const OPERATIONS: ReadonlySet<string> = new Set<SchedulerDiagnosticsOperation>([
-  'fire',
-  'attempt',
-]);
+const OPERATIONS: ReadonlySet<string> = new Set<SchedulerDiagnosticsOperation>(['fire', 'attempt']);
 
 /** States a SOURCE may report about itself (`unsupported` is connector-side only). */
 const SOURCE_STATES: ReadonlySet<string> = new Set<DiagnosticsInspectorState>([

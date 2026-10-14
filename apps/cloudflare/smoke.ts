@@ -31,9 +31,7 @@ try {
   }
 }
 if (check === null || !check.success) {
-  console.warn(
-    'SKIP: Wrangler is not installed; Cloudflare smoke check was not run.',
-  );
+  console.warn('SKIP: Wrangler is not installed; Cloudflare smoke check was not run.');
   Deno.exit(77);
 }
 
@@ -157,9 +155,7 @@ try {
   // short of real workerd exercises that crossing.
   const rpc = await fetch(`${baseUrl}/double/21`);
   if (!rpc.ok) {
-    throw new Error(
-      `Request/reply returned ${rpc.status}: ${await rpc.text()}`,
-    );
+    throw new Error(`Request/reply returned ${rpc.status}: ${await rpc.text()}`);
   }
   const { answer } = await rpc.json();
   if (answer !== 42) {

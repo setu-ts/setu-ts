@@ -30,12 +30,14 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 /** Result of one origin execution as observed by cache middleware. */
-type CacheOriginOutcome = {
-  readonly replayable: true;
-  readonly payload: CachedResponsePayload;
-} | {
-  readonly replayable: false;
-};
+type CacheOriginOutcome =
+  | {
+      readonly replayable: true;
+      readonly payload: CachedResponsePayload;
+    }
+  | {
+      readonly replayable: false;
+    };
 
 /**
  * Create a caching middleware function.
@@ -47,9 +49,7 @@ type CacheOriginOutcome = {
  * @returns The middleware function
  * @since 0.1.0
  */
-export function cacheMiddleware(
-  options?: CacheMiddlewareOptions,
-): MiddlewareFunction {
+export function cacheMiddleware(options?: CacheMiddlewareOptions): MiddlewareFunction {
   const ttlSeconds = options?.ttlSeconds;
   const keyFn = options?.key;
   const varyFn = options?.vary;
@@ -159,9 +159,7 @@ function replayCachedResponse(
     ctx.response.send(decoded.bodyBytes);
   } else if (typeof decoded.bodyBytes === 'string') {
     ctx.response.text(decoded.bodyBytes);
-    const cachedCT = decoded.headers.find(
-      ([name]) => name.toLowerCase() === 'content-type',
-    );
+    const cachedCT = decoded.headers.find(([name]) => name.toLowerCase() === 'content-type');
     if (cachedCT !== undefined) {
       ctx.response.header('content-type', cachedCT[1]);
     }

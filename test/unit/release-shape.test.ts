@@ -48,8 +48,9 @@ describe('shapeProblems', () => {
   const base = { allowQuietMinor: false, version: '0.9.1' };
 
   it('refuses a patch carrying breaking entries, and passes one that does not', () => {
-    expect(shapeProblems({ ...base, bump: 'patch', breaking: 1 })[0])
-      .toContain('0.9.1 is a PATCH release but its changelog section carries 1 BREAKING entry.');
+    expect(shapeProblems({ ...base, bump: 'patch', breaking: 1 })[0]).toContain(
+      '0.9.1 is a PATCH release but its changelog section carries 1 BREAKING entry.',
+    );
     expect(shapeProblems({ ...base, bump: 'patch', breaking: 3 })[0]).toContain(
       '3 BREAKING entries',
     );

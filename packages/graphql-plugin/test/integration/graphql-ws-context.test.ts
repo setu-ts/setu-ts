@@ -161,11 +161,13 @@ describe('GraphQL resolver context — HTTP vs WS (M70i X6-6)', () => {
         client.send(encodeFrame({ type: GQL_CONNECTION_INIT }));
         await nextMessage(client); // ack
 
-        client.send(encodeFrame({
-          type: GQL_SUBSCRIBE,
-          id: '1',
-          payload: { query: 'subscription { contextKeys }' },
-        }));
+        client.send(
+          encodeFrame({
+            type: GQL_SUBSCRIBE,
+            id: '1',
+            payload: { query: 'subscription { contextKeys }' },
+          }),
+        );
 
         const next = await nextMessage(client);
         expect(next).toContain(GQL_NEXT);

@@ -39,14 +39,14 @@ describe('pemToDer', () => {
 
   it('throws when the header is missing or mislabelled', () => {
     expect(() =>
-      pemToDer('-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PRIVATE KEY-----', 'PRIVATE KEY')
-    )
-      .toThrow('PEM must start with "-----BEGIN PRIVATE KEY-----"');
+      pemToDer('-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PRIVATE KEY-----', 'PRIVATE KEY'),
+    ).toThrow('PEM must start with "-----BEGIN PRIVATE KEY-----"');
   });
 
   it('throws when the footer is missing', () => {
-    expect(() => pemToDer('-----BEGIN PRIVATE KEY-----\nAAAA', 'PRIVATE KEY'))
-      .toThrow('PEM must end with "-----END PRIVATE KEY-----"');
+    expect(() => pemToDer('-----BEGIN PRIVATE KEY-----\nAAAA', 'PRIVATE KEY')).toThrow(
+      'PEM must end with "-----END PRIVATE KEY-----"',
+    );
   });
 
   it('throws when the body is empty', () => {

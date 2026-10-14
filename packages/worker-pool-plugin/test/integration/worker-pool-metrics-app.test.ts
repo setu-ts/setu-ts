@@ -64,9 +64,7 @@ describe('WorkerPoolPlugin — metrics through a real MetricsPlugin', () => {
     await expect(promise).resolves.toBe('done');
 
     const body = await scrape(app);
-    expect(body).toContain(
-      `${WORKER_POOL_METRICS.COMPLETED}{task_module="${SPEC}"} 1`,
-    );
+    expect(body).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="${SPEC}"} 1`);
     expect(body).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="${SPEC}"} 1`);
     expect(body).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${SPEC}"} 0`);
     expect(body).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${SPEC}"} 0`);
@@ -188,9 +186,7 @@ describe('WorkerPoolPlugin — metrics through a real MetricsPlugin', () => {
       `${WORKER_POOL_METRICS.WORKERS}{task_module="${SPEC}"} ${stats.workers}`,
     );
     expect(body).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${SPEC}"} ${stats.busy}`);
-    expect(body).toContain(
-      `${WORKER_POOL_METRICS.QUEUED}{task_module="${SPEC}"} ${stats.queued}`,
-    );
+    expect(body).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${SPEC}"} ${stats.queued}`);
     expect(body).toContain(
       `${WORKER_POOL_METRICS.COMPLETED}{task_module="${SPEC}"} ${stats.completed}`,
     );

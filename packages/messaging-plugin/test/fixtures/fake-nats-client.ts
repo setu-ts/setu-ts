@@ -92,8 +92,11 @@ function validateConsumerName(context: 'durable' | 'name', name: string | undefi
 
 /** The config fields a real server compares (an identical create is idempotent). */
 function sameConsumerConfig(a: FakeConsumerConfig, b: FakeConsumerConfig): boolean {
-  return a.durable_name === b.durable_name && a.filter_subject === b.filter_subject &&
-    JSON.stringify(a.metadata ?? {}) === JSON.stringify(b.metadata ?? {});
+  return (
+    a.durable_name === b.durable_name &&
+    a.filter_subject === b.filter_subject &&
+    JSON.stringify(a.metadata ?? {}) === JSON.stringify(b.metadata ?? {})
+  );
 }
 
 /**
@@ -185,9 +188,7 @@ export class FakeNatsConsumer {
    * `stop()` is a `ConsumerMessages` member — so this fake no longer offers
    * one either, and a caller stopping the wrong object fails loudly.
    */
-  consume(
-    options: { callback: (msg: FakeNatsMessage) => void },
-  ): Promise<{ stop(): void }> {
+  consume(options: { callback: (msg: FakeNatsMessage) => void }): Promise<{ stop(): void }> {
     // Deliver messages using the callback from options, filtered by subject if filterSubject is set
     for (const msg of this.#messages) {
       if (!this.#stopped) {
@@ -400,9 +401,9 @@ export class FakeNatsJetStream {
       if (!this.#seededMessages.has(msg.subject)) {
         this.#seededMessages.set(msg.subject, []);
       }
-      this.#seededMessages.get(msg.subject)!.push(
-        new FakeNatsMessage(msg.data, msg.seq, msg.timestampNanos, msg.subject, msg.headers),
-      );
+      this.#seededMessages
+        .get(msg.subject)!
+        .push(new FakeNatsMessage(msg.data, msg.seq, msg.timestampNanos, msg.subject, msg.headers));
     }
   }
 

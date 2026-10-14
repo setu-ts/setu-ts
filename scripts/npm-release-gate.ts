@@ -7,7 +7,7 @@ export const REPOSITORY_URL = 'git+https://github.com/setu-ts/setu-ts.git';
 /** Narrows external JSON objects without trusting their fields. */
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }
 

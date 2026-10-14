@@ -67,15 +67,18 @@ export function parseTraceparentToContext(header: string | null): TelemetryConte
 export function contextToTraceparent(context: TraceparentSource): string | null;
 /** @internal Compatibility overload for existing opaque-context object literals. */
 export function contextToTraceparent(context: TelemetryContext): string | null;
-export function contextToTraceparent(
-  context: TraceparentSource | TelemetryContext,
-): string | null {
+export function contextToTraceparent(context: TraceparentSource | TelemetryContext): string | null {
   const traceId = context.traceId;
   const spanId = context.spanId;
   const traceFlags = context.traceFlags ?? '01';
   if (
-    !traceId || !spanId || !TRACE_ID_RE.test(traceId) || !SPAN_ID_RE.test(spanId) ||
-    !TRACE_FLAGS_RE.test(traceFlags) || traceId === ZERO_TRACE_ID || spanId === ZERO_SPAN_ID
+    !traceId ||
+    !spanId ||
+    !TRACE_ID_RE.test(traceId) ||
+    !SPAN_ID_RE.test(spanId) ||
+    !TRACE_FLAGS_RE.test(traceFlags) ||
+    traceId === ZERO_TRACE_ID ||
+    spanId === ZERO_SPAN_ID
   ) {
     return null;
   }

@@ -15,10 +15,7 @@ export class AuthService implements IAuthService {
   private readonly strategies: readonly IAuthStrategy[];
   private readonly localStrategy: LocalStrategy;
 
-  constructor(
-    strategies: readonly IAuthStrategy[],
-    localStrategy: LocalStrategy,
-  ) {
+  constructor(strategies: readonly IAuthStrategy[], localStrategy: LocalStrategy) {
     this.strategies = strategies;
     this.localStrategy = localStrategy;
   }
@@ -40,9 +37,10 @@ export class AuthService implements IAuthService {
   /**
    * Verify credentials for login flow (delegates to LocalStrategy).
    */
-  verifyCredentials(
-    credentials: { readonly identifier: string; readonly secret: string },
-  ): Promise<IPrincipal | null> {
+  verifyCredentials(credentials: {
+    readonly identifier: string;
+    readonly secret: string;
+  }): Promise<IPrincipal | null> {
     return this.localStrategy.verify(credentials.identifier, credentials.secret);
   }
 }
@@ -64,10 +62,7 @@ export class LocalStrategy {
   /**
    * Verify credentials by delegating to the app-supplied callback.
    */
-  verify(
-    identifier: string,
-    secret: string,
-  ): Promise<IPrincipal | null> {
+  verify(identifier: string, secret: string): Promise<IPrincipal | null> {
     return this.verifyCallback(identifier, secret);
   }
 }

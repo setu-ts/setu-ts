@@ -197,7 +197,7 @@ describe('ZodToOpenApi — zod v4 (plain transform)', () => {
       children: Node[];
     }
     const Tree: z4.ZodType<Node> = z4.lazy(() =>
-      z4.object({ name: z4.string(), children: z4.array(Tree) })
+      z4.object({ name: z4.string(), children: z4.array(Tree) }),
     );
 
     const delivered: { name: string; schema: OpenApiSchemaObject }[] = [];
@@ -238,9 +238,7 @@ describe('ZodToOpenApi — collapsed `type` arrays (issue #253)', () => {
   });
 
   it('rewrites a nullable primitive into `anyOf`', () => {
-    const result = new ZodToOpenApi().transform(
-      zod4Like({ type: ['string', 'null'] }),
-    );
+    const result = new ZodToOpenApi().transform(zod4Like({ type: ['string', 'null'] }));
 
     expect(result).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] });
   });
@@ -501,17 +499,17 @@ describe('ZodToOpenApi — collapsed `type` arrays (issue #253)', () => {
 
 describe('ZodToOpenApi — declared Zod range floors', () => {
   it('transforms the supported Zod v3.24.0 floor', () => {
-    const result = new ZodToOpenApi().transform(
-      z3Floor.object({ id: z3Floor.string() }),
-    ) as { properties?: Record<string, OpenApiSchemaObject> };
+    const result = new ZodToOpenApi().transform(z3Floor.object({ id: z3Floor.string() })) as {
+      properties?: Record<string, OpenApiSchemaObject>;
+    };
 
     expect(result.properties?.id).toEqual({ type: 'string' });
   });
 
   it('transforms the supported Zod v4.4.0 floor', () => {
-    const result = new ZodToOpenApi().transform(
-      z4Floor.object({ id: z4Floor.string() }),
-    ) as { properties?: Record<string, OpenApiSchemaObject> };
+    const result = new ZodToOpenApi().transform(z4Floor.object({ id: z4Floor.string() })) as {
+      properties?: Record<string, OpenApiSchemaObject>;
+    };
 
     expect(result.properties?.id).toEqual({ type: 'string' });
   });
@@ -537,9 +535,7 @@ describe('ZodToOpenApi — zod v3 byte-identity pins', () => {
   });
 
   it('pins optional handling', () => {
-    expect(
-      new ZodToOpenApi().transform(z3.object({ n: z3.number().optional() })),
-    ).toEqual({
+    expect(new ZodToOpenApi().transform(z3.object({ n: z3.number().optional() }))).toEqual({
       type: 'object',
       properties: { n: { type: 'number' } },
     });
@@ -595,9 +591,7 @@ describe('ZodToOpenApi — hook bridge over the zod v4 path', () => {
   });
 
   it('still transforms normally when the hook answers `undefined`', () => {
-    const result = new ZodToOpenApi(() => undefined).transform(
-      z4.object({ id: z4.string() }),
-    );
+    const result = new ZodToOpenApi(() => undefined).transform(z4.object({ id: z4.string() }));
 
     expect(result).toEqual({
       type: 'object',

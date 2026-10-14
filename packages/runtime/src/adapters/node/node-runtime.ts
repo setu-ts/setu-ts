@@ -170,15 +170,18 @@ export function buildNodeHost(
         // Node rm refuses even an empty directory without recursive. rmdir
         // preserves the contract: remove empty directories, refuse nonempty ones.
         if (
-          !options?.recursive && typeof error === 'object' && error !== null && 'code' in error &&
-          error.code === 'ERR_FS_EISDIR' && mods.fs.rmdir
-        ) return mods.fs.rmdir(path);
+          !options?.recursive &&
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'ERR_FS_EISDIR' &&
+          mods.fs.rmdir
+        )
+          return mods.fs.rmdir(path);
         throw error;
       }),
-    createReadStream: (
-      path: string,
-      options?: { start?: number; end?: number },
-    ) => mods.fs.createReadStream?.(path, options) ?? null,
+    createReadStream: (path: string, options?: { start?: number; end?: number }) =>
+      mods.fs.createReadStream?.(path, options) ?? null,
   };
 }
 

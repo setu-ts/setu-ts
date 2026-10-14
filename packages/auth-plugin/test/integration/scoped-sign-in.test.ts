@@ -158,7 +158,7 @@ describe("'sign-in' timing", () => {
     const jar = new CookieJar();
     await code(jar, target, '/login/alice', 'POST');
     const response = await jar.fetch(target, '/session-raw');
-    const { stored } = await response.json() as {
+    const { stored } = (await response.json()) as {
       stored: { principalId: string; grants: unknown[] };
     };
     expect(stored.principalId).toBe('alice');
@@ -197,7 +197,7 @@ describe("'sign-in' timing", () => {
     const jar = new CookieJar();
     const response = await jar.fetch(target, '/login/alice', { method: 'POST' });
     expect(response.status).toBe(503);
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body.detail).toBe('Authorization grants could not be resolved');
     expect(JSON.stringify(body)).not.toContain('directory down');
     expect(await code(jar, target, '/channels/web/invoices')).toBe(401);
@@ -212,7 +212,7 @@ describe("'sign-in' timing", () => {
     expect(await code(jar, harness.app, '/channels/web/invoices')).toBe(401);
     const promoted = await jar.fetch(harness.app, '/second-factor', { method: 'POST' });
     expect(await promoted.json()).toEqual({ promoted: 'signed-in' });
-    const stored = await (await jar.fetch(harness.app, '/session-raw')).json() as {
+    const stored = (await (await jar.fetch(harness.app, '/session-raw')).json()) as {
       stored: { principalId: string; grants: unknown[] };
     };
     expect(stored.stored.principalId).toBe('mfa-alice');

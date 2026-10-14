@@ -33,13 +33,7 @@ export interface ResolvedInboxOptions {
 }
 
 /** Reads an integer option, refusing `NaN`, fractions and out-of-range values. */
-function integer(
-  name: string,
-  value: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
+function integer(name: string, value: unknown, fallback: number, min: number, max: number): number {
   if (value === undefined) return fallback;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
     throw new RangeError(`inbox: ${name} must be an integer between ${min} and ${max}`);
@@ -67,9 +61,10 @@ export function resolveInboxOptions(options: InboxOptions): ResolvedInboxOptions
   }
   return {
     store: options.store,
-    maxAttempts: options.maxAttempts === undefined
-      ? undefined
-      : integer('maxAttempts', options.maxAttempts, 0, 1, 1000),
+    maxAttempts:
+      options.maxAttempts === undefined
+        ? undefined
+        : integer('maxAttempts', options.maxAttempts, 0, 1, 1000),
     retainMs: integer('retainMs', options.retainMs, SEVEN_DAYS_MS, 60_000, Number.MAX_SAFE_INTEGER),
     storeTimeoutMs: integer('storeTimeoutMs', options.storeTimeoutMs, 5000, 1, MAX_TIMER_MS),
     maxParkedEnvelopeBytes: integer(

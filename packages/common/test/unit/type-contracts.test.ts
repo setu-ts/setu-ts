@@ -65,7 +65,8 @@ const withString: SseMessage = { data: 'hello' };
 // committed signature `(body: string) => HandlerResult`.
 type HasRequiredHtml = IResponse extends {
   html(body: string): HandlerResult;
-} ? true
+}
+  ? true
   : false;
 const htmlIsRequiredMember: HasRequiredHtml = true;
 
@@ -128,11 +129,13 @@ const withNestedNonFinite: SseMessage = { data: { ratio: NaN, cap: Infinity } };
 // --- M74 / X3-8: peek is a REQUIRED member with the committed signature ---
 type HasRequiredRoomPeek = IWebSocketService extends {
   peek(name: string): WebSocketRoom | undefined;
-} ? true
+}
+  ? true
   : false;
 type HasRequiredChannelPeek = ISseService extends {
   peek(name: string): SseChannel | undefined;
-} ? true
+}
+  ? true
   : false;
 const roomPeekIsRequired: HasRequiredRoomPeek = true;
 const channelPeekIsRequired: HasRequiredChannelPeek = true;

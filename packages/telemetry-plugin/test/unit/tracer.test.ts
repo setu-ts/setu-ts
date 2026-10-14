@@ -230,11 +230,7 @@ describe('buildTracerHost (via fake modules)', () => {
 
     return {
       BasicTracerProvider: class {
-        constructor(_config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {
+        constructor(_config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
           // constructor called — that's all we need
         }
         getTracer() {
@@ -301,7 +297,7 @@ describe('buildTracerHost (via fake modules)', () => {
         sdkMod: createFakeSdkModule(),
         resourcesMod: createFakeResourcesModule(),
         pluginOptions: { exporter: 'otlp' },
-      })
+      }),
     ).toThrow('endpoint');
     const host = await buildTracerHost({
       sdkMod: createFakeSdkModule(),
@@ -318,8 +314,9 @@ describe('buildTracerHost (via fake modules)', () => {
           parentContext: { _opaque: TELEMETRY_CONTEXT_OPAQUE, traceId: '1', spanId: '2' },
         }),
       ).toBeDefined();
-      expect(host.startSpan('no-id', { parentContext: { _opaque: TELEMETRY_CONTEXT_OPAQUE } }))
-        .toBeDefined();
+      expect(
+        host.startSpan('no-id', { parentContext: { _opaque: TELEMETRY_CONTEXT_OPAQUE } }),
+      ).toBeDefined();
       expect(await host.activate!({}, () => Promise.resolve('result'))).toBe('result');
       setOtelApi(api as unknown as Parameters<typeof setOtelApi>[0]);
       expect(
@@ -664,11 +661,7 @@ describe('buildTracerHost (via fake modules)', () => {
     const fakeSdkMod = {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
-        constructor(_config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {
+        constructor(_config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
           // no-op
         }
         getTracer() {
@@ -713,11 +706,7 @@ describe('buildTracerHost (via fake modules)', () => {
     const fakeSdkMod = {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
-        constructor(_config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {
+        constructor(_config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
           // no-op
         }
         getTracer() {
@@ -756,11 +745,7 @@ describe('buildTracerHost (via fake modules)', () => {
     const fakeSdkMod = {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
-        constructor(_config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {
+        constructor(_config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
           // no-op
         }
         getTracer() {
@@ -799,11 +784,7 @@ describe('buildTracerHost (via fake modules)', () => {
     const fakeSdkMod = {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
-        constructor(_config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {}
+        constructor(_config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {}
         getTracer() {
           return {
             startSpan(_name: string, options?: Record<string, unknown>) {
@@ -891,11 +872,7 @@ describe('buildTracerHost (via fake modules)', () => {
     const fakeSdkMod = {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
-        constructor(config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {
+        constructor(config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
           // With validated:true and no exporter kind, SimpleSpanProcessor is still created with null exporter.
           providerConfigured = true;
           expect(config.spanProcessors).toHaveLength(1);
@@ -1090,15 +1067,9 @@ describe('buildTracerHost (via fake modules)', () => {
     const fakeSdkMod = {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
-        constructor(_config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {
+        constructor(_config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
           // Processor is at index 0
-          capturedProcessorKind = (
-            _config.spanProcessors[0] as { kind?: string }
-          ).kind;
+          capturedProcessorKind = (_config.spanProcessors[0] as { kind?: string }).kind;
         }
         getTracer() {
           return {
@@ -1142,14 +1113,8 @@ describe('buildTracerHost (via fake modules)', () => {
     const fakeSdkMod = {
       ...createFakeSdkModule(),
       BasicTracerProvider: class {
-        constructor(_config: {
-          resource: unknown;
-          spanProcessors: unknown[];
-          sampler: unknown;
-        }) {
-          capturedProcessorKind = (
-            _config.spanProcessors[0] as { kind?: string }
-          ).kind;
+        constructor(_config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
+          capturedProcessorKind = (_config.spanProcessors[0] as { kind?: string }).kind;
         }
         getTracer() {
           return {
@@ -1227,10 +1192,10 @@ describe('buildTracerHost — M98g diagnostic processor composition', () => {
     };
     return {
       policy,
-      collector: new SpanObservationCollector(
-        availability,
-        { hrtime: () => 0 } as unknown as Pick<IRuntimeServices, 'hrtime'>,
-      ),
+      collector: new SpanObservationCollector(availability, { hrtime: () => 0 } as unknown as Pick<
+        IRuntimeServices,
+        'hrtime'
+      >),
     };
   }
 

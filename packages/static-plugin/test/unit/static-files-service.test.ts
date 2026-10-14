@@ -82,8 +82,9 @@ it('delegates a missing file to the configured handler', async () => {
       return undefined;
     },
   };
-  await service.serve(
-    { request: { path: '/missing.txt', method: 'GET', headers: new Headers() }, response } as never,
-  );
+  await service.serve({
+    request: { path: '/missing.txt', method: 'GET', headers: new Headers() },
+    response,
+  } as never);
   expect(response.statusCode).toBe(404);
 });

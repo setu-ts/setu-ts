@@ -46,7 +46,7 @@ describe('ConfigProvider', () => {
 
   it('allowlist on enabled flag', () => {
     const flags: Record<string, FlagDefinition> = {
-      'flag': { enabled: true, users: ['user1'], percentage: 50 },
+      flag: { enabled: true, users: ['user1'], percentage: 50 },
     };
     const provider = new ConfigProvider(flags);
     expect(provider.isEnabled('flag', { userId: 'user1' })).toBe(true);

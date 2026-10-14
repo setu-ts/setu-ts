@@ -104,10 +104,7 @@ export function securityHeadersMiddleware(
 
   const headersToSet = buildHeaders(options);
 
-  return async (
-    ctx: IRequestContext,
-    next: () => Promise<void>,
-  ): Promise<void> => {
+  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     for (const [name, value] of headersToSet) {
       ctx.response.header(name, value);
     }

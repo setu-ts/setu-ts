@@ -73,10 +73,7 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
   // never inspected (M101c, V8-9).
   const isExcluded = createPathMatcher(options.exclude ?? []);
 
-  return async (
-    ctx: IRequestContext,
-    next: () => Promise<void>,
-  ): Promise<void> => {
+  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     // Excluded paths skip the CSRF check entirely — no method test, no
     // origin inspection.
     if (isExcluded(ctx.request.path)) {

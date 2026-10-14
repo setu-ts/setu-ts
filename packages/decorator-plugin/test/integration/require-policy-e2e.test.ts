@@ -133,11 +133,13 @@ function build(
     plugins: [
       RuntimePlugin(),
       ...(withAuth
-        ? [AuthPlugin({
-          jwt: { secret: SECRET },
-          rbac: { roles: { editor: {} } },
-          policies: [auditPolicy],
-        })]
+        ? [
+            AuthPlugin({
+              jwt: { secret: SECRET },
+              rbac: { roles: { editor: {} } },
+              policies: [auditPolicy],
+            }),
+          ]
         : []),
       ValidationPlugin(),
       OpenApiPlugin({
@@ -215,26 +217,30 @@ describe('@RequirePolicy through a real application', () => {
     expect(await send(started, 'GET', '/docs/ann')).toBe(200);
   });
 
-  it('runs after @Roles and before validation', {
-    skip: z === undefined,
-  }, async () => {
-    const { app: started, token } = await start();
-    const bad = { title: 42 };
-    const good = { title: 'ok' };
-    expect(await send(started, 'PATCH', '/docs/ann', undefined, bad)).toBe(401);
-    expect(await send(started, 'PATCH', '/docs/ann', await token('ann'), bad)).toBe(403);
-    // Has the role, fails the policy: 403 even though the body is invalid —
-    // the policy runs first.
-    expect(await send(started, 'PATCH', '/docs/ann', await token('bob', ['editor']), bad)).toBe(
-      403,
-    );
-    expect(await send(started, 'PATCH', '/docs/ann', await token('ann', ['editor']), bad)).toBe(
-      400,
-    );
-    expect(await send(started, 'PATCH', '/docs/ann', await token('ann', ['editor']), good)).toBe(
-      200,
-    );
-  });
+  it(
+    'runs after @Roles and before validation',
+    {
+      skip: z === undefined,
+    },
+    async () => {
+      const { app: started, token } = await start();
+      const bad = { title: 42 };
+      const good = { title: 'ok' };
+      expect(await send(started, 'PATCH', '/docs/ann', undefined, bad)).toBe(401);
+      expect(await send(started, 'PATCH', '/docs/ann', await token('ann'), bad)).toBe(403);
+      // Has the role, fails the policy: 403 even though the body is invalid —
+      // the policy runs first.
+      expect(await send(started, 'PATCH', '/docs/ann', await token('bob', ['editor']), bad)).toBe(
+        403,
+      );
+      expect(await send(started, 'PATCH', '/docs/ann', await token('ann', ['editor']), bad)).toBe(
+        400,
+      );
+      expect(await send(started, 'PATCH', '/docs/ann', await token('ann', ['editor']), good)).toBe(
+        200,
+      );
+    },
+  );
 
   it('documents a @RequirePolicy requiring a principal as secured, despite @Public', async () => {
     const { app: started } = await start();
@@ -253,7 +259,10 @@ describe('@RequirePolicy and policies — refused at register()', () => {
     withAuth = true,
   ): Promise<string> {
     const built = build(decorator, withAuth);
-    const error = await built.start().then(() => undefined, (e: unknown) => e);
+    const error = await built.start().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
     app = built;
     expect(error).toBeInstanceOf(Error);
     return (error as Error).message;

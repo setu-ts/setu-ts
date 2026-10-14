@@ -108,9 +108,11 @@ export interface ServiceBusSdkModule {
     options?: { retryOptions?: Omit<ServiceBusRetryOptions, 'mode'> & { mode?: number } },
   ) => {
     createSender(queueOrTopicName: string): {
-      sendMessages(
-        messages: { body: unknown; applicationProperties?: unknown; messageId?: string },
-      ): Promise<void>;
+      sendMessages(messages: {
+        body: unknown;
+        applicationProperties?: unknown;
+        messageId?: string;
+      }): Promise<void>;
       close(): Promise<void>;
     };
     createReceiver(queueName: string, options?: unknown): IServiceBusReceiver;
@@ -158,18 +160,16 @@ export interface IServiceBusTransport {
   open(
     topic: string,
     subscription: string,
-    onMessage: (
-      msg: {
-        payload: string;
-        ack: () => void;
-        nack: () => void;
-        applicationProperties?: Readonly<Record<string, string>>;
-        /** The platform-assigned message id, when the transport carried one (X28-4). */
-        messageId?: string;
-        /** The platform-assigned enqueue time, when the transport carried one (X28-4). */
-        timestamp?: Date;
-      },
-    ) => void | Promise<void>,
+    onMessage: (msg: {
+      payload: string;
+      ack: () => void;
+      nack: () => void;
+      applicationProperties?: Readonly<Record<string, string>>;
+      /** The platform-assigned message id, when the transport carried one (X28-4). */
+      messageId?: string;
+      /** The platform-assigned enqueue time, when the transport carried one (X28-4). */
+      timestamp?: Date;
+    }) => void | Promise<void>,
   ): Promise<IServiceBusSubscription>;
   /** Create a subscription (for RPC inbox). */
   createSubscription(topic: string, subscription: string): Promise<void>;
@@ -454,15 +454,15 @@ export function adaptServiceBusModule(
 ): IServiceBusTransport {
   // The retry budget rides the DATA client only: the administration
   // client's pipeline options are a different contract and never receive it.
-  const client = options.retryOptions !== undefined
-    ? new mod.ServiceBusClient(
-      options.connectionString,
-      { retryOptions: toSdkRetryOptions(mod, options.retryOptions) },
-    )
-    : new mod.ServiceBusClient(options.connectionString);
+  const client =
+    options.retryOptions !== undefined
+      ? new mod.ServiceBusClient(options.connectionString, {
+          retryOptions: toSdkRetryOptions(mod, options.retryOptions),
+        })
+      : new mod.ServiceBusClient(options.connectionString);
   const admin = new mod.ServiceBusAdministrationClient(options.adminConnectionString);
 
-  const senders = new Map<string, ReturnType<typeof client['createSender']>>();
+  const senders = new Map<string, ReturnType<(typeof client)['createSender']>>();
   // Track multiple receiver handles per key to support duplicate opens
   const receivers = new Map<string, OpenReceiver[]>();
   // Captured once so the probe below needs no assertion and keeps calling
@@ -491,16 +491,14 @@ export function adaptServiceBusModule(
     open: async (
       topic: string,
       subscription: string,
-      onMessage: (
-        msg: {
-          payload: string;
-          ack: () => void;
-          nack: () => void;
-          applicationProperties?: Readonly<Record<string, string>>;
-          messageId?: string;
-          timestamp?: Date;
-        },
-      ) => void | Promise<void>,
+      onMessage: (msg: {
+        payload: string;
+        ack: () => void;
+        nack: () => void;
+        applicationProperties?: Readonly<Record<string, string>>;
+        messageId?: string;
+        timestamp?: Date;
+      }) => void | Promise<void>,
     ): Promise<IServiceBusSubscription> => {
       // createReceiver(topicName, subscriptionName) — two positional strings.
       const receiver = client.createReceiver(topic, subscription) as IServiceBusReceiver;
@@ -608,15 +606,15 @@ export function adaptServiceBusModule(
     // than lying `down`. The broker caches and bounds this probe.
     ...(typeof readNamespace === 'function'
       ? {
-        isHealthy: async (): Promise<boolean | undefined> => {
-          try {
-            await readNamespace.call(admin);
-            return true;
-          } catch (error) {
-            return classifyProbeFailure(error);
-          }
-        },
-      }
+          isHealthy: async (): Promise<boolean | undefined> => {
+            try {
+              await readNamespace.call(admin);
+              return true;
+            } catch (error) {
+              return classifyProbeFailure(error);
+            }
+          },
+        }
       : {}),
   };
 }
@@ -671,11 +669,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    */
   #evidence: { at: number; reachable: boolean } | null = null;
 
-  constructor(
-    runtime: IRuntimeServices,
-    serializer: ISerializer,
-    options?: ServiceBusOptions,
-  ) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: ServiceBusOptions) {
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#connectionString = options?.connectionString ?? '';
@@ -758,11 +752,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   async connect(): Promise<void> {
     if (this.#ready) return;
 
-    assertNotCloudflareWorkers(
-      this.#runtime,
-      'Azure Service Bus',
-      '@azure/service-bus',
-    );
+    assertNotCloudflareWorkers(this.#runtime, 'Azure Service Bus', '@azure/service-bus');
 
     if (this.#injectedClient !== undefined) {
       this.#transport = this.#injectedClient;

@@ -201,8 +201,9 @@ describe('bounded body read (X32-4)', () => {
     // is what `0` means for `maxDepth`/`maxNodes`/`maxBatchSize` elsewhere in
     // this framework. Pinned so the divergence cannot drift silently.
     const { request } = streamedRequest([chunk('X')]);
-    await expect(mapWebRequestToFrameworkRequest(request, 0).bytes())
-      .rejects.toThrow(RequestBodyTooLargeError);
+    await expect(mapWebRequestToFrameworkRequest(request, 0).bytes()).rejects.toThrow(
+      RequestBodyTooLargeError,
+    );
 
     const bodyless = new Request('http://localhost/');
     expect((await mapWebRequestToFrameworkRequest(bodyless, 0).bytes()).byteLength).toBe(0);
@@ -211,9 +212,11 @@ describe('bounded body read (X32-4)', () => {
   it('json() and text() both surface the refusal', async () => {
     const a = streamedRequest([chunk('{"a":1}')]);
     const b = streamedRequest([chunk('{"a":1}')]);
-    await expect(mapWebRequestToFrameworkRequest(a.request, 2).json())
-      .rejects.toThrow(RequestBodyTooLargeError);
-    await expect(mapWebRequestToFrameworkRequest(b.request, 2).text())
-      .rejects.toThrow(RequestBodyTooLargeError);
+    await expect(mapWebRequestToFrameworkRequest(a.request, 2).json()).rejects.toThrow(
+      RequestBodyTooLargeError,
+    );
+    await expect(mapWebRequestToFrameworkRequest(b.request, 2).text()).rejects.toThrow(
+      RequestBodyTooLargeError,
+    );
   });
 });

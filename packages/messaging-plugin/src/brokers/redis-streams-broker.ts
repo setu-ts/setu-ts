@@ -172,11 +172,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @param options - Redis connection and polling options
    * @throws {RangeError} If a retry, reclaim, retention, or sweep bound is invalid
    */
-  constructor(
-    runtime: IRuntimeServices,
-    serializer: ISerializer,
-    options?: RedisStreamsOptions,
-  ) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: RedisStreamsOptions) {
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#url = options?.url ?? 'redis://localhost:6379';
@@ -408,15 +404,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     const deliver = async (entry: [string, string[]], deliveries: number): Promise<void> => {
       delivering.add(entry[0]);
       try {
-        await this.#deliver(
-          client,
-          topic,
-          groupId,
-          deliverHandler,
-          entry,
-          deliveries,
-          active,
-        );
+        await this.#deliver(client, topic, groupId, deliverHandler, entry, deliveries, active);
       } finally {
         delivering.delete(entry[0]);
       }
@@ -524,14 +512,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
             observe(async () => {
               await Promise.all([pollFlight, reclaimFlight]);
               if (!abandoned) {
-                await this.#cleanConsumers(
-                  client,
-                  topic,
-                  groupId,
-                  consumerId,
-                  true,
-                  active,
-                );
+                await this.#cleanConsumers(client, topic, groupId, consumerId, true, active);
               }
             }, 'Consumer cleanup'),
             deadline,

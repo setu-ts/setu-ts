@@ -184,9 +184,8 @@ export function createCeremoniesHarness(options: HarnessOptions = {}): Ceremonie
   const runtime = createFakeRuntime();
   const session = createFakeSession();
   const authSession = new FakeAuthSessionService(session, () => runtime.now());
-  const principal = options.principal === undefined
-    ? { id: 'alice', roles: ['user'] }
-    : options.principal;
+  const principal =
+    options.principal === undefined ? { id: 'alice', roles: ['user'] } : options.principal;
   if (principal !== null) {
     session.set(AUTH_SESSION_KEY, {
       principal,

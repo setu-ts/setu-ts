@@ -110,9 +110,7 @@ describe('runtime-plugin integration', () => {
       expect(await response1.text()).toBe('healthy');
 
       // Through app.fetch
-      const response2 = await app.fetch(
-        new Request(`http://127.0.0.1:${port}/health`),
-      );
+      const response2 = await app.fetch(new Request(`http://127.0.0.1:${port}/health`));
       expect(response2.status).toBe(200);
       expect(await response2.text()).toBe('healthy');
     } finally {

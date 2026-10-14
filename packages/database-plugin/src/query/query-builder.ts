@@ -168,8 +168,11 @@ export function matchesFilter<Entity extends Record<string, unknown>>(
     case 'eq':
       return actual === filter.value;
     case 'contains':
-      return typeof actual === 'string' && typeof filter.value === 'string' &&
-        actual.includes(filter.value);
+      return (
+        typeof actual === 'string' &&
+        typeof filter.value === 'string' &&
+        actual.includes(filter.value)
+      );
     case 'gt':
       return comparableGreaterThan(actual, filter.value);
     case 'gte':
@@ -201,8 +204,10 @@ function comparableGreaterThan(left: unknown, right: unknown): boolean {
   if (left instanceof Date && right instanceof Date) {
     return left.getTime() > right.getTime();
   }
-  return typeof left === 'number' && typeof right === 'number' && left > right ||
-    typeof left === 'string' && typeof right === 'string' && left > right;
+  return (
+    (typeof left === 'number' && typeof right === 'number' && left > right) ||
+    (typeof left === 'string' && typeof right === 'string' && left > right)
+  );
 }
 
 /**
@@ -302,9 +307,7 @@ export function projectFields<Entity extends Record<string, unknown>>(
  * @returns Every key seen on at least one row
  * @since 0.2.0
  */
-function observedColumns(
-  rows: readonly Record<string, unknown>[],
-): ReadonlySet<string> {
+function observedColumns(rows: readonly Record<string, unknown>[]): ReadonlySet<string> {
   const columns = new Set<string>();
   for (const row of rows) {
     for (const key of Object.keys(row)) {
@@ -347,8 +350,8 @@ export function unknownColumnError(
 ): Error | undefined {
   const fields = [
     ...query.select.map((field) => ['select', Array.isArray(field) ? field[0] : field] as const),
-    ...Object.keys(query.orderBy).map((field) =>
-      ['orderBy', Array.isArray(field) ? field[0] : field] as const
+    ...Object.keys(query.orderBy).map(
+      (field) => ['orderBy', Array.isArray(field) ? field[0] : field] as const,
     ),
   ];
   if (fields.length === 0 || rows.length === 0) return undefined;

@@ -80,8 +80,7 @@ describe('kernel fallback 500 is logged (X11-2)', () => {
     expect(nf.statusCode).toBe(404);
     expect(
       logs.filter((l) => l.includes('Unhandled request error') && l.includes('"/nope"')).length,
-    )
-      .toBe(0);
+    ).toBe(0);
 
     await app.stop();
   });

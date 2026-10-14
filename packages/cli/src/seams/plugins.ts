@@ -52,20 +52,22 @@ function renderPluginsBarrel(artifacts: SeamArtifacts): string {
   const imports = [
     `import type { IPlugin } from '@setu-ts/common';`,
     renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.plugin.ts`),
-  ].filter((line) => line !== '').join('\n\n');
+  ]
+    .filter((line) => line !== '')
+    .join('\n\n');
 
   const entries = names.map((name) => `${deriveNames(name).pascal}Plugin()`);
 
   return assembleSeamBarrel(header, imports, [
     `/**\n` +
-    ` * Every generated plugin, spread into \`createApplication({ plugins })\`.\n` +
-    ` *\n` +
-    ` * Array position does not decide registration order: the kernel resolves plugins\n` +
-    ` * by their declared \`dependencies\`, and a generated plugin declares none. Delete a\n` +
-    ` * plugin's file to stop registering it — this barrel is regenerated from the\n` +
-    ` * directory, so removing the entry here alone would not survive.\n` +
-    ` */\n` +
-    renderExportedArray(GENERATED_PLUGINS_EXPORT, 'IPlugin', entries),
+      ` * Every generated plugin, spread into \`createApplication({ plugins })\`.\n` +
+      ` *\n` +
+      ` * Array position does not decide registration order: the kernel resolves plugins\n` +
+      ` * by their declared \`dependencies\`, and a generated plugin declares none. Delete a\n` +
+      ` * plugin's file to stop registering it — this barrel is regenerated from the\n` +
+      ` * directory, so removing the entry here alone would not survive.\n` +
+      ` */\n` +
+      renderExportedArray(GENERATED_PLUGINS_EXPORT, 'IPlugin', entries),
   ]);
 }
 

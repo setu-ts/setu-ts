@@ -43,26 +43,28 @@ describe('the observed column set', () => {
     // A sparse optional column appears on some rows and not others; treating
     // the first row as authoritative would reject a real column.
     const rows = [{ id: 'a' }, { id: 'b', deletedAt: 1 }];
-    expect(unknownColumnError('Product', rows, query({ select: ['deletedAt'] })))
-      .toBeUndefined();
+    expect(unknownColumnError('Product', rows, query({ select: ['deletedAt'] }))).toBeUndefined();
   });
 
   it('reports every observed column in the diagnostic', () => {
     const rows = [{ id: 'a' }, { id: 'b', deletedAt: 1 }];
-    expect(unknownColumnError('Product', rows, query({ select: ['sku'] }))?.message)
-      .toContain('Known columns: deletedAt, id.');
+    expect(unknownColumnError('Product', rows, query({ select: ['sku'] }))?.message).toContain(
+      'Known columns: deletedAt, id.',
+    );
   });
 });
 
 describe('unknownColumnError', () => {
   it('reports nothing when the query names no select or orderBy field', () => {
-    expect(unknownColumnError('Product', [{ id: 'p1' }], query({ where: { anything: 1 } })))
-      .toBeUndefined();
+    expect(
+      unknownColumnError('Product', [{ id: 'p1' }], query({ where: { anything: 1 } })),
+    ).toBeUndefined();
   });
 
   it('reports nothing when every named field is known', () => {
-    expect(unknownColumnError('Product', [{ id: 'p1' }], query({ select: ['id'] })))
-      .toBeUndefined();
+    expect(
+      unknownColumnError('Product', [{ id: 'p1' }], query({ select: ['id'] })),
+    ).toBeUndefined();
   });
 
   it('names the entity, the clause and the field it rejected', () => {
@@ -115,9 +117,9 @@ describe('MemoryAdapter column validation', () => {
 
   it('orders by a known column', async () => {
     const adapter = await seeded();
-    const rows = await adapter.createDataSource('Product').findAll(
-      query({ orderBy: { qty: 'asc' } }),
-    );
+    const rows = await adapter
+      .createDataSource('Product')
+      .findAll(query({ orderBy: { qty: 'asc' } }));
     expect(rows.map((row) => row.id)).toEqual(['p2', 'p1']);
   });
 
@@ -141,9 +143,9 @@ describe('MemoryAdapter column validation', () => {
   it('accepts any column against an empty store, where there is nothing to observe', async () => {
     const adapter = new MemoryAdapter();
     await adapter.connect();
-    const rows = await adapter.createDataSource('Product').findAll(
-      query({ select: ['whatever'], orderBy: { alsoWhatever: 'asc' } }),
-    );
+    const rows = await adapter
+      .createDataSource('Product')
+      .findAll(query({ select: ['whatever'], orderBy: { alsoWhatever: 'asc' } }));
     expect(rows).toEqual([]);
   });
 
@@ -152,9 +154,11 @@ describe('MemoryAdapter column validation', () => {
     const source = adapter.createDataSource('Product');
     expect(await source.findAll(query({ where: { sku: 'X' } }))).toEqual([]);
     expect(
-      await source.findAll(query({
-        filter: { type: 'comparison', field: 'sku', operator: 'eq', value: 'X' },
-      })),
+      await source.findAll(
+        query({
+          filter: { type: 'comparison', field: 'sku', operator: 'eq', value: 'X' },
+        }),
+      ),
     ).toEqual([]);
     expect(await source.count({ sku: 'X' })).toBe(0);
   });

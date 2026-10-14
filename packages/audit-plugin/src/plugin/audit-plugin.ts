@@ -168,8 +168,8 @@ function resolveRedaction(
   return redaction === undefined
     ? undefined
     : 'redactRecord' in redaction
-    ? redaction
-    : createRedactionService(redaction);
+      ? redaction
+      : createRedactionService(redaction);
 }
 
 /**

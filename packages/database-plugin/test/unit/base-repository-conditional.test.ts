@@ -38,22 +38,24 @@ describe('BaseRepository conditional writes', () => {
       return Promise.resolve(false);
     };
     const repo = new TestRepo(legacy);
-    for (
-      const call of [
-        () => repo.updateWhere('a', { n: 1 }, { n: 2 }),
-        () => repo.deleteWhere('a', { n: 1 }),
-      ]
-    ) {
+    for (const call of [
+      () => repo.updateWhere('a', { n: 1 }, { n: 2 }),
+      () => repo.deleteWhere('a', { n: 1 }),
+    ]) {
       let promise: Promise<unknown> | undefined;
       expect(() => {
         promise = call();
       }).not.toThrow();
-      const error = await promise!.catch((error: unknown) => error) as UnsupportedQueryFeatureError;
+      const error = (await promise!.catch(
+        (error: unknown) => error,
+      )) as UnsupportedQueryFeatureError;
       expect(error.feature).toBe('conditional-write');
       expect(httpStatusHintOf(error)?.status).toBe(501);
     }
     for (const promise of [repo.updateWhere('a', {}, { n: 2 }), repo.deleteWhere('a', {})]) {
-      const error = await promise.catch((error: unknown) => error) as UnsupportedQueryFeatureError;
+      const error = (await promise.catch(
+        (error: unknown) => error,
+      )) as UnsupportedQueryFeatureError;
       expect(error.feature).toBe('write-precondition');
       expect(httpStatusHintOf(error)).toBeUndefined();
     }

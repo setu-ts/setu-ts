@@ -50,10 +50,7 @@ export function createApp(): Promise<IKernelApplication> {
         context.set(sessionContext, getSession(ctx));
         context.set(csrfContext, getCsrfToken(ctx));
         context.set(loggerContext, ctx.services.get<ILogger>(CAPABILITIES.LOGGER));
-        context.set(
-          databaseContext,
-          ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
-        );
+        context.set(databaseContext, ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE));
       },
     },
     session: {

@@ -130,7 +130,7 @@ export class SendGridProvider implements MailProvider {
     const res = await this.#http(this.#endpoint, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${this.#apiKey}`,
+        Authorization: `Bearer ${this.#apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(toSendGridBody(message)),

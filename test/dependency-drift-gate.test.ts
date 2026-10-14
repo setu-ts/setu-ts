@@ -29,7 +29,10 @@ async function gitLsFiles(pathspecs: readonly string[]): Promise<string[]> {
   if (code !== 0) {
     throw new Error(`git ls-files failed: ${new TextDecoder().decode(stderr)}`);
   }
-  return new TextDecoder().decode(stdout).split('\n').filter((line) => line !== '');
+  return new TextDecoder()
+    .decode(stdout)
+    .split('\n')
+    .filter((line) => line !== '');
 }
 
 /**
@@ -45,8 +48,9 @@ async function gitLsFiles(pathspecs: readonly string[]): Promise<string[]> {
 async function listedSources(workflow: string): Promise<string[]> {
   const match = /git ls-files -- ((?:[^\n]|\\\n)+?) > "\$sources"/.exec(workflow);
   if (match === null) throw new Error('No `git ls-files -- … > "$sources"` in the workflow.');
-  const pathspecs = [...match[1]!.replaceAll('\\\n', ' ').matchAll(/'([^']+)'/g)]
-    .map((quoted) => quoted[1]!);
+  const pathspecs = [...match[1]!.replaceAll('\\\n', ' ').matchAll(/'([^']+)'/g)].map(
+    (quoted) => quoted[1]!,
+  );
   if (pathspecs.length === 0) throw new Error('The listing step passes no pathspec.');
   return await gitLsFiles(pathspecs);
 }

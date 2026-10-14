@@ -71,26 +71,28 @@ export class SseService implements IService {
     this.#backplane = backplane;
     this.#logger = logger;
     this.#registry = new ChannelRegistry(
-      backplane === undefined ? undefined : (name, msg): void => {
-        const frame: RealtimeFrame = {
-          kind: 'sse-channel',
-          origin: backplane.origin,
-          name,
-          // An SseMessage is already JSON-serializable, so its JSON encoding is
-          // the wire form; no base64 is involved on this path.
-          data: JSON.stringify(msg),
-        };
-        // Fire-and-forget: a transport failure must never make a local publish
-        // throw for the application that issued it. It is reported rather than
-        // swallowed, because the degradation — local-only delivery — is
-        // otherwise completely invisible to an operator.
-        void backplane.publish(frame).catch((error: unknown) => {
-          this.#logger?.warn('sse: backplane publish failed', {
-            channel: name,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      },
+      backplane === undefined
+        ? undefined
+        : (name, msg): void => {
+            const frame: RealtimeFrame = {
+              kind: 'sse-channel',
+              origin: backplane.origin,
+              name,
+              // An SseMessage is already JSON-serializable, so its JSON encoding is
+              // the wire form; no base64 is involved on this path.
+              data: JSON.stringify(msg),
+            };
+            // Fire-and-forget: a transport failure must never make a local publish
+            // throw for the application that issued it. It is reported rather than
+            // swallowed, because the degradation — local-only delivery — is
+            // otherwise completely invisible to an operator.
+            void backplane.publish(frame).catch((error: unknown) => {
+              this.#logger?.warn('sse: backplane publish failed', {
+                channel: name,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+          },
     );
   }
 
@@ -141,12 +143,8 @@ export class SseService implements IService {
     const observer = realtimeObserverOf(this);
     let conn: SseConnection;
     try {
-      conn = new SseConnection(
-        ctx,
-        this.#runtime,
-        this.#heartbeatMs,
-        this.#retryMs,
-        () => this.#onClosed(conn),
+      conn = new SseConnection(ctx, this.#runtime, this.#heartbeatMs, this.#retryMs, () =>
+        this.#onClosed(conn),
       );
     } catch (error) {
       observer?.observe('open', false);

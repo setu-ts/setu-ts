@@ -54,12 +54,14 @@ export type AnonymousPolicyCheck<T> = (
  * @typeParam T - The target type the policy is written for
  * @since 0.9.0
  */
-export type PolicyAbility<T> = PolicyCheck<T> | {
-  /** Marks the ability as evaluated for anonymous principals too. */
-  readonly anonymous: true;
-  /** The check, receiving `null` for an anonymous principal. */
-  readonly check: AnonymousPolicyCheck<T>;
-};
+export type PolicyAbility<T> =
+  | PolicyCheck<T>
+  | {
+      /** Marks the ability as evaluated for anonymous principals too. */
+      readonly anonymous: true;
+      /** The check, receiving `null` for an anonymous principal. */
+      readonly check: AnonymousPolicyCheck<T>;
+    };
 
 /**
  * A named authorization policy: a set of abilities over one target type, plus
@@ -143,8 +145,7 @@ export type PolicyRef<A extends string, T> = string | PolicyDefinition<A, T>;
  * @since 0.9.0
  */
 export type PolicyTarget<T> =
-  | T
-  | ((ctx: IRequestContext) => T | undefined | Promise<T | undefined>);
+  T | ((ctx: IRequestContext) => T | undefined | Promise<T | undefined>);
 
 /**
  * What a registry reports about one registered ability.

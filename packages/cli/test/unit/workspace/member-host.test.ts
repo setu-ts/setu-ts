@@ -29,9 +29,7 @@ describe('withWorkspaceMember', () => {
   it('points the discovery wiring at the generated map', () => {
     const member = withWorkspaceMember(hostOf('microservice'), HTTP, 'orders');
     const wiring = member.plugins.find((p) => p.pkg === 'service-discovery-plugin');
-    expect(wiring?.args).toBe(
-      `{ provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} }`,
-    );
+    expect(wiring?.args).toBe(`{ provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} }`);
   });
 
   it('brings the map identifier into scope exactly once', () => {
@@ -195,9 +193,15 @@ describe('withWorkspaceMember — the transport overlay', () => {
   it('contributes no plugin any template already registers', () => {
     for (const template of ['rest', 'microservice', 'class-based']) {
       const base = hostOf(template);
-      for (
-        const name of ['http', 'grpc', 'memory', 'redis', 'rabbitmq', 'nats', 'kafka'] as const
-      ) {
+      for (const name of [
+        'http',
+        'grpc',
+        'memory',
+        'redis',
+        'rabbitmq',
+        'nats',
+        'kafka',
+      ] as const) {
         const member = withWorkspaceMember(base, transportSpec(name), 'orders');
         const packages = member.plugins.map((p) => p.pkg);
         expect(new Set(packages).size).toBe(packages.length);

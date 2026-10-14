@@ -53,11 +53,11 @@ the rules the current gates enforce carried across, while every other gate keeps
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                             | Resolution (picked side)                                                                                                                                                            | Doc deliverable (same PR)                                                               |
-| -- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| C1 | ROADMAP M111e says to keep "unused-variable errors with no underscore escape", while the gate it describes (`deno lint`) allows a leading `_`, and 1,381 sites rely on it                            | The measured behaviour wins: ESLint ignores `^_` args, vars and caught errors, exactly as `deno lint` does. Removing the escape is a separate decision that would touch 1,381 sites | ROADMAP M111e bullet corrected                                                          |
-| C2 | ROADMAP describes M111e as one milestone; the maintainer split it into three PRs                                                                                                                     | The split wins                                                                                                                                                                      | ROADMAP gains 111e1/111e2/111e3 sub-sections and progress rows                          |
-| C3 | CLAUDE.md "Common pitfalls" says `no-console` applies everywhere except `packages/cli` and `scripts/`, while `deno.json` exempts only `packages/cli` and every script carries a file-level directive | The configuration wins: scripts stay linted for `no-console`, with their directives converted                                                                                       | Pitfall line corrected in 111f with the other governing-document wording (listed in §9) |
+| #   | Conflict                                                                                                                                                                                             | Resolution (picked side)                                                                                                                                                            | Doc deliverable (same PR)                                                               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| C1  | ROADMAP M111e says to keep "unused-variable errors with no underscore escape", while the gate it describes (`deno lint`) allows a leading `_`, and 1,381 sites rely on it                            | The measured behaviour wins: ESLint ignores `^_` args, vars and caught errors, exactly as `deno lint` does. Removing the escape is a separate decision that would touch 1,381 sites | ROADMAP M111e bullet corrected                                                          |
+| C2  | ROADMAP describes M111e as one milestone; the maintainer split it into three PRs                                                                                                                     | The split wins                                                                                                                                                                      | ROADMAP gains 111e1/111e2/111e3 sub-sections and progress rows                          |
+| C3  | CLAUDE.md "Common pitfalls" says `no-console` applies everywhere except `packages/cli` and `scripts/`, while `deno.json` exempts only `packages/cli` and every script carries a file-level directive | The configuration wins: scripts stay linted for `no-console`, with their directives converted                                                                                       | Pitfall line corrected in 111f with the other governing-document wording (listed in §9) |
 
 ## 3. Design decisions
 
@@ -72,8 +72,8 @@ the rules the current gates enforce carried across, while every other gate keeps
   one-time reformat is a commit containing nothing but formatter output, and its SHA goes in
   `.git-blame-ignore-revs`. Not carried: Deno's exclusions of `scripts/codemods`, `vitest.config.ts`
   and `test/node`, which exist because Deno cannot resolve that Node code — Prettier and ESLint can,
-  so both cover it. The commit after it reconciles what the reformat moved: the 21
-  `file:line` references in `docs/health-indicators.md`.
+  so both cover it. The commit after it reconciles what the reformat moved: the 21 `file:line`
+  references in `docs/health-indicators.md`.
 - **Why:** the residual diff is algorithmic; isolating it in one commit keeps `git blame` useful and
   review of the real changes separate. Formatting a generated file or a pinned workflow would only
   trade one byte gate's failure for another's.
@@ -106,8 +106,10 @@ the rules the current gates enforce carried across, while every other gate keeps
   Dropped, and listed in the PR: `no-sync-fn-in-async-fn` (its targets are the `Deno.*Sync` calls
   111e2 removes) and the Deno-only `no-sloppy-imports`, `no-unversioned-import`,
   `no-deprecated-deno-api`. The eleven `jsx-*` rules are dropped: `eslint-plugin-react` 7.37.5, the
-  current release, declares no ESLint 10 support (`peerDependencies.eslint` ends at `^9.7`). Recommended rules `deno lint` did not enforce stay ON; their ~70 findings are
-  fixed, or disabled inline with a reason where the code is deliberate.
+  current release, declares no ESLint 10 support (`peerDependencies.eslint` ends at `^9.7`).
+  Recommended rules `deno lint` did not enforce stay ON; their ~70 findings are fixed, or disabled
+  inline with a reason where the code is deliberate.
+
 - **Why:** the gate must keep everything it enforces today; a recommended preset is not that, as the
   override's `no-unreachable` shows.
 - **Test home:** `test/node/eslint-config.test.ts` lints planted snippets through the ESLint Node

@@ -56,8 +56,9 @@ describe('parameter resolver', () => {
   it('resolves @CurrentUser from ctx.request.user', async () => {
     const user: IPrincipal = { id: 'user-1', roles: ['admin'] };
     const ctx = createFakeRequestContext({ user });
-    expect(await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'current-user' }))
-      .toBe(user);
+    expect(
+      await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'current-user' }),
+    ).toBe(user);
   });
 
   it('resolves @Ctx to the active request context before registered resolvers', async () => {
@@ -76,15 +77,17 @@ describe('parameter resolver', () => {
   it('resolves an application-defined context parameter through its registered resolver', async () => {
     const ctx = createFakeRequestContext();
     registerParameterResolver('context', () => 'custom-context');
-    expect(await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'context' }))
-      .toBe('custom-context');
+    expect(await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'context' })).toBe(
+      'custom-context',
+    );
   });
 
   it('resolves a custom parameter via a registered resolver', async () => {
     const ctx = createFakeRequestContext();
     registerParameterResolver('current-tenant', () => 'tenant-1');
-    expect(await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'current-tenant' }))
-      .toBe('tenant-1');
+    expect(
+      await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'current-tenant' }),
+    ).toBe('tenant-1');
   });
 
   it('passes captured metadata to a custom resolver', async () => {
@@ -143,8 +146,9 @@ describe('parameter resolver', () => {
     // `Headers.get` answers null; the source is typed `string | undefined`, so a
     // handler testing `!== undefined` must not see a missing header as present.
     const ctx = createFakeRequestContext({ headers: {} });
-    expect(await resolveParameter(ctx, { index: 0, type: 'header', name: 'authorization' }))
-      .toBeUndefined();
+    expect(
+      await resolveParameter(ctx, { index: 0, type: 'header', name: 'authorization' }),
+    ).toBeUndefined();
   });
 
   it('@Header without name returns undefined', async () => {

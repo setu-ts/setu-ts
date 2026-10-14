@@ -86,10 +86,7 @@ interface AggregateStats {
 }
 
 /** Sums per-store statistics. */
-function aggregate(
-  all: readonly OutboxStoreStats[],
-  maxFailedScan: number,
-): AggregateStats {
+function aggregate(all: readonly OutboxStoreStats[], maxFailedScan: number): AggregateStats {
   let pending = 0;
   let failed = 0;
   let oldest: number | undefined;
@@ -166,15 +163,15 @@ export function createOutboxHealthIndicator(deps: OutboxHealthDeps): HealthIndic
         reasons,
         ...(last !== undefined
           ? {
-            lastSweep: {
-              origin: last.origin,
-              scanned: last.scanned,
-              published: last.published,
-              failures: last.failures,
-              poisoned: last.poisoned,
-              endedBy: last.endedBy,
-            },
-          }
+              lastSweep: {
+                origin: last.origin,
+                scanned: last.scanned,
+                published: last.published,
+                failures: last.failures,
+                poisoned: last.poisoned,
+                endedBy: last.endedBy,
+              },
+            }
           : {}),
       },
     };

@@ -24,9 +24,8 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT]
-> **Status: `v0.9.0` publishes 52 packages to npm under `@setu-ts`** — the first npm release. Every
-> earlier version remains on JSR; nothing new is published there.
+> [!IMPORTANT] **Status: `v0.9.0` publishes 52 packages to npm under `@setu-ts`** — the first npm
+> release. Every earlier version remains on JSR; nothing new is published there.
 >
 > <!-- version:history -->
 >
@@ -281,10 +280,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    LoggerPlugin({ level: 'info' }),
-  ],
+  plugins: [RuntimePlugin(), LoggerPlugin({ level: 'info' })],
 });
 
 app.router.get('/', (ctx) => {

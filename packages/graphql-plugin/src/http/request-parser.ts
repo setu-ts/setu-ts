@@ -65,7 +65,8 @@ export function parsePostBody(body: unknown): GraphqlRequestParams {
   // without the array check the two entry points disagree and an array reaches
   // `execute` as the variable map.
   if (
-    obj.variables !== undefined && obj.variables !== null &&
+    obj.variables !== undefined &&
+    obj.variables !== null &&
     (typeof obj.variables !== 'object' || Array.isArray(obj.variables))
   ) {
     const err = new Error('Variables must be a JSON object') as ParseError;
@@ -89,7 +90,9 @@ export function parsePostBody(body: unknown): GraphqlRequestParams {
   // Parse extensions (object-or-absent)
   if (obj.extensions !== undefined) {
     if (
-      typeof obj.extensions !== 'object' || obj.extensions === null || Array.isArray(obj.extensions)
+      typeof obj.extensions !== 'object' ||
+      obj.extensions === null ||
+      Array.isArray(obj.extensions)
     ) {
       const err = new Error('Extensions must be a JSON object') as ParseError;
       err.code = 'INVALID_EXTENSIONS';

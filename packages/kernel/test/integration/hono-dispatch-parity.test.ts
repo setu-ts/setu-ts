@@ -32,7 +32,7 @@ describe('Hono dispatch parity — inject() round-trip', () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     await app.start();
 
-    const handler = () => ({ __handlerResult: true } as never);
+    const handler = () => ({ __handlerResult: true }) as never;
     app.router.get('/hello', handler);
 
     const result = await app.inject({ method: 'GET', url: 'http://localhost/hello' });
@@ -102,7 +102,7 @@ describe('Hono dispatch parity — middleware priority', () => {
     });
     await app.start();
 
-    app.router.get('/test', () => ({ __handlerResult: true } as never));
+    app.router.get('/test', () => ({ __handlerResult: true }) as never);
 
     await app.inject({ method: 'GET', url: 'http://localhost/test' });
     // Outermost-first inbound, outermost-last outbound
@@ -142,7 +142,7 @@ describe('Hono dispatch parity — %zz → 400 (not 404/500)', () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     await app.start();
 
-    app.router.get('/users/:id', () => ({ __handlerResult: true } as never));
+    app.router.get('/users/:id', () => ({ __handlerResult: true }) as never);
 
     const result = await app.inject({
       method: 'GET',
@@ -160,10 +160,8 @@ describe('Hono dispatch parity — snapshot() fidelity', () => {
 
     app.router.get('/data', {
       handler: (ctx) => {
-        return ctx.response
-          .status(201)
-          .header('x-custom', 'value')
-          .json({ ok: true }).__handlerResult as never;
+        return ctx.response.status(201).header('x-custom', 'value').json({ ok: true })
+          .__handlerResult as never;
       },
     });
 

@@ -11,8 +11,9 @@ describe('inbox conditional transitions', () => {
     const ids = idsFor('a');
     await store.recordFailure(ids, failure);
     expect(
-      (await Promise.all([store.recordFailure(ids, failure), store.recordFailure(ids, failure)]))
-        .sort(),
+      (
+        await Promise.all([store.recordFailure(ids, failure), store.recordFailure(ids, failure)])
+      ).sort(),
     ).toEqual([2, 3]);
     expect(await service.getRepository(ENTITY).findById(ids.attempts)).toMatchObject({
       attempts: 3,
@@ -23,14 +24,18 @@ describe('inbox conditional transitions', () => {
       const adapter = new MemoryAdapter();
       const source = adapter.createDataSource(ENTITY);
       let calls = 0;
-      const service = new DatabaseService(adapter, () => ({
-        ...source,
-        updateWhere: async (id) => {
-          calls++;
-          if (vanished) await source.delete(id);
-          return null;
-        },
-      }), 'memory');
+      const service = new DatabaseService(
+        adapter,
+        () => ({
+          ...source,
+          updateWhere: async (id) => {
+            calls++;
+            if (vanished) await source.delete(id);
+            return null;
+          },
+        }),
+        'memory',
+      );
       const ids = idsFor('a');
       await source.create({
         ...marker('a', { status: 'attempting', attempts: 1 }),
@@ -82,13 +87,17 @@ describe('inbox conditional transitions', () => {
       const source = adapter.createDataSource(ENTITY);
       const ids = idsFor('a');
       await source.create({ ...marker('a', { status: 'parked' }) });
-      const service = new DatabaseService(adapter, () => ({
-        ...source,
-        deleteWhere: async (id) => {
-          if (vanished) await source.delete(id);
-          return false;
-        },
-      }), 'memory');
+      const service = new DatabaseService(
+        adapter,
+        () => ({
+          ...source,
+          deleteWhere: async (id) => {
+            if (vanished) await source.delete(id);
+            return false;
+          },
+        }),
+        'memory',
+      );
       const result = storeOver(service).release(ids, 'retry', 99);
       if (vanished) expect(await result).toEqual({ outcome: 'missing' });
       else await expect(result).rejects.toThrow(/contention/);

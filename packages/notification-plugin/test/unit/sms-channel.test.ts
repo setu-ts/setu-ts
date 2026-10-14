@@ -44,8 +44,6 @@ describe('SmsChannel', () => {
       body: 'SMS body',
     };
 
-    await expect(channel.send(notification)).rejects.toThrow(
-      'SMS channel requires "to.phone"',
-    );
+    await expect(channel.send(notification)).rejects.toThrow('SMS channel requires "to.phone"');
   });
 });

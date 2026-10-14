@@ -54,13 +54,7 @@ export interface ResolvedOutboxOptions {
 }
 
 /** Reads an integer option, refusing `NaN`, fractions and out-of-range values. */
-function integer(
-  name: string,
-  value: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
+function integer(name: string, value: unknown, fallback: number, min: number, max: number): number {
   if (value === undefined) return fallback;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
     throw new RangeError(`outbox: ${name} must be an integer between ${min} and ${max}`);

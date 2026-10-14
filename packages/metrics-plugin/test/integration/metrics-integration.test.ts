@@ -74,9 +74,8 @@ describe('Metrics integration (through the real kernel pipeline)', () => {
           name: 'work-route',
           version: '1.0.0',
           register(ctx: IPluginContext): void {
-            ctx.router.get(
-              '/work',
-              (c: IRequestContext) => c.response.status(200).json({ ok: true }),
+            ctx.router.get('/work', (c: IRequestContext) =>
+              c.response.status(200).json({ ok: true }),
             );
           },
         },

@@ -118,9 +118,7 @@ describe('a thrown error carrying its own `details.detail` key (code review, fin
       details: { field: 'tenant' },
     });
 
-    expect(bodyOf(responseSnapshot()).detail).toBe(
-      'No tenant could be resolved for this request',
-    );
+    expect(bodyOf(responseSnapshot()).detail).toBe('No tenant could be resolved for this request');
   });
 
   it('never serializes the internal marker into the body', () => {

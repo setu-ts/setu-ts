@@ -198,8 +198,8 @@ it('drains an admitted request through the runtime polling timer before shutdown
   const fake = createFakeRuntime();
   let release!: () => void;
   let entered!: () => void;
-  const gate = new Promise<void>((resolve) => release = resolve);
-  const started = new Promise<void>((resolve) => entered = resolve);
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const started = new Promise<void>((resolve) => (entered = resolve));
   const app = createApplication({ plugins: [runtimePluginWith(fake)] });
   app.router.get('/pending', async (ctx) => {
     entered();

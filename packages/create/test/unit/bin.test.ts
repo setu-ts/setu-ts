@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // The executable runs on load, so it is imported with both of its effects
 // replaced: no real CLI run and no real runtime services.
 const runMain = vi.fn((_runtime: unknown, _host: { args: readonly string[] }) =>
-  Promise.resolve(3)
+  Promise.resolve(3),
 );
 vi.mock('@setu-ts/cli/main', () => ({
   runMain,

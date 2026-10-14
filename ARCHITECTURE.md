@@ -1936,7 +1936,9 @@ app.middleware.add(loggingMiddleware(), { priority: 50 });
 // Route-level middleware
 app.router.get('/users', {
   middleware: [requireAuth(), validationMiddleware()],
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
 });
 ```
 
@@ -2226,18 +2228,22 @@ via `Reflect.getMetadata()`. This ensures:
 The `DecoratorPlugin` can auto-discover decorated classes:
 
 ```typescript
-app.register(DecoratorPlugin({
-  autoDiscover: true,
-  controllersPath: './src/controllers',
-}));
+app.register(
+  DecoratorPlugin({
+    autoDiscover: true,
+    controllersPath: './src/controllers',
+  }),
+);
 ```
 
 Or classes can be registered explicitly:
 
 ```typescript
-app.register(DecoratorPlugin({
-  controllers: [UserController, OrderController],
-}));
+app.register(
+  DecoratorPlugin({
+    controllers: [UserController, OrderController],
+  }),
+);
 ```
 
 ---
@@ -2306,11 +2312,13 @@ application (or by a starter bundle) — the kernel ships zero features, includi
 ```typescript
 import { errorHandler } from '@setu-ts/exceptions';
 
-app.middleware.add(errorHandler({
-  format: 'rfc9457',
-  includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
-  logErrors: true,
-}));
+app.middleware.add(
+  errorHandler({
+    format: 'rfc9457',
+    includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
+    logErrors: true,
+  }),
+);
 ```
 
 For an application-owned response to a caught error, `respond` can return or resolve a result built
@@ -2334,8 +2342,7 @@ import `exceptions` (where every formatter lives), and the kernel and every midd
 an error all need the same contract. `errorHandler` builds an `IErrorResponder` from the formatter
 and content type it already resolved at factory time and publishes it in `ctx.state` **before**
 `next()`; any site inside the pipeline then calls
-`respondWithError(ctx, { status, title, detail?,
-details? })`, which delegates to the published
+`respondWithError(ctx, { status, title, detail?, details? })`, which delegates to the published
 responder and answers in the application's configured format. The one first-party site deliberately
 outside the seam is `validation-plugin`, which owns its own `errorFormat` option and formats
 validation failures itself; an application sets the two to the same format, as the CLI templates and
@@ -2599,8 +2606,7 @@ is in-process only and registers no listener.
 ### Health Observation Boundary (Milestone 98d)
 
 Health observations extend the M98a/M98b pattern to the health plugin.
-`HealthPlugin({
-diagnostics })` is OFF unless the option is passed, and an omitted option registers
+`HealthPlugin({ diagnostics })` is OFF unless the option is passed, and an omitted option registers
 only an inert, disabled source under `CAPABILITIES.HEALTH_DIAGNOSTICS` — no capture, no timer. When
 enabled, the boundary is again STRUCTURAL, not a filter over captured data: the collector is handed
 the already-produced `HealthCheckResult` from the health service's single evaluation (one callback
@@ -3129,18 +3135,30 @@ the supported backends, and each one owns migrations through its own CLI.
 import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 
 export class MyAdapter implements IDatabaseAdapter {
-  async connect(): Promise<void> {/* ... */}
-  async disconnect(): Promise<void> {/* ... */}
-  isReady(): boolean {/* ... */}
+  async connect(): Promise<void> {
+    /* ... */
+  }
+  async disconnect(): Promise<void> {
+    /* ... */
+  }
+  isReady(): boolean {
+    /* ... */
+  }
 
   // One data source per entity; it owns query evaluation end to end.
-  createDataSource(entity: string): IDataSource {/* ... */}
+  createDataSource(entity: string): IDataSource {
+    /* ... */
+  }
 
   // The handle also opens transaction-scoped data sources, which is what makes
   // a Unit of Work spanning several entities atomic.
-  async beginTransaction(): Promise<IAdapterTransaction> {/* ... */}
+  async beginTransaction(): Promise<IAdapterTransaction> {
+    /* ... */
+  }
 
-  async rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {/* ... */}
+  async rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
+    /* ... */
+  }
 }
 
 app.register(DatabasePlugin({ type: 'custom', adapter: new MyAdapter() }));
@@ -3154,9 +3172,15 @@ app.register(DatabasePlugin({ type: 'custom', adapter: new MyAdapter() }));
 import { ICacheStore } from '@setu-ts/common';
 
 export class MyCacheStore implements ICacheStore {
-  async get<T>(key: string): Promise<T | null> {/* ... */}
-  async set<T>(key: string, value: T, ttl?: number): Promise<void> {/* ... */}
-  async delete(key: string): Promise<boolean> {/* ... */}
+  async get<T>(key: string): Promise<T | null> {
+    /* ... */
+  }
+  async set<T>(key: string, value: T, ttl?: number): Promise<void> {
+    /* ... */
+  }
+  async delete(key: string): Promise<boolean> {
+    /* ... */
+  }
   // ... implement all ICacheStore methods
 }
 ```
@@ -3169,10 +3193,18 @@ Transport adapters (message brokers, queue systems) follow the same pattern:
 import { IMessageBroker } from '@setu-ts/common';
 
 export class MyMessageBroker implements IMessageBroker {
-  async connect(): Promise<void> {/* ... */}
-  async disconnect(): Promise<void> {/* ... */}
-  async publish<T>(topic: string, message: T): Promise<void> {/* ... */}
-  async subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<Subscription> {/* ... */}
+  async connect(): Promise<void> {
+    /* ... */
+  }
+  async disconnect(): Promise<void> {
+    /* ... */
+  }
+  async publish<T>(topic: string, message: T): Promise<void> {
+    /* ... */
+  }
+  async subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<Subscription> {
+    /* ... */
+  }
 }
 ```
 

@@ -180,8 +180,7 @@ describe('HealthPlugin factory arm', () => {
     const factory = (): IHealthIndicator => {
       throw new Error('capability missing');
     };
-    await HealthPlugin({ indicators: [indicator('a'), indicator('b'), factory] })
-      .register!(ctx);
+    await HealthPlugin({ indicators: [indicator('a'), indicator('b'), factory] }).register!(ctx);
     expect(() => {
       for (const hook of onInit) hook();
     }).toThrow('HealthPlugin({ indicators })[2]');

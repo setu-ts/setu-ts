@@ -55,9 +55,7 @@ export type PathPattern = string | RegExp;
  * ```
  * @since 0.5.0
  */
-export function createPathMatcher(
-  patterns: readonly PathPattern[],
-): (path: string) => boolean {
+export function createPathMatcher(patterns: readonly PathPattern[]): (path: string) => boolean {
   const literals = new Set<string>();
   const expressions: RegExp[] = [];
 

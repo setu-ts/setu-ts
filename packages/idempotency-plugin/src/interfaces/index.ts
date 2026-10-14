@@ -46,47 +46,47 @@ export interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
  */
 export type IdempotencyStoreConfig =
   | {
-    /** The in-process store. */
-    readonly type: 'memory';
-    /** Global entry cap. Default 100,000. */
-    readonly maxEntries?: number;
-    /** Per-scope entry cap. Default 1,000; at most `maxEntries`. */
-    readonly maxEntriesPerScope?: number;
-    /** Global byte cap (approximate). Default 67,108,864. */
-    readonly maxBytes?: number;
-  }
+      /** The in-process store. */
+      readonly type: 'memory';
+      /** Global entry cap. Default 100,000. */
+      readonly maxEntries?: number;
+      /** Per-scope entry cap. Default 1,000; at most `maxEntries`. */
+      readonly maxEntriesPerScope?: number;
+      /** Global byte cap (approximate). Default 67,108,864. */
+      readonly maxBytes?: number;
+    }
   | {
-    /** The Redis store, over a client this package builds lazily. */
-    readonly type: 'redis';
-    /** Required. Isolates this application's records from another on the same Redis. */
-    readonly namespace: string;
-    /** The Redis connection URL. */
-    readonly url: string;
-    /** Must be absent on this arm — a URL and a client are mutually exclusive. */
-    readonly client?: never;
-    /** Per-command timeout in ms. Default 15,000; `0` disables. */
-    readonly commandTimeoutMs?: number;
-    /** Key prefix. Default `'setu:idempotency:'`. */
-    readonly keyPrefix?: string;
-  }
+      /** The Redis store, over a client this package builds lazily. */
+      readonly type: 'redis';
+      /** Required. Isolates this application's records from another on the same Redis. */
+      readonly namespace: string;
+      /** The Redis connection URL. */
+      readonly url: string;
+      /** Must be absent on this arm — a URL and a client are mutually exclusive. */
+      readonly client?: never;
+      /** Per-command timeout in ms. Default 15,000; `0` disables. */
+      readonly commandTimeoutMs?: number;
+      /** Key prefix. Default `'setu:idempotency:'`. */
+      readonly keyPrefix?: string;
+    }
   | {
-    /** The Redis store, over a caller-supplied client. */
-    readonly type: 'redis';
-    /** Required. Isolates this application's records from another on the same Redis. */
-    readonly namespace: string;
-    /** The caller-owned Redis client. */
-    readonly client: IRedisIdempotencyClient;
-    /** Must be absent on this arm — a client and a URL are mutually exclusive. */
-    readonly url?: never;
-    /** Key prefix. Default `'setu:idempotency:'`. */
-    readonly keyPrefix?: string;
-  }
+      /** The Redis store, over a caller-supplied client. */
+      readonly type: 'redis';
+      /** Required. Isolates this application's records from another on the same Redis. */
+      readonly namespace: string;
+      /** The caller-owned Redis client. */
+      readonly client: IRedisIdempotencyClient;
+      /** Must be absent on this arm — a client and a URL are mutually exclusive. */
+      readonly url?: never;
+      /** Key prefix. Default `'setu:idempotency:'`. */
+      readonly keyPrefix?: string;
+    }
   | {
-    /** Any `IIdempotencyStore` the application supplies. */
-    readonly type: 'custom';
-    /** The store instance, passed through unchanged. */
-    readonly store: IIdempotencyStore;
-  };
+      /** Any `IIdempotencyStore` the application supplies. */
+      readonly type: 'custom';
+      /** The store instance, passed through unchanged. */
+      readonly store: IIdempotencyStore;
+    };
 
 /**
  * The tier-C retention purge's schedule (plan §3.10).

@@ -244,7 +244,7 @@ export async function sweepTrackedFiles(
   current: string,
   paths?: readonly string[],
 ): Promise<SweepResult> {
-  const candidates = (paths ?? await trackedFiles()).filter(isSweptPath);
+  const candidates = (paths ?? (await trackedFiles())).filter(isSweptPath);
   const findings: StaleReference[] = [];
   let filesScanned = 0;
   let referencesSeen = 0;
@@ -296,8 +296,8 @@ export function reportSweep(
       failed: true,
       lines: [
         `version-sweep FAILED: scanned ${filesScanned} file(s) and found NO @setu-ts ` +
-        'references at all. The sweep pattern is broken — a scope rename or a lockfile ' +
-        'format change would look exactly like this, and so would a clean tree.',
+          'references at all. The sweep pattern is broken — a scope rename or a lockfile ' +
+          'format change would look exactly like this, and so would a clean tree.',
       ],
     };
   }
@@ -309,9 +309,9 @@ export function reportSweep(
         `version-sweep FAILED: ${findings.length} reference(s) name a version other than ${current}.`,
         ...findings.map((f) => `  ${f.file}:${f.line}  @setu-ts/${f.pkg}@${f.version}`),
         '\nThese sites are invisible to release:verify (which reads manifests) and to ' +
-        'check:docs (which reads Markdown). A stale source specifier still RESOLVES, so ' +
-        'it publishes green and makes the package depend on the previous release. ' +
-        'Mark a deliberately historical reference with a `version:history` comment.',
+          'check:docs (which reads Markdown). A stale source specifier still RESOLVES, so ' +
+          'it publishes green and makes the package depend on the previous release. ' +
+          'Mark a deliberately historical reference with a `version:history` comment.',
       ],
     };
   }
@@ -320,7 +320,7 @@ export function reportSweep(
     failed: false,
     lines: [
       `version-sweep passed: ${referencesSeen} @setu-ts reference(s) across ` +
-      `${filesScanned} file(s), all naming ${current}.`,
+        `${filesScanned} file(s), all naming ${current}.`,
     ],
   };
 }
@@ -350,9 +350,9 @@ export async function main(current: string): Promise<boolean> {
  * @returns The `version` field of the kernel manifest
  */
 export async function workspaceVersion(): Promise<string> {
-  const manifest = JSON.parse(
-    await Deno.readTextFile('packages/kernel/deno.json'),
-  ) as { version?: string };
+  const manifest = JSON.parse(await Deno.readTextFile('packages/kernel/deno.json')) as {
+    version?: string;
+  };
   if (manifest.version === undefined || manifest.version.length === 0) {
     throw new Error('packages/kernel/deno.json has no version field to sweep against.');
   }
@@ -360,6 +360,6 @@ export async function workspaceVersion(): Promise<string> {
 }
 
 if (import.meta.main) {
-  const version = Deno.args[0] ?? await workspaceVersion();
-  Deno.exit(await main(version) ? 1 : 0);
+  const version = Deno.args[0] ?? (await workspaceVersion());
+  Deno.exit((await main(version)) ? 1 : 0);
 }

@@ -61,10 +61,13 @@ describe('createTestApp — the composition-root arm', () => {
 
     // `middleware.add` throws once start() has compiled the pipeline, so this
     // succeeding IS the proof that start() was not called.
-    app.middleware.add(async (ctx, next) => {
-      await next();
-      ctx.response.header('x-mw', '1');
-    }, { priority: 10, name: 'probe' });
+    app.middleware.add(
+      async (ctx, next) => {
+        await next();
+        ctx.response.header('x-mw', '1');
+      },
+      { priority: 10, name: 'probe' },
+    );
     await app.start();
 
     app.router.get('/y', (ctx) => ctx.response.json({ ok: true }));
@@ -93,9 +96,9 @@ describe('createTestApp — the composition-root arm', () => {
   it('throws naming an unknown `without` entry', async () => {
     // A silently ignored exclusion runs the whole test against the real
     // plugin while reporting success.
-    await expect(
-      createTestApp({ app: root(), without: ['databse'] }),
-    ).rejects.toThrow(/cannot exclude plugin 'databse'/);
+    await expect(createTestApp({ app: root(), without: ['databse'] })).rejects.toThrow(
+      /cannot exclude plugin 'databse'/,
+    );
   });
 
   it('de-duplicates `without`, so a repeated name is not reported as unknown', async () => {
@@ -142,9 +145,9 @@ describe('createTestApp — the composition-root arm', () => {
       },
     ]);
 
-    await expect(
-      createTestApp({ app: built, without: ['database', 'cahce'] }),
-    ).rejects.toThrow(/cannot exclude plugin 'cahce'/);
+    await expect(createTestApp({ app: built, without: ['database', 'cahce'] })).rejects.toThrow(
+      /cannot exclude plugin 'cahce'/,
+    );
 
     // Nothing was removed: the good name is still pending and still runs.
     expect(built.hasPlugin('database')).toBe(true);
@@ -153,9 +156,9 @@ describe('createTestApp — the composition-root arm', () => {
   });
 
   it('names every unknown `without` entry, not just the first', async () => {
-    await expect(
-      createTestApp({ app: root(), without: ['databse', 'cahce'] }),
-    ).rejects.toThrow(/cannot exclude plugins 'databse', 'cahce'/);
+    await expect(createTestApp({ app: root(), without: ['databse', 'cahce'] })).rejects.toThrow(
+      /cannot exclude plugins 'databse', 'cahce'/,
+    );
   });
 
   it('applies `without` before `overrides`', async () => {
@@ -190,14 +193,16 @@ describe('createTestApp — the composition-root arm', () => {
     // exists rather than being sugar for app.register().
     const app = await createTestApp({
       app: root(),
-      overrides: [{
-        name: 'late',
-        version: '1.0.0',
-        provides: ['late'],
-        register(ctx: IPluginContext) {
-          ctx.services.register('late', { ok: true });
+      overrides: [
+        {
+          name: 'late',
+          version: '1.0.0',
+          provides: ['late'],
+          register(ctx: IPluginContext) {
+            ctx.services.register('late', { ok: true });
+          },
         },
-      }],
+      ],
     });
 
     expect(app.services.get<{ ok: boolean }>('late').ok).toBe(true);

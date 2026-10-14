@@ -268,7 +268,10 @@ function applyFilter(row: MutableRow, filter: BigtableFilter): MutableRow {
     for (const [family, qualifiers] of row) {
       const inner = new Map<string, BigtableCell[]>();
       for (const [qualifier, versions] of qualifiers) {
-        inner.set(qualifier, versions.map((cell) => ({ ...cell, value: '' })));
+        inner.set(
+          qualifier,
+          versions.map((cell) => ({ ...cell, value: '' })),
+        );
       }
       kept.set(family, inner);
     }
@@ -280,8 +283,8 @@ function applyFilter(row: MutableRow, filter: BigtableFilter): MutableRow {
     for (const [qualifier, versions] of qualifiers) {
       // An exact BYTE range — never a regex, which is what the SDK's string
       // form is and why the adapter never uses it.
-      const surviving = versions.filter((cell) =>
-        cell.value >= spec.start && cell.value <= spec.end
+      const surviving = versions.filter(
+        (cell) => cell.value >= spec.start && cell.value <= spec.end,
       );
       if (surviving.length > 0) inner.set(qualifier, surviving);
     }
@@ -340,17 +343,17 @@ export function createFakeBigtableClient(store: FakeBigtableStore): IBigtableCli
         candidates = candidates.filter((key) => wanted.has(key));
       }
       if (options.ranges !== undefined && options.ranges.length > 0) {
-        candidates = candidates.filter((key) =>
-          options.ranges?.some((range) => withinBoundary(key, range.start, range.end)) ?? false
+        candidates = candidates.filter(
+          (key) =>
+            options.ranges?.some((range) => withinBoundary(key, range.start, range.end)) ?? false,
         );
       }
       const results: BigtableReadRow[] = [];
       for (const key of candidates) {
         const stored = rows.get(key);
         if (stored === undefined) continue;
-        const filtered = options.filter === undefined
-          ? copyRow(stored)
-          : applyFilter(stored, options.filter);
+        const filtered =
+          options.filter === undefined ? copyRow(stored) : applyFilter(stored, options.filter);
         // A filter that removes every cell removes the ROW — the service does
         // not answer with an empty row.
         if (!hasCells(filtered)) continue;

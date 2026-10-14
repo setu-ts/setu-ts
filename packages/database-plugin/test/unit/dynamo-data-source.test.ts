@@ -55,8 +55,9 @@ describe('DynamoDB data source writes', () => {
       await ds.findAll({ where: { pk: 'p' }, orderBy: {}, limit: 1, offset: 0, select: ['value'] }),
     ).toStrictEqual([{ value: 1 }]);
     expect(calls).toBe(1);
-    await expect(ds.findAll({ where: {}, orderBy: {}, limit: -1, offset: 1, select: [] })).rejects
-      .toThrow('offset');
+    await expect(
+      ds.findAll({ where: {}, orderBy: {}, limit: -1, offset: 1, select: [] }),
+    ).rejects.toThrow('offset');
   });
   it('handles empty scan/findById results and count filters', async () => {
     const client: IDynamoClient = {
@@ -103,10 +104,14 @@ describe('DynamoDB data source writes', () => {
     await ds.create({ pk: 'p', value: 1 });
     expect(await ds.update('p', { value: 2 })).toStrictEqual({ pk: 'p', value: 2 });
     expect(await ds.delete('p')).toBe(true);
-    expect(calls).toMatchObject([{ ConditionExpression: 'attribute_not_exists(#n0)' }, {
-      ConditionExpression: 'attribute_exists(#n1)',
-      ReturnValues: 'ALL_NEW',
-    }, { ReturnValues: 'ALL_OLD' }]);
+    expect(calls).toMatchObject([
+      { ConditionExpression: 'attribute_not_exists(#n0)' },
+      {
+        ConditionExpression: 'attribute_exists(#n1)',
+        ReturnValues: 'ALL_NEW',
+      },
+      { ReturnValues: 'ALL_OLD' },
+    ]);
   });
   it('buffers transaction writes without immediate mutation and leaves reads committed', async () => {
     const calls: string[] = [];

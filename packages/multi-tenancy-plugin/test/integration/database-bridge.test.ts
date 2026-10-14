@@ -92,7 +92,7 @@ describe('tenant data-store bridge — real DatabasePlugin + createDatabaseTenan
         body: JSON.stringify({ name: 'Ada' }),
       });
       expect(createRes.statusCode).toBe(200);
-      const created = (JSON.parse(createRes.body ?? '{}').created) as Patient;
+      const created = JSON.parse(createRes.body ?? '{}').created as Patient;
       expect(created.name).toEqual('Ada');
       expect(created.tenant_id).toEqual('a'); // the column strategy reached the store
       const id = created.id;

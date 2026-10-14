@@ -49,9 +49,10 @@ function fakeCache(): ICacheStore {
 
 /** Reads the named health indicator from a started app. */
 async function health(app: ReturnType<typeof createApplication>, name: string) {
-  const indicators = app.services.getAll<
-    { name: string; check: () => Promise<{ status: string; data?: unknown }> }
-  >(CAPABILITIES.HEALTH_INDICATOR);
+  const indicators = app.services.getAll<{
+    name: string;
+    check: () => Promise<{ status: string; data?: unknown }>;
+  }>(CAPABILITIES.HEALTH_INDICATOR);
   const indicator = indicators.find((i) => i.name === name);
   expect(indicator).toBeDefined();
   return await indicator!.check();
@@ -89,10 +90,7 @@ describe('SessionPlugin registration', () => {
 
   it('reports the key count when a rotation list is configured', async () => {
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        SessionPlugin({ secret: [SECRET, `${SECRET}-old`] }),
-      ],
+      plugins: [RuntimePlugin(), SessionPlugin({ secret: [SECRET, `${SECRET}-old`] })],
     });
     await app.start();
 

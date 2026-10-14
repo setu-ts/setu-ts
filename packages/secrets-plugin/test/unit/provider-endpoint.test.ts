@@ -69,9 +69,9 @@ function recordingGcpModule(store: Map<string, string>): {
     constructor(options?: Record<string, unknown>) {
       configs.push(options);
     }
-    accessSecretVersion(
-      request: { name: string },
-    ): Promise<[{ payload?: { data?: string | Uint8Array | null } }]> {
+    accessSecretVersion(request: {
+      name: string;
+    }): Promise<[{ payload?: { data?: string | Uint8Array | null } }]> {
       const short = request.name.split('/secrets/')[1].split('/versions/')[0];
       const value = store.get(short);
       if (value === undefined) {
@@ -79,9 +79,7 @@ function recordingGcpModule(store: Map<string, string>): {
       }
       return Promise.resolve([{ payload: { data: new TextEncoder().encode(value) } }]);
     }
-    addSecretVersion(
-      request: { parent: string; payload: { data: Uint8Array } },
-    ): Promise<unknown> {
+    addSecretVersion(request: { parent: string; payload: { data: Uint8Array } }): Promise<unknown> {
       const short = request.parent.split('/secrets/')[1];
       store.set(short, new TextDecoder().decode(request.payload.data));
       return Promise.resolve({});

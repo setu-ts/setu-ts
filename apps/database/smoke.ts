@@ -21,7 +21,8 @@ try {
     body: { text: 'Read the updated note' },
   });
   if (
-    updated.statusCode !== 200 || updated.json<{ text: string }>().text !== 'Read the updated note'
+    updated.statusCode !== 200 ||
+    updated.json<{ text: string }>().text !== 'Read the updated note'
   ) {
     throw new Error('The repository update was not visible on read-back.');
   }
@@ -29,7 +30,7 @@ try {
   if (reread.json<{ text: string }>().text !== 'Read the updated note') {
     throw new Error('The updated note was not persisted.');
   }
-  if (await rollbackCount(app) !== 1) {
+  if ((await rollbackCount(app)) !== 1) {
     throw new Error('A rolled-back transaction changed the row count.');
   }
 } finally {

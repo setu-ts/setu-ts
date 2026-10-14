@@ -71,9 +71,7 @@ describe('SlackProvider', () => {
       http: fakeHttp,
     });
 
-    await expect(provider.send({ text: 'hi' })).rejects.toThrow(
-      'Slack webhook error (500)',
-    );
+    await expect(provider.send({ text: 'hi' })).rejects.toThrow('Slack webhook error (500)');
   });
 
   it('throws when 2xx but body is not "ok" (compound condition)', async () => {

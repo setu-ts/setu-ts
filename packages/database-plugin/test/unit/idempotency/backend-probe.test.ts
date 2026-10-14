@@ -119,10 +119,7 @@ describe('probeTwoCreateTransaction (M109b §3.6)', () => {
       probeTwoCreateTransaction(
         service,
         ENTITY,
-        [
-          { id: 'p-1' },
-          { id: 'p-1.r' },
-        ],
+        [{ id: 'p-1' }, { id: 'p-1.r' }],
         new ProbeRollback('test probe'),
       ),
     ).rejects.toBe(cause);

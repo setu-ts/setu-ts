@@ -20,7 +20,9 @@ async function documents(): Promise<string[]> {
     args: ['ls-files', '*.md'],
     stdout: 'piped',
   }).output();
-  return new TextDecoder().decode(output.stdout).split('\n')
+  return new TextDecoder()
+    .decode(output.stdout)
+    .split('\n')
     .filter((path) => path !== '' && path !== 'CHANGELOG.md')
     .filter((path) => !path.startsWith('plans/') && !path.startsWith('smoke/'));
 }

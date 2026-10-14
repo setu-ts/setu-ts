@@ -25,14 +25,12 @@ describe('WorkerPoolService — global sizing', () => {
   });
   it('resolves defaults from parallelism, global size and SUM of explicit sizes', () => {
     const runtime = createFakeRuntime(new FakeTimers(), new FakeHost(3));
-    for (
-      const [options, limit] of [
-        [undefined, 3],
-        [{ defaultPoolSize: 7 }, 7],
-        [{ pools: { a: { size: 6 }, b: { size: 7 } } }, 13],
-        [{ maxWorkers: 1, defaultPoolSize: 7 }, 1],
-      ] as const
-    ) {
+    for (const [options, limit] of [
+      [undefined, 3],
+      [{ defaultPoolSize: 7 }, 7],
+      [{ pools: { a: { size: 6 }, b: { size: 7 } } }, 13],
+      [{ maxWorkers: 1, defaultPoolSize: 7 }, 1],
+    ] as const) {
       expect(budgetLimitOf(new WorkerPoolService(options, runtime))).toBe(limit);
     }
   });
@@ -193,10 +191,7 @@ describe('WorkerPoolService — pools and option merging', () => {
   it('should pass the per-call timeout override through to the pool', () => {
     const host = new FakeHost();
     const timers = new FakeTimers();
-    const service = new WorkerPoolService(
-      { host, taskTimeoutMs: 0 },
-      createFakeRuntime(timers),
-    );
+    const service = new WorkerPoolService({ host, taskTimeoutMs: 0 }, createFakeRuntime(timers));
     void service.run(SPEC_A, 1, { timeoutMs: 75 }).catch(() => undefined);
     host.handles[0].emitReady();
     expect(timers.armed).toBe(1);

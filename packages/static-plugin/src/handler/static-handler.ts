@@ -100,11 +100,12 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // For non-root prefixes, the path must start with prefix/ (with trailing slash)
     // to avoid matching /assetstest.txt when prefix is /assets
     const prefixWithSlash = normalizedPrefix === '/' ? '/' : `${normalizedPrefix}/`;
-    const relativePath = decodedPath === normalizedPrefix
-      ? '/'
-      : decodedPath.startsWith(prefixWithSlash)
-      ? decodedPath.slice(prefixWithSlash.length)
-      : decodedPath;
+    const relativePath =
+      decodedPath === normalizedPrefix
+        ? '/'
+        : decodedPath.startsWith(prefixWithSlash)
+          ? decodedPath.slice(prefixWithSlash.length)
+          : decodedPath;
 
     // Normalize the path
     const normalizedPath = relativePath === '' ? '/' : relativePath;
@@ -291,10 +292,10 @@ async function serveFile(
     const ifModifiedSince = ctx.request.headers.get('If-Modified-Since') ?? undefined;
 
     if (shouldReturn304({ etag: true, stat: selected.stat, ifNoneMatch, ifModifiedSince })) {
-      const response = ctx.response.status(304).header(
-        'Cache-Control',
-        resolveCacheControl(requestPath, { cacheControl }),
-      ).header('Vary', 'Accept-Encoding');
+      const response = ctx.response
+        .status(304)
+        .header('Cache-Control', resolveCacheControl(requestPath, { cacheControl }))
+        .header('Vary', 'Accept-Encoding');
       const etagValue = computeETag(selected.stat);
       response.header('ETag', etagValue);
       if (selected.stat.mtime) {
@@ -382,7 +383,8 @@ async function serveCompressedFile(
     const ifRange = ctx.request.headers.get('If-Range') ?? undefined;
 
     if (
-      rangeHeader && shouldHonourRange({ size: stat.size, rangeHeader, ifRange, etag: etagValue })
+      rangeHeader &&
+      shouldHonourRange({ size: stat.size, rangeHeader, ifRange, etag: etagValue })
     ) {
       const parsedRange = parseRange(rangeHeader, stat.size);
       if (parsedRange) {

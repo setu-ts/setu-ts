@@ -77,10 +77,7 @@ function registered(): PolicyService {
 }
 
 /** Runs the guard and reports whether `next()` ran. */
-async function run(
-  guard: ReturnType<typeof requirePolicy>,
-  harness: Harness,
-): Promise<boolean> {
+async function run(guard: ReturnType<typeof requirePolicy>, harness: Harness): Promise<boolean> {
   let nextRan = false;
   await guard(harness.ctx, () => {
     nextRan = true;
@@ -132,11 +129,9 @@ describe('requirePolicy — allowing', () => {
 
   it('resolves a synchronous extractor against the request', async () => {
     const harness = context(registered(), { id: 'ann' });
-    const guard = requirePolicy(
-      docPolicy,
-      'edit',
-      (ctx) => ({ owner: ctx.request.user?.id ?? '' }),
-    );
+    const guard = requirePolicy(docPolicy, 'edit', (ctx) => ({
+      owner: ctx.request.user?.id ?? '',
+    }));
     expect(await run(guard, harness)).toBe(true);
   });
 
@@ -154,10 +149,12 @@ describe('requirePolicy — failures that are not refusals', () => {
     const outage = new Error('database unavailable');
     const guard = requirePolicy(docPolicy, 'edit', () => Promise.reject(outage));
     let nextRan = false;
-    const thrown = await Promise.resolve(guard(harness.ctx, () => {
-      nextRan = true;
-      return Promise.resolve();
-    })).catch((e: unknown) => e);
+    const thrown = await Promise.resolve(
+      guard(harness.ctx, () => {
+        nextRan = true;
+        return Promise.resolve();
+      }),
+    ).catch((e: unknown) => e);
     expect(thrown).toBe(outage);
     expect(nextRan).toBe(false);
     expect(harness.recorded.status).toBe(0);
@@ -167,10 +164,14 @@ describe('requirePolicy — failures that are not refusals', () => {
     const harness = context(new PolicyService(() => undefined), { id: 'ann' });
     const guard = requirePolicy(docPolicy, 'edit', { owner: 'ann' });
     let nextRan = false;
-    await expect(Promise.resolve(guard(harness.ctx, () => {
-      nextRan = true;
-      return Promise.resolve();
-    }))).rejects.toThrow(/no authorization policy named "doc"/);
+    await expect(
+      Promise.resolve(
+        guard(harness.ctx, () => {
+          nextRan = true;
+          return Promise.resolve();
+        }),
+      ),
+    ).rejects.toThrow(/no authorization policy named "doc"/);
     expect(nextRan).toBe(false);
   });
 });
@@ -213,14 +214,12 @@ describe('requirePolicy — construction and brands', () => {
     expect(policyGuardOf(nullBrand)).toBeUndefined();
     // The pre-M110b single-ability shape, an empty list and a non-string entry
     // are all malformed: the scan reads `abilities`, never `ability`.
-    for (
-      const value of [
-        { policy: 'doc', ability: 'edit', anonymous: false },
-        { policy: 'doc', abilities: [], anonymous: false },
-        { policy: 'doc', abilities: ['edit', 7], anonymous: false },
-        { policy: 'doc', abilities: 'edit', anonymous: false },
-      ]
-    ) {
+    for (const value of [
+      { policy: 'doc', ability: 'edit', anonymous: false },
+      { policy: 'doc', abilities: [], anonymous: false },
+      { policy: 'doc', abilities: ['edit', 7], anonymous: false },
+      { policy: 'doc', abilities: 'edit', anonymous: false },
+    ]) {
       const malformed = Object.assign(() => Promise.resolve(), {
         [Symbol.for('setu.auth.policy-guard')]: value,
       });

@@ -33,9 +33,13 @@ const user = await cache.get<{ name: string }>('user:1');
 
 // CacheService adds coalesced read-through for one cache key.
 const readThroughCache = app.services.get<CacheService>(CAPABILITIES.CACHE);
-const profile = await readThroughCache.getOrSet('profile:1', async () => {
-  return await loadProfile('1');
-}, 60);
+const profile = await readThroughCache.getOrSet(
+  'profile:1',
+  async () => {
+    return await loadProfile('1');
+  },
+  60,
+);
 ```
 
 ## Options

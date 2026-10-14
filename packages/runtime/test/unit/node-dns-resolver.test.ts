@@ -24,10 +24,12 @@ function fakeDns(overrides: Partial<NodeDnsModule>): NodeDnsModule {
 
 describe('createNodeDnsResolver — resolveSrv', () => {
   it("maps Node's `name` field onto `host`", async () => {
-    const resolver = createNodeDnsResolver(fakeDns({
-      resolveSrv: () =>
-        Promise.resolve([{ name: 'a.internal', port: 8080, priority: 10, weight: 5 }]),
-    }));
+    const resolver = createNodeDnsResolver(
+      fakeDns({
+        resolveSrv: () =>
+          Promise.resolve([{ name: 'a.internal', port: 8080, priority: 10, weight: 5 }]),
+      }),
+    );
 
     expect(await resolver.resolveSrv('billing.service.consul')).toEqual([
       { host: 'a.internal', port: 8080, priority: 10, weight: 5 },
@@ -36,31 +38,37 @@ describe('createNodeDnsResolver — resolveSrv', () => {
 
   it('passes the queried hostname through', async () => {
     let queried = '';
-    const resolver = createNodeDnsResolver(fakeDns({
-      resolveSrv: (hostname: string) => {
-        queried = hostname;
-        return Promise.resolve([]);
-      },
-    }));
+    const resolver = createNodeDnsResolver(
+      fakeDns({
+        resolveSrv: (hostname: string) => {
+          queried = hostname;
+          return Promise.resolve([]);
+        },
+      }),
+    );
 
     await resolver.resolveSrv('_http._tcp.billing');
     expect(queried).toBe('_http._tcp.billing');
   });
 
   it('propagates a lookup failure', async () => {
-    const resolver = createNodeDnsResolver(fakeDns({
-      resolveSrv: () => Promise.reject(new Error('ENOTFOUND')),
-    }));
+    const resolver = createNodeDnsResolver(
+      fakeDns({
+        resolveSrv: () => Promise.reject(new Error('ENOTFOUND')),
+      }),
+    );
     await expect(resolver.resolveSrv('missing')).rejects.toThrow('ENOTFOUND');
   });
 });
 
 describe('createNodeDnsResolver — resolveHost', () => {
   it('concatenates A and AAAA results', async () => {
-    const resolver = createNodeDnsResolver(fakeDns({
-      resolve4: () => Promise.resolve(['10.0.0.1']),
-      resolve6: () => Promise.resolve(['2001:db8::1']),
-    }));
+    const resolver = createNodeDnsResolver(
+      fakeDns({
+        resolve4: () => Promise.resolve(['10.0.0.1']),
+        resolve6: () => Promise.resolve(['2001:db8::1']),
+      }),
+    );
     expect(await resolver.resolveHost('svc')).toEqual(['10.0.0.1', '2001:db8::1']);
   });
 
@@ -68,27 +76,33 @@ describe('createNodeDnsResolver — resolveHost', () => {
     // An IPv4-only host has no AAAA record at all and the resolver REJECTS
     // rather than returning an empty list — so tolerating one family is what
     // makes this usable against an ordinary host.
-    const resolver = createNodeDnsResolver(fakeDns({
-      resolve4: () => Promise.resolve(['10.0.0.1']),
-      resolve6: () => Promise.reject(new Error('ENODATA')),
-    }));
+    const resolver = createNodeDnsResolver(
+      fakeDns({
+        resolve4: () => Promise.resolve(['10.0.0.1']),
+        resolve6: () => Promise.reject(new Error('ENODATA')),
+      }),
+    );
     expect(await resolver.resolveHost('svc')).toEqual(['10.0.0.1']);
   });
 
   it('tolerates a missing A record when AAAA succeeds', async () => {
-    const resolver = createNodeDnsResolver(fakeDns({
-      resolve4: () => Promise.reject(new Error('ENODATA')),
-      resolve6: () => Promise.resolve(['2001:db8::1']),
-    }));
+    const resolver = createNodeDnsResolver(
+      fakeDns({
+        resolve4: () => Promise.reject(new Error('ENODATA')),
+        resolve6: () => Promise.resolve(['2001:db8::1']),
+      }),
+    );
     expect(await resolver.resolveHost('svc')).toEqual(['2001:db8::1']);
   });
 
   it('rejects only when both families fail, carrying the first as cause', async () => {
     const first = new Error('ENOTFOUND v4');
-    const resolver = createNodeDnsResolver(fakeDns({
-      resolve4: () => Promise.reject(first),
-      resolve6: () => Promise.reject(new Error('ENOTFOUND v6')),
-    }));
+    const resolver = createNodeDnsResolver(
+      fakeDns({
+        resolve4: () => Promise.reject(first),
+        resolve6: () => Promise.reject(new Error('ENOTFOUND v6')),
+      }),
+    );
 
     await expect(resolver.resolveHost('missing')).rejects.toThrow('DNS lookup failed for missing');
     try {

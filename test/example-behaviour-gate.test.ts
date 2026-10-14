@@ -80,17 +80,16 @@ describe('hasSchemeInUrlAttribute — the scheme must be in an ATTRIBUTE (#333)'
   // JSDoc that can drift from it. Every row errs toward reporting.
   it('matches an attribute name by suffix, with the costs that buys', () => {
     // Worth having: formaction really does navigate.
-    expect(hasSchemeInUrlAttribute('<button formaction="javascript:alert(1)">x</button>'))
-      .toBe(true);
+    expect(hasSchemeInUrlAttribute('<button formaction="javascript:alert(1)">x</button>')).toBe(
+      true,
+    );
     // The cost: inert names ending the same way, and a tag inside a comment.
-    for (
-      const inert of [
-        '<a data-action="javascript:alert(1)">x</a>',
-        '<a data-href="javascript:alert(1)">x</a>',
-        '<a myhref="javascript:alert(1)">x</a>',
-        '<!-- <a href="javascript:alert(1)"> -->',
-      ]
-    ) {
+    for (const inert of [
+      '<a data-action="javascript:alert(1)">x</a>',
+      '<a data-href="javascript:alert(1)">x</a>',
+      '<a myhref="javascript:alert(1)">x</a>',
+      '<!-- <a href="javascript:alert(1)"> -->',
+    ]) {
       expect(hasSchemeInUrlAttribute(inert)).toBe(true);
     }
     // But the name must be followed by `=`, so `srcset` is not `src`.
@@ -252,8 +251,10 @@ const UserList = ${PLAIN};
 `;
     const found = collectComponents('docs/x.md', markdown);
     expect(found).toHaveLength(2);
-    expect(found.map((c) => c.source.includes('html') || c.source.includes('<ul>')))
-      .toEqual([true, false]);
+    expect(found.map((c) => c.source.includes('html') || c.source.includes('<ul>'))).toEqual([
+      true,
+      false,
+    ]);
   });
 
   it('reads the counter-example label from the component own comment', () => {
@@ -411,15 +412,16 @@ describe('parseProbe', () => {
         '{"index":0,"ok":true,"escaped":true,"urlRenders":[],"delivered":true,"reached":true}',
         1,
       ),
-    )
-      .toEqual([{
+    ).toEqual([
+      {
         index: 0,
         ok: true,
         escaped: true,
         scheme: false,
         delivered: true,
         reached: true,
-      }]);
+      },
+    ]);
   });
 
   it('treats empty output as a batch of none', () => {
@@ -443,40 +445,55 @@ describe('compare', () => {
 
   it('passes a safe component', () => {
     expect(
-      compare([base], [{
-        index: 0,
-        ok: true,
-        escaped: true,
-        scheme: false,
-        delivered: true,
-        reached: true,
-      }]),
+      compare(
+        [base],
+        [
+          {
+            index: 0,
+            ok: true,
+            escaped: true,
+            scheme: false,
+            delivered: true,
+            reached: true,
+          },
+        ],
+      ),
     ).toEqual([]);
   });
 
   it('fails an unlabelled component that does not escape', () => {
-    const [finding] = compare([base], [{
-      index: 0,
-      ok: true,
-      escaped: false,
-      scheme: false,
-      delivered: true,
-      reached: true,
-    }]);
+    const [finding] = compare(
+      [base],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: false,
+          scheme: false,
+          delivered: true,
+          reached: true,
+        },
+      ],
+    );
     expect(finding?.message).toContain('UNESCAPED');
     expect(finding?.line).toBe(7);
   });
 
   it('fails a labelled counter-example that HAS started escaping', () => {
     const labelled = { ...base, expectUnsafe: true };
-    const [finding] = compare([labelled], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: false,
-      delivered: true,
-      reached: true,
-    }]);
+    const [finding] = compare(
+      [labelled],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: true,
+          scheme: false,
+          delivered: true,
+          reached: true,
+        },
+      ],
+    );
     expect(finding?.message).toContain('no longer unsafe');
   });
 
@@ -486,14 +503,19 @@ describe('compare', () => {
     // counter-example in that state used to be told it "ESCAPES its input" and
     // invited to drop a warning that is still true.
     const counter = { ...base, expectUnsafe: true };
-    const findings = compare([counter], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: false,
-      delivered: false,
-      reached: true,
-    }]);
+    const findings = compare(
+      [counter],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: true,
+          scheme: false,
+          delivered: false,
+          reached: true,
+        },
+      ],
+    );
     // The honest report is UNCHECKED, and only that.
     expect(findings).toHaveLength(1);
     expect(findings[0]?.message).toContain('UNCHECKED');
@@ -503,16 +525,20 @@ describe('compare', () => {
   it('passes a labelled counter-example that is still unsafe', () => {
     const labelled = { ...base, expectUnsafe: true };
     expect(
-      compare([labelled], [{
-        index: 0,
-        ok: true,
-        escaped: false,
-        scheme: false,
-        delivered: true,
-        reached: true,
-      }]),
-    )
-      .toEqual([]);
+      compare(
+        [labelled],
+        [
+          {
+            index: 0,
+            ok: true,
+            escaped: false,
+            scheme: false,
+            delivered: true,
+            reached: true,
+          },
+        ],
+      ),
+    ).toEqual([]);
   });
 
   it('reports a render failure rather than reading it as a pass', () => {
@@ -525,14 +551,19 @@ describe('compare', () => {
   });
 
   it('fails a component that carries the scheme into a URL attribute', () => {
-    const [finding] = compare([base], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: true,
-      delivered: true,
-      reached: true,
-    }]);
+    const [finding] = compare(
+      [base],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: true,
+          scheme: true,
+          delivered: true,
+          reached: true,
+        },
+      ],
+    );
     expect(finding?.message).toContain(JSON.stringify(URL_PAYLOAD));
     expect(finding?.message).toContain('href, src or action');
   });
@@ -543,28 +574,37 @@ describe('compare', () => {
     // lacking a javascript: link.
     const labelled = { ...base, expectUnsafe: true };
     expect(
-      compare([labelled], [{
-        index: 0,
-        ok: true,
-        escaped: false,
-        scheme: true,
-        delivered: true,
-        reached: true,
-      }]),
-    )
-      .toEqual([]);
+      compare(
+        [labelled],
+        [
+          {
+            index: 0,
+            ok: true,
+            escaped: false,
+            scheme: true,
+            delivered: true,
+            reached: true,
+          },
+        ],
+      ),
+    ).toEqual([]);
   });
 
   it('reports UNCHECKED for a component whose source routes through raw()', () => {
     const rawUser = { ...base, usesRaw: true };
-    const findings = compare([rawUser], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: false,
-      delivered: true,
-      reached: true,
-    }]);
+    const findings = compare(
+      [rawUser],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: true,
+          scheme: false,
+          delivered: true,
+          reached: true,
+        },
+      ],
+    );
     expect(findings).toHaveLength(1);
     expect(findings[0]?.message).toContain('UNCHECKED');
     expect(findings[0]?.message).toContain('`raw()`');
@@ -577,14 +617,19 @@ describe('compare', () => {
     // reading past all of them would have every payload resolve to `undefined`,
     // render nothing, and score ESCAPED — a false PASS. The unbounded reach
     // proxy answers a read at any depth, so the two disagreeing IS that case.
-    const [finding] = compare([base], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: false,
-      delivered: false,
-      reached: true,
-    }]);
+    const [finding] = compare(
+      [base],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: true,
+          scheme: false,
+          delivered: false,
+          reached: true,
+        },
+      ],
+    );
     expect(finding?.message).toContain('UNCHECKED');
     expect(finding?.message).toContain('no delivery mode reaches');
   });
@@ -592,51 +637,75 @@ describe('compare', () => {
   it('does not report a component that simply never touches its props', () => {
     // Neither probe delivered, so there is nothing to judge and nothing to warn
     // about — a static component is not a blind spot.
-    expect(compare([base], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: false,
-      delivered: false,
-      reached: false,
-    }])).toEqual([]);
+    expect(
+      compare(
+        [base],
+        [
+          {
+            index: 0,
+            ok: true,
+            escaped: true,
+            scheme: false,
+            delivered: false,
+            reached: false,
+          },
+        ],
+      ),
+    ).toEqual([]);
   });
 
   it('reports UNCHECKED for an element spread', () => {
     const spreader = { ...base, spreads: true };
-    const [finding] = compare([spreader], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: false,
-      delivered: true,
-      reached: true,
-    }]);
+    const [finding] = compare(
+      [spreader],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: true,
+          scheme: false,
+          delivered: true,
+          reached: true,
+        },
+      ],
+    );
     expect(finding?.message).toContain('element spread');
   });
 
   it('passes an exempted raw() component, which is the only way past UNCHECKED', () => {
     const exempted = { ...base, usesRaw: true, exempt: true };
-    expect(compare([exempted], [{
-      index: 0,
-      ok: true,
-      escaped: true,
-      scheme: false,
-      delivered: true,
-      reached: true,
-    }])).toEqual([]);
+    expect(
+      compare(
+        [exempted],
+        [
+          {
+            index: 0,
+            ok: true,
+            escaped: true,
+            scheme: false,
+            delivered: true,
+            reached: true,
+          },
+        ],
+      ),
+    ).toEqual([]);
   });
 
   it('can emit the UNCHECKED and UNESCAPED verdicts together', () => {
     const rawAndUnsafe = { ...base, usesRaw: true };
-    const findings = compare([rawAndUnsafe], [{
-      index: 0,
-      ok: true,
-      escaped: false,
-      scheme: false,
-      delivered: true,
-      reached: true,
-    }]);
+    const findings = compare(
+      [rawAndUnsafe],
+      [
+        {
+          index: 0,
+          ok: true,
+          escaped: false,
+          scheme: false,
+          delivered: true,
+          reached: true,
+        },
+      ],
+    );
     expect(findings).toHaveLength(2);
     expect(findings[0]?.message).toContain('UNCHECKED');
     expect(findings[1]?.message).toContain('UNESCAPED');
@@ -666,8 +735,9 @@ describe('the gate covers the repository it is meant to cover', () => {
 
     // And the view-plugin README's SECOND definition is present, which is the
     // one the original defect lived in.
-    expect(collected.filter((c) => c.file === 'packages/view-plugin/README.md').length)
-      .toBeGreaterThan(1);
+    expect(
+      collected.filter((c) => c.file === 'packages/view-plugin/README.md').length,
+    ).toBeGreaterThan(1);
   });
 
   it('leaves no component in the corpus unchecked', async () => {
@@ -688,12 +758,10 @@ describe('the gate covers the repository it is meant to cover', () => {
       .filter((c) => c.usesRaw || c.spreads)
       .map((c) => `${c.file} ${c.name}${c.exempt ? '' : ' UNEXEMPTED'}`)
       .sort();
-    expect(rawComponents).toEqual([
-      'docs/mvc.md Page',
-      'packages/view-plugin/README.md Snippet',
+    expect(rawComponents).toEqual(['docs/mvc.md Page', 'packages/view-plugin/README.md Snippet']);
+    expect(spots.map((s) => `${s.file} ${s.name}${s.exempt ? '' : ' UNEXEMPTED'}`)).toEqual([
+      'packages/session-plugin/README.md LoginForm',
     ]);
-    expect(spots.map((s) => `${s.file} ${s.name}${s.exempt ? '' : ' UNEXEMPTED'}`))
-      .toEqual(['packages/session-plugin/README.md LoginForm']);
     expect(blindSpotFindings(spots)).toEqual([]);
   });
 });
@@ -757,10 +825,7 @@ describe('run — end to end, through the real renderer', () => {
     // it. That suppresses the finding, which is the dangerous direction.
     const raw =
       'const Snippet = (p: { m: string }) => html`<div>${raw(p.m)}</div>`;\n@Render(Snippet)';
-    const bare = await write(
-      'raw-bare-marker.md',
-      `// ${UNCHECKED_EXEMPT_MARKERS[0]}\n${raw}`,
-    );
+    const bare = await write('raw-bare-marker.md', `// ${UNCHECKED_EXEMPT_MARKERS[0]}\n${raw}`);
     expect(await run([bare])).toHaveLength(1);
     const mention = await write(
       'raw-mention.md',

@@ -88,15 +88,12 @@ describe('Documentation snippet validation — mechanical type-check', () => {
       // pass it explicitly. The config also carries the import map, so module
       // resolution is identical to the other fixtures.
       const config = fixture === 'decorator-flow.ts' ? `${FIXTURE_DIR}/deno.json` : undefined;
-      const { code, stderr } = await denoCheck(
-        path,
-        config !== undefined ? { config } : undefined,
-      );
+      const { code, stderr } = await denoCheck(path, config !== undefined ? { config } : undefined);
       if (code !== 0) {
         throw new Error(
-          `deno check ${path} failed (exit ${code}). The guide snippet it represents (${
-            guides.join(', ')
-          }) is invalid.\n--- stderr ---\n${stderr}`,
+          `deno check ${path} failed (exit ${code}). The guide snippet it represents (${guides.join(
+            ', ',
+          )}) is invalid.\n--- stderr ---\n${stderr}`,
         );
       }
       expect(code).toBe(0);
@@ -189,8 +186,9 @@ describe('Documentation snippet validation — guide content invariants', () => 
     for (const guide of ROUTE_GUIDES) {
       const content = await Deno.readTextFile(guide);
       // Match app.get/post/put/patch/delete but NOT app.router.get etc.
-      const badMatches = [...content.matchAll(/app\.(get|post|put|patch|delete|head|options)\(/g)]
-        .filter((m) => !m[0].startsWith('app.router.'));
+      const badMatches = [
+        ...content.matchAll(/app\.(get|post|put|patch|delete|head|options)\(/g),
+      ].filter((m) => !m[0].startsWith('app.router.'));
       expect(badMatches.length).toBe(0);
     }
   });
@@ -198,8 +196,9 @@ describe('Documentation snippet validation — guide content invariants', () => 
   it('verifies no ctx.json() calls in Setu-TS guides (must use ctx.response.json)', async () => {
     for (const guide of ROUTE_GUIDES) {
       const content = await Deno.readTextFile(guide);
-      const badMatches = [...content.matchAll(/ctx\.json\(/g)]
-        .filter((m) => !m[0].startsWith('ctx.response.json'));
+      const badMatches = [...content.matchAll(/ctx\.json\(/g)].filter(
+        (m) => !m[0].startsWith('ctx.response.json'),
+      );
       expect(badMatches.length).toBe(0);
     }
   });
@@ -319,9 +318,7 @@ describe('Documentation snippet validation — guide content invariants', () => 
     // that drifted from source; this assertion pins the exact union so it
     // cannot drift again.
     const sourceTypes = await Deno.readTextFile('packages/common/src/types.ts');
-    const sourceMatch = sourceTypes.match(
-      /export type RuntimePlatform = ([^;]+);/,
-    );
+    const sourceMatch = sourceTypes.match(/export type RuntimePlatform = ([^;]+);/);
     expect(sourceMatch).not.toBeNull();
     const sourceUnion = sourceMatch![1].trim();
     // Source must NOT contain 'unknown'.

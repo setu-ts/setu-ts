@@ -317,11 +317,8 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     operation: EventObservationOperation,
     at?: number | null,
   ): ObservationStart | null {
-    const now = at === undefined
-      ? this.#read()
-      : this.#closed || this.#collectionFailed
-      ? null
-      : at;
+    const now =
+      at === undefined ? this.#read() : this.#closed || this.#collectionFailed ? null : at;
     if (now === null) {
       return null;
     }
@@ -608,11 +605,12 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
         ageMs: clampDuration(ageMs),
       });
     }
-    const state: EventDiagnosticsState = records.length === 0
-      ? 'no-data'
-      : records.every((record) => record.ageMs > STALE_MS)
-      ? 'stale'
-      : 'ready';
+    const state: EventDiagnosticsState =
+      records.length === 0
+        ? 'no-data'
+        : records.every((record) => record.ageMs > STALE_MS)
+          ? 'stale'
+          : 'ready';
     return deepFreeze({
       state,
       alias: this.#policy.alias,

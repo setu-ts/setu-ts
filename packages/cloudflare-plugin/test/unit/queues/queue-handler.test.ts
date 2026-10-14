@@ -145,8 +145,9 @@ describe('createQueueHandler', () => {
     // REJECTS rather than throwing synchronously: the handler is declared
     // `=> Promise<void>` and is assigned straight to the Worker's `queue`
     // export, so `handler(b).catch(report)` has to be able to see this.
-    await expect(handler(new FakeQueueBatch('q', [message])))
-      .rejects.toBeInstanceOf(CloudflareUnsupportedError);
+    await expect(handler(new FakeQueueBatch('q', [message]))).rejects.toBeInstanceOf(
+      CloudflareUnsupportedError,
+    );
     await expect(handler(new FakeQueueBatch('q', [message]))).rejects.toThrow(/'queue'/);
     // The message is left unsettled rather than wrongly acked.
     expect(message.disposition).toBe('unsettled');

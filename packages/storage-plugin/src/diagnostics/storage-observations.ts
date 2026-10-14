@@ -333,16 +333,18 @@ export class StorageObservationCollector {
         continue;
       }
       freshest = Math.min(freshest, age);
-      records.push(Object.freeze({
-        alias: this.#alias,
-        operation,
-        count: record.count,
-        lastDurationMs: record.lastDurationMs,
-        ageMs: age,
-        succeeded: record.succeeded,
-        failed: record.failed,
-        lastBytes: record.lastBytes,
-      }));
+      records.push(
+        Object.freeze({
+          alias: this.#alias,
+          operation,
+          count: record.count,
+          lastDurationMs: record.lastDurationMs,
+          ageMs: age,
+          succeeded: record.succeeded,
+          failed: record.failed,
+          lastBytes: record.lastBytes,
+        }),
+      );
     }
     let state: DiagnosticsInspectorState = 'no-data';
     if (records.length > 0) {

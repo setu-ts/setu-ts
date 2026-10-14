@@ -169,9 +169,9 @@ export class D1Adapter implements IDatabaseAdapter {
   constructor(db: ID1Database, options?: D1AdapterOptions) {
     if (!isD1Database(db)) {
       throw new CloudflareBindingMissingError(
-        `D1Adapter needs a D1 binding exposing prepare() and batch(), but received ${
-          describeBinding(db)
-        }. An absent binding reads as \`undefined\` — check the binding name you ` +
+        `D1Adapter needs a D1 binding exposing prepare() and batch(), but received ${describeBinding(
+          db,
+        )}. An absent binding reads as \`undefined\` — check the binding name you ` +
           'read from `env` against the `d1_databases` stanza in wrangler.toml.',
       );
     }
@@ -253,7 +253,10 @@ export class D1Adapter implements IDatabaseAdapter {
   /** @inheritdoc */
   async rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
     this.assertReady();
-    const result = await this.#db.prepare(sql).bind(...(params ?? [])).all<T>();
+    const result = await this.#db
+      .prepare(sql)
+      .bind(...(params ?? []))
+      .all<T>();
     return [...result.results];
   }
 

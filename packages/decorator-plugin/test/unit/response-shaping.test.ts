@@ -37,11 +37,7 @@ async function appWith(controller: Constructor): Promise<IKernelApplication> {
 }
 
 /** Issues one request through the real fetch entry point. */
-function call(
-  app: IKernelApplication,
-  method: string,
-  path: string,
-): Promise<Response> {
+function call(app: IKernelApplication, method: string, path: string): Promise<Response> {
   return app.fetch(new Request(`http://local${path}`, { method }));
 }
 

@@ -46,11 +46,7 @@ export interface RoomMembershipListener {
  * @param data - The payload, exactly as handed to `broadcast`
  * @since 0.2.0
  */
-export type RoomPublisher = (
-  name: string,
-  data: string | Uint8Array,
-  exceptId?: string,
-) => void;
+export type RoomPublisher = (name: string, data: string | Uint8Array, exceptId?: string) => void;
 
 /**
  * Options for {@linkcode Room.broadcastLocal}.
@@ -264,34 +260,38 @@ export class RoomRegistry {
     }
     // `room` is referenced by the listener closures, which only ever run after
     // the constructor has returned.
-    const room: Room = new Room(name, {
-      onJoin: (conn: IWebSocketConnection): void => {
-        this.#onMemberJoined?.();
-        this.#neverJoined.delete(room);
-        let joined = this.#membership.get(conn);
-        if (joined === undefined) {
-          joined = new Set<Room>();
-          this.#membership.set(conn, joined);
-        }
-        joined.add(room);
-      },
-      onLeave: (conn: IWebSocketConnection): void => {
-        const joined = this.#membership.get(conn);
-        if (joined !== undefined) {
-          joined.delete(room);
-          if (joined.size === 0) {
-            this.#membership.delete(conn);
+    const room: Room = new Room(
+      name,
+      {
+        onJoin: (conn: IWebSocketConnection): void => {
+          this.#onMemberJoined?.();
+          this.#neverJoined.delete(room);
+          let joined = this.#membership.get(conn);
+          if (joined === undefined) {
+            joined = new Set<Room>();
+            this.#membership.set(conn, joined);
           }
-        }
-        // Disposal lives here, not only in `evict`, so a room emptied by a
-        // mid-broadcast drop is discarded too. The identity check matters: the
-        // name may already have been rebound to a fresh room by a `get` that
-        // ran after this one emptied.
-        if (room.rawSize === 0 && this.#rooms.get(room.name) === room) {
-          this.#rooms.delete(room.name);
-        }
+          joined.add(room);
+        },
+        onLeave: (conn: IWebSocketConnection): void => {
+          const joined = this.#membership.get(conn);
+          if (joined !== undefined) {
+            joined.delete(room);
+            if (joined.size === 0) {
+              this.#membership.delete(conn);
+            }
+          }
+          // Disposal lives here, not only in `evict`, so a room emptied by a
+          // mid-broadcast drop is discarded too. The identity check matters: the
+          // name may already have been rebound to a fresh room by a `get` that
+          // ran after this one emptied.
+          if (room.rawSize === 0 && this.#rooms.get(room.name) === room) {
+            this.#rooms.delete(room.name);
+          }
+        },
       },
-    }, this.#publish);
+      this.#publish,
+    );
     this.#rooms.set(name, room);
     this.#neverJoined.add(room);
     return room;
@@ -355,10 +355,7 @@ export class RoomRegistry {
   deliverRemote(name: string, data: string | Uint8Array, exceptId?: string): void {
     // `exactOptionalPropertyTypes` forbids handing through an explicit
     // `undefined`, so the absent case passes no options at all.
-    this.#rooms.get(name)?.broadcastLocal(
-      data,
-      exceptId === undefined ? undefined : { exceptId },
-    );
+    this.#rooms.get(name)?.broadcastLocal(data, exceptId === undefined ? undefined : { exceptId });
   }
 
   /** Discards every room. */

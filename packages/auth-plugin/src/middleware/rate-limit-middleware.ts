@@ -116,10 +116,7 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
   // Lazily-built store (memoized per middleware instance, not per request)
   let store: RateLimitStore | undefined = options.store;
 
-  return async (
-    ctx: IRequestContext,
-    next: () => Promise<void>,
-  ): Promise<void | HandlerResult> => {
+  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void | HandlerResult> => {
     // An exempt path skips the limiter entirely: no counter is incremented, so
     // a probe cannot consume the budget a real caller needs, and no
     // RateLimit-* headers are written for a request the limit does not govern.

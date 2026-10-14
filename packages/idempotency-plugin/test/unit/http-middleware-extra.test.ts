@@ -159,9 +159,8 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     const { store } = recordingStore({ outcome: 'claimed', takeover: false });
     const mw = middleware(store, {}, logger);
     for (let n = 0; n < 1_000; n++) {
-      await mw(
-        makeCtx({ snapshot: streaming(), path: `/orders/${n}` }).ctx,
-        () => Promise.resolve(),
+      await mw(makeCtx({ snapshot: streaming(), path: `/orders/${n}` }).ctx, () =>
+        Promise.resolve(),
       );
     }
     // 256 distinct (reason, namespace) pairs, then ONE suppression line.
@@ -200,7 +199,11 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     // The omission-warning path: the handler's response is recorded.
     const { store, calls } = recordingStore({ outcome: 'claimed', takeover: false });
     let ran = 0;
-    await middleware(store, {}, throwing)(makeCtx({ snapshot: streaming() }).ctx, () => {
+    await middleware(
+      store,
+      {},
+      throwing,
+    )(makeCtx({ snapshot: streaming() }).ctx, () => {
       ran += 1;
       return Promise.resolve();
     });
@@ -242,10 +245,11 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     const { logger, warnings } = captureLogger();
     const { store } = recordingStore({ outcome: 'claimed', takeover: false });
     const oversize = { streaming: false, status: 200, headers: new Headers(), body: 'x' };
-    await middleware(store, { maxResponseBytes: 0 }, logger)(
-      makeCtx({ snapshot: oversize } as never).ctx,
-      () => Promise.resolve(),
-    );
+    await middleware(
+      store,
+      { maxResponseBytes: 0 },
+      logger,
+    )(makeCtx({ snapshot: oversize } as never).ctx, () => Promise.resolve());
     expect(warnings.join(' ')).toContain('exceeds maxResponseBytes');
   });
 
@@ -259,10 +263,11 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
       headers: new Headers({ 'content-type': 'text/plain' }),
       body: 'x',
     };
-    await middleware(store, { redaction }, logger)(
-      makeCtx({ snapshot: plain } as never).ctx,
-      () => Promise.resolve(),
-    );
+    await middleware(
+      store,
+      { redaction },
+      logger,
+    )(makeCtx({ snapshot: plain } as never).ctx, () => Promise.resolve());
     expect(warnings.join(' ')).toContain('not a JSON object');
   });
 
@@ -271,10 +276,11 @@ describe('createHttpMiddleware — recorded-without-body warnings (M109a §3.10)
     const { store } = recordingStore({ outcome: 'claimed', takeover: false });
     (store as { maxRecordBytes?: number }).maxRecordBytes = 5;
     const big = { streaming: false, status: 200, headers: new Headers(), body: 'x'.repeat(100) };
-    await middleware(store, {}, logger)(
-      makeCtx({ snapshot: big } as never).ctx,
-      () => Promise.resolve(),
-    );
+    await middleware(
+      store,
+      {},
+      logger,
+    )(makeCtx({ snapshot: big } as never).ctx, () => Promise.resolve());
     expect(warnings.join(' ')).toContain('store limit');
   });
 });
@@ -288,14 +294,22 @@ describe('createHttpMiddleware — lost settle warns (M109a §3.8)', () => {
     } as unknown as ILogger;
 
     const completed = recordingStore({ outcome: 'claimed', takeover: false }, 'lost');
-    await middleware(completed.store, {}, logger)(
+    await middleware(
+      completed.store,
+      {},
+      logger,
+    )(
       makeCtx({ snapshot: { streaming: false, status: 201, headers: new Headers(), body: null } })
         .ctx,
       () => Promise.resolve(),
     );
 
     const released = recordingStore({ outcome: 'claimed', takeover: false }, 'lost');
-    await middleware(released.store, {}, logger)(
+    await middleware(
+      released.store,
+      {},
+      logger,
+    )(
       makeCtx({ snapshot: { streaming: false, status: 503, headers: new Headers(), body: null } })
         .ctx,
       () => Promise.resolve(),

@@ -40,10 +40,12 @@ describe('within-d1: real SQLite', () => {
   };
   beforeAll(async () => {
     d1 = new SqliteD1(
-      (await nodeFs.readFile(
-        new URL('../../../database-plugin/test/fixtures/idempotency-sqlite.sql', import.meta.url),
-        'utf8',
-      )).replaceAll('setu_idempotency', claims),
+      (
+        await nodeFs.readFile(
+          new URL('../../../database-plugin/test/fixtures/idempotency-sqlite.sql', import.meta.url),
+          'utf8',
+        )
+      ).replaceAll('setu_idempotency', claims),
       `CREATE TABLE ${business} (id TEXT PRIMARY KEY, name TEXT NOT NULL)`,
     );
     app = withinApp(
@@ -140,10 +142,13 @@ describe('within-d1: real SQLite', () => {
     ]);
     const timer = setTimeout(release.resolve, 100);
     try {
-      expect(await pending).toEqual([{ value: 'expired-seed', replayed: true }, {
-        value: 'expired-seed',
-        replayed: true,
-      }]);
+      expect(await pending).toEqual([
+        { value: 'expired-seed', replayed: true },
+        {
+          value: 'expired-seed',
+          replayed: true,
+        },
+      ]);
       expect(calls).toBe(0);
       expect(d1.dump(business)).toHaveLength(before);
       expect((await repo.findById(id))?.expiresAt).toBe(1);

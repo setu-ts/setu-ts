@@ -32,37 +32,40 @@ async function buildApp(): Promise<IKernelApplication> {
       SessionPlugin({ secret: 'keycloak-sign-in-secret-at-least-32-chars', store: 'memory' }),
       AuthPlugin({
         signIn: {
-          providers: [{
-            kind: 'oidc',
-            name: 'keycloak',
-            issuer: REALM,
-            clientId: 'setu-web',
-            clientSecret: 'setu-web-secret',
-            scopes: ['openid', 'profile', 'email'],
-            redirectUri: 'http://localhost/auth/keycloak/callback',
-            toPrincipal: (claims) => ({
-              id: `keycloak:${String(claims.sub)}`,
-              roles: ['user'],
-              claims: { username: claims.preferred_username },
-            }),
-            rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT, idTokenHint: true },
-          }, {
-            // The same realm driven as a PLAIN OAuth 2.0 provider: no ID token is
-            // read, so the profile must come from userinfo with the access token.
-            kind: 'oauth2',
-            name: 'keycloak-oauth2',
-            clientId: 'setu-web',
-            clientSecret: 'setu-web-secret',
-            scopes: ['openid'],
-            authorizationEndpoint: `${REALM}/protocol/openid-connect/auth`,
-            tokenEndpoint: `${REALM}/protocol/openid-connect/token`,
-            userinfoEndpoint: `${REALM}/protocol/openid-connect/userinfo`,
-            redirectUri: 'http://localhost/auth/keycloak-oauth2/callback',
-            toPrincipal: (profile) => ({
-              id: `keycloak-oauth2:${String(profile.sub)}`,
-              claims: { username: profile.preferred_username },
-            }),
-          }],
+          providers: [
+            {
+              kind: 'oidc',
+              name: 'keycloak',
+              issuer: REALM,
+              clientId: 'setu-web',
+              clientSecret: 'setu-web-secret',
+              scopes: ['openid', 'profile', 'email'],
+              redirectUri: 'http://localhost/auth/keycloak/callback',
+              toPrincipal: (claims) => ({
+                id: `keycloak:${String(claims.sub)}`,
+                roles: ['user'],
+                claims: { username: claims.preferred_username },
+              }),
+              rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT, idTokenHint: true },
+            },
+            {
+              // The same realm driven as a PLAIN OAuth 2.0 provider: no ID token is
+              // read, so the profile must come from userinfo with the access token.
+              kind: 'oauth2',
+              name: 'keycloak-oauth2',
+              clientId: 'setu-web',
+              clientSecret: 'setu-web-secret',
+              scopes: ['openid'],
+              authorizationEndpoint: `${REALM}/protocol/openid-connect/auth`,
+              tokenEndpoint: `${REALM}/protocol/openid-connect/token`,
+              userinfoEndpoint: `${REALM}/protocol/openid-connect/userinfo`,
+              redirectUri: 'http://localhost/auth/keycloak-oauth2/callback',
+              toPrincipal: (profile) => ({
+                id: `keycloak-oauth2:${String(profile.sub)}`,
+                claims: { username: profile.preferred_username },
+              }),
+            },
+          ],
         },
       }),
     ],

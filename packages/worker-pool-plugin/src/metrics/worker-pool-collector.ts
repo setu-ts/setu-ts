@@ -60,10 +60,7 @@ export class WorkerPoolCollector {
       WORKER_POOL_METRICS.WORKERS,
       GAUGE_OPTIONS[WORKER_POOL_METRICS.WORKERS],
     );
-    this.#busy = metrics.gauge(
-      WORKER_POOL_METRICS.BUSY,
-      GAUGE_OPTIONS[WORKER_POOL_METRICS.BUSY],
-    );
+    this.#busy = metrics.gauge(WORKER_POOL_METRICS.BUSY, GAUGE_OPTIONS[WORKER_POOL_METRICS.BUSY]);
     this.#queued = metrics.gauge(
       WORKER_POOL_METRICS.QUEUED,
       GAUGE_OPTIONS[WORKER_POOL_METRICS.QUEUED],

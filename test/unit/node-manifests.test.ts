@@ -284,12 +284,22 @@ describe('the decorator-plugin sideEffects guard (§3.4 safeguard 2)', () => {
   });
 
   it('is enforced by generateWorkspace for the decorator-plugin member only', () => {
-    const decorated = member(dir, '@setu-ts/decorator-plugin', { 'src/index.ts': 'export {};' }, {
-      currentPackageJson: '{"sideEffects":false}',
-    });
-    const other = member('packages/other', '@setu-ts/common', { 'src/index.ts': 'export {};' }, {
-      currentPackageJson: '{"sideEffects":false}',
-    });
+    const decorated = member(
+      dir,
+      '@setu-ts/decorator-plugin',
+      { 'src/index.ts': 'export {};' },
+      {
+        currentPackageJson: '{"sideEffects":false}',
+      },
+    );
+    const other = member(
+      'packages/other',
+      '@setu-ts/common',
+      { 'src/index.ts': 'export {};' },
+      {
+        currentPackageJson: '{"sideEffects":false}',
+      },
+    );
     const refusals = generateWorkspace([decorated, other]).refusals;
     expect(refusals).toHaveLength(1);
     expect(refusals[0]).toContain(dir);
@@ -352,7 +362,8 @@ describe('renderDenoJson — splices only the imports block', () => {
   });
 
   it('replaces a stale bare alias and keeps a prefixed pin, sorted', () => {
-    const raw = '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "stale": "npm:stale@1",\n' +
+    const raw =
+      '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "stale": "npm:stale@1",\n' +
       '    "npm:zod@^3.24.0": "npm:zod@^3.24.0"\n  }\n}\n';
     expect(renderDenoJson(raw, aliases)).toBe(
       '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "hono": "npm:hono@^4.12.30",\n' +
@@ -377,14 +388,19 @@ describe('renderDenoJson — splices only the imports block', () => {
 });
 
 describe('generateWorkspace — rendered files', () => {
-  const kernel = member('packages/kernel', '@setu-ts/kernel', {
-    'src/index.ts': "import { x } from '@setu-ts/common';",
-  }, {
-    exports: [
-      { subpath: '.', source: './src/index.ts' },
-      { subpath: './worker', source: './src/worker/index.ts' },
-    ],
-  });
+  const kernel = member(
+    'packages/kernel',
+    '@setu-ts/kernel',
+    {
+      'src/index.ts': "import { x } from '@setu-ts/common';",
+    },
+    {
+      exports: [
+        { subpath: '.', source: './src/index.ts' },
+        { subpath: './worker', source: './src/worker/index.ts' },
+      ],
+    },
+  );
   const starter = member('packages/starters/rest-starter', '@setu-ts/rest-starter', {
     'src/index.ts': "import { k } from '@setu-ts/kernel';",
   });
@@ -412,9 +428,12 @@ describe('generateWorkspace — rendered files', () => {
       generateWorkspace([COMMON, kernel, RUNTIME, m]).files.get('packages/cache/package.json')!;
     expect(render(reversed)).toBe(render(forward));
     const pkg = JSON.parse(render(forward));
-    for (
-      const field of ['dependencies', 'peerDependencies', 'peerDependenciesMeta', 'devDependencies']
-    ) {
+    for (const field of [
+      'dependencies',
+      'peerDependencies',
+      'peerDependenciesMeta',
+      'devDependencies',
+    ]) {
       const keys = Object.keys(pkg[field]);
       expect(keys).toEqual([...keys].sort());
     }
@@ -525,10 +544,12 @@ describe('generateWorkspace — rendered files', () => {
 
 describe('small helpers', () => {
   it('normalizes the string and object export forms', () => {
-    expect(normalizeExports('./src/index.ts')).toEqual([{
-      subpath: '.',
-      source: './src/index.ts',
-    }]);
+    expect(normalizeExports('./src/index.ts')).toEqual([
+      {
+        subpath: '.',
+        source: './src/index.ts',
+      },
+    ]);
     expect(normalizeExports({ '.': './a.ts', './x': './x.ts' })).toEqual([
       { subpath: '.', source: './a.ts' },
       { subpath: './x', source: './x.ts' },
@@ -603,16 +624,15 @@ describe('npm publish metadata', () => {
     const generated = generateWorkspace(inputs, 'license bytes');
     for (const input of inputs) {
       const pkg = JSON.parse(generated.files.get(`${input.dir}/package.json`)!);
-      for (
-        const field of [
-          'description',
-          'repository',
-          'homepage',
-          'bugs',
-          'publishConfig',
-          'sideEffects',
-        ]
-      ) expect(Object.hasOwn(pkg, field)).toBe(true);
+      for (const field of [
+        'description',
+        'repository',
+        'homepage',
+        'bugs',
+        'publishConfig',
+        'sideEffects',
+      ])
+        expect(Object.hasOwn(pkg, field)).toBe(true);
       expect(pkg.repository).toEqual({
         type: 'git',
         url: 'git+https://github.com/setu-ts/setu-ts.git',

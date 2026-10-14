@@ -95,15 +95,14 @@ export async function loadEnvWithProvenance(
   const fileSystem = runtime.fs;
 
   if (paths.length > 0 && fileSystem === undefined) {
-    throw new Error(
-      'ConfigPlugin: envFilePath requires a runtime with filesystem support.',
-    );
+    throw new Error('ConfigPlugin: envFilePath requires a runtime with filesystem support.');
   }
 
   const sources = new Map<string, EnvSourceObservation>();
-  const merged = fileSystem === undefined
-    ? {}
-    : await loadFiles(fileSystem, paths, options.envFileOptional ?? false, diagnostics, sources);
+  const merged =
+    fileSystem === undefined
+      ? {}
+      : await loadFiles(fileSystem, paths, options.envFileOptional ?? false, diagnostics, sources);
   for (const [key, value] of Object.entries(runtime.env)) {
     if (value !== undefined) {
       if (diagnostics !== undefined && diagnostics.approvedKeys.has(key)) {
@@ -132,10 +131,13 @@ function recordDisplacement(
   winner: { readonly origin: 'environment' | 'file'; readonly sourceAlias?: string },
 ): void {
   const previous = sources.get(key);
-  const displaced = previous === undefined ? [] : [
-    ...previous.overriddenSourceAliases,
-    ...(previous.sourceAlias === undefined ? [] : [previous.sourceAlias]),
-  ].slice(-MAX_OVERRIDDEN_ALIASES);
+  const displaced =
+    previous === undefined
+      ? []
+      : [
+          ...previous.overriddenSourceAliases,
+          ...(previous.sourceAlias === undefined ? [] : [previous.sourceAlias]),
+        ].slice(-MAX_OVERRIDDEN_ALIASES);
   sources.set(key, {
     origin: winner.origin,
     ...(winner.sourceAlias === undefined ? {} : { sourceAlias: winner.sourceAlias }),
@@ -164,7 +166,7 @@ async function loadFiles(
   // observed as the merge step wins.
   for (let index = paths.length - 1; index >= 0; index--) {
     const path = paths[index];
-    if (optional && !await exists(fileSystem, path)) continue;
+    if (optional && !(await exists(fileSystem, path))) continue;
     const content = await readFile(fileSystem, path);
     const parsed = parseEnv(content);
     if (diagnostics !== undefined) {

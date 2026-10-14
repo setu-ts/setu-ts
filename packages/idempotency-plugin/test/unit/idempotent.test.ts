@@ -22,8 +22,8 @@ function context(service: IIdempotencyService | undefined, logger?: ILogger): IR
       token === CAPABILITIES.IDEMPOTENCY
         ? service !== undefined
         : token === CAPABILITIES.LOGGER
-        ? logger !== undefined
-        : false,
+          ? logger !== undefined
+          : false,
     get: <T>(token: string): T => (token === CAPABILITIES.IDEMPOTENCY ? service : logger) as T,
   };
   return { services, state: new Map<string, unknown>() } as unknown as IRequestContext;

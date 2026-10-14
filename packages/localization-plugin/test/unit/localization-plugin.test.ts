@@ -56,28 +56,26 @@ describe('LocalizationPlugin — construction refusals', () => {
   it('refuses a Cache-Control value no response could carry', () => {
     for (const cacheControl of ['no-store\r\nX-Injected: 1', 7 as unknown as string]) {
       expect(() =>
-        LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath: '/i18n', cacheControl } })
+        LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath: '/i18n', cacheControl } }),
       ).toThrow('exposeCatalogues.cacheControl is not a valid header value');
     }
   });
 
   it('refuses a bad catalogue basePath', () => {
-    for (
-      const basePath of [
-        'i18n',
-        '/i18n/:x',
-        '/i18n/*',
-        '/',
-        '/i18n?x',
-        '/a//b',
-        '/i18n\r\n',
-        '/.',
-        '/..',
-        '/i18n/..',
-        '/./i18n',
-        7 as unknown as string,
-      ]
-    ) {
+    for (const basePath of [
+      'i18n',
+      '/i18n/:x',
+      '/i18n/*',
+      '/',
+      '/i18n?x',
+      '/a//b',
+      '/i18n\r\n',
+      '/.',
+      '/..',
+      '/i18n/..',
+      '/./i18n',
+      7 as unknown as string,
+    ]) {
       expect(() => LocalizationPlugin({ ...BASE, exposeCatalogues: { basePath } })).toThrow(
         'exposeCatalogues.basePath',
       );
@@ -210,8 +208,9 @@ describe('LocalizationPlugin — register()', () => {
     await LocalizationPlugin(BASE).register(fake.ctx);
     const service = fake.services.get(CAPABILITIES.LOCALIZATION) as ILocalizer;
     expect(service.t('nope')).toBe('nope');
-    expect(fake.logs.filter((line) => line.level === 'warn').map((line) => line.message))
-      .toEqual(['localization-plugin: no catalogue defines this message key']);
+    expect(fake.logs.filter((line) => line.level === 'warn').map((line) => line.message)).toEqual([
+      'localization-plugin: no catalogue defines this message key',
+    ]);
   });
 
   it('honours onMissing and timeZone on the registered service', async () => {

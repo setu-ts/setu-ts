@@ -72,13 +72,13 @@ is what makes a `POST` or `PATCH` safe to retry.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                      | Resolution (picked side)                                                                                                                                                                                                                                                                                                                  | Doc deliverable (same PR)                                                              |
-| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| C1 | ROADMAP M109 and 109a plan §0 name the entry point `within(uow, key, fn)` — the CALLER's unit of work.                                                                        | `within(options, fn)`: the store opens the transaction. With a caller-owned transaction, a lost race surfaces OUTSIDE `within` — a PostgreSQL insert aborts the caller's transaction so no re-read is possible inside it, and the deferred backends refuse at the caller's commit — so the winner's result could never be returned. §3.3. | ROADMAP M109 "Four entry points" bullet.                                               |
-| C2 | ROADMAP M109: "Tier C per backend: SQL, MongoDB and DynamoDB yes; D1 for database-only effects; Cosmos only within one partition; Bigtable no."                               | Cosmos is REFUSED, like M108's inbox: a database-plugin transaction is one container and one partition-key value, and the record lives in its own entity, so it cannot share the business partition. D1 is supported through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })` with the deferred-write caveat (§3.7).              | ROADMAP M109 tier-C bullet.                                                            |
-| C3 | ROADMAP M109 `Package(s)`: "109b: `packages/sdk` (the `idempotencyKey` request option) and tier C."                                                                           | 109b: `common`, `idempotency-plugin`, `database-plugin`, `sdk`.                                                                                                                                                                                                                                                                           | ROADMAP `Package(s)` line; Progress row `109b`.                                        |
-| C4 | The idempotency-plugin README tier table (`README.md:124-128`) has no tier-C row; only the archived 109a plan (§3.18) describes one, as "Expiry: Backend-specific; Clock: —". | Tier C row: atomic with the business write; expiry is `expiresAt` from `runtime.now()` (wall clock, read by other replicas), and a record stays authoritative until the scheduled purge deletes it (§3.10).                                                                                                                               | idempotency-plugin README tier table gains the row; PUBLIC_API.md idempotency section. |
-| C5 | ROADMAP M109 SDK bullet: "an `idempotencyKey` request option, generated once per logical call".                                                                               | Two members: per-request `ClientRequest.idempotencyKey` (a caller's own key) and client-level `ClientOptions.idempotency` (generated keys — how a GENERATED client gets one, since its operations take no per-call options beyond document-declared header parameters, `test/fixtures/generated-client.ts:47-52`).                        | ROADMAP M109 SDK bullet.                                                               |
+| #   | Conflict                                                                                                                                                                      | Resolution (picked side)                                                                                                                                                                                                                                                                                                                  | Doc deliverable (same PR)                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| C1  | ROADMAP M109 and 109a plan §0 name the entry point `within(uow, key, fn)` — the CALLER's unit of work.                                                                        | `within(options, fn)`: the store opens the transaction. With a caller-owned transaction, a lost race surfaces OUTSIDE `within` — a PostgreSQL insert aborts the caller's transaction so no re-read is possible inside it, and the deferred backends refuse at the caller's commit — so the winner's result could never be returned. §3.3. | ROADMAP M109 "Four entry points" bullet.                                               |
+| C2  | ROADMAP M109: "Tier C per backend: SQL, MongoDB and DynamoDB yes; D1 for database-only effects; Cosmos only within one partition; Bigtable no."                               | Cosmos is REFUSED, like M108's inbox: a database-plugin transaction is one container and one partition-key value, and the record lives in its own entity, so it cannot share the business partition. D1 is supported through `DatabasePlugin({ type: 'custom', adapter: D1Adapter })` with the deferred-write caveat (§3.7).              | ROADMAP M109 tier-C bullet.                                                            |
+| C3  | ROADMAP M109 `Package(s)`: "109b: `packages/sdk` (the `idempotencyKey` request option) and tier C."                                                                           | 109b: `common`, `idempotency-plugin`, `database-plugin`, `sdk`.                                                                                                                                                                                                                                                                           | ROADMAP `Package(s)` line; Progress row `109b`.                                        |
+| C4  | The idempotency-plugin README tier table (`README.md:124-128`) has no tier-C row; only the archived 109a plan (§3.18) describes one, as "Expiry: Backend-specific; Clock: —". | Tier C row: atomic with the business write; expiry is `expiresAt` from `runtime.now()` (wall clock, read by other replicas), and a record stays authoritative until the scheduled purge deletes it (§3.10).                                                                                                                               | idempotency-plugin README tier table gains the row; PUBLIC_API.md idempotency section. |
+| C5  | ROADMAP M109 SDK bullet: "an `idempotencyKey` request option, generated once per logical call".                                                                               | Two members: per-request `ClientRequest.idempotencyKey` (a caller's own key) and client-level `ClientOptions.idempotency` (generated keys — how a GENERATED client gets one, since its operations take no per-call options beyond document-declared header parameters, `test/fixtures/generated-client.ts:47-52`).                        | ROADMAP M109 SDK bullet.                                                               |
 
 ## 3. Design decisions
 
@@ -203,15 +203,13 @@ purgeTransactional(): Promise<number>;
 
 - **Decision:** in this order:
   1. Validate options (§3.13); a key `parseKeyValue` rejects →
-     `IdempotencyWithinError
-     ('key-invalid')`; a `fingerprint` `canonicalJson` rejects →
+     `IdempotencyWithinError ('key-invalid')`; a `fingerprint` `canonicalJson` rejects →
      `'fingerprint-invalid'` (its message names key paths of the input, so it is never surfaced). No
      store call.
   2. Derive id and fingerprint; `now = runtime.now()`.
   3. Pre-read `store.find(id)` (bounded by `storeTimeoutMs`). A record, whatever its `expiresAt`:
      different fingerprint → `'fingerprint-mismatch'`; equal → decode, return
-     `{ value,
-     replayed: true }`.
+     `{ value, replayed: true }`.
   4. `store.run(claim, work)`. `work` calls `fn(scope)` inside a try that TAGS a throw as `fn`'s
      own; then encodes `JSON.stringify({ v: value })` (`void` → `{}`), refusing an encoding over
      `maxResultBytes` UTF-8 bytes (`'result-too-large'`) or one `JSON.stringify` throws on or omits
@@ -240,8 +238,7 @@ purgeTransactional(): Promise<number>;
   memory by the plan review). A present record therefore stays authoritative until the purge removes
   it (§3.10).
 - **Worked example (README):** an HTTP handler calls
-  `within({ key: headerKey, namespace:
-  'orders.create', scope:`
+  `within({ key: headerKey, namespace: 'orders.create', scope:`
   ${tenant}:${user.id}`, fingerprint: body }, (uow: IUnitOfWork) => …)` and answers
   `replayed ? 200 : 201`.
 - **Test home:** `test/unit/within.test.ts` (fake store), `test/integration/within-kernel.test.ts`
@@ -250,9 +247,7 @@ purgeTransactional(): Promise<number>;
 ### 3.4 Errors and logging
 
 - **Decision:** `IdempotencyWithinError extends Error`,
-  `reason: 'key-invalid' |
-  'fingerprint-invalid' | 'fingerprint-mismatch' | 'conflict' | 'result-too-large' |
-  'result-unserializable' | 'record-invalid' | 'store-failed'`.
+  `reason: 'key-invalid' | 'fingerprint-invalid' | 'fingerprint-mismatch' | 'conflict' | 'result-too-large' | 'result-unserializable' | 'record-invalid' | 'store-failed'`.
   Messages carry no key, scope, namespace, fingerprint input or result, and no `cause`. Status
   hints: `key-invalid` and `fingerprint-invalid` → `400`; `fingerprint-mismatch` → `422`; `conflict`
   → `409`; `store-failed` → `503`; the rest unhinted (a masked `500`). Every store failure the
@@ -269,8 +264,7 @@ purgeTransactional(): Promise<number>;
 ### 3.5 Plugin wiring
 
 - **Decision:**
-  `IdempotencyPluginOptions.transactional?: { store, ttlMs?, storeTimeoutMs?,
-  maxResultBytes?, purge?: { schedule?, intervalMs?, batch? } }`.
+  `IdempotencyPluginOptions.transactional?: { store, ttlMs?, storeTimeoutMs?, maxResultBytes?, purge?: { schedule?, intervalMs?, batch? } }`.
   With `transactional` set the plugin declares
   `optionalDependencies: [CAPABILITIES.SCHEDULER, CAPABILITIES.DATABASE]`, resolves `store` at
   `onInit` (so `DatabasePlugin` may register before or after), runs `verify()` bounded by
@@ -286,11 +280,9 @@ purgeTransactional(): Promise<number>;
 - **Decision:** `createDatabaseIdempotencyStore({ entity = 'Idempotency', database? })` returns a
   `RegistryFactory<ITransactionalIdempotencyStore>` resolving `CAPABILITIES.DATABASE` (or
   `database.<name>`). Rows: claim
-  `{ id, kind, role: 'claim', fingerprint, createdAt, expiresAt,
-  result: null }` and result
-  `{ id:`${id}.r`, kind, role: 'result', fingerprint, createdAt,
-  expiresAt, result }`; `find`
-  reads both by id and requires both, matching `kind`. The backend refusal code — `adapterInfoOf`
+  `{ id, kind, role: 'claim', fingerprint, createdAt, expiresAt, result: null }` and result
+  `{ id:`${id}.r`, kind, role: 'result', fingerprint, createdAt, expiresAt, result }`; `find` reads
+  both by id and requires both, matching `kind`. The backend refusal code — `adapterInfoOf`
   Cosmos/Bigtable checks, `isMongoReplicaSetRefusal`, `ProbeRollback` and the rolled-back two-create
   probe — moves to ONE internal module `src/transactional/backend-probe.ts` used by THREE stores:
   the new one, M108's inbox store and M107's outbox store (`database-outbox-store.ts:150-175` holds
@@ -331,8 +323,7 @@ uses Drizzle, not Prisma.
 - **Decision:**
   - `ClientRequest.idempotencyKey?: string` — the caller's own key, validated (1–255 characters of
     `0x21`–`0x7E`, no `"`) before any network call; the error names the field, never the value.
-  - `ClientOptions.idempotency?: { methods?: readonly string[] (default ['POST', 'PATCH']); header?:
-    string (default 'Idempotency-Key'); generateKey?: () => string }`.
+  - `ClientOptions.idempotency?: { methods?: readonly string[] (default ['POST', 'PATCH']); header?: string (default 'Idempotency-Key'); generateKey?: () => string }`.
     Every request whose method is listed and that has no key gets ONE generated key: 32 hex
     characters from 16 `crypto.getRandomValues` bytes, through `drawNonce` extracted from
     `observed-fetch.ts` into a shared internal `http/random-hex.ts` (§11.1). `crypto` availability

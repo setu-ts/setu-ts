@@ -180,8 +180,10 @@ export class IdempotencyObjectCore {
     const leaseMs = positiveInt(raw.leaseMs);
     const ttlMs = positiveInt(raw.ttlMs);
     if (
-      typeof raw.token !== 'string' || typeof raw.fingerprint !== 'string' ||
-      leaseMs === undefined || ttlMs === undefined
+      typeof raw.token !== 'string' ||
+      typeof raw.fingerprint !== 'string' ||
+      leaseMs === undefined ||
+      ttlMs === undefined
     ) {
       return undefined;
     }
@@ -211,7 +213,7 @@ export class IdempotencyObjectCore {
       return undefined;
     }
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
+      ? (parsed as Record<string, unknown>)
       : undefined;
   }
 

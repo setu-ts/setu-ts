@@ -73,11 +73,14 @@ try {
 
   const ticks: number[] = [];
   await new Promise<void>((resolve, reject) => {
-    ws.subscribe<{ countdown: number }>({ query: 'subscription { countdown(from: 3) }' }, {
-      next: (d) => void (d.data && ticks.push(d.data.countdown)),
-      error: reject,
-      complete: resolve,
-    });
+    ws.subscribe<{ countdown: number }>(
+      { query: 'subscription { countdown(from: 3) }' },
+      {
+        next: (d) => void (d.data && ticks.push(d.data.countdown)),
+        error: reject,
+        complete: resolve,
+      },
+    );
     setTimeout(() => reject(new Error('timed out')), 10_000);
   });
   check(
@@ -88,11 +91,14 @@ try {
 
   const queryOverSocket = await new Promise<unknown>((resolve, reject) => {
     let data: unknown;
-    ws.subscribe<Record<string, unknown>>({ query: '{ hello }' }, {
-      next: (d) => void (data = d.data),
-      error: reject,
-      complete: () => resolve(data),
-    });
+    ws.subscribe<Record<string, unknown>>(
+      { query: '{ hello }' },
+      {
+        next: (d) => void (data = d.data),
+        error: reject,
+        complete: () => resolve(data),
+      },
+    );
     setTimeout(() => reject(new Error('timed out')), 10_000);
   });
   check(
@@ -103,11 +109,14 @@ try {
 
   const maskedOverSocket = await new Promise<string>((resolve, reject) => {
     let text = '';
-    ws.subscribe<Record<string, unknown>>({ query: '{ boom }' }, {
-      next: (d) => void (text = JSON.stringify(d)),
-      error: (e: unknown) => resolve(JSON.stringify(e)),
-      complete: () => resolve(text),
-    });
+    ws.subscribe<Record<string, unknown>>(
+      { query: '{ boom }' },
+      {
+        next: (d) => void (text = JSON.stringify(d)),
+        error: (e: unknown) => resolve(JSON.stringify(e)),
+        complete: () => resolve(text),
+      },
+    );
     setTimeout(() => reject(new Error('timed out')), 10_000);
   });
   check(
@@ -167,11 +176,18 @@ try {
 
   const apollo = new ApolloClient({
     cache: new InMemoryCache(),
-    link: createPersistedQueryLink({ sha256: (body: string) => sha256(body) })
-      .concat(new HttpLink({ uri: http, fetch: recordingFetch })),
+    link: createPersistedQueryLink({ sha256: (body: string) => sha256(body) }).concat(
+      new HttpLink({ uri: http, fetch: recordingFetch }),
+    ),
   });
 
-  const query = gql`{ books { title } }`;
+  const query = gql`
+    {
+      books {
+        title
+      }
+    }
+  `;
   const first = await apollo.query({ query, fetchPolicy: 'no-cache' });
   const second = await apollo.query({ query, fetchPolicy: 'no-cache' });
 
@@ -191,27 +207,31 @@ try {
 
   // Replay Apollo's own hash with no document at all.
   const apolloHash = wire[0]?.hash ?? '';
-  const replay = await (await fetch(http, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      extensions: { persistedQuery: { version: 1, sha256Hash: apolloHash } },
-    }),
-  })).json();
+  const replay = await (
+    await fetch(http, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        extensions: { persistedQuery: { version: 1, sha256Hash: apolloHash } },
+      }),
+    })
+  ).json();
   check(
     replay.data?.books !== undefined,
     'a bare hash with no document is served from the APQ cache',
     JSON.stringify(replay).slice(0, 90),
   );
 
-  const poisoned = await (await fetch(http, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      query: '{ books { author } }',
-      extensions: { persistedQuery: { version: 1, sha256Hash: apolloHash } },
-    }),
-  })).json();
+  const poisoned = await (
+    await fetch(http, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        query: '{ books { author } }',
+        extensions: { persistedQuery: { version: 1, sha256Hash: apolloHash } },
+      }),
+    })
+  ).json();
   check(
     poisoned.errors?.[0]?.extensions?.code === 'PERSISTED_QUERY_HASH_MISMATCH',
     'a document that does not match its hash is refused, so the cache cannot be poisoned',
@@ -258,17 +278,21 @@ try {
   // ── HTTP transport ────────────────────────────────────────────────────────
   console.log('\nHTTP transport');
 
-  const batch = await (await fetch(http, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify([
-      { query: '{ hello }' },
-      { query: '{ book(id: "2") { title } }' },
-      { query: '{ nope }' },
-    ]),
-  })).json();
+  const batch = await (
+    await fetch(http, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify([
+        { query: '{ hello }' },
+        { query: '{ book(id: "2") { title } }' },
+        { query: '{ nope }' },
+      ]),
+    })
+  ).json();
   check(
-    Array.isArray(batch) && batch.length === 3 && batch[0].data?.hello === 'world' &&
+    Array.isArray(batch) &&
+      batch.length === 3 &&
+      batch[0].data?.hello === 'world' &&
       batch[2].errors?.length > 0,
     'a batch answers one array, each element carrying its own result or errors',
     JSON.stringify(batch).slice(0, 100),
@@ -288,10 +312,7 @@ try {
   );
 
   const graphiql = await fetch(http, { headers: { accept: 'text/html' } });
-  check(
-    (await graphiql.text()).includes('GraphiQL'),
-    'GraphiQL is served for a browser request',
-  );
+  check((await graphiql.text()).includes('GraphiQL'), 'GraphiQL is served for a browser request');
 } finally {
   await app.stop();
 }

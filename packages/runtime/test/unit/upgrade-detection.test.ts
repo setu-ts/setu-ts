@@ -7,18 +7,21 @@ function headers(init: Record<string, string>): Headers {
 
 describe('isWebSocketUpgradeRequest', () => {
   it('accepts the canonical header pair', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'Upgrade' })))
-      .toBe(true);
+    expect(
+      isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'Upgrade' })),
+    ).toBe(true);
   });
 
   it('is case-insensitive on both header values', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'WebSocket', connection: 'UPGRADE' })))
-      .toBe(true);
+    expect(
+      isWebSocketUpgradeRequest(headers({ upgrade: 'WebSocket', connection: 'UPGRADE' })),
+    ).toBe(true);
   });
 
   it('tolerates surrounding whitespace', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: ' websocket ', connection: ' upgrade ' })))
-      .toBe(true);
+    expect(
+      isWebSocketUpgradeRequest(headers({ upgrade: ' websocket ', connection: ' upgrade ' })),
+    ).toBe(true);
   });
 
   it('accepts a multi-token Connection header, as proxies send', () => {
@@ -34,8 +37,9 @@ describe('isWebSocketUpgradeRequest', () => {
   });
 
   it('rejects a non-websocket upgrade protocol', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'h2c', connection: 'Upgrade' })))
-      .toBe(false);
+    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'h2c', connection: 'Upgrade' }))).toBe(
+      false,
+    );
   });
 
   it('rejects when the Connection header is absent', () => {
@@ -43,8 +47,9 @@ describe('isWebSocketUpgradeRequest', () => {
   });
 
   it('rejects when Connection does not contain the upgrade token', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'keep-alive' })))
-      .toBe(false);
+    expect(
+      isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'keep-alive' })),
+    ).toBe(false);
   });
 
   it('rejects a Connection value that merely contains upgrade as a substring', () => {

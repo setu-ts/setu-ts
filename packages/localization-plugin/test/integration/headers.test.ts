@@ -22,9 +22,7 @@ afterEach(async () => {
   app = undefined;
 });
 
-async function start(
-  extra: Partial<LocalizationPluginOptions> = {},
-): Promise<IKernelApplication> {
+async function start(extra: Partial<LocalizationPluginOptions> = {}): Promise<IKernelApplication> {
   app = await createTestApp({
     autoStart: false,
     plugins: [
@@ -37,10 +35,13 @@ async function start(
     ],
   });
   // A CORS-like stage that varies on Origin, earlier in the pipeline.
-  app.middleware.add(async (ctx, next) => {
-    ctx.response.appendHeader('Vary', 'Origin');
-    await next();
-  }, { priority: 10 });
+  app.middleware.add(
+    async (ctx, next) => {
+      ctx.response.appendHeader('Vary', 'Origin');
+      await next();
+    },
+    { priority: 10 },
+  );
   app.router.get('/page', (ctx) => ctx.response.text(localizerFor(ctx).t('title')));
   app.router.get('/replace', (ctx) => {
     replaceLocale(ctx.request, 'de');

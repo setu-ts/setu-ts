@@ -37,13 +37,14 @@ export type DrizzleTransactionBridge<TDatabase extends object> = <T>(
  * @typeParam TDatabase - The application's configured outer Drizzle database type
  * @since 0.2.0
  */
-export type DrizzleTransaction<TDatabase extends object> = TDatabase extends
-  { transaction: infer TMethod }
+export type DrizzleTransaction<TDatabase extends object> = TDatabase extends {
+  transaction: infer TMethod;
+}
   ? TMethod extends (...args: infer TArguments) => unknown
     ? TArguments[0] extends (transaction: infer TTransaction, ...args: never[]) => unknown
       ? TTransaction
+      : never
     : never
-  : never
   : never;
 
 /** Internal private state for one package-created opaque configuration. */
@@ -147,7 +148,8 @@ export function createDrizzleDatabase<const TDatabase extends object>(
       },
       ...args: unknown[]
     ): { readonly __setuSynchronousTransactionResult: true };
-  } ? [unsupportedSynchronousDriver: never]
+  }
+    ? [unsupportedSynchronousDriver: never]
     : []
 ): DrizzleDatabase<TDatabase> {
   void unsupportedSynchronousDriver;
@@ -179,6 +181,9 @@ export function readDrizzleDatabase(value: unknown): DrizzleDatabaseState {
 
 /** Test whether two values are the identical package-created configuration. */
 export function isDrizzleDatabase(value: unknown): value is DrizzleDatabaseIdentity {
-  return value !== null && (typeof value === 'object' || typeof value === 'function') &&
-    DRIZZLE_DATABASES.has(value);
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    DRIZZLE_DATABASES.has(value)
+  );
 }

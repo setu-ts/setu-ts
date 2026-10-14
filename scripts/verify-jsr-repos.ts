@@ -42,7 +42,7 @@ for (const path of PUBLISHED_PACKAGES) {
     continue;
   }
 
-  const pkg = await response.json() as IJsrPackage;
+  const pkg = (await response.json()) as IJsrPackage;
   const linked = pkg.githubRepository;
   if (linked === undefined || linked === null) {
     console.log('UNLINKED', name);

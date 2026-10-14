@@ -584,7 +584,9 @@ app.router.get('/users', async (ctx) => {
 });
 
 app.router.post('/users', {
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
   middleware: [validateBody(UserSchema)],
   schema: { body: UserSchema }, // For OpenAPI
 });
@@ -734,9 +736,11 @@ function detectRuntime(): RuntimePlatform {
   if (typeof Bun !== 'undefined') return 'bun';
   // Check for Cloudflare Workers
   if (
-    typeof caches !== 'undefined' && typeof navigator !== 'undefined' &&
+    typeof caches !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
     navigator.userAgent?.includes('cloudflare')
-  ) return 'cloudflare-workers';
+  )
+    return 'cloudflare-workers';
   // Default to Node
   return 'node';
 }
@@ -800,12 +804,14 @@ const app = createApplication({
 **Plugin Registration:**
 
 ```typescript
-app.register(LoggerPlugin({
-  level: 'info',
-  transport: 'pino', // or 'console'
-  redact: ['password', 'token'],
-  pretty: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
-}));
+app.register(
+  LoggerPlugin({
+    level: 'info',
+    transport: 'pino', // or 'console'
+    redact: ['password', 'token'],
+    pretty: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -871,11 +877,13 @@ childLogger.debug('Processing request');
 **Plugin Registration:**
 
 ```typescript
-app.register(ConfigPlugin({
-  envFilePath: ['.env.local', '.env'],
-  validationSchema: AppConfigSchema,
-  expandVariables: true,
-}));
+app.register(
+  ConfigPlugin({
+    envFilePath: ['.env.local', '.env'],
+    validationSchema: AppConfigSchema,
+    expandVariables: true,
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -955,11 +963,13 @@ app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 **Plugin Registration:**
 
 ```typescript
-app.register(ValidationPlugin({
-  errorFormat: 'rfc7807', // or 'default', 'nestjs', custom
-  whitelist: true,
-  forbidNonWhitelisted: false,
-}));
+app.register(
+  ValidationPlugin({
+    errorFormat: 'rfc7807', // or 'default', 'nestjs', custom
+    whitelist: true,
+    forbidNonWhitelisted: false,
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -978,7 +988,9 @@ if (result.success) {
 // Validate as middleware
 app.router.post('/users', {
   middleware: [validation.middleware(UserSchema, 'body')],
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
 });
 ```
 
@@ -1087,11 +1099,13 @@ function internalServerError(message: string, cause?: Error): HttpError;
 ```typescript
 import { errorHandler } from '@setu-ts/exceptions';
 
-app.middleware.add(errorHandler({
-  format: 'rfc7807', // or 'default', custom
-  includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
-  logErrors: true,
-}));
+app.middleware.add(
+  errorHandler({
+    format: 'rfc7807', // or 'default', custom
+    includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
+    logErrors: true,
+  }),
+);
 ```
 
 **Implementation Files:**
@@ -1129,10 +1143,12 @@ app.middleware.add(errorHandler({
 **Plugin Registration:**
 
 ```typescript
-app.register(DiPlugin({
-  defaultScope: 'singleton',
-  autoRegister: true, // Auto-register services from plugins
-}));
+app.register(
+  DiPlugin({
+    defaultScope: 'singleton',
+    autoRegister: true, // Auto-register services from plugins
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -1196,10 +1212,12 @@ const userService = container.resolve<UserService>('UserService');
 **Plugin Registration:**
 
 ```typescript
-app.register(DecoratorPlugin({
-  autoDiscover: true, // Auto-scan for decorated classes
-  controllersPath: './src/controllers',
-}));
+app.register(
+  DecoratorPlugin({
+    autoDiscover: true, // Auto-scan for decorated classes
+    controllersPath: './src/controllers',
+  }),
+);
 ```
 
 **Decorators Provided:**
@@ -1209,11 +1227,15 @@ app.register(DecoratorPlugin({
 @Controller('/users')
 class UserController {
   @Get('/')
-  async list() {/* ... */}
+  async list() {
+    /* ... */
+  }
 
   @Post('/')
   @UseGuards(JwtGuard)
-  async create(@Body() body: CreateUserDto) {/* ... */}
+  async create(@Body() body: CreateUserDto) {
+    /* ... */
+  }
 }
 
 // Injectable (requires DiPlugin)
@@ -1308,15 +1330,17 @@ interface RouteMetadata {
 **Plugin Registration:**
 
 ```typescript
-app.register(DatabasePlugin({
-  type: 'prisma',
-  options: {
-    // A Prisma v7 client is application-generated and carries its own
-    // connection configuration; `url` is deprecated and unread.
-    prismaClient,
-    logQueries: true,
-  },
-}));
+app.register(
+  DatabasePlugin({
+    type: 'prisma',
+    options: {
+      // A Prisma v7 client is application-generated and carries its own
+      // connection configuration; `url` is deprecated and unread.
+      prismaClient,
+      logQueries: true,
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -1402,14 +1426,16 @@ interface IRepository<Entity, Id = string> {
 **Plugin Registration:**
 
 ```typescript
-app.register(CachePlugin({
-  store: 'redis',
-  options: {
-    url: config.get('REDIS_URL'),
-    prefix: 'myapp:',
-    defaultTTL: 3600,
-  },
-}));
+app.register(
+  CachePlugin({
+    store: 'redis',
+    options: {
+      url: config.get('REDIS_URL'),
+      prefix: 'myapp:',
+      defaultTTL: 3600,
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -1431,7 +1457,9 @@ import { cacheMiddleware } from '@setu-ts/cache-plugin';
 
 app.router.get('/users/:id', {
   middleware: [cacheMiddleware({ ttlSeconds: 3600, key: (ctx) => `user:${ctx.params.id}` })],
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
 });
 ```
 
@@ -1477,10 +1505,12 @@ app.router.get('/users/:id', {
 **Plugin Registration:**
 
 ```typescript
-app.register(EventsPlugin({
-  async: true, // Non-blocking handlers
-  errorHandler: (err, event) => logger.error('Event handler failed', { err, event }),
-}));
+app.register(
+  EventsPlugin({
+    async: true, // Non-blocking handlers
+    errorHandler: (err, event) => logger.error('Event handler failed', { err, event }),
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -1635,18 +1665,22 @@ Behaviors are consumer-supplied and composable; no built-in behaviors ship in M1
 **Plugin Registration:**
 
 ```typescript
-app.register(MessagingPlugin({
-  broker: 'memory', // or 'redis-streams'
-}));
+app.register(
+  MessagingPlugin({
+    broker: 'memory', // or 'redis-streams'
+  }),
+);
 
 // With Redis Streams
-app.register(MessagingPlugin({
-  broker: 'redis-streams',
-  options: {
-    url: config.get('REDIS_URL'),
-    defaultQueue: 'myapp-events',
-  },
-}));
+app.register(
+  MessagingPlugin({
+    broker: 'redis-streams',
+    options: {
+      url: config.get('REDIS_URL'),
+      defaultQueue: 'myapp-events',
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -1660,9 +1694,13 @@ const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 await broker.publish('user.created', { userId: '123' });
 
 // Subscribe
-await broker.subscribe('user.created', async (message, metadata) => {
-  await processUserCreated(message);
-}, { queue: 'user-service' });
+await broker.subscribe(
+  'user.created',
+  async (message, metadata) => {
+    await processUserCreated(message);
+  },
+  { queue: 'user-service' },
+);
 ```
 
 **Implemented Brokers:**
@@ -1682,13 +1720,15 @@ await broker.subscribe('user.created', async (message, metadata) => {
 
 ```typescript
 // Bridge domain events to messaging broker
-app.register(EventsMessagingBridge({
-  eventTypes: ['user.created', 'user.updated'],
-  brokerToken: CAPABILITIES.MESSAGING,
-  errorHandler: (error, eventType) => {
-    console.error(`Failed to forward ${eventType}:`, error);
-  },
-}));
+app.register(
+  EventsMessagingBridge({
+    eventTypes: ['user.created', 'user.updated'],
+    brokerToken: CAPABILITIES.MESSAGING,
+    errorHandler: (error, eventType) => {
+      console.error(`Failed to forward ${eventType}:`, error);
+    },
+  }),
+);
 ```
 
 **Implementation Files:**
@@ -1880,12 +1920,14 @@ were never affected).
 **Plugin Registration:**
 
 ```typescript
-app.register(QueuePlugin({
-  adapter: 'redis',
-  url: config.get('REDIS_URL'),
-  pollIntervalMs: 1000,
-  defaultMaxAttempts: 3,
-}));
+app.register(
+  QueuePlugin({
+    adapter: 'redis',
+    url: config.get('REDIS_URL'),
+    pollIntervalMs: 1000,
+    defaultMaxAttempts: 3,
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -1897,9 +1939,13 @@ const queue = ctx.services.get<IQueue>('queue');
 await queue.add('send-email', { to: 'john@example.com', subject: 'Welcome' });
 
 // Process jobs
-queue.process('send-email', async (job) => {
-  await mailer.send(job.data.to, job.data.subject);
-}, { concurrency: 3 });
+queue.process(
+  'send-email',
+  async (job) => {
+    await mailer.send(job.data.to, job.data.subject);
+  },
+  { concurrency: 3 },
+);
 
 // Scheduled jobs
 await queue.addRecurring('cleanup', {}, { cron: '0 * * * *' });
@@ -1993,12 +2039,14 @@ Registers `IJwtService` under `'jwt'`, `IAuthService` under `'authentication'`, 
 ```typescript
 import { authMiddleware, AuthPlugin } from '@setu-ts/auth-plugin';
 
-app.register(AuthPlugin({
-  jwt: { secret: config.get('JWT_SECRET') }, // HS256; use privateKey/publicKey PEMs for RS256
-  apiKey: { header: 'X-API-Key', validate: (key) => apiKeyService.validate(key) },
-  local: { verify: (identifier, secret) => userService.checkPassword(identifier, secret) },
-  rbac: { roles: roleDefinitions },
-}));
+app.register(
+  AuthPlugin({
+    jwt: { secret: config.get('JWT_SECRET') }, // HS256; use privateKey/publicKey PEMs for RS256
+    apiKey: { header: 'X-API-Key', validate: (key) => apiKeyService.validate(key) },
+    local: { verify: (identifier, secret) => userService.checkPassword(identifier, secret) },
+    rbac: { roles: roleDefinitions },
+  }),
+);
 app.middleware.add(authMiddleware());
 ```
 
@@ -2020,7 +2068,9 @@ const payload = await jwt.verify(token);
 // Guards are free middleware factories (NOT methods on IAuthService).
 app.router.get('/admin', {
   middleware: [requireAuth(), requireRole('admin')],
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
 });
 ```
 
@@ -2105,25 +2155,27 @@ was required — refresh tokens are minted with the existing `IJwtService.sign({
 **Plugin Registration:**
 
 ```typescript
-app.register(HttpSecurityPlugin({
-  cors: {
-    origin: ['https://app.example.com'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  },
-  headers: {
-    contentSecurityPolicy: { defaultSrc: ["'self'"] },
-    xFrameOptions: 'DENY',
-    xContentTypeOptions: true,
-    strictTransportSecurity: { maxAge: 31536000 },
-  },
-  csrf: { enabled: true },
-  requestSize: { maxBodySize: 1024 * 1024 },
-  ipSecurity: {
-    trustProxy: true,
-    ipHeader: 'X-Forwarded-For',
-  },
-}));
+app.register(
+  HttpSecurityPlugin({
+    cors: {
+      origin: ['https://app.example.com'],
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    },
+    headers: {
+      contentSecurityPolicy: { defaultSrc: ["'self'"] },
+      xFrameOptions: 'DENY',
+      xContentTypeOptions: true,
+      strictTransportSecurity: { maxAge: 31536000 },
+    },
+    csrf: { enabled: true },
+    requestSize: { maxBodySize: 1024 * 1024 },
+    ipSecurity: {
+      trustProxy: true,
+      ipHeader: 'X-Forwarded-For',
+    },
+  }),
+);
 ```
 
 **Implementation Files:**
@@ -2161,14 +2213,16 @@ app.register(HttpSecurityPlugin({
 **Plugin Registration:**
 
 ```typescript
-app.register(SchedulerPlugin({
-  timezone: 'UTC',
-  distributedLock: {
-    enabled: true,
-    storage: 'redis',
-    url: config.get('REDIS_URL'),
-  },
-}));
+app.register(
+  SchedulerPlugin({
+    timezone: 'UTC',
+    distributedLock: {
+      enabled: true,
+      storage: 'redis',
+      url: config.get('REDIS_URL'),
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -2182,19 +2236,32 @@ scheduler.addCron('cleanup', '0 * * * *', async (job) => {
 });
 
 // Delayed job
-scheduler.addDelayed('send-reminder', async (job) => {
-  await sendReminder(job.data.userId);
-}, { delay: 60000 });
+scheduler.addDelayed(
+  'send-reminder',
+  async (job) => {
+    await sendReminder(job.data.userId);
+  },
+  { delay: 60000 },
+);
 
 // Recurring
-scheduler.addRecurring('health-check', async (job) => {
-  await runHealthCheck();
-}, { every: 300000 });
+scheduler.addRecurring(
+  'health-check',
+  async (job) => {
+    await runHealthCheck();
+  },
+  { every: 300000 },
+);
 
 // With retry
-scheduler.addCron('sync-data', '*/5 * * * *', async (job) => {
-  await syncData();
-}, { retry: { limit: 3, delay: 5000, backoff: 'exponential' } });
+scheduler.addCron(
+  'sync-data',
+  '*/5 * * * *',
+  async (job) => {
+    await syncData();
+  },
+  { retry: { limit: 3, delay: 5000, backoff: 'exponential' } },
+);
 ```
 
 **Distributed Locking:** For multi-instance deployments, the scheduler uses distributed locks to
@@ -2240,14 +2307,14 @@ ensure only one instance executes a job.
 **Plugin Registration:**
 
 ```typescript
-app.register(MetricsPlugin({
-  endpoint: '/metrics',
-  defaultMetrics: true,
-  httpMetrics: true,
-  customMetrics: [
-    { name: 'users_total', help: 'Total users', type: 'counter' },
-  ],
-}));
+app.register(
+  MetricsPlugin({
+    endpoint: '/metrics',
+    defaultMetrics: true,
+    httpMetrics: true,
+    customMetrics: [{ name: 'users_total', help: 'Total users', type: 'counter' }],
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -2318,18 +2385,16 @@ gauge.set(42);
 **Plugin Registration:**
 
 ```typescript
-app.register(HealthPlugin({
-  endpoints: {
-    health: '/health',
-    live: '/live',
-    ready: '/ready',
-  },
-  indicators: [
-    databaseIndicator,
-    cacheIndicator,
-    queueIndicator,
-  ],
-}));
+app.register(
+  HealthPlugin({
+    endpoints: {
+      health: '/health',
+      live: '/live',
+      ready: '/ready',
+    },
+    indicators: [databaseIndicator, cacheIndicator, queueIndicator],
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -2396,13 +2461,15 @@ health.registerIndicator('external-api', async () => {
 **Plugin Registration:**
 
 ```typescript
-app.register(OpenApiPlugin({
-  endpoint: '/docs',
-  specEndpoint: '/openapi.json',
-  title: 'My API',
-  version: '1.0.0',
-  swagger: true,
-}));
+app.register(
+  OpenApiPlugin({
+    endpoint: '/docs',
+    specEndpoint: '/openapi.json',
+    title: 'My API',
+    version: '1.0.0',
+    swagger: true,
+  }),
+);
 ```
 
 **Route Schema Definition:**
@@ -2410,7 +2477,9 @@ app.register(OpenApiPlugin({
 ```typescript
 // Programmatic
 app.router.post('/users', {
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
   schema: {
     body: CreateUserSchema, // Zod schema
     response: {
@@ -2429,7 +2498,9 @@ class UserController {
   @ApiTags('Users')
   @ApiOperation('Create a new user')
   @ApiResponse(201, UserSchema)
-  async create(@Body(CreateUserSchema) body: CreateUserDto) {/* ... */}
+  async create(@Body(CreateUserSchema) body: CreateUserDto) {
+    /* ... */
+  }
 }
 ```
 
@@ -2585,11 +2656,13 @@ with W3C `traceparent`/`tracestate` propagation.
 **Plugin Registration:**
 
 ```typescript
-app.register(TelemetryPlugin({
-  serviceName: 'my-service',
-  exporter: 'otlp',
-  endpoint: config.get('OTLP_ENDPOINT'),
-}));
+app.register(
+  TelemetryPlugin({
+    serviceName: 'my-service',
+    exporter: 'otlp',
+    endpoint: config.get('OTLP_ENDPOINT'),
+  }),
+);
 ```
 
 > **Note:** Auto-instrumentation is **deferred to Milestone 24b**. M24 accepts **no**
@@ -2655,11 +2728,10 @@ message brokers behind the same inject-or-lazy `TracerHost` seam that M24 establ
    `string[]` of names** — OTel instrumentations take options (e.g. `http` needs ignore-path lists,
    `ioredis` needs a db-statement flag), which a name-list cannot express. Add it as a NEW field on
    `TelemetryPluginOptions` (e.g.
-   `instrumentations?: { http?: …; fetch?: …; ioredis?:
-   …; amqplib?: …; kafkajs?: … }`; `fetch`
-   maps to `@opentelemetry/instrumentation-undici`). This is a **public-API change**:
-   PUBLIC_API.md + the type are updated in M24b's PR, and the deferral note M24 left in
-   PUBLIC_API/ROADMAP is replaced with the real surface.
+   `instrumentations?: { http?: …; fetch?: …; ioredis?: …; amqplib?: …; kafkajs?: … }`; `fetch` maps
+   to `@opentelemetry/instrumentation-undici`). This is a **public-API change**: PUBLIC_API.md + the
+   type are updated in M24b's PR, and the deferral note M24 left in PUBLIC_API/ROADMAP is replaced
+   with the real surface.
 2. **Auto-instrumentation** — `@opentelemetry/instrumentation-http`, fetch, ioredis, amqplib,
    kafkajs loaded behind runtime-gated instrumentation packages using the same inject-or-lazy seam
    M24 established. **Runtime gating is mandatory:** an instrumentation whose target is unavailable
@@ -2774,14 +2846,16 @@ telemetry plugin, mirroring the sub-milestone convention (16b, 24b).
 **Plugin Registration:**
 
 ```typescript
-app.register(SecretsPlugin({
-  provider: 'aws-kms',
-  options: {
-    region: config.get('AWS_REGION'),
-    accessKeyId: config.get('AWS_ACCESS_KEY_ID'),
-    secretAccessKey: config.get('AWS_SECRET_ACCESS_KEY'),
-  },
-}));
+app.register(
+  SecretsPlugin({
+    provider: 'aws-kms',
+    options: {
+      region: config.get('AWS_REGION'),
+      accessKeyId: config.get('AWS_ACCESS_KEY_ID'),
+      secretAccessKey: config.get('AWS_SECRET_ACCESS_KEY'),
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -2841,12 +2915,14 @@ await secrets.rotate('database/password', newPassword);
 **Plugin Registration:**
 
 ```typescript
-app.register(AuditPlugin({
-  storage: 'database',
-  options: {
-    table: 'audit_logs',
-  },
-}));
+app.register(
+  AuditPlugin({
+    storage: 'database',
+    options: {
+      table: 'audit_logs',
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -2903,22 +2979,24 @@ await audit.log({
 **Plugin Registration:**
 
 ```typescript
-app.register(ResiliencePlugin({
-  defaultCircuitBreaker: {
-    threshold: 5,
-    timeout: 60000,
-    resetTimeout: 30000,
-  },
-  defaultRetry: {
-    limit: 3,
-    delay: 1000,
-    backoff: 'exponential',
-  },
-  defaultBulkhead: {
-    maxConcurrent: 10,
-    maxQueue: 20,
-  },
-}));
+app.register(
+  ResiliencePlugin({
+    defaultCircuitBreaker: {
+      threshold: 5,
+      timeout: 60000,
+      resetTimeout: 30000,
+    },
+    defaultRetry: {
+      limit: 3,
+      delay: 1000,
+      backoff: 'exponential',
+    },
+    defaultBulkhead: {
+      maxConcurrent: 10,
+      maxQueue: 20,
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -2927,14 +3005,17 @@ app.register(ResiliencePlugin({
 const resilience = ctx.services.get<IResilienceService>('resilience');
 
 // Wrap a function with circuit breaker + retry
-const safeCall = resilience.wrap(async () => {
-  return await externalApi.call();
-}, {
-  bulkhead: true,
-  circuitBreaker: true,
-  retry: true,
-  timeout: 5000,
-});
+const safeCall = resilience.wrap(
+  async () => {
+    return await externalApi.call();
+  },
+  {
+    bulkhead: true,
+    circuitBreaker: true,
+    retry: true,
+    timeout: 5000,
+  },
+);
 
 const result = await safeCall();
 ```
@@ -2984,13 +3065,15 @@ an inline policy object; a `true` with no configured default throws at `wrap` ti
 **Plugin Registration:**
 
 ```typescript
-app.register(StoragePlugin({
-  provider: 's3',
-  options: {
-    bucket: config.get('S3_BUCKET'),
-    region: config.get('AWS_REGION'),
-  },
-}));
+app.register(
+  StoragePlugin({
+    provider: 's3',
+    options: {
+      bucket: config.get('S3_BUCKET'),
+      region: config.get('AWS_REGION'),
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -3065,14 +3148,16 @@ app.router.post('/upload', {
 **Plugin Registration:**
 
 ```typescript
-app.register(MailPlugin({
-  provider: 'smtp',
-  options: {
-    host: config.get('SMTP_HOST'),
-    port: 587,
-    auth: { user: config.get('SMTP_USER'), pass: config.get('SMTP_PASS') },
-  },
-}));
+app.register(
+  MailPlugin({
+    provider: 'smtp',
+    options: {
+      host: config.get('SMTP_HOST'),
+      port: 587,
+      auth: { user: config.get('SMTP_USER'), pass: config.get('SMTP_PASS') },
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -3138,14 +3223,19 @@ await mailer.sendTemplate('welcome', { to: 'user@example.com' }, { name: 'John' 
 **Plugin Registration:**
 
 ```typescript
-app.register(NotificationPlugin({
-  channels: {
-    email: { provider: 'mail' }, // transport comes from MailPlugin (M29)
-    sms: { provider: 'twilio', options: { accountSid: '…', authToken: '…', from: '+1234567890' } },
-    push: { provider: 'fcm', options: { serverKey: '…' } },
-    slack: { provider: 'slack', options: { webhookUrl: 'https://hooks.slack.com/…' } },
-  },
-}));
+app.register(
+  NotificationPlugin({
+    channels: {
+      email: { provider: 'mail' }, // transport comes from MailPlugin (M29)
+      sms: {
+        provider: 'twilio',
+        options: { accountSid: '…', authToken: '…', from: '+1234567890' },
+      },
+      push: { provider: 'fcm', options: { serverKey: '…' } },
+      slack: { provider: 'slack', options: { webhookUrl: 'https://hooks.slack.com/…' } },
+    },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -3223,8 +3313,7 @@ Workers-portable, the same posture as the other HTTP providers and the same cryp
 `JwtService` proves.
 
 `FcmProviderOptions.serverKey` is **replaced** (not deprecated) by
-`{ projectId, clientEmail,
-privateKey }` — a breaking change, deliberately, because the option
+`{ projectId, clientEmail, privateKey }` — a breaking change, deliberately, because the option
 addressed a dead endpoint and a compile error is the correct signal. An exported `FcmTokenSource`
 covers sourcing tokens from a GCP metadata server or an external key holder instead.
 
@@ -3251,15 +3340,17 @@ covers sourcing tokens from a GCP metadata server or an external key holder inst
 **Plugin Registration:**
 
 ```typescript
-app.register(FeatureFlagsPlugin({
-  provider: 'config',
-  options: {
-    flags: {
-      'new-dashboard': { enabled: true, percentage: 50 },
-      'beta-features': { enabled: false, users: ['user1', 'user2'] },
+app.register(
+  FeatureFlagsPlugin({
+    provider: 'config',
+    options: {
+      flags: {
+        'new-dashboard': { enabled: true, percentage: 50 },
+        'beta-features': { enabled: false, users: ['user1', 'user2'] },
+      },
     },
-  },
-}));
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -3276,7 +3367,9 @@ import { createFlagGuard } from '@setu-ts/feature-flags-plugin';
 
 app.router.get('/dashboard', {
   middleware: [createFlagGuard('new-dashboard', { fallback: '/old-dashboard' })],
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
 });
 ```
 
@@ -3330,11 +3423,13 @@ app.router.get('/dashboard', {
 **Plugin Registration:**
 
 ```typescript
-app.register(MultiTenancyPlugin({
-  resolver: 'subdomain',
-  database: 'schema-per-tenant',
-  cache: { prefix: true },
-}));
+app.register(
+  MultiTenancyPlugin({
+    resolver: 'subdomain',
+    database: 'schema-per-tenant',
+    cache: { prefix: true },
+  }),
+);
 ```
 
 **Programmatic API:**
@@ -3751,18 +3846,22 @@ resolved by load order.
 **Starters:**
 
 1. **REST Starter**
+
    ```typescript
    import { createRestApp } from '@setu-ts/rest-starter';
    const app = await createRestApp({ port: 3000 });
    ```
+
    Includes: Runtime, Logger, Config, Validation, Database, Auth, OpenApi, Health, Metrics,
    HttpSecurity
 
 2. **Microservice Starter**
+
    ```typescript
    import { createMicroserviceApp } from '@setu-ts/microservice-starter';
    const app = await createMicroserviceApp({ port: 3000 });
    ```
+
    Includes: REST Starter + Messaging, Queue, Telemetry, Resilience
 
 3. **Full-Stack Starter** Includes: Microservice Starter + Cache, Events, CQRS, Scheduler, Storage,
@@ -3893,8 +3992,7 @@ framed when this milestone was opened:
 **Decided: a third option, measured.** Both framings assume the real build needs the Node toolchain.
 It does not — Deno's own npm support runs the identical Vite build. Measured against a project
 scaffolded by `setu new --template full-stack` and repointed at the workspace:
-`deno install
---allow-scripts` took 4 s and the build 0.6 s, after which the app served SSR HTML and
+`deno install --allow-scripts` took 4 s and the build 0.6 s, after which the app served SSR HTML and
 completed a CSRF-protected login. So the smoke performs the **real** build (`deno install` + the
 `@react-router/dev` CLI), CI gains no `setup-node` step, no `ServerBuild` fixture is committed, and
 `full-stack` is deliberately **not** in `ALLOW_SKIP` — `test/apps-gate.test.ts` asserts it never
@@ -4180,10 +4278,9 @@ it.
    the response a web-standard readable stream. No new capability token (it is a contract method,
    not a service).
 2. Widen `IResponse.snapshot()` body type to
-   `Uint8Array | string | ReadableStream<Uint8Array> |
-   null` and add a `streaming: boolean`
-   marker to the snapshot, so response-reading middleware can detect a live stream and decline to
-   buffer it.
+   `Uint8Array | string | ReadableStream<Uint8Array> | null` and add a `streaming: boolean` marker
+   to the snapshot, so response-reading middleware can detect a live stream and decline to buffer
+   it.
 3. `IRequestContext.signal: AbortSignal` (populated by the HTTP adapter) — fires on client
    disconnect so a streaming producer can stop. Required for SSE/long-lived responses to avoid
    leaking producers.
@@ -4255,10 +4352,12 @@ interface documented in PUBLIC_API.md — a token resolves to a documented `comm
 **Plugin Registration:**
 
 ```typescript
-app.register(SsePlugin({
-  heartbeatMs: 15000, // keep-alive comment interval; omit to disable
-  retryMs: 3000, // advertised client reconnect delay
-}));
+app.register(
+  SsePlugin({
+    heartbeatMs: 15000, // keep-alive comment interval; omit to disable
+    retryMs: 3000, // advertised client reconnect delay
+  }),
+);
 ```
 
 **Usage:**
@@ -4319,8 +4418,7 @@ app.router.get('/events', (ctx) => {
 **Objective:** Serve a React frontend with SSR and file-based routing by embedding React Router v7
 framework mode (the Remix successor) as a plugin. RR framework mode is bring-your-own-server: its
 server contract is a web-standard
-`createRequestHandler(build): (Request, loadContext) =>
-Promise<Response>`, which maps cleanly onto
+`createRequestHandler(build): (Request, loadContext) => Promise<Response>`, which maps cleanly onto
 a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M43.
 
 > **Scope boundary.** RR owns SSR, file-based routing, loaders/actions, client hydration, and code
@@ -4375,15 +4473,17 @@ documented in PUBLIC_API.md).
 **Plugin Registration:**
 
 ```typescript
-app.register(ReactRouterPlugin({
-  serverBuildPath: './build/server/index.js', // RR production server build
-  assetsDir: './build/client', // hashed client assets + static files
-  basename: '/', // mount point
-  // `servicesContext` and `userContext` are set automatically; this hook adds
-  // app values on top. React Router 8 requires a real RouterContextProvider,
-  // so the callback mutates the provider instead of returning an object.
-  populateLoadContext: (ctx, context) => context.set(tenantContext, ctx.state.get('tenant')),
-}));
+app.register(
+  ReactRouterPlugin({
+    serverBuildPath: './build/server/index.js', // RR production server build
+    assetsDir: './build/client', // hashed client assets + static files
+    basename: '/', // mount point
+    // `servicesContext` and `userContext` are set automatically; this hook adds
+    // app values on top. React Router 8 requires a real RouterContextProvider,
+    // so the callback mutates the provider instead of returning an object.
+    populateLoadContext: (ctx, context) => context.set(tenantContext, ctx.state.get('tenant')),
+  }),
+);
 ```
 
 For a development loop with HMR and React Fast Refresh, see
@@ -5899,10 +5999,14 @@ const app = createRestApp({
   database: { type: 'prisma', options: { prismaClient } },
 });
 
-app.router.get('/users', async (ctx) => {
-  const db = ctx.services.get<IDatabase>(CAPABILITIES.DATABASE);
-  return ctx.response.json(await db.getRepository('User').findAll());
-}, { middleware: [requireAuth()] });
+app.router.get(
+  '/users',
+  async (ctx) => {
+    const db = ctx.services.get<IDatabase>(CAPABILITIES.DATABASE);
+    return ctx.response.json(await db.getRepository('User').findAll());
+  },
+  { middleware: [requireAuth()] },
+);
 
 await app.start({ port: 3000 });
 ```
@@ -5917,10 +6021,13 @@ closes the ordering gap once, for every option:
 ```typescript
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
-const app = await createFullStackAppFromConfig((config) => ({
-  database: { type: 'prisma', options: { prismaClient } },
-  session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-}), { config: { envFilePath: ['.env.local', '.env'] } });
+const app = await createFullStackAppFromConfig(
+  (config) => ({
+    database: { type: 'prisma', options: { prismaClient } },
+    session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+  }),
+  { config: { envFilePath: ['.env.local', '.env'] } },
+);
 
 await app.start({ port: 3000 });
 ```
@@ -6792,8 +6899,7 @@ class-based:** one flag brings both plugins and switches _every_ schematic to cl
 `@Controller` classes, `@Injectable` providers, constructor injection, module barrels.
 
 The load-bearing part is that the flag selects a **generator mode**, not just a plugin:
-`setu g
-service` must emit an `@Injectable` class in an opted-in project and an exported function
+`setu g service` must emit an `@Injectable` class in an opted-in project and an exported function
 otherwise, which means the choice has to be readable long after `new` ran — persisted in the
 manifest, or inferred from the import map the way gating already works. Sequencing is a hard
 constraint: dropping `DecoratorPlugin` from `rest` must land in the same change as the functional
@@ -6805,8 +6911,7 @@ string, and a plugin whose presence silently changes how every service is constr
 
 **Two published CLI options were removed to get there, and neither is silent.** `--di` was the
 independent axis this section replaces; it is refused with a message naming
-`--template
-class-based`. `--template nest` was renamed to `class-based` — the composition is
+`--template class-based`. `--template nest` was renamed to `class-based` — the composition is
 unchanged, and the old name is refused through a renamed-template map rather than the generic
 unknown-name error, because a published template name is public surface (AI_GUIDELINES §9.2) and
 "expected one of: …" does not say which entry took over.
@@ -6829,8 +6934,7 @@ header and the emitted JSDoc say so rather than implying wiring that does not ex
 `datasources: { db: { url } }`. Both halves fail against that exact version, verified independently:
 the import yields `Cannot find module '.prisma/client/default'` (v7 generates the client to the
 project's own `output` path), and given a real v7 client class the constructor answers
-`Unknown
-property datasources provided to PrismaClient constructor`. The documented
+`Unknown property datasources provided to PrismaClient constructor`. The documented
 `options.prismaClient` injection seam works and is what the smoke test used — but the JSDoc
 describes a path that cannot execute, and every adapter test injects a fake, so nothing exercises
 it. This is the contract-violating-double root cause this repo has hit repeatedly.
@@ -7132,6 +7236,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   (publish 5673 and name it in the endpoint), the Pub/Sub emulator must be addressed by IP so
   `grpc-js` skips a DNS lookup the grant does not authorize, and the suite is not repeatable without
   restarting the container.
+
 - ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`) — complete (PR #166). The largest row
   count and the one that amortizes best, because every row needs the same scaffold-boot gate:
   `--transport <broker>` leaves `QueuePlugin()` on memory in the one template built for distributed
@@ -7150,6 +7255,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   branch. **E8 moved here from M70n** (see that row). And **D3 was built rather than deferred**:
   `setu add <plugin>` now exists, so every gate that named a package to install names a command that
   installs it.
+
 - ✅ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`, `websocket-plugin`) —
   complete (PR #180). The package list was corrected at plan time: X6-5's register row names
   `websocket-plugin` (docs) and `cli`, and the fix is a README change there, while `cli` was dropped
@@ -7223,6 +7329,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   column refusal threw **synchronously** from a method typed `Promise<…>`, bypassing any caller
   using `.catch()` — the M52b/M52c class — so the check returns its error and the adapter rejects
   with it.
+
 - ✅ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
   `worker-pool-plugin`, plus `common`, `runtime` and `cli`). Upload `maxSize` did not bound what is
   buffered, so a 1 KB limit multipart-parsed a 40 MB body first (X8-3); `taskTimeoutMs: 0` leaked a
@@ -7239,6 +7346,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   signal — the row's own text calls for "per-runtime implementations"), and `cli` (X8-9's assigned
   package). `cloudflare-plugin` also changes, because `R2Storage` is the other in-repo `IStorage`
   implementor and R2 can genuinely carry the metadata X8-6 adds. **Complete (PR #178).**
+
 - ✅ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
   `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the CLI-generated stack crash-loops
   two of three services (X10-1); a scheduled job runs once per replica and `distributedLock` does
@@ -7288,6 +7396,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   with no parentheses; a long parameter list wraps one per line; and a long template literal is
   rewrapped at whichever `${` happens to fit, which no generator can predict — so a path too long
   for one line is emitted as an equivalent `[…].join('')`, a shape fmt leaves alone.
+
 - ✅ **M70n — Decorators, validation and the alpha.8 closeout** — complete (PR #183)
   (`decorator-plugin`, `validation-plugin`, `common`, `kernel`, `testing`, `static-plugin`,
   `auth-plugin`, `session-plugin`, `audit-plugin`, `react-router-plugin`,
@@ -8305,8 +8414,7 @@ defines, and generated starting points for both — so a browser is not left han
 the protocol the framework never wrote down in code.
 
 **The gap is asymmetric, and the asymmetry is the whole design.**
-`grep -rln "new WebSocket("
-packages/*/src` returns **nothing**, and so does `EventSource(`: no
+`grep -rln "new WebSocket(" packages/*/src` returns **nothing**, and so does `EventSource(`: no
 package constructs a client for either transport. `@setu-ts/sdk` advertises itself as a client "for
 consuming Setu-TS APIs from browsers and servers" and is HTTP-only. No first-party example connects
 either — `apps/realtime`, the flagship two-replica realtime example, drives **SSE over `fetch`**,
@@ -8930,8 +9038,7 @@ ctx-free. Proven with `@ts-expect-error`, which cannot pass vacuously.
 
 The consequence beyond the wording is that a **tenant-scoped repository is unreachable from all
 background work**, which compounds X18-5. A ctx-free entry point —
-`getRepositoryFor(tenantId,
-entity)` alongside the existing `prefixCacheKey(tenantId, key)` shape —
+`getRepositoryFor(tenantId, entity)` alongside the existing `prefixCacheKey(tenantId, key)` shape —
 is the recommended fix and is a flagged `common` widening; whether it lands optional or required is
 the decision, since a required member breaks out-of-repo implementors.
 
@@ -9531,6 +9638,7 @@ them.
   This leaves applications free to retain their own entity hierarchy and keeps the domain object
   portable. It also gives a child entity an explicit route to surface a fact through its aggregate
   rather than an ambient global dispatcher.
+
 - **Precise lifecycle tests and documentation.** Tests cover insertion order, duplicate references,
   immutable snapshots, `[A, B, A]` becoming `[B, A]` after one `remove(A)`, an absent removal
   returning `false` without changing the list, clearing, and an aggregate reconstructed from
@@ -10121,8 +10229,7 @@ either strip `urlPrefix` before calling — which is what `relativePath` and the
 both imply — or correct the three doc sites and the example.
 
 **Shipped.** All five rows are closed. (1) The seam admits the real driver —
-`connect():
-Promise<unknown>` — and the compile-time fixture (`test/types/mongo-seam.assert.ts`, a
+`connect(): Promise<unknown>` — and the compile-time fixture (`test/types/mongo-seam.assert.ts`, a
 static import, no cast) did exactly its job on first run: the real driver still failed on
 `ClientSession.startTransaction(options?): void` and on the `Sort` union of `find`/`findOne`, both
 reconciled in the same widening spirit and each pinned by the fixture; the seam test's laundering
@@ -10358,8 +10465,7 @@ regulation. The gap is that the three exporters disagree.
   wrong.** An earlier draft shipped a `@setu-ts/redaction-plugin` providing a
   `CAPABILITIES.REDACTION` token, "the M47 `realtime-backplane-plugin` shape exactly". It is not
   that shape: `realtime-backplane-plugin.ts:60-107` has `async register`,
-  `await
-  backplane.connect()`, a health indicator and an `onClose` — real resources — while
+  `await backplane.connect()`, a health indicator and an `onClose` — real resources — while
   redaction is a pure synchronous transform whose implementation must live in `common` anyway, since
   three plugins consume it and §2.2 forbids plugin-to-plugin imports. The package would therefore
   have contained no implementation at all, and its only purpose — making the service resolvable by
@@ -10548,8 +10654,7 @@ this cheap.**
 
 - **One decorator per ingress, in `decorator-plugin`.** `@Processor(name, options?)`,
   `@Cron(expression, options?)` / `@Every(ms, options?)`, `@OnEvent(type)`,
-  `@Subscribe(topic,
-  options?)`, `@Gateway(path)` + `@OnMessage`/`@OnOpen`/`@OnClose`, and
+  `@Subscribe(topic, options?)`, `@Gateway(path)` + `@OnMessage`/`@OnOpen`/`@OnClose`, and
   `@CommandHandler(type)`/`@QueryHandler(type)`. Each is a method decorator on a class the
   application lists in `DecoratorPluginOptions`, exactly as `@Controller` is.
 - **One registration pass, at one lifecycle phase, resolving each token with `ctx.services.has`.**
@@ -10920,8 +11025,7 @@ launcher.
 workspace member owns exactly one allocated port (`packages/cli/src/workspace/manifest.ts:113`), and
 `allocatePort` walks `member.port` and nothing else (`:417`), so a second port stored beside it is
 invisible to the allocator and collides with the next member's application port.
-`setu workspace
-ports --reallocate` regenerates the discovery module, Compose and Kubernetes
+`setu workspace ports --reallocate` regenerates the discovery module, Compose and Kubernetes
 together, so both ports have to move as one. M98b's §3.2 forbids sharing a session across
 applications, so N members need N credential pairs and the launcher has to discover N endpoints. And
 `setu generate app` only creates a member, so enabling the devtool on one that already exists needs
@@ -12691,8 +12795,7 @@ two public surfaces on one capability. So `MailPluginOptions.templates` gains a 
 beside the string arm, `MailPlugin` declares `CAPABILITIES.VIEW` in `optionalDependencies` and
 resolves the engine once at `register()` — the `@Render` precedent
 (`decorator-plugin/src/plugin/decorator-plugin.ts:422-431`) — and
-`sendTemplate(name, envelope,
-data)` renders a component template through `IViewEngine.render` with
+`sendTemplate(name, envelope, data)` renders a component template through `IViewEngine.render` with
 `data` as its props. Every holder of `IMailer` that calls `sendTemplate` gets the new arm with no
 code change.
 
@@ -13026,8 +13129,7 @@ isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit
 
 - `updateWhere(id, where, data)` and `deleteWhere(id, where)` on `IRepository` (and on the
   `IDataSource` port), each applied as ONE native operation per adapter (a
-  `WHERE key = ? AND
-  col = ?` statement, a Mongo filter, a DynamoDB `ConditionExpression`, a
+  `WHERE key = ? AND col = ?` statement, a Mongo filter, a DynamoDB `ConditionExpression`, a
   Bigtable CheckAndMutateRow), returning "not matched" rather than writing when the predicate fails.
   Cosmos has no predicate-conditioned delete, so it reads and then writes guarded by the read's
   `_etag` (`IfMatch`) — a version compare-and-swap, not a check-then-write: probed on the emulator,
@@ -13564,15 +13666,13 @@ each one.
 - A new capability token and contract beside `CAPABILITIES.AUTHORIZATION`, which stays byte-for-byte
   unchanged (it is consumed by the six guards, by `decorator-plugin`'s `@Roles`/`@Permissions`
   middleware, and by M98h's authorization explanations). Settled by the plan (C3):
-  `can(...) →
-  Promise<boolean>` and `authorize(...) → Promise<void>`, which REJECTS a denial with
-  a status-hinted error — the "throwing check plus a non-throwing twin" the surveyed applications
+  `can(...) → Promise<boolean>` and `authorize(...) → Promise<void>`, which REJECTS a denial with a
+  status-hinted error — the "throwing check plus a non-throwing twin" the surveyed applications
   needed — both funnelling through ONE evaluator. No public decision type: nothing would read it.
 - Policies registered by name, each a set of abilities
-  `(principal, target?) → boolean |
-  Promise<boolean>` — an ability sees a `null` principal only
-  when it opts in with `{ anonymous: true, check }`, so the default is fail-closed (plan C2) — with
-  an optional `before()` that may allow or deny every ability of the policy (NestJS's admin bypass).
+  `(principal, target?) → boolean | Promise<boolean>` — an ability sees a `null` principal only when
+  it opts in with `{ anonymous: true, check }`, so the default is fail-closed (plan C2) — with an
+  optional `before()` that may allow or deny every ability of the policy (NestJS's admin bypass).
   Functional form in `auth-plugin`; a class form (`@Policy`) in `decorator-plugin`, matching the
   framework's functional-default / class-based-opt-in split (M65).
 - Entry points: a route guard `requirePolicy(policy, ability, target?)` (named by AI_GUIDELINES

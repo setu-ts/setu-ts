@@ -145,7 +145,8 @@ describe('HealthService', () => {
         Promise.resolve({
           status: 'up',
           data: { version: '1.0.0' },
-        }));
+        }),
+      );
 
       const report = await service.check();
 
@@ -163,7 +164,8 @@ describe('HealthService', () => {
           status: 'up',
           details: { leak: true },
           latencyMs: 999,
-        } as unknown as { status: 'up'; details: { leak: boolean }; latencyMs: number }));
+        } as unknown as { status: 'up'; details: { leak: boolean }; latencyMs: number }),
+      );
 
       const report = await service.check();
       const entry = report.checks['sloppy'] as {
@@ -183,9 +185,8 @@ describe('HealthService', () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
 
-      service.registerIndicator(
-        'with-data',
-        () => Promise.resolve({ status: 'up', data: { broker: 'memory' } }),
+      service.registerIndicator('with-data', () =>
+        Promise.resolve({ status: 'up', data: { broker: 'memory' } }),
       );
       service.registerIndicator('no-data', () => Promise.resolve({ status: 'down' }));
 
@@ -201,9 +202,8 @@ describe('HealthService', () => {
       const service = new HealthService(runtime);
 
       service.registerIndicator('a', () => Promise.resolve({ status: 'up' }));
-      service.registerIndicator(
-        'b',
-        () => Promise.resolve({ status: 'degraded', data: { reason: 'stale' } }),
+      service.registerIndicator('b', () =>
+        Promise.resolve({ status: 'degraded', data: { reason: 'stale' } }),
       );
       service.registerIndicator('c', () => Promise.resolve({ status: 'down' }));
 
@@ -224,7 +224,8 @@ describe('HealthService', () => {
         Promise.resolve({
           status: 'up',
           data: { platform: 'node' },
-        }));
+        }),
+      );
 
       // Register other indicators
       service.registerIndicator('other', () => Promise.resolve({ status: 'up' }));
@@ -680,9 +681,8 @@ describe('HealthService', () => {
     it('runIndicatorRaw resolves the raw result for a known indicator', async () => {
       const runtime = createFakeRuntime();
       const service = new HealthService(runtime);
-      service.registerIndicator(
-        'db',
-        () => Promise.resolve({ status: 'up', data: { detail: 'x' } }),
+      service.registerIndicator('db', () =>
+        Promise.resolve({ status: 'up', data: { detail: 'x' } }),
       );
       const result = await runIndicatorRaw(service, 'db');
       expect(result?.status).toBe('up');

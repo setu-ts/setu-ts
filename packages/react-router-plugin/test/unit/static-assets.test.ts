@@ -91,7 +91,8 @@ describe('static-assets', () => {
     fileMap['/assets/app.js'] = new TextEncoder().encode('console.log(1)');
     const fs = {
       readFile: (p: string) =>
-        fileMap[p] ?? (() => {
+        fileMap[p] ??
+        (() => {
           throw new Error('ENOENT');
         })(),
     } as unknown as IFileSystem;
@@ -107,9 +108,7 @@ describe('static-assets', () => {
     expect(result).toEqual(mockResp.result);
     expect(mockResp.status).toBe(200);
     expect(mockResp.headers.get('Content-Type')).toBe('text/javascript');
-    expect(mockResp.headers.get('Cache-Control')).toBe(
-      'public, max-age=31536000, immutable',
-    );
+    expect(mockResp.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
     expect(mockResp.sentBody).not.toBeNull();
   });
 
@@ -118,7 +117,8 @@ describe('static-assets', () => {
     fileMap['/assets/style.css'] = new TextEncoder().encode('body {}');
     const fs = {
       readFile: (p: string) =>
-        fileMap[p] ?? (() => {
+        fileMap[p] ??
+        (() => {
           throw new Error('ENOENT');
         })(),
     } as unknown as IFileSystem;
@@ -133,9 +133,7 @@ describe('static-assets', () => {
     await handler(ctx);
 
     expect(mockResp.headers.get('Content-Type')).toBe('text/css');
-    expect(mockResp.headers.get('Cache-Control')).toBe(
-      'public, max-age=31536000, immutable',
-    );
+    expect(mockResp.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('returns correct Content-Type per extension', async () => {
@@ -154,7 +152,8 @@ describe('static-assets', () => {
       fileMap[filePath] = new TextEncoder().encode('test');
       const fs = {
         readFile: (p: string) =>
-          fileMap[p] ?? (() => {
+          fileMap[p] ??
+          (() => {
             throw new Error('ENOENT');
           })(),
       } as unknown as IFileSystem;
@@ -169,8 +168,7 @@ describe('static-assets', () => {
 
       await handler(ctx);
 
-      expect(mockResp.headers.get('Content-Type'), `contentType for ${urlPath}`)
-        .toBe(expectedType);
+      expect(mockResp.headers.get('Content-Type'), `contentType for ${urlPath}`).toBe(expectedType);
     }
   });
 
@@ -279,7 +277,8 @@ describe('static-assets', () => {
     fileMap['/assets/test.html'] = new TextEncoder().encode('<html></html>');
     const fs = {
       readFile: (p: string) =>
-        fileMap[p] ?? (() => {
+        fileMap[p] ??
+        (() => {
           throw new Error('ENOENT');
         })(),
     } as unknown as IFileSystem;

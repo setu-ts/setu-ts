@@ -22,9 +22,7 @@ import type { BigtableEntityMapping } from '../../src/adapters/bigtable/bigtable
  * `snapshot()`: a store assertion proves the cells landed, and only a read
  * proves the entity is retrievable through the surface an application uses.
  */
-function setup(
-  mapping?: Readonly<Record<string, BigtableEntityMapping>>,
-): {
+function setup(mapping?: Readonly<Record<string, BigtableEntityMapping>>): {
   store: FakeBigtableStore;
   tx: BigtableTransaction;
   committed: (entity?: string) => IDataSource;
@@ -34,10 +32,8 @@ function setup(
   const instance = client.instance('i');
   const resolve = (entity: string): ReturnType<typeof resolveBigtableTarget> =>
     resolveBigtableTarget(entity, mapping);
-  const tx = new BigtableTransaction(
-    instance,
-    resolve,
-    (table, target, buffer) => createBigtableDataSource(table, target, { buffer }),
+  const tx = new BigtableTransaction(instance, resolve, (table, target, buffer) =>
+    createBigtableDataSource(table, target, { buffer }),
   );
   const committed = (entity = 'User'): IDataSource => {
     const target = resolve(entity);
@@ -114,8 +110,9 @@ describe('BigtableTransaction', () => {
     store.seed('User', 'u1', { cf: { id: 's:u1', name: 's:ada' } });
     const users = tx.createDataSource('User');
     await users.update('u1', { name: 'bob' });
-    await expect(users.create({ id: 'u1', name: 'created' }))
-      .rejects.toThrow(BigtableTransactionScopeError);
+    await expect(users.create({ id: 'u1', name: 'created' })).rejects.toThrow(
+      BigtableTransactionScopeError,
+    );
     // Nothing landed: the refusal happened at the write, before any commit.
     expect(store.snapshot('User', 'u1')).toEqual({ cf: { id: 's:u1', name: 's:ada' } });
   });
@@ -152,8 +149,9 @@ describe('BigtableTransaction', () => {
   it('refuses a second TABLE even at the same row key', async () => {
     const { tx } = setup({ Order: { table: 'orders' } });
     await tx.createDataSource('User').create({ id: 'k' });
-    await expect(tx.createDataSource('Order').create({ id: 'k' }))
-      .rejects.toThrow(/already targets 'User'\/'k'/);
+    await expect(tx.createDataSource('Order').create({ id: 'k' })).rejects.toThrow(
+      /already targets 'User'\/'k'/,
+    );
   });
 
   it('reports the same row a direct update would, for an undefined payload field', async () => {
@@ -175,8 +173,9 @@ describe('BigtableTransaction', () => {
 
   it('refuses an update of an absent row at the write, not at commit', async () => {
     const { tx } = setup();
-    await expect(tx.createDataSource('User').update('nope', { a: 1 }))
-      .rejects.toThrow(/no row keyed 'nope'/);
+    await expect(tx.createDataSource('User').update('nope', { a: 1 })).rejects.toThrow(
+      /no row keyed 'nope'/,
+    );
   });
 
   it('reports a buffered delete against committed state', async () => {
@@ -238,8 +237,7 @@ describe('BigtableTransaction', () => {
     // Unreachable through a data source, which claims first; reachable through
     // the write-buffer seam the transaction publishes to it.
     const { tx } = setup();
-    expect(() => tx.insert({ cf: { a: '1' } }, false))
-      .toThrow(BigtableTransactionScopeError);
+    expect(() => tx.insert({ cf: { a: '1' } }, false)).toThrow(BigtableTransactionScopeError);
     expect(() => tx.remove()).toThrow(/before any row was claimed/);
   });
 

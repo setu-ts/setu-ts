@@ -85,10 +85,9 @@ describe('scoped-rbac policy — evaluation', () => {
 
   it("treats the principal's own roles as global grants and its permissions as held", async () => {
     const harness = withGrants([]);
-    expect(await check(harness, 'perm:invoices:read', T1, principal('x', { roles: ['viewer'] })))
-      .toBe(
-        true,
-      );
+    expect(
+      await check(harness, 'perm:invoices:read', T1, principal('x', { roles: ['viewer'] })),
+    ).toBe(true);
     expect(
       await check(
         harness,
@@ -99,13 +98,10 @@ describe('scoped-rbac policy — evaluation', () => {
     ).toBe(true);
     expect(
       await check(harness, 'perm:invoices:approve', T1, principal('x', { permissions: ['*'] })),
-    ).toBe(
-      true,
-    );
+    ).toBe(true);
     expect(
       await check(harness, 'perm:invoices:approve', T1, principal('x', { permissions: ['other'] })),
-    )
-      .toBe(false);
+    ).toBe(false);
   });
 
   it('never resolves a prototype member as a role', async () => {
@@ -145,8 +141,7 @@ describe('scoped-rbac policy — grantableIn', () => {
     expect(await check(denied, 'perm:invoices:approve', T1)).toBe(false);
     expect(
       await check(denied, 'perm:invoices:approve', T1, principal('x', { roles: ['approver'] })),
-    )
-      .toBe(false);
+    ).toBe(false);
     const allowed = withGrants([{ subject: 'u1', ...global }], {
       grantableIn: { approver: { scopeTypes: ['tenant'], global: true } },
     });

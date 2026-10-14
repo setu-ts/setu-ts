@@ -37,9 +37,13 @@ describe('Mail integration (through a real kernel app)', () => {
     });
 
     // Templated send — body rendered with escaping, subject taken from envelope.
-    await mailer.sendTemplate('welcome', { to: 'user@example.com', subject: 'Welcome' }, {
-      name: 'A & B',
-    });
+    await mailer.sendTemplate(
+      'welcome',
+      { to: 'user@example.com', subject: 'Welcome' },
+      {
+        name: 'A & B',
+      },
+    );
 
     expect(sent).toHaveLength(2);
     expect(sent[0]?.from).toBe('noreply@myapp.com');

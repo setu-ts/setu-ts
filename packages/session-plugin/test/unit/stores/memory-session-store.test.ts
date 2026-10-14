@@ -59,7 +59,7 @@ describe('MemorySessionStore', () => {
     const { store } = harness();
     await store.write('s-1', { nested: 'v' }, 60_000);
 
-    const first = await store.read('s-1') as Record<string, unknown>;
+    const first = (await store.read('s-1')) as Record<string, unknown>;
     first['nested'] = 'mutated';
 
     expect(await store.read('s-1')).toEqual({ nested: 'v' });

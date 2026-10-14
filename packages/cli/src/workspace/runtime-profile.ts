@@ -150,10 +150,9 @@ export function stringLiteral(value: string): string {
   if (value.includes("'") && !value.includes('"')) return doubleQuoted;
   // Each JSON escape pair is consumed whole, so a `\\` is never read as the
   // start of a `\"` that follows it.
-  const body = doubleQuoted.slice(1, -1).replace(
-    /\\.|'/g,
-    (token) => token === '\\"' ? '"' : token === "'" ? "\\'" : token,
-  );
+  const body = doubleQuoted
+    .slice(1, -1)
+    .replace(/\\.|'/g, (token) => (token === '\\"' ? '"' : token === "'" ? "\\'" : token));
   return `'${body}'`;
 }
 
@@ -200,7 +199,8 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     // the read is the entire cost. Unscoped `--allow-env`, or
     // `clearEnv: true` over `Deno.env.toObject()`, was rejected: either would
     // put an UNSCOPED grant on every generated workspace to read three names.
-    runAll: 'deno run --allow-read --allow-run --allow-net ' +
+    runAll:
+      'deno run --allow-read --allow-run --allow-net ' +
       `--allow-env=${DEVTOOL_ENV_NAMES.join(',')} scripts/dev.ts`,
     runScript: (script) => `deno task ${script}`,
     lockfile: 'deno.lock',

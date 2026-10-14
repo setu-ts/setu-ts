@@ -24,18 +24,22 @@ import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plug
 import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 import { CAPABILITIES, type IFeatureFlags } from '@setu-ts/common';
 
-app.register(FeatureFlagsPlugin({
-  provider: 'config',
-  options: {
-    flags: {
-      'new-checkout': { enabled: false, users: ['user-1', 'user-2'] },
-      'dark-mode': { enabled: true, percentage: 25 },
+app.register(
+  FeatureFlagsPlugin({
+    provider: 'config',
+    options: {
+      flags: {
+        'new-checkout': { enabled: false, users: ['user-1', 'user-2'] },
+        'dark-mode': { enabled: true, percentage: 25 },
+      },
     },
-  },
-}));
+  }),
+);
 
 const flags = app.services.get<IFeatureFlags>(CAPABILITIES.FEATURE_FLAGS);
-if (flags.isEnabled('new-checkout', { userId: 'user-1' })) { /* … */ }
+if (flags.isEnabled('new-checkout', { userId: 'user-1' })) {
+  /* … */
+}
 
 // Route guard — short-circuits without calling next()
 app.router.get('/beta', {

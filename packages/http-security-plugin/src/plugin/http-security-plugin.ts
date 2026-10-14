@@ -68,9 +68,7 @@ export interface HttpSecurityPluginOptions {
  * }));
  * ```
  */
-export function HttpSecurityPlugin(
-  options: HttpSecurityPluginOptions = {},
-): IPlugin {
+export function HttpSecurityPlugin(options: HttpSecurityPluginOptions = {}): IPlugin {
   return {
     name: 'http-security-plugin',
     version: VERSION,

@@ -39,9 +39,9 @@ export function createHttpInstrumentation(
   configArg: unknown,
 ): unknown {
   const HttpInstrumentation = mod.HttpInstrumentation as unknown;
-  return new (HttpInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (HttpInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**
@@ -75,9 +75,9 @@ export function createFetchInstrumentation(
   configArg: unknown,
 ): unknown {
   const UndiciInstrumentation = mod.UndiciInstrumentation as unknown;
-  return new (UndiciInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (UndiciInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**

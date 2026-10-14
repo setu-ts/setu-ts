@@ -140,14 +140,16 @@ export function createWebWorkerHost(
         },
         // Present only when this runtime names an event that actually fires
         // (`exactOptionalPropertyTypes` — the key is omitted, not undefined).
-        ...(exitEventName === undefined ? {} : {
-          onExit: (listener: (code: number | null) => void) => {
-            worker.addEventListener(exitEventName, (event: unknown) => {
-              const code = (event as { code?: unknown } | null)?.code;
-              listener(typeof code === 'number' ? code : null);
-            });
-          },
-        }),
+        ...(exitEventName === undefined
+          ? {}
+          : {
+              onExit: (listener: (code: number | null) => void) => {
+                worker.addEventListener(exitEventName, (event: unknown) => {
+                  const code = (event as { code?: unknown } | null)?.code;
+                  listener(typeof code === 'number' ? code : null);
+                });
+              },
+            }),
         terminate: () => {
           worker.terminate();
           return Promise.resolve();

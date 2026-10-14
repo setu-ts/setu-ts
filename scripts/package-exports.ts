@@ -81,9 +81,9 @@ const UNRESOLVED = 'reference';
  * @param payload - Parsed `deno doc --json` output
  * @returns Symbol name to its resolved display kind
  */
-export function buildKindIndex(
-  payload: { nodes?: Record<string, { symbols?: unknown[] }> },
-): Map<string, string> {
+export function buildKindIndex(payload: {
+  nodes?: Record<string, { symbols?: unknown[] }>;
+}): Map<string, string> {
   const index = new Map<string, string>();
   for (const node of Object.values(payload.nodes ?? {})) {
     for (const entry of node.symbols ?? []) {
@@ -218,10 +218,13 @@ export function diffExportsTable(
   const missing = [...real].filter((k) => !claimed.has(k));
   const extra = [...claimed].filter((k) => !real.has(k));
   const show = (keys: string[]): string =>
-    keys.map((k) => {
-      const [name, kind] = k.split(' ');
-      return `${name} (${kind})`;
-    }).sort().join(', ');
+    keys
+      .map((k) => {
+        const [name, kind] = k.split(' ');
+        return `${name} (${kind})`;
+      })
+      .sort()
+      .join(', ');
 
   if (missing.length > 0) messages.push(`table omits ${missing.length}: ${show(missing)}`);
   if (extra.length > 0) {

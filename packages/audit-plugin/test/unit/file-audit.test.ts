@@ -87,13 +87,14 @@ describe('FileAuditStorage', () => {
       result: 'success',
     });
 
-    const expected = JSON.stringify({
-      id: '1',
-      timestamp: 100,
-      action: 'a',
-      resource: 'r',
-      result: 'success',
-    }) + '\n';
+    const expected =
+      JSON.stringify({
+        id: '1',
+        timestamp: 100,
+        action: 'a',
+        resource: 'r',
+        result: 'success',
+      }) + '\n';
     expect(files['./nonexistent.log']).toBe(expected);
   });
 

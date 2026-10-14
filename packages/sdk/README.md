@@ -61,9 +61,7 @@ import { createBearerAuthInterceptor, createClient } from '@setu-ts/sdk';
 
 const client = createClient({
   baseUrl: 'https://api.example.com',
-  requestInterceptors: [
-    createBearerAuthInterceptor('my-token'),
-  ],
+  requestInterceptors: [createBearerAuthInterceptor('my-token')],
   retry: {
     limit: 3,
     delay: 500,
@@ -417,6 +415,7 @@ publish or format it has nowhere to go.
   means what it always did. The union is discriminated on `status` because
   `HttpClientError<A> | HttpClientError<B>` is not — `status` is `number` on both arms. A `default`
   response and range codes such as `4XX` are skipped: they name no single status.
+
 - **Formatting matches `deno fmt`.** Two-space indentation, a signature past 100 columns wrapped one
   parameter per line, and a path template too long for one line emitted as an equivalent
   `[…].join('')` — a template literal is not usable there, because `deno fmt` rewraps a long one at
@@ -492,11 +491,7 @@ export function createApp(
   });
   void payments; // routes use `payments`
   return createApplication({
-    plugins: [
-      RuntimePlugin(),
-      ...(observed ? [observed.plugin] : []),
-      ...(devtool?.plugins ?? []),
-    ],
+    plugins: [RuntimePlugin(), ...(observed ? [observed.plugin] : []), ...(devtool?.plugins ?? [])],
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
   });
 }

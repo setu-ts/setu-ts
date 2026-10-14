@@ -18,7 +18,7 @@ describe('createDefaultNotificationHttp', () => {
     const mockFetch = (url: string, init?: RequestInit): Promise<Response> => {
       actualUrl = url;
       actualMethod = init?.method ?? 'GET';
-      Object.assign(actualHeaders, init?.headers as Record<string, string> ?? {});
+      Object.assign(actualHeaders, (init?.headers as Record<string, string>) ?? {});
       actualBody = init?.body as string;
       actualText = 'result-text';
       return Promise.resolve({
@@ -30,11 +30,10 @@ describe('createDefaultNotificationHttp', () => {
 
     const http = createDefaultNotificationHttp(mockFetch as unknown as typeof fetch);
 
-    const result = await http.post(
-      'https://example.com/api',
-      '{"key":"val"}',
-      { 'X-Custom': 'abc', 'Content-Type': 'application/json' },
-    );
+    const result = await http.post('https://example.com/api', '{"key":"val"}', {
+      'X-Custom': 'abc',
+      'Content-Type': 'application/json',
+    });
 
     expect(actualUrl).toBe('https://example.com/api');
     expect(actualMethod).toBe('POST');
@@ -45,19 +44,18 @@ describe('createDefaultNotificationHttp', () => {
   });
 
   it('maps non-OK response correctly', async () => {
-    const mockFetch = (): Response => ({
-      ok: false,
-      status: 500,
-      text: () => Promise.resolve('Server Error'),
-    } as Response);
+    const mockFetch = (): Response =>
+      ({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve('Server Error'),
+      }) as Response;
 
     const http = createDefaultNotificationHttp(mockFetch as unknown as typeof fetch);
 
-    const result = await http.post(
-      'https://example.com/api',
-      '{}',
-      { 'Content-Type': 'application/json' },
-    );
+    const result = await http.post('https://example.com/api', '{}', {
+      'Content-Type': 'application/json',
+    });
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe(500);

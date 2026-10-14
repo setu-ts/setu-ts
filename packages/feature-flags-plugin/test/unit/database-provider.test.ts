@@ -27,7 +27,7 @@ describe('DatabaseProvider', () => {
   describe('start / initial load', () => {
     it('loads initial snapshot via store.loadFlags()', async () => {
       const flags: Record<string, FlagDefinition> = {
-        'beta': { enabled: true },
+        beta: { enabled: true },
       };
       let loadCalled = false;
       const store: IFlagStore = {
@@ -112,7 +112,7 @@ describe('DatabaseProvider', () => {
       const store: IFlagStore = {
         loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
           loadCallCount++;
-          return Promise.resolve({ 'v': { enabled: true, percentage: loadCallCount } });
+          return Promise.resolve({ v: { enabled: true, percentage: loadCallCount } });
         },
       };
 
@@ -199,7 +199,7 @@ describe('DatabaseProvider', () => {
         loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
           callCount++;
           if (callCount === 1) {
-            return Promise.resolve({ 'stable': { enabled: true } });
+            return Promise.resolve({ stable: { enabled: true } });
           }
           return Promise.reject(new Error('network error'));
         },
@@ -234,7 +234,7 @@ describe('DatabaseProvider', () => {
       const store: IFlagStore = {
         loadFlags: (): Promise<Readonly<Record<string, FlagDefinition>>> => {
           callCount++;
-          if (callCount === 1) return Promise.resolve({ 'stable': { enabled: true } });
+          if (callCount === 1) return Promise.resolve({ stable: { enabled: true } });
           return Promise.reject('connection reset');
         },
       };
@@ -276,7 +276,7 @@ describe('DatabaseProvider', () => {
             // Three driven polls fail
             return Promise.reject(new Error('fail'));
           }
-          return Promise.resolve({ 'recovered': { enabled: true } });
+          return Promise.resolve({ recovered: { enabled: true } });
         },
       };
 

@@ -21,11 +21,7 @@ function packagesOn(host: TemplateHost, runtime: TargetRuntime): readonly string
 }
 
 /** One file's contents from a rendered project, or undefined. */
-function fileAt(
-  host: TemplateHost,
-  runtime: TargetRuntime,
-  path: string,
-): string | undefined {
+function fileAt(host: TemplateHost, runtime: TargetRuntime, path: string): string | undefined {
   const resolved = resolveHost(host, runtime);
   return projectFiles('proj', runtime, resolved).find((f) => f.path === path)?.contents;
 }
@@ -69,8 +65,9 @@ describe('runtime swaps', () => {
   });
 
   it('emits the swap files only on the runtime that swapped', () => {
-    expect(fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'src/reply-inbox-object.ts'))
-      .toContain('ReplyInboxObjectCore');
+    expect(
+      fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'src/reply-inbox-object.ts'),
+    ).toContain('ReplyInboxObjectCore');
     expect(fileAt(MICROSERVICE_TEMPLATE, 'deno', 'src/reply-inbox-object.ts')).toBeUndefined();
   });
 
@@ -117,10 +114,10 @@ describe('runtime swaps', () => {
     // prevent.
     const produced = [
       ...wrangler.matchAll(/\[\[queues\.producers\]\]\nbinding = "[^"]+"\nqueue = "([^"]+)"/g),
-    ]
-      .map((match) => match[1]);
-    const consumed = [...wrangler.matchAll(/\[\[queues\.consumers\]\]\nqueue = "([^"]+)"/g)]
-      .map((match) => match[1]);
+    ].map((match) => match[1]);
+    const consumed = [...wrangler.matchAll(/\[\[queues\.consumers\]\]\nqueue = "([^"]+)"/g)].map(
+      (match) => match[1],
+    );
 
     expect(produced.length).toBeGreaterThan(0);
     expect([...produced].sort()).toEqual([...consumed].sort());

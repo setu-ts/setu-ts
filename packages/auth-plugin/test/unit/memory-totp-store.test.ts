@@ -117,9 +117,8 @@ describe('MemoryTotpStore', () => {
     const store = new MemoryTotpStore();
 
     const results = await Promise.all(
-      Array.from(
-        { length: 10 },
-        () => store.reserveAttempt('user1', 59_000, { limit: 5, windowMs: 900_000 }),
+      Array.from({ length: 10 }, () =>
+        store.reserveAttempt('user1', 59_000, { limit: 5, windowMs: 900_000 }),
       ),
     );
     const allowed = results.filter((r) => r.allowed).length;

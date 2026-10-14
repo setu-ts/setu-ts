@@ -127,17 +127,15 @@ export class ServiceAccountTokenSource implements FcmTokenSource {
   /** Signs a fresh assertion and exchanges it for an access token. */
   async #refresh(): Promise<string> {
     const assertion = await this.#createAssertion();
-    const body = `grant_type=${encodeURIComponent(JWT_BEARER_GRANT)}&assertion=${
-      encodeURIComponent(assertion)
-    }`;
+    const body = `grant_type=${encodeURIComponent(JWT_BEARER_GRANT)}&assertion=${encodeURIComponent(
+      assertion,
+    )}`;
 
     const response = await this.#http.post(TOKEN_ENDPOINT, body, {
       'Content-Type': 'application/x-www-form-urlencoded',
     });
     if (!response.ok) {
-      throw new Error(
-        `FCM token exchange failed (${response.status}): ${response.text}`,
-      );
+      throw new Error(`FCM token exchange failed (${response.status}): ${response.text}`);
     }
 
     let parsed: unknown;
@@ -166,13 +164,15 @@ export class ServiceAccountTokenSource implements FcmTokenSource {
     const issuedAt = Math.floor(this.#runtime.now() / 1000);
 
     const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-    const claims = base64url(JSON.stringify({
-      iss: this.#clientEmail,
-      scope: FCM_SCOPE,
-      aud: TOKEN_ENDPOINT,
-      iat: issuedAt,
-      exp: issuedAt + ASSERTION_TTL_SECONDS,
-    }));
+    const claims = base64url(
+      JSON.stringify({
+        iss: this.#clientEmail,
+        scope: FCM_SCOPE,
+        aud: TOKEN_ENDPOINT,
+        iat: issuedAt,
+        exp: issuedAt + ASSERTION_TTL_SECONDS,
+      }),
+    );
     const signingInput = `${header}.${claims}`;
 
     const signature = await this.#runtime.subtle.sign(

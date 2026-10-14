@@ -212,7 +212,7 @@ export async function undoReleaseRename(
   const cut = headings[0];
   const previous = headings[1];
   if (cut?.[1] === undefined || previous?.[1] === undefined) return null;
-  if (await tagExists(cut[1]) || !(await tagExists(previous[1]))) return null;
+  if ((await tagExists(cut[1])) || !(await tagExists(previous[1]))) return null;
   const withoutEmpty = changelog.replace(/^## \[Unreleased\]\s*\n(?=## \[)/m, '');
   return {
     base: previous[1],
@@ -260,7 +260,11 @@ export async function publishedReadmes(): Promise<readonly string[]> {
   if (!listed.success) {
     throw new Error(`git ls-files failed: ${new TextDecoder().decode(listed.stderr).trim()}`);
   }
-  return new TextDecoder().decode(listed.stdout).split('\n').filter((line) => line !== '').sort();
+  return new TextDecoder()
+    .decode(listed.stdout)
+    .split('\n')
+    .filter((line) => line !== '')
+    .sort();
 }
 
 /** The I/O `main` needs, injected so its branches are testable. */

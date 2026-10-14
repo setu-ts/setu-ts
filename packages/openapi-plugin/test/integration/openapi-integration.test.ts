@@ -406,9 +406,9 @@ describe('OpenAPI Integration', () => {
     // and the decorator-provided description wins over the status default.
     const getResp = getOp.responses as Record<string, Record<string, unknown>>;
     expect(getResp['200'].description).toBe('The product');
-    const getSchema =
-      ((getResp['200'].content as Record<string, Record<string, unknown>>)['application/json']
-        .schema) as Record<string, unknown>;
+    const getSchema = (getResp['200'].content as Record<string, Record<string, unknown>>)[
+      'application/json'
+    ].schema as Record<string, unknown>;
     expect(getSchema.type).toBe('object');
     expect(getSchema.properties).toEqual(
       expect.objectContaining({ id: { type: 'string' }, name: { type: 'string' } }),
@@ -422,9 +422,9 @@ describe('OpenAPI Integration', () => {
     expect(postBodySchema.properties).toHaveProperty('name');
 
     const postResp = postOp.responses as Record<string, Record<string, unknown>>;
-    const postRespSchema =
-      ((postResp['201'].content as Record<string, Record<string, unknown>>)['application/json']
-        .schema) as Record<string, unknown>;
+    const postRespSchema = (postResp['201'].content as Record<string, Record<string, unknown>>)[
+      'application/json'
+    ].schema as Record<string, unknown>;
     expect(postRespSchema.type).toBe('object');
     expect(postRespSchema.properties).toHaveProperty('id');
 

@@ -368,11 +368,7 @@ export function validateProtocolHeaders(request: IRequest): {
     return null;
   }
   const instanceRaw = headers.get('x-setu-instance');
-  if (
-    instanceRaw !== null &&
-    instanceRaw !== '' &&
-    !UUID_PATTERN.test(instanceRaw)
-  ) {
+  if (instanceRaw !== null && instanceRaw !== '' && !UUID_PATTERN.test(instanceRaw)) {
     return null;
   }
   const mac = headers.get('x-setu-mac') ?? '';
@@ -634,9 +630,9 @@ function collectionFailedTraceBatch(instanceId: string, after: number): TraceDia
 type TraceReadOutcome =
   | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
   | {
-    readonly kind: 'refused';
-    readonly code: 'unsupported-version' | 'unauthorized' | 'invalid-request';
-  };
+      readonly kind: 'refused';
+      readonly code: 'unsupported-version' | 'unauthorized' | 'invalid-request';
+    };
 
 /**
  * Projects one of the connector's OWN value-free batches (unsupported or
@@ -811,8 +807,8 @@ function readEventProjection(
   }
   const aggregate: EventDiagnosticsResponse['state'] = readySeen
     ? 'ready'
-    : (priority.find((state) => perSourceStates.includes(state)) ??
-      'disabled') as EventDiagnosticsResponse['state'];
+    : ((priority.find((state) => perSourceStates.includes(state)) ??
+        'disabled') as EventDiagnosticsResponse['state']);
   const projected: Record<string, unknown> = {
     version: 1,
     instanceId,
@@ -898,9 +894,9 @@ function collectionFailedAuthorizationBatch(
 type AuthorizationReadOutcome =
   | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
   | {
-    readonly kind: 'refused';
-    readonly code: 'unsupported-version' | 'unauthorized' | 'invalid-request';
-  };
+      readonly kind: 'refused';
+      readonly code: 'unsupported-version' | 'unauthorized' | 'invalid-request';
+    };
 
 /**
  * Projects one of the connector's OWN value-free batches (unsupported or
@@ -976,10 +972,7 @@ function readAuthorizationProjection(
     }
     // any other throw: the value-free collection-failed answer below
   }
-  return projectOwnAuthorizationBatch(
-    collectionFailedAuthorizationBatch(instanceId, after),
-    after,
-  );
+  return projectOwnAuthorizationBatch(collectionFailedAuthorizationBatch(instanceId, after), after);
 }
 
 /**
@@ -1114,18 +1107,16 @@ export function createConnectorHandler(
         }
         deps.session.bindInstance(snapshot.instanceId);
         const lifetime = deps.session.lifetime(deps.clock);
-        projected = lifetime === null
-          ? statusBody(
-            snapshot.instanceId,
-            deps.session.remainingMs(deps.clock),
-            currentInspectorsManifest(),
-          )
-          : statusBody(
-            snapshot.instanceId,
-            lifetime.expiresInMs,
-            currentInspectorsManifest(),
-            { maxRemainingMs: lifetime.maxRemainingMs },
-          );
+        projected =
+          lifetime === null
+            ? statusBody(
+                snapshot.instanceId,
+                deps.session.remainingMs(deps.clock),
+                currentInspectorsManifest(),
+              )
+            : statusBody(snapshot.instanceId, lifetime.expiresInMs, currentInspectorsManifest(), {
+                maxRemainingMs: lifetime.maxRemainingMs,
+              });
       } else if (target.op === 'renew') {
         if (!deps.session.isRenewable) {
           return refusalResponse('invalid-request');
@@ -1222,10 +1213,7 @@ export function createConnectorHandler(
         // built response before anything is signed. The cross-instance check
         // above already proved the presented (non-null) instance IS the
         // session's bound one.
-        const candidate = buildSchedulerResponse(
-          parsed.instance as string,
-          deps.schedulerSources,
-        );
+        const candidate = buildSchedulerResponse(parsed.instance as string, deps.schedulerSources);
         if (!isSchedulerResponseProjection(candidate)) {
           return refusalResponse('unavailable');
         }

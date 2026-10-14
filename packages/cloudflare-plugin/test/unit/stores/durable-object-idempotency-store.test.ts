@@ -159,9 +159,8 @@ describe('DurableObjectIdempotencyStore (M109a §3.15)', () => {
   it('grants exactly one claim among 50 concurrent REAL-serialised claims', async () => {
     const { store } = await build();
     const results = await Promise.all(
-      Array.from(
-        { length: 50 },
-        (_unused, index) => store.claim(claimRequest({ token: `t${index}` })),
+      Array.from({ length: 50 }, (_unused, index) =>
+        store.claim(claimRequest({ token: `t${index}` })),
       ),
     );
     expect(results.filter((result) => result.outcome === 'claimed')).toHaveLength(1);
@@ -169,8 +168,9 @@ describe('DurableObjectIdempotencyStore (M109a §3.15)', () => {
   });
 
   it('refuses a missing namespace and a non-namespace binding', () => {
-    expect(() => new DurableObjectIdempotencyStore(new FakeNamespace(), { namespace: 'Bad' }))
-      .toThrow(TypeError);
+    expect(
+      () => new DurableObjectIdempotencyStore(new FakeNamespace(), { namespace: 'Bad' }),
+    ).toThrow(TypeError);
     expect(() => new DurableObjectIdempotencyStore({}, { namespace: 'ok' })).toThrow(
       CloudflareBindingMissingError,
     );
@@ -225,20 +225,19 @@ describe('DurableObjectIdempotencyStore (M109a §3.15)', () => {
 
   it('validates keyPrefix, binding and timeoutMs', () => {
     const namespace = new FakeNamespace();
-    expect(() => new DurableObjectIdempotencyStore(namespace, { namespace: 'ok', keyPrefix: '' }))
-      .toThrow(
-        RangeError,
-      );
-    expect(() =>
-      new DurableObjectIdempotencyStore(namespace, {
-        namespace: 'ok',
-        binding: 5 as unknown as string,
-      })
+    expect(
+      () => new DurableObjectIdempotencyStore(namespace, { namespace: 'ok', keyPrefix: '' }),
+    ).toThrow(RangeError);
+    expect(
+      () =>
+        new DurableObjectIdempotencyStore(namespace, {
+          namespace: 'ok',
+          binding: 5 as unknown as string,
+        }),
     ).toThrow(TypeError);
-    expect(() => new DurableObjectIdempotencyStore(namespace, { namespace: 'ok', timeoutMs: -1 }))
-      .toThrow(
-        RangeError,
-      );
+    expect(
+      () => new DurableObjectIdempotencyStore(namespace, { namespace: 'ok', timeoutMs: -1 }),
+    ).toThrow(RangeError);
   });
 
   it('releases a held claim and reports lost for a stale one', async () => {

@@ -121,8 +121,7 @@ Paths are relative to the repository root. Every row was read in source on 2026-
 
 **Measurement: the watermark trap on real PostgreSQL 16 (2026-10-08, M107).** A throwaway
 `postgres:16-alpine`; table
-`outbox(seq bigserial, id text, created_at timestamptz default
-clock_timestamp(), status text default 'pending')`.
+`outbox(seq bigserial, id text, created_at timestamptz default clock_timestamp(), status text default 'pending')`.
 Transaction A inserts `A` (seq 1, earlier `created_at`) and stays open; B inserts `B` (seq 2) and
 commits; a relay tick reads `[B]` and marks it sent; A commits. Second tick:
 
@@ -137,17 +136,17 @@ because B committed first. A pending-set relay orders only the rows it can see.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                                            | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                                                                                                            | Doc deliverable (same PR)                                                                                      |
-| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| C1 | ROADMAP M107 says `messaging-plugin` "reaches the database structurally the way `multi-tenancy-plugin` does". Source (§1): multi-tenancy reaches it through a port in `common` and a bridge in `database-plugin`, never by resolving `CAPABILITIES.DATABASE` itself | Source. Follow the real precedent (§3.1)                                                                                                                                                                                                                                                                                                                                                                                                            | ROADMAP M107 placement paragraph corrected; package list gains `database-plugin`, `telemetry-plugin` and `cli` |
-| C2 | ROADMAP M107 lists `cloudflare-plugin` for the Workers relay                                                                                                                                                                                                        | No `cloudflare-plugin` source changes: `WorkersCron` calls `outbox.sweep()`, `waitUntil` is the outbox's `background` hook, and D1 is reached through the bridge as a `'custom'` adapter (§3.12)                                                                                                                                                                                                                                                    | ROADMAP M107 package list corrected; `apps/cloudflare` carries the Workers example                             |
-| C3 | ROADMAP M107: "Column isolation is one table with the tenant in the row and in the headers"                                                                                                                                                                         | Row only. A tenant header would ride the framework channel (callers may not use the reserved `x-setu-` prefix), which custom brokers drop (§1), and a delivered header is a hint a consumer may never authorize on (M106 §3.9). An event that needs its tenant carries it in the payload                                                                                                                                                            | ROADMAP M107 tenancy bullet corrected                                                                          |
-| C4 | ROADMAP M107: Bigtable "is refused by name, pointing at the CDC follow-up" — implied at the write                                                                                                                                                                   | Refused at STARTUP by the bridge (§3.4): the relay query cannot run on Bigtable (`bigtable-scan.ts:110-127`)                                                                                                                                                                                                                                                                                                                                        | Bridge JSDoc, README, PUBLIC_API                                                                               |
-| C5 | ROADMAP M107: "Cosmos only when the row shares the business partition key"                                                                                                                                                                                          | Sharpened from source: the outbox entity must map to the business CONTAINER (`cosmos-transaction.ts:58-63`), its partition-key path must be a column the row carries (`tenantId` or `orderingKey`), and — because Cosmos queries the whole container (`cosmos-query.ts:295`) — every outbox read carries the discriminator (§3.2)                                                                                                                   | Per-backend table in README + PUBLIC_API                                                                       |
-| C6 | ROADMAP M107 promises "per aggregate in order"                                                                                                                                                                                                                      | Measured (§1): a pending-set relay cannot order a row whose transaction commits after a later row of the same key was published; across replicas `position` follows each writer's clock (§3.2)                                                                                                                                                                                                                                                      | ROADMAP M107 promise sentence corrected; README states it with the measurement                                 |
-| C7 | `ITelemetryService.withSpan` JSDoc names a `parentSpan` option (`common/src/services/telemetry.ts:177`); the option is `parentContext` (`:55`)                                                                                                                      | Source                                                                                                                                                                                                                                                                                                                                                                                                                                              | JSDoc corrected in `common`                                                                                    |
-| C8 | `test/apps-gate.test.ts:627-646` (M101a §3.8) pins `POSTGRES_URL` ABSENT from `ci.yml` and `release.yml` with a substring match, while this milestone adds a PostgreSQL service                                                                                     | Both hold: the database-plugin live-Postgres cells stay local-only (they need a generated Prisma client and the `:5433` grant), and the outbox suite uses a DISTINCT variable, `OUTBOX_POSTGRES_URL`. The pin is amended from `not.toContain('POSTGRES_URL')` to `not.toMatch(/(?<![A-Z_])POSTGRES_URL/)`, which still refuses the bare name and admits the prefixed one, and gains a positive pin for `OUTBOX_POSTGRES_URL` in all three workflows | The amended assertion and its comment, naming M107                                                             |
-| C9 | `mongo-adapter.ts:226-231` documents that a standalone server "fails here", at `beginTransaction`; measured (§1), the real driver fails at the first operation inside the transaction, unwrapped                                                                    | Measurement                                                                                                                                                                                                                                                                                                                                                                                                                                         | JSDoc corrected to describe where the refusal surfaces; the behaviour fix is named in §9 for a `fix/…` branch  |
+| #   | Conflict                                                                                                                                                                                                                                                            | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                                                                                                            | Doc deliverable (same PR)                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| C1  | ROADMAP M107 says `messaging-plugin` "reaches the database structurally the way `multi-tenancy-plugin` does". Source (§1): multi-tenancy reaches it through a port in `common` and a bridge in `database-plugin`, never by resolving `CAPABILITIES.DATABASE` itself | Source. Follow the real precedent (§3.1)                                                                                                                                                                                                                                                                                                                                                                                                            | ROADMAP M107 placement paragraph corrected; package list gains `database-plugin`, `telemetry-plugin` and `cli` |
+| C2  | ROADMAP M107 lists `cloudflare-plugin` for the Workers relay                                                                                                                                                                                                        | No `cloudflare-plugin` source changes: `WorkersCron` calls `outbox.sweep()`, `waitUntil` is the outbox's `background` hook, and D1 is reached through the bridge as a `'custom'` adapter (§3.12)                                                                                                                                                                                                                                                    | ROADMAP M107 package list corrected; `apps/cloudflare` carries the Workers example                             |
+| C3  | ROADMAP M107: "Column isolation is one table with the tenant in the row and in the headers"                                                                                                                                                                         | Row only. A tenant header would ride the framework channel (callers may not use the reserved `x-setu-` prefix), which custom brokers drop (§1), and a delivered header is a hint a consumer may never authorize on (M106 §3.9). An event that needs its tenant carries it in the payload                                                                                                                                                            | ROADMAP M107 tenancy bullet corrected                                                                          |
+| C4  | ROADMAP M107: Bigtable "is refused by name, pointing at the CDC follow-up" — implied at the write                                                                                                                                                                   | Refused at STARTUP by the bridge (§3.4): the relay query cannot run on Bigtable (`bigtable-scan.ts:110-127`)                                                                                                                                                                                                                                                                                                                                        | Bridge JSDoc, README, PUBLIC_API                                                                               |
+| C5  | ROADMAP M107: "Cosmos only when the row shares the business partition key"                                                                                                                                                                                          | Sharpened from source: the outbox entity must map to the business CONTAINER (`cosmos-transaction.ts:58-63`), its partition-key path must be a column the row carries (`tenantId` or `orderingKey`), and — because Cosmos queries the whole container (`cosmos-query.ts:295`) — every outbox read carries the discriminator (§3.2)                                                                                                                   | Per-backend table in README + PUBLIC_API                                                                       |
+| C6  | ROADMAP M107 promises "per aggregate in order"                                                                                                                                                                                                                      | Measured (§1): a pending-set relay cannot order a row whose transaction commits after a later row of the same key was published; across replicas `position` follows each writer's clock (§3.2)                                                                                                                                                                                                                                                      | ROADMAP M107 promise sentence corrected; README states it with the measurement                                 |
+| C7  | `ITelemetryService.withSpan` JSDoc names a `parentSpan` option (`common/src/services/telemetry.ts:177`); the option is `parentContext` (`:55`)                                                                                                                      | Source                                                                                                                                                                                                                                                                                                                                                                                                                                              | JSDoc corrected in `common`                                                                                    |
+| C8  | `test/apps-gate.test.ts:627-646` (M101a §3.8) pins `POSTGRES_URL` ABSENT from `ci.yml` and `release.yml` with a substring match, while this milestone adds a PostgreSQL service                                                                                     | Both hold: the database-plugin live-Postgres cells stay local-only (they need a generated Prisma client and the `:5433` grant), and the outbox suite uses a DISTINCT variable, `OUTBOX_POSTGRES_URL`. The pin is amended from `not.toContain('POSTGRES_URL')` to `not.toMatch(/(?<![A-Z_])POSTGRES_URL/)`, which still refuses the bare name and admits the prefixed one, and gains a positive pin for `OUTBOX_POSTGRES_URL` in all three workflows | The amended assertion and its comment, naming M107                                                             |
+| C9  | `mongo-adapter.ts:226-231` documents that a standalone server "fails here", at `beginTransaction`; measured (§1), the real driver fails at the first operation inside the transaction, unwrapped                                                                    | Measurement                                                                                                                                                                                                                                                                                                                                                                                                                                         | JSDoc corrected to describe where the refusal surfaces; the behaviour fix is named in §9 for a `fix/…` branch  |
 
 ## 3. Design decisions
 
@@ -201,7 +200,6 @@ because B committed first. A pending-set relay orders only the rows it can see.
   | `lastError`   | `string` (absent when none)                      | `describeError(error)` cut to 1024 characters                                                          |
   | `settledAt`   | `number` (absent until `sent`/`discarded`)       | epoch ms; the retention clock (§3.14)                                                                  |
   | `sentBy`      | `string` (absent until sent)                     | `<relay instance id>/<scheduled \| dispatch>` (§3.8)                                                   |
-
   - **The discriminator is one rule on every backend.** The bridge writes `kind: 'setu-outbox'` on
     `append` and adds `kind` to the `where` of EVERY read it issues (`scanPending`, `failedKeys`,
     `stats`, `purge`); a lookup by id (`findById` before a transition) treats a row whose `kind`
@@ -218,6 +216,7 @@ because B committed first. A pending-set relay orders only the rows it can see.
     so they agree with each other on every backend.
   - **`blockKey`** is `JSON.stringify([tenantId ?? null, orderingKey])`, so no tenant or key value
     can contain a separator that makes two pairs collide.
+
 - **Why:**
   - Numbers, not `Date`: D1 refuses a `Date` in an ordered comparison (`d1-sql.ts:136-147`), the
     memory evaluator compares a `Date` with a number as `false` (`query-builder.ts:199-205`), and
@@ -282,8 +281,7 @@ Every method returns a promise that REJECTS on failure, never throws synchronous
 - **Decision:** the bridge's `verify()` runs at `onInit` and performs, in order:
   1. The relay's first query, `scanPending(undefined, 1)`.
   2. A transactional probe that reads exactly what the relay reads:
-     `transaction(uow => uow.getRepository(entity).findAll({ where: { kind, status: 'pending' },
-     limit: 1 }))`.
+     `transaction(uow => uow.getRepository(entity).findAll({ where: { kind, status: 'pending' }, limit: 1 }))`.
 
   A rejection becomes `OutboxStoreUnavailableError` naming the entity, with the adapter error as
   `cause` and a reason from a fixed vocabulary:
@@ -316,6 +314,7 @@ Every method returns a promise that REJECTS on failure, never throws synchronous
 
   On memory and MongoDB a missing entity cannot be detected (both create lazily), so step 1 passes
   there by construction — stated, not hidden.
+
 - **Why:** the relay query and the transaction are the two operations that differ per backend, so
   running each once at startup turns an unusable backend into a named startup failure instead of a
   relay that fails every tick (the M52c binding-guard shape).
@@ -343,6 +342,7 @@ Every method returns a promise that REJECTS on failure, never throws synchronous
 
   Every refusal is a REJECTED promise (the method is `async`). A refusal propagates to the caller's
   `transaction(...)` callback, so the business write rolls back with it.
+
 - **Why:** the envelope id is fixed at write time because it is the deduplication id every re-send
   carries; refusing an oversized envelope inside the transaction is the only point at which refusal
   prevents an unsendable committed row. Two entry points with one precedence implementation is the
@@ -376,6 +376,7 @@ Every method returns a promise that REJECTS on failure, never throws synchronous
      An UNKEYED row is never blocked: it is published unless in backoff, which skips only that row.
      Every skip counts toward `scanned` only. The query never filters by `availableAt`: doing so
      would hide an earlier row in backoff and let a later row of the same key overtake it.
+
   3. **Blocked-set cap (N6):** `blocked` holds at most 10 000 keys. An insertion that would exceed
      it sets `capReached` instead, so every further keyed row of the lap is skipped — the same
      mechanism as step 1, and the same fail-safe: an incomplete blocked set never publishes a keyed
@@ -535,9 +536,8 @@ Every method returns a promise that REJECTS on failure, never throws synchronous
     when telemetry is registered. **The rule:** a stored `traceparent` that
     `parseTraceparentToContext` turns into a context with BOTH ids is used as
     `{ kind: 'internal', parentContext }`; ANYTHING else — absent, malformed, or edited into an
-    invalid value — gives `{ kind: 'internal', root:
-    true }`. `TracedBroker` opens its producer
-    span under the active relay span (`traced-broker.ts:56-73`) and injects its `traceparent`.
+    invalid value — gives `{ kind: 'internal', root: true }`. `TracedBroker` opens its producer span
+    under the active relay span (`traced-broker.ts:56-73`) and injects its `traceparent`.
   - `common` gains an optional `SpanOptions.root?: boolean`. Its JSDoc states that an
     `ITelemetryService` implementation that ignores it starts the span under the ACTIVE span.
   - `telemetry-plugin`:
@@ -560,9 +560,8 @@ Every method returns a promise that REJECTS on failure, never throws synchronous
   consumer cannot continue the trace — named in §9.
 - **Test home:**
   - `packages/telemetry-plugin/test/unit/telemetry-service-root.test.ts`:
-    `withSpan(..., { root:
-    true })` reaches the host's `startSpan` options (a recording host),
-    and an omitted `root` does not appear.
+    `withSpan(..., { root: true })` reaches the host's `startSpan` options (a recording host), and
+    an omitted `root` does not appear.
   - `packages/telemetry-plugin/test/unit/span-root.test.ts`: with the real SDK, `root: true` yields
     a parentless span while another span is active, and omitting it keeps the parent.
   - `packages/messaging-plugin/test/integration/outbox-trace-real.test.ts` (real OTel API + SDK +
@@ -621,6 +620,7 @@ Every method returns a promise that REJECTS on failure, never throws synchronous
     shared lock the replicas that lose the slot are `contended` and never sweep
     (`scheduler-service.ts:582`, `:677-701`), so such a rule would flap. The three per-instance
     reasons are labelled as such in the README: a replica that never sweeps reports none of them.
+
   - Optional `CAPABILITIES.METRICS` (joins `optionalDependencies`), an `OutboxCollector` on the M45b
     pattern: counters `outbox_published_total{topic}`, `outbox_publish_failures_total{topic}`,
     `outbox_poisoned_total{topic}`, `outbox_overlaps_total{origin}`; gauges `outbox_pending_rows`,
@@ -810,8 +810,7 @@ Real-backend suites guard with `ignore:` on their env var — never an early ret
   (`postgres://postgres:postgres@127.0.0.1:5432/postgres`) — a distinct variable, so the
   database-plugin live-Postgres cells keep ignoring on `POSTGRES_URL`;
 - a step starting a single-node MongoDB replica set on its own port —
-  `docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8 --replSet rs0 --port 27018
-  --bind_ip_all`,
+  `docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8 --replSet rs0 --port 27018 --bind_ip_all`,
   then `rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27018' }] })` through
   `mongosh`, waiting for a primary — and `MONGODB_RS_URI`
   (`mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true`). The existing standalone
@@ -1128,15 +1127,13 @@ Each is an obligation for implementation, measured before the code relies on it.
 - **DynamoDB GSI selection and `position > after` as a key condition — verified on DynamoDB Local.**
   A recording client over the real SDK showed every relay page as a `Query` on the GSI with
   `KeyConditionExpression` `status = :pending` (first page) and
-  `status = :pending AND position >
-  :after` (every later page), `kind` as the `FilterExpression`,
+  `status = :pending AND position > :after` (every later page), `kind` as the `FilterExpression`,
   and no `Scan`; seven rows over four pages of two were published in order. Without the GSI,
   `start()` refuses with `dynamodb-index`. GSI read consistency and the false-overlap scenario
   remain unverified.
 - **Cosmos with the outbox in the business container — verified on the local emulator** (not CI):
   the business write and the row commit in one batch, and business documents carrying
-  `status:
-  'pending'` and `'sent'` are not counted, transitioned or purged.
+  `status: 'pending'` and `'sent'` are not counted, transitioned or purged.
 - **The read-only probe transaction (§3.4 step 2) commits cleanly** on Drizzle/PostgreSQL, a MongoDB
   replica set, DynamoDB Local, the Cosmos emulator and D1 (`D1Adapter` over real SQLite). Prisma is
   not driven.

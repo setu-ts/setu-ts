@@ -31,9 +31,10 @@ function localizer(
     logger?: ILogger;
   } = {},
 ): ILocalizer {
-  const store = options.partial === true
-    ? validateCatalogues(['en', 'de'], { en: EN, de: { title: 'Warenkorb' } }, true, () => {})
-    : validateCatalogues(['en', 'de', 'fr'], CATALOGUES, false, () => {});
+  const store =
+    options.partial === true
+      ? validateCatalogues(['en', 'de'], { en: EN, de: { title: 'Warenkorb' } }, true, () => {})
+      : validateCatalogues(['en', 'de', 'fr'], CATALOGUES, false, () => {});
   return createLocalizer({
     store,
     onMissing: options.onMissing ?? 'key',
@@ -170,12 +171,7 @@ describe('missing keys', () => {
 
   it('formats a fallback message in the REQUEST locale, as a browser does', () => {
     const service = createLocalizer({
-      store: validateCatalogues(
-        ['en', 'de'],
-        { en: { n: '{n}' }, de: {} },
-        true,
-        () => {},
-      ),
+      store: validateCatalogues(['en', 'de'], { en: { n: '{n}' }, de: {} }, true, () => {}),
       onMissing: 'key',
       timeZone: undefined,
       logger: () => undefined,

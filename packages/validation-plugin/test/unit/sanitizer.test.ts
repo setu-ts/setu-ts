@@ -46,9 +46,7 @@ describe('sanitize — individual rules', () => {
 
   it('keeps only allowed tags', () => {
     // <i> and </i> are removed, leaving "hello" and "world" adjacent
-    expect(
-      sanitize('<b>hello<i>world</i></b>', { allowedTags: ['b'] }),
-    ).toBe('<b>helloworld</b>');
+    expect(sanitize('<b>hello<i>world</i></b>', { allowedTags: ['b'] })).toBe('<b>helloworld</b>');
   });
 
   it('encodes HTML entities literally', () => {
@@ -141,8 +139,6 @@ describe('sanitize — edge cases', () => {
   });
 
   it('toUpperCase after toLowerCase wins (last case transform)', () => {
-    expect(
-      sanitize('Hello', { toLowerCase: true, toUpperCase: true }),
-    ).toBe('HELLO');
+    expect(sanitize('Hello', { toLowerCase: true, toUpperCase: true })).toBe('HELLO');
   });
 });

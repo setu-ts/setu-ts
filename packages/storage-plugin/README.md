@@ -23,10 +23,12 @@ The registration below applies when your application owns its plugin list.
 import { createUploadMiddleware, getUploadedFile, StoragePlugin } from '@setu-ts/storage-plugin';
 import { CAPABILITIES, type IStorage } from '@setu-ts/common';
 
-app.register(StoragePlugin({
-  provider: 's3',
-  options: { bucket: 'uploads', region: 'us-east-1' },
-}));
+app.register(
+  StoragePlugin({
+    provider: 's3',
+    options: { bucket: 'uploads', region: 'us-east-1' },
+  }),
+);
 
 const storage = app.services.get<IStorage>(CAPABILITIES.STORAGE);
 

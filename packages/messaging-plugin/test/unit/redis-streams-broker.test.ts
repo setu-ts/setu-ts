@@ -236,9 +236,10 @@ describe('RedisStreamsBroker', () => {
       blockSizeMs: 5,
     });
     await broker.connect();
-    const delivered: Array<
-      { body: unknown; headers: Readonly<Record<string, string>> | undefined }
-    > = [];
+    const delivered: Array<{
+      body: unknown;
+      headers: Readonly<Record<string, string>> | undefined;
+    }> = [];
     await broker.subscribeWithHeaders('reserved', (message, metadata) => {
       delivered.push({ body: message, headers: metadata.headers });
     });
@@ -259,12 +260,14 @@ describe('RedisStreamsBroker', () => {
 
   it('takes the first payload field when a foreign producer wrote two', async () => {
     const client = new FakeRedisStreamsClient({
-      seededMessages: [{
-        id: '1-0',
-        payload: '{"real":"body"}',
-        // A duplicate `payload` field, as only a foreign producer could write.
-        fields: { payload: 'HIJACKED' },
-      }],
+      seededMessages: [
+        {
+          id: '1-0',
+          payload: '{"real":"body"}',
+          // A duplicate `payload` field, as only a foreign producer could write.
+          fields: { payload: 'HIJACKED' },
+        },
+      ],
     });
     const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
       client,
@@ -313,9 +316,9 @@ describe('RedisStreamsBroker', () => {
     const broker = new RedisStreamsBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.publish('test', { data: 'test' }),
-    ).rejects.toThrow('RedisStreamsBroker is not connected');
+    await expect(broker.publish('test', { data: 'test' })).rejects.toThrow(
+      'RedisStreamsBroker is not connected',
+    );
   });
 
   it('subscribe throws when not connected', async () => {
@@ -324,9 +327,9 @@ describe('RedisStreamsBroker', () => {
     const broker = new RedisStreamsBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.subscribe('test', async () => {}),
-    ).rejects.toThrow('RedisStreamsBroker is not connected');
+    await expect(broker.subscribe('test', async () => {})).rejects.toThrow(
+      'RedisStreamsBroker is not connected',
+    );
   });
 
   it('handler failure does NOT acknowledge message', async () => {

@@ -47,13 +47,21 @@ describe('InMemoryBroker', () => {
     const received: string[] = [];
 
     // Subscribe with same queue (load-balanced)
-    await broker.subscribe('test.topic', (_msg) => {
-      received.push('handler1');
-    }, { queue: 'my-queue' });
+    await broker.subscribe(
+      'test.topic',
+      (_msg) => {
+        received.push('handler1');
+      },
+      { queue: 'my-queue' },
+    );
 
-    await broker.subscribe('test.topic', (_msg) => {
-      received.push('handler2');
-    }, { queue: 'my-queue' });
+    await broker.subscribe(
+      'test.topic',
+      (_msg) => {
+        received.push('handler2');
+      },
+      { queue: 'my-queue' },
+    );
 
     // First publish - should go to handler1 (cursor at 0)
     await broker.publish('test.topic', 'msg1');
@@ -265,9 +273,13 @@ describe('InMemoryBroker request-reply', () => {
     // queue, and whenever it won the round-robin its envelope guard discarded
     // the payload outright — the message was simply gone, with no signal.
     const seen: unknown[] = [];
-    await broker.subscribe('orders', (message) => {
-      seen.push(message);
-    }, { queue: 'workers' });
+    await broker.subscribe(
+      'orders',
+      (message) => {
+        seen.push(message);
+      },
+      { queue: 'workers' },
+    );
     await broker.respond('orders', () => 'rpc', { queue: 'workers' });
 
     await broker.publish('orders', { n: 1 });

@@ -120,10 +120,7 @@ export class BigtableAdapter implements IDatabaseAdapter {
     // loop would never run a single fetch and EVERY `findPage` would answer an
     // empty terminal page. `0` and a negative disable it the same way.
     const pageFetches = options.maxPageFetches;
-    if (
-      pageFetches !== undefined &&
-      (!Number.isInteger(pageFetches) || pageFetches < 1)
-    ) {
+    if (pageFetches !== undefined && (!Number.isInteger(pageFetches) || pageFetches < 1)) {
       throw new Error(
         `BigtableAdapter requires options.maxPageFetches to be a positive integer; ` +
           `received ${String(pageFetches)}. A non-positive or NaN bound stops the page loop ` +
@@ -132,13 +129,14 @@ export class BigtableAdapter implements IDatabaseAdapter {
     }
     this.#options = options;
     this.#mapping = options.tables;
-    this.#loader = loader ??
+    this.#loader =
+      loader ??
       (options.client !== undefined
         ? createInjectedBigtableLoader(options.client)
         : createLazyBigtableLoader({
-          projectId: options.projectId as string,
-          ...(options.apiEndpoint === undefined ? {} : { apiEndpoint: options.apiEndpoint }),
-        }));
+            projectId: options.projectId as string,
+            ...(options.apiEndpoint === undefined ? {} : { apiEndpoint: options.apiEndpoint }),
+          }));
   }
 
   /**

@@ -13,17 +13,22 @@ import { findNameConflict } from '../../../src/utils/name-conflicts.ts';
 
 describe('findPluginIndicatorClaim', () => {
   it('reports the plugin that claims the name', () => {
-    expect(findPluginIndicatorClaim('database', new Set(['database-plugin'])))
-      .toBe('database-plugin');
-    expect(findPluginIndicatorClaim('static-files', new Set(['static-plugin'])))
-      .toBe('static-plugin');
+    expect(findPluginIndicatorClaim('database', new Set(['database-plugin']))).toBe(
+      'database-plugin',
+    );
+    expect(findPluginIndicatorClaim('static-files', new Set(['static-plugin']))).toBe(
+      'static-plugin',
+    );
     // A plugin may claim more than one name (M107/M108: the outbox and inbox indicators).
-    expect(findPluginIndicatorClaim('messaging', new Set(['messaging-plugin'])))
-      .toBe('messaging-plugin');
-    expect(findPluginIndicatorClaim('outbox', new Set(['messaging-plugin'])))
-      .toBe('messaging-plugin');
-    expect(findPluginIndicatorClaim('inbox', new Set(['messaging-plugin'])))
-      .toBe('messaging-plugin');
+    expect(findPluginIndicatorClaim('messaging', new Set(['messaging-plugin']))).toBe(
+      'messaging-plugin',
+    );
+    expect(findPluginIndicatorClaim('outbox', new Set(['messaging-plugin']))).toBe(
+      'messaging-plugin',
+    );
+    expect(findPluginIndicatorClaim('inbox', new Set(['messaging-plugin']))).toBe(
+      'messaging-plugin',
+    );
   });
 
   it('reports nothing when the claiming plugin is not installed', () => {
@@ -34,8 +39,9 @@ describe('findPluginIndicatorClaim', () => {
   });
 
   it('reports nothing for a name no plugin claims', () => {
-    expect(findPluginIndicatorClaim('billing-schema', new Set(['database-plugin'])))
-      .toBe(undefined);
+    expect(findPluginIndicatorClaim('billing-schema', new Set(['database-plugin']))).toBe(
+      undefined,
+    );
   });
 
   it('records only kebab-case identifiers, since that is all a name can derive to', () => {

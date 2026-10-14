@@ -154,9 +154,9 @@ export function createInjectedClientLoader(
   return objectIdCtor === undefined
     ? { createClient: (): Promise<IMongoClient> => Promise.resolve(client) }
     : {
-      createClient: (): Promise<IMongoClient> => Promise.resolve(client),
-      objectIdCtor,
-    };
+        createClient: (): Promise<IMongoClient> => Promise.resolve(client),
+        objectIdCtor,
+      };
 }
 
 /**
@@ -171,7 +171,7 @@ export function createInjectedClientLoader(
  * @since 0.2.0
  */
 export async function createLazyClientLoader(url: string): Promise<MongoClientLoader> {
-  const mod = await import('mongodb') as unknown as MongoSdkModule;
+  const mod = (await import('mongodb')) as unknown as MongoSdkModule;
   return {
     createClient: (): Promise<IMongoClient> => Promise.resolve(new mod.MongoClient(url)),
     objectIdCtor: mod.ObjectId,

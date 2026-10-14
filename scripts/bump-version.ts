@@ -173,9 +173,10 @@ export function rewriteReferences(
   );
   const fromLine = minorLine(from);
   const toLine = minorLine(to);
-  const short = path.endsWith('deno.lock') && fromLine !== toLine
-    ? new RegExp(String.raw`(@setu-ts/[a-z0-9-]+@)${escapeRegExp(fromLine)}(?![\d.-])`, 'g')
-    : null;
+  const short =
+    path.endsWith('deno.lock') && fromLine !== toLine
+      ? new RegExp(String.raw`(@setu-ts/[a-z0-9-]+@)${escapeRegExp(fromLine)}(?![\d.-])`, 'g')
+      : null;
 
   const exempt = exemptLines(path, source);
   const lines = source.split('\n');
@@ -210,7 +211,9 @@ function exemptLines(path: string, source: string): Set<number> {
     let blockStart = 0;
     let marked = false;
     const flush = (end: number): void => {
-      if (marked) { for (let i = blockStart; i < end; i += 1) exempt.add(i); }
+      if (marked) {
+        for (let i = blockStart; i < end; i += 1) exempt.add(i);
+      }
     };
     for (const [index, line] of lines.entries()) {
       if (/^\s*>?\s*$/.test(line)) {
@@ -269,10 +272,7 @@ function replaceOnce(source: string, pattern: RegExp, replacement: string): stri
  * @param options - The versions, the date and the workspace members
  * @returns The edits, the residual operator steps, and any refusal
  */
-export function planBump(
-  files: ReadonlyMap<string, string>,
-  options: BumpOptions,
-): BumpPlan {
+export function planBump(files: ReadonlyMap<string, string>, options: BumpOptions): BumpPlan {
   const { from, to, date, members } = options;
   const refusals: string[] = [];
   const residual: string[] = [];
@@ -461,8 +461,9 @@ export function planBump(
   const toLine = minorLine(to);
   if (checkDocs !== undefined && !to.includes('-')) {
     const arrayMatch =
-      /export const POST_ALPHA_MINOR_LINES: readonly string\[\] = \[\n([\s\S]*?)\n\];/
-        .exec(checkDocs);
+      /export const POST_ALPHA_MINOR_LINES: readonly string\[\] = \[\n([\s\S]*?)\n\];/.exec(
+        checkDocs,
+      );
     if (arrayMatch === null) {
       refusals.push(
         `${CHECK_DOCS_FILE}: POST_ALPHA_MINOR_LINES was not found in its expected shape.`,
@@ -542,9 +543,14 @@ export const productionDeps: MainDeps = {
 
 /** Files read as text: anything tracked whose bytes carry no NUL. */
 export async function readTrackedText(): Promise<Map<string, string>> {
-  const list = await new Deno.Command('git', { args: ['ls-files', '-z'], stdout: 'piped' })
-    .output();
-  const paths = new TextDecoder().decode(list.stdout).split('\0').filter((p) => p !== '');
+  const list = await new Deno.Command('git', {
+    args: ['ls-files', '-z'],
+    stdout: 'piped',
+  }).output();
+  const paths = new TextDecoder()
+    .decode(list.stdout)
+    .split('\0')
+    .filter((p) => p !== '');
   const files = new Map<string, string>();
   const decoder = new TextDecoder('utf-8', { fatal: true });
   for (const path of paths) {
@@ -565,8 +571,10 @@ export async function readTrackedText(): Promise<Map<string, string>> {
 }
 
 export async function workingTreeIsClean(): Promise<boolean> {
-  const status = await new Deno.Command('git', { args: ['status', '--porcelain'], stdout: 'piped' })
-    .output();
+  const status = await new Deno.Command('git', {
+    args: ['status', '--porcelain'],
+    stdout: 'piped',
+  }).output();
   return new TextDecoder().decode(status.stdout).trim() === '';
 }
 
@@ -586,7 +594,7 @@ export async function main(
   const dryRun = args.includes('--dry-run');
   const allowDirty = args.includes('--allow-dirty');
   const dateIndex = args.indexOf('--date');
-  const date = dateIndex === -1 ? deps.today() : args[dateIndex + 1] ?? '';
+  const date = dateIndex === -1 ? deps.today() : (args[dateIndex + 1] ?? '');
   if (to === undefined) {
     deps.error('usage: release:bump <version> [--dry-run] [--date YYYY-MM-DD] [--allow-dirty]');
     return false;

@@ -183,7 +183,7 @@ describe('SchedulerPlugin acquire bound (M101a V8-24)', () => {
       RangeError,
     );
     expect(() =>
-      SchedulerPlugin({ distributedLock: { acquireTimeoutMs: 100, commandTimeoutMs: 200 } })
+      SchedulerPlugin({ distributedLock: { acquireTimeoutMs: 100, commandTimeoutMs: 200 } }),
     ).toThrow('must not exceed distributedLock.acquireTimeoutMs');
   });
 

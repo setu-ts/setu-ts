@@ -153,9 +153,10 @@ export function shippingSection(
 ): { readonly heading: string; readonly version: string; readonly body: string } {
   const sections = splitSections(changelog);
   const unreleased = sections.find((section) => section.version === 'Unreleased');
-  const shipping = unreleased !== undefined && unreleased.body.trim() !== ''
-    ? unreleased
-    : sections.find((section) => section.version === version);
+  const shipping =
+    unreleased !== undefined && unreleased.body.trim() !== ''
+      ? unreleased
+      : sections.find((section) => section.version === version);
   if (shipping === undefined) {
     throw new Error(
       `CHANGELOG.md has neither a non-empty '## [Unreleased]' section nor a '## [${version}]' ` +
@@ -209,8 +210,8 @@ export function checkChangelogPrs(
   const sections = splitSections(changelog);
   const shipping = shippingSection(changelog, version);
   // By version, not identity: `shippingSection` parses its own copy.
-  const published = sections.filter((section) =>
-    section.version !== shipping.version && section.version !== 'Unreleased'
+  const published = sections.filter(
+    (section) => section.version !== shipping.version && section.version !== 'Unreleased',
   );
 
   const findings: ChangelogPrFinding[] = [];
@@ -253,8 +254,7 @@ export async function runGit(args: readonly string[]): Promise<string> {
     args: [...args],
     stdout: 'piped',
     stderr: 'piped',
-  })
-    .output();
+  }).output();
   if (!output.success) {
     throw new Error(
       `git ${args.join(' ')} failed: ${new TextDecoder().decode(output.stderr).trim()}`,
@@ -283,8 +283,9 @@ export async function mergedPullRequests(
       .split('\n')
       .filter((tag) => tag.trim() !== '');
     const describeFrom = tagsAtHead.length === 0 ? 'HEAD' : 'HEAD^';
-    previousTag = (await git(['describe', '--tags', '--abbrev=0', '--match', 'v*', describeFrom]))
-      .trim();
+    previousTag = (
+      await git(['describe', '--tags', '--abbrev=0', '--match', 'v*', describeFrom])
+    ).trim();
   } catch (error: unknown) {
     throw new Error(
       'No release tag is reachable from HEAD, so merged pull requests cannot be listed. ' +
@@ -318,11 +319,15 @@ export function describeFindings(result: ChangelogPrResult): readonly string[] {
   return result.findings.map((finding) => {
     const pr = `PR #${finding.pr.number} (${finding.pr.branch})`;
     if (finding.kind === 'missing') {
-      return `${pr} merged since the previous tag but ${result.shippingSection} names no entry ` +
+      return (
+        `${pr} merged since the previous tag but ${result.shippingSection} names no entry ` +
         `carrying \`${finding.expectedToken}\` — add one, or name the PR as \`${finding.expectedToken}\`` +
-        ` in the entry that already covers it.`;
+        ` in the entry that already covers it.`
+      );
     }
-    return `${pr} has an entry filed under \`${finding.foundIn}\`, which was published before this ` +
-      `PR merged — move it into ${result.shippingSection}.`;
+    return (
+      `${pr} has an entry filed under \`${finding.foundIn}\`, which was published before this ` +
+      `PR merged — move it into ${result.shippingSection}.`
+    );
   });
 }

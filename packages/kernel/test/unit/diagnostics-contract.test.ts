@@ -37,8 +37,9 @@ describe('DiagnosticsCollector — snapshot contract', () => {
       durationMs: null,
     });
     const batch = collector.read(0);
-    expect(batch.events.every((event) => event.atMs === null && event.durationMs === null))
-      .toBe(true);
+    expect(batch.events.every((event) => event.atMs === null && event.durationMs === null)).toBe(
+      true,
+    );
   });
 
   it('deep-freezes snapshots and batches, and caches until a mutation', () => {
@@ -193,9 +194,7 @@ describe('DiagnosticsCollector — snapshot contract', () => {
     collector.observeLifecycleEvent(collector.beginOperation(), 'bootstrap', null, 'ok');
     collector.markClosed(false);
     expect(() => collector.read(2)).toThrow('beyond the current sequence');
-    expect(() => collector.read(Number.MAX_SAFE_INTEGER)).toThrow(
-      'beyond the current sequence',
-    );
+    expect(() => collector.read(Number.MAX_SAFE_INTEGER)).toThrow('beyond the current sequence');
   });
 });
 
@@ -326,10 +325,7 @@ describe('DiagnosticsCollector — events', () => {
       reader: (() => { activeSpanContext?(): unknown } | undefined) | undefined,
     ): DiagnosticsEvent => {
       const collector = collectorWith();
-      collector.initializeRuntime(
-        { uuid: () => 'u', hrtime: () => 0 },
-        reader as never,
-      );
+      collector.initializeRuntime({ uuid: () => 'u', hrtime: () => 0 }, reader as never);
       const ctx: object = {};
       collector.beginRequestOperation(ctx);
       collector.endRequestOperation(ctx, { outcome: 'ok', statusCode: 200 });
@@ -397,9 +393,7 @@ describe('DiagnosticsCollector — topology', () => {
     expect(api?.version).toBeUndefined();
     const unlisted = snapshot.nodes.find((node) => node.kind === 'plugin' && !node.label);
     expect(unlisted).toBeDefined();
-    expect(
-      snapshot.nodes.some((node) => node.label === 'secret-capability'),
-    ).toBe(false);
+    expect(snapshot.nodes.some((node) => node.label === 'secret-capability')).toBe(false);
     const database = snapshot.nodes.find((node) => node.label === 'database');
     expect(database?.registered).toBe(false);
   });
@@ -423,9 +417,7 @@ describe('DiagnosticsCollector — topology', () => {
     // A capability never declared by a plugin is created on its registration.
     const indicator = snapshot.nodes.find((node) => node.label === 'indicator');
     expect(indicator?.registered).toBe(true);
-    expect(
-      snapshot.edges.some((edge) => edge.kind === 'owns' && edge.from!.length > 0),
-    ).toBe(true);
+    expect(snapshot.edges.some((edge) => edge.kind === 'owns' && edge.from!.length > 0)).toBe(true);
     // Unregister reports the registration as no longer present.
     collector.capabilityRegistrationObserved({ kind: 'unregister', token: 'db' }, 'api');
     expect(collector.snapshot().nodes.find((node) => node.label === 'db')?.registered).toBe(false);
@@ -434,9 +426,7 @@ describe('DiagnosticsCollector — topology', () => {
       { kind: 'register-single', token: 'orphan' },
       undefined,
     );
-    expect(
-      collector.snapshot().edges.filter((edge) => edge.kind === 'owns').length,
-    ).toBe(2);
+    expect(collector.snapshot().edges.filter((edge) => edge.kind === 'owns').length).toBe(2);
   });
 
   it('captures routes with projected methods, positions, and middleware stages', () => {
@@ -470,8 +460,8 @@ describe('DiagnosticsCollector — topology', () => {
     expect(route?.method).toBe('GET');
     expect(route?.label).toBe('GET /users');
     // The unsupported method is omitted, never widened.
-    const traceRoute = snapshot.nodes.find((node) =>
-      node.label === undefined && node.kind === 'route'
+    const traceRoute = snapshot.nodes.find(
+      (node) => node.label === undefined && node.kind === 'route',
     );
     expect(traceRoute?.method).toBeUndefined();
     // Route middleware stages carry only id and position.
@@ -495,8 +485,8 @@ describe('DiagnosticsCollector — topology', () => {
     const auth = snapshot.nodes.find((node) => node.label === 'auth');
     expect(auth?.priority).toBe(20);
     expect(auth?.position).toBe(1);
-    const anonymous = snapshot.nodes.find((node) =>
-      node.label === undefined && node.kind === 'middleware'
+    const anonymous = snapshot.nodes.find(
+      (node) => node.label === undefined && node.kind === 'middleware',
     );
     expect(anonymous?.position).toBe(2);
   });
@@ -518,8 +508,9 @@ describe('DiagnosticsCollector — topology', () => {
     expect(snapshot.truncated).toBe(true);
     // Every edge kept names two retained nodes: no dangling endpoints.
     const nodeIds = new Set(snapshot.nodes.map((node) => node.id));
-    expect(snapshot.edges.every((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to)))
-      .toBe(true);
+    expect(snapshot.edges.every((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))).toBe(
+      true,
+    );
   });
 
   it('snapshot cache survives request events but rebuilds on drops', () => {

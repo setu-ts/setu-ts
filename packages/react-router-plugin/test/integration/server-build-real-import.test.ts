@@ -20,7 +20,7 @@ import { assembleHandler } from '../../src/handler/server-build.ts';
 // absent optional dependency does not turn the suite red.
 let rrModule: Record<string, unknown> | null = null;
 try {
-  rrModule = await import('react-router') as unknown as Record<string, unknown>;
+  rrModule = (await import('react-router')) as unknown as Record<string, unknown>;
 } catch {
   rrModule = null;
 }

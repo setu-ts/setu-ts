@@ -228,20 +228,19 @@ export interface ResolvedDiscoveryOptions {
  * @returns Options with defaults applied
  * @since 0.2.0
  */
-export function resolveOptions(
-  options: ServiceDiscoveryPluginOptions,
-): ResolvedDiscoveryOptions {
-  const watchIntervalMs = 'watchIntervalMs' in options && options.watchIntervalMs !== undefined
-    ? options.watchIntervalMs
-    : 30_000;
+export function resolveOptions(options: ServiceDiscoveryPluginOptions): ResolvedDiscoveryOptions {
+  const watchIntervalMs =
+    'watchIntervalMs' in options && options.watchIntervalMs !== undefined
+      ? options.watchIntervalMs
+      : 30_000;
 
-  const waitSeconds = options.provider === 'consul' && options.waitSeconds !== undefined
-    ? Math.min(options.waitSeconds, MAX_WAIT_SECONDS)
-    : 30;
+  const waitSeconds =
+    options.provider === 'consul' && options.waitSeconds !== undefined
+      ? Math.min(options.waitSeconds, MAX_WAIT_SECONDS)
+      : 30;
 
-  const ejection: Required<EjectionOptions> | false = options.ejection === false
-    ? false
-    : { ...DEFAULT_EJECTION, ...(options.ejection ?? {}) };
+  const ejection: Required<EjectionOptions> | false =
+    options.ejection === false ? false : { ...DEFAULT_EJECTION, ...(options.ejection ?? {}) };
 
   const base = {
     cacheTtlMs: options.cacheTtlMs !== undefined ? options.cacheTtlMs : 30_000,

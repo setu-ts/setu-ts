@@ -110,22 +110,10 @@
     "scripts/codemods"
   ],
   "lint": {
-    "exclude": [
-      "website",
-      "scripts/codemods",
-      "vitest.config.ts",
-      "test/node"
-    ],
+    "exclude": ["website", "scripts/codemods", "vitest.config.ts", "test/node"],
     "rules": {
-      "tags": [
-        "recommended"
-      ],
-      "include": [
-        "no-eval",
-        "no-sync-fn-in-async-fn",
-        "no-console",
-        "verbatim-module-syntax"
-      ]
+      "tags": ["recommended"],
+      "include": ["no-eval", "no-sync-fn-in-async-fn", "no-console", "verbatim-module-syntax"]
     }
   },
   "fmt": {
@@ -181,8 +169,6 @@
     "drizzle-orm/": "npm:drizzle-orm@0.45.2/"
   },
   "publish": {
-    "exclude": [
-      "**/test"
-    ]
+    "exclude": ["**/test"]
   }
 }

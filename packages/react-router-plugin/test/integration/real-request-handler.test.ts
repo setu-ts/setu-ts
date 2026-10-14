@@ -22,7 +22,7 @@ import { servicesContext, userContext } from '../../src/handler/context-keys.ts'
 // is unavailable, rather than reporting a failure for an absent package.
 let rrModule: Record<string, unknown> | null = null;
 try {
-  rrModule = await import('react-router') as unknown as Record<string, unknown>;
+  rrModule = (await import('react-router')) as unknown as Record<string, unknown>;
 } catch {
   rrModule = null;
 }
@@ -198,10 +198,7 @@ describe('real createRequestHandler — loadContext contract', { skip: rrModule 
     );
 
     // This is what the plugin passed before the fix: `{ services, user }`.
-    const response = await handler(
-      new Request('http://localhost/'),
-      { services: {} } as unknown,
-    );
+    const response = await handler(new Request('http://localhost/'), { services: {} } as unknown);
 
     expect(response.status).toBe(500);
   });

@@ -123,13 +123,7 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-      const logger = await createLogger(
-        transport,
-        level,
-        runtime,
-        options,
-        loggerRedaction,
-      );
+      const logger = await createLogger(transport, level, runtime, options, loggerRedaction);
 
       // X34-2: every record names the trace it was emitted in, so an operator
       // holding a trace id can find the log lines and vice versa.
@@ -146,21 +140,19 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
       // reports nothing and the record is byte-identical to an undecorated one.
       ctx.services.register<ILogger>(
         CAPABILITIES.LOGGER,
-        new TraceEnrichedLogger(
-          logger,
-          () =>
-            ctx.services.has(CAPABILITIES.TELEMETRY)
-              ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
-              : undefined,
+        new TraceEnrichedLogger(logger, () =>
+          ctx.services.has(CAPABILITIES.TELEMETRY)
+            ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
+            : undefined,
         ),
       );
 
       if (requestLogging) {
         const middlewareOptions: RequestLoggerOptions = buildRequestLoggerOptions(options);
-        ctx.middleware.add(
-          createRequestLoggerMiddleware(middlewareOptions),
-          { name: 'request-logger', priority: PLUGIN_PRIORITY.HIGH },
-        );
+        ctx.middleware.add(createRequestLoggerMiddleware(middlewareOptions), {
+          name: 'request-logger',
+          priority: PLUGIN_PRIORITY.HIGH,
+        });
       }
     },
   };
@@ -264,8 +256,8 @@ function resolveRedaction(
   return redaction === undefined
     ? undefined
     : 'redactRecord' in redaction
-    ? redaction
-    : createRedactionService(redaction);
+      ? redaction
+      : createRedactionService(redaction);
 }
 
 /**

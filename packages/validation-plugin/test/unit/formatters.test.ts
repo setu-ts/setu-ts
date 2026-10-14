@@ -89,10 +89,7 @@ describe('nestjsFormatter', () => {
 
     expect(result.statusCode).toBe(400);
     expect(result.error).toBe('Bad Request');
-    expect(result.message).toEqual([
-      'email: Invalid email',
-      'age: Must be a number',
-    ]);
+    expect(result.message).toEqual(['email: Invalid email', 'age: Must be a number']);
     expect(result.errors).toHaveLength(2);
   });
 
@@ -198,7 +195,8 @@ describe('the deprecated rfc7807Formatter alias', () => {
 
   it('produces a byte-identical body, so migrating changes nothing on the wire', () => {
     const ctx = createFakeContext({ request: { path: '/api/users' } }).ctx;
-    expect(JSON.stringify(rfc7807Formatter(ISSUES, ctx)))
-      .toBe(JSON.stringify(rfc9457Formatter(ISSUES, ctx)));
+    expect(JSON.stringify(rfc7807Formatter(ISSUES, ctx))).toBe(
+      JSON.stringify(rfc9457Formatter(ISSUES, ctx)),
+    );
   });
 });

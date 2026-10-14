@@ -89,15 +89,17 @@ function ceremonyRoute(
   run: (ctx: IRequestContext) => Promise<PasskeyRefusal | null>,
 ): RouteDefinition {
   return {
-    middleware: [async (ctx, next) => {
-      const refusal = await run(ctx);
-      if (refusal !== null) {
-        const status = REFUSAL_STATUS[refusal];
-        respondWithError(ctx, { status, title: statusTitle(status), detail: refusal });
-        return;
-      }
-      await next();
-    }],
+    middleware: [
+      async (ctx, next) => {
+        const refusal = await run(ctx);
+        if (refusal !== null) {
+          const status = REFUSAL_STATUS[refusal];
+          respondWithError(ctx, { status, title: statusTitle(status), detail: refusal });
+          return;
+        }
+        await next();
+      },
+    ],
     handler: (ctx) => ctx.response.json(ctx.state.get(RESULT_STATE_KEY)),
   };
 }

@@ -98,11 +98,7 @@ class AppController {
 }
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    DiPlugin(),
-    DecoratorPlugin({ controllers: [AppController] }),
-  ],
+  plugins: [RuntimePlugin(), DiPlugin(), DecoratorPlugin({ controllers: [AppController] })],
 });
 
 await app.start({ port: 3000 });
@@ -339,10 +335,12 @@ export class AuthGuard implements CanActivate {
 ```typescript
 import { AuthPlugin, requireAuth, requireRole } from '@setu-ts/auth-plugin';
 
-app.register(AuthPlugin({
-  jwt: { secret: 'replace-with-a-secret-from-configuration' },
-  rbac: { roles: { admin: { permissions: ['*'] } } },
-}));
+app.register(
+  AuthPlugin({
+    jwt: { secret: 'replace-with-a-secret-from-configuration' },
+    rbac: { roles: { admin: { permissions: ['*'] } } },
+  }),
+);
 
 // Guards attach per route, like @UseGuards. An unauthenticated request answers 401
 // and a principal without the role answers 403, before the handler runs.
@@ -521,14 +519,16 @@ const database = defineConfigSection({
   schema: z.object({ URL: z.string().url() }),
 });
 
-app.register(ConfigPlugin({
-  // Optional: load .env files before reading `runtime.env` (requires a
-  // runtime with filesystem support). Validate with a structural schema
-  // (e.g. Zod) via `validationSchema` — `ConfigPluginOptions` has no `validate`
-  // field.
-  envFilePath: '.env',
-  sections: [database],
-}));
+app.register(
+  ConfigPlugin({
+    // Optional: load .env files before reading `runtime.env` (requires a
+    // runtime with filesystem support). Validate with a structural schema
+    // (e.g. Zod) via `validationSchema` — `ConfigPluginOptions` has no `validate`
+    // field.
+    envFilePath: '.env',
+    sections: [database],
+  }),
+);
 
 // Usage
 const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
@@ -580,12 +580,14 @@ import { DatabasePlugin, type IDatabaseService } from '@setu-ts/database-plugin'
 // output, e.g. `import { PrismaClient } from './generated/prisma/client.ts';`
 declare const myPrismaClient: unknown;
 
-app.register(DatabasePlugin({
-  type: 'prisma',
-  options: {
-    prismaClient: myPrismaClient,
-  },
-}));
+app.register(
+  DatabasePlugin({
+    type: 'prisma',
+    options: {
+      prismaClient: myPrismaClient,
+    },
+  }),
+);
 
 // Usage — IDatabaseService.getRepository() returns IRepository, not raw CRUD.
 const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
@@ -621,10 +623,12 @@ import { CachePlugin } from '@setu-ts/cache-plugin';
 // `store` selects the backend; store-specific config lives under `options`
 // (a `CacheStoreOptions`), not a top-level `redis` field. For Redis, pass the
 // connection URL (or inject an ioredis-compatible `client`).
-app.register(CachePlugin({
-  store: 'redis',
-  options: { url: 'redis://localhost:6379' },
-}));
+app.register(
+  CachePlugin({
+    store: 'redis',
+    options: { url: 'redis://localhost:6379' },
+  }),
+);
 
 // Usage — ICacheStore uses the token 'cache' (CAPABILITIES.CACHE), stores value
 // with numeric TTL seconds (not an options bag), and deletes with delete().
@@ -665,9 +669,11 @@ const CreateUserDto = z.object({
 });
 
 // Usage with validation plugin
-app.register(ValidationPlugin({
-  errorFormat: 'default',
-}));
+app.register(
+  ValidationPlugin({
+    errorFormat: 'default',
+  }),
+);
 
 // Or manual validation
 app.router.post('/users', async (ctx) => {
@@ -721,7 +727,11 @@ import type { IRequestContext } from '@setu-ts/common';
 // JSX, so every interpolation is escaped by the rendering runtime. A plain
 // template literal is a `string`, returned unchanged with nothing escaped.
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+  <ul>
+    {props.users.map((user) => (
+      <li>{user}</li>
+    ))}
+  </ul>
 );
 
 @Controller('/pages')
@@ -798,14 +808,16 @@ describe('UsersController', () => {
   beforeEach(async () => {
     const module = await Test.createTestingModule({
       controllers: [UsersController],
-      providers: [{
-        provide: UserService,
-        useValue: {
-          findAll: () => [],
-          findById: (_id: string) => null,
-          create: (_dto: CreateUserDto) => ({}),
+      providers: [
+        {
+          provide: UserService,
+          useValue: {
+            findAll: () => [],
+            findById: (_id: string) => null,
+            create: (_dto: CreateUserDto) => ({}),
+          },
         },
-      }],
+      ],
     }).compile();
 
     controller = module.get<UsersController>(UsersController);

@@ -170,9 +170,7 @@ function buildCells(
  * @param data - The update payload
  * @returns The fields carrying a value
  */
-function writtenFields(
-  data: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
+function writtenFields(data: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const written: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(data)) {
     if (value !== undefined) written[field] = value;
@@ -270,9 +268,7 @@ export function createBigtableDataSource(
     return filter === undefined || matchesFilter(row, filter);
   };
 
-  const readEntities = async (
-    read: BigtableReadOptions,
-  ): Promise<Record<string, unknown>[]> => {
+  const readEntities = async (read: BigtableReadOptions): Promise<Record<string, unknown>[]> => {
     const rows = await table.readRows(read);
     return rows.map((row) => decodeRow(target, index, row));
   };
@@ -286,13 +282,13 @@ export function createBigtableDataSource(
     async findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]> {
       const plan = planBigtableScan(target, query);
       if (plan.empty) return [];
-      const entities = (await readEntities(plan.read))
-        .filter((row) => matches(row, query.where, query.filter));
+      const entities = (await readEntities(plan.read)).filter((row) =>
+        matches(row, query.where, query.filter),
+      );
       // Rows arrive in row-key order, which IS the only order this adapter
       // serves, so no client-side sort exists to drift from the scan.
-      const limited = !plan.serverLimited && query.limit > 0
-        ? entities.slice(0, query.limit)
-        : entities;
+      const limited =
+        !plan.serverLimited && query.limit > 0 ? entities.slice(0, query.limit) : entities;
       return limited.map((row) => projectFields(row, query.select) as Record<string, unknown>);
     },
 
@@ -300,9 +296,7 @@ export function createBigtableDataSource(
       return await readOne(composeRowKey(target, id, 'findById'));
     },
 
-    async create(
-      data: Partial<Record<string, unknown>>,
-    ): Promise<Record<string, unknown>> {
+    async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
       const rowKey = composeRowKeyFromFields(target, data, 'create');
       const cells = buildCells(target, index, data, 'create');
       const persisted = { ...data } as Record<string, unknown>;
@@ -370,8 +364,10 @@ export function createBigtableDataSource(
         );
       }
       const updated = await readOne(rowKey);
-      return updated ??
-        ({ ...keyFieldsOf(target, id), ...writtenFields(data) } as Record<string, unknown>);
+      return (
+        updated ??
+        ({ ...keyFieldsOf(target, id), ...writtenFields(data) } as Record<string, unknown>)
+      );
     },
 
     async delete(id: EntityKey): Promise<boolean> {
@@ -387,41 +383,50 @@ export function createBigtableDataSource(
       });
     },
 
-    ...(buffer !== undefined ? {} : {
-      async updateWhere(id, where, data) {
-        const checked = checkWritePrecondition(where, data);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
-        }
-        where = checked.where;
-        data = checked.data;
-        const rowKey = composeRowKey(target, id, 'updateWhere');
-        const test = preconditionTest(target, where);
-        if (test === null) return null;
-        assertKeyUnchanged(target, id, data);
-        const cells = buildCells(target, index, data, 'update');
-        const matched = await table.row(rowKey).conditionalMutate(test, {
-          onMatch: [{ method: 'insert', data: cells }],
-        });
-        return matched ? await readOne(rowKey) : null;
-      },
-      async deleteWhere(id, where) {
-        const checked = checkWritePrecondition(where);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
-        }
-        where = checked.where;
-        const rowKey = composeRowKey(target, id, 'deleteWhere');
-        const test = preconditionTest(target, where);
-        if (test === null) return false;
-        return await table.row(rowKey).conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
-      },
-    } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>),
+    ...(buffer !== undefined
+      ? {}
+      : ({
+          async updateWhere(id, where, data) {
+            const checked = checkWritePrecondition(where, data);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                ADAPTER,
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            data = checked.data;
+            const rowKey = composeRowKey(target, id, 'updateWhere');
+            const test = preconditionTest(target, where);
+            if (test === null) return null;
+            assertKeyUnchanged(target, id, data);
+            const cells = buildCells(target, index, data, 'update');
+            const matched = await table.row(rowKey).conditionalMutate(test, {
+              onMatch: [{ method: 'insert', data: cells }],
+            });
+            return matched ? await readOne(rowKey) : null;
+          },
+          async deleteWhere(id, where) {
+            const checked = checkWritePrecondition(where);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                ADAPTER,
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            const rowKey = composeRowKey(target, id, 'deleteWhere');
+            const test = preconditionTest(target, where);
+            if (test === null) return false;
+            return await table
+              .row(rowKey)
+              .conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
+          },
+        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
 
-    async count(
-      where: Record<string, unknown>,
-      filter?: FilterExpression,
-    ): Promise<number> {
+    async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
       const needsValues = Object.keys(where).length > 0 || filter !== undefined;
       const query: NormalizedQuery = {
         where,
@@ -463,8 +468,8 @@ export function createBigtableDataSource(
         const rows = plan.empty
           ? []
           : (await readEntities(plan.read)).filter((row) =>
-            matches(row, query.where, query.filter)
-          );
+              matches(row, query.where, query.filter),
+            );
         return { rows: rows.map(project), nextCursor: null };
       }
 

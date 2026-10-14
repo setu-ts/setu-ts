@@ -16,10 +16,7 @@ describe('testing package — e2e', () => {
     // tier where exercising real dependencies is the point. fetch() requires
     // an HTTP adapter, which only the real RuntimePlugin provides.
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        ...fixtures.plugins(),
-      ],
+      plugins: [RuntimePlugin(), ...fixtures.plugins()],
     });
 
     // Register routes on the started app (post-start, verified in integration tests)

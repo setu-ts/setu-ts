@@ -68,10 +68,7 @@ const schema = buildSchema(`
 `);
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    GraphqlPlugin({ schema }),
-  ],
+  plugins: [RuntimePlugin(), GraphqlPlugin({ schema })],
 });
 
 await app.start({ port: 3000 });

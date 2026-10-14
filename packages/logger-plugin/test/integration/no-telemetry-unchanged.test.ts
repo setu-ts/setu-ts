@@ -84,8 +84,7 @@ describe('no telemetry registered — the record is unchanged', () => {
     // Byte-identical apart from the timestamp — no added key, none dropped, no
     // reordering that would change the serialized line.
     expect(withoutTime(throughPlugin)).toEqual(withoutTime(direct));
-    expect(JSON.stringify(withoutTime(throughPlugin)))
-      .toBe(JSON.stringify(withoutTime(direct)));
+    expect(JSON.stringify(withoutTime(throughPlugin))).toBe(JSON.stringify(withoutTime(direct)));
     // And named explicitly, so the intent survives a refactor of the above.
     expect('trace_id' in throughPlugin).toBe(false);
     expect('span_id' in throughPlugin).toBe(false);
@@ -108,8 +107,7 @@ describe('no telemetry registered — the record is unchanged', () => {
     const [direct] = capture(() => reference.child(bindings).warn(MESSAGE, METADATA));
     await app.stop();
 
-    expect(JSON.stringify(withoutTime(throughPlugin)))
-      .toBe(JSON.stringify(withoutTime(direct)));
+    expect(JSON.stringify(withoutTime(throughPlugin))).toBe(JSON.stringify(withoutTime(direct)));
     expect(throughPlugin.requestId).toBe('r-1');
   });
 

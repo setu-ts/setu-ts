@@ -53,13 +53,7 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
     const mapping = {
       Widget: { collection: 'widgets', primaryKey: 'id', idType: 'objectId' as const },
     };
-    const ds = createMongoDataSource(
-      makeClient(),
-      'testdb',
-      'Widget',
-      mapping,
-      fakeObjectIdCtor,
-    );
+    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', mapping, fakeObjectIdCtor);
     const row = await ds.create({ id: '507f1f77bcf86cd799439011' });
     expect(row.id).toBe('507f1f77bcf86cd799439011');
   });
@@ -107,11 +101,13 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
     await ds.create({ name: 'Nut', size: 20 });
     await ds.create({ name: 'Washer', size: 30 });
 
-    const rows = await ds.findAll(query({
-      orderBy: { size: 'desc' },
-      limit: 2,
-      select: ['name'],
-    }));
+    const rows = await ds.findAll(
+      query({
+        orderBy: { size: 'desc' },
+        limit: 2,
+        select: ['name'],
+      }),
+    );
     expect(rows.map((r) => r.name)).toEqual(['Washer', 'Nut']);
     expect(Object.hasOwn(rows[0], 'id')).toBe(false);
     const calls = client.databases.get('testdb')!.collection('Widget').calls;
@@ -140,9 +136,11 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
     const ds = makeDataSource();
     await ds.create({ name: '3.5mm jack' });
     await ds.create({ name: '315mm jack' });
-    const rows = await ds.findAll(query({
-      filter: { type: 'comparison', field: 'name', operator: 'contains', value: '3.5' },
-    }));
+    const rows = await ds.findAll(
+      query({
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: '3.5' },
+      }),
+    );
     // The escaped dot matches only the literal 3.5, not the 315.
     expect(rows.map((r) => r.name)).toEqual(['3.5mm jack']);
   });
@@ -154,9 +152,13 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
     await ds.create({ id: '507f1f77bcf86cd799439012', name: 'second' });
 
     await expect(ds.findAll(query({ where: { id: first.id } }))).resolves.toEqual([first]);
-    await expect(ds.findAll(query({
-      filter: { type: 'comparison', field: 'id', operator: 'eq', value: first.id },
-    }))).resolves.toEqual([first]);
+    await expect(
+      ds.findAll(
+        query({
+          filter: { type: 'comparison', field: 'id', operator: 'eq', value: first.id },
+        }),
+      ),
+    ).resolves.toEqual([first]);
     await expect(ds.count({ id: first.id })).resolves.toBe(1);
     await ds.findAll(query({ orderBy: { id: 'desc' } }));
 
@@ -275,8 +277,9 @@ describe('MongoTransaction — commit, rollback and createDataSource', () => {
     const transaction = new MongoTransaction(session, client, 'testdb', undefined);
     const ds = transaction.createDataSource('Widget');
     await ds.create({ name: 'Bolt' });
-    expect(await ds.count({}, { type: 'comparison', field: 'name', operator: 'eq', value: 'Bolt' }))
-      .toBe(1);
+    expect(
+      await ds.count({}, { type: 'comparison', field: 'name', operator: 'eq', value: 'Bolt' }),
+    ).toBe(1);
     // The data source ran inside the transaction and can still be closed by
     // committing the transaction; the session-bound create() above is what the
     // commit later finalizes.
@@ -311,9 +314,10 @@ describe('update never sends the primary key to the driver', () => {
 
     await ds.update(7, { id: 9, name: 'renamed' });
 
-    const call = client.db('testdb').collection('Widget').calls.find(
-      (c) => c.method === 'findOneAndUpdate',
-    );
+    const call = client
+      .db('testdb')
+      .collection('Widget')
+      .calls.find((c) => c.method === 'findOneAndUpdate');
     const payload = (call?.args[1] as { $set: Record<string, unknown> }).$set;
     expect(payload).toEqual({ name: 'renamed' });
     expect('_id' in payload).toBe(false);
@@ -380,8 +384,9 @@ describe('update strips the primary key before it can be converted', () => {
     const valid = '507f1f77bcf86cd799439011';
     await ds.create({ id: valid, name: 'first' });
 
-    await expect(ds.update(valid, { id: 'not-a-valid-objectid', name: 'renamed' }))
-      .resolves.toMatchObject({ name: 'renamed' });
+    await expect(
+      ds.update(valid, { id: 'not-a-valid-objectid', name: 'renamed' }),
+    ).resolves.toMatchObject({ name: 'renamed' });
   });
 
   it('a stray literal `_id` beside the mapped key never reaches $set', async () => {
@@ -391,9 +396,10 @@ describe('update strips the primary key before it can be converted', () => {
 
     await ds.update(1, { id: 1, _id: 'stray', name: 'renamed' });
 
-    const call = client.db('testdb').collection('Widget').calls.find(
-      (c) => c.method === 'findOneAndUpdate',
-    );
+    const call = client
+      .db('testdb')
+      .collection('Widget')
+      .calls.find((c) => c.method === 'findOneAndUpdate');
     const payload = (call?.args[1] as { $set: Record<string, unknown> }).$set;
     expect(payload).toEqual({ name: 'renamed' });
   });
@@ -473,16 +479,16 @@ describe('composite keys — flat multi-field target', () => {
 
   it('rejects a scalar id with a rejected promise naming the columns', async () => {
     const ds = makeCompositeDataSource();
-    await expect(ds.findById('scalar'))
-      .rejects
-      .toThrow(/needs a composite record for multi-column key/);
+    await expect(ds.findById('scalar')).rejects.toThrow(
+      /needs a composite record for multi-column key/,
+    );
   });
 
   it('rejects a record missing a required column', async () => {
     const ds = makeCompositeDataSource();
-    await expect(ds.findById({ tenantId: 't1' }))
-      .rejects
-      .toThrow(/missing required column 'userId'/);
+    await expect(ds.findById({ tenantId: 't1' })).rejects.toThrow(
+      /missing required column 'userId'/,
+    );
   });
 
   it('findAll leaves the named columns as top-level fields (no _id rename for flat composite)', async () => {
@@ -545,16 +551,16 @@ describe('composite keys — compound _id subdocument (P4/P5)', () => {
 
   it('rejects a scalar id with a rejected promise naming the columns', async () => {
     const ds = makeCompoundDataSource();
-    await expect(ds.findById('scalar'))
-      .rejects
-      .toThrow(/needs a composite record for compound key/);
+    await expect(ds.findById('scalar')).rejects.toThrow(
+      /needs a composite record for compound key/,
+    );
   });
 
   it('rejects a record missing a required column', async () => {
     const ds = makeCompoundDataSource();
-    await expect(ds.findById({ tenantId: 't1' }))
-      .rejects
-      .toThrow(/missing required column 'userId'/);
+    await expect(ds.findById({ tenantId: 't1' })).rejects.toThrow(
+      /missing required column 'userId'/,
+    );
   });
 
   it('findAll wraps the named columns under _id for a compound key', async () => {
@@ -618,11 +624,13 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
     let cursor: string | undefined;
     const seen: string[] = [];
     for (let page = 0; page < 3; page++) {
-      const result = await ds.findPage!(query({
-        orderBy: { size: 'asc' },
-        limit: 2,
-        ...(cursor === undefined ? {} : { cursor }),
-      }));
+      const result = await ds.findPage!(
+        query({
+          orderBy: { size: 'asc' },
+          limit: 2,
+          ...(cursor === undefined ? {} : { cursor }),
+        }),
+      );
       for (const row of result.rows) seen.push(String(row.id));
       cursor = result.nextCursor ?? undefined;
       if (cursor === undefined) break;
@@ -636,16 +644,20 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
     const { ds } = seededClient();
     // Walk to the final page by consuming the cursors.
     const p1 = await ds.findPage!(query({ orderBy: { size: 'asc' }, limit: 2 }));
-    const p2 = await ds.findPage!(query({
-      orderBy: { size: 'asc' },
-      limit: 2,
-      cursor: p1.nextCursor as string,
-    }));
-    const p3 = await ds.findPage!(query({
-      orderBy: { size: 'asc' },
-      limit: 2,
-      cursor: p2.nextCursor as string,
-    }));
+    const p2 = await ds.findPage!(
+      query({
+        orderBy: { size: 'asc' },
+        limit: 2,
+        cursor: p1.nextCursor as string,
+      }),
+    );
+    const p3 = await ds.findPage!(
+      query({
+        orderBy: { size: 'asc' },
+        limit: 2,
+        cursor: p2.nextCursor as string,
+      }),
+    );
     // Six rows over three pages of two: the last page is a full page of two,
     // and the probe fetched exactly two (no extra), so nextCursor is null.
     expect(p3.nextCursor).toBeNull();
@@ -661,11 +673,13 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
     expect(p1.nextCursor).not.toBeNull();
 
     // Second page: assert on the recorded driver arguments.
-    const p2 = await ds.findPage!(query({
-      orderBy: { size: 'asc' },
-      limit: 2,
-      cursor: p1.nextCursor as string,
-    }));
+    const p2 = await ds.findPage!(
+      query({
+        orderBy: { size: 'asc' },
+        limit: 2,
+        cursor: p1.nextCursor as string,
+      }),
+    );
     const calls = client.databases.get('testdb')!.collection('Widget').calls;
     const findCall = calls.filter((c) => c.method === 'find').at(-1)!;
     const args = findCall.args as [
@@ -693,33 +707,43 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
 
   it('rejects a malformed cursor token by name (never a synchronous throw)', async () => {
     const { ds } = seededClient();
-    await expect(ds.findPage!(query({
-      orderBy: { size: 'asc' },
-      limit: 2,
-      cursor: 'bm90anNvbg', // base64url of 'notjson' — decodes, fails JSON.parse
-    }))).rejects.toThrow(/malformed cursor token/);
+    await expect(
+      ds.findPage!(
+        query({
+          orderBy: { size: 'asc' },
+          limit: 2,
+          cursor: 'bm90anNvbg', // base64url of 'notjson' — decodes, fails JSON.parse
+        }),
+      ),
+    ).rejects.toThrow(/malformed cursor token/);
   });
 
   it('rejects a cursor whose fingerprint does not match the current sort by name', async () => {
     const { ds } = seededClient();
-    await expect(ds.findPage!(query({
-      orderBy: { size: 'desc' },
-      limit: 2,
-      cursor: encodeCursor({
-        orderedValues: [1],
-        keyValues: [ID.a],
-        sortFingerprint: 'size:asc',
-      }),
-    }))).rejects.toThrow(/cursor fingerprint mismatch/);
+    await expect(
+      ds.findPage!(
+        query({
+          orderBy: { size: 'desc' },
+          limit: 2,
+          cursor: encodeCursor({
+            orderedValues: [1],
+            keyValues: [ID.a],
+            sortFingerprint: 'size:asc',
+          }),
+        }),
+      ),
+    ).rejects.toThrow(/cursor fingerprint mismatch/);
   });
 
   it('strips the key columns from the returned rows when a projection is present', async () => {
     const { client, ds } = seededClient();
-    const result = await ds.findPage!(query({
-      orderBy: { size: 'asc' },
-      limit: 2,
-      select: ['name'],
-    }));
+    const result = await ds.findPage!(
+      query({
+        orderBy: { size: 'asc' },
+        limit: 2,
+        select: ['name'],
+      }),
+    );
     // The caller's projection is what comes back — `id` (a key column) is stripped.
     expect(result.rows[0]).toEqual({ name: 's1a' });
     expect(Object.hasOwn(result.rows[0], 'id')).toBe(false);
@@ -734,16 +758,20 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
 
   it('refuses a query carrying both offset and cursor by name before any call', async () => {
     const { ds } = seededClient();
-    await expect(ds.findPage!(query({
-      orderBy: { size: 'asc' },
-      limit: 2,
-      offset: 1,
-      cursor: encodeCursor({
-        orderedValues: [1],
-        keyValues: [ID.a],
-        sortFingerprint: 'size:asc',
-      }),
-    }))).rejects.toThrow(/offset=1 conflicts with cursor/);
+    await expect(
+      ds.findPage!(
+        query({
+          orderBy: { size: 'asc' },
+          limit: 2,
+          offset: 1,
+          cursor: encodeCursor({
+            orderedValues: [1],
+            keyValues: [ID.a],
+            sortFingerprint: 'size:asc',
+          }),
+        }),
+      ),
+    ).rejects.toThrow(/offset=1 conflicts with cursor/);
   });
 });
 
@@ -769,7 +797,10 @@ describe('scalar-key mapping renames in place (M79 review regression)', () => {
       offset: 0,
       select: [],
     });
-    const call = client.db('testdb').collection('Widget').calls.find((c) => c.method === 'find');
+    const call = client
+      .db('testdb')
+      .collection('Widget')
+      .calls.find((c) => c.method === 'find');
     // `status` must survive; without it the query matches rows it was never
     // asked for — more rows, not fewer, so no assertion on a result COUNT
     // would necessarily catch it.
@@ -779,13 +810,12 @@ describe('scalar-key mapping renames in place (M79 review regression)', () => {
   it('keeps the caller sort and appends the renamed key as the tiebreaker', async () => {
     const client = makeClient();
     const source = makeDataSource(client);
-    for (
-      const row of [
-        { id: 'a', score: 1 },
-        { id: 'b', score: 2 },
-        { id: 'c', score: 3 },
-      ]
-    ) await source.create(row);
+    for (const row of [
+      { id: 'a', score: 1 },
+      { id: 'b', score: 2 },
+      { id: 'c', score: 3 },
+    ])
+      await source.create(row);
 
     const page = await source.findPage!({
       where: {},
@@ -798,13 +828,15 @@ describe('scalar-key mapping renames in place (M79 review regression)', () => {
     const call = client
       .db('testdb')
       .collection('Widget')
-      .calls
-      .filter((c) => c.method === 'find')
+      .calls.filter((c) => c.method === 'find')
       .at(-1);
     const sort = (call?.args[1] as { sort?: Record<string, unknown> } | undefined)?.sort;
     // Both keys, in precedence order: the caller's field FIRST, the renamed
     // key column second. The defect produced `{ _id: 'asc' }` alone.
-    expect(Object.entries(sort ?? {})).toEqual([['score', 'asc'], ['_id', 'asc']]);
+    expect(Object.entries(sort ?? {})).toEqual([
+      ['score', 'asc'],
+      ['_id', 'asc'],
+    ]);
     expect(page.rows.map((r) => r.id)).toEqual(['a', 'b']);
   });
 });
@@ -835,15 +867,13 @@ describe('operator-shaped key values are refused before the driver (M105 audit O
       const client = makeClient();
       const ds = createMongoDataSource(client, 'testdb', entity, mapping);
       const calls = client.db('testdb').collection(entity).calls;
-      for (
-        const attempt of [
-          () => ds.findById(key),
-          () => ds.update(key, { name: 'x' }),
-          () => ds.delete(key),
-          () => ds.updateWhere!(key, { name: 'a' }, { name: 'x' }),
-          () => ds.deleteWhere!(key, { name: 'a' }),
-        ]
-      ) {
+      for (const attempt of [
+        () => ds.findById(key),
+        () => ds.update(key, { name: 'x' }),
+        () => ds.delete(key),
+        () => ds.updateWhere!(key, { name: 'a' }, { name: 'x' }),
+        () => ds.deleteWhere!(key, { name: 'a' }),
+      ]) {
         let synchronous = false;
         let pending: Promise<unknown>;
         try {
@@ -853,7 +883,10 @@ describe('operator-shaped key values are refused before the driver (M105 audit O
           pending = Promise.resolve();
         }
         expect(synchronous).toBe(false);
-        const error = await pending.then(() => undefined, (caught: unknown) => caught);
+        const error = await pending.then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
         expect((error as Error).message).toMatch(/key values must be strings or numbers/);
         expect((error as Error).message).not.toContain('$ne');
       }
@@ -871,14 +904,15 @@ describe('composite key refusals quote no caller value (M105 audit F2-r2)', () =
           ...(idType === undefined ? {} : { idType }),
         },
       });
-      for (
-        const attempt of [
-          () => ds.updateWhere!('canary-key', { name: 'a' }, { name: 'x' }),
-          () => ds.deleteWhere!('canary-key', { name: 'a' }),
-          () => ds.findById('canary-key'),
-        ]
-      ) {
-        const error = await attempt().then(() => undefined, (caught: unknown) => caught);
+      for (const attempt of [
+        () => ds.updateWhere!('canary-key', { name: 'a' }, { name: 'x' }),
+        () => ds.deleteWhere!('canary-key', { name: 'a' }),
+        () => ds.findById('canary-key'),
+      ]) {
+        const error = await attempt().then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
         expect((error as Error).message).toMatch(/got a scalar/);
         expect((error as Error).message).not.toContain('canary-key');
       }

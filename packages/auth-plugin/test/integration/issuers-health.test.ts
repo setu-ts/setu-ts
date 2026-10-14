@@ -38,14 +38,16 @@ async function buildApp(available: () => boolean) {
       AuthPlugin({
         http,
         jwt: { secret: 'self-issued-secret-at-least-32-characters' },
-        issuers: [{
-          name: 'idp',
-          issuer: ISS,
-          audience: 'api',
-          keys: { jwksUri: JWKS },
-          keySet: { ttlMs: 60_000, minRefreshIntervalMs: 1 },
-          toPrincipal: (claims) => ({ id: String(claims.sub), roles: ['from-idp'] }),
-        }],
+        issuers: [
+          {
+            name: 'idp',
+            issuer: ISS,
+            audience: 'api',
+            keys: { jwksUri: JWKS },
+            keySet: { ttlMs: 60_000, minRefreshIntervalMs: 1 },
+            toPrincipal: (claims) => ({ id: String(claims.sub), roles: ['from-idp'] }),
+          },
+        ],
       }),
     ],
   });

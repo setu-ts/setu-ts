@@ -152,15 +152,13 @@ describe('EventsMessagingBridge integration', () => {
     await app.start();
 
     const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-    await broker.respond<{ id: string }, { name: string }>(
-      'user.lookup',
-      (req) => ({ name: `user-${req.id}` }),
-    );
+    await broker.respond<{ id: string }, { name: string }>('user.lookup', (req) => ({
+      name: `user-${req.id}`,
+    }));
 
-    const reply = await broker.request<{ id: string }, { name: string }>(
-      'user.lookup',
-      { id: '42' },
-    );
+    const reply = await broker.request<{ id: string }, { name: string }>('user.lookup', {
+      id: '42',
+    });
 
     expect(reply).toEqual({ name: 'user-42' });
     await app.stop();
@@ -196,11 +194,9 @@ describe('MessagingPlugin arms integration', () => {
     const fakeTransport: import('../../src/brokers/pubsub-broker.ts').IPubSubTransport = {
       publish: () => Promise.resolve(),
       open: () =>
-        Promise.resolve(
-          {
-            close: () => Promise.resolve(),
-          } as import('../../src/brokers/pubsub-broker.ts').IPubSubSubscription,
-        ),
+        Promise.resolve({
+          close: () => Promise.resolve(),
+        } as import('../../src/brokers/pubsub-broker.ts').IPubSubSubscription),
       createSubscription: () => Promise.resolve(),
       deleteSubscription: () => Promise.resolve(),
       close: () => {
@@ -230,11 +226,9 @@ describe('MessagingPlugin arms integration', () => {
     const fakeTransport: import('../../src/brokers/service-bus-broker.ts').IServiceBusTransport = {
       send: () => Promise.resolve(),
       open: () =>
-        Promise.resolve(
-          {
-            close: () => Promise.resolve(),
-          } as import('../../src/brokers/service-bus-broker.ts').IServiceBusSubscription,
-        ),
+        Promise.resolve({
+          close: () => Promise.resolve(),
+        } as import('../../src/brokers/service-bus-broker.ts').IServiceBusSubscription),
       createSubscription: () => Promise.resolve(),
       deleteSubscription: () => Promise.resolve(),
       close: () => Promise.resolve(),
@@ -269,10 +263,7 @@ describe('MessagingPlugin arms integration', () => {
       respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
     };
     const app = createApplication({
-      plugins: [
-        fakeRuntimePlugin(),
-        MessagingPlugin({ broker: 'custom', instance: customBroker }),
-      ],
+      plugins: [fakeRuntimePlugin(), MessagingPlugin({ broker: 'custom', instance: customBroker })],
     });
     await app.start();
     const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);

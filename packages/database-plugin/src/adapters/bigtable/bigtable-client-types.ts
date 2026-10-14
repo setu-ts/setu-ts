@@ -139,11 +139,11 @@ export type BigtableFilter =
   | { readonly interleave: readonly (readonly BigtableFilter[])[] }
   | { readonly chain: readonly BigtableFilter[] }
   | {
-    readonly condition: {
-      readonly test: readonly BigtableFilter[];
-      readonly pass?: readonly BigtableFilter[];
+      readonly condition: {
+        readonly test: readonly BigtableFilter[];
+        readonly pass?: readonly BigtableFilter[];
+      };
     };
-  };
 
 /**
  * What a read asks the server for.
@@ -173,9 +173,9 @@ export interface BigtableReadOptions {
 export type BigtableMutation =
   | { readonly method: 'delete' }
   | {
-    readonly method: 'insert';
-    readonly data: Readonly<Record<string, Readonly<Record<string, string>>>>;
-  };
+      readonly method: 'insert';
+      readonly data: Readonly<Record<string, Readonly<Record<string, string>>>>;
+    };
 
 /**
  * The row-scoped write surface: one atomic check-and-mutate.

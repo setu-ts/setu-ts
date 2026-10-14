@@ -146,10 +146,7 @@ export interface CheckResult {
  * @param files - Files to check
  * @returns The process result
  */
-export async function denoCheck(
-  root: string,
-  files: readonly string[],
-): Promise<CheckResult> {
+export async function denoCheck(root: string, files: readonly string[]): Promise<CheckResult> {
   const command = () =>
     runProcess(denoBinary(), {
       // `--node-modules-dir=none` because a template that also emits a
@@ -380,7 +377,10 @@ export async function withGeneratedServer<T>(
   if (start === undefined) throw new Error(`No start task in ${project}/deno.json.`);
 
   // Everything between `deno run` and the entry module is the permission set.
-  const flags = start.replace(/^deno run\s+/, '').replace(/\s+\S+\.ts$/, '').split(/\s+/)
+  const flags = start
+    .replace(/^deno run\s+/, '')
+    .replace(/\s+\S+\.ts$/, '')
+    .split(/\s+/)
     .filter((flag) => flag.startsWith('--'));
 
   // The port arrives through the environment, exactly as the generated project
@@ -388,18 +388,11 @@ export async function withGeneratedServer<T>(
   // boots a file the CLI never emitted. It also proves `--allow-env` is in the
   // generated permission set: without it this boot fails with NotCapable
   // rather than silently binding a default.
-  const port = workspacePort ?? await unusedPort();
+  const port = workspacePort ?? (await unusedPort());
   const entry = `${project}/main.ts`;
 
   const child = spawnProcess(denoBinary(), {
-    args: [
-      'run',
-      ...flags,
-      '--node-modules-dir=none',
-      '--config',
-      `${project}/deno.json`,
-      entry,
-    ],
+    args: ['run', ...flags, '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
     cwd: project,
     env: { PORT: String(port) },
     stdout: 'piped',
@@ -437,8 +430,9 @@ export async function withGeneratedServer<T>(
   }
 
   const status = await child.status;
-  const output = `${await new Response(child.stdout).text()}${await new Response(child.stderr)
-    .text()}`;
+  const output = `${await new Response(child.stdout).text()}${await new Response(
+    child.stderr,
+  ).text()}`;
   if (!served) {
     throw new Error(`The project never served a request (exit ${status.code}):\n${output}`);
   }

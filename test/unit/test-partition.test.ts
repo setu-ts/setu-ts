@@ -177,19 +177,24 @@ describe('test partition', () => {
     });
 
     it('isolates a suite naming a shared backend, including in a comment', () => {
-      expect(isolationReason('t/a.test.ts', '// guarded on REDIS_URL\n'))
-        .toBe('shared backend (REDIS_URL)');
+      expect(isolationReason('t/a.test.ts', '// guarded on REDIS_URL\n')).toBe(
+        'shared backend (REDIS_URL)',
+      );
     });
 
     it('isolates a subprocess spawner', () => {
-      expect(isolationReason('t/a.test.ts', 'new Deno.Command("deno")'))
-        .toBe('spawns a subprocess');
+      expect(isolationReason('t/a.test.ts', 'new Deno.Command("deno")')).toBe(
+        'spawns a subprocess',
+      );
     });
 
     it('isolates a suite that binds a port', () => {
-      for (
-        const source of ['unusedPort()', 'Deno.listen({})', 'Deno.serve(h)', 'app.start({ port })']
-      ) {
+      for (const source of [
+        'unusedPort()',
+        'Deno.listen({})',
+        'Deno.serve(h)',
+        'app.start({ port })',
+      ]) {
         expect(isolationReason('t/a.test.ts', source)).toBe('binds a port');
       }
     });

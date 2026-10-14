@@ -57,8 +57,8 @@ const hasNpm = await npmAvailable();
 /** The generated `package.json` of a Workers project, minus `@setu-ts/*`. */
 function workersManifest(template: string): Record<string, unknown> {
   const host = resolveHost(getTemplate(template)!, 'cloudflare-workers');
-  const file = projectFiles('edge', 'cloudflare-workers', host).find((candidate) =>
-    candidate.path === 'package.json'
+  const file = projectFiles('edge', 'cloudflare-workers', host).find(
+    (candidate) => candidate.path === 'package.json',
   );
   if (file === undefined) throw new Error(`${template}: no package.json emitted`);
   const manifest = JSON.parse(file.contents) as Record<string, unknown>;
@@ -74,27 +74,33 @@ describe('a Workers scaffold resolves its npm dependencies', () => {
   // npm packages (the full-stack one adds Vite and React Router) and a peer
   // range can break on any of them.
   for (const template of ['rest', 'microservice', 'class-based', 'full-stack']) {
-    it(`npm install resolves for --template ${template}`, {
-      skip: !hasNpm && !onCi,
-    }, async () => {
-      const dir = await tempDir({ prefix: 'setu-workers-install-' });
-      try {
-        const manifest = workersManifest(template);
-        await nodeFs.writeFile(`${dir}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
-        const { code, stdout, stderr } = await runProcess('npm', {
-          args: ['install', '--dry-run', '--ignore-scripts', '--no-audit', '--no-fund'],
-          cwd: dir,
-          stdout: 'piped',
-          stderr: 'piped',
-        });
-        const output = new TextDecoder().decode(stdout) + new TextDecoder().decode(stderr);
+    it(
+      `npm install resolves for --template ${template}`,
+      {
+        skip: !hasNpm && !onCi,
+      },
+      async () => {
+        const dir = await tempDir({ prefix: 'setu-workers-install-' });
+        try {
+          const manifest = workersManifest(template);
+          await nodeFs.writeFile(`${dir}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+          const { code, stdout, stderr } = await runProcess('npm', {
+            args: ['install', '--dry-run', '--ignore-scripts', '--no-audit', '--no-fund'],
+            cwd: dir,
+            stdout: 'piped',
+            stderr: 'piped',
+          });
+          const output = new TextDecoder().decode(stdout) + new TextDecoder().decode(stderr);
 
-        // The output is in the assertion so a failure names the peer that broke.
-        expect({ code, eresolve: output.includes('ERESOLVE') ? output : '' })
-          .toEqual({ code: 0, eresolve: '' });
-      } finally {
-        await nodeFs.rm(dir, { recursive: true });
-      }
-    });
+          // The output is in the assertion so a failure names the peer that broke.
+          expect({ code, eresolve: output.includes('ERESOLVE') ? output : '' }).toEqual({
+            code: 0,
+            eresolve: '',
+          });
+        } finally {
+          await nodeFs.rm(dir, { recursive: true });
+        }
+      },
+    );
   }
 });

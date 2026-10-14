@@ -170,7 +170,7 @@ describe('serializeError', () => {
   it('caps nested aggregate trees with a shared total-node budget', () => {
     const nested = (depth: number): AggregateError =>
       new AggregateError(
-        Array.from({ length: 8 }, () => depth === 0 ? new Error('leaf') : nested(depth - 1)),
+        Array.from({ length: 8 }, () => (depth === 0 ? new Error('leaf') : nested(depth - 1))),
       );
 
     const count = (error: SerializedError): number =>
@@ -249,11 +249,14 @@ describe('serializeError never throws (code review, CodeRabbit)', () => {
   // legal `Error` causes.
   const hostile: [string, unknown][] = [
     ['a null-prototype object', Object.create(null)],
-    ['an object whose toString throws', {
-      toString() {
-        throw new Error('nope');
+    [
+      'an object whose toString throws',
+      {
+        toString() {
+          throw new Error('nope');
+        },
       },
-    }],
+    ],
   ];
 
   for (const [label, value] of hostile) {
@@ -362,8 +365,9 @@ describe('serializeError never throws (code review, CodeRabbit)', () => {
 
 describe('causeMessage', () => {
   it("reports an Error's own message", () => {
-    expect(causeMessage(new Error('Invalid cron expression: not a cron')))
-      .toBe('Invalid cron expression: not a cron');
+    expect(causeMessage(new Error('Invalid cron expression: not a cron'))).toBe(
+      'Invalid cron expression: not a cron',
+    );
   });
 
   it('stringifies a thrown non-Error rather than reporting nothing', () => {

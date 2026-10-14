@@ -56,8 +56,7 @@ export class RemoteHandlerError extends Error {
  */
 export class MessagingNotSupportedError extends Error {
   constructor(
-    message =
-      'This broker does not support request-reply; use in-memory, redis-streams, rabbitmq, or nats',
+    message = 'This broker does not support request-reply; use in-memory, redis-streams, rabbitmq, or nats',
   ) {
     super(message);
     this.name = 'MessagingNotSupportedError';
@@ -146,10 +145,7 @@ export class ChainGateTimeoutError extends Error {
  * @since 0.6.0
  */
 export type IntegrationEventRejectionReason =
-  | 'malformed'
-  | 'type-mismatch'
-  | 'version-mismatch'
-  | 'parse';
+  'malformed' | 'type-mismatch' | 'version-mismatch' | 'parse';
 
 /**
  * Thrown by {@linkcode onIntegrationEvent}'s wrapper when a delivered message
@@ -272,7 +268,9 @@ export class JetStreamStreamError extends Error {
   constructor(stream: string, cause?: unknown) {
     super(
       `JetStream stream "${stream}" could not be ensured. Create the stream ` +
-        'out of band (for example `nats stream add ' + stream + '`), or supply ' +
+        'out of band (for example `nats stream add ' +
+        stream +
+        '`), or supply ' +
         'NatsOptions.streamSubjects so the broker can create it with explicit ' +
         'subjects — a catch-all subject is refused by the server.',
       cause === undefined ? undefined : { cause },
@@ -359,9 +357,9 @@ export class NatsConsumerNameCollisionError extends Error {
   constructor(queue: string, existingQueue: string, consumerName: string) {
     super(
       `NATS queue ${JSON.stringify(queue)} maps to JetStream consumer ` +
-        `${JSON.stringify(consumerName)}, which already belongs to ${
-          JSON.stringify(existingQueue)
-        } (a different queue or topic). Choose a queue name that does not collide.`,
+        `${JSON.stringify(consumerName)}, which already belongs to ${JSON.stringify(
+          existingQueue,
+        )} (a different queue or topic). Choose a queue name that does not collide.`,
     );
     this.name = 'NatsConsumerNameCollisionError';
     this.queue = queue;

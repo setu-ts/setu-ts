@@ -720,7 +720,7 @@ describe('RequestReplyCore', () => {
 
     // All requests should have been rejected due to close
     type Result = { rejected: true; error: Error };
-    const results = await Promise.all([req1, req2, req3]) as [Result, Result, Result];
+    const results = (await Promise.all([req1, req2, req3])) as [Result, Result, Result];
     expect(results[0].rejected).toBe(true);
     expect(results[1].rejected).toBe(true);
     expect(results[2].rejected).toBe(true);

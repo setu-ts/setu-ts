@@ -37,8 +37,7 @@ export class TenantDataStoreNotReadyError extends Error {
    * @param message - The refusal, naming `onInit` and the factory arm
    */
   constructor(
-    message: string =
-      'MultiTenancyPlugin: the dataStore factory is resolved in onInit; a repository ' +
+    message: string = 'MultiTenancyPlugin: the dataStore factory is resolved in onInit; a repository ' +
       'request before onInit has no store to delegate to',
   ) {
     super(message);

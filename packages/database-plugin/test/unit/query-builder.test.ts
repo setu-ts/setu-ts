@@ -98,8 +98,7 @@ describe('matchesFilter', () => {
   it('evaluates every comparison operator', () => {
     expect(
       matchesFilter(entity, { type: 'comparison', field: 'name', operator: 'eq', value: 'Alice' }),
-    )
-      .toBe(true);
+    ).toBe(true);
     expect(
       matchesFilter(entity, {
         type: 'comparison',
@@ -108,32 +107,30 @@ describe('matchesFilter', () => {
         value: 'lic',
       }),
     ).toBe(true);
-    expect(matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'gt', value: 9 }))
-      .toBe(true);
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'gt', value: 9 }),
+    ).toBe(true);
     expect(
       matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'gte', value: 10 }),
-    )
-      .toBe(true);
-    expect(matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'lt', value: 11 }))
-      .toBe(true);
+    ).toBe(true);
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'lt', value: 11 }),
+    ).toBe(true);
     expect(
       matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'lte', value: 10 }),
-    )
-      .toBe(true);
+    ).toBe(true);
     expect(
       matchesFilter(entity, { type: 'comparison', field: 'id', operator: 'in', value: ['0', '1'] }),
     ).toBe(true);
   });
 
   it('returns false for incompatible values and an empty membership list', () => {
-    expect(matchesFilter(entity, { type: 'comparison', field: 'name', operator: 'gt', value: 1 }))
-      .toBe(
-        false,
-      );
-    expect(matchesFilter(entity, { type: 'comparison', field: 'id', operator: 'in', value: [] }))
-      .toBe(
-        false,
-      );
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'name', operator: 'gt', value: 1 }),
+    ).toBe(false);
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'id', operator: 'in', value: [] }),
+    ).toBe(false);
     expect(
       matchesFilter(
         { ...entity, deletedAt: null },

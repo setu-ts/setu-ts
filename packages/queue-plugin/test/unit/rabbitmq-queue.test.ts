@@ -320,9 +320,7 @@ describe('RabbitMqQueue', () => {
       const assertQueueCalls = channel2.calls.filter((c) => c.method === 'assertQueue');
 
       // Find the delay queue assert
-      const delayQueueCall = assertQueueCalls.find(
-        (c) => c.args[0] === 'test.queue.test.delay',
-      );
+      const delayQueueCall = assertQueueCalls.find((c) => c.args[0] === 'test.queue.test.delay');
       expect(delayQueueCall).toBeDefined();
 
       const delayOptions = delayQueueCall!.args[1] as {
@@ -337,9 +335,7 @@ describe('RabbitMqQueue', () => {
       expect(delayOptions.deadLetterRoutingKey).toBe('test.queue.test.ready');
 
       // Find the ready queue assert
-      const readyQueueCall = assertQueueCalls.find(
-        (c) => c.args[0] === 'test.queue.test.ready',
-      );
+      const readyQueueCall = assertQueueCalls.find((c) => c.args[0] === 'test.queue.test.ready');
       expect(readyQueueCall).toBeDefined();
       const readyOptions = readyQueueCall!.args[1] as { durable: boolean };
       expect(readyOptions.durable).toBe(true);
@@ -348,9 +344,7 @@ describe('RabbitMqQueue', () => {
       expect((readyOptions as Record<string, unknown>).deadLetterRoutingKey).toBeUndefined();
 
       // Find the dead queue assert
-      const deadQueueCall = assertQueueCalls.find(
-        (c) => c.args[0] === 'test.queue.test.dead',
-      );
+      const deadQueueCall = assertQueueCalls.find((c) => c.args[0] === 'test.queue.test.dead');
       expect(deadQueueCall).toBeDefined();
       const deadOptions = deadQueueCall!.args[1] as { durable: boolean };
       expect(deadOptions.durable).toBe(true);
@@ -449,9 +443,9 @@ describe('RabbitMqQueue', () => {
       };
       await queue.enqueue(job);
 
-      const channel =
-        await (fakeClient as unknown as { createChannel(): Promise<FakeAmqpQueueChannel> })
-          .createChannel();
+      const channel = await (
+        fakeClient as unknown as { createChannel(): Promise<FakeAmqpQueueChannel> }
+      ).createChannel();
       const readyBuffer = channel.getReadyBuffer('custom.prefix.myjob.ready');
       expect(readyBuffer.length).toBe(1);
     });

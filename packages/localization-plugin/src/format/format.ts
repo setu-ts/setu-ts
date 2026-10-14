@@ -164,9 +164,7 @@ export function format(
     }
     text = selectForm(message, count, locale);
   }
-  return text.replace(
-    PLACEHOLDER,
-    (whole, name: string) =>
-      Object.hasOwn(values, name) ? render(values[name], locale, options.timeZone) : whole,
+  return text.replace(PLACEHOLDER, (whole, name: string) =>
+    Object.hasOwn(values, name) ? render(values[name], locale, options.timeZone) : whole,
   );
 }

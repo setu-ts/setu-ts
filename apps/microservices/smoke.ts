@@ -23,7 +23,7 @@ await serviceB.start({ port: serviceBPort });
 await serviceA.start();
 let unsubscribe: (() => Promise<void>) | undefined;
 try {
-  if (await callServiceB(serviceA) !== 'Hello, service-a!') {
+  if ((await callServiceB(serviceA)) !== 'Hello, service-a!') {
     throw new Error("Service A did not receive Service B's network response.");
   }
   if (redisUrl === undefined) {
@@ -31,7 +31,7 @@ try {
     Deno.exitCode = 77;
   } else {
     unsubscribe = await registerGreetingResponder(serviceB);
-    if (await brokeredGreeting(serviceA) !== 'Hello, service-a!') {
+    if ((await brokeredGreeting(serviceA)) !== 'Hello, service-a!') {
       throw new Error('Service B did not complete Redis request/reply for service A.');
     }
   }

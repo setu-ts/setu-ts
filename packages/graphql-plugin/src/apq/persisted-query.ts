@@ -46,10 +46,7 @@ export function extractPersistedQuery(
  * @param subtle - The SubtleCrypto instance
  * @returns The lowercase hex hash
  */
-export async function persistedQueryHash(
-  query: string,
-  subtle: SubtleCrypto,
-): Promise<string> {
+export async function persistedQueryHash(query: string, subtle: SubtleCrypto): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(query);
   const hashBuffer = await subtle.digest('SHA-256', data);

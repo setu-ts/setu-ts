@@ -132,9 +132,10 @@ export class MongoAdapter implements IDatabaseAdapter {
   async #establish(): Promise<void> {
     // Resolve the loader — injected (no import) or the literal lazy import.
     const injected = this.#options.client !== undefined;
-    const loader = this.#options.client !== undefined
-      ? createInjectedClientLoader(this.#options.client, this.#options.objectIdCtor)
-      : await createLazyClientLoader(this.#options.url as string);
+    const loader =
+      this.#options.client !== undefined
+        ? createInjectedClientLoader(this.#options.client, this.#options.objectIdCtor)
+        : await createLazyClientLoader(this.#options.url as string);
     const client = await loader.createClient(this.#options.url as string);
     try {
       await client.connect();

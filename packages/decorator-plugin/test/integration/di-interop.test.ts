@@ -147,7 +147,10 @@ describe('@Optional injection (real container and real registry)', () => {
     @Controller('/optional-di')
     @Inject('present-dep', Optional('never-registered'))
     class OptionalController {
-      constructor(readonly present: PresentDep, readonly missing?: { text: string }) {}
+      constructor(
+        readonly present: PresentDep,
+        readonly missing?: { text: string },
+      ) {}
 
       @Get('/')
       read(): { present: string; missing: string | null } {
@@ -216,7 +219,10 @@ describe('@Optional injection (real container and real registry)', () => {
     @Controller('/optional-registry')
     @Inject('registry-present', Optional('registry-absent'))
     class RegistryOptionalController {
-      constructor(readonly present: RegistryPresent, readonly missing?: { text: string }) {}
+      constructor(
+        readonly present: RegistryPresent,
+        readonly missing?: { text: string },
+      ) {}
 
       @Get('/')
       read(): { present: string; missing: string | null } {
@@ -259,11 +265,7 @@ describe('@Optional injection (real container and real registry)', () => {
     }
 
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        DiPlugin(),
-        DecoratorPlugin({ services: [ExplodingDep, Holder] }),
-      ],
+      plugins: [RuntimePlugin(), DiPlugin(), DecoratorPlugin({ services: [ExplodingDep, Holder] })],
     });
 
     await app.start();
@@ -284,7 +286,10 @@ describe('@Optional injection (real container and real registry)', () => {
     @Injectable({ token: 'untokened' })
     @Inject('a')
     class Untokened {
-      constructor(readonly a: unknown, readonly dep?: object) {}
+      constructor(
+        readonly a: unknown,
+        readonly dep?: object,
+      ) {}
     }
     metadataStore.mergeCtorOptional(Untokened, 1);
 

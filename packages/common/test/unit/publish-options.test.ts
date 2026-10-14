@@ -247,21 +247,27 @@ describe('publish options at the common parser boundary', () => {
     }
     expect(() =>
       parsePublishOptions(
-        new Proxy({}, {
-          getPrototypeOf() {
-            throw Error('trap');
+        new Proxy(
+          {},
+          {
+            getPrototypeOf() {
+              throw Error('trap');
+            },
           },
-        }),
-      )
+        ),
+      ),
     ).toThrow('publish options could not be read');
     expect(() =>
       parsePublishOptions(
-        new Proxy({}, {
-          get() {
-            throw Error('trap');
+        new Proxy(
+          {},
+          {
+            get() {
+              throw Error('trap');
+            },
           },
-        }),
-      )
+        ),
+      ),
     ).toThrow('publish options could not be read');
     for (const field of ['orderingKey', 'deduplicationId']) {
       expect(() => parsePublishOptions({ [field]: ' bad ' })).toThrow(`publish options ${field}`);
@@ -277,7 +283,7 @@ describe('publish options at the common parser boundary', () => {
     expect(() =>
       parsePublishOptions({
         headers: Object.fromEntries(Array.from({ length: 33 }, (_, i) => ['x-' + i, 'v'])),
-      })
+      }),
     ).toThrow('at most 32 entries');
     expect(() => parsePublishOptions({ headers: { 'x-setu-ordering-key': 'spoof' } })).toThrow(
       'reserved',
@@ -288,12 +294,15 @@ describe('publish options at the common parser boundary', () => {
     );
     expect(() =>
       parsePublishOptions({
-        headers: new Proxy({}, {
-          ownKeys() {
-            throw Error('trap');
+        headers: new Proxy(
+          {},
+          {
+            ownKeys() {
+              throw Error('trap');
+            },
           },
-        }),
-      })
+        ),
+      }),
     ).toThrow('headers could not be read');
     expect(() =>
       parsePublishOptions({
@@ -303,7 +312,7 @@ describe('publish options at the common parser boundary', () => {
             throw Error('trap');
           },
         }),
-      })
+      }),
     ).toThrow('headers could not be read');
   });
 });

@@ -113,15 +113,16 @@ describe('request-parser', () => {
 
     it('throws on invalid variables JSON', () => {
       expect(() =>
-        parseGetQuery(
-          { query: 'q', variables: 'invalid json' } as Record<string, string | string[]>,
-        )
+        parseGetQuery({ query: 'q', variables: 'invalid json' } as Record<
+          string,
+          string | string[]
+        >),
       ).toThrow();
     });
 
     it('throws on non-object variables JSON', () => {
       expect(() =>
-        parseGetQuery({ query: 'q', variables: '[]' } as Record<string, string | string[]>)
+        parseGetQuery({ query: 'q', variables: '[]' } as Record<string, string | string[]>),
       ).toThrow();
     });
   });

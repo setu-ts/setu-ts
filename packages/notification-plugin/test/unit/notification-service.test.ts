@@ -11,9 +11,7 @@ import { NotificationService } from '../../src/services/notification-service.ts'
 describe('NotificationService', () => {
   it('resolves when channels array is empty', async () => {
     const service = new NotificationService(new Map());
-    await expect(
-      service.send({ channels: [], to: {}, body: 'hello' }),
-    ).resolves.toBeUndefined();
+    await expect(service.send({ channels: [], to: {}, body: 'hello' })).resolves.toBeUndefined();
   });
 
   it('dispatches to all requested channels on success', async () => {
@@ -32,7 +30,10 @@ describe('NotificationService', () => {
         return Promise.resolve();
       },
     };
-    const map = new Map([['a', channelA], ['b', channelB]]);
+    const map = new Map([
+      ['a', channelA],
+      ['b', channelB],
+    ]);
     const service = new NotificationService(map);
 
     await service.send({
@@ -59,7 +60,10 @@ describe('NotificationService', () => {
         return Promise.resolve();
       },
     };
-    const map = new Map([['fail', failingChannel], ['ok', workingChannel]]);
+    const map = new Map([
+      ['fail', failingChannel],
+      ['ok', workingChannel],
+    ]);
     const service = new NotificationService(map);
 
     try {

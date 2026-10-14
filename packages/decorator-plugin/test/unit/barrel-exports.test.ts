@@ -137,9 +137,11 @@ describe('published barrel surface', () => {
   it('keeps the response-shaping refusals internal', () => {
     // `response-status.ts` is the mechanism, not the surface: its refusals are
     // reached through registration and never named by a consumer.
-    for (
-      const name of ['validateResponseShaping', 'assertServeableStatus', 'assertRedirectStatus']
-    ) {
+    for (const name of [
+      'validateResponseShaping',
+      'assertServeableStatus',
+      'assertRedirectStatus',
+    ]) {
       expect(name in barrel).toBe(false);
     }
   });
@@ -155,13 +157,11 @@ describe('published barrel surface', () => {
     // The enforcing middleware @Roles/@Permissions produce is plugin plumbing
     // reached through registration, never a published symbol — the published
     // surface is unchanged by M89a.
-    for (
-      const name of [
-        'createRolesMiddleware',
-        'createPermissionsMiddleware',
-        'appendAuthorizationMiddleware',
-      ]
-    ) {
+    for (const name of [
+      'createRolesMiddleware',
+      'createPermissionsMiddleware',
+      'appendAuthorizationMiddleware',
+    ]) {
       expect(name in barrel).toBe(false);
     }
   });
@@ -175,8 +175,7 @@ describe('published barrel surface', () => {
     expect(_moduleOptions).toEqual({});
     expect(
       [_classDecorator, _methodDecorator, _classOrMethod].every((f) => typeof f === 'function'),
-    )
-      .toBe(true);
+    ).toBe(true);
   });
 });
 
@@ -198,14 +197,12 @@ describe('@setu-ts/decorator-plugin barrel — authorization policies (M110a)', 
 
   it('keeps the policy internals off the barrel', () => {
     const names = Object.keys(barrel);
-    for (
-      const internal of [
-        'toPolicyDefinition',
-        'registerPolicyClasses',
-        'appendPolicyMiddleware',
-        'createPolicyMiddleware',
-      ]
-    ) {
+    for (const internal of [
+      'toPolicyDefinition',
+      'registerPolicyClasses',
+      'appendPolicyMiddleware',
+      'createPolicyMiddleware',
+    ]) {
       expect(names).not.toContain(internal);
     }
   });

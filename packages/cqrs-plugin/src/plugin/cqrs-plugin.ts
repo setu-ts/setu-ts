@@ -178,11 +178,7 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
         }
 
         const behaviors = opts.behaviors.map((entry, index) =>
-          resolveRegistryEntry(
-            entry,
-            ctx.services,
-            `CqrsPlugin({ behaviors })[${index}]`,
-          )
+          resolveRegistryEntry(entry, ctx.services, `CqrsPlugin({ behaviors })[${index}]`),
         );
         commandBus.setBehaviors(behaviors);
         queryBus.setBehaviors(behaviors);

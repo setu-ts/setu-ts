@@ -11,10 +11,7 @@ import type { IRequestContext } from '@setu-ts/common';
 import type { CsrfFormOptions } from '../options.ts';
 
 /** Whether an explicit path exclusion matches this request. */
-export function isCsrfExcluded(
-  ctx: IRequestContext,
-  exclude: CsrfFormOptions['exclude'],
-): boolean {
+export function isCsrfExcluded(ctx: IRequestContext, exclude: CsrfFormOptions['exclude']): boolean {
   for (const entry of exclude ?? []) {
     if (typeof entry === 'string') {
       if (entry === ctx.request.path) return true;

@@ -9,9 +9,11 @@ export interface FakeRedisOptions {
   now?: () => number;
   /** Redis 6.2 returns a null slot for a successfully claimed trimmed entry. */
   trimmedClaimReply?: 'null';
-  seededMessages?: Array<
-    { id: string; payload: string; fields?: Readonly<Record<string, string>> }
-  >;
+  seededMessages?: Array<{
+    id: string;
+    payload: string;
+    fields?: Readonly<Record<string, string>>;
+  }>;
 }
 interface Pending {
   id: string;
@@ -70,7 +72,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     const previous = group.consumers.get(consumer);
     group.consumers.set(consumer, {
       seenAt: this.#now(),
-      activeAt: active ? this.#now() : previous?.activeAt ?? -1,
+      activeAt: active ? this.#now() : (previous?.activeAt ?? -1),
     });
   }
   // deno-lint-ignore require-await
@@ -106,7 +108,9 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
       const groups = this.#groups.get(topic) ?? new Map<string, Group>();
       if (groups.has(group)) throw new Error('BUSYGROUP Consumer Group name already exists');
       const delivered = new Set<string>();
-      if (args[2] === '$') { for (const [id] of this.#streams.get(topic) ?? []) delivered.add(id); }
+      if (args[2] === '$') {
+        for (const [id] of this.#streams.get(topic) ?? []) delivered.add(id);
+      }
       groups.set(group, { delivered, pending: new Map(), consumers: new Map() });
       this.#groups.set(topic, groups);
       this.#streams.set(topic, this.#streams.get(topic) ?? []);
@@ -163,14 +167,16 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
       return BigInt(a) * 1000000n + BigInt(b);
     };
     return [...this.#group(topic, group).pending.values()]
-      .sort((a, b) => numericId(a.id) < numericId(b.id) ? -1 : 1)
-      .filter((p) =>
-        this.#now() - p.deliveredAt >= threshold &&
-        (owner === undefined || p.owner === owner) &&
-        (start === '-' || (start.startsWith('(')
-          ? numericId(p.id) > numericId(start.slice(1))
-          : numericId(p.id) >= numericId(start))) &&
-        (end === '+' || numericId(p.id) <= numericId(end))
+      .sort((a, b) => (numericId(a.id) < numericId(b.id) ? -1 : 1))
+      .filter(
+        (p) =>
+          this.#now() - p.deliveredAt >= threshold &&
+          (owner === undefined || p.owner === owner) &&
+          (start === '-' ||
+            (start.startsWith('(')
+              ? numericId(p.id) > numericId(start.slice(1))
+              : numericId(p.id) >= numericId(start))) &&
+          (end === '+' || numericId(p.id) <= numericId(end)),
       )
       .slice(0, Number(count))
       .map((p) => [p.id, p.owner, this.#now() - p.deliveredAt, p.deliveries]);

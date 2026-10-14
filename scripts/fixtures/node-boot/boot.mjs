@@ -41,9 +41,11 @@ try {
     failure = `/decorated answered ${JSON.stringify(decorated)}`;
   } else {
     console.log(
-      `BOOT-OK ${
-        JSON.stringify({ imported: packages.length, json: plain.body, decorated: decorated.body })
-      }`,
+      `BOOT-OK ${JSON.stringify({
+        imported: packages.length,
+        json: plain.body,
+        decorated: decorated.body,
+      })}`,
     );
   }
 } catch (error) {

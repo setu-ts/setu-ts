@@ -78,10 +78,12 @@ describe('the entry port', () => {
   // a literal that could drift from the generated map.
   it('imports the port when one is named', () => {
     const main = contentsOf(
-      [...projectFiles('svc', 'deno', host, {
-        symbol: 'SERVICE_PORT',
-        from: './src/discovery/services.ts',
-      })],
+      [
+        ...projectFiles('svc', 'deno', host, {
+          symbol: 'SERVICE_PORT',
+          from: './src/discovery/services.ts',
+        }),
+      ],
       'main.ts',
     );
     expect(main).toContain(`import { SERVICE_PORT } from './src/discovery/services.ts';`);
@@ -213,9 +215,11 @@ describe('a template with a frontend build, on a Deno target', () => {
     JSON.parse(contentsOf([...projectFiles('shop', runtime, host)], 'deno.json'));
 
   it('emits install and build tasks, with start depending on build', () => {
-    const tasks = (manifestOf('deno') as unknown as {
-      tasks: Record<string, string>;
-    }).tasks;
+    const tasks = (
+      manifestOf('deno') as unknown as {
+        tasks: Record<string, string>;
+      }
+    ).tasks;
 
     // `--min-dep-age 0` for D1: the project is pinned to the CLI's own version,
     // which on release day is younger than Deno's 24-hour policy allows.
@@ -274,14 +278,19 @@ describe('a template with a frontend build, on a Deno target', () => {
 
   it('emits the same development entry on Node and Bun, run by a dev script', () => {
     const deno = contentsOf([...projectFiles('shop', 'deno', host)], 'dev.ts');
-    for (const [runtime, dev] of [['node', 'tsx dev.ts'], ['bun', 'bun run dev.ts']] as const) {
+    for (const [runtime, dev] of [
+      ['node', 'tsx dev.ts'],
+      ['bun', 'bun run dev.ts'],
+    ] as const) {
       const files = [
         ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
       ];
       expect(contentsOf(files, 'dev.ts')).toBe(deno);
-      const scripts = (JSON.parse(contentsOf(files, 'package.json')) as {
-        scripts: Record<string, string>;
-      }).scripts;
+      const scripts = (
+        JSON.parse(contentsOf(files, 'package.json')) as {
+          scripts: Record<string, string>;
+        }
+      ).scripts;
       expect(scripts['dev']).toBe(dev);
       expect(contentsOf(files, 'README.md')).toContain(
         runtime === 'bun' ? '```bash\nbun run dev\n```' : '```bash\nnpm run dev\n```',
@@ -303,9 +312,11 @@ describe('a template with a frontend build, on a Deno target', () => {
       "  _ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
     );
     expect(workers).not.toContain('ssr === undefined');
-    const scripts = (JSON.parse(contentsOf(files, 'package.json')) as {
-      scripts: Record<string, string>;
-    }).scripts;
+    const scripts = (
+      JSON.parse(contentsOf(files, 'package.json')) as {
+        scripts: Record<string, string>;
+      }
+    ).scripts;
     expect(scripts['dev']).not.toContain('dev.ts');
   });
 
@@ -448,17 +459,15 @@ describe('the Cloudflare Workers target', () => {
 
     // Two of seven before this: a developer standing up the platform surface
     // had to hand-edit three files against three separate README sections.
-    for (
-      const stanza of [
-        '[[kv_namespaces]]',
-        '[[r2_buckets]]',
-        '[[d1_databases]]',
-        '[[queues.producers]]',
-        '[[queues.consumers]]',
-        '[[durable_objects.bindings]]',
-        '[triggers]',
-      ]
-    ) {
+    for (const stanza of [
+      '[[kv_namespaces]]',
+      '[[r2_buckets]]',
+      '[[d1_databases]]',
+      '[[queues.producers]]',
+      '[[queues.consumers]]',
+      '[[durable_objects.bindings]]',
+      '[triggers]',
+    ]) {
       expect(toml).toContain(stanza);
     }
     // The two facts a reader cannot infer from the stanza alone.
@@ -472,9 +481,9 @@ describe('the routes a generated README lists', () => {
   // e2e re-checks the list against a running project on every run.
   const PLUGIN_PATHS = ['/health', '/live', '/ready', '/metrics', '/docs', '/openapi.json'];
   const pathsOf = (name: string | undefined, runtime: TargetRuntime = 'deno') =>
-    servedRoutes(
-      resolveHost(name === undefined ? MINIMAL_HOST : getTemplate(name)!, runtime),
-    ).map((route) => route.path);
+    servedRoutes(resolveHost(name === undefined ? MINIMAL_HOST : getTemplate(name)!, runtime)).map(
+      (route) => route.path,
+    );
 
   it('lists only the hello-world route for the template-less host', () => {
     expect(pathsOf(undefined)).toEqual(['/']);
@@ -503,8 +512,9 @@ describe('the routes a generated README lists', () => {
 
   it('writes the section into the README with the address for each runtime', () => {
     const readme = (runtime: TargetRuntime) =>
-      projectFiles('proj', runtime, resolveHost(getTemplate('rest')!, runtime))
-        .find((f) => f.path === 'README.md')?.contents ?? '';
+      projectFiles('proj', runtime, resolveHost(getTemplate('rest')!, runtime)).find(
+        (f) => f.path === 'README.md',
+      )?.contents ?? '';
     expect(readme('deno')).toContain('## What it serves\n\nAt `http://localhost:3000`');
     expect(readme('node')).toContain('- `/docs` — Swagger UI for the API');
     expect(readme('cloudflare-workers')).toContain(
@@ -513,12 +523,10 @@ describe('the routes a generated README lists', () => {
   });
 
   it('names the allocated port for a workspace member', () => {
-    const files = projectFiles(
-      'proj',
-      'deno',
-      resolveHost(getTemplate('rest')!, 'deno'),
-      { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
-    );
+    const files = projectFiles('proj', 'deno', resolveHost(getTemplate('rest')!, 'deno'), {
+      symbol: 'SERVICE_PORT',
+      from: './src/discovery/services.ts',
+    });
     const readme = files.find((f) => f.path === 'README.md')?.contents ?? '';
     expect(readme).toContain('On the port `./src/discovery/services.ts` exports:');
   });
@@ -551,9 +559,7 @@ describe('the emitted smoke test', () => {
   // The emitted test runs on all three runtimes through testHarnessFor, so the
   // fetch assertion must render in each target's own idiom.
   it('renders the fetch assertion in each runtime idiom', () => {
-    expect(smokeTest('full-stack', 'node')).toContain(
-      'assert.deepStrictEqual(page.status, 200);',
-    );
+    expect(smokeTest('full-stack', 'node')).toContain('assert.deepStrictEqual(page.status, 200);');
     expect(smokeTest('full-stack', 'bun')).toContain('expect(page.status).toEqual(200);');
     expect(smokeTest('full-stack', 'deno')).toContain('expect(page.status).toEqual(200);');
   });

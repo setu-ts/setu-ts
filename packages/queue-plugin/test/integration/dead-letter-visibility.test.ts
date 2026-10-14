@@ -55,14 +55,18 @@ describe('dead-letter visibility through a real application (X8-4)', () => {
       const failures: unknown[] = [];
       let deadLettered = 0;
 
-      queue.process('thumbnail', () => {
-        throw new Error('thumbnailer exploded');
-      }, {
-        onFailed: (job, error) => {
-          deadLettered++;
-          failures.push({ id: job.id, name: job.name, attempts: job.attempts, error });
+      queue.process(
+        'thumbnail',
+        () => {
+          throw new Error('thumbnailer exploded');
         },
-      });
+        {
+          onFailed: (job, error) => {
+            deadLettered++;
+            failures.push({ id: job.id, name: job.name, attempts: job.attempts, error });
+          },
+        },
+      );
 
       await queue.add('thumbnail', { key: 'photo.png' });
       await until(() => deadLettered > 0, 'the job to exhaust its retries');
@@ -73,9 +77,7 @@ describe('dead-letter visibility through a real application (X8-4)', () => {
       expect(failures[0]).toMatchObject({ name: 'thumbnail', attempts: 2 });
 
       // 2. The alertable surface, rendered by the REAL Prometheus renderer.
-      const metricsBody = await (await app.fetch(
-        new Request('http://localhost/metrics'),
-      )).text();
+      const metricsBody = await (await app.fetch(new Request('http://localhost/metrics'))).text();
       expect(metricsBody).toContain(`# TYPE ${QUEUE_METRICS.JOBS} counter`);
       expect(metricsBody).toMatch(
         new RegExp(`${QUEUE_METRICS.JOBS}\\{[^}]*outcome="dead_lettered"[^}]*\\} 1`),
@@ -86,9 +88,9 @@ describe('dead-letter visibility through a real application (X8-4)', () => {
 
       // 3. The durable surface: a depth the counter cannot give after a
       //    restart, served by the real HealthPlugin.
-      const healthBody = await (await app.fetch(
-        new Request('http://localhost/health'),
-      )).json() as {
+      const healthBody = (await (
+        await app.fetch(new Request('http://localhost/health'))
+      ).json()) as {
         checks?: Record<string, { data?: { queues?: Record<string, unknown> } }>;
       };
       const queueCheck = healthBody.checks?.[CAPABILITIES.QUEUE];

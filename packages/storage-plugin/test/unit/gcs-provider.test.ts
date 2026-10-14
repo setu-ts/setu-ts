@@ -132,15 +132,13 @@ describe('adaptGcsModule', () => {
   it('save adapts to callback-based SDK save via facade', () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
-    const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => {
-        save: (
-          d: Uint8Array,
-          o: Record<string, unknown>,
-          cb: (e: Error | null) => void,
-        ) => void;
-      };
-    }).file('cb-save.bin');
+    const fileHandle = (
+      facade.bucket() as unknown as {
+        file: (n: string) => {
+          save: (d: Uint8Array, o: Record<string, unknown>, cb: (e: Error | null) => void) => void;
+        };
+      }
+    ).file('cb-save.bin');
     let gotError: Error | null = null;
     fileHandle.save(new Uint8Array([77]), {}, (err: Error | null) => {
       gotError = err;
@@ -154,11 +152,7 @@ describe('adaptGcsModule', () => {
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
     const bucketHandle = facade.bucket() as unknown as {
       file: (n: string) => {
-        save: (
-          d: Uint8Array,
-          o: Record<string, unknown>,
-          cb: (e: Error | null) => void,
-        ) => void;
+        save: (d: Uint8Array, o: Record<string, unknown>, cb: (e: Error | null) => void) => void;
       };
     };
     bucketHandle.file('test.bin').save(new Uint8Array([5, 6, 7]), {}, () => {});
@@ -235,10 +229,13 @@ describe('adaptGcsModule', () => {
         };
       },
     };
-    const provider = new GcsProvider({
-      bucket: 'my-bucket',
-      client: facade as unknown as IGcsClient,
-    }, () => Date.now());
+    const provider = new GcsProvider(
+      {
+        bucket: 'my-bucket',
+        client: facade as unknown as IGcsClient,
+      },
+      () => Date.now(),
+    );
     await provider.connect();
     const before = Math.floor(Date.now() / 1000);
     await provider.getSignedUrl('obj.txt', { expiresIn: 3600 });
@@ -933,12 +930,14 @@ describe('GcsProvider', () => {
   // ── adaptGcsModule internal callback-branch coverage (callback-style SDK) ─
 
   /** Build a callback-style GCS SDK module for adaptGcsModule tests. */
-  function buildCallbackGcs(opts: {
-    onDeleteError?: boolean;
-    onSignError?: boolean;
-    onDownloadData?: Uint8Array;
-    onMetadataError?: boolean;
-  } = {}) {
+  function buildCallbackGcs(
+    opts: {
+      onDeleteError?: boolean;
+      onSignError?: boolean;
+      onDownloadData?: Uint8Array;
+      onMetadataError?: boolean;
+    } = {},
+  ) {
     const store = new Map<string, Uint8Array>();
     store.set('default-data', new Uint8Array([42]));
     const { onDeleteError, onSignError, onDownloadData, onMetadataError } = opts;
@@ -995,9 +994,7 @@ describe('GcsProvider', () => {
                     cb(new Error('signing failed'));
                     return;
                   }
-                  const params = new URLSearchParams(
-                    cfg as unknown as Record<string, string>,
-                  );
+                  const params = new URLSearchParams(cfg as unknown as Record<string, string>);
                   cb(null, `https://signed.url/${nameStr}?${params.toString()}`);
                 },
                 createReadStream() {
@@ -1029,20 +1026,24 @@ describe('GcsProvider', () => {
   it('adaptGcsModule delete() rejects when callback receives error', async () => {
     const { mod } = buildCallbackGcs({ onDeleteError: true });
     const facade = adaptGcsModule(mod, { bucket: 'cb-bucket' });
-    const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => { delete: () => Promise<boolean> };
-    }).file('cb-del');
+    const fileHandle = (
+      facade.bucket() as unknown as {
+        file: (n: string) => { delete: () => Promise<boolean> };
+      }
+    ).file('cb-del');
     await expect(fileHandle.delete()).rejects.toThrow('sdk delete error');
   });
 
   it('adaptGcsModule getSignedUrl rejects when callback receives error', async () => {
     const { mod } = buildCallbackGcs({ onSignError: true });
     const facade = adaptGcsModule(mod, { bucket: 'cb-bucket' });
-    const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => {
-        getSignedUrl: (cfg: { action: string; expires: number }) => Promise<[string]>;
-      };
-    }).file('cb-sig');
+    const fileHandle = (
+      facade.bucket() as unknown as {
+        file: (n: string) => {
+          getSignedUrl: (cfg: { action: string; expires: number }) => Promise<[string]>;
+        };
+      }
+    ).file('cb-sig');
     await expect(
       fileHandle.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 }),
     ).rejects.toThrow('signing failed');
@@ -1051,9 +1052,11 @@ describe('GcsProvider', () => {
   it('adaptGcsModule download() resolves when callback returns data', async () => {
     const { mod } = buildCallbackGcs({ onDownloadData: new Uint8Array([99, 100]) });
     const facade = adaptGcsModule(mod, { bucket: 'cb-bucket' });
-    const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => { download: () => Promise<{ body: unknown }> };
-    }).file('cb-dl');
+    const fileHandle = (
+      facade.bucket() as unknown as {
+        file: (n: string) => { download: () => Promise<{ body: unknown }> };
+      }
+    ).file('cb-dl');
     const result = await fileHandle.download();
     expect(result.body).toBeInstanceOf(Uint8Array);
     expect((result.body as Uint8Array).length).toBe(2);
@@ -1062,11 +1065,13 @@ describe('GcsProvider', () => {
   it('adaptGcsModule getMetadata() rejects when callback receives error', async () => {
     const { mod } = buildCallbackGcs({ onMetadataError: true });
     const facade = adaptGcsModule(mod, { bucket: 'cb-bucket' });
-    const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => {
-        getMetadata: () => Promise<[Record<string, unknown>]>;
-      };
-    }).file('cb-meta');
+    const fileHandle = (
+      facade.bucket() as unknown as {
+        file: (n: string) => {
+          getMetadata: () => Promise<[Record<string, unknown>]>;
+        };
+      }
+    ).file('cb-meta');
     await await expect(fileHandle.getMetadata()).rejects.toThrow('metadata error');
   });
 
@@ -1107,9 +1112,11 @@ describe('GcsProvider', () => {
   it('adaptGcsModule getMetadata() resolves successfully when callback receives no error', async () => {
     const result = buildCallbackGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'cb-bucket' });
-    const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => { getMetadata: () => Promise<[Record<string, unknown>]> };
-    }).file('default-data');
+    const fileHandle = (
+      facade.bucket() as unknown as {
+        file: (n: string) => { getMetadata: () => Promise<[Record<string, unknown>]> };
+      }
+    ).file('default-data');
     const meta = await fileHandle.getMetadata();
     expect(meta).toEqual([{ size: 1 }]);
   });
@@ -1117,9 +1124,11 @@ describe('GcsProvider', () => {
   it('adaptGcsModule createReadStream() is reachable from adapted file handle', () => {
     const result = buildCallbackGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'cb-bucket' });
-    const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => { createReadStream: () => NodeJS.ReadableStream };
-    }).file('default-data');
+    const fileHandle = (
+      facade.bucket() as unknown as {
+        file: (n: string) => { createReadStream: () => NodeJS.ReadableStream };
+      }
+    ).file('default-data');
     const stream = fileHandle.createReadStream();
     expect(stream).toBeDefined();
     expect(typeof stream.on).toBe('function');
@@ -1360,11 +1369,8 @@ describe('GcsProvider getStream — injected client stream shapes', () => {
     const client = {
       bucket: () => ({
         file: () => ({
-          save: (
-            _d: Uint8Array,
-            _o: Record<string, unknown>,
-            cb: (e: Error | null) => void,
-          ) => cb(null),
+          save: (_d: Uint8Array, _o: Record<string, unknown>, cb: (e: Error | null) => void) =>
+            cb(null),
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -1412,7 +1418,7 @@ describe('GcsProvider getStream — injected client stream shapes', () => {
       },
     }));
     await provider.connect();
-    const reader = (await provider.getStream('cancel') as ReadableStream<Uint8Array>).getReader();
+    const reader = ((await provider.getStream('cancel')) as ReadableStream<Uint8Array>).getReader();
     push(new Uint8Array([1]));
     expect((await reader.read()).done).toBe(false);
     await reader.cancel();
@@ -1429,7 +1435,7 @@ describe('GcsProvider getStream — injected client stream shapes', () => {
         async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
           yield new Uint8Array([7, 7]);
         },
-      })
+      }),
     );
     await provider.connect();
     const stream = await provider.getStream('callable');

@@ -120,22 +120,31 @@ describe('primary-key mapping inside a composed filter', () => {
     await source.create({ id: 7, name: 'numeric' });
     await source.create({ id: 8, name: 'other' });
 
-    await expect(source.findAll(query({
-      filter: {
-        type: 'and',
-        filters: [
-          { type: 'comparison', field: 'id', operator: 'in', value: [7, 8] },
-          { type: 'comparison', field: 'name', operator: 'eq', value: 'numeric' },
-        ],
-      },
-    }))).resolves.toEqual([{ id: 7, name: 'numeric' }]);
+    await expect(
+      source.findAll(
+        query({
+          filter: {
+            type: 'and',
+            filters: [
+              { type: 'comparison', field: 'id', operator: 'in', value: [7, 8] },
+              { type: 'comparison', field: 'name', operator: 'eq', value: 'numeric' },
+            ],
+          },
+        }),
+      ),
+    ).resolves.toEqual([{ id: 7, name: 'numeric' }]);
 
-    await expect(source.count({}, {
-      type: 'or',
-      filters: [
-        { type: 'comparison', field: 'id', operator: 'eq', value: 7 },
-        { type: 'comparison', field: 'id', operator: 'eq', value: 8 },
-      ],
-    })).resolves.toBe(2);
+    await expect(
+      source.count(
+        {},
+        {
+          type: 'or',
+          filters: [
+            { type: 'comparison', field: 'id', operator: 'eq', value: 7 },
+            { type: 'comparison', field: 'id', operator: 'eq', value: 8 },
+          ],
+        },
+      ),
+    ).resolves.toBe(2);
   });
 });

@@ -93,8 +93,7 @@ describe('mentions', () => {
   it('reads a symbol inside a longer span, which is how options are written', () => {
     expect(
       mentions('- `defineConfigSection({ prefix, keys })` declares one', 'defineConfigSection'),
-    )
-      .toBe(true);
+    ).toBe(true);
   });
 
   it('matches on a word boundary in both directions', () => {
@@ -127,9 +126,7 @@ describe('lastReleasedVersion', () => {
 describe('run', () => {
   it('reports an added export no entry names', async () => {
     const result = await run(options());
-    expect(result.unannounced).toEqual([
-      { readme: 'packages/pkg/README.md', symbol: 'Minted' },
-    ]);
+    expect(result.unannounced).toEqual([{ readme: 'packages/pkg/README.md', symbol: 'Minted' }]);
     expect(result.compared).toBe(1);
   });
 
@@ -141,9 +138,7 @@ describe('run', () => {
   });
 
   it('ignores an export that was already there', async () => {
-    const result = await run(
-      options({ readAtHead: () => Promise.resolve(readme('Kept')) }),
-    );
+    const result = await run(options({ readAtHead: () => Promise.resolve(readme('Kept')) }));
     expect(result.unannounced).toEqual([]);
   });
 
@@ -235,7 +230,11 @@ describe('main — reporting and exit codes', () => {
     // The gate's own failure mode. An empty `git ls-files`, a checkout with no
     // packages, or every table missing all reach here, and reporting a pass
     // for a run that checked nothing is what this gate exists to stop.
-    const { deps: d, out, err } = deps({
+    const {
+      deps: d,
+      out,
+      err,
+    } = deps({
       readWorkingTree: () => Promise.resolve('# Pkg\n\nNo table.\n'),
     });
     expect(await main(d)).toBe(1);
@@ -321,8 +320,10 @@ describe('a release PR that has already renamed `Unreleased`', () => {
   const cutChangelog = (body: string): string =>
     `# Changelog\n\n## [Unreleased]\n\n## [0.8.0] — 2026-10-03\n\n### Added\n\n${body}\n\n` +
     `## [0.7.0] — 2026-09-18\n\n- old\n`;
-  const tags = (...existing: readonly string[]) => (version: string) =>
-    Promise.resolve(existing.includes(version));
+  const tags =
+    (...existing: readonly string[]) =>
+    (version: string) =>
+      Promise.resolve(existing.includes(version));
 
   function deps(body: string, exists: readonly string[]): { deps: MainDeps; err: string[] } {
     const err: string[] = [];

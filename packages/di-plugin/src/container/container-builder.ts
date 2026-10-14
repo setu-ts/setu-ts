@@ -105,9 +105,10 @@ export class ContainerBuilder {
       defaultScope: this.#defaultScope,
       autoRegister: this.#autoRegister,
     };
-    const container = this.#externalResolver !== undefined
-      ? new DiContainer({ ...base, externalResolver: this.#externalResolver })
-      : new DiContainer(base);
+    const container =
+      this.#externalResolver !== undefined
+        ? new DiContainer({ ...base, externalResolver: this.#externalResolver })
+        : new DiContainer(base);
     for (const entry of this.#entries) {
       container.register(entry.token, entry.provider, entry.options);
     }

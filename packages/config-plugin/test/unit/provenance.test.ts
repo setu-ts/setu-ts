@@ -32,8 +32,14 @@ import {
 /** A two-key policy used by most tests: `PORT` → `port`, `HOST` → `host`. */
 function smallPolicy(): CompiledConfigDiagnosticsPolicy {
   return {
-    aliasByKey: new Map([['PORT', 'port'], ['HOST', 'host']]),
-    aliasByPath: new Map([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]),
+    aliasByKey: new Map([
+      ['PORT', 'port'],
+      ['HOST', 'host'],
+    ]),
+    aliasByPath: new Map([
+      ['.env.local', 'dotenv-local'],
+      ['.env', 'dotenv'],
+    ]),
   };
 }
 
@@ -118,9 +124,7 @@ describe('provenance builder | source evidence', () => {
 
   it('retains expansion evidence only when both endpoints are approved, capped at the budget', () => {
     const policy = smallPolicy();
-    const sources = new Map<string, EnvSourceObservation>([
-      ['PORT', observation('environment')],
-    ]);
+    const sources = new Map<string, EnvSourceObservation>([['PORT', observation('environment')]]);
     const expansions = new Map<string, readonly string[]>([
       // HOST is approved; SECRET_REF is not. DIST is approved and appears
       // twice (deduplicated by the expander's distinct-name report).
@@ -190,7 +194,7 @@ describe('provenance builder | structurally value-free inputs (audit F3)', () =>
         // @ts-expect-error — a values record is not a presence set
         { PORT: 'canary-value' },
         false,
-      )
+      ),
     ).toThrow(TypeError);
   });
 
@@ -240,7 +244,10 @@ describe('provenance builder | schema effects are presence-derived', () => {
     // the input-present/output-absent pattern.
     const entries = buildConfigProvenanceEntries(
       smallPolicy(),
-      new Map([['HOST', observation('environment')], ['PORT', observation('environment')]]),
+      new Map([
+        ['HOST', observation('environment')],
+        ['PORT', observation('environment')],
+      ]),
       new Map(),
       new Set(['PORT']),
       true,
@@ -449,19 +456,16 @@ describe('config diagnostics source', () => {
 
 describe('config snapshot budget', () => {
   it('returns the whole snapshot when it fits the 256 KiB budget', () => {
-    const snapshot = applyConfigSnapshotBudget(
-      { instanceId: 'i', state: 'ready' },
-      [
-        {
-          keyAlias: 'port',
-          origin: 'environment',
-          overriddenSourceAliases: [],
-          expanded: false,
-          referenceAliases: [],
-          schemaEffect: 'validated',
-        },
-      ],
-    );
+    const snapshot = applyConfigSnapshotBudget({ instanceId: 'i', state: 'ready' }, [
+      {
+        keyAlias: 'port',
+        origin: 'environment',
+        overriddenSourceAliases: [],
+        expanded: false,
+        referenceAliases: [],
+        schemaEffect: 'validated',
+      },
+    ]);
     expect(snapshot.truncated).toBe(false);
     expect(snapshot.droppedEntries).toBe(0);
     expect(snapshot.entries.length).toBe(1);
@@ -483,8 +487,9 @@ describe('config snapshot budget', () => {
     expect(snapshot.droppedEntries).toBe(128 - snapshot.entries.length);
     expect(snapshot.entries.length).toBeGreaterThan(0);
     // The returned object's encoding is what the wire consumer measures.
-    expect(new TextEncoder().encode(JSON.stringify(snapshot)).length)
-      .toBeLessThanOrEqual(MAX_CONFIG_SNAPSHOT_BYTES);
+    expect(new TextEncoder().encode(JSON.stringify(snapshot)).length).toBeLessThanOrEqual(
+      MAX_CONFIG_SNAPSHOT_BYTES,
+    );
   });
 
   it('is reachable with LEGAL aliases, because aliases are bounded in UTF-8 bytes, not JSON bytes', () => {
@@ -507,7 +512,8 @@ describe('config snapshot budget', () => {
     const snapshot = applyConfigSnapshotBudget({ instanceId: 'i', state: 'ready' }, entries);
     expect(snapshot.truncated).toBe(true);
     expect(snapshot.entries.length + snapshot.droppedEntries).toBe(128);
-    expect(new TextEncoder().encode(JSON.stringify(snapshot)).length)
-      .toBeLessThanOrEqual(MAX_CONFIG_SNAPSHOT_BYTES);
+    expect(new TextEncoder().encode(JSON.stringify(snapshot)).length).toBeLessThanOrEqual(
+      MAX_CONFIG_SNAPSHOT_BYTES,
+    );
   });
 });

@@ -32,9 +32,7 @@ function dockerfile(): string {
 describe('generated Dockerfile chown fold (X10-5)', () => {
   it('one RUN carries both the cache and the ownership fixup', () => {
     const contents = dockerfile();
-    const runLines = contents
-      .split('\n')
-      .filter((line) => line.startsWith('RUN '));
+    const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));
 
     const cacheRun = runLines.find((line) => line.includes('deno cache main.ts'));
     expect(cacheRun).toBeDefined();
@@ -45,9 +43,7 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
 
   it('no standalone chown line remains', () => {
     const contents = dockerfile();
-    const standalone = contents
-      .split('\n')
-      .filter((line) => /^RUN chown\b/.test(line.trim()));
+    const standalone = contents.split('\n').filter((line) => /^RUN chown\b/.test(line.trim()));
     expect(standalone).toEqual([]);
   });
 

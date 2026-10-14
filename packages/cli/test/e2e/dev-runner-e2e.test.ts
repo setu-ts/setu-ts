@@ -118,7 +118,7 @@ async function runRunner(timeoutMs: number): Promise<string> {
   const collected = child.output();
   const deadline = performance.now() + timeoutMs;
   while (performance.now() < deadline) {
-    if (await observed() !== undefined) break;
+    if ((await observed()) !== undefined) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   try {
@@ -198,7 +198,7 @@ async function runNodeRunner(
   const collected = child.output();
   const deadline = performance.now() + timeoutMs;
   while (performance.now() < deadline) {
-    if (await observed() !== undefined) break;
+    if ((await observed()) !== undefined) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   try {
@@ -214,7 +214,10 @@ describe('the npm-profile dev runner, executed', () => {
     const orders = await unusedPort();
     const billing = await unusedPort();
     await writeNodeWorkspace(
-      [{ name: 'orders', port: orders }, { name: 'billing', port: billing, dependsOn: ['orders'] }],
+      [
+        { name: 'orders', port: orders },
+        { name: 'billing', port: billing, dependsOn: ['orders'] },
+      ],
       2000,
     );
     await runNodeRunner(20_000);
@@ -225,7 +228,10 @@ describe('the npm-profile dev runner, executed', () => {
     const orders = await unusedPort();
     const billing = await unusedPort();
     await writeNodeWorkspace(
-      [{ name: 'orders', port: orders }, { name: 'billing', port: billing }],
+      [
+        { name: 'orders', port: orders },
+        { name: 'billing', port: billing },
+      ],
       2000,
     );
     await runNodeRunner(20_000);
@@ -259,11 +265,14 @@ describe('the npm-profile dev runner, stopped', () => {
       const orders = await unusedPort();
       const billing = await unusedPort();
       await writeNodeWorkspace(
-        [{ name: 'orders', port: orders }, {
-          name: 'billing',
-          port: billing,
-          dependsOn: ['orders'],
-        }],
+        [
+          { name: 'orders', port: orders },
+          {
+            name: 'billing',
+            port: billing,
+            dependsOn: ['orders'],
+          },
+        ],
         0,
       );
       const shell = `${root}/non-forwarding-sh`;
@@ -273,12 +282,15 @@ describe('the npm-profile dev runner, stopped', () => {
       // Shutdown is asynchronous: give the members' groups a moment to exit.
       const deadline = performance.now() + 5_000;
       while (
-        performance.now() < deadline && (await listening(orders) || await listening(billing))
+        performance.now() < deadline &&
+        ((await listening(orders)) || (await listening(billing)))
       ) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      expect({ orders: await listening(orders), billing: await listening(billing) })
-        .toEqual({ orders: false, billing: false });
+      expect({ orders: await listening(orders), billing: await listening(billing) }).toEqual({
+        orders: false,
+        billing: false,
+      });
     },
   );
 });
@@ -288,7 +300,10 @@ describe('the generated dev runner, executed', () => {
     const orders = await unusedPort();
     const billing = await unusedPort();
     await writeWorkspace(
-      [{ name: 'orders', port: orders }, { name: 'billing', port: billing, dependsOn: ['orders'] }],
+      [
+        { name: 'orders', port: orders },
+        { name: 'billing', port: billing, dependsOn: ['orders'] },
+      ],
       2000,
     );
 
@@ -306,7 +321,10 @@ describe('the generated dev runner, executed', () => {
     const orders = await unusedPort();
     const billing = await unusedPort();
     await writeWorkspace(
-      [{ name: 'orders', port: orders }, { name: 'billing', port: billing }],
+      [
+        { name: 'orders', port: orders },
+        { name: 'billing', port: billing },
+      ],
       2000,
     );
 
@@ -342,7 +360,10 @@ describe('the generated dev runner, executed', () => {
     const orders = await unusedPort();
     const billing = await unusedPort();
     await writeWorkspace(
-      [{ name: 'orders', port: orders }, { name: 'billing', port: billing, dependsOn: ['orders'] }],
+      [
+        { name: 'orders', port: orders },
+        { name: 'billing', port: billing, dependsOn: ['orders'] },
+      ],
       60_000,
     );
 
@@ -427,7 +448,7 @@ ${extraEnv}`;
 /** Reads what one member recorded about the environment it was handed. */
 async function observedEnv(member: string): Promise<Record<string, string> | undefined> {
   const text = await nodeFs.readFile(`${root}/${member}.env.json`, 'utf8').catch(() => undefined);
-  return text === undefined ? undefined : JSON.parse(text) as Record<string, string>;
+  return text === undefined ? undefined : (JSON.parse(text) as Record<string, string>);
 }
 
 /** Runs the runner with the given devtool environment until both ports answer. */
@@ -457,7 +478,9 @@ async function runRunnerWithEnv(
     while (performance.now() < deadline) {
       const both = await Promise.all(
         ports.map((port) =>
-          fetch(`http://127.0.0.1:${port}/`).then((r) => r.ok).catch(() => false)
+          fetch(`http://127.0.0.1:${port}/`)
+            .then((r) => r.ok)
+            .catch(() => false),
         ),
       );
       if (both.every(Boolean)) return;

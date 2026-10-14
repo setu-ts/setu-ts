@@ -17,9 +17,12 @@ import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';
 
 /** A branded passthrough standing in for a `validateXxx(...)` middleware. */
 function branded(target: ValidationTarget, schema: unknown): MiddlewareFunction {
-  return withValidationMetadata(async (_ctx, next) => {
-    await next();
-  }, { target, schema });
+  return withValidationMetadata(
+    async (_ctx, next) => {
+      await next();
+    },
+    { target, schema },
+  );
 }
 
 /** An unbranded middleware — the control for "derives nothing". */
@@ -112,9 +115,7 @@ describe('deriveRequestSchemas', () => {
   });
 
   it('derives nothing from unbranded middleware', () => {
-    const doc = generator().generate([
-      route('POST', '/orders', { middleware: [plain()] }),
-    ]);
+    const doc = generator().generate([route('POST', '/orders', { middleware: [plain()] })]);
 
     expect(doc.paths['/orders']?.post?.requestBody).toBeUndefined();
   });
@@ -133,9 +134,7 @@ describe('deriveRequestSchemas', () => {
     const op = doc.paths['/orders']?.post;
     // Declared body wins…
     expect(
-      Object.keys(
-        op?.requestBody?.content['application/json'].schema.properties ?? {},
-      ),
+      Object.keys(op?.requestBody?.content['application/json'].schema.properties ?? {}),
     ).toEqual(['declared']);
     // …while the query, which is NOT declared, is still derived.
     expect(op?.parameters?.map((p) => p.name)).toEqual(['q']);
@@ -224,18 +223,22 @@ describe('excludeOwners', () => {
   });
 
   it('documents everything again when passed an empty list', () => {
-    const doc = new OpenApiGenerator({ title: 'T', version: '1', excludeOwners: [] })
-      .generate([{ ...route('GET', '/health'), owner: 'health-plugin' }]);
+    const doc = new OpenApiGenerator({ title: 'T', version: '1', excludeOwners: [] }).generate([
+      { ...route('GET', '/health'), owner: 'health-plugin' },
+    ]);
 
     expect(Object.keys(doc.paths)).toEqual(['/health']);
   });
 
   it('honours a caller-supplied owner list', () => {
-    const doc = new OpenApiGenerator({ title: 'T', version: '1', excludeOwners: ['my-plugin'] })
-      .generate([
-        { ...route('GET', '/health'), owner: 'health-plugin' },
-        { ...route('GET', '/orders'), owner: 'my-plugin' },
-      ]);
+    const doc = new OpenApiGenerator({
+      title: 'T',
+      version: '1',
+      excludeOwners: ['my-plugin'],
+    }).generate([
+      { ...route('GET', '/health'), owner: 'health-plugin' },
+      { ...route('GET', '/orders'), owner: 'my-plugin' },
+    ]);
 
     expect(Object.keys(doc.paths)).toEqual(['/health']);
   });
@@ -254,8 +257,9 @@ describe('review findings (PR #181)', () => {
     };
     Object.defineProperty(forged, VALIDATION_METADATA, { value: { target: 'body' } });
 
-    const doc = new OpenApiGenerator({ title: 'T', version: '1' })
-      .generate([route('POST', '/a', { middleware: [forged] })]);
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' }).generate([
+      route('POST', '/a', { middleware: [forged] }),
+    ]);
     const op = doc.paths?.['/a']?.post;
 
     expect(op?.requestBody).toBeUndefined();
@@ -266,8 +270,9 @@ describe('review findings (PR #181)', () => {
     // `schema` is typed `unknown`, so `undefined` is a legal value and the
     // `'schema' in value` guard accepts it. Assigning it still created an own
     // key, which counted as a derivation and added a `400`.
-    const doc = new OpenApiGenerator({ title: 'T', version: '1' })
-      .generate([route('POST', '/u', { middleware: [branded('body', undefined)] })]);
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' }).generate([
+      route('POST', '/u', { middleware: [branded('body', undefined)] }),
+    ]);
     const op = doc.paths?.['/u']?.post;
 
     expect(op?.requestBody).toBeUndefined();
@@ -278,8 +283,10 @@ describe('review findings (PR #181)', () => {
     // Unwrapping `{id}` to `by-id` costs injectivity: a literal `by-id` segment
     // slugs identically. A duplicate `operationId` is invalid per the
     // specification and makes a generated client emit two methods with one name.
-    const doc = new OpenApiGenerator({ title: 'T', version: '1' })
-      .generate([route('GET', '/users/:id'), route('GET', '/users/by-id')]);
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' }).generate([
+      route('GET', '/users/:id'),
+      route('GET', '/users/by-id'),
+    ]);
 
     expect(doc.paths?.['/users/{id}']?.get?.operationId).toBe('get-users-by-id');
     expect(doc.paths?.['/users/by-id']?.get?.operationId).toBe('get-users-by-id-2');

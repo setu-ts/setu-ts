@@ -794,9 +794,9 @@ export type GrantSourceConfig =
   | { readonly kind: 'static'; readonly grants: readonly StaticGrant[] }
   | { readonly kind: 'claims'; readonly map: ClaimsGrantMapper }
   | {
-    readonly kind: 'custom';
-    readonly source: IGrantSource | RegistryFactory<IGrantSource>;
-  };
+      readonly kind: 'custom';
+      readonly source: IGrantSource | RegistryFactory<IGrantSource>;
+    };
 
 /**
  * Where a catalogue role may be granted (`scopedRbac.grantableIn`).

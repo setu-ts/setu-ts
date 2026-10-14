@@ -88,16 +88,19 @@ for (const backend of backends) {
       release.resolve();
       const [ra, rb] = await settled;
       if (backend.deferred) {
-        expect([ra, rb].map((r) => r.status === 'fulfilled' ? r.value.value : r.reason)).toEqual([
+        expect([ra, rb].map((r) => (r.status === 'fulfilled' ? r.value.value : r.reason))).toEqual([
           'winner',
           'winner',
         ]);
-        expect([ra, rb].map((r) => r.status === 'fulfilled' ? r.value.replayed : undefined).sort())
-          .toEqual([false, true]);
-      } else {expect(ra).toEqual({
+        expect(
+          [ra, rb].map((r) => (r.status === 'fulfilled' ? r.value.replayed : undefined)).sort(),
+        ).toEqual([false, true]);
+      } else {
+        expect(ra).toEqual({
           status: 'fulfilled',
           value: { value: 'winner', replayed: false },
-        });}
+        });
+      }
       if (backend.name === 'MongoDB replica set') {
         expect(rb.status).toBe('rejected');
         if (rb.status !== 'rejected') throw new Error('MongoDB loser unexpectedly fulfilled');
@@ -119,10 +122,12 @@ for (const backend of backends) {
 
     it('obligation 1: two scopes and two namespaces never cross on one key', async () => {
       const { idempotency } = servicesOf(first);
-      const cases = [['scope-a', 'namespace-a'], ['scope-b', 'namespace-a'], [
-        'scope-a',
-        'namespace-b',
-      ], ['scope-b', 'namespace-b']];
+      const cases = [
+        ['scope-a', 'namespace-a'],
+        ['scope-b', 'namespace-a'],
+        ['scope-a', 'namespace-b'],
+        ['scope-b', 'namespace-b'],
+      ];
       for (const [scope, namespace] of cases) {
         const value = `${scope}/${namespace}`;
         expect(
@@ -134,9 +139,8 @@ for (const backend of backends) {
       }
       for (const [scope, namespace] of cases) {
         expect(
-          await idempotency.within(
-            withinOptions('isolation', scope, namespace),
-            () => Promise.reject(new Error('replay ran work')),
+          await idempotency.within(withinOptions('isolation', scope, namespace), () =>
+            Promise.reject(new Error('replay ran work')),
           ),
         ).toEqual({ value: `${scope}/${namespace}`, replayed: true });
       }
@@ -159,7 +163,8 @@ for (const backend of backends) {
           await repo.update(`${id}.r`, { kind: 'foreign-business-record' });
         }
         if (tamper === 'missing-result') await repo.delete(`${id}.r`);
-        const outcome = await idempotency.within(options, () => Promise.resolve('must-not-replay'))
+        const outcome = await idempotency
+          .within(options, () => Promise.resolve('must-not-replay'))
           .catch((error: unknown) => error);
         expect(outcome).toBeInstanceOf(IdempotencyWithinError);
         if (tamper === 'wrong-envelope') {
@@ -175,13 +180,12 @@ for (const backend of backends) {
       const { idempotency, database } = servicesOf(first);
       const business = await database.getRepository('Business').count();
       const records = await database.getRepository('Idempotency').count();
-      const failure = await idempotency.within(
-        withinOptions('oversized'),
-        async (uow: IUnitOfWork) => {
+      const failure = await idempotency
+        .within(withinOptions('oversized'), async (uow: IUnitOfWork) => {
           await writeBusiness(uow, 'oversized');
           return 'x'.repeat(65_536);
-        },
-      ).catch((error: unknown) => error);
+        })
+        .catch((error: unknown) => error);
       expect(failure).toBeInstanceOf(IdempotencyWithinError);
       expect((failure as IdempotencyWithinError).reason).toBe('result-too-large');
       expect(await database.getRepository('Business').count()).toBe(business);
@@ -223,8 +227,10 @@ describe('within-real: PostgreSQL interrupted purge', { skip: postgresUrl === un
       try {
         await expect(store.purge(Number.MAX_SAFE_INTEGER, 100)).rejects.toThrow();
         expect(await repo.findAll()).toEqual(before);
-        expect(await idempotency.within(options, () => Promise.resolve('unexpected')))
-          .toEqual({ value: 'winner', replayed: true });
+        expect(await idempotency.within(options, () => Promise.resolve('unexpected'))).toEqual({
+          value: 'winner',
+          replayed: true,
+        });
       } finally {
         await pg.pool.query('DROP TRIGGER refuse_result_delete ON setu_idempotency');
         await pg.pool.query('DROP FUNCTION refuse_result_delete()');
@@ -277,13 +283,16 @@ describe('within-real: PostgreSQL obligation 3', { skip: postgresUrl === undefin
           ctx.router.post('/probe', async (c) => {
             try {
               const { idempotency } = servicesOf(app);
-              const outcome = await idempotency.within({
-                ...withinOptions(values.key, values.scope, values.namespace),
-                fingerprint: { input: values.fingerprint },
-              }, async (uow: IUnitOfWork) => {
-                await writeBusiness(uow, `leak-${phase}`);
-                return values;
-              });
+              const outcome = await idempotency.within(
+                {
+                  ...withinOptions(values.key, values.scope, values.namespace),
+                  fingerprint: { input: values.fingerprint },
+                },
+                async (uow: IUnitOfWork) => {
+                  await writeBusiness(uow, `leak-${phase}`);
+                  return values;
+                },
+              );
               return c.response.json(outcome.value);
             } catch (error) {
               failures.push(error);
@@ -347,33 +356,41 @@ describe('within-real: PostgreSQL obligation 3', { skip: postgresUrl === undefin
 });
 
 describe('within-real: backend refusals', () => {
-  it('refuses Bigtable at start with bigtable-unsupported', {
-    skip: bigtableEndpoint === undefined,
-  }, async () => {
-    const app = withinApp(
-      new BigtableAdapter({
-        projectId: 'setu-m109b',
-        instance: `m109b-${crypto.randomUUID()}`,
-        apiEndpoint: bigtableEndpoint!,
-      }),
-    );
-    const error = await app.start().catch((error: unknown) => error);
-    await app.stop().catch(() => {});
-    expect(error).toBeInstanceOf(TransactionalStoreUnavailableError);
-    expect((error as TransactionalStoreUnavailableError).reason).toBe('bigtable-unsupported');
-  });
-  it('refuses standalone MongoDB at start with mongodb-standalone', {
-    skip: mongoUri === undefined,
-  }, async () => {
-    const harness = await mongoHarness(mongoUri!);
-    const app = withinApp(harness.adapter());
-    try {
+  it(
+    'refuses Bigtable at start with bigtable-unsupported',
+    {
+      skip: bigtableEndpoint === undefined,
+    },
+    async () => {
+      const app = withinApp(
+        new BigtableAdapter({
+          projectId: 'setu-m109b',
+          instance: `m109b-${crypto.randomUUID()}`,
+          apiEndpoint: bigtableEndpoint!,
+        }),
+      );
       const error = await app.start().catch((error: unknown) => error);
-      expect(error).toBeInstanceOf(TransactionalStoreUnavailableError);
-      expect((error as TransactionalStoreUnavailableError).reason).toBe('mongodb-standalone');
-    } finally {
       await app.stop().catch(() => {});
-      await harness.dispose();
-    }
-  });
+      expect(error).toBeInstanceOf(TransactionalStoreUnavailableError);
+      expect((error as TransactionalStoreUnavailableError).reason).toBe('bigtable-unsupported');
+    },
+  );
+  it(
+    'refuses standalone MongoDB at start with mongodb-standalone',
+    {
+      skip: mongoUri === undefined,
+    },
+    async () => {
+      const harness = await mongoHarness(mongoUri!);
+      const app = withinApp(harness.adapter());
+      try {
+        const error = await app.start().catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(TransactionalStoreUnavailableError);
+        expect((error as TransactionalStoreUnavailableError).reason).toBe('mongodb-standalone');
+      } finally {
+        await app.stop().catch(() => {});
+        await harness.dispose();
+      }
+    },
+  );
 });

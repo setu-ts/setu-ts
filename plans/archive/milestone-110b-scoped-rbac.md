@@ -63,13 +63,13 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                          | Resolution (picked side)                                                                                                                                                                                                                                                                        | Doc deliverable (same PR)                                       |
-| -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| C1 | ROADMAP: "a permission absent from the catalogue denies … the catalogue check also catches a typo". A request-time deny cannot tell a typo from an unheld permission.             | The catalogue check runs at STARTUP for every route guard (§3.9: each permission is an ability of the built-in policy, so M110a's scan refuses a typo). The imperative path still denies an unknown permission per request — by REJECTING (M110a's unknown-ability rule), not by a silent deny. | ROADMAP 110b "Fixed" bullet reworded to "refused at startup".   |
-| C2 | ROADMAP axis 4 lists "a parent scope's grants descend" and "relationship-based delegation via a resolver" as two mechanisms.                                                      | One mechanism: an `inheritsFrom(scope)` resolver returning the scopes whose grants apply (parents and delegators), walked transitively with cycle refusal and depth/node bounds (§3.5). A parent is one hop of it; a delegation is another.                                                     | ROADMAP 110b axis 4 bullet updated.                             |
-| C3 | ROADMAP axis 6 "computed at sign-in into the principal". Writing grants into `principal.claims` makes a federated token carrying the same claim name indistinguishable from them. | Grants resolved at sign-in are stored in the auth session under a PRIVATE session key beside the principal record, never in `claims` (§3.12).                                                                                                                                                   | ROADMAP 110b axis 6 bullet updated; PUBLIC_API states the rule. |
-| C4 | ROADMAP scenario E is "per-tenant custom roles (or its named deferral)"; axis 5 says custom roles are "a stretch the plan accepts or defers by name".                             | Accepted (maintainer, 2026-10-10). A custom role bundles CATALOGUE permissions only and is checked through permissions; a guard naming a custom role is refused at startup (§3.11).                                                                                                             | ROADMAP 110b scenario E + axis 5 bullets updated.               |
-| C5 | ARCHITECTURE §14 "Authorization" describes roles as global.                                                                                                                       | Extended, not contradicted.                                                                                                                                                                                                                                                                     | ARCHITECTURE §14 gains a "Scoped roles" subsection.             |
+| #   | Conflict                                                                                                                                                                          | Resolution (picked side)                                                                                                                                                                                                                                                                        | Doc deliverable (same PR)                                       |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| C1  | ROADMAP: "a permission absent from the catalogue denies … the catalogue check also catches a typo". A request-time deny cannot tell a typo from an unheld permission.             | The catalogue check runs at STARTUP for every route guard (§3.9: each permission is an ability of the built-in policy, so M110a's scan refuses a typo). The imperative path still denies an unknown permission per request — by REJECTING (M110a's unknown-ability rule), not by a silent deny. | ROADMAP 110b "Fixed" bullet reworded to "refused at startup".   |
+| C2  | ROADMAP axis 4 lists "a parent scope's grants descend" and "relationship-based delegation via a resolver" as two mechanisms.                                                      | One mechanism: an `inheritsFrom(scope)` resolver returning the scopes whose grants apply (parents and delegators), walked transitively with cycle refusal and depth/node bounds (§3.5). A parent is one hop of it; a delegation is another.                                                     | ROADMAP 110b axis 4 bullet updated.                             |
+| C3  | ROADMAP axis 6 "computed at sign-in into the principal". Writing grants into `principal.claims` makes a federated token carrying the same claim name indistinguishable from them. | Grants resolved at sign-in are stored in the auth session under a PRIVATE session key beside the principal record, never in `claims` (§3.12).                                                                                                                                                   | ROADMAP 110b axis 6 bullet updated; PUBLIC_API states the rule. |
+| C4  | ROADMAP scenario E is "per-tenant custom roles (or its named deferral)"; axis 5 says custom roles are "a stretch the plan accepts or defers by name".                             | Accepted (maintainer, 2026-10-10). A custom role bundles CATALOGUE permissions only and is checked through permissions; a guard naming a custom role is refused at startup (§3.11).                                                                                                             | ROADMAP 110b scenario E + axis 5 bullets updated.               |
+| C5  | ARCHITECTURE §14 "Authorization" describes roles as global.                                                                                                                       | Extended, not contradicted.                                                                                                                                                                                                                                                                     | ARCHITECTURE §14 gains a "Scoped roles" subsection.             |
 
 ## 3. Design decisions
 
@@ -118,8 +118,7 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
     readonly scope: ScopeRef | null; // null = global
   }
   type GrantQuery =
-    | { readonly kind: 'chain'; readonly scopes: readonly ScopeRef[] }
-    | { readonly kind: 'all' };
+    { readonly kind: 'chain'; readonly scopes: readonly ScopeRef[] } | { readonly kind: 'all' };
   interface IGrantSource {
     readonly name: string;
     grantsFor(
@@ -135,6 +134,7 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
   M110a T9 rule); an invalid grant is dropped and counted, never coerced. A `chain` query asks for
   grants whose scope is one of `scopes`, plus every global grant; `all` asks for every grant the
   principal holds (used only by sign-in timing, §3.12).
+
 - **Why:** the assignment carries the scope (Casbin), `null` is global (spatie); the `chain`/`all`
   split lets one source serve both the per-request and the sign-in timing.
 - **Test home:** `common/test/unit/scoped-grants.test.ts` (validator rows: grammar, length,
@@ -143,8 +143,7 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
 ### 3.4 Where a check's scope comes from
 
 - **Decision:** a scoped check's target is a
-  `ScopedRbacTarget = { readonly scope: ScopeRef | null;
-  readonly context?: IRequestContext }`.
+  `ScopedRbacTarget = { readonly scope: ScopeRef | null; readonly context?: IRequestContext }`.
   Guards and decorators take a `ScopeSource`:
   `ScopeRef | null | ((ctx) => ScopeRef | null | undefined | Promise<…>)`, defaulting to
   `scopeFromTenant()`. `common` exports `scopeFromTenant(type = 'tenant')` (reads
@@ -200,17 +199,15 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
 - **Decision:** `scopedRbac.sources: readonly GrantSourceConfig[]`, a union discriminated on `kind`:
   `{ kind: 'static'; grants: readonly { subject: string; role: string; scope: ScopeRef | null }[] }`
   (validated and indexed by subject at construction);
-  `{ kind: 'claims'; map: (claims, principal) =>
-  readonly ScopedGrant[] }` (the
+  `{ kind: 'claims'; map: (claims, principal) => readonly ScopedGrant[] }` (the
   Keycloak-Organizations shape — no store);
-  `{ kind: 'custom';
-  source: IGrantSource | RegistryFactory<IGrantSource> }` (a factory is
-  resolved at `onInit`, the M101c precedent — which is how `createDatabaseGrantSource()` plugs in).
-  The principal's own `roles` are always included as GLOBAL grants (`principal.permissions` is
-  honoured as global directly-held permissions). Grants from all sources are UNIONED; one source
-  rejecting or timing out denies the WHOLE check. A partial union cannot over-grant (there are no
-  deny rules), but it would make a broken source look like a principal with fewer rights, hiding the
-  outage; denying and logging the source makes it visible.
+  `{ kind: 'custom'; source: IGrantSource | RegistryFactory<IGrantSource> }` (a factory is resolved
+  at `onInit`, the M101c precedent — which is how `createDatabaseGrantSource()` plugs in). The
+  principal's own `roles` are always included as GLOBAL grants (`principal.permissions` is honoured
+  as global directly-held permissions). Grants from all sources are UNIONED; one source rejecting or
+  timing out denies the WHOLE check. A partial union cannot over-grant (there are no deny rules),
+  but it would make a broken source look like a principal with fewer rights, hiding the outage;
+  denying and logging the source makes it visible.
 - **Why:** axis 3 verbatim; union because grants are additive and there are no deny rules.
 - **Test home:** `auth-plugin/test/unit/scoped/grant-sources.test.ts`.
 
@@ -223,8 +220,7 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
   `Object.hasOwn` lookups (a grant naming `constructor` resolves nothing). A grant of a role absent
   from the catalogue (and from the grant scope's custom roles, §3.11) grants nothing and is counted.
   Per role scope-type limits:
-  `scopedRbac.grantableIn?: Record<role, { readonly scopeTypes: readonly
-  string[]; readonly global?: boolean }>`
+  `scopedRbac.grantableIn?: Record<role, { readonly scopeTypes: readonly string[]; readonly global?: boolean }>`
   — a grant of a limited role in a scope whose type is not in `scopeTypes` is IGNORED (counted,
   never an error), and a limited role held GLOBALLY (a `null`-scope grant, or `principal.roles`)
   counts only when `global: true`. A separate boolean rather than a sentinel string, because every
@@ -259,11 +255,9 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
 ### 3.10 Guards
 
 - **Decision:**
-  `requireScopedRole(role: string | readonly string[], options?: { scope?:
-  ScopeSource })` — an
-  array is ANY-of; `requireScopedPermission(permission: string | readonly
-  string[], options?)` —
-  an array is ALL-of (mirroring `requireAnyRole`/`requireAllPermissions`). An array of length 0 is
+  `requireScopedRole(role: string | readonly string[], options?: { scope?: ScopeSource })` — an
+  array is ANY-of; `requireScopedPermission(permission: string | readonly string[], options?)` — an
+  array is ALL-of (mirroring `requireAnyRole`/`requireAllPermissions`). An array of length 0 is
   refused at construction. Each is ONE middleware, built in `scoped/scoped-guards.ts` without
   `requirePolicy`, that resolves the scope once and calls `service.can` per entry (short-circuiting
   in order). Per request it mirrors `requirePolicy`'s order: `501` with no policy provider;
@@ -309,8 +303,7 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
     calls a failing source once and logs once; it is never carried into another request. Without
     `context`, nothing is memoised. **Revocation latency: the next request.**
   - `cache`: an LRU (`maxEntries`, 1–100 000) keyed by `JSON.stringify([principalKey, query])` where
-    `principalKey = JSON.stringify([principal.id, typeof claims.iss === 'string' ? claims.iss
-    : null])`
+    `principalKey = JSON.stringify([principal.id, typeof claims.iss === 'string' ? claims.iss : null])`
     — so the same `sub` from two issuers never shares an entry. Entries expire after `ttlMs` (1
     000–3 600 000) on the MONOTONIC clock (`runtime.hrtime()`); a failed resolution is never cached.
     **Revocation latency: up to `ttlMs`.**
@@ -394,14 +387,12 @@ existing guards and `@Roles`/`@Permissions` keep their single evaluator and thei
 
 - **Decision:** `createDatabaseGrantSource({ entity, fields? })` → `RegistryFactory<IGrantSource>`
   over `CAPABILITIES.DATABASE`'s repository for `entity`, reading rows
-  `{ subject, role, scopeType,
-  scopeId }` (field names overridable). A `chain` query is ONE
+  `{ subject, role, scopeType, scopeId }` (field names overridable). A `chain` query is ONE
   `findAll` with filter
   `and(eq(subject), or(and(eq(scopeType, null), eq(scopeId, null)), …one and() per chain scope))`
   and `limit: maxGrantsPerPrincipal + 1` (the source refuses rather than truncates); `all` drops the
   scope clause. `createDatabaseRoleSource({ entity, fields? })` reads
-  `{ scopeType, scopeId, role,
-  permission }` rows (one per permission) and groups them. Both pass
+  `{ scopeType, scopeId, role, permission }` rows (one per permission) and groups them. Both pass
   only scalar strings into `where`/`filter` (the M101c operator-injection rule). The signal they
   receive is checked before the query is issued, but `IRepository.findAll` takes no signal (§1), so
   a query already running is ABANDONED on expiry rather than cancelled — the deny is immediate, the

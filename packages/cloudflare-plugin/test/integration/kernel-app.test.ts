@@ -264,7 +264,8 @@ describe('CloudflarePlugin in a kernel application', () => {
     });
 
     app.router.get('/bg', (ctx) => {
-      ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE)
+      ctx.services
+        .get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE)
         .waitUntil(Promise.reject(new Error('analytics upload failed')));
       return ctx.response.json({ ok: true });
     });
@@ -301,10 +302,7 @@ describe('CloudflarePlugin in a kernel application', () => {
     ).rejects.toThrow(/toString/);
     await expect(
       createApplication({
-        plugins: [
-          RuntimePlugin(),
-          CloudflarePlugin({ env: {}, requireBindings: ['SESSIONS'] }),
-        ],
+        plugins: [RuntimePlugin(), CloudflarePlugin({ env: {}, requireBindings: ['SESSIONS'] })],
       }).start(),
     ).rejects.toBeInstanceOf(CloudflareBindingMissingError);
   });

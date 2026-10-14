@@ -83,14 +83,14 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
   // `start()` where the store is built.
   if (storeType === 'redis') resolveCommandTimeoutMs(storeOptions.commandTimeoutMs);
   // M98i: validated here, before any application exists.
-  const diagnosticsAlias = options?.diagnostics === undefined
-    ? null
-    : compileCacheDiagnosticsAlias(options.diagnostics);
+  const diagnosticsAlias =
+    options?.diagnostics === undefined ? null : compileCacheDiagnosticsAlias(options.diagnostics);
 
   // Derive token: default → 'cache', named → 'cache.<name>'
-  const token = instanceName === 'default'
-    ? CAPABILITIES.CACHE
-    : createCapabilityToken(`cache.${instanceName}`);
+  const token =
+    instanceName === 'default'
+      ? CAPABILITIES.CACHE
+      : createCapabilityToken(`cache.${instanceName}`);
 
   // Plugin name: default → 'cache-plugin', named → 'cache-plugin.<name>'
   const pluginName = instanceName === 'default' ? PLUGIN_NAME : `cache-plugin.${instanceName}`;
@@ -147,9 +147,10 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
       // collide). It describes THIS service only — a later replacement of the
       // cache token is outside its coverage. Opted out, the source is inert
       // and nothing is attached to the service.
-      const collector = diagnosticsAlias === null
-        ? null
-        : new CacheObservationCollector(diagnosticsAlias, ctx.runtime.hrtime.bind(ctx.runtime));
+      const collector =
+        diagnosticsAlias === null
+          ? null
+          : new CacheObservationCollector(diagnosticsAlias, ctx.runtime.hrtime.bind(ctx.runtime));
       if (collector !== null) {
         attachCacheCollector(service, collector);
       }

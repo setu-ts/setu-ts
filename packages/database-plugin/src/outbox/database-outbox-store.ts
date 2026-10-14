@@ -291,11 +291,13 @@ export class DatabaseOutboxStore implements IOutboxStore {
     return await this.#transition(
       id,
       'pending',
-      update.deleteNow ? undefined : {
-        status: 'sent',
-        settledAt: update.settledAt,
-        sentBy: update.sentBy,
-      },
+      update.deleteNow
+        ? undefined
+        : {
+            status: 'sent',
+            settledAt: update.settledAt,
+            sentBy: update.sentBy,
+          },
       update.claimVersion,
     );
   }
@@ -320,10 +322,15 @@ export class DatabaseOutboxStore implements IOutboxStore {
     id: string,
     update: { readonly claimVersion: number; readonly leaseUntil: number },
   ): Promise<OutboxTransition> {
-    return await this.#transition(id, 'pending', {
-      claimVersion: update.claimVersion + 1,
-      leaseUntil: update.leaseUntil,
-    }, update.claimVersion);
+    return await this.#transition(
+      id,
+      'pending',
+      {
+        claimVersion: update.claimVersion + 1,
+        leaseUntil: update.leaseUntil,
+      },
+      update.claimVersion,
+    );
   }
 
   /** @inheritdoc */
@@ -361,9 +368,10 @@ export class DatabaseOutboxStore implements IOutboxStore {
       ...(claimVersion === undefined ? {} : { claimVersion }),
     };
     for (let round = 0; round < 3; round += 1) {
-      const result = data === undefined
-        ? await conditionalDelete(repo, id, where)
-        : await conditionalUpdate(repo, id, where, data);
+      const result =
+        data === undefined
+          ? await conditionalDelete(repo, id, where)
+          : await conditionalUpdate(repo, id, where, data);
       if (result.outcome === 'applied') return { outcome: 'applied' };
       if (result.outcome === 'unsupported') {
         throw new OutboxStoreUnavailableError(this.#entity, 'conditional-writes-unsupported');
@@ -427,7 +435,7 @@ export class DatabaseOutboxStore implements IOutboxStore {
         uow.getRepository<Row, EntityKey>(this.#entity).findAll({
           where: this.#where('pending'),
           limit: 1,
-        })
+        }),
       );
       // Both conditional operations are probed: they are independent optional
       // members, and `markSent` with `deleteNow` (`retainSentMs: 0`) needs the
@@ -503,9 +511,10 @@ export function createDatabaseOutboxStore(
     throw new TypeError('createDatabaseOutboxStore: entity must be a non-empty string');
   }
   const database = options?.database;
-  const token = database === undefined || database === 'default'
-    ? CAPABILITIES.DATABASE
-    : createCapabilityToken(`database.${database}`);
+  const token =
+    database === undefined || database === 'default'
+      ? CAPABILITIES.DATABASE
+      : createCapabilityToken(`database.${database}`);
   return (services: IServiceRegistry): IOutboxStore =>
     new DatabaseOutboxStore(services.get<IDatabaseService>(token), entity);
 }

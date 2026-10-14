@@ -66,9 +66,15 @@ describe('telemetry contract types', () => {
       setAttributes(_attrs: Readonly<Record<string, SpanAttributeValue>>): this {
         return this;
       }
-      setStatus(_status: SpanStatus): void {/* no-op */}
-      recordException(_error: Error): void {/* no-op */}
-      end(): void {/* no-op */}
+      setStatus(_status: SpanStatus): void {
+        /* no-op */
+      }
+      recordException(_error: Error): void {
+        /* no-op */
+      }
+      end(): void {
+        /* no-op */
+      }
       spanContext() {
         return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
       }
@@ -97,9 +103,15 @@ describe('telemetry contract types', () => {
       setAttributes(_attrs: Readonly<Record<string, SpanAttributeValue>>): this {
         return this;
       }
-      setStatus(_status: SpanStatus): void {/* no-op */}
-      recordException(_error: Error): void {/* no-op */}
-      end(): void {/* no-op */}
+      setStatus(_status: SpanStatus): void {
+        /* no-op */
+      }
+      recordException(_error: Error): void {
+        /* no-op */
+      }
+      end(): void {
+        /* no-op */
+      }
       spanContext() {
         return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' };
       }

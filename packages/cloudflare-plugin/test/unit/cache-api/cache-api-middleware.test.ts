@@ -500,10 +500,7 @@ describe('cacheApiMiddleware — hit', () => {
     const ctx = contextFor('https://example.test/multi');
     await cacheApiMiddleware({ cache })(ctx, () => Promise.resolve());
 
-    expect(ctx.response.snapshot().headers.getSetCookie()).toEqual([
-      'a=1; Path=/',
-      'b=2; Path=/',
-    ]);
+    expect(ctx.response.snapshot().headers.getSetCookie()).toEqual(['a=1; Path=/', 'b=2; Path=/']);
   });
 
   it('still overwrites rather than appends for an ordinary repeated header', async () => {
@@ -512,7 +509,12 @@ describe('cacheApiMiddleware — hit', () => {
     const cache = new FakeCacheApi();
     await cache.put(
       'https://example.test/vary',
-      new Response('body', { headers: [['vary', 'Accept'], ['vary', 'Origin']] }),
+      new Response('body', {
+        headers: [
+          ['vary', 'Accept'],
+          ['vary', 'Origin'],
+        ],
+      }),
     );
 
     const ctx = contextFor('https://example.test/vary');
@@ -618,13 +620,11 @@ describe('cacheApiMiddleware — skips', () => {
   it('does not store a response the platform would refuse', async () => {
     const cache = new FakeCacheApi();
 
-    for (
-      const write of [
-        (ctx: IRequestContext) => ctx.response.status(500).json({ error: true }),
-        (ctx: IRequestContext) => ctx.response.header('vary', '*').json({ ok: true }),
-        (ctx: IRequestContext) => ctx.response.header('set-cookie', 'a=1').json({ ok: true }),
-      ]
-    ) {
+    for (const write of [
+      (ctx: IRequestContext) => ctx.response.status(500).json({ error: true }),
+      (ctx: IRequestContext) => ctx.response.header('vary', '*').json({ ok: true }),
+      (ctx: IRequestContext) => ctx.response.header('set-cookie', 'a=1').json({ ok: true }),
+    ]) {
       const ctx = contextFor('https://example.test/x');
       await cacheApiMiddleware({ cache })(ctx, () => {
         write(ctx);

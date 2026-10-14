@@ -118,21 +118,21 @@ export interface InboxFailureUpdate {
  */
 export type InboxReleaseOutcome =
   | {
-    /** The marker was parked and was released. */
-    readonly outcome: 'applied';
-    /** The marker as it was before the release. */
-    readonly record: InboxRecord;
-  }
+      /** The marker was parked and was released. */
+      readonly outcome: 'applied';
+      /** The marker as it was before the release. */
+      readonly record: InboxRecord;
+    }
   | {
-    /** No inbox marker with that id exists (a row of another `kind` counts as missing). */
-    readonly outcome: 'missing';
-  }
+      /** No inbox marker with that id exists (a row of another `kind` counts as missing). */
+      readonly outcome: 'missing';
+    }
   | {
-    /** The marker was not parked; nothing written. */
-    readonly outcome: 'not-parked';
-    /** The marker's actual status. */
-    readonly status: Exclude<InboxStatus, 'parked'>;
-  };
+      /** The marker was not parked; nothing written. */
+      readonly outcome: 'not-parked';
+      /** The marker's actual status. */
+      readonly status: Exclude<InboxStatus, 'parked'>;
+    };
 
 /**
  * Counts read by {@linkcode IInboxStore.stats} for the inbox health

@@ -108,11 +108,16 @@ describe('respondWithAuthorizationFailure', () => {
 
   it('delegates to a published responder with exactly the helper value', () => {
     const received: ErrorResponseInit[] = [];
-    const state = new Map<string, unknown>([[ERROR_RESPONDER_STATE_KEY, {
-      respond(_target: ErrorResponderTarget, init: ErrorResponseInit): void {
-        received.push(init);
-      },
-    }]]);
+    const state = new Map<string, unknown>([
+      [
+        ERROR_RESPONDER_STATE_KEY,
+        {
+          respond(_target: ErrorResponderTarget, init: ErrorResponseInit): void {
+            received.push(init);
+          },
+        },
+      ],
+    ]);
     const { target } = recordingTarget(state);
     respondWithAuthorizationFailure(target, 'authentication-required');
     expect(received).toEqual([authorizationFailureInit('authentication-required')]);

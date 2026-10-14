@@ -22,9 +22,9 @@ export function createFieldMatcher(
   caseSensitive: boolean,
 ): (path: string) => CompiledFieldPattern | undefined {
   const patterns: readonly Pattern[] = Object.entries(fields).map(([path, value]) => {
-    const segments = path.split('.').map((
-      segment,
-    ) => (caseSensitive ? segment : segment.toLowerCase()));
+    const segments = path
+      .split('.')
+      .map((segment) => (caseSensitive ? segment : segment.toLowerCase()));
     if (typeof value === 'string') return { segments, classification: value };
     // Own properties only: an inherited `redactor` (from a polluted
     // `Object.prototype` or an entry built with `Object.create`) must never
@@ -41,9 +41,9 @@ export function createFieldMatcher(
       : { segments, classification };
   });
   return (path: string): CompiledFieldPattern | undefined => {
-    const segments = path.split('.').map((
-      segment,
-    ) => (caseSensitive ? segment : segment.toLowerCase()));
+    const segments = path
+      .split('.')
+      .map((segment) => (caseSensitive ? segment : segment.toLowerCase()));
     let selected: Pattern | undefined;
     for (const pattern of patterns) {
       if (
@@ -83,10 +83,7 @@ function specificity(segments: readonly string[]): readonly number[] {
 }
 
 /** Tests a normalized path against a compiled wildcard pattern. */
-function matches(
-  pattern: readonly string[],
-  path: readonly string[],
-): boolean {
+function matches(pattern: readonly string[], path: readonly string[]): boolean {
   const results = new Map<string, boolean>();
 
   function visit(patternIndex: number, pathIndex: number): boolean {
@@ -94,9 +91,10 @@ function matches(
     const previousResult = results.get(key);
     if (previousResult !== undefined) return previousResult;
 
-    const result = patternIndex === pattern.length
-      ? pathIndex === path.length
-      : matchSegment(patternIndex, pathIndex);
+    const result =
+      patternIndex === pattern.length
+        ? pathIndex === path.length
+        : matchSegment(patternIndex, pathIndex);
     results.set(key, result);
     return result;
   }
@@ -104,11 +102,16 @@ function matches(
   function matchSegment(patternIndex: number, pathIndex: number): boolean {
     const segment = pattern[patternIndex]!;
     if (segment === '**') {
-      return visit(patternIndex + 1, pathIndex) ||
-        (pathIndex < path.length && visit(patternIndex, pathIndex + 1));
+      return (
+        visit(patternIndex + 1, pathIndex) ||
+        (pathIndex < path.length && visit(patternIndex, pathIndex + 1))
+      );
     }
-    return pathIndex < path.length && (segment === '*' || segment === path[pathIndex]) &&
-      visit(patternIndex + 1, pathIndex + 1);
+    return (
+      pathIndex < path.length &&
+      (segment === '*' || segment === path[pathIndex]) &&
+      visit(patternIndex + 1, pathIndex + 1)
+    );
   }
 
   return visit(0, 0);

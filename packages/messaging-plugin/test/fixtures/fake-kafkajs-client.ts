@@ -4,11 +4,7 @@
  * Records all method calls and simulates Kafka behavior.
  */
 /** A header value in any shape kafkajs's `IHeaders` admits. */
-export type KafkaHeaderValue =
-  | string
-  | Uint8Array
-  | readonly (string | Uint8Array)[]
-  | undefined;
+export type KafkaHeaderValue = string | Uint8Array | readonly (string | Uint8Array)[] | undefined;
 
 export interface FakeKafkaOptions {
   /** Pre-seeded messages for eachMessage callbacks. */
@@ -46,9 +42,11 @@ export interface FakeKafkaOptions {
 
 /** Builds the protocol error real kafkajs raises for an unknown topic. */
 export function unknownTopicError(): Error & { type: string; retriable: boolean } {
-  const err = new Error(
-    'This server does not host this topic-partition',
-  ) as Error & { type: string; retriable: boolean; code: number };
+  const err = new Error('This server does not host this topic-partition') as Error & {
+    type: string;
+    retriable: boolean;
+    code: number;
+  };
   err.name = 'KafkaJSProtocolError';
   err.type = 'UNKNOWN_TOPIC_OR_PARTITION';
   err.retriable = true;
@@ -85,9 +83,10 @@ export class FakeKafkaMessage {
     this.#offset = offset;
     this.#timestamp = timestamp;
     this.#headers = Object.fromEntries(
-      Object.entries(headers).map((
-        [k, v],
-      ) => [k, typeof v === 'string' ? new TextEncoder().encode(v) : v]),
+      Object.entries(headers).map(([k, v]) => [
+        k,
+        typeof v === 'string' ? new TextEncoder().encode(v) : v,
+      ]),
     );
     this.#key = key !== null ? new TextEncoder().encode(key) : null;
   }
@@ -119,9 +118,11 @@ export class FakeKafkaMessage {
 export class FakeKafkaConsumer {
   #subscribedTopics: string[];
   #runOptions: {
-    eachMessage: (
-      data: { topic: string; partition: number; message: FakeKafkaMessage },
-    ) => Promise<void>;
+    eachMessage: (data: {
+      topic: string;
+      partition: number;
+      message: FakeKafkaMessage;
+    }) => Promise<void>;
   } | null;
   #running: boolean;
   #calls: Array<{ method: string; args: unknown[] }>;
@@ -220,13 +221,13 @@ export class FakeKafkaConsumer {
     return Promise.resolve();
   }
 
-  run(
-    options: {
-      eachMessage: (
-        data: { topic: string; partition: number; message: FakeKafkaMessage },
-      ) => Promise<void>;
-    },
-  ): Promise<void> {
+  run(options: {
+    eachMessage: (data: {
+      topic: string;
+      partition: number;
+      message: FakeKafkaMessage;
+    }) => Promise<void>;
+  }): Promise<void> {
     this.#record('run', [options]);
     if (this.#runRejection !== null) {
       return Promise.reject(this.#runRejection.value);
@@ -340,9 +341,9 @@ export class FakeKafkaProducer {
     const accepted = Object.values(this.events) as readonly string[];
     if (!accepted.includes(event)) {
       throw new Error(
-        `Event name should be one of ${
-          accepted.map((name) => `producer.events.${name}`).join(', ')
-        }`,
+        `Event name should be one of ${accepted
+          .map((name) => `producer.events.${name}`)
+          .join(', ')}`,
       );
     }
     const set = this.#listeners.get(event) ?? new Set();
@@ -363,12 +364,10 @@ export class FakeKafkaProducer {
     return Promise.resolve();
   }
 
-  async send(
-    options: {
-      topic: string;
-      messages: Array<{ value: string; headers?: Record<string, string> }>;
-    },
-  ): Promise<void> {
+  async send(options: {
+    topic: string;
+    messages: Array<{ value: string; headers?: Record<string, string> }>;
+  }): Promise<void> {
     this.#record('send', [options]);
     if (this.#route) {
       for (const message of options.messages) {
@@ -418,9 +417,7 @@ export class FakeKafkaFactory {
     this.#record('producer', []);
     // Return existing producer, or create a new one
     if (this.#producers.length === 0) {
-      const producer = new FakeKafkaProducer(
-        (topic, value) => this.route(topic, value),
-      );
+      const producer = new FakeKafkaProducer((topic, value) => this.route(topic, value));
       this.#producers.push(producer);
     }
     return this.#producers[0];
@@ -434,15 +431,10 @@ export class FakeKafkaFactory {
    * to per-instance inbox groups.
    */
   async route(topic: string, value: string): Promise<void> {
-    const message = new FakeKafkaMessage(
-      value,
-      String(this.#offset++),
-      '0',
-      {},
-    );
+    const message = new FakeKafkaMessage(value, String(this.#offset++), '0', {});
     for (const consumer of this.#consumers.values()) {
-      const subscribed = consumer.calls.some((c) =>
-        c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === topic
+      const subscribed = consumer.calls.some(
+        (c) => c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === topic,
       );
       if (subscribed) {
         await consumer.deliver(topic, message, 0);
@@ -480,8 +472,9 @@ export class FakeKafkaFactory {
       );
       for (const consumer of this.#consumers.values()) {
         if (
-          consumer.calls.some((c) =>
-            c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === seeded.topic
+          consumer.calls.some(
+            (c) =>
+              c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === seeded.topic,
           )
         ) {
           await consumer.deliver(seeded.topic, message, seeded.partition);

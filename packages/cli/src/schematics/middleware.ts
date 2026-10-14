@@ -57,8 +57,8 @@ export const FRAMEWORK_MIDDLEWARE_BANDS: readonly FrameworkMiddlewareBand[] = [
  * @returns E.g. `0 (error handler), 20 (metrics), …`
  */
 function renderBands(): string {
-  return FRAMEWORK_MIDDLEWARE_BANDS.map((band) =>
-    `${band.from === band.to ? band.from : `${band.from}–${band.to}`} (${band.owner})`
+  return FRAMEWORK_MIDDLEWARE_BANDS.map(
+    (band) => `${band.from === band.to ? band.from : `${band.from}–${band.to}`} (${band.owner})`,
   ).join(', ');
 }
 
@@ -129,12 +129,10 @@ export function generateMiddleware(
  * Change it HERE, not in \`src/middleware/index.ts\` — the CLI regenerates that barrel
  * from this constant, so an edit there is lost on the next generate.
  *
-${
-    commentLines(
-      `For reference, the framework's own middleware occupy ${renderBands()}. Keep a ` +
-        'value above 0, so an installed error handler still formats what this middleware throws.',
-    )
-  }
+${commentLines(
+  `For reference, the framework's own middleware occupy ${renderBands()}. Keep a ` +
+    'value above 0, so an installed error handler still formats what this middleware throws.',
+)}
  */
 export const ${priorityConst} = ${DEFAULT_PRIORITY};
 

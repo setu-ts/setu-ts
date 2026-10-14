@@ -76,17 +76,14 @@ describe('Storage integration (through a real kernel app)', () => {
     ]);
 
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        StoragePlugin(),
-      ],
+      plugins: [RuntimePlugin(), StoragePlugin()],
     });
     await app.start();
 
     const storage = app.services.get<IStorage>(CAPABILITIES.STORAGE);
 
     // deno-lint-ignore no-explicit-any
-    const { getUploadedFile } = await import('../../src/index.ts') as any;
+    const { getUploadedFile } = (await import('../../src/index.ts')) as any;
 
     // Build a minimal request context that simulates what the kernel inject() provides.
     // deno-lint-ignore no-explicit-any

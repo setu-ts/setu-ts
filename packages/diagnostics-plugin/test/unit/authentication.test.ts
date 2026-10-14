@@ -54,12 +54,12 @@ describe('Authentication — canonical bytes', () => {
     expect(utf8(MAC_DOMAIN + '\nrequest\n').length).toEqual(MAC_DOMAIN.length + 9);
     const decode = new TextDecoder();
     expect(
-      decode.decode(response.slice(0, MAC_DOMAIN.length + 10))
+      decode
+        .decode(response.slice(0, MAC_DOMAIN.length + 10))
         .startsWith(`${MAC_DOMAIN}\nresponse\n`),
     ).toBe(true);
     expect(
-      decode.decode(request.slice(0, MAC_DOMAIN.length + 9))
-        .startsWith(`${MAC_DOMAIN}\nrequest\n`),
+      decode.decode(request.slice(0, MAC_DOMAIN.length + 9)).startsWith(`${MAC_DOMAIN}\nrequest\n`),
     ).toBe(true);
   });
 
@@ -85,9 +85,7 @@ describe('Authentication — canonical bytes', () => {
     const independent = await crypto.subtle.sign(
       'HMAC',
       key,
-      utf8(
-        `${MAC_DOMAIN}\nrequest\n${'s'.repeat(32)}\n\n1\nGET\n127.0.0.1:4919\n/v1/status`,
-      ),
+      utf8(`${MAC_DOMAIN}\nrequest\n${'s'.repeat(32)}\n\n1\nGET\n127.0.0.1:4919\n/v1/status`),
     );
     expect(signed).toEqual(hexEncode(new Uint8Array(independent)));
   });

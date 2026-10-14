@@ -314,9 +314,9 @@ export function interruptedRunRetryHint(
   const directory = wouldCreateDirectory.replace(/\/+$/, '');
   const prefix = `${directory}/`;
   if (!existing.every((path) => path.startsWith(prefix))) return undefined;
-  return `If an earlier run was interrupted before this change, delete ${
-    escapeName(directory)
-  } and run this again.`;
+  return `If an earlier run was interrupted before this change, delete ${escapeName(
+    directory,
+  )} and run this again.`;
 }
 
 /** One attempted write, recorded before the filesystem can partially modify it. */
@@ -331,18 +331,15 @@ export interface WriteOutcome {
   readonly outcome: 'created' | 'updated' | 'unchanged';
 }
 
-function outcomeFor(
-  path: string,
-  before: Uint8Array | undefined,
-  after: Uint8Array,
-): WriteOutcome {
+function outcomeFor(path: string, before: Uint8Array | undefined, after: Uint8Array): WriteOutcome {
   return {
     path,
-    outcome: before === undefined
-      ? 'created'
-      : before.length === after.length && before.every((byte, index) => byte === after[index])
-      ? 'unchanged'
-      : 'updated',
+    outcome:
+      before === undefined
+        ? 'created'
+        : before.length === after.length && before.every((byte, index) => byte === after[index])
+          ? 'unchanged'
+          : 'updated',
   };
 }
 
@@ -409,10 +406,8 @@ async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
   const current = await previousBytes(fs, undo.path);
   // A read-only file can reject without changing anything. Do not turn that
   // into a spurious rollback failure by trying to rewrite the intact bytes.
-  if (
-    current?.length === before.length &&
-    current.every((byte, index) => byte === before[index])
-  ) return;
+  if (current?.length === before.length && current.every((byte, index) => byte === before[index]))
+    return;
   await fs.writeFile(undo.path, before);
 }
 
@@ -590,9 +585,10 @@ export async function withFileTransaction<T>(
     }
     // A nested write batch rolls back through this abort-aware journal, so its
     // aggregate can wrap the interruption even when outer recovery also fails.
-    const originalCause = cause instanceof AggregateError && cause.cause instanceof InterruptedError
-      ? cause.cause
-      : cause;
+    const originalCause =
+      cause instanceof AggregateError && cause.cause instanceof InterruptedError
+        ? cause.cause
+        : cause;
     if (failures.length > 0) {
       throw new AggregateError(
         [cause, ...failures],

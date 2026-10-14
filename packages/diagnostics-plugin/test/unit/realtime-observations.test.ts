@@ -211,13 +211,15 @@ describe('realtime protocol — source reading', () => {
       sourceKind: 'sse',
       coverage: 'owned-instance',
       gauges: { state: 'available', openConnections: 4, groups: 2 },
-      records: [record('feed', 'close', {
-        count: 1,
-        ageMs: 0,
-        succeeded: 0,
-        failed: 1,
-        backpressureCloses: 1,
-      })],
+      records: [
+        record('feed', 'close', {
+          count: 1,
+          ageMs: 0,
+          succeeded: 0,
+          failed: 1,
+          backpressureCloses: 1,
+        }),
+      ],
       dropped: 0,
     });
   });
@@ -228,16 +230,22 @@ describe('realtime protocol — source reading', () => {
     ['a class instance', () => Object.assign(new (class Snapshot {})(), websocket())],
     ['an extra key', () => ({ ...websocket(), room: 'canary' })],
     ['a symbol key', () => ({ ...websocket(), [Symbol('x')]: 1 })],
-    ['a getter', () => {
-      const value = { ...websocket() };
-      Object.defineProperty(value, 'alias', { get: () => 'chat', enumerable: true });
-      return value;
-    }],
-    ['a gauge getter', () => {
-      const gauges = available();
-      Object.defineProperty(gauges, 'groups', { get: () => 1, enumerable: true });
-      return { ...websocket(), gauges };
-    }],
+    [
+      'a getter',
+      () => {
+        const value = { ...websocket() };
+        Object.defineProperty(value, 'alias', { get: () => 'chat', enumerable: true });
+        return value;
+      },
+    ],
+    [
+      'a gauge getter',
+      () => {
+        const gauges = available();
+        Object.defineProperty(gauges, 'groups', { get: () => 1, enumerable: true });
+        return { ...websocket(), gauges };
+      },
+    ],
     ['gauges with an extra key', () => ({ ...websocket(), gauges: { ...available(), x: 1 } })],
     ['a non-object gauges', () => ({ ...websocket(), gauges: 'available' })],
     ['an unknown gauge state', () => ({ ...websocket(), gauges: { ...available(), state: 'on' } })],
@@ -251,22 +259,31 @@ describe('realtime protocol — source reading', () => {
     ['null available gauges', () => ({ ...websocket(), gauges: available(null as never) })],
     ['a negative gauge', () => ({ ...websocket(), gauges: available(-1) })],
     ['a fractional gauge', () => ({ ...websocket(), gauges: available(1, 0.5) })],
-    ['numbers on an unread gauge', () => ({
-      ...backplane(),
-      gauges: { state: 'unsupported', openConnections: 0, groups: 0 },
-    })],
+    [
+      'numbers on an unread gauge',
+      () => ({
+        ...backplane(),
+        gauges: { state: 'unsupported', openConnections: 0, groups: 0 },
+      }),
+    ],
     ['a disabled source with available gauges', () => ({ ...disabled(), gauges: available() })],
-    ['a failed source with disabled gauges', () => ({
-      ...disabled(),
-      state: 'collection-failed',
-    })],
+    [
+      'a failed source with disabled gauges',
+      () => ({
+        ...disabled(),
+        state: 'collection-failed',
+      }),
+    ],
     ['a disabled source with an alias', () => ({ ...disabled(), alias: 'x' })],
     ['an enabled source without an alias', () => ({ ...websocket(), alias: null })],
     ['a control-character alias', () => websocket('a\u001bb', [])],
-    ['a disabled source with records', () => ({
-      ...disabled(),
-      records: [record('chat', 'send')],
-    })],
+    [
+      'a disabled source with records',
+      () => ({
+        ...disabled(),
+        records: [record('chat', 'send')],
+      }),
+    ],
     ['a ready backplane with no records', () => backplane('fanout', [])],
     ['a no-data backplane with records', () => ({ ...backplane(), state: 'no-data' })],
     ['a record under another alias', () => websocket('chat', [record('other', 'send')])],
@@ -283,14 +300,20 @@ describe('realtime protocol — source reading', () => {
       'a backpressure count on a websocket close',
       () => websocket('chat', [record('chat', 'close', { backpressureCloses: 0 })]),
     ],
-    ['a backpressure count on an sse send', () => ({
-      ...sse(),
-      records: [record('feed', 'send', { backpressureCloses: 0 })],
-    })],
-    ['a null backpressure count on an sse close', () => ({
-      ...sse(),
-      records: [record('feed', 'close')],
-    })],
+    [
+      'a backpressure count on an sse send',
+      () => ({
+        ...sse(),
+        records: [record('feed', 'send', { backpressureCloses: 0 })],
+      }),
+    ],
+    [
+      'a null backpressure count on an sse close',
+      () => ({
+        ...sse(),
+        records: [record('feed', 'close')],
+      }),
+    ],
     [
       'a duration on a send',
       () => websocket('chat', [record('chat', 'send', { lastDurationMs: 1 })]),
@@ -309,16 +332,23 @@ describe('realtime protocol — source reading', () => {
     ['a non-array records', () => ({ ...websocket(), records: { length: 0 } })],
     [
       'more than 64 records',
-      () => websocket('chat', Array.from({ length: 65 }, () => record('chat', 'send'))),
+      () =>
+        websocket(
+          'chat',
+          Array.from({ length: 65 }, () => record('chat', 'send')),
+        ),
     ],
     ['a fractional dropped', () => ({ ...websocket(), dropped: 0.5 })],
     ['a wrong coverage', () => ({ ...websocket(), coverage: 'cluster' })],
-    ['a throwing proxy', () =>
-      new Proxy(websocket(), {
-        ownKeys: () => {
-          throw new Error('trap-canary');
-        },
-      })],
+    [
+      'a throwing proxy',
+      () =>
+        new Proxy(websocket(), {
+          ownKeys: () => {
+            throw new Error('trap-canary');
+          },
+        }),
+    ],
   ];
   for (const [name, make] of invalid) {
     it(`isolates ${name} as the value-free unknown snapshot`, () => {
@@ -401,8 +431,8 @@ describe('realtime protocol — aggregate response', () => {
       source(new Error('x')),
     ]);
     expect(
-      (response.sources as { snapshot: { sourceKind: string } }[]).map((s) =>
-        s.snapshot.sourceKind
+      (response.sources as { snapshot: { sourceKind: string } }[]).map(
+        (s) => s.snapshot.sourceKind,
       ),
     ).toEqual(['websocket', 'sse', 'backplane', 'unknown']);
     expect(isRealtimeResponseProjection(response)).toBe(true);
@@ -427,11 +457,9 @@ describe('realtime protocol — aggregate response', () => {
     const make = (count: number) =>
       Array.from({ length: count }, (_, i) => {
         const alias = `source-${i}`;
-        return source(websocket(alias, [
-          record(alias, 'open'),
-          record(alias, 'close'),
-          record(alias, 'send'),
-        ]));
+        return source(
+          websocket(alias, [record(alias, 'open'), record(alias, 'close'), record(alias, 'send')]),
+        );
       });
     // Positive control: sixteen full sources are far under the budget.
     expect(buildRealtimeResponse(TEST_INSTANCE_ID, make(16)).state).toBe('ready');
@@ -479,9 +507,11 @@ describe('realtime protocol — aggregate response', () => {
 });
 
 /** Decodes a handler response. */
-function inspect(
-  response: IResponse,
-): { status: number; body: Record<string, unknown>; text: string } {
+function inspect(response: IResponse): {
+  status: number;
+  body: Record<string, unknown>;
+  text: string;
+} {
   const snapshot = response.snapshot();
   const text = new TextDecoder().decode(snapshot.body as Uint8Array);
   return { status: snapshot.status, body: JSON.parse(text), text };
@@ -534,20 +564,22 @@ async function request(
 ): Promise<IResponse> {
   const sequence = parts.sequence ?? 1;
   const instance = parts.instance ?? TEST_INSTANCE_ID;
-  const mac = parts.mac ??
-    await signRequest(crypto.subtle, key, '/v1/realtime', sequence, instance);
-  return await handler(fakeRequest({
-    ...(parts.method !== undefined ? { method: parts.method } : {}),
-    url: `http://${HOST}/v1/realtime`,
-    headers: {
-      host: parts.host ?? HOST,
-      'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
-      'x-setu-sequence': String(sequence),
-      'x-setu-instance': instance,
-      'x-setu-mac': mac,
-      ...(parts.origin !== undefined ? { origin: parts.origin } : {}),
-    },
-  }));
+  const mac =
+    parts.mac ?? (await signRequest(crypto.subtle, key, '/v1/realtime', sequence, instance));
+  return await handler(
+    fakeRequest({
+      ...(parts.method !== undefined ? { method: parts.method } : {}),
+      url: `http://${HOST}/v1/realtime`,
+      headers: {
+        host: parts.host ?? HOST,
+        'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
+        'x-setu-sequence': String(sequence),
+        'x-setu-instance': instance,
+        'x-setu-mac': mac,
+        ...(parts.origin !== undefined ? { origin: parts.origin } : {}),
+      },
+    }),
+  );
 }
 
 describe('connector — GET /v1/realtime', () => {

@@ -53,10 +53,12 @@ export function claimStateOf(
   now: number,
 ): { readonly claimVersion: number; readonly leaseUntil: number } | undefined {
   const { claimVersion, leaseUntil } = record;
-  return Number.isSafeInteger(claimVersion) && claimVersion >= 0 &&
-      claimVersion < Number.MAX_SAFE_INTEGER &&
-      Number.isSafeInteger(leaseUntil) && leaseUntil >= 0 &&
-      leaseUntil <= now + MAX_CLAIM_HORIZON_MS
+  return Number.isSafeInteger(claimVersion) &&
+    claimVersion >= 0 &&
+    claimVersion < Number.MAX_SAFE_INTEGER &&
+    Number.isSafeInteger(leaseUntil) &&
+    leaseUntil >= 0 &&
+    leaseUntil <= now + MAX_CLAIM_HORIZON_MS
     ? { claimVersion, leaseUntil }
     : undefined;
 }
@@ -72,7 +74,8 @@ export function claimStateOf(
  *
  * @internal
  */
-export const MAX_STORED_OPTIONS_LENGTH: number = 6 *
+export const MAX_STORED_OPTIONS_LENGTH: number =
+  6 *
     (2 * MAX_PUBLISH_ID_BYTES +
       MAX_PUBLISH_HEADERS * (MAX_PUBLISH_HEADER_NAME_BYTES + MAX_PUBLISH_HEADER_VALUE_BYTES)) +
   MAX_PUBLISH_HEADERS * 6 +
@@ -164,8 +167,13 @@ export type InvalidRowCause =
 
 /** Whether a stored topic is publishable: non-empty, bounded, no Cc/Cf/Zl/Zp. */
 function isValidTopic(topic: unknown): topic is string {
-  return typeof topic === 'string' && topic.length > 0 && topic.isWellFormed() &&
-    UTF8.encode(topic).length <= MAX_TOPIC_BYTES && !hasForbiddenAliasCharacter(topic);
+  return (
+    typeof topic === 'string' &&
+    topic.length > 0 &&
+    topic.isWellFormed() &&
+    UTF8.encode(topic).length <= MAX_TOPIC_BYTES &&
+    !hasForbiddenAliasCharacter(topic)
+  );
 }
 
 /** Parses JSON, answering `undefined` for anything unparseable. */
@@ -194,10 +202,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function decodeOutboxRecord(
   record: OutboxRecord,
   maxEnvelopeBytes: number,
-): { readonly ok: true; readonly row: DecodedOutboxRow } | {
-  readonly ok: false;
-  readonly cause: InvalidRowCause;
-} {
+):
+  | { readonly ok: true; readonly row: DecodedOutboxRow }
+  | {
+      readonly ok: false;
+      readonly cause: InvalidRowCause;
+    } {
   if (!isValidTopic(record.topic)) return { ok: false, cause: 'topic-invalid' };
   if (typeof record.envelope !== 'string') return { ok: false, cause: 'envelope-not-json' };
   if (UTF8.encode(record.envelope).length > maxEnvelopeBytes) {

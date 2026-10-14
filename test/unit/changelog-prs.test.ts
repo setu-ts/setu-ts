@@ -53,13 +53,15 @@ const CHANGELOG = [
 
 describe('parseMergeSubject', () => {
   it('reads the PR number and branch from a GitHub merge subject', () => {
-    expect(parseMergeSubject('Merge pull request #405 from setu-ts/feat/m103-localization-plugin'))
-      .toEqual({ number: 405, branch: 'feat/m103-localization-plugin' });
+    expect(
+      parseMergeSubject('Merge pull request #405 from setu-ts/feat/m103-localization-plugin'),
+    ).toEqual({ number: 405, branch: 'feat/m103-localization-plugin' });
   });
 
   it('ignores a merge that is not a pull request', () => {
-    expect(parseMergeSubject("Merge remote-tracking branch 'origin/develop' into feat/x"))
-      .toBeNull();
+    expect(
+      parseMergeSubject("Merge remote-tracking branch 'origin/develop' into feat/x"),
+    ).toBeNull();
     expect(parseMergeSubject('chore: merge develop into m101d')).toBeNull();
   });
 });
@@ -98,8 +100,7 @@ describe('requiredToken', () => {
     // Nor is a script or a workflow.
     expect(
       requiredToken(pr(12, 'chore/ci', ['scripts/verify-release.ts', '.github/workflows/ci.yml'])),
-    )
-      .toBeNull();
+    ).toBeNull();
   });
 
   it("exempts the verified version's own release PR, and only that one", () => {
@@ -262,7 +263,8 @@ describe('mergedPullRequests (git seam)', () => {
 describe('runGit (real subprocess)', () => {
   it('returns stdout on success and throws with stderr on failure', async () => {
     expect((await runGit(['--version'])).startsWith('git version')).toBe(true);
-    await expect(runGit(['rev-parse', '--verify', 'refs/heads/no-such-branch-ever']))
-      .rejects.toThrow('git rev-parse --verify refs/heads/no-such-branch-ever failed');
+    await expect(
+      runGit(['rev-parse', '--verify', 'refs/heads/no-such-branch-ever']),
+    ).rejects.toThrow('git rev-parse --verify refs/heads/no-such-branch-ever failed');
   });
 });

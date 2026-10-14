@@ -151,12 +151,14 @@ describe('real Node protocol helpers', () => {
       controller.abort();
       await outcome;
       expect(
-        (await run(process.execPath, {
-          args: ['-e', 'process.exit(0)'],
-          stdin: 'null',
-          stdout: 'inherit',
-          stderr: 'inherit',
-        })).code,
+        (
+          await run(process.execPath, {
+            args: ['-e', 'process.exit(0)'],
+            stdin: 'null',
+            stdout: 'inherit',
+            stderr: 'inherit',
+          })
+        ).code,
       ).toBe(0);
     } finally {
       await rm(directory, { recursive: true });

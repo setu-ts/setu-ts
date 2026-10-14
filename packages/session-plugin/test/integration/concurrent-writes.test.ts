@@ -27,12 +27,17 @@ async function createService(store?: ISessionStore): Promise<SessionService> {
   const clock = makeClock();
   const config = resolveSessionConfig({ mode: 'encrypt' });
   const ring = await deriveKeyRing(crypto.subtle, [SECRET], 'encrypt');
-  return new SessionService(config, ring, {
-    subtle: crypto.subtle,
-    randomBytes: (length) => crypto.getRandomValues(new Uint8Array(length)),
-    now: clock.now,
-    uuid: clock.uuid,
-  }, store);
+  return new SessionService(
+    config,
+    ring,
+    {
+      subtle: crypto.subtle,
+      randomBytes: (length) => crypto.getRandomValues(new Uint8Array(length)),
+      now: clock.now,
+      uuid: clock.uuid,
+    },
+    store,
+  );
 }
 
 async function seededCookie(service: SessionService): Promise<string> {

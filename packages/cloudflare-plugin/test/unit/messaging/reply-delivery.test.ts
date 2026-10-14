@@ -29,9 +29,10 @@ interface RecordedDelivery {
 }
 
 /** A namespace whose stub answers with a fixed status, or throws. */
-function namespaceAnswering(
-  answer: { readonly status: number } | { readonly throws: string },
-): { namespace: IDurableObjectNamespace; deliveries: RecordedDelivery[] } {
+function namespaceAnswering(answer: { readonly status: number } | { readonly throws: string }): {
+  namespace: IDurableObjectNamespace;
+  deliveries: RecordedDelivery[];
+} {
   const deliveries: RecordedDelivery[] = [];
   const namespace: IDurableObjectNamespace = {
     idFromName: (name: string): unknown => name,
@@ -74,12 +75,11 @@ describe('deliverReply', () => {
     const { namespace } = namespaceAnswering({ status: 500 });
     const logger = new RecordingLogger();
 
-    await expect(deliverReply(namespace, 'rr.inbox.abc', REPLY, () => logger))
-      .resolves.toBeUndefined();
+    await expect(
+      deliverReply(namespace, 'rr.inbox.abc', REPLY, () => logger),
+    ).resolves.toBeUndefined();
 
-    expect(logger.messages()).toEqual([
-      'cloudflare-messaging: reply inbox refused a delivery',
-    ]);
+    expect(logger.messages()).toEqual(['cloudflare-messaging: reply inbox refused a delivery']);
     expect(logger.records[0]?.meta).toMatchObject({ replyTo: 'rr.inbox.abc', status: 500 });
   });
 
@@ -87,8 +87,9 @@ describe('deliverReply', () => {
     const { namespace } = namespaceAnswering({ throws: 'namespace unreachable' });
     const logger = new RecordingLogger();
 
-    await expect(deliverReply(namespace, 'rr.inbox.abc', REPLY, () => logger))
-      .resolves.toBeUndefined();
+    await expect(
+      deliverReply(namespace, 'rr.inbox.abc', REPLY, () => logger),
+    ).resolves.toBeUndefined();
 
     expect(logger.messages()).toEqual(['cloudflare-messaging: reply delivery failed']);
     expect(logger.records[0]?.meta).toMatchObject({ error: 'namespace unreachable' });
@@ -105,8 +106,9 @@ describe('deliverReply', () => {
     };
     const logger = new RecordingLogger();
 
-    await expect(deliverReply(namespace, 'rr.inbox.abc', REPLY, () => logger))
-      .resolves.toBeUndefined();
+    await expect(
+      deliverReply(namespace, 'rr.inbox.abc', REPLY, () => logger),
+    ).resolves.toBeUndefined();
 
     expect(logger.records[0]?.meta).toMatchObject({ error: 'binding revoked' });
     expect(deliveries).toEqual([]);

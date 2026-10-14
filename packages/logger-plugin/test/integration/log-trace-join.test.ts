@@ -64,11 +64,11 @@ async function realOtel(): Promise<RealOtel | null> {
     pluginOptions: { serviceName: 'm90i-log-join', exporter: 'console' },
     // The console-exporter seam, handed the in-memory exporter so finished
     // spans are inspectable rather than printed.
-    consoleExporterCtor: (class {
+    consoleExporterCtor: class {
       constructor() {
         return exporter;
       }
-    }) as never,
+    } as never,
     validated: true,
     contextActivation: true,
   });

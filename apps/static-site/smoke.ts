@@ -65,11 +65,7 @@ async function main() {
       headers: { 'If-None-Match': etag ?? '' },
     }),
   );
-  check(
-    'revalidates to 304',
-    revalidated.status === 304,
-    `status ${revalidated.status}`,
-  );
+  check('revalidates to 304', revalidated.status === 304, `status ${revalidated.status}`);
   await revalidated.body?.cancel();
 
   // ------------------------------------------------------------ SPA fallback
@@ -94,31 +90,18 @@ async function main() {
   await missingAsset.body?.cancel();
 
   // -------------------------------------------------------------------- HEAD
-  const head = await app.fetch(
-    new Request('http://localhost/test.txt', { method: 'HEAD' }),
-  );
+  const head = await app.fetch(new Request('http://localhost/test.txt', { method: 'HEAD' }));
   const headBody = await head.arrayBuffer();
   check('HEAD answers 200', head.status === 200, `status ${head.status}`);
-  check(
-    'HEAD carries Content-Length',
-    head.headers.get('Content-Length') === '12',
-  );
-  check(
-    'HEAD has an empty body',
-    headBody.byteLength === 0,
-    `${headBody.byteLength} bytes`,
-  );
+  check('HEAD carries Content-Length', head.headers.get('Content-Length') === '12');
+  check('HEAD has an empty body', headBody.byteLength === 0, `${headBody.byteLength} bytes`);
 
   // ------------------------------------------------- resuming an interrupted
   //                                                    download (Range + If-Range)
   const full = await app.fetch(new Request('http://localhost/test.txt'));
   const fullEtag = full.headers.get('ETag') ?? '';
   const fullBody = await full.text();
-  check(
-    'full file body is intact',
-    fullBody === 'hello world\n',
-    JSON.stringify(fullBody),
-  );
+  check('full file body is intact', fullBody === 'hello world\n', JSON.stringify(fullBody));
   check(
     'ETag is STRONG so If-Range can authorize a resume',
     !fullEtag.startsWith('W/'),
@@ -141,22 +124,14 @@ async function main() {
     resumed.headers.get('Content-Range') === 'bytes 6-11/12',
     `got ${resumed.headers.get('Content-Range')}`,
   );
-  check(
-    'resumed bytes continue the file',
-    resumedBody === 'world\n',
-    JSON.stringify(resumedBody),
-  );
+  check('resumed bytes continue the file', resumedBody === 'world\n', JSON.stringify(resumedBody));
 
   const stale = await app.fetch(
     new Request('http://localhost/test.txt', {
       headers: { Range: 'bytes=6-', 'If-Range': '"999-1"' },
     }),
   );
-  check(
-    'a stale If-Range forces the whole file',
-    stale.status === 200,
-    `status ${stale.status}`,
-  );
+  check('a stale If-Range forces the whole file', stale.status === 200, `status ${stale.status}`);
   await stale.body?.cancel();
 
   const unsatisfiable = await app.fetch(
@@ -173,9 +148,7 @@ async function main() {
   await unsatisfiable.body?.cancel();
 
   // --------------------------------------------- precompressed sidecar + cache
-  const identity = await app.fetch(
-    new Request('http://localhost/assets/app-a1b2c3d4.js'),
-  );
+  const identity = await app.fetch(new Request('http://localhost/assets/app-a1b2c3d4.js'));
   const identityEtag = identity.headers.get('ETag');
   const identityCache = identity.headers.get('Cache-Control');
   await identity.body?.cancel();
@@ -207,8 +180,7 @@ async function main() {
   );
   check(
     'the sidecar keeps the immutable policy of the original asset',
-    brotli.headers.get('Cache-Control') ===
-      'public, max-age=31536000, immutable',
+    brotli.headers.get('Cache-Control') === 'public, max-age=31536000, immutable',
     `got ${brotli.headers.get('Cache-Control')} — resolving from the '.js.br' path loses it`,
   );
   check(
@@ -238,14 +210,8 @@ async function main() {
   await refused.body?.cancel();
 
   // ---------------------------------------------------------------- traversal
-  const traversal = await app.fetch(
-    new Request('http://localhost/../deno.json'),
-  );
-  check(
-    'refuses path traversal',
-    traversal.status === 404,
-    `status ${traversal.status}`,
-  );
+  const traversal = await app.fetch(new Request('http://localhost/../deno.json'));
+  check('refuses path traversal', traversal.status === 404, `status ${traversal.status}`);
   await traversal.body?.cancel();
 
   await app.stop();

@@ -50,11 +50,7 @@ function advanceToStep(ctx: TestContext, counter: number): void {
 }
 
 /** The code `step` produces for `secretText`, independent of the current clock. */
-async function codeForSecret(
-  ctx: TestContext,
-  secretText: string,
-  step: number,
-): Promise<string> {
+async function codeForSecret(ctx: TestContext, secretText: string, step: number): Promise<string> {
   return (await computeTotpCode(ctx.runtime.subtle, decodeBase32(secretText), step)).slice(-6);
 }
 
@@ -167,11 +163,13 @@ describe('TotpService', () => {
     // pending secret in and keeps the step monotonic.
     advanceToStep(ctx, 5);
     expect(
-      (await ctx.service.confirmEnrolment(
-        'user1',
-        await codeForSecret(ctx, newSecret, 5),
-        await codeForSecret(ctx, oldSecret ?? '', 5),
-      )).status,
+      (
+        await ctx.service.confirmEnrolment(
+          'user1',
+          await codeForSecret(ctx, newSecret, 5),
+          await codeForSecret(ctx, oldSecret ?? '', 5),
+        )
+      ).status,
     ).toBe('ok');
     const after = await ctx.store.getEnrolment('user1');
     expect(after?.secret).toBe(newSecret);
@@ -521,10 +519,10 @@ describe('TotpService', () => {
   });
 
   it('completeSignIn honours the configured signIn.mfa.pendingTtlMs', async () => {
-    const harness = buildCompleteHarness(
-      startOfStep(1) + 1_000,
-      { required: () => true, pendingTtlMs: 1 },
-    );
+    const harness = buildCompleteHarness(startOfStep(1) + 1_000, {
+      required: () => true,
+      pendingTtlMs: 1,
+    });
     await enrolledAndConfirmed(harness, 'user1');
     await signInAndPend(harness);
     // Advance past the configured TTL on the same controllable clock the service
@@ -601,25 +599,25 @@ describe('TotpService', () => {
   });
 
   it('completeSignInWithRecoveryCode honours the configured pendingTtlMs', async () => {
-    const harness = buildCompleteHarness(
-      startOfStep(1) + 1_000,
-      { required: () => true, pendingTtlMs: 1 },
-    );
+    const harness = buildCompleteHarness(startOfStep(1) + 1_000, {
+      required: () => true,
+      pendingTtlMs: 1,
+    });
     const codes = await enrolledAndConfirmed(harness, 'user1');
     await signInAndPend(harness);
     advanceToStep(harness, 3);
-    expect(
-      await harness.service.completeSignInWithRecoveryCode(harness.ctx, codes[0]),
-    ).toBe('no-pending');
+    expect(await harness.service.completeSignInWithRecoveryCode(harness.ctx, codes[0])).toBe(
+      'no-pending',
+    );
   });
 
   it('completeSignInWithRecoveryCode signs in inside the default TTL (control)', async () => {
     const harness = buildCompleteHarness(startOfStep(1) + 1_000, { required: () => true });
     const codes = await enrolledAndConfirmed(harness, 'user1');
     await signInAndPend(harness);
-    expect(
-      await harness.service.completeSignInWithRecoveryCode(harness.ctx, codes[0]),
-    ).toBe('signed-in');
+    expect(await harness.service.completeSignInWithRecoveryCode(harness.ctx, codes[0])).toBe(
+      'signed-in',
+    );
     expect(harness.authSession.current(harness.ctx)?.id).toBe('user1');
   });
 });

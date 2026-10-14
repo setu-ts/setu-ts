@@ -68,9 +68,9 @@ describe('classifyDriverError — unavailable signals (503)', () => {
   });
 
   it('the pg pool timeout anchor, which carries no code', () => {
-    expect(
-      classifyDriverError(new Error('timeout exceeded when trying to connect')),
-    ).toBe('unavailable');
+    expect(classifyDriverError(new Error('timeout exceeded when trying to connect'))).toBe(
+      'unavailable',
+    );
   });
 
   it('MongoDB MongoNetworkError by name', () => {
@@ -185,10 +185,15 @@ describe('classifyDriverError — duplicate-key signals (409, not retryable)', (
   });
 
   it('a duplicate signal outranks a retryable label beside it', () => {
-    expect(classifyDriverError({
-      code: 11000,
-      errorLabels: ['TransientTransactionError'],
-    }, 'mongodb')).toBe('duplicate');
+    expect(
+      classifyDriverError(
+        {
+          code: 11000,
+          errorLabels: ['TransientTransactionError'],
+        },
+        'mongodb',
+      ),
+    ).toBe('duplicate');
   });
 });
 
@@ -272,8 +277,9 @@ describe('classifyDriverError — already-classified errors', () => {
   });
 
   it('a DuplicateKeyError returns null — the adapters raise it themselves', () => {
-    expect(classifyDriverError(new DuplicateKeyError('dup', { cause: { code: '23505' } })))
-      .toBeNull();
+    expect(
+      classifyDriverError(new DuplicateKeyError('dup', { cause: { code: '23505' } })),
+    ).toBeNull();
   });
 
   it('a package-owned DatabaseUnavailableError returns null too', () => {

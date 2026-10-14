@@ -190,26 +190,30 @@ describe('a --broker redis --queue redis scaffold', () => {
   // real redis:7 service container, so the boot half runs there every time.
   // Locally without a broker it reports `ignored` with its reason, never a
   // false pass.
-  it('boots under its own permissions and answers /health once the broker runs', {
-    skip: !REDIS_AVAILABLE,
-  }, async () => {
-    expect(
-      await run([
-        'new',
-        '--runtime',
-        'deno',
-        'svc',
-        '--template',
-        'microservice',
-        '--broker',
-        'redis',
-        '--queue',
-        'redis',
-      ]),
-    ).toBe(0);
-    const project = `${root}/svc`;
-    await useWorkspacePackages(project);
-    const outcome = await bootWithGeneratedPermissions(project, ['/health']);
-    expect(outcome.statuses['/health'], outcome.output).toBe(200);
-  });
+  it(
+    'boots under its own permissions and answers /health once the broker runs',
+    {
+      skip: !REDIS_AVAILABLE,
+    },
+    async () => {
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'svc',
+          '--template',
+          'microservice',
+          '--broker',
+          'redis',
+          '--queue',
+          'redis',
+        ]),
+      ).toBe(0);
+      const project = `${root}/svc`;
+      await useWorkspacePackages(project);
+      const outcome = await bootWithGeneratedPermissions(project, ['/health']);
+      expect(outcome.statuses['/health'], outcome.output).toBe(200);
+    },
+  );
 });

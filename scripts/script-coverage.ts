@@ -139,15 +139,10 @@ interface FileCoverage {
  * (a `[33m` prefix once turned 75.9 into a false "OK" under naive parsing).
  */
 export function parseCoverageRow(line: string): FileCoverage | null {
-  const ansiStripRe = new RegExp(
-    String.fromCharCode(0x1b) + '\\[[0-9;]*m',
-    'g',
-  );
+  const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
   const stripped = line.replace(ansiStripRe, '');
   // Match: | filename | branch | function | line |
-  const match = /\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/.exec(
-    stripped,
-  );
+  const match = /\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/.exec(stripped);
   if (!match) return null;
   return {
     branchPct: parseFloat(match[1] as string),
@@ -203,10 +198,7 @@ export function parseCoverageTable(
     // as an extra. A real extra (a row for a non-target script) carries a
     // basename, not the literal "All files". The line may be ANSI-colorized, so
     // strip escape codes before testing.
-    const ansiStripRe = new RegExp(
-      String.fromCharCode(0x1b) + '\\[[0-9;]*m',
-      'g',
-    );
+    const ansiStripRe = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
     const strippedLine = line.replace(ansiStripRe, '');
     if (/\bAll files\b/.test(strippedLine)) continue;
 
@@ -310,15 +302,11 @@ export function belowThreshold(
 /**
  * Formats a coverage row for the printed table.
  */
-function formatRow(
-  file: string,
-  coverage: FileCoverage,
-  pass: boolean,
-): string {
+function formatRow(file: string, coverage: FileCoverage, pass: boolean): string {
   const status = pass ? '✅' : '❌';
-  return `| ${file.padEnd(28)} | ${coverage.branchPct.toFixed(1).padStart(8)} | ${
-    coverage.functionPct.toFixed(1).padStart(10)
-  } | ${coverage.linePct.toFixed(1).padStart(6)} | ${status}`;
+  return `| ${file.padEnd(28)} | ${coverage.branchPct.toFixed(1).padStart(8)} | ${coverage.functionPct
+    .toFixed(1)
+    .padStart(10)} | ${coverage.linePct.toFixed(1).padStart(6)} | ${status}`;
 }
 
 /** Decoded child-process result consumed by the fail-closed gate. */
@@ -333,9 +321,7 @@ export interface CoverageChildResult {
  * Validates subprocess success before parsing any percentage rows.
  * @throws {Error} when the coverage child fails, regardless of stdout shape
  */
-export function parseSuccessfulCoverageChild(
-  result: CoverageChildResult,
-): ParsedCoverage {
+export function parseSuccessfulCoverageChild(result: CoverageChildResult): ParsedCoverage {
   if (!result.success) {
     throw new Error(
       `script-coverage: deno coverage exited with code ${result.code}\n${result.stderr}`,
@@ -380,27 +366,20 @@ async function main(): Promise<void> {
     for (const failure of completenessFailures) {
       console.error(`  - ${failure}`);
     }
-    console.error(
-      `Expected exactly these targets, each once: ${SCRIPT_TARGETS.join(', ')}`,
-    );
+    console.error(`Expected exactly these targets, each once: ${SCRIPT_TARGETS.join(', ')}`);
     Deno.exit(1);
   }
 
   // Print the per-file table.
-  console.log(
-    '\nScript coverage (per-file, ≥90% branch/function/line required):',
-  );
-  console.log(
-    '| File                         | Branch % | Function % | Line % |',
-  );
-  console.log(
-    '| ---------------------------- | -------- | ---------- | ------ |',
-  );
+  console.log('\nScript coverage (per-file, ≥90% branch/function/line required):');
+  console.log('| File                         | Branch % | Function % | Line % |');
+  console.log('| ---------------------------- | -------- | ---------- | ------ |');
 
   let allPass = true;
   for (const target of SCRIPT_TARGETS) {
     const coverage = parsed.byTarget.get(target)!;
-    const pass = coverage.branchPct >= THRESHOLD &&
+    const pass =
+      coverage.branchPct >= THRESHOLD &&
       coverage.functionPct >= THRESHOLD &&
       coverage.linePct >= THRESHOLD;
     if (!pass) allPass = false;
@@ -408,9 +387,7 @@ async function main(): Promise<void> {
   }
 
   if (!allPass) {
-    console.error(
-      '\nscript-coverage: one or more scripts are below the 90% threshold.',
-    );
+    console.error('\nscript-coverage: one or more scripts are below the 90% threshold.');
     Deno.exit(1);
   }
 

@@ -243,9 +243,11 @@ describe('SecretsPlugin.register', () => {
       };
       const plugin = SecretsPlugin({ provider: 'aws-kms', options: { client } });
       const { ctx, healthIndicators } = createFakeContext();
-      (ctx.runtime as {
-        setTimeout: (fn: () => void, ms: number) => unknown;
-      }).setTimeout = (fn: () => void, ms: number): unknown => {
+      (
+        ctx.runtime as {
+          setTimeout: (fn: () => void, ms: number) => unknown;
+        }
+      ).setTimeout = (fn: () => void, ms: number): unknown => {
         timerCalls.push({ ms });
         return setTimeout(fn, ms);
       };

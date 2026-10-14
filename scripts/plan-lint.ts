@@ -167,12 +167,14 @@ export function lintText(file: string, text: string): { errors: Finding[]; warni
         'minor <X.Y.0>` — the release that carries a break is chosen when the break is designed.',
     });
   } else if (
-    !/^none\b/i.test(breakingStatement.value) && !TARGET_MINOR.test(breakingStatement.value)
+    !/^none\b/i.test(breakingStatement.value) &&
+    !TARGET_MINOR.test(breakingStatement.value)
   ) {
     errors.push({
       file,
       line: breakingStatement.line,
-      message: 'the compatibility statement names a break but no minor release to carry it — add ' +
+      message:
+        'the compatibility statement names a break but no minor release to carry it — add ' +
         '"ships in minor <X.Y.0>" (a patch may not carry a BREAKING entry; verify-release check 10 ' +
         'refuses one).',
     });
@@ -190,7 +192,8 @@ async function rootHygiene(): Promise<Finding[]> {
       findings.push({
         file: `${PLANS_DIR}/${entry.name}`,
         line: null,
-        message: 'non-canonical file at plans/ root — only milestone-<N>-<desc>.md, ' +
+        message:
+          'non-canonical file at plans/ root — only milestone-<N>-<desc>.md, ' +
           'TEMPLATE.md, README.md are permitted. Scratch (continuation / fix-round / ' +
           'hand-off / review) belongs in the session scratchpad, never committed here.',
       });
@@ -223,7 +226,7 @@ async function main(args: readonly string[]): Promise<void> {
   const warnings: Finding[] = [];
 
   // Directory-level invariant: run only when scanning the default root set.
-  if (scanningDefault) errors.push(...await rootHygiene());
+  if (scanningDefault) errors.push(...(await rootHygiene()));
 
   let planCount = 0;
   for (const file of targets) {

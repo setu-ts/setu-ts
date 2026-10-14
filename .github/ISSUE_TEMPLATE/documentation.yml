@@ -20,7 +20,8 @@ body:
     id: expected
     attributes:
       label: Suggested correction
-      description: Explain the behaviour the documentation should describe. A pull request is welcome
-        once the correction is clear.
+      description:
+        Explain the behaviour the documentation should describe. A pull request is welcome once the
+        correction is clear.
     validations:
       required: true

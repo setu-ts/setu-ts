@@ -23,7 +23,8 @@ try {
   const spins = Array.from({ length: 5 }, (_, index) =>
     pool.run(spinModule, 30).then(() => {
       order.push(`spin-${index}`);
-    }));
+    }),
+  );
   const shared = new SharedArrayBuffer(1024);
   const fill = pool.run(fillModule, { buf: shared, pattern: 0x5a }).then(() => {
     order.push('fill');
@@ -36,17 +37,17 @@ try {
     throw new Error('Worker writes to a SharedArrayBuffer were not visible to its caller.');
   }
   const copied = new ArrayBuffer(1024);
-  const copiedLength = await pool.run<{ buf: ArrayBuffer; pattern: number }, number>(
-    fillModule,
-    { buf: copied, pattern: 0x5a },
-  );
+  const copiedLength = await pool.run<{ buf: ArrayBuffer; pattern: number }, number>(fillModule, {
+    buf: copied,
+    pattern: 0x5a,
+  });
   if (copiedLength !== copied.byteLength || !new Uint8Array(copied).every((byte) => byte === 0)) {
     throw new Error('ArrayBuffer control was not copied into the worker.');
   }
   const health = await app.inject({ method: 'GET', url: '/health' });
-  const payload = health.json<
-    { checks: Record<string, { data: { budget: { maxWorkers: number; workers: number } } }> }
-  >();
+  const payload = health.json<{
+    checks: Record<string, { data: { budget: { maxWorkers: number; workers: number } } }>;
+  }>();
   const budget = payload.checks['worker-pool'].data.budget;
   if (health.statusCode !== 200 || budget.maxWorkers !== 1 || budget.workers > 1) {
     throw new Error(`Health budget does not match the configured cap: ${JSON.stringify(budget)}`);

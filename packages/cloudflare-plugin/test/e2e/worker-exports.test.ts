@@ -142,7 +142,7 @@ describe('a deployed Worker module', () => {
     const response = await worker.fetch(
       new Request('https://worker.test/signup', { method: 'POST' }),
     );
-    const { id } = await response.json() as { id: string };
+    const { id } = (await response.json()) as { id: string };
 
     // Deliver exactly what the producer recorded, as the platform would.
     const message = new FakeQueueMessage('cf-1', producer.sends.at(0)?.body, 1);
@@ -175,8 +175,9 @@ describe('a deployed Worker module', () => {
   it('fails the invocation for a trigger the Worker has no handler for (M70l X9-5)', async () => {
     const { worker, producer, stop } = await buildWorker();
 
-    await expect(worker.scheduled({ cron: '*/1 * * * *', scheduledTime: 1 }))
-      .rejects.toThrow(/no handler registered/);
+    await expect(worker.scheduled({ cron: '*/1 * * * *', scheduledTime: 1 })).rejects.toThrow(
+      /no handler registered/,
+    );
     expect(producer.sends).toEqual([]);
 
     await stop();

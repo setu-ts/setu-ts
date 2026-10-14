@@ -52,7 +52,10 @@ describe('MessagingPlugin with a declared subscription that rejects', () => {
       ],
     });
 
-    const err = await app.start().then(() => null, (e: unknown) => e);
+    const err = await app.start().then(
+      () => null,
+      (e: unknown) => e,
+    );
 
     expect(err).toBe(refusal);
     // Connected, refused, and then CLOSED by the kernel's failed-start

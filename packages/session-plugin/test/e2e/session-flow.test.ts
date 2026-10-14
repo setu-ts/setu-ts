@@ -337,9 +337,10 @@ describe('session e2e (real kernel app)', () => {
       const { app } = buildApp({ store: 'memory' });
       await app.start();
 
-      const indicators = app.services.getAll<
-        { name: string; check: () => Promise<{ status: string; data?: unknown }> }
-      >(CAPABILITIES.HEALTH_INDICATOR);
+      const indicators = app.services.getAll<{
+        name: string;
+        check: () => Promise<{ status: string; data?: unknown }>;
+      }>(CAPABILITIES.HEALTH_INDICATOR);
       const session = indicators.find((i) => i.name === 'session');
       expect(session).toBeDefined();
 

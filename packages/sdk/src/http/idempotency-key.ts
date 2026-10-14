@@ -76,8 +76,12 @@ export interface ResolvedClientIdempotencyOptions {
  * @throws {RangeError} When it is not 1–255 characters of `0x21`–`0x7E` without `"`
  */
 export function validateIdempotencyKey(value: unknown, field: string): string {
-  const usable = typeof value === 'string' && value.length >= 1 && value.length <= MAX_KEY_CHARS &&
-    !value.includes('"') && hasOnlyPrintableChars(value);
+  const usable =
+    typeof value === 'string' &&
+    value.length >= 1 &&
+    value.length <= MAX_KEY_CHARS &&
+    !value.includes('"') &&
+    hasOnlyPrintableChars(value);
   if (!usable) {
     throw new RangeError(`${field} must be 1 to 255 printable characters`);
   }

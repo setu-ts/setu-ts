@@ -59,9 +59,14 @@ describe('Scheduler zero-configuration dispatch is unchanged (M86 §3.9)', () =>
     const scheduler = registered.get('scheduler') as IScheduler;
     const seen: ScheduledJob<{ to: string }>[] = [];
     const payload = { to: 'ada@example.com' };
-    await scheduler.every<{ to: string }>('send-email', TICK_MS, (job) => {
-      seen.push(job);
-    }, { data: payload });
+    await scheduler.every<{ to: string }>(
+      'send-email',
+      TICK_MS,
+      (job) => {
+        seen.push(job);
+      },
+      { data: payload },
+    );
 
     await runtime.advance(ONE_FIRE_MS);
 

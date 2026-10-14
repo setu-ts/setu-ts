@@ -9,17 +9,15 @@ import { REPLY_INBOX_TRANSIENT } from '../../src/brokers/inbox.ts';
 import { clockRuntime } from '../fixtures/clock-runtime.ts';
 
 describe('RabbitMQ consumer retry', () => {
-  for (
-    const [label, characters] of [
-      ['CR/LF', '\r\n'],
-      ['NUL', '\0'],
-      ['terminal controls', '\x1b\x7f'],
-      ['bidi format', '\u202e'],
-      ['zero-width format', '\u200d'],
-      ['line/paragraph separators', '\u2028\u2029'],
-      ['printable names', '-'],
-    ]
-  ) {
+  for (const [label, characters] of [
+    ['CR/LF', '\r\n'],
+    ['NUL', '\0'],
+    ['terminal controls', '\x1b\x7f'],
+    ['bidi format', '\u202e'],
+    ['zero-width format', '\u200d'],
+    ['line/paragraph separators', '\u2028\u2029'],
+    ['printable names', '-'],
+  ]) {
     it(`normalizes ${label} in dead-letter logs while preserving routing names`, async () => {
       const logs: string[] = [];
       const client = new FakeAmqpConnection();
@@ -32,9 +30,13 @@ describe('RabbitMQ consumer retry', () => {
       const topic = `topic${characters}FORGED`;
       await broker.connect();
       try {
-        await broker.subscribe(topic, (message) => {
-          if (message === 1) throw Error('failure\nFORGED');
-        }, { queue });
+        await broker.subscribe(
+          topic,
+          (message) => {
+            if (message === 1) throw Error('failure\nFORGED');
+          },
+          { queue },
+        );
         const channel = await client.createChannel();
         await channel.deliver('1');
         expect(logs).toHaveLength(1);
@@ -44,8 +46,9 @@ describe('RabbitMQ consumer retry', () => {
         expect(logs[0]).toContain('Error: failure FORGED');
         const copy = channel.calls.find((call) => call.method === 'publish')!;
         expect(copy.args[1]).toBe(`${queue}.dead`);
-        expect((copy.args[3] as { headers: Record<string, unknown> }).headers['x-setu-topic'])
-          .toBe(topic);
+        expect((copy.args[3] as { headers: Record<string, unknown> }).headers['x-setu-topic']).toBe(
+          topic,
+        );
         await channel.deliver('2');
         expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(2);
         expect(channel.calls.filter((call) => call.method === 'publish')).toHaveLength(1);
@@ -67,9 +70,13 @@ describe('RabbitMQ consumer retry', () => {
     });
     await broker.connect();
     try {
-      await broker.subscribe('topic-🙂'.repeat(25), () => {
-        throw Error('temporary 🙂'.repeat(2000));
-      }, { queue: 'q' });
+      await broker.subscribe(
+        'topic-🙂'.repeat(25),
+        () => {
+          throw Error('temporary 🙂'.repeat(2000));
+        },
+        { queue: 'q' },
+      );
       const channel = await client.createChannel();
       await channel.deliver('1');
       expect(logs).toHaveLength(1);
@@ -93,9 +100,13 @@ describe('RabbitMQ consumer retry', () => {
     runtime.clearTimeout = (_handle) => {};
     const broker = new RabbitMqBroker(runtime, new JsonSerializer(), { client });
     await broker.connect();
-    await broker.subscribe('t', () => {
-      throw Error('temporary');
-    }, { queue: 'q' });
+    await broker.subscribe(
+      't',
+      () => {
+        throw Error('temporary');
+      },
+      { queue: 'q' },
+    );
     const channel = await client.createChannel();
     await channel.deliver('1');
     expect(channel.calls.some((c) => ['publish', 'ack', 'nack'].includes(c.method))).toBe(false);
@@ -113,12 +124,16 @@ describe('RabbitMQ consumer retry', () => {
       logger: { error: (text) => logs.push(text) },
     });
     await broker.connect();
-    await broker.subscribe('t', () => {
-      throw Error('temporary');
-    }, { queue: 'q' });
+    await broker.subscribe(
+      't',
+      () => {
+        throw Error('temporary');
+      },
+      { queue: 'q' },
+    );
     const channel = await client.createChannel();
     let settled = false;
-    const delivery = channel.deliver('1').then(() => settled = true);
+    const delivery = channel.deliver('1').then(() => (settled = true));
     await clock.advance(0);
     expect(channel.calls.some((c) => c.method === 'publish')).toBe(true);
     expect(settled).toBe(false);
@@ -144,9 +159,13 @@ describe('RabbitMQ consumer retry', () => {
     const client = new FakeAmqpConnection({ returnMandatory: true });
     const broker = new RabbitMqBroker(clock.runtime, new JsonSerializer(), { client });
     await broker.connect();
-    await broker.subscribe('t', () => {
-      throw Error('temporary');
-    }, { queue: 'q' });
+    await broker.subscribe(
+      't',
+      () => {
+        throw Error('temporary');
+      },
+      { queue: 'q' },
+    );
     const channel = await client.createChannel();
     let closes = 0;
     Object.defineProperty(channel, 'close', {
@@ -173,26 +192,34 @@ describe('RabbitMQ consumer retry', () => {
     const client = new FakeAmqpConnection({ withholdConfirms: true });
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
     await broker.connect();
-    await broker.subscribe('t', () => {
-      throw Error('temporary');
-    }, { queue: 'q' });
+    await broker.subscribe(
+      't',
+      () => {
+        throw Error('temporary');
+      },
+      { queue: 'q' },
+    );
     const channel = await client.createChannel();
     const first = channel.deliver('1', { messageId: 'same' });
     const second = channel.deliver('2', { messageId: 'same' });
     await new Promise((r) => setTimeout(r, 0));
     const publications = channel.calls.filter((c) => c.method === 'publish');
     expect(publications).toHaveLength(2);
-    const [one, two] = publications.map((c) =>
-      c.args[3] as { mandatory: boolean; headers: Record<string, unknown> }
+    const [one, two] = publications.map(
+      (c) => c.args[3] as { mandatory: boolean; headers: Record<string, unknown> },
     );
     expect(one!.mandatory).toBe(true);
     expect(two!.mandatory).toBe(true);
     expect(one!.headers['x-setu-disposition-id']).not.toBe(two!.headers['x-setu-disposition-id']);
-    for (
-      const unrelated of [undefined, {}, { properties: { headers: {} } }, {
+    for (const unrelated of [
+      undefined,
+      {},
+      { properties: { headers: {} } },
+      {
         properties: { headers: Object.create(one!.headers) },
-      }]
-    ) channel.emitReturn(unrelated);
+      },
+    ])
+      channel.emitReturn(unrelated);
     expect(channel.listenerCount('return')).toBe(2);
     channel.emitReturn({ properties: one });
     await first;
@@ -226,16 +253,18 @@ describe('RabbitMQ consumer retry', () => {
       await expect(broker.subscribe('t', () => {}, { queue: 'q' })).rejects.toThrow(
         'consumerRetry: false',
       );
-      expect(channel.calls.some((c) => c.method === 'assertQueue' || c.method === 'consume'))
-        .toBe(false);
+      expect(channel.calls.some((c) => c.method === 'assertQueue' || c.method === 'consume')).toBe(
+        false,
+      );
       await broker.disconnect();
     });
   }
 
   it('still serves a non-retrying subscription on an unconfirmed channel', async () => {
-    for (
-      const [consumerRetry, queue] of [[false, 'q'], [undefined, undefined]] as const
-    ) {
+    for (const [consumerRetry, queue] of [
+      [false, 'q'],
+      [undefined, undefined],
+    ] as const) {
       const client = new FakeAmqpConnection({ withoutConfirmChannel: true });
       const broker = new RabbitMqBroker(
         createFakeRuntime(),
@@ -246,9 +275,11 @@ describe('RabbitMQ consumer retry', () => {
       const subscription = await broker.subscribe(
         't',
         () => {},
-        queue === undefined ? {} : {
-          queue,
-        },
+        queue === undefined
+          ? {}
+          : {
+              queue,
+            },
       );
       await subscription.unsubscribe();
       await broker.disconnect();
@@ -262,9 +293,13 @@ describe('RabbitMQ consumer retry', () => {
       });
       const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
       await broker.connect();
-      await broker.subscribe('t', () => {
-        throw Error('temporary');
-      }, { queue: 'q' });
+      await broker.subscribe(
+        't',
+        () => {
+          throw Error('temporary');
+        },
+        { queue: 'q' },
+      );
       const channel = await client.createChannel();
       if (missing === 'listeners') Object.defineProperty(channel, 'on', { value: undefined });
       const delivery = channel.deliver('1');
@@ -292,12 +327,14 @@ describe('RabbitMQ consumer retry', () => {
       expect(() =>
         MessagingPlugin({
           broker: 'rabbitmq',
-          subscriptions: [{
-            topic: 't',
-            handler: () => {},
-            options: { queue },
-          }],
-        })
+          subscriptions: [
+            {
+              topic: 't',
+              handler: () => {},
+              options: { queue },
+            },
+          ],
+        }),
       ).toThrow(RangeError);
       expect(channel.calls.some((c) => c.method === 'assertQueue')).toBe(false);
       await broker.subscribe('ok', () => {}, { queue: 'orders' });
@@ -307,7 +344,10 @@ describe('RabbitMQ consumer retry', () => {
     });
   }
 
-  for (const queues of [['orders', 'orders.dead'], ['orders.dead', 'orders']] as const) {
+  for (const queues of [
+    ['orders', 'orders.dead'],
+    ['orders.dead', 'orders'],
+  ] as const) {
     it(`preflights declarative collisions with ${queues[0]} first`, () => {
       expect(() =>
         MessagingPlugin({
@@ -317,7 +357,7 @@ describe('RabbitMQ consumer retry', () => {
             handler: () => {},
             options: { queue },
           })),
-        })
+        }),
       ).toThrow(RangeError);
     });
   }
@@ -341,12 +381,14 @@ describe('RabbitMQ consumer retry', () => {
       MessagingPlugin({
         broker: 'rabbitmq',
         consumerRetry: false,
-        subscriptions: [{
-          topic: 't',
-          handler: () => {},
-          options: { queue: 'orders.dead' },
-        }],
-      })
+        subscriptions: [
+          {
+            topic: 't',
+            handler: () => {},
+            options: { queue: 'orders.dead' },
+          },
+        ],
+      }),
     ).not.toThrow();
   });
 
@@ -355,9 +397,13 @@ describe('RabbitMQ consumer retry', () => {
       const client = new FakeAmqpConnection({ returnMandatory: true });
       const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
       await broker.connect();
-      await broker.subscribe('t', () => {
-        throw Error('temporary');
-      }, { queue: 'q' });
+      await broker.subscribe(
+        't',
+        () => {
+          throw Error('temporary');
+        },
+        { queue: 'q' },
+      );
       const channel = await client.createChannel();
       await channel.deliver('1', { headers: { 'x-setu-attempt': attempt } });
       expect(channel.calls.some((c) => c.method === 'ack' || c.method === 'nack')).toBe(false);
@@ -371,9 +417,13 @@ describe('RabbitMQ consumer retry', () => {
     const client = new FakeAmqpConnection({ withholdConfirms: true });
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
     await broker.connect();
-    await broker.subscribe('t', () => {
-      throw Error('temporary');
-    }, { queue: 'q' });
+    await broker.subscribe(
+      't',
+      () => {
+        throw Error('temporary');
+      },
+      { queue: 'q' },
+    );
     const channel = await client.createChannel();
     const delivery = channel.deliver('1');
     await new Promise((r) => setTimeout(r, 0));
@@ -383,32 +433,31 @@ describe('RabbitMQ consumer retry', () => {
     await delivery;
     expect(channel.calls.filter((c) => c.method === 'ack')).toHaveLength(1);
   });
-  for (
-    const [name, options] of Object.entries({
-      zero: { consumerRetry: { maxAttempts: 0 } },
-      nan: { consumerRetry: { maxAttempts: NaN } },
-      fractional: { consumerRetry: { maxAttempts: 1.5 } },
-      unsafe: { consumerRetry: { maxAttempts: Number.MAX_SAFE_INTEGER + 1 } },
-      empty: { consumerRetry: { delaysMs: [] } },
-      decreasing: { consumerRetry: { delaysMs: [3, 2] } },
-      negative: { consumerRetry: { delaysMs: [-1] } },
-      nanDelay: { consumerRetry: { delaysMs: [NaN] } },
-      fractionalDelay: { consumerRetry: { delaysMs: [1.1] } },
-      overflowDelay: { consumerRetry: { delaysMs: [2147483648] } },
-      cap: { deadLetterMaxLength: 0 },
-      nanCap: { deadLetterMaxLength: NaN },
-      prefetch: { prefetch: 0 },
-      qosOverflow: { prefetch: 65536 },
-      fractionalQos: { prefetch: 1.5 },
-      nanQos: { prefetch: NaN },
-      badClassifier: { consumerRetry: { isRetryable: 7 } },
-      badPolicy: { consumerRetry: true },
-    })
-  ) {
+  for (const [name, options] of Object.entries({
+    zero: { consumerRetry: { maxAttempts: 0 } },
+    nan: { consumerRetry: { maxAttempts: NaN } },
+    fractional: { consumerRetry: { maxAttempts: 1.5 } },
+    unsafe: { consumerRetry: { maxAttempts: Number.MAX_SAFE_INTEGER + 1 } },
+    empty: { consumerRetry: { delaysMs: [] } },
+    decreasing: { consumerRetry: { delaysMs: [3, 2] } },
+    negative: { consumerRetry: { delaysMs: [-1] } },
+    nanDelay: { consumerRetry: { delaysMs: [NaN] } },
+    fractionalDelay: { consumerRetry: { delaysMs: [1.1] } },
+    overflowDelay: { consumerRetry: { delaysMs: [2147483648] } },
+    cap: { deadLetterMaxLength: 0 },
+    nanCap: { deadLetterMaxLength: NaN },
+    prefetch: { prefetch: 0 },
+    qosOverflow: { prefetch: 65536 },
+    fractionalQos: { prefetch: 1.5 },
+    nanQos: { prefetch: NaN },
+    badClassifier: { consumerRetry: { isRetryable: 7 } },
+    badPolicy: { consumerRetry: true },
+  })) {
     it(`refuses ${name} at broker AND plugin construction`, () => {
       const invalid = options as RabbitMqOptions;
-      expect(() => new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), invalid))
-        .toThrow(RangeError);
+      expect(() => new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), invalid)).toThrow(
+        RangeError,
+      );
       expect(() => MessagingPlugin({ broker: 'rabbitmq', ...invalid })).toThrow(RangeError);
     });
   }
@@ -422,20 +471,26 @@ describe('RabbitMQ consumer retry', () => {
       persistentMessages: false,
     });
     await broker.connect();
-    await broker.subscribe('t', () => {
-      throw Error('temporary');
-    }, { queue: 'q' });
+    await broker.subscribe(
+      't',
+      () => {
+        throw Error('temporary');
+      },
+      { queue: 'q' },
+    );
     delays[0] = 1;
     const channel = await client.createChannel();
     const headers = { traceparent: 'trace', ['__proto__']: 'safe', binary: new Uint8Array([1]) };
     expect(Object.hasOwn(headers, '__proto__')).toBe(true);
     let settled = false;
-    const delivery = channel.deliver('{"m":1}', {
-      messageId: 'm1',
-      timestamp: 42,
-      headers,
-      expiration: '5',
-    }).then(() => settled = true);
+    const delivery = channel
+      .deliver('{"m":1}', {
+        messageId: 'm1',
+        timestamp: 42,
+        headers,
+        expiration: '5',
+      })
+      .then(() => (settled = true));
     await new Promise((r) => setTimeout(r, 0));
     expect(settled).toBe(false);
     expect(channel.calls.some((c) => c.method === 'ack')).toBe(false);
@@ -457,8 +512,12 @@ describe('RabbitMQ consumer retry', () => {
     await delivery;
     const order = channel.calls.filter((c) => ['publish', 'ack', 'nack'].includes(c.method));
     expect(order.map((c) => c.method)).toEqual(['publish', 'ack']);
-    expect(channel.calls.filter((c) => c.method === 'assertQueue').map((c) => c.args[0]))
-      .toEqual(['q', 'q.retry.200ms', 'q.retry.800ms', 'q.dead']);
+    expect(channel.calls.filter((c) => c.method === 'assertQueue').map((c) => c.args[0])).toEqual([
+      'q',
+      'q.retry.200ms',
+      'q.retry.800ms',
+      'q.dead',
+    ]);
     expect(channel.calls.find((c) => c.method === 'prefetch')?.args).toEqual([32]);
     await broker.disconnect();
   });
@@ -474,9 +533,13 @@ describe('RabbitMQ consumer retry', () => {
         consumerRetry: { maxAttempts: target === 'dead' ? 1 : 3, delaysMs: [200] },
       });
       await broker.connect();
-      await broker.subscribe('t', () => {
-        throw Error('temporary');
-      }, { queue: 'q' });
+      await broker.subscribe(
+        't',
+        () => {
+          throw Error('temporary');
+        },
+        { queue: 'q' },
+      );
       const channel = await client.createChannel();
       await channel.deliver('{"m":1}', {
         messageId: 'm1',
@@ -497,59 +560,57 @@ describe('RabbitMQ consumer retry', () => {
     });
   }
 
-  for (
-    const [name, body, header, error, classifier, target, attempts] of [
-      ['tier two', '1', 2, Error('temporary'), undefined, 'q.retry.800ms', 3],
-      ['last tier', '1', 4, Error('temporary'), undefined, 'q.retry.800ms', 5],
-      ['budget', '1', 5, Error('poison'), undefined, 'q.dead', 5],
-      ['over budget', '1', 8, Error('poison'), undefined, 'q.dead', 8],
-      [
-        'deserialize',
-        '{',
-        undefined,
-        Error('unused'),
-        () => {
-          throw Error('must not run');
-        },
-        'q.dead',
-        1,
-      ],
-      [
-        'integration rejection',
-        '1',
-        undefined,
-        new IntegrationEventRejectedError({
-          topic: 't',
-          reason: 'malformed',
-          expectedType: 'event',
-          expectedVersion: 1,
-          detail: 'bad',
-        }),
-        () => {
-          throw Error('must not run');
-        },
-        'q.dead',
-        1,
-      ],
-      ['application refusal', '1', undefined, Error('invalid'), () => false, 'q.dead', 1],
-      [
-        'classifier throws',
-        '1',
-        undefined,
-        Error('temporary'),
-        () => {
-          throw Error('classifier');
-        },
-        'q.retry.200ms',
-        2,
-      ],
-      ['invalid attempt', '1', '2', Error('invalid'), undefined, 'q.dead', 1],
-      ['nan attempt', '1', NaN, Error('invalid'), undefined, 'q.dead', 1],
-      ['negative attempt', '1', -1, Error('invalid'), undefined, 'q.dead', 1],
-      ['utf8 error bound', '1', 5, Error('😀'.repeat(2000)), undefined, 'q.dead', 5],
-      ['throw undefined', '1', undefined, undefined, undefined, 'q.retry.200ms', 2],
-    ] as const
-  ) {
+  for (const [name, body, header, error, classifier, target, attempts] of [
+    ['tier two', '1', 2, Error('temporary'), undefined, 'q.retry.800ms', 3],
+    ['last tier', '1', 4, Error('temporary'), undefined, 'q.retry.800ms', 5],
+    ['budget', '1', 5, Error('poison'), undefined, 'q.dead', 5],
+    ['over budget', '1', 8, Error('poison'), undefined, 'q.dead', 8],
+    [
+      'deserialize',
+      '{',
+      undefined,
+      Error('unused'),
+      () => {
+        throw Error('must not run');
+      },
+      'q.dead',
+      1,
+    ],
+    [
+      'integration rejection',
+      '1',
+      undefined,
+      new IntegrationEventRejectedError({
+        topic: 't',
+        reason: 'malformed',
+        expectedType: 'event',
+        expectedVersion: 1,
+        detail: 'bad',
+      }),
+      () => {
+        throw Error('must not run');
+      },
+      'q.dead',
+      1,
+    ],
+    ['application refusal', '1', undefined, Error('invalid'), () => false, 'q.dead', 1],
+    [
+      'classifier throws',
+      '1',
+      undefined,
+      Error('temporary'),
+      () => {
+        throw Error('classifier');
+      },
+      'q.retry.200ms',
+      2,
+    ],
+    ['invalid attempt', '1', '2', Error('invalid'), undefined, 'q.dead', 1],
+    ['nan attempt', '1', NaN, Error('invalid'), undefined, 'q.dead', 1],
+    ['negative attempt', '1', -1, Error('invalid'), undefined, 'q.dead', 1],
+    ['utf8 error bound', '1', 5, Error('😀'.repeat(2000)), undefined, 'q.dead', 5],
+    ['throw undefined', '1', undefined, undefined, undefined, 'q.retry.200ms', 2],
+  ] as const) {
     it(name, async () => {
       const logs: string[] = [];
       let classifications = 0;
@@ -559,18 +620,24 @@ describe('RabbitMQ consumer retry', () => {
         logger: { error: (text) => logs.push(text) },
         consumerRetry: {
           delaysMs: [200, 800],
-          ...(classifier === undefined ? {} : {
-            isRetryable: () => {
-              classifications++;
-              return classifier();
-            },
-          }),
+          ...(classifier === undefined
+            ? {}
+            : {
+                isRetryable: () => {
+                  classifications++;
+                  return classifier();
+                },
+              }),
         },
       });
       await broker.connect();
-      await broker.subscribe('t', () => {
-        throw error;
-      }, { queue: 'q' });
+      await broker.subscribe(
+        't',
+        () => {
+          throw error;
+        },
+        { queue: 'q' },
+      );
       const channel = await client.createChannel();
       await channel.deliver(body, { headers: { 'x-setu-attempt': header, traceparent: 'trace' } });
       const pub = channel.calls.find((c) => c.method === 'publish')!;
@@ -579,8 +646,9 @@ describe('RabbitMQ consumer retry', () => {
       expect(headers[target === 'q.dead' ? 'x-setu-attempts' : 'x-setu-attempt']).toBe(attempts);
       if (target === 'q.dead') {
         expect(headers['x-setu-topic']).toBe('t');
-        expect(new TextEncoder().encode(headers['x-setu-error'] as string).length)
-          .toBeLessThanOrEqual(1024);
+        expect(
+          new TextEncoder().encode(headers['x-setu-error'] as string).length,
+        ).toBeLessThanOrEqual(1024);
       }
       if (name === 'deserialize' || name === 'integration rejection') {
         expect(classifications).toBe(0);
@@ -589,18 +657,20 @@ describe('RabbitMQ consumer retry', () => {
         expect(logs.some((l) => l.includes('classifier failed'))).toBe(true);
       }
       expect(
-        channel.calls.filter((c) => ['publish', 'ack', 'nack'].includes(c.method)).map((c) =>
-          c.method
-        ),
-      )
-        .toEqual(['publish', 'ack']);
+        channel.calls
+          .filter((c) => ['publish', 'ack', 'nack'].includes(c.method))
+          .map((c) => c.method),
+      ).toEqual(['publish', 'ack']);
       await broker.disconnect();
     });
   }
 
-  for (
-    const mode of ['confirm refusal', 'sync publish failure', 'ack failure', 'success'] as const
-  ) {
+  for (const mode of [
+    'confirm refusal',
+    'sync publish failure',
+    'ack failure',
+    'success',
+  ] as const) {
     it(`disposes once on ${mode}`, async () => {
       const client = new FakeAmqpConnection({
         ...(mode === 'confirm refusal' ? { confirmError: Error('refused') } : {}),
@@ -608,9 +678,13 @@ describe('RabbitMQ consumer retry', () => {
       });
       const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
       await broker.connect();
-      await broker.subscribe('t', () => {
-        if (mode !== 'success') throw Error('temporary');
-      }, { queue: 'q' });
+      await broker.subscribe(
+        't',
+        () => {
+          if (mode !== 'success') throw Error('temporary');
+        },
+        { queue: 'q' },
+      );
       const channel = await client.createChannel();
       if (mode === 'ack failure') {
         channel.ack = () => {
@@ -642,10 +716,12 @@ describe('RabbitMQ consumer retry', () => {
         () => {
           throw Error('failed');
         },
-        kind === 'private' ? undefined : {
-          queue: 'q',
-          ...(kind === 'reply' ? { [REPLY_INBOX_TRANSIENT]: true } : {}),
-        },
+        kind === 'private'
+          ? undefined
+          : {
+              queue: 'q',
+              ...(kind === 'reply' ? { [REPLY_INBOX_TRANSIENT]: true } : {}),
+            },
       );
       const channel = await client.createChannel();
       await channel.deliver('1');

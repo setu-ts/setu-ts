@@ -42,9 +42,7 @@ export const usersDocument: SdkOpenApiDocument = {
     '/users/{id}': {
       get: {
         operationId: 'getUserById',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
-        ],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '200': {
             description: 'OK',

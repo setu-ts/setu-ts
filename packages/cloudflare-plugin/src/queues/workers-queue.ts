@@ -255,11 +255,9 @@ export class WorkersQueue implements IQueue {
 
     await Promise.all(
       [...routable].map(([name, group]) =>
-        runBounded(
-          group.work,
-          group.at.concurrency,
-          (delivery) => this.#runOne(batch.queue, name, group.at, delivery),
-        )
+        runBounded(group.work, group.at.concurrency, (delivery) =>
+          this.#runOne(batch.queue, name, group.at, delivery),
+        ),
       ),
     );
   }

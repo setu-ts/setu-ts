@@ -11,9 +11,8 @@ const SPAN_ID = '0123456789abcdef';
 describe('SDK trace propagation', () => {
   it('adds the active traceparent while an unconfigured client sends none', async () => {
     const app = createApplication({ plugins: [RuntimePlugin()] });
-    app.router.get(
-      '/trace',
-      (ctx) => ctx.response.json({ traceparent: ctx.request.headers.get('traceparent') }),
+    app.router.get('/trace', (ctx) =>
+      ctx.response.json({ traceparent: ctx.request.headers.get('traceparent') }),
     );
     await app.start();
 
@@ -21,24 +20,30 @@ describe('SDK trace propagation', () => {
     try {
       const plain = createClient({ baseUrl: 'http://localhost', fetch: appFetch });
       expect(
-        (await plain.request<{ traceparent: string | null }>({
-          method: 'GET',
-          path: 'trace',
-        })).data,
+        (
+          await plain.request<{ traceparent: string | null }>({
+            method: 'GET',
+            path: 'trace',
+          })
+        ).data,
       ).toEqual({ traceparent: null });
 
       const traced = createClient({
         baseUrl: 'http://localhost',
         fetch: appFetch,
-        requestInterceptors: [createTraceContextInterceptor({
-          activeSpanContext: () => ({ traceId: TRACE_ID, spanId: SPAN_ID, traceFlags: '01' }),
-        })],
+        requestInterceptors: [
+          createTraceContextInterceptor({
+            activeSpanContext: () => ({ traceId: TRACE_ID, spanId: SPAN_ID, traceFlags: '01' }),
+          }),
+        ],
       });
       expect(
-        (await traced.request<{ traceparent: string | null }>({
-          method: 'GET',
-          path: 'trace',
-        })).data,
+        (
+          await traced.request<{ traceparent: string | null }>({
+            method: 'GET',
+            path: 'trace',
+          })
+        ).data,
       ).toEqual({ traceparent: `00-${TRACE_ID}-${SPAN_ID}-01` });
     } finally {
       await app.stop();

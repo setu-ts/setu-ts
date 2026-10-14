@@ -40,10 +40,7 @@ const baseline = JSON.parse(
  * @param runtime - The runtime target to render for
  * @returns The per-file hash map
  */
-async function render(
-  host: TemplateHost,
-  runtime: TargetRuntime,
-): Promise<Record<string, string>> {
+async function render(host: TemplateHost, runtime: TargetRuntime): Promise<Record<string, string>> {
   const files = projectFiles(BASELINE_NAME, runtime, resolveHost(host, runtime));
   const hashes: Record<string, string> = {};
   for (const file of files) hashes[file.path] = await baselineHash(file.contents);

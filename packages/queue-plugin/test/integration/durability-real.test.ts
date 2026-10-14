@@ -121,38 +121,42 @@ async function fillReadyQueue(
 }
 
 describe('REAL RabbitMQ job durability', () => {
-  it('persistent jobs survive a broker restart; the transient control does not', {
-    skip: rabbitUrl === undefined,
-  }, async () => {
-    const url = toIpv4(rabbitUrl!);
-    const amqp = await import('amqplib');
-    const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
-    const containerId = await containerIdForPort(port);
+  it(
+    'persistent jobs survive a broker restart; the transient control does not',
+    {
+      skip: rabbitUrl === undefined,
+    },
+    async () => {
+      const url = toIpv4(rabbitUrl!);
+      const amqp = await import('amqplib');
+      const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
+      const containerId = await containerIdForPort(port);
 
-    const run = crypto.randomUUID().slice(0, 8);
-    const persistentPrefix = `durability-persistent-${run}`;
-    const transientPrefix = `durability-transient-${run}`;
-    const readyQueues = [`${persistentPrefix}.reports.ready`, `${transientPrefix}.reports.ready`];
-    await fillReadyQueue(url, true, persistentPrefix, 5);
-    await fillReadyQueue(url, false, transientPrefix, 5);
+      const run = crypto.randomUUID().slice(0, 8);
+      const persistentPrefix = `durability-persistent-${run}`;
+      const transientPrefix = `durability-transient-${run}`;
+      const readyQueues = [`${persistentPrefix}.reports.ready`, `${transientPrefix}.reports.ready`];
+      await fillReadyQueue(url, true, persistentPrefix, 5);
+      await fillReadyQueue(url, false, transientPrefix, 5);
 
-    try {
-      expect(await depths(amqp, url, readyQueues)).toEqual([5, 5]);
+      try {
+        expect(await depths(amqp, url, readyQueues)).toEqual([5, 5]);
 
-      await docker(['restart', containerId]);
-      await waitForBroker(amqp, url);
+        await docker(['restart', containerId]);
+        await waitForBroker(amqp, url);
 
-      // Both queues are durable, so both survive; only persistent jobs do.
-      expect(await depths(amqp, url, readyQueues)).toEqual([5, 0]);
-    } finally {
-      const connection = await amqp.connect(url);
-      const channel = await connection.createChannel();
-      for (const prefix of [persistentPrefix, transientPrefix]) {
-        for (const kind of ['ready', 'delay', 'dead']) {
-          await channel.deleteQueue(`${prefix}.reports.${kind}`);
+        // Both queues are durable, so both survive; only persistent jobs do.
+        expect(await depths(amqp, url, readyQueues)).toEqual([5, 0]);
+      } finally {
+        const connection = await amqp.connect(url);
+        const channel = await connection.createChannel();
+        for (const prefix of [persistentPrefix, transientPrefix]) {
+          for (const kind of ['ready', 'delay', 'dead']) {
+            await channel.deleteQueue(`${prefix}.reports.${kind}`);
+          }
         }
+        await connection.close();
       }
-      await connection.close();
-    }
-  });
+    },
+  );
 });

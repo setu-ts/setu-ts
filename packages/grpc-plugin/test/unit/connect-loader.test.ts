@@ -32,9 +32,10 @@ interface Calls {
   createFileRegistry: unknown[];
 }
 
-function createFakeModules(
-  overrides: { fromBinaryThrows?: boolean } = {},
-): { modules: ConnectModuleLike; calls: Calls } {
+function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
+  modules: ConnectModuleLike;
+  calls: Calls;
+} {
   const calls: Calls = {
     createConnectRouter: 0,
     createFetchHandler: [],
@@ -144,9 +145,7 @@ describe('adaptConnectModule', () => {
     const bytes = adaptConnectModule(modules).serializeFileDescriptor(file);
 
     expect(bytes).toEqual(new Uint8Array([1, 2, 3]));
-    expect(calls.toBinary).toEqual([
-      { schema: 'FileDescriptorProtoSchema', message: file.proto },
-    ]);
+    expect(calls.toBinary).toEqual([{ schema: 'FileDescriptorProtoSchema', message: file.proto }]);
   });
 });
 
@@ -179,9 +178,10 @@ describe('loadConnectModule', () => {
     const importers: Partial<ConnectImporters> = {};
     for (const key of Object.keys(byKey) as Array<keyof ConnectImporters>) {
       const specifier = SPECIFIER_BY_KEY[key];
-      importers[key] = specifier === failing
-        ? () => Promise.reject(new Error(`Module not found: ${specifier}`))
-        : () => Promise.resolve(byKey[key]);
+      importers[key] =
+        specifier === failing
+          ? () => Promise.reject(new Error(`Module not found: ${specifier}`))
+          : () => Promise.resolve(byKey[key]);
     }
     return importers;
   }

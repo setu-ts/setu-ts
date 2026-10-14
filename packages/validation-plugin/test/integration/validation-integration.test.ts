@@ -276,8 +276,7 @@ describe('resolveFormatter — all formatters produce valid output', () => {
 
     it('prefers strict() over strip() when both are set', () => {
       const schema = policySchema();
-      serviceWith({ whitelist: true, forbidNonWhitelisted: true })
-        .middleware(schema, 'body');
+      serviceWith({ whitelist: true, forbidNonWhitelisted: true }).middleware(schema, 'body');
       expect(schema.calls).toEqual(['strict']);
     });
 

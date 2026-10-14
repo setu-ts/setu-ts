@@ -26,9 +26,10 @@ import { VERSION } from '../version.ts';
  * This is extracted as a named function for testability.
  * @internal - exported for testing only
  */
-export function createHandlerLogger(
-  logger: NonNullable<IPluginContext['logger']>,
-): { info: (msg: string) => void; error: (msg: string, err?: unknown) => void } {
+export function createHandlerLogger(logger: NonNullable<IPluginContext['logger']>): {
+  info: (msg: string) => void;
+  error: (msg: string, err?: unknown) => void;
+} {
   return {
     info: (msg: string) => logger.info(msg),
     error: (msg: string, err?: unknown) => logger.error(msg, err as Record<string, unknown>),
@@ -215,9 +216,9 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
             cachedDocuments: graphqlService!.cachedDocumentCount,
             subscriptions: subscriptions
               ? {
-                websocket: wsAvailable,
-                sse: subscriptions.sse !== false,
-              }
+                  websocket: wsAvailable,
+                  sse: subscriptions.sse !== false,
+                }
               : undefined,
           },
         });

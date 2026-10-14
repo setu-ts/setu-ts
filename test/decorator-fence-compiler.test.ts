@@ -100,9 +100,7 @@ function importsFromSetuTs(code: string): boolean {
 /**
  * Invokes `deno check --config <config> <file>` and returns exit code + stderr.
  */
-async function denoCheck(
-  filePath: string,
-): Promise<{ code: number; stderr: string }> {
+async function denoCheck(filePath: string): Promise<{ code: number; stderr: string }> {
   const cmd = new Deno.Command('deno', {
     args: ['check', '--config', SNIPPET_CONFIG, filePath],
     stdout: 'null',

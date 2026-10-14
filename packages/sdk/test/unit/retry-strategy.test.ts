@@ -213,9 +213,7 @@ describe('runWithRetry', () => {
     const fn = () => {
       attempts++;
       if (attempts < 2) {
-        return Promise.reject(
-          httpError(429, { 'Retry-After': 'Wed, 21 Oct 2025 07:28:00 GMT' }),
-        );
+        return Promise.reject(httpError(429, { 'Retry-After': 'Wed, 21 Oct 2025 07:28:00 GMT' }));
       }
       return Promise.resolve('ok');
     };

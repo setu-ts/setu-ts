@@ -432,17 +432,17 @@ describe('attachResolvers — a malformed field entry', () => {
       getType: (name: string) =>
         name === 'Query'
           ? {
-            name: 'Query',
-            getFields: () => ({ hello: { name: 'hello', args: [] } }),
-            getInterfaces: () => [],
-          }
+              name: 'Query',
+              getFields: () => ({ hello: { name: 'hello', args: [] } }),
+              getInterfaces: () => [],
+            }
           : null,
     } as unknown as GraphqlSchemaLike;
 
     expect(() =>
       attachResolvers(schema, {
         Query: { hello: { nonsense: true } as unknown as FieldResolver },
-      })
+      }),
     ).toThrow(/must be a function/);
   });
 });

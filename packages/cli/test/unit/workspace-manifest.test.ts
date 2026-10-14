@@ -40,9 +40,9 @@ describe('devtoolPort in the workspace manifest', () => {
   it('absent stays absent', async () => {
     const read = await readWorkspaceManifest(
       fsWith({
-        '/ws/setu.workspace.json': renderWorkspaceManifest(baseManifest([
-          { name: 'orders', port: 3000 },
-        ])),
+        '/ws/setu.workspace.json': renderWorkspaceManifest(
+          baseManifest([{ name: 'orders', port: 3000 }]),
+        ),
       }),
       '/ws',
     );

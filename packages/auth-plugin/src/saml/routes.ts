@@ -99,14 +99,16 @@ type FlowOutcome = string | null;
 /** A route whose flow runs as middleware and whose terminal handler redirects. */
 function flowRoute(flow: (ctx: IRequestContext) => Promise<FlowOutcome>) {
   return {
-    middleware: [async (ctx: IRequestContext, next: () => Promise<void>) => {
-      const target = await flow(ctx);
-      if (target === null) {
-        return;
-      }
-      ctx.state.set(REDIRECT_STATE_KEY, target);
-      await next();
-    }],
+    middleware: [
+      async (ctx: IRequestContext, next: () => Promise<void>) => {
+        const target = await flow(ctx);
+        if (target === null) {
+          return;
+        }
+        ctx.state.set(REDIRECT_STATE_KEY, target);
+        await next();
+      },
+    ],
     handler: (ctx: IRequestContext) =>
       ctx.response.redirect(String(ctx.state.get(REDIRECT_STATE_KEY)), 302),
   };
@@ -187,9 +189,10 @@ interface AssertionFacts {
  */
 function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | null {
   const parsed = typeof profile.getAssertion === 'function' ? profile.getAssertion() : undefined;
-  const assertion = typeof parsed === 'object' && parsed !== null
-    ? (parsed as Record<string, unknown>).Assertion
-    : undefined;
+  const assertion =
+    typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>).Assertion
+      : undefined;
   const id = stringOf(attributeOf(assertion, 'ID'));
   if (id === undefined) {
     return null;
@@ -249,9 +252,10 @@ function toSamlProfile(facts: AssertionFacts, profile: SamlLibraryProfile): Saml
   if (facts.issuer === undefined || facts.nameID === undefined) {
     return null;
   }
-  const attributes = typeof profile.attributes === 'object' && profile.attributes !== null
-    ? { ...(profile.attributes as Record<string, unknown>) }
-    : {};
+  const attributes =
+    typeof profile.attributes === 'object' && profile.attributes !== null
+      ? { ...(profile.attributes as Record<string, unknown>) }
+      : {};
   return Object.freeze({
     issuer: facts.issuer,
     nameID: facts.nameID,
@@ -329,9 +333,10 @@ function registerLogin(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
 /** Reads the `SAMLResponse` form field, or `null`. */
 async function readSamlResponse(ctx: IRequestContext): Promise<string | null> {
   try {
-    const form = ctx.request.formData !== undefined
-      ? await ctx.request.formData()
-      : parseFormBody(await ctx.request.bytes(), ctx.request.headers.get('content-type'));
+    const form =
+      ctx.request.formData !== undefined
+        ? await ctx.request.formData()
+        : parseFormBody(await ctx.request.bytes(), ctx.request.headers.get('content-type'));
     const value = form.get('SAMLResponse');
     return typeof value === 'string' && value.length > 0 ? value : null;
   } catch {
@@ -406,7 +411,7 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         },
         removeAsync: async (requestId) => {
           if (bindingRefused) return null;
-          return requestId === null ? null : (await consume(requestId))?.issuedAt ?? null;
+          return requestId === null ? null : ((await consume(requestId))?.issuedAt ?? null);
         },
       };
 
@@ -464,7 +469,8 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         return fail(provider, ctx, 'assertion-invalid');
       }
       if (
-        facts === null || facts.recipients.length === 0 ||
+        facts === null ||
+        facts.recipients.length === 0 ||
         facts.recipients.some((recipient) => recipient !== provider.acsUrl)
       ) {
         deps.debug?.(`auth-plugin: signIn['${provider.name}'] response refused (recipient)`);
