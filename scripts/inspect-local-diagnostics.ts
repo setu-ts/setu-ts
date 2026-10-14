@@ -18,7 +18,7 @@ import { run } from './lib/run.ts';
  * this script.
  *
  * Usage:
- *   deno run --allow-read --allow-env --allow-net=127.0.0.1 scripts/inspect-local-diagnostics.ts
+ *   node --import ./test/node-source-register.ts scripts/inspect-local-diagnostics.ts
  *
  * @module
  */

@@ -1,7 +1,3 @@
-import ts from 'typescript';
-import { Worker } from 'node:worker_threads';
-import { resolve } from 'node:path';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
 /**
  * Shared fence-classification and compilation engine for the M38 guide-fence
  * and decorator-fence compilers.
@@ -43,6 +39,11 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import ts from 'typescript';
+import { Worker } from 'node:worker_threads';
+import { resolve } from 'node:path';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { scanFences } from '../../../scripts/check-docs.ts';
 
 /**

@@ -1,5 +1,6 @@
-import { readFile } from 'node:fs/promises';
 /** Source-derived invariants for curated M38 guide contracts. @module */
+
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import { contractsMatch } from './fixtures/contract-ast.ts';

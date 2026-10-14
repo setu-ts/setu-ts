@@ -1,4 +1,3 @@
-import { readdir, readFile } from 'node:fs/promises';
 /**
  * Which test suites must run alone, and which may run in parallel.
  *
@@ -17,6 +16,8 @@ import { readdir, readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readdir, readFile } from 'node:fs/promises';
 
 /** Test-file roots, matching what `deno task test` passed positionally. */
 export const ROOTS = ['packages', 'test'] as const;

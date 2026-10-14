@@ -1,4 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
 /* eslint-disable no-console -- a CI entry point; `scripts/` is exempt */
 /**
  * `deno audit` with bounded retries for a flaking npm advisories endpoint.
@@ -44,6 +43,8 @@ import { run as runProcess } from './lib/run.ts';
  *
  * @module
  */
+
+import { run as runProcess } from './lib/run.ts';
 
 /** How the strict audit's failure was classified. */
 export type AuditOutcome =

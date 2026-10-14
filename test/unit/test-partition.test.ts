@@ -1,4 +1,3 @@
-import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 /**
  * The two-phase test partition covers the whole suite and isolates every hazard.
  *
@@ -16,6 +15,8 @@ import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 import {

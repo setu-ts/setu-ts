@@ -1,6 +1,3 @@
-import { type Dirent } from 'node:fs';
-import { readdir, readFile as readSourceFile } from 'node:fs/promises';
-import { isNotFound } from './lib/run.ts';
 /* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * The `@since` gate: every tag is checked against the version that SHIPPED the
@@ -36,7 +33,7 @@ import { isNotFound } from './lib/run.ts';
  * {@linkcode lineStandIn}.
  *
  * A network failure is NOT an exit 77 here. `check:docs` is an `&&` chain of
- * `deno run` invocations, so any non-zero status fails the task — 77
+ * `node` invocations, so any non-zero status fails the task — 77
  * included — and a transient registry outage would fail the documentation
  * job and block release PRs. Instead every unreachable fetch is reported on
  * stderr and the run exits 0; and so that silence is never mistaken for a
@@ -45,6 +42,10 @@ import { isNotFound } from './lib/run.ts';
  *
  * @module
  */
+
+import { type Dirent } from 'node:fs';
+import { readdir, readFile as readSourceFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 
 import { gunzipBounded, readTar } from './tar-read.ts';
 

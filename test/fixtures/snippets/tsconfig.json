@@ -52,7 +52,14 @@
       "@setu-ts/full-stack-starter": ["../../../packages/starters/full-stack-starter/src/index.ts"],
       "@setu-ts/view-plugin": ["../../../packages/view-plugin/src/index.ts"],
       "@setu-ts/*": ["../../../packages/*/src/index.ts"],
-      "@setu-ts/runtime/worker": ["../../../packages/runtime/src/worker/define-worker-task.ts"]
+      "@setu-ts/runtime/worker": ["../../../packages/runtime/src/worker/define-worker-task.ts"],
+      "@std/testing/bdd": ["./shims/std-testing-bdd.ts"],
+      "@std/expect": ["./shims/std-expect.ts"],
+      "cloudflare:workers": ["./shims/cloudflare-workers.ts"],
+      "@setu-ts/localization-plugin/format": [
+        "../../../packages/localization-plugin/src/format/index.ts"
+      ],
+      "@setu-ts/cli/main": ["../../../packages/cli/src/main.ts"]
     },
     "lib": ["es2024", "esnext.decorators", "dom", "dom.iterable"],
     "typeRoots": ["../../../node_modules/@types", "../../../packages/runtime/node_modules/@types"]

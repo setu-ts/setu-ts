@@ -29,6 +29,7 @@ import {
   DOC_LINT_BASELINE_TYPEDOC,
   DOC_LINT_EXIT_CODE,
   evaluateBaselineRatchet,
+  inRatchetScope,
   expandExportTargets,
   normalizeDiagnosticPath,
   parseDocLintDiagnostics,
@@ -368,19 +369,47 @@ error[private-type-ref]: public type references private type
     });
   });
 
+  describe('inRatchetScope', () => {
+    it('drops a missing comment on an anonymous object-type member only', () => {
+      const member = {
+        rule: 'notDocumented',
+        path: 'packages/common/src/http.ts',
+        message:
+          'common/src.ResponseSnapshot.__type.status (Property), defined in @setu-ts/common/src/http.ts, does not have any documentation',
+      };
+      expect(inRatchetScope(member)).toBe(false);
+      expect(
+        inRatchetScope({
+          ...member,
+          message:
+            'common/src.ResponseSnapshot.status (Property), defined in @setu-ts/common/src/http.ts, does not have any documentation',
+        }),
+      ).toBe(true);
+      expect(inRatchetScope({ ...member, rule: 'notExported' })).toBe(true);
+    });
+  });
+
   describe('CLEAN_PACKAGES constant', () => {
-    it('contains exactly the twenty-two re-measured clean packages', () => {
+    it('contains exactly the thirty-one re-measured clean packages', () => {
       expect([...CLEAN_PACKAGES].sort()).toEqual([
+        'auth-plugin',
+        'common',
         'config-plugin',
         'cqrs-plugin',
         'create',
+        'decorator-plugin',
         'di-plugin',
+        'diagnostics-plugin',
+        'exceptions',
+        'feature-flags-plugin',
         'full-stack-starter',
         'http-security-plugin',
         'idempotency-plugin',
         'kernel',
+        'localization-plugin',
         'logger-plugin',
         'microservice-starter',
+        'openapi-plugin',
         'realtime-backplane-plugin',
         'resilience-plugin',
         'rest-starter',
@@ -390,15 +419,33 @@ error[private-type-ref]: public type references private type
         'session-plugin',
         'sse-plugin',
         'static-plugin',
+        'telemetry-plugin',
         'validation-plugin',
         'view-plugin',
         'worker-pool-plugin',
       ]);
     });
+
+    it('keeps every package the deno doc ratchet kept clean', () => {
+      for (const name of [
+        'common',
+        'config-plugin',
+        'cqrs-plugin',
+        'exceptions',
+        'full-stack-starter',
+        'http-security-plugin',
+        'kernel',
+        'microservice-starter',
+        'rest-starter',
+        'scheduler-plugin',
+      ]) {
+        expect(CLEAN_PACKAGES.has(name), name).toBe(true);
+      }
+    });
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the re-measured baseline of 554 on pinned TypeDoc 0.28.20', () => {
+    it('is the re-measured baseline of 237 on pinned TypeDoc 0.28.20', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
       // M59 then added four diagnostics and removed five, so it fell to 774.
@@ -449,7 +496,12 @@ error[private-type-ref]: public type references private type
       // widened, which is the whole point of a ratchet.
       // M109a added two packages' worth of surface and documented every new
       // symbol, so the count is unchanged.
-      expect(DOC_LINT_BASELINE).toBe(554);
+      //
+      // M111e2 moved the ratchet to TypeDoc 0.28.20, whose count is not
+      // comparable with Deno's, and re-measured it: 554 warnings, of which 317
+      // are members of anonymous object types that `deno doc --lint` never
+      // required (inRatchetScope) — 237 in scope.
+      expect(DOC_LINT_BASELINE).toBe(237);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.

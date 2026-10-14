@@ -1,6 +1,3 @@
-import { compileFence } from './fixtures/snippets/fence-engine.ts';
-import { run as runProcess } from './../scripts/lib/run.ts';
-import { stat, readFile } from 'node:fs/promises';
 /**
  * Mechanical validation of documentation snippet fixtures.
  *
@@ -24,6 +21,10 @@ import { stat, readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { compileFence } from './fixtures/snippets/fence-engine.ts';
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { stat, readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 /** Each fixture mapped to the guide(s) whose examples it mechanically verifies. */

@@ -25,7 +25,9 @@ it('pins the plan section 3.12 direct Deno commands', () => {
     .filter(([, command]) => /\bdeno\s/.test(command))
     .map(([name]) => name)
     .sort();
-  expect(direct).toEqual(['audit', 'fmt', 'fmt:check']);
+  // `check:browser` runs the full-stack app's browser harness, which is a Deno
+  // program until M111e3 moves the apps to pnpm.
+  expect(direct).toEqual(['audit', 'check:browser', 'fmt', 'fmt:check']);
 });
 
 it('pins every repository script that launches a Deno subject', () => {
@@ -46,4 +48,17 @@ it('pins every repository script that launches a Deno subject', () => {
     'inspect-local-diagnostics.ts',
     'test-deno-lane.ts',
   ]);
+});
+
+it('pins the root test fixtures that launch Deno', () => {
+  // `contract-ast.ts` reads interface shapes through `deno doc --json`; M111e3
+  // owns removing the last `deno` from the root suite.
+  const retained = readdirSync('test/fixtures', { recursive: true })
+    .map(String)
+    .filter((file) => file.endsWith('.ts'))
+    .filter((file) =>
+      /\b(?:runProcess|run)\(\s*'deno'/.test(readFileSync(`test/fixtures/${file}`, 'utf8')),
+    )
+    .sort();
+  expect(retained).toEqual(['contract-ast.ts']);
 });

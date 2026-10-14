@@ -1,6 +1,3 @@
-import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
-import { readFile, stat } from 'node:fs/promises';
 /**
  * The version constant agrees with both manifests (M111a plan §3.5).
  *
@@ -11,6 +8,10 @@ import { readFile, stat } from 'node:fs/promises';
  *
  * @module
  */
+
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 /** Every workspace member directory, read from the root manifest. */

@@ -21,8 +21,8 @@ import { readdir, readFile } from 'node:fs/promises';
  *     prompts committed beside the one canonical plan (M10 shipped four).
  *
  * Usage:
- *   deno run --allow-read scripts/plan-lint.ts                  # all plans/*.md at root
- *   deno run --allow-read scripts/plan-lint.ts plans/x.md ...   # specific files
+ *   node scripts/plan-lint.ts                  # all plans/*.md at root
+ *   node scripts/plan-lint.ts plans/x.md ...   # specific files
  *
  * Exits 1 on any ERROR. Warnings print but do not fail the run.
  */

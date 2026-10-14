@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
  * Run with the expected version (the git tag without its leading `v`):
  *
  * ```
- * deno run --allow-read scripts/verify-release.ts 0.2.0
+ * node scripts/verify-release.ts 0.2.0
  * ```
  *
  * Verifies eleven things a green test suite cannot:

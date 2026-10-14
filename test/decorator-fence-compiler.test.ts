@@ -1,5 +1,3 @@
-import { compileFence } from './fixtures/snippets/fence-engine.ts';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
 /**
  * Actual Markdown fence compiler for `docs/decorators.md`.
  *
@@ -26,6 +24,9 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { compileFence } from './fixtures/snippets/fence-engine.ts';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { scanFences } from '../scripts/check-docs.ts';

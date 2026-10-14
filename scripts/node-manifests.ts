@@ -1,5 +1,3 @@
-import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { type Dirent } from 'node:fs';
 /* eslint-disable no-console -- a gate prints what it found (AI_GUIDELINES §11.5/§11.6) */
 /**
  * The Node-manifest generator and drift gate (M111a plan §3.1).
@@ -36,11 +34,14 @@ import { type Dirent } from 'node:fs';
  * (§3.4 safeguard 2).
  *
  * Usage:
- *   deno run --allow-read --allow-write scripts/node-manifests.ts --write
- *   deno run --allow-read scripts/node-manifests.ts --check
+ *   node scripts/node-manifests.ts --write
+ *   node scripts/node-manifests.ts --check
  *
  * @module
  */
+
+import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { type Dirent } from 'node:fs';
 
 import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
@@ -53,6 +54,13 @@ import {
   OVERRIDES,
   WORKSPACE_SCOPE,
 } from './node-dependency-ranges.ts';
+
+/**
+ * Root tests that import an app's Deno entry point, whose `npm:` specifiers `tsc`
+ * cannot resolve. They still run under Vitest; M111e3 moves the apps to pnpm and
+ * empties this list.
+ */
+export const CHECK_EXCLUDED_UNTIL_APPS_MOVE: readonly string[] = ['test/browser-gate.test.ts'];
 
 // ── Pure core ─────────────────────────────────────────────────────────────────
 
@@ -1003,6 +1011,7 @@ export function renderCheckTsconfig(): string {
           ...DENO_ONLY_SOURCES,
           'test/deno-lane',
           'test/fixtures/snippets',
+          ...CHECK_EXCLUDED_UNTIL_APPS_MOVE,
         ],
       },
       null,

@@ -1,10 +1,11 @@
-import { readFile } from 'node:fs/promises';
 /**
  * Exercises the executable prose-assertion gate's grammar, sandbox, and CI
  * wiring. The gate is useful only when a false claim demonstrably fails.
  *
  * @module
  */
+
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {

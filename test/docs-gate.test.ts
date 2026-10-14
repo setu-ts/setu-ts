@@ -1,6 +1,3 @@
-import { run as runProcess } from './../scripts/lib/run.ts';
-import { readFile, readdir, stat, writeFile, rm, mkdir } from 'node:fs/promises';
-import { readdirSync, statSync } from 'node:fs';
 /**
  * Pins the documentation gate: that its checks actually discriminate, and that
  * CI runs it.
@@ -14,6 +11,10 @@ import { readdirSync, statSync } from 'node:fs';
  *
  * @module
  */
+
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFile, readdir, stat, writeFile, rm, mkdir } from 'node:fs/promises';
+import { readdirSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {

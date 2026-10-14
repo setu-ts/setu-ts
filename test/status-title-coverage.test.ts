@@ -1,4 +1,3 @@
-import { readdir, readFile } from 'node:fs/promises';
 /**
  * Every status the framework BRANDS must have a `STATUS_TITLES` row.
  *
@@ -22,6 +21,8 @@ import { readdir, readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readdir, readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { STATUS_TITLES, statusTitle } from '@setu-ts/exceptions';
 

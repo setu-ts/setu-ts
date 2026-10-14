@@ -1,4 +1,3 @@
-import { readdir, readFile, mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 /**
  * Every `actions/checkout` in every workflow declares a credential decision.
  *
@@ -40,6 +39,8 @@ import { readdir, readFile, mkdir, mkdtemp, writeFile, rm } from 'node:fs/promis
  *
  * @module
  */
+
+import { readdir, readFile, mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 

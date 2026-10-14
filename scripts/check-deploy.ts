@@ -1,5 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
-import { stat, readdir, readFile, mkdir, mkdtemp, rm, writeFile, rename } from 'node:fs/promises';
 /* eslint-disable no-console -- this CI script reports progress, drift and skips. */
 import { fileURLToPath } from 'node:url';
 import { startRegistryOverlay } from './registry-overlay.ts';
@@ -28,6 +26,9 @@ import { startRegistryOverlay } from './registry-overlay.ts';
  * A mode whose tooling is absent exits with {@linkcode SKIP_EXIT_CODE} (77) — the same code
  * `scripts/check-apps.ts` reserves — so a missing prerequisite can never read as a pass.
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { stat, readdir, readFile, mkdir, mkdtemp, rm, writeFile, rename } from 'node:fs/promises';
 
 /** Exit code reserved for "this check reported a skip", matching `scripts/check-apps.ts`. */
 export const SKIP_EXIT_CODE = 77;

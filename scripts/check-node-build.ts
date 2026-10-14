@@ -1,6 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
-import { readFile, rm, mkdir, realpath, readdir, copyFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 /* eslint-disable no-console -- a gate script reports to the console. */
 /**
  * The Node pack-and-boot gate (M111a plan §3.10).
@@ -26,6 +23,10 @@ import { createServer } from 'node:net';
  *
  * @module
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { readFile, rm, mkdir, realpath, readdir, copyFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import {
   classifyLeg,
   decideOutcome,

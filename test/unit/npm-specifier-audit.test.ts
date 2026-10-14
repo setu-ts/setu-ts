@@ -1,4 +1,3 @@
-import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 /**
  * Unit tests for the computed-`import()` recurrence gate (M70e §3.7/§3.8).
  *
@@ -8,6 +7,8 @@ import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
  *
  * @module
  */
+
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
   auditPackageSources,

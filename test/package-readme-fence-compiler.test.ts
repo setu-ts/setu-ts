@@ -1,4 +1,3 @@
-import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 /**
  * Fence compiler for the package READMEs M70k rewrites.
  *
@@ -33,6 +32,8 @@ import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {

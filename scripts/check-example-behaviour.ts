@@ -1,8 +1,3 @@
-import { transform } from 'esbuild';
-import { run as runProcess } from './lib/run.ts';
-import { type Dirent } from 'node:fs';
-import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
-import { isNotFound } from './lib/run.ts';
 /* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * Executable behaviour gate for documented view components.
@@ -27,6 +22,12 @@ import { isNotFound } from './lib/run.ts';
  *
  * @module
  */
+
+import { transform } from 'esbuild';
+import { run as runProcess } from './lib/run.ts';
+import { type Dirent } from 'node:fs';
+import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 import { classify, extractFences, TS_ALIASES } from '../test/fixtures/snippets/fence-engine.ts';
 
 /** The payload rendered into every string-shaped prop. */

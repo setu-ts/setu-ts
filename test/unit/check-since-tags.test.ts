@@ -1,5 +1,3 @@
-import { run as runProcess } from './../../scripts/lib/run.ts';
-import { mkdir, writeFile } from 'node:fs/promises';
 /**
  * The `@since` gate's own controls, because a gate that has never been
  * observed failing is not a gate.
@@ -12,6 +10,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { run as runProcess } from './../../scripts/lib/run.ts';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {

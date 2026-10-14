@@ -4,8 +4,7 @@
  * to publish to.
  *
  * ```
- * JSR_TOKEN=jsrp_… deno run --allow-read --allow-env --allow-net=api.jsr.io \
- *   scripts/create-jsr-packages.ts [--dry-run]
+ * JSR_TOKEN=jsrp_… node scripts/create-jsr-packages.ts [--dry-run]
  * ```
  *
  * WHY THIS EXISTS. A JSR package must exist before anything can be published

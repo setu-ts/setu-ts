@@ -87,6 +87,7 @@
     "packages/runtime/src/adapters/deno/deno-ws-upgrader.ts",
     "packages/runtime/src/diagnostics/local-diagnostics-listener.ts",
     "test/deno-lane",
-    "test/fixtures/snippets"
+    "test/fixtures/snippets",
+    "test/browser-gate.test.ts"
   ]
 }

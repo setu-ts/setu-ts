@@ -1,4 +1,3 @@
-import { mkdir, mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
 /**
  * Unit tests for the Node-manifest generator (M111a plan §3.1, §3.4, §3.6).
  *
@@ -9,6 +8,8 @@ import { mkdir, mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises'
  *
  * @module
  */
+
+import { mkdir, mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
   basePackageName,

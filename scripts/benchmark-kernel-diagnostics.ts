@@ -22,8 +22,8 @@
  * workstation is around 5% even at a full window.
  *
  * Usage:
- *   deno run --allow-read --allow-env scripts/benchmark-kernel-diagnostics.ts --mode=disabled
- *   deno run --allow-read --allow-env scripts/benchmark-kernel-diagnostics.ts --mode=enabled
+ *   node --import ./test/node-source-register.ts scripts/benchmark-kernel-diagnostics.ts --mode=disabled
+ *   node --import ./test/node-source-register.ts scripts/benchmark-kernel-diagnostics.ts --mode=enabled
  *
  * @module
  */

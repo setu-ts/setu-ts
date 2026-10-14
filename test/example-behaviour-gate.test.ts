@@ -1,4 +1,3 @@
-import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
 /**
  * The executable behaviour gate for documented view components.
  *
@@ -10,6 +9,8 @@ import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {

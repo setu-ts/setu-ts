@@ -1,6 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
-import { type Stats } from 'node:fs';
-import { readFile, stat, rm, mkdir } from 'node:fs/promises';
 /**
  * Generate the website's API HTML with Deno, or validate repository JSDoc with TypeDoc.
  * The check ratchet is measured on the pinned TypeDoc version with every published
@@ -9,22 +6,37 @@ import { readFile, stat, rm, mkdir } from 'node:fs/promises';
  * HTML generation remains `deno doc --html` until M111e3.
  * @module
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { type Stats } from 'node:fs';
+import { readFile, stat, rm, mkdir } from 'node:fs/promises';
 /* eslint-disable no-console -- repository documentation gate */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 import { Application } from 'typedoc';
 
-/** Packages with zero diagnostics in the M111e2 TypeDoc measurement. */
+/**
+ * Packages with zero in-scope TypeDoc diagnostics (see {@linkcode inRatchetScope}),
+ * measured in M111e2. A superset of the set `deno doc --lint` kept clean.
+ */
 export const CLEAN_PACKAGES = new Set([
+  'auth-plugin',
+  'common',
   'config-plugin',
   'cqrs-plugin',
   'create',
+  'decorator-plugin',
   'di-plugin',
+  'diagnostics-plugin',
+  'exceptions',
+  'feature-flags-plugin',
   'full-stack-starter',
   'http-security-plugin',
   'idempotency-plugin',
   'kernel',
+  'localization-plugin',
   'logger-plugin',
   'microservice-starter',
+  'openapi-plugin',
   'realtime-backplane-plugin',
   'resilience-plugin',
   'rest-starter',
@@ -34,12 +46,16 @@ export const CLEAN_PACKAGES = new Set([
   'session-plugin',
   'sse-plugin',
   'static-plugin',
+  'telemetry-plugin',
   'validation-plugin',
   'view-plugin',
   'worker-pool-plugin',
 ]);
-/** 554 diagnostics on TypeDoc 0.28.20; the previous Deno count was not comparable. */
-export const DOC_LINT_BASELINE = 554;
+/**
+ * In-scope diagnostics on TypeDoc 0.28.20 (554 before excluding anonymous
+ * object-type members); the previous Deno count is not comparable.
+ */
+export const DOC_LINT_BASELINE = 237;
 /** Exact TypeDoc version on which the diagnostic debt was measured. */
 export const DOC_LINT_BASELINE_TYPEDOC = '0.28.20';
 
@@ -822,7 +838,9 @@ export async function runApiDocs(
     }
 
     // Ratchet-eligible: parse diagnostics and apply the clean-package + baseline policy.
-    const diagnostics = parseDocLintDiagnostics(result.stdout + '\n' + result.stderr);
+    const diagnostics = parseDocLintDiagnostics(result.stdout + '\n' + result.stderr).filter(
+      inRatchetScope,
+    );
     const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
 
     if (cleanPackageFindings.length > 0) {
@@ -892,6 +910,16 @@ export async function runApiDocsMain(
 }
 
 if (import.meta.main) process.exitCode = await runApiDocsMain();
+
+/**
+ * Whether a diagnostic is one the ratchet counts. TypeDoc also reports a missing
+ * comment on each member of an anonymous object type (`Foo.__type.bar`), which
+ * `deno doc --lint` never required; counting those would change the rule this
+ * gate carries over rather than port it, so they are out of scope.
+ */
+export function inRatchetScope(diagnostic: DocLintDiagnostic): boolean {
+  return !(diagnostic.rule === 'notDocumented' && /\.__type\b/.test(diagnostic.message));
+}
 
 /** Parse TypeDoc's pinned CLI warning dialect, retaining an owner for every diagnostic. */
 export function parseTypedocDiagnostics(output: string): DocLintDiagnostic[] {

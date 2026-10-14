@@ -1,4 +1,3 @@
-import { readdir } from 'node:fs/promises';
 /**
  * Repo-wide recurrence gate for computed `import()` specifiers (M70e §3.7).
  *
@@ -10,6 +9,8 @@ import { readdir } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readdir } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { auditPackageSources } from '../scripts/npm-specifier-audit.ts';
 

@@ -1,5 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
-import { readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * @module
@@ -33,6 +31,9 @@ import { readFile } from 'node:fs/promises';
  * #195 was dependency ranges, a workflow and a release artifact. Reading the
  * merged PR list stays in the runbook for that reason.
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { readFile } from 'node:fs/promises';
 
 import { parseExportsTable } from './package-exports.ts';
 

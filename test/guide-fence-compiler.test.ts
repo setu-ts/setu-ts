@@ -1,5 +1,3 @@
-import { run as runProcess } from './../scripts/lib/run.ts';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
 /**
  * Actual-fence compiler for every copyable Setu-TS block across every curated guide.
  *
@@ -21,6 +19,9 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {

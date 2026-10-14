@@ -1,5 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
-import { writeFile, readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- a release tool prints what it changed. */
 /**
  * @module
@@ -50,6 +48,9 @@ import { writeFile, readFile } from 'node:fs/promises';
  * files, writes the plan, and re-sweeps the result with the same reader
  * `check:versions` uses, so a residual old reference fails the bump itself.
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { writeFile, readFile } from 'node:fs/promises';
 
 import { findStaleReferences, isSweptPath } from './version-sweep.ts';
 

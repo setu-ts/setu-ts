@@ -1,7 +1,8 @@
-import { rm, mkdir, writeFile } from 'node:fs/promises';
-import { isNotFound } from './lib/run.ts';
 /* eslint-disable no-console -- the filesystem seam reports the generated placeholder set. */
 /** Writes the pure generator output, without publishing. @module */
+
+import { rm, mkdir, writeFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 import { placeholderFiles } from './npm-placeholders.ts';
 async function main(): Promise<void> {
   const root = '.tmp/npm-placeholders';

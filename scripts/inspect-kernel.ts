@@ -14,7 +14,7 @@
  * imports, no application configuration, no secret capture.
  *
  * Usage:
- *   deno run --allow-read --allow-env scripts/inspect-kernel.ts
+ *   node --import ./test/node-source-register.ts scripts/inspect-kernel.ts
  *
  * @module
  */

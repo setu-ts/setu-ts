@@ -51,8 +51,8 @@ import { statSync, type Dirent } from 'node:fs';
  * full block parser, and every code sample in this repo's docs is fenced.
  *
  * Usage:
- *   deno run --allow-read scripts/check-docs.ts              # the default set
- *   deno run --allow-read scripts/check-docs.ts a.md b.md    # specific files
+ *   node scripts/check-docs.ts              # the default set
+ *   node scripts/check-docs.ts a.md b.md    # specific files
  *
  * Exits 1 on any finding.
  */

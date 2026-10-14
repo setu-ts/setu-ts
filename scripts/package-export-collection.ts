@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises';
 /**
  * Resolve every published barrel through one TypeScript program. Re-exports
  * follow their declaring symbols before the pure README table renderer reads them.
  * @module
  */
 
+import { readFile } from 'node:fs/promises';
 import type { PackageExports } from './package-exports.ts';
 import ts from 'typescript';
 import { resolve } from 'node:path';
@@ -104,7 +104,9 @@ export function exportsOfModule(
                 : ts.isModuleDeclaration(declaration)
                   ? ts.SymbolFlags.NamespaceModule
                   : ts.isVariableDeclaration(declaration)
-                    ? ts.SymbolFlags.BlockScopedVariable
+                    ? isFunctionValued(declaration)
+                      ? ts.SymbolFlags.Function
+                      : ts.SymbolFlags.BlockScopedVariable
                     : symbol.flags;
       kinds.add(symbolKind(flags));
     }
@@ -115,6 +117,15 @@ export function exportsOfModule(
   return result.sort(
     (a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.name.localeCompare(b.name),
   );
+}
+
+/**
+ * Whether a variable is initialised with a function, which the table reports as a
+ * `function` because that is what an importer calls (`deno doc`'s labelling).
+ */
+export function isFunctionValued(declaration: ts.VariableDeclaration): boolean {
+  const init = declaration.initializer;
+  return init !== undefined && (ts.isArrowFunction(init) || ts.isFunctionExpression(init));
 }
 
 /** Compiler symbol flags mapped to the existing README vocabulary. */

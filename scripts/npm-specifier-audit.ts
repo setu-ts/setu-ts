@@ -1,4 +1,3 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
 /**
  * Recurrence gate for computed `import()` specifiers (M70e, plan §3.7/§3.8).
  *
@@ -28,6 +27,8 @@ import { readFile, readdir, stat } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readFile, readdir, stat } from 'node:fs/promises';
 
 /** A computed (non-literal) `import()` the gate refuses. */
 export interface ComputedImport {

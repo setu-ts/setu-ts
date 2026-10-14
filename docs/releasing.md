@@ -108,7 +108,7 @@ patch or a quiet minor unless `--allow-quiet-minor` is deliberate.
 ```fish
 deno task release:bump 0.9.0 --dry-run
 deno task release:bump 0.9.0
-deno run -A scripts/node-manifests.ts --write
+node scripts/node-manifests.ts --write
 ```
 
 The bump refuses a dirty tree. Read its diff and residual sweep; never bump an `@since` tag. Member
@@ -288,7 +288,7 @@ set prerelease
 if string match -q '*-*' "$version"
     set prerelease --prerelease
 end
-mkdir -p .tmp; and deno task release:resolved-set "$version" .tmp/resolved-set.json; and deno run --allow-read scripts/release-notes.ts "$version" > .tmp/notes.md; and gh release create "v$version" --verify-tag --title "v$version" --notes-file .tmp/notes.md .tmp/resolved-set.json#resolved-set.json $prerelease
+mkdir -p .tmp; and deno task release:resolved-set "$version" .tmp/resolved-set.json; and node scripts/release-notes.ts "$version" > .tmp/notes.md; and gh release create "v$version" --verify-tag --title "v$version" --notes-file .tmp/notes.md .tmp/resolved-set.json#resolved-set.json $prerelease
 ```
 
 `--verify-tag` prevents a mistyped version from creating a new tag. The workflow checks whether the
@@ -349,11 +349,12 @@ The JSDoc ratchet runs **TypeDoc 0.28.20**, pinned exactly in the generated root
 documentation and unexported references; invalid-link validation is disabled. The source graph uses
 `tsconfig.docs.json` and workspace source paths.
 
-`DOC_LINT_BASELINE = 554` and `DOC_LINT_BASELINE_TYPEDOC = '0.28.20'` record the M111e2 measurement.
-The earlier Deno count of 496 measures a different diagnostic model and is not comparable. The 22
-`CLEAN_PACKAGES` were re-derived from zero TypeDoc diagnostics; `common` and `exceptions` left the
-previous clean set under the new checks. Any diagnostic in a clean package fails independently of
-the total.
+`DOC_LINT_BASELINE = 237` and `DOC_LINT_BASELINE_TYPEDOC = '0.28.20'` record the M111e2 measurement.
+TypeDoc reported 554 warnings; 317 of them are missing comments on members of anonymous object types
+(`Foo.__type.bar`), which `deno doc --lint` never required, so `inRatchetScope` leaves them out. The
+earlier Deno count of 496 measures a different diagnostic model and is not comparable. The 31
+`CLEAN_PACKAGES` were re-derived from zero in-scope diagnostics and include every package the Deno
+ratchet kept clean. Any diagnostic in a clean package fails independently of the total.
 
 A count above the baseline fails. A count below it also fails and instructs you to lower the
 constant in the same commit; do not raise it to accommodate new debt. A TypeDoc version mismatch

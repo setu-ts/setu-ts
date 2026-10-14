@@ -421,8 +421,13 @@ MIT
 
 ### `@setu-ts/cli/main`
 
-| Export | Kind |
-| ------ | ---- |
+| Export          | Kind      |
+| --------------- | --------- |
+| `emitInterrupt` | function  |
+| `nodeProcess`   | function  |
+| `runMain`       | function  |
+| `MainProcess`   | interface |
+| `MainRuntime`   | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

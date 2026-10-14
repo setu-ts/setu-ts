@@ -1,5 +1,3 @@
-import { SCRIPT_TARGETS } from '../../scripts/script-targets.ts';
-import { run as runProcess } from '../../scripts/lib/run.ts';
 /**
  * Target-set completeness tests for the script-coverage gate.
  *
@@ -17,6 +15,9 @@ import { run as runProcess } from '../../scripts/lib/run.ts';
  *
  * @module
  */
+
+import { SCRIPT_TARGETS } from '../../scripts/script-targets.ts';
+import { run as runProcess } from '../../scripts/lib/run.ts';
 import { describe, expect, it } from 'vitest';
 
 import {

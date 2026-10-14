@@ -1,5 +1,3 @@
-import { run as runProcess } from './../scripts/lib/run.ts';
-import { readFile } from 'node:fs/promises';
 /**
  * Every documented `setu` install command is the one that works.
  *
@@ -13,6 +11,9 @@ import { readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 /** Tracked Markdown files that may carry a current install command. */

@@ -1,4 +1,3 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
 /**
  * M70c health-indicator audit gate (plan §3.9).
  *
@@ -11,6 +10,8 @@ import { readdir, readFile, stat } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = new URL('..', import.meta.url);

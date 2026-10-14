@@ -1,6 +1,7 @@
+/** Executes the actual injection examples extracted from the curated guide. @module */
+
 import { run as runProcess } from './../scripts/lib/run.ts';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-/** Executes the actual injection examples extracted from the curated guide. @module */
 import { describe, expect, it } from 'vitest';
 
 function injectionFences(markdown: string): readonly string[] {

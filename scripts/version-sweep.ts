@@ -1,6 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
-import { readFile } from 'node:fs/promises';
-import { isNotFound } from './lib/run.ts';
 /* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Residual-version gate for the sites the other release gates cannot see.
@@ -48,6 +45,10 @@ import { isNotFound } from './lib/run.ts';
  *
  * @module
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { readFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 
 /** A `@setu-ts/*` reference naming a version other than the shipping one. */
 export interface StaleReference {

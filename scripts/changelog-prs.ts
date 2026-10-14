@@ -1,4 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
 /**
  * @module
  *
@@ -51,6 +50,8 @@ import { run as runProcess } from './lib/run.ts';
  * text and a list of merged PRs; {@linkcode mergedPullRequests} is the git
  * seam. The pure core carries the 90% bar via `SCRIPT_TARGETS`.
  */
+
+import { run as runProcess } from './lib/run.ts';
 
 /** One pull request merged since the previous release tag. */
 export interface MergedPullRequest {

@@ -1,6 +1,7 @@
+/** AST-based exact contract comparison for documented TypeScript interfaces. @module */
+
 import { run as runProcess } from './../../scripts/lib/run.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
-/** AST-based exact contract comparison for documented TypeScript interfaces. @module */
 
 interface DocNode {
   readonly name: string;

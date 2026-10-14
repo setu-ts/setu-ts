@@ -1,4 +1,3 @@
-import { readdir, stat, readFile } from 'node:fs/promises';
 /**
  * Drift gate for the CLI's health-indicator claim table (M70g — register row A1).
  *
@@ -15,6 +14,8 @@ import { readdir, stat, readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readdir, stat, readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { PLUGIN_HEALTH_INDICATORS } from '../packages/cli/src/utils/plugin-claims.ts';

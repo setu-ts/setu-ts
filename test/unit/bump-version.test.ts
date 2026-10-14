@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 /**
  * The release bump's own controls.
  *
@@ -9,6 +8,8 @@ import { readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {

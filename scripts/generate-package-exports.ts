@@ -1,5 +1,3 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import * as prettier from 'prettier';
 /**
  * @module
  *
@@ -10,6 +8,9 @@ import * as prettier from 'prettier';
  * hand; `deno task check:docs` fails when a barrel changes and the table does
  * not follow.
  */
+
+import { readFile, writeFile } from 'node:fs/promises';
+import * as prettier from 'prettier';
 
 /* eslint-disable no-console */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';

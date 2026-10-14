@@ -12,6 +12,9 @@ it('follows two re-exports, type-only aliases, merged declarations and namespace
       `export function fn(): void {}
 export class Subject {}
 export const value = 1;
+export const arrow: () => void = () => {};
+export const expression = function () {};
+export const aliasOfArrow = arrow;
 export interface Shape {}
 export type Alias = string;
 export enum Choice { One }
@@ -34,8 +37,11 @@ export const Merged = 1;`,
     const source = program.getSourceFile(`${dir}/index.ts`)!;
     const module = checker.getSymbolAtLocation(source)!;
     expect(exportsOfModule(checker, module)).toEqual([
+      { name: 'arrow', kind: 'function' },
+      { name: 'expression', kind: 'function' },
       { name: 'fn', kind: 'function' },
       { name: 'Subject', kind: 'class' },
+      { name: 'aliasOfArrow', kind: 'const' },
       { name: 'Merged', kind: 'const' },
       { name: 'value', kind: 'const' },
       { name: 'Merged', kind: 'interface' },

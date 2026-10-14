@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 /**
  * Unit tests for the decidable half of the Node pack-and-boot gate
  * (M111a plan §3.10): the `workspace:` scan and the
@@ -6,6 +5,8 @@ import { readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
   classifyLeg,

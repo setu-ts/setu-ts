@@ -1,6 +1,3 @@
-import { run as runProcess } from './lib/run.ts';
-import { type Dirent } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * Executable prose-assertion gate.
@@ -12,6 +9,10 @@ import { readdir, readFile } from 'node:fs/promises';
  *
  * @module
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { type Dirent } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 
 /** Marker placed in a comment block immediately before a claim table. */
 export const MARKER = 'assert:js';
