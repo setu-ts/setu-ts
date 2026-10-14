@@ -98,6 +98,11 @@ describe('ESLint configuration parity with deno lint', () => {
       'valid-typeof',
     ],
     [
+      'a duplicate parameter',
+      'export function f(a: number, a: number) {\n  return a;\n}\n',
+      'no-dupe-args',
+    ],
+    [
       'a function declared in a block',
       'export function f() {\n  if (Math.random()) {\n    function g() {}\n    g();\n  }\n}\n',
       'no-inner-declarations',
@@ -107,7 +112,6 @@ describe('ESLint configuration parity with deno lint', () => {
   });
 
   it.each([
-    ['a duplicate parameter', 'export function f(a, a) {\n  return a;\n}\n', 'no-dupe-args'],
     ['a redeclared variable', 'var v = 1;\nvar v = 2;\nexport { v };\n', 'no-redeclare'],
     [
       'a duplicate class member',
@@ -116,6 +120,31 @@ describe('ESLint configuration parity with deno lint', () => {
     ],
   ])('reports %s in JavaScript', async (_name, code, rule) => {
     expect(await rulesFor(code, 'scripts/sample.mjs')).toContain(rule);
+  });
+
+  // espree parses JavaScript: nothing type-checks it, so these syntax errors are its only owner.
+  it.each([
+    ['a duplicate parameter (a module is strict)', 'export function f(a, a) {\n  return a;\n}\n'],
+    ['await in a synchronous function', 'export function f() {\n  await Promise.resolve(1);\n}\n'],
+    [
+      'an import assertion',
+      "import data from './sample.json' assert { type: 'json' };\nexport { data };\n",
+    ],
+  ])('refuses %s in JavaScript', async (_name, code) => {
+    const [result] = await eslint.lintText(code, { filePath: 'scripts/sample.mjs' });
+    expect(result.messages.some((message) => message.fatal)).toBe(true);
+  });
+
+  it('accepts an import attribute and JSX in JavaScript', async () => {
+    const code =
+      "import data from './sample.json' with { type: 'json' };\nexport const v = <div>{data}</div>;\n";
+    expect(await rulesFor(code, 'packages/sample/src/view.jsx')).toEqual([]);
+  });
+
+  it('accepts a superclass wrapped in a type assertion', async () => {
+    const code =
+      'export function make(): object {\n  class Base {}\n  class C extends (Base as typeof Base) {\n    constructor() {\n      super();\n    }\n  }\n  return new C();\n}\n';
+    expect(await rulesFor(code)).toEqual([]);
   });
 
   it('accepts TypeScript overloads and declaration merging', async () => {

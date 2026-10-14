@@ -1,7 +1,7 @@
 // Converts deno lint suppression comments to ESLint's (M111e1 §3.3).
 // Usage: node scripts/codemods/deno-lint-ignore-to-eslint.ts [--write] [files...]
 /* eslint-disable no-console -- repository command-line tooling */
-// Without file arguments it reads every tracked .ts/.tsx/.js/.mjs file. Without --write it reports
+// Without file arguments it reads every tracked .ts/.tsx/.js/.jsx/.mjs/.cjs file. Without --write it reports
 // what it would change. A rule with no mapping is refused by file and line, never guessed.
 import ts from 'typescript';
 import { execFileSync } from 'node:child_process';
@@ -78,7 +78,11 @@ export function convertSource(file: string, source: string): Conversion {
  * trivia, so a range that starts inside it is dropped.
  */
 function commentRanges(file: string, source: string): ts.CommentRange[] {
-  const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const kind = file.endsWith('.tsx')
+    ? ts.ScriptKind.TSX
+    : file.endsWith('.jsx')
+      ? ts.ScriptKind.JSX
+      : ts.ScriptKind.TS;
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false, kind);
   const found = new Map<number, ts.CommentRange>();
   const jsxText: { pos: number; end: number }[] = [];
@@ -121,10 +125,14 @@ function rewrite(fileLevel: boolean, rest: string): string | { refusal: string }
 
 /** Every tracked source file ESLint will lint. */
 export function trackedSources(cwd = '.'): string[] {
-  const output = execFileSync('git', ['ls-files', '*.ts', '*.tsx', '*.js', '*.mjs'], {
-    cwd,
-    encoding: 'utf8',
-  });
+  const output = execFileSync(
+    'git',
+    ['ls-files', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs'],
+    {
+      cwd,
+      encoding: 'utf8',
+    },
+  );
   return output.split('\n').filter((file) => file !== '');
 }
 

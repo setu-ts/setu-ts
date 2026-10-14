@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import js from '@eslint/js';
 import { includeIgnoreFile } from '@eslint/compat';
 import comments from '@eslint-community/eslint-plugin-eslint-comments';
+import * as espree from 'espree';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -50,11 +51,11 @@ export default tseslint.config(
       ],
       // typescript-eslint's preset turns these off for TypeScript on the grounds that a type check
       // reports them. deno lint enforced them, and a type check only warns about unreachable code,
-      // so they come back. no-dupe-class-members and no-redeclare stay off for TypeScript: both
-      // misfire on overloads and declaration merging, and tsc reports the real cases. Neither
+      // so they come back. no-dupe-class-members, no-redeclare and constructor-super stay off for
+      // TypeScript: they misfire on overloads, declaration merging and an asserted superclass
+      // (`extends (Base as typeof Base)`), and tsc reports the real cases. Neither
       // preset touches them for JavaScript, where nothing type-checks.
       'no-unreachable': 'error',
-      'constructor-super': 'error',
       'getter-return': 'error',
       'no-class-assign': 'error',
       'no-const-assign': 'error',
@@ -92,9 +93,13 @@ export default tseslint.config(
   },
   {
     files: ['**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs'],
+    // ESLint's own parser: nothing type-checks JavaScript, so a synchronous `await` or an `assert`
+    // import must fail here as a syntax error, which typescript-eslint's parser does not raise.
     languageOptions: {
+      parser: espree,
       globals: { ...globals.node },
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: { '@typescript-eslint/consistent-type-imports': 'off' },
   },
 );

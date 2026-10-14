@@ -87,7 +87,9 @@ describe('deno-lint-ignore-to-eslint codemod', () => {
       ');',
       '',
     ].join('\n');
-    expect(convertSource('view.tsx', text)).toEqual({ text, converted: 0, refusals: [] });
+    for (const file of ['view.tsx', 'view.jsx']) {
+      expect(convertSource(file, text)).toEqual({ text, converted: 0, refusals: [] });
+    }
     const expression =
       'export const b = (\n  <div>\n    {\n      // deno-lint-ignore no-console\n      console.log(1)\n    }\n  </div>\n);\n';
     expect(convertSource('view.tsx', expression).text).toContain(
@@ -178,7 +180,7 @@ describe('deno-lint-ignore-to-eslint codemod', () => {
   it('lists tracked sources when no file is named', () => {
     const files = trackedSources();
     expect(files).toContain('scripts/codemods/std-to-vitest.ts');
-    expect(files.every((file) => /\.(ts|tsx|js|mjs)$/.test(file))).toBe(true);
+    expect(files.every((file) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(file))).toBe(true);
   });
 
   it('refuses nothing across the tracked tree', () => {

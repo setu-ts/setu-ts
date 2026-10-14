@@ -98,8 +98,10 @@ the rules the current gates enforce carried across, while every other gate keeps
     empty enums (deno's `no-empty-enum`). Deprecated import assertions are NOT carried here: an
     `assert` import and a `with` import parse to the identical ESTree node, so no selector can tell
     them apart, and TypeScript 6 refuses `assert` with TS2880 in both `deno check` and `tsc -b`
-    (measured), so the type-check gate already owns that rule. Likewise `no-await-in-sync-fn`: no
-    ESLint rule exists, and both checkers refuse it with TS1308 (measured).
+    (measured), so the type-check gate owns that rule for TypeScript; JavaScript, which nothing
+    type-checks, is parsed by `espree`, which refuses it as a syntax error. Likewise
+    `no-await-in-sync-fn` (TS1308 in both checkers, a syntax error to `espree`) and a duplicate
+    parameter in a module.
   - `consistent-type-imports` with `disallowTypeAnnotations: false`: the default forbids
     `typeof import('ioredis')`, the pattern for typing a lazily loaded optional dependency (245
     sites, all permitted by deno's `verbatim-module-syntax`).
@@ -111,11 +113,13 @@ the rules the current gates enforce carried across, while every other gate keeps
   - The core rules typescript-eslint's preset switches off for TypeScript on the grounds that a type
     check reports them (`no-dupe-keys`, `no-const-assign`, `getter-return`,
     `no-new-native- nonconstructor` and eleven more), restored for every file — deno lint enforced
-    them and nothing type-checks `.js`/`.mjs`. `no-dupe-class-members` and `no-redeclare` stay off
-    for TypeScript only (they misfire on overloads and declaration merging; `tsc` reports the real
-    cases). `valid-typeof` with `requireStringLiterals: true` and `no-inner-declarations` with
+    them and nothing type-checks `.js`/`.mjs`. `no-dupe-class-members`, `no-redeclare` and
+    `constructor-super` stay off for TypeScript only (they misfire on overloads, declaration merging
+    and an asserted superclass; `tsc` reports the real cases). `valid-typeof` with
+    `requireStringLiterals: true` and `no-inner-declarations` with
     `blockScopedFunctions: 'disallow'`, matching deno's stricter forms. Found by the code review.
-  - Node globals (the `globals` package) and JSX parsing for `**/*.{js,jsx,mjs,cjs}`.
+  - For `**/*.{js,jsx,mjs,cjs}`: ESLint's own parser `espree`, so the syntax errors above are
+    refused where no type check runs, plus Node globals (the `globals` package) and JSX parsing.
   - Global ignores from `.gitignore` via `includeIgnoreFile` (`@eslint/compat`), plus `website/` and
     `apps/full-stack/build/` (§3.1 says why the Node-code exclusions are not carried).
 

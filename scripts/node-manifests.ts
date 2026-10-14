@@ -117,6 +117,7 @@ const LINT_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
   '@eslint-community/eslint-plugin-eslint-comments': '4.8.1',
   'typescript-eslint': '8.71.2',
   globals: '17.13.0',
+  espree: '11.2.0',
 };
 
 const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
