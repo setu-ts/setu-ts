@@ -30,6 +30,7 @@ import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
 import { REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import type { TemplateHost } from '../../src/templates/registry.ts';
+import { VERSION } from '../../src/version.ts';
 
 /** The fixed project name every baseline render uses, so the README is stable. */
 export const BASELINE_NAME = 'baseline';
@@ -73,6 +74,22 @@ export async function sha256Hex(text: string): Promise<string> {
 }
 
 /**
+ * The hash a baseline file is pinned by: its contents with the CLI's own
+ * version replaced by a placeholder.
+ *
+ * Generated manifests pin the framework to the CLI's version, so hashing the
+ * raw text made every release bump fail this baseline although no template
+ * changed (cutting `v0.9.0` did). The version is the release's to move; the
+ * baseline pins everything else.
+ *
+ * @param text - The file contents to hash
+ * @returns The lowercase hex digest of the version-normalized contents
+ */
+export function baselineHash(text: string): Promise<string> {
+  return sha256Hex(text.replaceAll(VERSION, '<cli-version>'));
+}
+
+/**
  * Renders every baseline pair and writes the fixture.
  *
  * @returns The number of pairs captured
@@ -84,7 +101,7 @@ async function capture(): Promise<number> {
     if (host === undefined) throw new Error(`Unknown baseline host: ${hostName}`);
     const files = projectFiles(BASELINE_NAME, runtime, resolveHost(host, runtime));
     const hashes: Record<string, string> = {};
-    for (const file of files) hashes[file.path] = await sha256Hex(file.contents);
+    for (const file of files) hashes[file.path] = await baselineHash(file.contents);
     baseline[`${hostName}/${runtime}`] = hashes;
   }
   const out = new URL('./template-baseline.json', import.meta.url);

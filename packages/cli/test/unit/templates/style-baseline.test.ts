@@ -25,7 +25,7 @@ import {
   BASELINE_HOSTS,
   BASELINE_NAME,
   BASELINE_PAIRS,
-  sha256Hex,
+  baselineHash,
 } from '../../fixtures/capture-template-baseline.ts';
 
 const baseline = JSON.parse(
@@ -46,7 +46,7 @@ async function render(
 ): Promise<Record<string, string>> {
   const files = projectFiles(BASELINE_NAME, runtime, resolveHost(host, runtime));
   const hashes: Record<string, string> = {};
-  for (const file of files) hashes[file.path] = await sha256Hex(file.contents);
+  for (const file of files) hashes[file.path] = await baselineHash(file.contents);
   return hashes;
 }
 

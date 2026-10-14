@@ -6,7 +6,7 @@
     "exactOptionalPropertyTypes": true,
     "useUnknownInCatchVariables": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "@hono/hono/jsx"
+    "jsxImportSource": "hono/jsx"
   },
   "imports": {
     "@setu-ts/common": "../../../packages/common/src/index.ts",
@@ -44,6 +44,8 @@
     "@std/expect": "jsr:@std/expect@^1.0.19",
     "@setu-ts/view-plugin": "../../../packages/view-plugin/src/index.ts",
     "@hono/hono": "jsr:@hono/hono@^4.12.30",
+    "hono": "npm:hono@^4.12.30",
+    "hono/": "npm:/hono@^4.12.30/",
     "zod": "npm:zod@^3.23.8"
   }
 }

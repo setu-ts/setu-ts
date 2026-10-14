@@ -12,6 +12,7 @@ import {
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
 import { LEGACY_DENO_RUN_ALL } from '../../src/workspace/runtime-profile.ts';
+import { VERSION } from '../../src/version.ts';
 
 /** The emitted config module a current CLI writes — the signature `enable` accepts. */
 const CONFIG = `import { createApplication, type KernelDiagnosticsOptions } from '@setu-ts/kernel';
@@ -169,7 +170,7 @@ describe('the one devtool planner', () => {
       '/ws/shop/deno.json': `${
         JSON.stringify({
           tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
-          imports: { '@setu-ts/cache-plugin': 'npm:@setu-ts/cache-plugin@^0.8.0' },
+          imports: { '@setu-ts/cache-plugin': `npm:@setu-ts/cache-plugin@^${VERSION}` },
         })
       }\n`,
       '/ws/shop/setu.config.ts': CONFIG + 'const banner = `unclassified`;\n',

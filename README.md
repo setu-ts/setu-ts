@@ -25,8 +25,8 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: `v0.8.0` published 49 packages, all live on JSR.** Two members added since,
-> `localization-plugin` and `idempotency-plugin`, ship in the next release.
+> **Status: `v0.9.0` publishes 52 packages to npm under `@setu-ts`** — the first npm release. Every
+> earlier version remains on JSR; nothing new is published there.
 >
 > <!-- version:history -->
 >
@@ -35,9 +35,9 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 >
 > <!-- version:history -->
 >
-> **Every release from `v0.2.0` on is a normal release rather than a prerelease.** JSR points
-> `latest` at the current one, so a bare `deno add jsr:@setu-ts/kernel` resolves, where every
-> `alpha` version had to be pinned by hand.
+> **Every release from `v0.2.0` on is a normal release rather than a prerelease.** The registry
+> points `latest` at the current one, so a bare install resolves, where every `alpha` version had to
+> be pinned by hand.
 >
 > The label changed; the stability promise did not. This is pre-1.0 software — under semver `0.x`
 > the public API is not stable, and a minor bump carries breaking changes. See
@@ -197,19 +197,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 ## Installation
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/kernel@^0.8.0 jsr:@setu-ts/runtime@^0.8.0
-
-# Node
-npx jsr add @setu-ts/kernel@^0.8.0 @setu-ts/runtime@^0.8.0
+# Node (pnpm add / yarn add work the same way)
+npm install @setu-ts/kernel@^0.9.0 @setu-ts/runtime@^0.9.0
 
 # Bun
-bunx jsr add @setu-ts/kernel@^0.8.0 @setu-ts/runtime@^0.8.0
+bun add @setu-ts/kernel@^0.9.0 @setu-ts/runtime@^0.9.0
+
+# Deno
+deno add npm:@setu-ts/kernel@^0.9.0 npm:@setu-ts/runtime@^0.9.0
 ```
 
-**The `@^0.8.0` is recommended, not required.** `v0.8.0` is a normal release, so a bare
-`deno add jsr:@setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet the
-next breaking release as a deliberate upgrade than as a surprise — see [Versioning](#versioning).
+**The `@^0.9.0` is recommended, not required.** npm points `latest` at the current release, so a
+bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
+the next breaking release as a deliberate upgrade than as a surprise — see
+[Versioning](#versioning). Earlier releases are on JSR only; see the
+[upgrading guide](docs/upgrading.md) to move an existing project to npm.
 
 <!-- version:history -->
 
@@ -232,8 +234,8 @@ installing the framework from npm with its own package manager.
 
 All 52 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
 `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, the `cli`
-and `create` — through `v0.8.0` on JSR, and from `v0.9.0` on npm, which also publishes the members
-added since `v0.8.0` (`localization-plugin`, `idempotency-plugin` and `create`) for the first time.
+and `create` — on npm from `v0.9.0`, which publishes `localization-plugin`, `idempotency-plugin` and
+`create` for the first time. Earlier releases were published on JSR.
 
 Every plugin is a separate package — add only what you use. Heavy dependencies (Prisma, ioredis,
 nodemailer, the OpenTelemetry SDK, …) are never hard dependencies: each is injected through plugin
@@ -250,7 +252,7 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 | **Minor** — `0.5` → `0.6`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
 | **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
 
-Under semver a `^0.8.0` range means `>=0.8.0 <0.9.0`, so a caret pin absorbs patches and stops at
+Under semver a `^0.9.0` range means `>=0.9.0 <0.10.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
 
 From `0.9.0` the **patch is the normal release** and breaking changes are batched into an occasional
@@ -271,7 +273,7 @@ Node/Bun compatibility suites as release gates. Until then, read the CHANGELOG b
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`deno add jsr:@setu-ts/logger-plugin@^0.8.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.9.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -369,11 +371,12 @@ graph TB
 
 ## Repository Structure
 
-A Deno 2 workspace. Every package is published independently to JSR.
+A Deno 2 workspace. Every package is published independently to npm; releases before `v0.9.0` were
+published to JSR.
 
 ```
 setu-ts/
-├── packages/              # 52 workspace members, published on JSR through v0.8.0, npm from v0.9.0
+├── packages/              # 52 workspace members, published on npm (JSR before v0.9.0)
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)

@@ -26,7 +26,7 @@ The `DecoratorPlugin` reads the metadata and translates it into framework capabi
 ### Install Dependencies
 
 ```bash
-deno add jsr:@setu-ts/decorator-plugin jsr:@setu-ts/di-plugin
+npm install @setu-ts/decorator-plugin @setu-ts/di-plugin
 ```
 
 ### Enable Decorators
@@ -63,7 +63,11 @@ app.register(DecoratorPlugin()); // Required for decorator processing
 The container falls back to the kernel's service registry for a token it has no provider for, so a
 class can inject a framework capability such as `CAPABILITIES.CACHE` or `CAPABILITIES.LOGGER`, which
 live in the registry rather than the container. `DiPlugin({ autoRegister: false })` turns the
-fallback off. On `0.8.0` and earlier the default was `false`, so pass `autoRegister: true` there.
+fallback off.
+
+<!-- version:history -->
+
+On `0.8.0` and earlier the default was `false`, so pass `autoRegister: true` there.
 
 `DecoratorPlugin` is required — decorators are inert without it. **`DiPlugin` is not.**
 `DecoratorPlugin` branches on the container's presence: with `DiPlugin` registered, an `@Injectable`

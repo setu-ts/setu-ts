@@ -26,12 +26,12 @@ await app.start({ port: 3000 });
 
 Both arm names describe the **authoring mode** — which import your components use — rather than a
 rendering strategy; one engine serves both, and the selected mode is reported by the `view` health
-indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with
-`@hono/hono/jsx`, escaped by the JSX runtime, zero client JavaScript.
-`ViewPlugin({ engine: 'hono-html' })` selects the `html` tagged-template arm, which needs no
-`jsxImportSource` and works in a plain `.ts` file. **Both arms require `@hono/hono` as a direct
-dependency** — `deno add jsr:@hono/hono` — because neither `@hono/hono/jsx/jsx-runtime` nor
-`@hono/hono/html` resolves through a transitive one; see the
+indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with `hono/jsx`,
+escaped by the JSX runtime, zero client JavaScript. `ViewPlugin({ engine: 'hono-html' })` selects
+the `html` tagged-template arm, which needs no `jsxImportSource` and works in a plain `.ts` file.
+**Declare `hono` as a direct dependency** — `npm install hono` — because the application's own
+compiler resolves `hono/jsx/jsx-runtime` and `hono/html`; the view plugin's own `hono` dependency
+resolves only under a hoisting installer (npm, Bun), not pnpm or Deno; see the
 [view-plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/view-plugin/README.md#installation).
 The `'custom'` arm registers an application-supplied `IViewEngine` verbatim.
 
@@ -228,7 +228,7 @@ clean — only the boundary is refused.
 A layout is an ordinary component that accepts `children`:
 
 ```tsx
-import type { Child } from '@hono/hono/jsx';
+import type { Child } from 'hono/jsx';
 
 function Layout(props: { readonly title: string; readonly children: Child }) {
   return (
@@ -280,7 +280,7 @@ shape a by-name engine adapts a compiled template to, and the plugin returns wha
 interpolations, and it is an **XSS hole** for a hand-written template literal:
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 
 // UNSAFE: `name` is interpolated raw. With name = '<script>alert(1)</script>'
 // this serves the script tag verbatim.
@@ -341,7 +341,7 @@ and a `SyntaxError` in the browser. The script never runs and nothing reports wh
 opens an `EventSource` or a `WebSocket` needs the opt-out:
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 import { raw } from '@setu-ts/view-plugin';
 
 const CLIENT = `const es = new EventSource('/events');

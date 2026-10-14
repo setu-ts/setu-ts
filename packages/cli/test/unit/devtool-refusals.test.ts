@@ -20,6 +20,7 @@ import {
   LEGACY_DENO_RUN_ALL,
   workspaceProfile,
 } from '../../src/workspace/runtime-profile.ts';
+import { VERSION } from '../../src/version.ts';
 
 /** The config module a current CLI writes — the signature `enable` accepts. */
 const CURRENT_CONFIG = "import type { IApplication, IPlugin } from '@setu-ts/common';\n" +
@@ -106,7 +107,7 @@ function workspaceSeed(
     }\n`,
     '/ws/apps/orders/deno.json': JSON.stringify({
       tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
-      imports: { '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0' },
+      imports: { '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
     }),
     '/ws/apps/orders/setu.config.ts': CURRENT_CONFIG,
   };
@@ -711,7 +712,7 @@ describe('devtool enable branch coverage', () => {
       imports: Record<string, string>;
     };
     expect(manifest.imports).toEqual({
-      '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0',
+      '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}`,
     });
   });
 
@@ -719,7 +720,7 @@ describe('devtool enable branch coverage', () => {
     const h = workspaceHarness({
       '/ws/deno.json': JSON.stringify({
         tasks: { start: 'deno run --allow-net --allow-env main.ts' },
-        imports: { '~': './src/', '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0' },
+        imports: { '~': './src/', '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
       }),
       '/ws/setu.config.ts': CURRENT_CONFIG,
     });
@@ -729,8 +730,8 @@ describe('devtool enable branch coverage', () => {
     };
     expect(manifest.imports).toEqual({
       '~': './src/',
-      '@setu-ts/common': 'npm:@setu-ts/common@^0.8.0',
-      '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0',
+      '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}`,
+      '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}`,
     });
   });
 });
@@ -922,7 +923,7 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
         },
         // The pin the enable flow merges: byte-identical, so the whole run is
         // a no-op, which is what makes the command idempotent.
-        imports: { '@setu-ts/diagnostics-plugin': 'npm:@setu-ts/diagnostics-plugin@^0.8.0' },
+        imports: { '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}` },
       }),
       '/ws/setu.config.ts': CURRENT_CONFIG,
       // Byte-identical to what the command would write.

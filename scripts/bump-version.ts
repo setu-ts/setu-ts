@@ -238,10 +238,22 @@ function exemptLines(path: string, source: string): Set<number> {
  * leave alone.
  *
  * @param path - A repository-relative path
- * @returns `true` for anything under a `test/` directory
+ * @returns `true` for anything under a `test/` directory, or a colocated `*.test.ts`
  */
 export function isTestPath(path: string): boolean {
-  return /(^|\/)test\//.test(path);
+  return /(^|\/)test\//.test(path) || path.endsWith('.test.ts');
+}
+
+/**
+ * Whether a path is an archived milestone plan. A plan records what was true
+ * when its milestone shipped, so a version it names is history — moving it
+ * makes the record false. `check:versions` reads no Markdown, so the two agree.
+ *
+ * @param path - A repository-relative path
+ * @returns `true` for anything under `plans/archive/`
+ */
+export function isArchivedPlan(path: string): boolean {
+  return path.startsWith('plans/archive/');
 }
 
 /** Replaces exactly one occurrence, reporting whether it was found. */
@@ -336,7 +348,7 @@ export function planBump(
   //    version it is checked against would fail the test it belongs to).
   //    `check:versions` reads no test file either, so the two agree.
   for (const [path, source] of files) {
-    if (isTestPath(path)) continue;
+    if (isTestPath(path) || isArchivedPlan(path)) continue;
     const base = current(path) ?? source;
     const { content, replacements } = rewriteReferences(path, base, from, to);
     if (replacements > 0) stage(path, content, replacements);

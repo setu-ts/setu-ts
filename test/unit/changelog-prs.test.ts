@@ -101,9 +101,27 @@ describe('requiredToken', () => {
     )
       .toBeNull();
   });
+
+  it("exempts the verified version's own release PR, and only that one", () => {
+    const bump = ['packages/kernel/src/version.ts'];
+    expect(requiredToken(pr(451, 'release/v0.9.0', bump), '0.9.0')).toBeNull();
+    // Another release's branch, or no version at all, is still held to the source rule.
+    expect(requiredToken(pr(394, 'release/v0.8.0', bump), '0.9.0')).toBe('#394');
+    expect(requiredToken(pr(451, 'release/v0.9.0', bump))).toBe('#451');
+  });
 });
 
 describe('checkChangelogPrs', () => {
+  it('passes on the tag, where the release PR itself is merged (the v0.9.0 case)', () => {
+    const released = CHANGELOG.replace('## [Unreleased]', '## [Unreleased]\n\n## [0.9.0]');
+    const result = checkChangelogPrs(released, '0.9.0', [
+      pr(405, 'feat/m103-localization-plugin', ['packages/localization-plugin/src/index.ts']),
+      pr(451, 'release/v0.9.0', ['packages/kernel/src/version.ts']),
+    ]);
+    expect(result.findings).toEqual([]);
+    expect(result.exempt).toBe(1);
+  });
+
   it('passes a changelog that represents every merged PR', () => {
     const result = checkChangelogPrs(CHANGELOG, '0.9.0', [
       pr(405, 'feat/m103-localization-plugin', ['packages/localization-plugin/src/index.ts']),

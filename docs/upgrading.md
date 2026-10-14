@@ -10,12 +10,14 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
-## Unreleased
+## 0.9.0
 
 ### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`
 
 From 0.9.0 the packages are published to npm under their own names (`@setu-ts/kernel`, …), and the
 CLI is a Node program. What an existing project changes depends on its target:
+
+<!-- version:history -->
 
 - **Node, Bun or Workers project.** Replace each `npm:@jsr/setu-ts__<pkg>@^0.8.0` dependency with
   `^0.9.0` under the key it already has (`"@setu-ts/kernel": "^0.9.0"`), delete the
@@ -194,6 +196,8 @@ project reached through a linked parent directory needs no change.
 
 ### Refresh `main.dev.ts` and production images (M101f)
 
+<!-- version:history -->
+
 Upgrade every `@setu-ts/*` pin together before `setu devtool enable`; mixed versions are refused.
 Apply the complete factory edit in the CLI README: the second parameter AND both usage spreads. The
 development entry now stops when composition is discarded. Restore an edited entry before
@@ -361,6 +365,89 @@ A subscription to an unknown Kafka topic now retries for about 9 s (`retry`), th
 `KafkaTopicUnavailableError` (M101b) — so on a broker without `auto.create.topics.enable`, `start()`
 for a declared subscription to a missing topic fails after that budget rather than at once. Create
 the topic first, or set `retry: { retries: 0 }` to fail immediately.
+
+### Run Node.js 22 or later (`engines.node >=22`)
+
+The documented floor was Node 18; five packages use `Promise.withResolvers`, which Node 22 was the
+first to ship. Upgrade runtimes and production images to Node 22 or newer before installing `0.9.0`
+(CI verifies on Node 24).
+
+### Test a missing header against `undefined`, not `null`
+
+`@Params(Header('X-Name'))` now passes `undefined` for an absent header, like a missing cookie or
+query parameter. A handler testing `=== null` must test `=== undefined`.
+
+### Match bare package names in lazy-import errors and `GrpcRuntimeLoadError`
+
+Lazy-import failures now name the bare package (`ioredis`, `@connectrpc/connect`,
+`@node-saml/node-saml`) instead of an `npm:…` specifier, including `GrpcRuntimeLoadError.specifier`
+and the telemetry loaders' reported `specifier`. Code matching the old strings must match the bare
+name.
+
+### Handle a rejecting `NatsBroker` publish
+
+`NatsBroker.publish()` now resolves only once JetStream has stored the message, and rejects with an
+error naming the subject when no stream captures it. A publish that used to resolve silently now
+rejects: await it, handle the rejection, and make sure a stream captures every subject you publish
+to.
+
+### Keep `RabbitMqBroker` names within 255 bytes
+
+An exchange, queue, topic, message id or header name over 255 bytes is now refused (a processor at
+registration, a publish before it is sent) instead of jamming the channel. Shorten any that exceed
+the limit, counting the suffixes the queue adapter appends to a job name.
+
+### Set a `content-type` on streamed responses that clients read as text
+
+On Node, a `ctx.response.stream(...)` body with no `content-type` no longer arrives labelled
+`text/plain; charset=UTF-8`, matching Deno, Bun and Workers. Set the content type explicitly where a
+client relied on that default, and send `X-Content-Type-Options: nosniff` for untrusted bytes.
+
+### Order a global `cacheMiddleware` after the locale and tenant middleware
+
+`cache-plugin` and `cloudflare-plugin`'s `cacheApiMiddleware` now key on the resolved locale and
+tenant, read when the cache middleware runs. A GLOBAL cache middleware must therefore run after the
+locale (and tenancy) middleware — give it a higher priority number — and a per-request locale
+override must happen before the lookup. Existing cached entries simply miss once.
+
+### Rename Vault secrets that relied on a literal `%`, `?` or `#`
+
+Each `/`-separated segment of a Vault secret name is now percent-encoded, and a name with an empty,
+`.` or `..` segment is refused. A name that relied on a literal `%`, `?` or `#` reaching Vault
+unencoded now reads a different path; rename those secrets. `connect()` also refuses an address that
+is not an absolute `http:`/`https:` URL.
+
+### Set `retry.maxRetryAfterMs` if a server's `Retry-After` may exceed the default cap
+
+Generated and hand-built SDK clients now cap how long an honoured `Retry-After` may make them wait,
+and surface the original error at once when the hint exceeds the cap. Raise `retry.maxRetryAfterMs`
+where longer server-directed waits are acceptable. Client construction also refuses non-finite or
+invalid retry counts and delays.
+
+### Import `hono`, not `@hono/hono`, in views and templates
+
+`@setu-ts/view-plugin` now depends on the npm package `hono`; `@hono/hono` is the JSR name and does
+not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hono/html` and
+`hono/jsx`, set `jsxImportSource` to `hono/jsx`, and install `hono` as a direct dependency
+(`npm install hono`, or `deno add npm:hono` on Deno), since your own compiler resolves those paths.
+
+### Repair projects scaffolded by an earlier `setu new`
+
+Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
+copy the fix from a fresh scaffold:
+
+- **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
+  `setu new --runtime
+  cloudflare-workers` project does (the old pair fails `npm install` with
+  `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
+  new entry carries, so a bindings-only deploy is picked up.
+- **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
+  without it the first `start` fails with "Failed to load React Router server build".
+- **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which
+  answers `501` unless `AuthPlugin` is registered with an `rbac` option. A guard generated earlier
+  is unchanged.
+
+<!-- version:history -->
 
 ## 0.8.0
 
@@ -552,7 +639,9 @@ unchanged — so any value reaching it is written to the page verbatim. With a u
 emit `&lt;script&gt;`.
 
 Nothing in the plugin changed and no version is affected — the engine always behaved this way. What
-changed is the documentation. If you copied that shape, switch to either escaping form:
+changed is the documentation. If you copied that shape, switch to either escaping form. The
+`@hono/hono` import below is the JSR name earlier releases used; on npm write `hono/html` instead
+(see "Import `hono`, not `@hono/hono`" under 0.9.0):
 
 ```tsx
 // JSX — what `ViewPlugin()` selects with no options.

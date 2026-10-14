@@ -9,11 +9,11 @@ utilities — no runtime behavior beyond those.
 ## Installation
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/common
+# npm (pnpm add / yarn add / bun add work the same way)
+npm install @setu-ts/common
 
-# npm / pnpm / yarn / bun (via JSR's npm compatibility layer)
-npx jsr add @setu-ts/common
+# Deno
+deno add npm:@setu-ts/common
 ```
 
 ## What's Inside

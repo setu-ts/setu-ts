@@ -6178,7 +6178,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Those were fixed and NOT re-audited, at the maintainer's direction. `setu adopt` also now moves a
   project's `deno.jsonc` (pre-existing, folded in at the maintainer's direction) — complete (PR
   #450)
-- **Next milestone** — the `v0.9.0` cut (placeholders, trust, OIDC publish), then M104, the `v0.9.0`
+- **Release `v0.9.0`** — on `release/v0.9.0`, cut 2026-10-12 (PR #451). The first npm release: **52
+  packages** under `@setu-ts`, three of them (`localization-plugin`, `idempotency-plugin`, `create`)
+  published for the first time; `v0.8.0` and earlier stay on JSR. Publishing needs the one-time npm
+  bootstrap first (placeholders, trust, then the tag inside the two-day window — see
+  `docs/releasing.md`). **The cut pulled the install half of M111f forward** at the maintainer's
+  direction: the docs still taught `jsr:` installs, which the bump moved to `^0.9.0`, a version that
+  never exists on JSR. Every user-facing install line now uses npm, examples import `hono` rather
+  than `@hono/hono`, and PUBLIC_API's JSR-era descriptions of `setu add`, the Workers manifest and
+  the workspace root (`@jsr` aliases, `.npmrc`) are corrected. `release:bump` itself failed on first
+  real use: its task could run `git` only, so it rewrote 186 files and died with `NotCapable` before
+  regenerating manifests, and it rewrote history in archived plans and a colocated test fixture. Two
+  tests pinned `0.8.0` as a literal, which the bump correctly leaves alone, and failed.
+- **Next milestone** — publish `v0.9.0` (placeholders, trust, OIDC tag), then M104, the `v0.9.0`
   client-brief run; see ROADMAP.md.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

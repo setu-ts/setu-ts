@@ -76,7 +76,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { ViewPlugin } from '@setu-ts/view-plugin';
 import { MailPlugin } from '@setu-ts/mail-plugin';
 import { CAPABILITIES, type IMailer } from '@setu-ts/common';
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 
 interface WelcomeProps {
   readonly name: string;

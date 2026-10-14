@@ -9,7 +9,8 @@ architectures requiring async communication, circuit breakers, and observability
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/microservice-starter
+npm install @setu-ts/microservice-starter
+# Deno: deno add npm:@setu-ts/microservice-starter
 ```
 
 Or via npm/yarn/pnpm:
@@ -215,7 +216,7 @@ Two consequences follow from the list being positional:
 
 ## See Also
 
-- [JSR Registry](https://jsr.io/@setu-ts/microservice-starter)
+- [npm](https://www.npmjs.com/package/@setu-ts/microservice-starter)
 - [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#starter-exports-and-option-arms)
 - [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
 

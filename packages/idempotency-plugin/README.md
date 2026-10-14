@@ -23,7 +23,8 @@ guarantees; the other two are out of scope here:
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/idempotency-plugin
+npm install @setu-ts/idempotency-plugin
+# Deno: deno add npm:@setu-ts/idempotency-plugin
 ```
 
 ## Usage

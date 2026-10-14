@@ -10,6 +10,15 @@ import {
 import { runNpmPublish } from '../../scripts/npm-publish.ts';
 import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
 
+/**
+ * The version pnpm writes into a packed `workspace:^` range. Read from the
+ * manifest, never written as a literal: the release bump leaves test trees
+ * alone, so a literal here goes stale at every cut (it did at v0.9.0).
+ */
+const WORKSPACE_VERSION = (JSON.parse(
+  await Deno.readTextFile(new URL('../../packages/kernel/package.json', import.meta.url)),
+) as { version: string }).version;
+
 const valid = {
   name: '@setu-ts/kernel',
   version: '0.8.0',
@@ -88,7 +97,7 @@ describe('npm release rules', () => {
           const source = JSON.parse(await Deno.readTextFile(`${dir}/package.json`));
           for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
             for (const name of Object.keys(source[field] ?? {})) {
-              if (name.startsWith('@setu-ts/')) source[field][name] = '^0.8.0';
+              if (name.startsWith('@setu-ts/')) source[field][name] = `^${WORKSPACE_VERSION}`;
             }
           }
           events.push(`check:${dir}`);

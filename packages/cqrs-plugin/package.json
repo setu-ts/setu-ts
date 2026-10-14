@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/cqrs-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Command and query buses with a composable pipeline of behaviors",
   "repository": {
     "type": "git",

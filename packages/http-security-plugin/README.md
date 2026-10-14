@@ -22,7 +22,8 @@ security**.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/http-security-plugin
+npm install @setu-ts/http-security-plugin
+# Deno: deno add npm:@setu-ts/http-security-plugin
 ```
 
 ## Usage

@@ -15,7 +15,8 @@ testable with a plain object.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/cloudflare-plugin
+npm install @setu-ts/cloudflare-plugin
+# Deno: deno add npm:@setu-ts/cloudflare-plugin
 ```
 
 ## Usage

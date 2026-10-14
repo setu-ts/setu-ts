@@ -76,34 +76,36 @@
 
 ## Installation
 
-Packages are published to [JSR](https://jsr.io) under the `@setu-ts` scope and are consumable from
-every runtime:
+Packages are published to [npm](https://www.npmjs.com/org/setu-ts) under the `@setu-ts` scope and
+are consumable from every runtime:
 
 ```bash
-# Deno
-deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime
-
-# npm / pnpm / yarn (via JSR's npm compatibility layer)
-npx jsr add @setu-ts/kernel @setu-ts/runtime
-pnpm dlx jsr add @setu-ts/kernel @setu-ts/runtime
+# npm (pnpm add / yarn add work the same way)
+npm install @setu-ts/kernel @setu-ts/runtime
 
 # bun
-bunx jsr add @setu-ts/kernel @setu-ts/runtime
+bun add @setu-ts/kernel @setu-ts/runtime
+
+# Deno
+deno add npm:@setu-ts/kernel npm:@setu-ts/runtime
 ```
 
 Add plugins as needed:
 
 ```bash
-deno add jsr:@setu-ts/logger-plugin jsr:@setu-ts/config-plugin \
-         jsr:@setu-ts/validation-plugin jsr:@setu-ts/database-plugin \
-         jsr:@setu-ts/auth-plugin jsr:@setu-ts/openapi-plugin
+npm install @setu-ts/logger-plugin @setu-ts/config-plugin \
+            @setu-ts/validation-plugin @setu-ts/database-plugin \
+            @setu-ts/auth-plugin @setu-ts/openapi-plugin
 ```
 
 Or use a starter bundle:
 
 ```bash
-deno add jsr:@setu-ts/rest-starter
+npm install @setu-ts/rest-starter
 ```
+
+Earlier releases were published on JSR (`jsr:@setu-ts/…`) and stay there; nothing new is published
+to JSR.
 
 ---
 
@@ -155,9 +157,9 @@ No decorators. No DI. No reflection. Just a router and a runtime.
 
 ## Kernel diagnostics (`@setu-ts/kernel` + `@setu-ts/common`)
 
-**Since 0.8.0.** An optional, read-only view of application composition and kernel execution. Enable
-it explicitly per application; an omitted `diagnostics` option creates no collector, metadata
-mirror, ring, or timer anywhere in the kernel, and `IApplication.diagnostics` is absent.
+An optional, read-only view of application composition and kernel execution. Enable it explicitly
+per application; an omitted `diagnostics` option creates no collector, metadata mirror, ring, or
+timer anywhere in the kernel, and `IApplication.diagnostics` is absent.
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -728,7 +730,7 @@ interface ConfigDiagnosticsOptions {
   configuration loads normally. This exists so an application can resolve configuration before its
   plugins are constructed and then hand the plugin that same object, rather than letting it load a
   second snapshot a moment later that the composition never saw.
-- **`diagnostics`** — The opt-in value-free provenance policy (0.8.0), below.
+- **`diagnostics`** — The opt-in value-free provenance policy, below.
 
 ### loadConfig()
 
@@ -830,6 +832,8 @@ so throws a clear startup error.
 ### Hot Reload
 
 **Deferred.** Configuration is an immutable application-startup snapshot.
+
+<!-- version:history -->
 
 ### Configuration Provenance (0.8.0)
 
@@ -3029,9 +3033,9 @@ applications sharing one Redis deployment do not count against each other. Pass 
 pre-namespacing keys.
 
 The application constructs `RedisRateLimitStore`, so no plugin supplies its connection-error
-reporter. Since 0.8.0 pass `connectionErrorReporter` — built with `createConnectionErrorReporter`
-from `@setu-ts/common` over your logger — and the `'error'` events of the client the store builds
-are logged (first error at `warn`, repeats at `debug`, recovery at `info`) instead of printed by
+reporter. Pass `connectionErrorReporter` — built with `createConnectionErrorReporter` from
+`@setu-ts/common` over your logger — and the `'error'` events of the client the store builds are
+logged (first error at `warn`, repeats at `debug`, recovery at `info`) instead of printed by
 `ioredis` to `console.error` on every reconnect attempt. Absent, `ioredis` keeps its console
 fallback. An injected `client` never gets a listener.
 
@@ -3398,12 +3402,12 @@ backend to reach). The probe is cached for 5 seconds and bounded at 2 seconds th
 when the store offers no probe. A store that cannot probe is never reported as reachable — the
 absent capability stays explicitly `'unknown'`.
 
-**Connection errors.** Since 0.8.0 the Redis store routes the `'error'` events of the `ioredis`
-client it builds to the application logger through `createConnectionErrorReporter` (common): the
-first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a
-listener `ioredis` prints every reconnect failure to `console.error`, bypassing the logger and
-redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
-unchanged; the indicator still reports the outage.
+**Connection errors.** The Redis store routes the `'error'` events of the `ioredis` client it builds
+to the application logger through `createConnectionErrorReporter` (common): the first error of an
+outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a listener `ioredis`
+prints every reconnect failure to `console.error`, bypassing the logger and redaction. An injected
+client gets no listener — it belongs to the caller. Health semantics are unchanged; the indicator
+still reports the outage.
 
 **Command bound.** Since M101a the Redis store's `options.commandTimeoutMs` (default `15000`, `0`
 disables) is the ioredis `commandTimeout` on the client it builds. A paused or partitioned Redis
@@ -4777,6 +4781,8 @@ composition and the Deno permission grant that refuses the bind independently. L
 authentication (the HMAC-SHA-256 signed protocol is) and not encryption (a privileged local sniffer
 reads authenticated bytes; remote and production use are unsupported).
 
+<!-- version:history -->
+
 | Export                       | Kind      | Since |
 | ---------------------------- | --------- | ----- |
 | `DiagnosticsPlugin`          | function  | 0.8.0 |
@@ -5446,12 +5452,12 @@ app.register(MessagingPlugin({
 }));
 ```
 
-**Connection errors.** Since 0.8.0 the `'redis-streams'` broker routes the `'error'` events of the
-`ioredis` client it builds to the application logger through `createConnectionErrorReporter`
-(common): the first error of an outage at `warn`, identical repeats at `debug`, the recovery at
-`info`. Without a listener `ioredis` prints every reconnect failure to `console.error`, bypassing
-the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
-semantics are unchanged; the indicator still reports the outage.
+**Connection errors.** The `'redis-streams'` broker routes the `'error'` events of the `ioredis`
+client it builds to the application logger through `createConnectionErrorReporter` (common): the
+first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a
+listener `ioredis` prints every reconnect failure to `console.error`, bypassing the logger and
+redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
+unchanged; the indicator still reports the outage.
 
 **RabbitMQ consumer recovery (0.9.0).** Durable consumer groups retry transient handler failures
 through durable quorum `Q.retry.<delay>ms` queues (queue-level TTL, default-exchange DLX back to
@@ -6857,12 +6863,12 @@ app.register(QueuePlugin({
 }));
 ```
 
-**Connection errors.** Since 0.8.0 the `'redis'` adapter routes the `'error'` events of the
-`ioredis` client it builds to the application logger through `createConnectionErrorReporter`
-(common): the first error of an outage at `warn`, identical repeats at `debug`, the recovery at
-`info`. Without a listener `ioredis` prints every reconnect failure to `console.error`, bypassing
-the logger and redaction. An injected client gets no listener — it belongs to the caller. Health
-semantics are unchanged; the indicator still reports the outage.
+**Connection errors.** The `'redis'` adapter routes the `'error'` events of the `ioredis` client it
+builds to the application logger through `createConnectionErrorReporter` (common): the first error
+of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a listener
+`ioredis` prints every reconnect failure to `console.error`, bypassing the logger and redaction. An
+injected client gets no listener — it belongs to the caller. Health semantics are unchanged; the
+indicator still reports the outage.
 
 **Command bound.** Since M101a the `'redis'` adapter's `commandTimeoutMs` option (default `15000`,
 `0` disables) is the ioredis `commandTimeout` on the client it builds, so a paused server makes
@@ -7239,12 +7245,12 @@ unless you inject one via `client`, or supply your own `IDistributedLock` via `l
 priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
 if the lock expires mid-run, another instance may start the same job.
 
-Since 0.8.0 a Redis lock client the plugin builds routes the `'error'` events of the `ioredis`
-client it builds to the application logger through `createConnectionErrorReporter` (common): the
-first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a
-listener `ioredis` prints every reconnect failure to `console.error`, bypassing the logger and
-redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
-unchanged; a lock that cannot reach Redis still fails its `acquire`.
+A Redis lock client the plugin builds routes the `'error'` events of the `ioredis` client it builds
+to the application logger through `createConnectionErrorReporter` (common): the first error of an
+outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a listener `ioredis`
+prints every reconnect failure to `console.error`, bypassing the logger and redaction. An injected
+client gets no listener — it belongs to the caller. Health semantics are unchanged; a lock that
+cannot reach Redis still fails its `acquire`.
 
 **Multi-instance deduplication** works across replicas sharing one lock backend. `cron` and `every`
 fires each claim a never-released _slot_ lock keyed on the fire's intended time
@@ -9412,10 +9418,11 @@ correct for packages released as one version with it — so a typo is refused, n
 accepted, rather than pinned to a version that does not exist.
 
 Deno projects update only `deno.json` imports, even when a full-stack frontend has its own
-`package.json`. Node, Bun and Workers update both manifests: Deno imports hold `jsr:` pins, and npm
-dependencies use `npm:@jsr/setu-ts__<name>`. Testing uses npm `devDependencies`. Existing key order
-is retained; sorted maps receive a sorted insertion, otherwise the new framework key follows the
-existing scope block. Re-adding the same pin leaves the dependency map unchanged.
+`package.json`. Node, Bun and Workers update every manifest they carry. Every pin comes from npm: a
+Deno import holds `npm:@setu-ts/<name>@^<version>` and a `package.json` dependency holds
+`^<version>`. Testing uses npm `devDependencies`. Existing key order is retained; sorted maps
+receive a sorted insertion, otherwise the new framework key follows the existing scope block.
+Re-adding the same pin leaves the dependency map unchanged.
 
 The twelve safe zero-configuration providers listed in [the CLI guide](docs/cli.md) are registered
 above the emitted development-plugin anchor in either generator style. Unrecognized source is
@@ -9436,9 +9443,8 @@ it:
 
 That is deliberate. On the day of a release the pin is younger than Deno's 24-hour
 minimum-dependency-age policy, so the flags need to be visible rather than buried in a failing
-subprocess — and it keeps the command free of the `run` permission. On Node, Bun or Workers, when it
-writes a `package.json` entry and the project's `.npmrc` does not route the `@jsr` scope to JSR, it
-also prints the `@jsr:registry=https://npm.jsr.io` line the install needs.
+subprocess — and it keeps the command free of the `run` permission. No registry mapping is printed:
+every package resolves from the default npm registry.
 
 A **workspace root** is refused (exit `2`, nothing written) — recognised by `setu.workspace.json`, a
 `deno.json` `workspace` key, or a `package.json` `workspaces` key. Framework packages are pinned in
@@ -9534,11 +9540,11 @@ function is needed. In a class-based project the same path holds the `APP_SERVIC
 > dependency.
 
 > **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
-> `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, so a
-> scaffolded Workers project emits `package.json` (npm-compat `@jsr/…` dependencies, `wrangler`
-> pinned in `devDependencies`, and `dev`/`deploy` scripts) plus `.npmrc`, and
-> `npm install && npx wrangler dev` works as printed. The Deno target does NOT get one: it resolves
-> through the import map, and a `package.json` switches Deno to node_modules resolution.
+> `src/index.ts` with esbuild, which does not read a Deno import map, so a scaffolded Workers
+> project emits `package.json` (`@setu-ts/*` dependencies from npm, `wrangler` pinned in
+> `devDependencies`, and `dev`/`deploy` scripts), and `npm install && npx wrangler dev` works as
+> printed. The Deno target does NOT get one: it resolves through the import map, and a
+> `package.json` switches Deno to node_modules resolution.
 
 **The decorator-free way to serve HTTP is `setu generate route`.** It emits
 `register<Name>Routes(router: IRouterApi)` and is ungated, so it works in a project with no plugins
@@ -9725,10 +9731,11 @@ workspace created before this keeps its shape.
 
 Three facts were measured, and each shaped the result. **Bun needs no root shape of its own** — it
 reads npm `workspaces` — but it installs into each MEMBER's `node_modules` as well as the root, so
-the generated ignore file and image account for both. **A workspace-root `.npmrc` maps the `@jsr`
-scope** for every member, and without it not one framework package resolves. And **a sibling library
-resolves by its package name** under npm exactly as it does under Deno, so libraries needed no
-per-runtime design beyond their manifest.
+the generated ignore file and image account for both. **No registry mapping is needed**: every
+member takes the framework from npm, so the root carries no `.npmrc` (before `0.9.0` one mapped the
+`@jsr` scope, and without it no framework package resolved). And **a sibling library resolves by its
+package name** under npm exactly as it does under Deno, so libraries needed no per-runtime design
+beyond their manifest.
 
 **Cloudflare Workers is refused as a workspace target**, with the reason: each Worker is its own
 deploy unit with its own `wrangler.toml`, so several in one repository are several deployments
@@ -9952,11 +9959,11 @@ full-stack` is deliberately not a host: its layering is `routes → features →
 and it has no `src/modules/` concept.
 
 A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
-setup — as a `deno.json` import on Deno and Cloudflare Workers, and as an `npm:@jsr/std__*` alias in
-`devDependencies` on Node and Bun, which get a `package.json` and no `deno.json`. Only a directory
-holding both `<name>.controller.ts` and `<name>.service.ts` is treated as a module, so unrelated
-folders under `src/modules/` (a shared-helpers directory, say) are left out of the barrel rather
-than breaking it.
+setup — as a `deno.json` import on Deno and Cloudflare Workers. Node and Bun declare neither: their
+emitted test uses the built-in `node:test` and `bun:test`, because `@std/testing/bdd` calls
+`Deno.test`. Only a directory holding both `<name>.controller.ts` and `<name>.service.ts` is treated
+as a module, so unrelated folders under `src/modules/` (a shared-helpers directory, say) are left
+out of the barrel rather than breaking it.
 
 The emitted controller's handlers take **only the arguments their `@Params(...)` names** and return
 plain values, which the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a
@@ -11796,6 +11803,8 @@ value and no capability token, because the reader is reached through the applica
 from the registry. Activation, label allowlists, and the projection bounds are the kernel's — see
 [Kernel diagnostics](#kernel-diagnostics-setu-tskernel--setu-tscommon).
 
+<!-- version:history -->
+
 ### Inspector contracts (0.8.0)
 
 The inspector-side contracts the optional addon packages register and the Diagnostics Connector
@@ -13088,7 +13097,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.8.0
+npm install @setu-ts/sdk@^0.9.0
 ```
 
 ### createClient()
@@ -14474,7 +14483,7 @@ rather than a deliberate empty render.
 | ------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `ViewPlugin`              | function | Plugin factory — registers the selected engine under `CAPABILITIES.VIEW` and a `view` health indicator reporting it (always `up`) |
 | `renderView`              | function | Functional entry point — `renderView(ctx, component, props)` resolves the engine per request and answers `IResponse.html(...)`    |
-| `raw`                     | function | The escaping opt-out, re-exported from `@hono/hono/html` so an application does not import hono directly                          |
+| `raw`                     | function | The escaping opt-out, re-exported from `hono/html` so an application does not import hono directly                                |
 | `ViewRenderError`         | class    | A component threw while rendering (original carried as `cause`), or returned `undefined` (almost always a missing `return`)       |
 | `UnresolvedSuspenseError` | class    | The rendered tree holds a pending `<Suspense>` boundary; buffered rendering would serve only the fallback, so it is refused       |
 | `ViewPluginOptions`       | type     | The discriminated options union above                                                                                             |

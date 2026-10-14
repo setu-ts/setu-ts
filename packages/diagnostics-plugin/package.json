@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/diagnostics-plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Authenticated local diagnostics connector: signed loopback polling for the devtool",
   "repository": {
     "type": "git",

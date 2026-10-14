@@ -18,25 +18,27 @@ the application did not concatenate by hand.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/view-plugin jsr:@hono/hono
+npm install @setu-ts/view-plugin hono
+# Deno: deno add npm:@setu-ts/view-plugin npm:hono
 ```
 
-**`@hono/hono` is required, not optional.** The default `'hono-jsx'` arm compiles JSX through
-`@hono/hono/jsx/jsx-runtime`, and the `'hono-html'` arm imports `@hono/hono/html` — neither resolves
-from a transitive dependency, so a project that installs only this package gets
-`TS2307: Import "@hono/hono/jsx/jsx-runtime" not a dependency and not in import map` on its first
-component. Add the JSX transform to the application manifest alongside it:
+**Declare `hono` directly.** The default `'hono-jsx'` arm compiles JSX through
+`hono/jsx/jsx-runtime`, and the `'hono-html'` arm's components import `hono/html` — both resolved by
+the application's own compiler, not by this package. This package depends on `hono`, so a hoisting
+installer (npm, Bun) happens to make it resolvable; pnpm's strict layout and a Deno import map do
+not, and `hono/jsx/jsx-runtime` fails to resolve on the first component. Add the JSX transform to
+the application manifest alongside it:
 
 ```json
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@hono/hono/jsx"
+    "jsxImportSource": "hono/jsx"
   }
 }
 ```
 
-A project using only the `'hono-html'` arm needs `@hono/hono` but neither compiler option.
+A project using only the `'hono-html'` arm needs `hono` but neither compiler option.
 
 ## Usage
 
@@ -90,13 +92,13 @@ class PagesController {
 ```
 
 Components are JSX, so their module is `.tsx` and the application manifest declares `jsx` /
-`jsxImportSource` and depends on `@hono/hono` (see [Installation](#installation)) — the controller
-itself may stay `.ts` and import them. If you would rather not add a JSX toolchain at all,
+`jsxImportSource` and depends on `hono` (see [Installation](#installation)) — the controller itself
+may stay `.ts` and import them. If you would rather not add a JSX toolchain at all,
 `ViewPlugin({ engine: 'hono-html' })` takes components written with hono's `html` tagged template in
 a plain `.ts` file:
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 
 const UserList = (props: { readonly users: readonly string[] }) =>
   html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
@@ -155,7 +157,7 @@ That is right for a by-name engine whose compiled template already escaped, and 
 hand-written literal like `` (p) => `<p>${p.name}</p>` ``. Write views with JSX or the `html` tag.
 
 ```typescript
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 import { raw } from '@setu-ts/view-plugin';
 
 // UNCHECKED-EXEMPT: this fence IS the opt-out's documentation — raw() is the

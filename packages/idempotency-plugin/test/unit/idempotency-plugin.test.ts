@@ -14,6 +14,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import { IdempotencyConfigurationError } from '../../src/errors.ts';
 import { IdempotencyPlugin } from '../../src/plugin/idempotency-plugin.ts';
 import { createClockRuntime } from '../fixtures/clock-runtime.ts';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /** A fake plugin context recording registration. */
 function fakeContext(options: { failHealth?: boolean } = {}) {
@@ -54,7 +55,7 @@ describe('IdempotencyPlugin (M109a §3.14)', () => {
   it('declares its name, version and capability', () => {
     const plugin = IdempotencyPlugin();
     expect(plugin.name).toBe('idempotency-plugin');
-    expect(plugin.version).toBe('0.8.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual([CAPABILITIES.IDEMPOTENCY]);
   });
 

@@ -1631,6 +1631,31 @@ describe('documentation gate — install-snippet versions', () => {
     expect(fenceExtension('typescript')).toBe('ts');
   });
 
+  it('reads the post-alpha 0.9.x line, and still reads 0.8.x as stale beside it', () => {
+    // Stale WITHIN 0.9 — the only case that discriminates. `^0.9.0` clean at
+    // 0.9.0 passes just as well when the gate reads no 0.9 at all. 0.9 is the
+    // first npm line, so the fixture is the npm install form.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'npm install @setu-ts/kernel@^0.9.0\n'),
+      '0.9.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.9.0');
+    expect(withinLine[0]?.message).toContain('0.9.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'npm install @setu-ts/kernel@^0.9.0\n'), '0.9.0'),
+    ).toEqual([]);
+
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.8.0\n'),
+      '0.9.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.8.0');
+    expect(outgoing[0]?.message).toContain('0.9.0');
+  });
+
   it('reads the post-alpha 0.8.x line, and still reads 0.7.x as stale beside it', () => {
     // Stale WITHIN 0.8 — the only case that discriminates. `^0.8.0` clean at
     // 0.8.0 passes just as well when the gate reads no 0.8 at all.
@@ -1946,6 +1971,21 @@ describe('documentation gate — bare version claims', () => {
 
   // The bare-claim checker reads its own copy of the alternation, so the 0.6
   // line is unproven here until asserted here.
+  it('reads the post-alpha 0.9.x line in a bare claim', () => {
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.9.0`\n'), '0.9.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.9.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.9.0`\n'), '0.9.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.8.0`\n'), '0.9.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.8.0');
+
+    const nineNoise = 'bound to 127.0.9.1 and 10.0.9.2, requires foo 10.9.1, mask 192.0.9.9\n';
+    expect(checkVersionClaims(doc('README.md', nineNoise), '0.9.0')).toEqual([]);
+  });
+
   it('reads the post-alpha 0.8.x line in a bare claim', () => {
     const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.8.0`\n'), '0.8.1');
     expect(withinLine).toHaveLength(1);
