@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { run, isNotFound } from '../../scripts/lib/run.ts';
+import { isNotFound, killGroup, run } from '../../scripts/lib/run.ts';
 
 describe('repository subprocess helper', () => {
   it('captures both streams and a nonzero status', async () => {
@@ -68,5 +68,34 @@ describe('repository subprocess helper', () => {
     expect((await run(process.execPath, ['-e', 'process.kill(process.pid,"SIGTERM")'])).code).toBe(
       1,
     );
+  });
+  it('resolves when a child exits without reading its standard input', async () => {
+    const result = await run(process.execPath, ['-e', 'process.exit(3)'], {
+      stdin: 'x'.repeat(8 * 1024 * 1024),
+    });
+    expect(result.code).toBe(3);
+  });
+});
+
+describe('killGroup', () => {
+  const thrower = (code: string) => () => {
+    throw Object.assign(new Error(code), { code });
+  };
+  it('kills the negative pid with SIGKILL', () => {
+    const calls: unknown[] = [];
+    expect(killGroup(42, (...args) => calls.push(args))).toBeUndefined();
+    expect(calls).toEqual([[-42, 'SIGKILL']]);
+  });
+  it('treats a missing pid and an exited group as nothing to raise', () => {
+    expect(killGroup(undefined, thrower('EPERM'))).toBeUndefined();
+    expect(killGroup(7, thrower('ESRCH'))).toBeUndefined();
+  });
+  it('returns any other failure', () => {
+    expect(killGroup(7, thrower('EPERM'))).toMatchObject({ code: 'EPERM' });
+    expect(
+      killGroup(7, () => {
+        throw 'plain';
+      }),
+    ).toBe('plain');
   });
 });

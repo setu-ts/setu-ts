@@ -1408,7 +1408,7 @@ error[private-type-ref]: public type references private type
         '--check',
       ]);
       const output = await cmd;
-      expect(output.code).toBe(0);
+      expect(output.code, output.stdout + output.stderr).toBe(0);
     });
 
     it('main() generate mode exits 0 and produces docs/api/index.html', async () => {

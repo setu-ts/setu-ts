@@ -7,9 +7,9 @@ import { runVersionSweepMain } from '../../scripts/version-sweep.ts';
 import { runApiDocsMain } from '../../scripts/generate-api-docs.ts';
 
 describe('real repository entry points without exiting the runner', () => {
-  it('executes the complete documentation path and reports the stopped export-table discrepancy', async () => {
+  it('executes the complete documentation path over one file and the whole tree', async () => {
     expect(await runDocsMain(['README.md'])).toBe(0);
-    expect(await runDocsMain([])).toBe(1);
+    expect(await runDocsMain([])).toBe(0);
   }, 120_000);
   it('runs both API documentation modes through their real engines', async () => {
     expect(await runApiDocsMain(['--check'])).toBe(0);

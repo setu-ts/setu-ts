@@ -49,19 +49,8 @@ export function run(
         ? undefined
         : setTimeout(() => {
             timedOut = true;
-            if (child.pid !== undefined) {
-              try {
-                process.kill(-child.pid, 'SIGKILL');
-              } catch (error) {
-                if (!(
-                  typeof error === 'object' &&
-                  error !== null &&
-                  'code' in error &&
-                  error.code === 'ESRCH'
-                ))
-                  reject(error);
-              }
-            }
+            const failure = killGroup(child.pid);
+            if (failure !== undefined) reject(failure);
           }, options.timeoutMs);
     child.on('error', (error) => {
       clearTimeout(timer);
@@ -77,6 +66,29 @@ export function run(
     });
     if (options.stdin !== undefined) child.stdin?.end(options.stdin);
   });
+}
+
+/**
+ * Kills a detached child's whole process group. A group that has already exited
+ * (`ESRCH`) is not a failure; any other error is returned for the caller to raise.
+ *
+ * @param pid - The group leader's pid, absent when the spawn itself failed
+ * @param kill - The signal sender (injected by tests)
+ * @returns The error to raise, or undefined
+ */
+export function killGroup(
+  pid: number | undefined,
+  kill: (pid: number, signal: NodeJS.Signals) => unknown = process.kill,
+): unknown {
+  if (pid === undefined) return undefined;
+  try {
+    kill(-pid, 'SIGKILL');
+    return undefined;
+  } catch (error) {
+    return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH'
+      ? undefined
+      : error;
+  }
 }
 
 /** Whether optional filesystem input was absent; other failures must propagate. */
