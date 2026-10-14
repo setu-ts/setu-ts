@@ -1846,23 +1846,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   while keeping ten clean packages permanently clean, a Markdown documentation gate
   ([`scripts/check-docs.ts`](scripts/check-docs.ts)) with structural package-catalog validation,
   generated-API-link and cross-file-anchor validation, and a dedicated per-file script-coverage gate
-  ([`scripts/script-coverage.ts`](scripts/script-coverage.ts)) enforcing ≥90% branch/function/line
-  on both documentation scripts. The snippet gate mechanically type-checks committed fixtures
-  representing all nine guides plus the architecture registry example, with a negative control
-  proving the compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6
-  service-registry examples (CAPABILITIES constants, no nonexistent `lazy` option,
-  `registerFactory()` for lazy construction) and §16 testing claim (Deno full suite; Node/Bun
-  published-artifact compat). No package source, manifest export, capability token, or plugin option
-  changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the final
-  verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56), derived
-  OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all postdate the
-  guides' first draft. Verification then found the guides still taught the DEPRECATED `'rfc7807'`
-  alias in three files while `PUBLIC_API.md` called it deprecated (every gate passed — the alias
-  still exists, so every fence compiled), a phantom `## HttpClient` section documenting a
-  `@setu-ts/http-client-plugin` that exists nowhere in source, and two drift gates that could not
-  detect their own drift because they matched a bare substring rather than a link. Also: the
-  `PUBLIC_API.md` section anchors now name their package, which is a **breaking change for external
-  deep links** (`#storage` → `#storage-setu-tsstorage-plugin`) — complete (PR #143)
+  (`scripts/script-coverage.ts`, retired in M111e2) enforcing ≥90% branch/function/line on both
+  documentation scripts. The snippet gate mechanically type-checks committed fixtures representing
+  all nine guides plus the architecture registry example, with a negative control proving the
+  compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6 service-registry
+  examples (CAPABILITIES constants, no nonexistent `lazy` option, `registerFactory()` for lazy
+  construction) and §16 testing claim (Deno full suite; Node/Bun published-artifact compat). No
+  package source, manifest export, capability token, or plugin option changed. Developed on a branch
+  cut before M56–M61, so `origin/main` was merged in before the final verification pass and the
+  guides were re-checked against the merged tree — RFC 9457 (M56), derived OpenAPI security (M57),
+  and the `module` schematic plus the M60/M61 CLI wiring all postdate the guides' first draft.
+  Verification then found the guides still taught the DEPRECATED `'rfc7807'` alias in three files
+  while `PUBLIC_API.md` called it deprecated (every gate passed — the alias still exists, so every
+  fence compiled), a phantom `## HttpClient` section documenting a `@setu-ts/http-client-plugin`
+  that exists nowhere in source, and two drift gates that could not detect their own drift because
+  they matched a bare substring rather than a link. Also: the `PUBLIC_API.md` section anchors now
+  name their package, which is a **breaking change for external deep links** (`#storage` →
+  `#storage-setu-tsstorage-plugin`) — complete (PR #143)
 - **Milestone 62** (`packages/cli` — monorepo support: more than one deployable service in a
   repository. The CLI had no workspace concept at all, so a second service meant
   `setu new other --dir .` — a fully independent project with its own manifest, its own lockfile,

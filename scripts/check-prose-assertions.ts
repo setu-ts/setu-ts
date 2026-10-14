@@ -180,11 +180,13 @@ export function parseClaimTable(block: ClaimBlock): readonly Claim[] {
  * @returns TypeScript source that emits one JSON line per expression
  */
 export function buildProgram(claims: readonly Claim[]): string {
-  return `import { createContext, runInContext } from 'node:vm';
+  return `import { constants, createContext, runInContext } from 'node:vm';
 const context = createContext({ JSON, Math, Number, String, Array, Object, Boolean });
 for (const expression of ${JSON.stringify(claims.map((claim) => claim.expression))}) {
   try {
-    const value = runInContext('(' + expression + ')', context);
+    const value = await runInContext('(async () => (' + expression + '))()', context, {
+      importModuleDynamically: constants.USE_MAIN_CONTEXT_DEFAULT_LOADER,
+    });
     console.log(JSON.stringify({ ok: true, value }));
   } catch (error) {
     const code = typeof error === 'object' && error !== null && 'code' in error ? '[' + String(error.code) + '] ' : '';
@@ -224,7 +226,9 @@ export function parseResults(stdout: string, expected: number): readonly ClaimRe
 }
 
 /**
- * Evaluates a document's claims in a no-permissions Deno subprocess.
+ * Evaluates a document's claims in a Node permission-model subprocess that may only
+ * read the repository (so a claim can import the package it describes, as Deno's
+ * loader allowed), with an empty environment and no write or child-process access.
  *
  * @param claims - Claims in one document
  * @param timeoutMs - Maximum time permitted for the complete batch
@@ -237,7 +241,15 @@ export async function evaluateClaims(
   try {
     const output = await runProcess(
       process.execPath,
-      ['--permission', '--input-type=module-typescript', '-'],
+      [
+        '--permission',
+        `--allow-fs-read=${process.cwd()}`,
+        '--import',
+        './test/node-source-register.ts',
+        '--no-warnings',
+        '--input-type=module-typescript',
+        '-',
+      ],
       { env: {}, stdin: buildProgram(claims), timeoutMs },
     );
     return output.code === 0 ? parseResults(output.stdout, claims.length) : null;

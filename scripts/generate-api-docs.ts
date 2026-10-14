@@ -918,7 +918,7 @@ if (import.meta.main) process.exitCode = await runApiDocsMain();
  * gate carries over rather than port it, so they are out of scope.
  */
 export function inRatchetScope(diagnostic: DocLintDiagnostic): boolean {
-  return !(diagnostic.rule === 'notDocumented' && /\.__type\b/.test(diagnostic.message));
+  return !(diagnostic.rule === 'notDocumented' && /\.__type\b/.test(diagnostic.message ?? ''));
 }
 
 /** Parse TypeDoc's pinned CLI warning dialect, retaining an owner for every diagnostic. */

@@ -160,6 +160,20 @@ describe('prose assertion gate — evaluator', () => {
     expect(findings[0]?.message).toContain('ERR_ACCESS_DENIED');
   });
 
+  it('lets a claim import the package it describes', async () => {
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(await import('@setu-ts/common')).CAPABILITIES.LOGGER\` | \`"logger"\` |`;
+    expect(await checkDocument('import.md', source)).toEqual([]);
+  });
+
+  it('denies writing inside the repository and starting a child process', async () => {
+    const proc = 'this.constructor.constructor("return process")()';
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${proc}.getBuiltinModule('fs').writeFileSync('.tmp/prose-write', 'x')\` | \`null\` |\n| \`${proc}.getBuiltinModule('child_process').execFileSync('true')\` | \`null\` |`;
+    const findings = await checkDocument('write.md', source);
+
+    expect(findings.length).toBe(2);
+    for (const finding of findings) expect(finding.message).toContain('ERR_ACCESS_DENIED');
+  });
+
   it('fails closed when a claim exits before every result is emitted', async () => {
     const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`this.constructor.constructor("return process")().exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
     const findings = await checkDocument('exit.md', source);
