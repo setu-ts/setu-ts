@@ -65,9 +65,15 @@ describe('repository subprocess helper', () => {
     expect(() => process.kill(pid, 0)).toThrow();
   });
   it('refuses a deadline a Node timer cannot honour, without spawning', async () => {
-    for (const timeoutMs of [0, -1, 1.5, Number.NaN, 2 ** 31]) {
+    for (const timeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31]) {
       await expect(run('definitely-not-a-binary', [], { timeoutMs })).rejects.toThrow(RangeError);
     }
+  });
+
+  it('accepts a fractional deadline, as a budget read from the monotonic clock is', async () => {
+    // scripts/audit.ts passes `TOTAL_BUDGET_MS - (now() - started)`, never a whole number.
+    const result = await run(process.execPath, ['-e', 'process.exit(0)'], { timeoutMs: 30_000.75 });
+    expect(result.code).toBe(0);
   });
 
   it('reports signal termination as failure', async () => {

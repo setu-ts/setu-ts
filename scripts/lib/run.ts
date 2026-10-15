@@ -26,13 +26,11 @@ export function run(
   options: RunOptions = {},
 ): Promise<RunResult> {
   const { timeoutMs } = options;
-  // Above 2^31 - 1 ms a Node timer fires after 1 ms, so an oversized deadline
-  // would kill the child at once; NaN or a fraction is a caller mistake.
-  if (
-    timeoutMs !== undefined &&
-    !(Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= MAX_TIMEOUT_MS)
-  ) {
-    return Promise.reject(new RangeError(`timeoutMs must be an integer in [1, ${MAX_TIMEOUT_MS}]`));
+  // Above 2^31 - 1 ms a Node timer fires after 1 ms, so an oversized deadline would kill the
+  // child at once; NaN, zero and negatives are caller mistakes. Fractions are fine: callers derive
+  // a remaining budget from the monotonic clock, and the timer truncates.
+  if (timeoutMs !== undefined && !(timeoutMs > 0 && timeoutMs <= MAX_TIMEOUT_MS)) {
+    return Promise.reject(new RangeError(`timeoutMs must be in (0, ${MAX_TIMEOUT_MS}]`));
   }
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
