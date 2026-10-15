@@ -14363,12 +14363,13 @@ the peer is a trusted proxy, or an explicit `publicOrigin` option is added; and 
 
 ## Milestone 114: Self-Contained Feature Modules
 
-**Package(s):** `packages/cli` (generator output and docs only — the runtime never scans folders, so
-no plugin, kernel or `common` change)
+**Package(s):** `packages/cli` (generator output and docs — the runtime never scans folders, so the
+layout change needs no plugin or kernel change), plus `packages/validation-plugin` (and `common` if
+the plan places the accessor's type there) for item 7's typed accessor
 
 **Source:** the maintainer's review of the M104 product (`smoke/M104-FINDINGS.md`, "Module layout
-review" and "Generated tests"), confirmed against the CLI source and the published `0.9.0` CLI.
-Closes **V9-79**.
+review", "Generated tests" and "Request and response shapes" sections), confirmed against the CLI
+source and the published `0.9.0` CLI. Closes **V9-79**.
 
 **The problem.** The two generator styles disagree about what a module is:
 
@@ -14433,6 +14434,37 @@ point, and a feature is deleted by deleting its folder.
    - The `test` and `test:e2e` scripts are separate, so the fast unit run does not need a socket.
    - **Optional follow-on, not this milestone:** a browser e2e scaffold (Playwright config plus one
      page test) for `full-stack`, behind `setu add testing --browser`.
+7. **A home for request and response shapes — the DTO answer.** In Setu-TS a DTO is a Zod schema,
+   not a class: one value validates the request (`validateBody`/`@ValidateBody`, enforced with
+   `ValidationPlugin`), gives the type (`z.infer`), drives the OpenAPI document (a route's `schema`,
+   and since M70m a `validateBody` schema derived automatically, deduplicated into components), and
+   through it the generated SDK client's types. NestJS's `PartialType`/`PickType` are Zod's
+   `.partial()`/`.pick()`/`.extend()`. Today nothing says where schemas live: M104's builder
+   declared all eight inline in one route file, parsed the UI's form posts by hand, and cast every
+   validated value (`ctx.state.get(validatedStateKey('query')) as z.infer<typeof ListQuery>`). The
+   convention this milestone ships and documents:
+
+   | Shape                                                                              | Home                                                                                                                                                                                                                                                                                                             |
+   | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | a feature's request/response shapes                                                | `src/modules/<name>/<name>.schemas.ts` — one file per module (not a `dto/` folder of one class per file), one export per shape named by purpose (`CreateXBody`, `UpdateXBody`, `ListXQuery`, `XParams`, `XResponse`, `XListResponse`), each paired with its `z.infer` type; routes import it directly, no barrel |
+   | shapes several modules use (pagination query, `:id` params, money, page envelopes) | `src/shared/schemas/`                                                                                                                                                                                                                                                                                            |
+   | shapes several services share (integration events, cross-service contracts)        | a workspace library, `setu generate library contracts` → `libs/contracts/` (X67's precedent)                                                                                                                                                                                                                     |
+   | database rows                                                                      | stay with the database schema (Drizzle `$infer…`); **a row type is never an API shape** — response schemas define what may leave the service (Ledgerline's `api_keys.key_hash` is why)                                                                                                                           |
+   | a consumer's view of the API                                                       | the generated SDK client, never the server's schemas                                                                                                                                                                                                                                                             |
+
+   Generator and framework work:
+   - **`setu generate module <name>` emits `<name>.schemas.ts`** (create/update bodies, list query,
+     `:id` params, a response shape) and its generated routes use them — the validation middleware
+     (or decorators, class-based) and `schema.response` — so OpenAPI documents the module from its
+     first commit. `setu generate schema <name> --module <module>` adds another shape to a module's
+     file (or to `src/shared/schemas/` without `--module`).
+   - **A typed accessor for the validated value**, removing the cast: e.g. `validated(ctx, Schema)`
+     returning `z.infer<typeof Schema>`, or a route option that hands the handler typed
+     `{ body, query, params }`. One implementation behind both styles; the plan decides the shape
+     and which package owns it (public API, so PUBLIC_API.md in the same PR).
+   - **The plan verifies** whether `validateBody` accepts a urlencoded or multipart form body
+     (M94b's `FormBody`), so a server-rendered form validates with the same schema; if not, that is
+     a scoped follow-on, not a silent gap.
 
 **Compatibility.** Existing projects keep working unchanged: their
 `src/controllers/<name>.routes.ts` files are still scanned and wired by the controllers barrel. Only
@@ -14475,7 +14507,12 @@ follow if users ask; the second is the parked "project layout" proposal.
       `<name>.e2e.test.ts` from `g module`; a CLI e2e that scaffolds, generates a module, implements
       its service with real logic, and runs BOTH generated suites green (the M104 stub-breakage
       regression), on Node, Deno and Bun
-- [ ] `docs/cli.md`, `docs/decorators.md`, CLI README, CHANGELOG migration note
+- [ ] `<name>.schemas.ts` from `g module` with the generated routes validating and documenting
+      through it; `g schema`; the typed validated-value accessor with a test that fails if the cast
+      comes back; an e2e asserting the module's routes appear in `/openapi.json` with their schemas
+- [ ] `docs/cli.md` (including "Where request and response shapes live" and the row-type rule),
+      `docs/migration-nestjs.md` (`dto/` → `<name>.schemas.ts`), `docs/decorators.md`, CLI README,
+      CHANGELOG migration note
 - [ ] **ROADMAP.md** — this section and the Progress Tracking row `114`
 
 ---
@@ -14746,4 +14783,4 @@ patch by construction and gains nothing new here.
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 113m      | ⬜     | scheduler-plugin + auth-plugin — time the framework does not honour                                                                                                                                                                                                                       |
 | 113n      | ⬜     | http-security-plugin + runtime — security behind a reverse proxy                                                                                                                                                                                                                          |
-| 114       | ⬜     | cli — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, generated e2e tests (V9-79)                                                                                                                                              |
+| 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
