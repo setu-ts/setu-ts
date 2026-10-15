@@ -14079,9 +14079,9 @@ artifacts. Deno gates stay authoritative until the later tooling milestones repl
 artifacts — the regression run (`smoke/V090-REGRESSION.md`), Part 16's exercise block X67–X73
 (`smoke/X67-X73-FINDINGS.md`), the M104 client-brief run (`smoke/M104-FINDINGS.md`, with its outage
 and security passes) and the first run of Part 10's confidence block X39–X44
-(`smoke/X39-X44-FINDINGS.md`). **78 findings, nine High.** V9-1 is the only release regression;
+(`smoke/X39-X44-FINDINGS.md`). **82 findings, nine High.** V9-1 is the only release regression;
 every other row reproduces on a `0.8.0` control, rides surface that is new in `0.9.0`, or was not
-controlled (each row says which). The register is `smoke/DEFECTS.md`, rows V9-1…V9-78. M104's
+controlled (each row says which). The register is `smoke/DEFECTS.md`, rows V9-1…V9-82. M104's
 product defects (the builder's own code) are recorded in its findings file and are not rows.
 
 **Grouped by SHAPE, not by package** — the rule since M70. The letters are of three kinds, and the
@@ -14097,9 +14097,9 @@ re-run against a newly published version.
 | **M113c** | design | connections and jobs that never recover, and a shutdown with no bound | V9-18 **High**, V9-31, V9-64 **High**, V9-71, V9-76                                      | `queue-plugin`, `runtime`                                                                                                                          |
 | **M113d** | design | Workers builds and the edge cache                                     | V9-1 **High, REGRESSION**, V9-23 **High**, V9-4                                          | `database`, `scheduler`, `cloudflare`, `cli`                                                                                                       |
 | **M113e** | design | identity and session semantics a client cannot predict                | V9-28, V9-27, V9-46, V9-50                                                               | `auth-plugin`, `session-plugin`                                                                                                                    |
-| **M113f** | design | what reaches logs and public endpoints                                | V9-45, V9-47, V9-43, V9-41, V9-49                                                        | `exceptions`, `logger`, `database`, `health`, `openapi`                                                                                            |
+| **M113f** | design | what reaches logs and public endpoints                                | V9-45, V9-47, V9-43, V9-41, V9-49, V9-80, V9-82                                          | `exceptions`, `logger`, `database`, `health`, `openapi`, `kernel`                                                                                  |
 | **M113g** | design | database calls and errors under faults and edge inputs                | V9-25, V9-33, V9-26, V9-34, V9-48                                                        | `database-plugin`                                                                                                                                  |
-| **M113h** | fix    | generated output that is wrong                                        | V9-8, V9-17, V9-38, V9-39, V9-9, V9-11, V9-42, V9-67                                     | `cli`, `runtime`                                                                                                                                   |
+| **M113h** | fix    | generated output that is wrong                                        | V9-8, V9-17, V9-38, V9-39, V9-9, V9-11, V9-42, V9-67, V9-81                              | `cli`, `runtime`, `logger-plugin`, `kernel`                                                                                                        |
 | **M113i** | fix    | CLI commands whose refusals and guidance mislead                      | V9-5, V9-12, V9-13, V9-30, V9-40, V9-60, V9-61, V9-62, V9-75                             | `cli`                                                                                                                                              |
 | **M113j** | fix    | outbox and inbox signals                                              | V9-20, V9-21, V9-22                                                                      | `messaging-plugin`                                                                                                                                 |
 | **M113k** | fix    | the idempotency key from client to server                             | V9-14, V9-15, V9-16                                                                      | `sdk`, `idempotency`, `http-security`, `database`                                                                                                  |
@@ -14237,6 +14237,12 @@ hint for the Redis-backed stores' outage errors on the M90f/M89b pattern.
 - **V9-47** — `/live` and `/health` are public on the application port and carry the `self`
   indicator's runtime version and pod hostname plus each indicator's data.
 - **V9-43** — an expected 4xx `HttpError` is logged twice at `error`, once with a full stack.
+- **V9-80** — with `requestLogging: true`, every request that fails through `errorHandler` is logged
+  as "request completed" with `status: 200`: the request logger reads the status before
+  `errorHandler`, registered outside it, writes the response (all 16 failed requests in M104's
+  deployed logs). A log-based 5xx alert sees only successes.
+- **V9-82** — with no logger registered an unhandled 500 is logged nowhere, and no README says the
+  logger is the only error sink.
 - **V9-41** — `LoggerPluginOptions.excludePaths` is `readonly string[]` while the README and the
   middleware take `PathPattern[]`.
 - **V9-49** — `/docs` loads Swagger UI from `unpkg.com/swagger-ui-dist@5`, a floating major with no
@@ -14271,7 +14277,9 @@ scaffolds omit `streamSubjects`), V9-38 (`adopt` writes TCP probes for a templat
 full-stack scaffold fails its own `npm run check`), V9-11 (`.gitignore` omits `.react-router/`),
 V9-42 (`adopt` asks for a hand edit of its own `main.ts`), V9-67 (a Node project with
 `add websocket` gets no `ws`, and every upgrade then answers 500 with nothing logged — the runtime
-swallows `loadWsModule`'s error).
+swallows `loadWsModule`'s error), V9-81 (no startup line in any configuration, and the scaffold's
+`LoggerPlugin()` logs no requests, so a fresh app prints nothing while it serves — ASP.NET and
+NestJS both announce startup).
 
 ### Milestone 113i: CLI Commands Whose Refusals and Guidance Mislead
 
@@ -14723,7 +14731,7 @@ patch by construction and gains nothing new here.
 | 111e2     | ✅     | repository scripts and root tests on Node (Vitest); doc gates re-pointed; JSDoc ratchet re-measured on TypeDoc                                                                                                                                                                            |
 | 111e3     | ✅     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                                                                           |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                                                             |
-| 113       | ⬜     | the `v0.9.0` smoke closeout — 78 rows V9-1…V9-78 grouped by shape into M113a–M113n                                                                                                                                                                                                        |
+| 113       | ⬜     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113n                                                                                                                                                                                                        |
 | 113a      | ⬜     | messaging-plugin — brokers that report healthy while down, and publishes with no bound                                                                                                                                                                                                    |
 | 113b      | ⬜     | service-discovery + health + scheduler + cache + session + auth — readiness that does not describe the dependency                                                                                                                                                                         |
 | 113c      | ⬜     | queue-plugin + runtime — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                                            |
