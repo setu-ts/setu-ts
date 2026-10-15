@@ -222,9 +222,17 @@ describe('decorated non-HTTP ingress through real plugins', () => {
   });
 
   it('round-trips a real WebSocket frame through a decorated gateway', async () => {
+    // The probe imports `@setu-ts/*` by name. The Deno lane's generated config maps those to
+    // workspace source; without it Deno resolves them through node_modules to an unbuilt
+    // `dist/`. `--no-lock` keeps a test run from rewriting the committed lane lock, and
+    // DENO_NO_PACKAGE_JSON stops the root package.json joining the resolution (M111e3).
     const result = await runProcess(denoBinary(), {
+      env: { DENO_NO_PACKAGE_JSON: '1' },
       args: [
         'run',
+        '--config',
+        'test/deno-lane/lane.config.json',
+        '--no-lock',
         '--allow-net',
         '--allow-read',
         '--allow-import',
