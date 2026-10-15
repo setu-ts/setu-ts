@@ -144,14 +144,15 @@ sandbox uses (`SANDBOX_READ_PATHS` in `scripts/lib/sandbox.ts`) plus the probe's
 the preload refuses the builtins that bypass the permission model:
 
 ```bash
+PROBE=.verify-111f   # this milestone's id
 R=(); for p in packages node_modules pnpm-workspace.yaml package.json scripts/lib/workspace.ts \
   scripts/lib/source-register.ts scripts/lib/source-hooks.ts scripts/codemods/workspace-sources.ts \
-  scripts/lib/sandbox-preload.ts scripts/lib/sandbox.ts scripts/lib/run.ts .verify-<N>; do
+  scripts/lib/sandbox-preload.ts scripts/lib/sandbox.ts scripts/lib/run.ts "$PROBE"; do
   R+=("--allow-fs-read=$PWD/$p"); done
 env -i PATH="$PATH" HOME="$HOME" node --permission "${R[@]}" \
-  --allow-fs-write="$PWD/.verify-<N>" \
+  --allow-fs-write="$PWD/$PROBE" \
   --import ./scripts/lib/source-register.ts --import ./scripts/lib/sandbox-preload.ts \
-  .verify-<N>/driver.ts
+  "$PROBE/driver.ts"
 ```
 
 The code under audit can then read only the package sources and `node_modules`, never `.git`, a
