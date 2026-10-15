@@ -138,20 +138,31 @@ file), at the real surface — a kernel application, the real connector, the rea
 **Run every probe sandboxed, never with `-A`.** The driver imports the code under audit, so whatever
 the probe is granted, that code is granted too — and `-A` gives an untrusted branch the host's
 files, environment, and network. Run from the repository (or worktree) root so `.` is the tree under
-audit. Install dependencies first with `pnpm install --frozen-lockfile`, then run a plain Node probe
-through the source resolver, with a clean environment:
+audit. Install dependencies first with `pnpm install --frozen-lockfile`, then run the probe under
+Node's permission model with a clean environment. The read grants are the ones the documentation
+sandbox uses (`SANDBOX_READ_PATHS` in `scripts/lib/sandbox.ts`) plus the probe's own directory, and
+the preload refuses the builtins that bypass the permission model:
 
 ```bash
-env -i PATH="$PATH" HOME="$HOME" node --import ./scripts/lib/source-register.ts \
-  .tmp/verify-<N>/driver.ts
+R=(); for p in packages node_modules pnpm-workspace.yaml package.json scripts/lib/workspace.ts \
+  scripts/lib/source-register.ts scripts/lib/source-hooks.ts scripts/codemods/workspace-sources.ts \
+  scripts/lib/sandbox-preload.ts scripts/lib/sandbox.ts scripts/lib/run.ts .verify-<N>; do
+  R+=("--allow-fs-read=$PWD/$p"); done
+env -i PATH="$PATH" HOME="$HOME" node --permission "${R[@]}" \
+  --allow-fs-write="$PWD/.verify-<N>" \
+  --import ./scripts/lib/source-register.ts --import ./scripts/lib/sandbox-preload.ts \
+  .verify-<N>/driver.ts
 ```
 
-Pass only the variables the probe needs after `env -i` (`REDIS_URL=…`). This invocation is not a
-sandbox: Node does not inherit the former Deno permissions. For untrusted inputs, use an isolated
-container or explicit Node permission flags and the repository `scripts/lib/sandbox.ts` helpers.
-Scope filesystem access to the probe inputs and scratch outputs, and network access to the
-disposable backend using the isolation mechanism. Do not widen an audited boundary simply to make a
-probe pass; record the access request and compare it with the design review.
+The code under audit can then read only the package sources and `node_modules`, never `.git`, a
+local `.env` or the rest of the host, and write only the probe's scratch directory. Pass only the
+variables the probe needs after `env -i` (`REDIS_URL=…`). Node 24's permission model does not
+restrict the network: a probe whose audited code must not reach the host's network runs in a
+container instead, on a Docker network holding only the disposable backend (`--network <isolated>`,
+the repository mounted read-only). Grant child processes or workers (`--allow-child-process`,
+`--allow-worker`) only when the design review accounts for them. A permission error is evidence, not
+an obstacle: when audited code asks for access neither this baseline nor the design review accounts
+for, record it as a finding rather than widening the grant.
 
 Every probe has two halves, and both are mandatory:
 
@@ -252,8 +263,8 @@ A `fetch`-based probe of a refusal on framing, authority, or a duplicate header 
 something other than what it claims. It has cut both ways here: on M98b a `fetch` probe reported a
 wrong-`Host` request served `200` when the raw-socket probe got `400`, and only the raw-socket
 rewrite found that a forwarding header the plan said to refuse was being served. Write those
-requests as bytes on a `Deno.connect` socket with `Connection: close` and read the raw response;
-keep `fetch` for the happy path and for a client library's own code path.
+requests as bytes on a `node:net` socket (`createConnection`) with `Connection: close` and read the
+raw response; keep `fetch` for the happy path and for a client library's own code path.
 
 # Step 5 — Negative controls for every new control
 

@@ -367,7 +367,7 @@ graph TB
 
 ## Repository Structure
 
-A Deno 2 workspace. Every package is published independently to npm; releases before `v0.9.0` were
+A pnpm workspace. Every package is published independently to npm; releases before `v0.9.0` were
 published to JSR.
 
 ```
