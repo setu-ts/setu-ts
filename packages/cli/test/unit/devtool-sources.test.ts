@@ -1,6 +1,8 @@
 import * as nodeFs from 'node:fs/promises';
 /** Source policies and conservative upgrades consume the actual exported option types. */
 import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { workspaceMembers } from '../../../../scripts/lib/workspace.ts';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { DEVTOOL_SOURCES } from '../fixtures/devtool-source-shapes.ts';
 import {
@@ -401,10 +403,8 @@ describe('development source policies', () => {
   // configuration's meaning must be decidable from its own text. Each row below is
   // outside that language and must be refused, not parsed.
   it('lists exactly the workspace packages as framework packages', async () => {
-    const root = JSON.parse(
-      await nodeFs.readFile(new URL('../../../../deno.json', import.meta.url), 'utf8'),
-    ) as { workspace: string[] };
-    const members = root.workspace.map((path) => path.split('/').at(-1)!).sort();
+    const root = fileURLToPath(new URL('../../../../', import.meta.url));
+    const members = (await workspaceMembers(root)).map((path) => path.split('/').at(-1)!).sort();
     expect([...FRAMEWORK_PACKAGES].sort()).toEqual(members);
   });
 

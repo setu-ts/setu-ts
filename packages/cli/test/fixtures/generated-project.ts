@@ -5,7 +5,9 @@ import {
   unusedPort as nodeUnusedPort,
 } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { workspaceMembers } from '../../../../scripts/lib/workspace.ts';
 /**
  * Helpers for type-checking a project the CLI just scaffolded.
  *
@@ -65,6 +67,41 @@ export function workspaceEntrypoint(pkg: string): string {
 }
 
 /**
+ * The mappings the framework's own sources resolve through.
+ *
+ * A repointed `@setu-ts/*` source imports more than the project declares: other
+ * framework packages it depends on (a starter imports `@setu-ts/static-plugin`)
+ * and the bare npm names its members map (`hono`, `zod`, …). A check run with
+ * `--config <project>/deno.json` applies only the project's map, so those would
+ * fall back to `package.json` resolution. The root `deno.json` workspace
+ * supplied them until M111e3 removed it; now every framework entry point comes
+ * from the Deno lane's generated config (one source for both) and every npm
+ * mapping from the members' own `deno.json`.
+ */
+async function frameworkImports(): Promise<Record<string, string>> {
+  const imports: Record<string, string> = {};
+  const lane = JSON.parse(
+    await nodeFs.readFile(`${REPO_ROOT}/test/deno-lane/lane.config.json`, 'utf8'),
+  ) as { imports: Record<string, string> };
+  for (const [specifier, target] of Object.entries(lane.imports)) {
+    if (specifier.startsWith('@setu-ts/')) {
+      imports[specifier] = resolve(`${REPO_ROOT}/test/deno-lane`, target);
+    }
+  }
+  for (const member of await workspaceMembers(REPO_ROOT)) {
+    const manifest = JSON.parse(
+      await nodeFs.readFile(`${REPO_ROOT}/${member}/deno.json`, 'utf8'),
+    ) as { imports?: Record<string, string> };
+    for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
+      if (!specifier.startsWith('@setu-ts/') && !(specifier in imports)) {
+        imports[specifier] = target;
+      }
+    }
+  }
+  return imports;
+}
+
+/**
  * Repoints a scaffolded project's `@setu-ts/*` imports at this workspace, so a
  * check measures drift against HEAD rather than against a published snapshot.
  *
@@ -82,7 +119,8 @@ export async function useWorkspacePackages(root: string): Promise<void> {
     imports?: Record<string, string>;
     compilerOptions?: Record<string, unknown>;
   };
-  const imports: Record<string, string> = {};
+  // The project's own entries win: they are what the CLI emitted.
+  const imports: Record<string, string> = await frameworkImports();
   for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
     // Only framework specifiers are repointed. A template may also declare a
     // project-local alias (`~/` → `./app/`), and rewriting that to a package
