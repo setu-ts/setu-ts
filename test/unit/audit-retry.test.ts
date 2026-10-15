@@ -4,6 +4,8 @@ import {
   backoffMs,
   classifyAudit,
   runAuditLoop,
+  runAudit,
+  auditDeps,
   shouldRetry,
   type AuditRun,
 } from '../../scripts/audit.ts';
@@ -15,6 +17,30 @@ const registry = {
 };
 const advisory = { code: 1, stdout: '{"metadata":{"vulnerabilities":{"high":1,"critical":0}}}' };
 describe('pnpm audit', () => {
+  it('uses a monotonic production clock and resolves its bounded wait', async () => {
+    const before = auditDeps.now();
+    await auditDeps.sleep(1);
+    expect(auditDeps.now()).toBeGreaterThanOrEqual(before);
+    auditDeps.log('audit production logger exercised');
+    expect(auditDeps.run).toBe(runAudit);
+  });
+  it('calls pnpm with JSON and the deadline, retaining errors and timeouts', async () => {
+    for (const code of [0, 124]) {
+      expect(
+        await runAudit(123, (command, args, options) => {
+          expect(command).toBe('pnpm');
+          expect(args).toEqual(['audit', '--audit-level', 'high', '--json']);
+          expect(options?.timeoutMs).toBe(123);
+          return Promise.resolve({ code, stdout: '{}', stderr: code === 0 ? '' : 'timed out' });
+        }),
+      ).toEqual({
+        code,
+        stdout: '{}',
+        stderr: code === 0 ? '' : 'timed out',
+        timedOut: code === 124,
+      });
+    }
+  });
   it('distinguishes clean, advisory, registry and unclassifiable outcomes', () => {
     expect(classifyAudit(clean).kind).toBe('clean');
     expect(classifyAudit(registry).kind).toBe('registry');

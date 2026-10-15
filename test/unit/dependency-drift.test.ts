@@ -1,11 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import {
   findDependencyDrift,
   formatDependencyDrift,
   packageNameOf,
+  runDependencyDriftMain,
 } from '../../scripts/dependency-drift.ts';
 describe('pnpm dependency drift', () => {
+  it('reads two YAML locks through the command path and refuses incomplete arguments', async () => {
+    await mkdir('.tmp', { recursive: true });
+    const dir = await mkdtemp('.tmp/dependency-drift-');
+    try {
+      await writeFile(
+        `${dir}/before.yaml`,
+        "lockfileVersion: '9.0'\npackages: { a@1.0.0: {resolution: {integrity: before}} }",
+      );
+      await writeFile(
+        `${dir}/after.yaml`,
+        "lockfileVersion: '9.0'\npackages: { a@2.0.0: {resolution: {integrity: after}} }",
+      );
+      expect(await runDependencyDriftMain([])).toBe(2);
+      expect(await runDependencyDriftMain([`${dir}/before.yaml`])).toBe(2);
+      expect(await runDependencyDriftMain([`${dir}/before.yaml`, `${dir}/after.yaml`])).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
   it('reads scoped and unscoped package keys', () => {
     expect(packageNameOf('@scope/a@1.0.0')).toBe('@scope/a');
     expect(packageNameOf('zod@4.4.3')).toBe('zod');

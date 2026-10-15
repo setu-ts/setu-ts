@@ -4,7 +4,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { parse } from 'yaml';
+import { parsePnpmLock } from './lib/pnpm-lock.ts';
 
 /** The lockfile subset needed to attribute a range resolution. */
 export interface IDriftLockfile {
@@ -96,7 +96,7 @@ export function formatDependencyDrift(changes: readonly IDependencyDrift[]): str
  * @returns Parsed lockfile specifier resolutions.
  */
 async function readLockfile(path: string): Promise<IDriftLockfile> {
-  return parse(await readFile(path, 'utf8')) as IDriftLockfile;
+  return parsePnpmLock(await readFile(path, 'utf8'));
 }
 
 /**
@@ -104,8 +104,10 @@ async function readLockfile(path: string): Promise<IDriftLockfile> {
  *
  * @returns Process exit status for the command-line caller.
  */
-async function main(): Promise<number> {
-  const [committedPath, freshPath] = process.argv.slice(2);
+export async function runDependencyDriftMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const [committedPath, freshPath] = args;
   if (committedPath === undefined || freshPath === undefined) {
     console.error('usage: dependency-drift.ts <committed-lock> <fresh-lock>');
     return 2;
@@ -118,9 +120,4 @@ async function main(): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) {
-  await (async () => {
-    process.exitCode = await main();
-    return;
-  })();
-}
+if (import.meta.main) process.exitCode = await runDependencyDriftMain();

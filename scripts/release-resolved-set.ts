@@ -2,7 +2,7 @@
 /** Captures the installed pnpm dependency set attached to a release. @module */
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { parse } from 'yaml';
+import { parsePnpmLock } from './lib/pnpm-lock.ts';
 
 /** The resolved-package portion of a pnpm lockfile. */
 export interface IPnpmLockfile {
@@ -46,17 +46,23 @@ export function serializeReleaseResolvedSet(resolvedSet: IReleaseResolvedSet): s
   return JSON.stringify(resolvedSet, null, 2) + '\n';
 }
 
-if (import.meta.main) {
-  const [version, output] = process.argv.slice(2);
+/** Writes a release asset from the repository lock without exiting its caller. */
+export async function runResolvedSetMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const [version, output] = args;
   if (!version || !output) {
     console.error('usage: release-resolved-set.ts <version> <output-path>');
-    process.exitCode = 2;
+    return 2;
   } else {
-    const lockfile = parse(await readFile('pnpm-lock.yaml', 'utf8')) as IPnpmLockfile;
+    const lockfile = parsePnpmLock(await readFile('pnpm-lock.yaml', 'utf8'));
     await writeFile(
       output,
       serializeReleaseResolvedSet(createReleaseResolvedSet(version, lockfile)),
     );
     console.log(`Wrote resolved dependency set for ${version} to ${output}.`);
+    return 0;
   }
 }
+
+if (import.meta.main) process.exitCode = await runResolvedSetMain();

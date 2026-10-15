@@ -81,8 +81,11 @@ export async function runAuditLoop(deps: AuditDeps): Promise<number> {
 }
 
 /** Runs the real audit while preserving JSON for classification and CI evidence. */
-export async function runAudit(timeoutMs: number): Promise<AuditRun> {
-  const result = await runProcess('pnpm', ['audit', '--audit-level', 'high', '--json'], {
+export async function runAudit(
+  timeoutMs: number,
+  run: typeof runProcess = runProcess,
+): Promise<AuditRun> {
+  const result = await run('pnpm', ['audit', '--audit-level', 'high', '--json'], {
     timeoutMs,
   });
   console.log(result.stdout);
@@ -90,10 +93,12 @@ export async function runAudit(timeoutMs: number): Promise<AuditRun> {
   return { ...result, timedOut: result.code === 124 };
 }
 
-if (import.meta.main)
-  process.exitCode = await runAuditLoop({
-    run: runAudit,
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    now: () => performance.now(),
-    log: (message) => console.log(message),
-  });
+/** Production audit dependencies, shared with the command entry. */
+export const auditDeps: AuditDeps = {
+  run: runAudit,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: () => performance.now(),
+  log: (message) => console.log(message),
+};
+
+if (import.meta.main) process.exitCode = await runAuditLoop(auditDeps);
