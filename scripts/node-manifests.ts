@@ -3,7 +3,7 @@
  * The Node-manifest generator and drift gate (M111a plan §3.1).
  *
  * Writes every workspace member's `package.json` and `tsconfig.json`, the root
- * solution `tsconfig.json`, Deno lane config, and the root `package.json`
+ * solution `tsconfig.json`, app type-check configs, Deno lane config, and the root `package.json`
  * `workspaces` field, from four inputs: each member's `deno.json`
  * (`name`/`version`/`exports`), a scan of every TypeScript file under its
  * `src` and `test` trees, the committed external-range table
@@ -43,7 +43,7 @@
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { type Dirent } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
-import { workspaceMembers } from './lib/workspace.ts';
+import { workspaceApps, workspaceMembers } from './lib/workspace.ts';
 
 import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
@@ -58,9 +58,8 @@ import {
 } from './node-dependency-ranges.ts';
 
 /**
- * Root tests that import an app's Deno entry point, whose `npm:` specifiers `tsc`
- * cannot resolve. They still run under Vitest; M111e3 moves the apps to pnpm and
- * empties this list.
+ * Root tests importing an app's Deno entry point remain excluded until the
+ * app/browser migration in M111e3 is complete.
  */
 export const CHECK_EXCLUDED_UNTIL_APPS_MOVE: readonly string[] = ['test/browser-gate.test.ts'];
 
@@ -952,6 +951,10 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
   if (refusals.length === 0) {
     const lane = await readFile(`${root}/test/deno-lane/deno.json`, 'utf8');
     files.set('test/deno-lane/lane.config.json', renderLaneConfig(members, lane));
+    files.set('tsconfig.apps.json', renderAppsTsconfig());
+    for (const app of await workspaceApps(root)) {
+      files.set(`${app}/tsconfig.json`, renderAppTsconfig(app));
+    }
   }
   if (refusals.length > 0) {
     for (const refusal of refusals) console.error(`✗ ${refusal}`);
@@ -1004,19 +1007,7 @@ export function renderCheckTsconfig(): string {
           jsx: 'react-jsx',
           jsxImportSource: 'hono/jsx',
           types: ['node', './packages/runtime/node_modules/@types/deno'],
-          paths: {
-            '@setu-ts/rest-starter': ['./packages/starters/rest-starter/src/index.ts'],
-            '@setu-ts/microservice-starter': [
-              './packages/starters/microservice-starter/src/index.ts',
-            ],
-            '@setu-ts/full-stack-starter': ['./packages/starters/full-stack-starter/src/index.ts'],
-            '@setu-ts/*': ['./packages/*/src/index.ts'],
-            '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
-            '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
-            '@setu-ts/localization-plugin/format': [
-              './packages/localization-plugin/src/format/index.ts',
-            ],
-          },
+          paths: sourcePaths(),
         },
         include: [
           'packages/*/src',
@@ -1033,6 +1024,71 @@ export function renderCheckTsconfig(): string {
           'test/fixtures/snippets',
           ...CHECK_EXCLUDED_UNTIL_APPS_MOVE,
         ],
+      },
+      null,
+      2,
+    ) + '\n'
+  );
+}
+
+/** The shared source aliases for repository and app type checking. */
+export function sourcePaths(prefix = './'): Record<string, string[]> {
+  const paths = {
+    '@setu-ts/rest-starter': ['./packages/starters/rest-starter/src/index.ts'],
+    '@setu-ts/microservice-starter': ['./packages/starters/microservice-starter/src/index.ts'],
+    '@setu-ts/full-stack-starter': ['./packages/starters/full-stack-starter/src/index.ts'],
+    '@setu-ts/*': ['./packages/*/src/index.ts'],
+    '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
+    '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
+    '@setu-ts/localization-plugin/format': ['./packages/localization-plugin/src/format/index.ts'],
+  };
+  return Object.fromEntries(
+    Object.entries(paths).map(([key, values]) => [
+      key,
+      values.map((value) => prefix + value.slice(2)),
+    ]),
+  );
+}
+
+/** Root options for apps that consume source without emitting it. */
+export function renderAppsTsconfig(): string {
+  return (
+    JSON.stringify(
+      {
+        extends: './tsconfig.base.json',
+        compilerOptions: {
+          noEmit: true,
+          composite: false,
+          declaration: false,
+          declarationMap: false,
+          isolatedDeclarations: false,
+          allowImportingTsExtensions: true,
+          rewriteRelativeImportExtensions: false,
+          types: ['node'],
+          paths: sourcePaths(),
+        },
+      },
+      null,
+      2,
+    ) + '\n'
+  );
+}
+
+/** Generated per-app roots; full-stack replaces paths to add its React route alias. */
+export function renderAppTsconfig(app: string): string {
+  return (
+    JSON.stringify(
+      {
+        extends: '../../tsconfig.apps.json',
+        ...(app === 'apps/full-stack'
+          ? {
+              compilerOptions: {
+                jsx: 'react-jsx',
+                paths: { ...sourcePaths('../../'), '~/*': ['./app/*'] },
+              },
+            }
+          : {}),
+        include: ['**/*.ts', '**/*.tsx'],
       },
       null,
       2,

@@ -24,6 +24,9 @@ import {
   renderPackageJson,
   renderLaneConfig,
   renderRootPackageJson,
+  renderAppsTsconfig,
+  renderAppTsconfig,
+  renderCheckTsconfig,
   runNodeManifests,
 } from '../../scripts/node-manifests.ts';
 
@@ -603,6 +606,8 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
     await mkdir(`${root}/test/deno-lane`, { recursive: true });
     await writeFile(`${root}/test/deno-lane/deno.json`, '{"imports":{},"scopes":{}}');
     await writeFile(`${root}/LICENSE`, 'test license\n');
+    await mkdir(`${root}/apps/minimal`, { recursive: true });
+    await writeFile(`${root}/apps/minimal/package.json`, '{}');
     await mkdir(`${root}/packages/a/src`, { recursive: true });
     await writeFile(
       `${root}/packages/a/deno.json`,
@@ -622,6 +627,12 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
       expect(await runNodeManifests(['--check'], root)).toBe(1);
       expect(await runNodeManifests(['--write'], root)).toBe(0);
       expect(await runNodeManifests(['--check'], root)).toBe(0);
+      for (const path of ['tsconfig.apps.json', 'apps/minimal/tsconfig.json']) {
+        const original = await readFile(`${root}/${path}`, 'utf8');
+        await writeFile(`${root}/${path}`, '{}');
+        expect(await runNodeManifests(['--check'], root)).toBe(1);
+        await writeFile(`${root}/${path}`, original);
+      }
       await writeFile(`${root}/packages/a/LICENSE`, 'drift');
       expect(await runNodeManifests(['--check'], root)).toBe(1);
       await writeFile(`${root}/packages/a/LICENSE`, 'test license\n');
@@ -694,6 +705,48 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
     }
     expect(config.permissions.cli.net).toEqual(['127.0.0.1']);
     expect(config.permissions.runtime.net).toBe(true);
+  });
+});
+
+describe('app type-check configurations', () => {
+  it('shares source aliases and uses the plan-prescribed non-emitting Node options', () => {
+    const apps = JSON.parse(renderAppsTsconfig());
+    const check = JSON.parse(renderCheckTsconfig());
+    expect(apps.extends).toBe('./tsconfig.base.json');
+    expect(apps.compilerOptions).toEqual({
+      noEmit: true,
+      composite: false,
+      declaration: false,
+      declarationMap: false,
+      isolatedDeclarations: false,
+      allowImportingTsExtensions: true,
+      rewriteRelativeImportExtensions: false,
+      types: ['node'],
+      paths: check.compilerOptions.paths,
+    });
+  });
+
+  it('replaces the complete alias map only for the React full-stack app', () => {
+    const minimal = JSON.parse(renderAppTsconfig('apps/minimal'));
+    expect(minimal).toEqual({
+      extends: '../../tsconfig.apps.json',
+      include: ['**/*.ts', '**/*.tsx'],
+    });
+    const full = JSON.parse(renderAppTsconfig('apps/full-stack'));
+    expect(full.extends).toBe(minimal.extends);
+    expect(full.include).toEqual(minimal.include);
+    expect(full.compilerOptions.jsx).toBe('react-jsx');
+    const { '~/*': alias, ...paths } = full.compilerOptions.paths;
+    expect(alias).toEqual(['./app/*']);
+    const root = JSON.parse(renderAppsTsconfig()).compilerOptions.paths;
+    expect(paths).toEqual(
+      Object.fromEntries(
+        Object.entries(root).map(([key, values]) => [
+          key,
+          (values as string[]).map((value) => '../../' + value.slice(2)),
+        ]),
+      ),
+    );
   });
 });
 
