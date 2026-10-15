@@ -25,7 +25,7 @@ no session outlives a sitting.
    README-only `0.0.0-bootstrap.0` placeholders, and run `npm logout` when the loop finishes:
 
    ```fish
-   deno task release:placeholders
+   pnpm run release:placeholders
    for dir in .tmp/npm-placeholders/*
        set name (node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).name" "$dir/package.json")
        npm view "$name" name >/dev/null 2>&1; and continue
@@ -106,8 +106,8 @@ shipping CHANGELOG section: a `BREAKING` entry requires a minor. `release:verify
 patch or a quiet minor unless `--allow-quiet-minor` is deliberate.
 
 ```fish
-deno task release:bump 0.9.0 --dry-run
-deno task release:bump 0.9.0
+pnpm run release:bump 0.9.0 --dry-run
+pnpm run release:bump 0.9.0
 node scripts/node-manifests.ts --write
 ```
 
@@ -126,30 +126,26 @@ own placeholder and trust configuration before their first real release.
   move both. Sources now import bare package names, and `scripts/npm-specifier-audit.ts` refuses any
   `npm:` or `jsr:` specifier under `packages/*/src`, so there is nothing to grep for. **Never bump
   an `@since` tag**: it records when a symbol appeared, so moving it makes it a lie.
-- **Move the version in the 15 tracked `apps/*/deno.lock` files, and do it with `sed`, not by
-  regenerating.** Each records its workspace members under `workspace.links` — a site no gate sees,
-  because every example maps `@setu-ts/*` at `../../packages/<name>/src` and nothing installs from
-  these locks. Rewrite the `@setu-ts` version tokens in place (both the full `@0.4.0` and the bare
-  `@0.4` forms appear), then run the same entry points `check:apps` uses to confirm Deno accepts the
-  result **unchanged** — `main.ts smoke.ts`, plus `worker.ts` where it exists.
+- **`release:bump` rewrites `test/deno-lane/deno.lock` in place, and you commit that result.** The
+  lane lock records every workspace member under `workspace.links` at the shipping version (52
+  `jsr:@setu-ts/<pkg>@<version>` keys), so it is the swept file that keeps the sweep's
+  zero-reference guard meaningful. `pnpm-lock.yaml` records workspace members as `link:` entries
+  with a `workspace:^` specifier and no version, so a bump does not change it and it is not swept;
+  `pnpm install --frozen-lockfile` after the bump confirms that. The 15 tracked `apps/*/deno.lock`
+  files this runbook used to bump are gone — M111e3 made the examples pnpm workspace members with no
+  lockfile of their own.
 
-  **Do not reach for `deno check` alone to regenerate them.** With the members bumped and the lock
-  still naming the old version, Deno rebuilds the whole file and re-resolves every third-party range
-  as well — cutting `v0.5.0` that way silently moved `@hono/hono` `4.13.5` → `4.13.7` plus several
-  npm transitives across all 15 locks. That is dependency drift riding into a release PR, which the
-  weekly **Dependency drift** workflow exists to review separately. Rewritten in place the locks
-  already agree with the tree, so `deno check` re-resolves nothing and leaves them byte-identical.
-  Prove it rather than assume it: normalise the `@setu-ts` version tokens on both sides and diff,
-  and every remaining difference is drift you did not intend. `apps/full-stack/deno.lock` is
-  gitignored and needs nothing.
-
-  The ROOT `deno.lock` carries them too — 96 tokens at this writing, in its workspace-member
-  dependency lists, in both the `@<minor>` and the full `@<version>` forms. Unlike the app locks it
-  is rewritten automatically by the first `deno task` you run after bumping the manifests, so it
-  usually moves without being asked; do not rely on that. Check it explicitly and commit the result:
+  **Never regenerate the lane lock during a bump.** With the members bumped and the lock still
+  naming the old version, Deno rebuilds the whole file and re-resolves every third-party range as
+  well — cutting `v0.5.0` that way silently moved `@hono/hono` `4.13.5` → `4.13.7` plus several npm
+  transitives across all 15 app locks. That is dependency drift riding into a release PR, which the
+  weekly **Dependency drift** workflow exists to review separately. Prove the rewrite rather than
+  assume it: normalise the `@setu-ts` version tokens on both sides and diff, and every remaining
+  difference is drift you did not intend.
 
   ```fish
-  grep -oE '@setu-ts/[a-z0-9-]+@[0-9][^"]*' deno.lock | sed -E 's#@setu-ts/[a-z0-9-]+@##' | sort -u
+  grep -oE '@setu-ts/[a-z0-9-]+@[0-9][^"]*' test/deno-lane/deno.lock |
+    sed -E 's#@setu-ts/[a-z0-9-]+@##' | sort -u
   ```
 
   Every line it prints must name the version being released.
@@ -179,7 +175,7 @@ own placeholder and trust configuration before their first real release.
 - **Re-render `k8s/manifests/` after bumping `k8s/chart/Chart.yaml`.** The chart is the single
   authored source and the rendered manifests are committed beside it (M39), so bumping `appVersion`
   without re-rendering leaves eight manifests carrying the previous `app.kubernetes.io/version`
-  label. `deno task deploy:render` rewrites them; `check:deploy` fails with
+  label. `pnpm run deploy:render` rewrites them; `check:deploy` fails with
   `k8s/manifests/ is out of date with k8s/chart/` if you forget. Nothing else sees it — the four
   ordinary gates, both publish gates and `check:versions` all pass over the drift, because the label
   is not an `@setu-ts` specifier and the manifests are not TypeScript. Cutting `v0.5.0` found this
@@ -211,12 +207,12 @@ own placeholder and trust configuration before their first real release.
 ### 2. Verify the committed tree
 
 ```fish
-deno task fmt:check; and deno task lint; and deno task check; and deno task test:coverage
+pnpm run fmt:check; and pnpm run lint; and pnpm run check; and pnpm run test:tooling:coverage
 pnpm test:coverage
-deno task release:verify 0.9.0
-deno task check:versions
-deno task check:node-build --require-all
-deno task release:publish --dry-run
+pnpm run release:verify 0.9.0
+pnpm run check:versions
+pnpm run check:node-build --require-all
+pnpm run release:publish --dry-run
 ```
 
 The npm dry run builds once, packs all 52 with scripts disabled, checks each exact packed manifest,
@@ -269,7 +265,7 @@ an unused trust configuration expires, delete it in npm's package settings, recr
 for packages whose first publish already validated it.
 
 As a last-resort recovery when CI cannot be restored, the maintainer may locally publish the real
-release with npm login and 2FA using `deno task release:publish`. This produces no provenance and
+release with npm login and 2FA using `pnpm run release:publish`. This produces no provenance and
 therefore does not satisfy the cut's provenance exit criterion. It is a fallback requiring an
 explicit maintainer decision, never the normal bootstrap path.
 
@@ -288,27 +284,29 @@ set prerelease
 if string match -q '*-*' "$version"
     set prerelease --prerelease
 end
-mkdir -p .tmp; and deno task release:resolved-set "$version" .tmp/resolved-set.json; and node scripts/release-notes.ts "$version" > .tmp/notes.md; and gh release create "v$version" --verify-tag --title "v$version" --notes-file .tmp/notes.md .tmp/resolved-set.json#resolved-set.json $prerelease
+mkdir -p .tmp; and pnpm run release:resolved-set "$version" .tmp/resolved-set.json; and node scripts/release-notes.ts "$version" > .tmp/notes.md; and gh release create "v$version" --verify-tag --title "v$version" --notes-file .tmp/notes.md .tmp/resolved-set.json#resolved-set.json $prerelease
 ```
 
 `--verify-tag` prevents a mistyped version from creating a new tag. The workflow checks whether the
-Release already exists before creating it. `resolved-set.json` wraps committed `deno.lock` with the
-release version; M111e will move it to pnpm. It reproduces the framework build, while an application
-still resolves its own dependency graph. `release:verify` requires generation, upload, download and
+Release already exists before creating it. `resolved-set.json` records the resolved set read from
+the committed `pnpm-lock.yaml`: the release `version`, the lock's `lockfileVersion`, and a
+`packages` map keyed `<name>@<version>` that holds each package's registry `integrity` where the
+lock carries one, sorted by key. It reproduces the framework build, while an application still
+resolves its own dependency graph. `release:verify` requires generation, upload, download and
 attachment across the jobs.
 
 ### Dependency drift
 
-The scheduled **Dependency drift** workflow runs weekly. It resolves all workspace ranges with
-`--reload` into a temporary lockfile — the workspace manifests first, then the tracked source graph,
-because a source-only resolution produces a lockfile `deno ci` refuses to install and mis-attributes
-the peer versions that fall out with it — compares that lockfile's direct resolutions with the
-committed one, then runs format, lint, type-check, and test gates against the fresh lock. It never
-modifies `deno.lock` and cannot block a pull request or release. A changed resolution or failed gate
-creates or updates one `dependency-drift` GitHub issue whose table names each package, specifier,
-and committed→fresh version.
+The scheduled **Dependency drift** workflow runs weekly. It keeps a copy of the committed
+`pnpm-lock.yaml`, deletes the working copy, and runs `pnpm install --lockfile-only` so every
+declared range resolves fresh; `dependency:drift` then compares that resolution's packages with the
+committed lock, and the job installs the fresh lock with `--frozen-lockfile` and runs the format,
+lint, type-check and test gates against it. It never modifies the committed lockfile and cannot
+block a pull request or release. A changed resolution or failed gate creates or updates one
+`dependency-drift` GitHub issue whose table names each package, specifier, and committed→fresh
+version.
 
-The job declares the same backend containers as ci.yml's `deno` job, and must: it re-runs that job's
+The job declares the same backend containers as ci.yml's `node` job, and must: it re-runs that job's
 suite, so a backend it does not start is a guarded suite that skips there while passing on every PR
 — and `REDIS_URL`'s reachability assertion fires in every workflow, so a job without the container
 reports a `test` failure that has nothing to do with drift. `test/unit/release-notes.test.ts`
@@ -316,9 +314,9 @@ derives that requirement from ci.yml for every workflow that runs the suite.
 
 **Acting on the report.** Drift is diagnostic, not a queue to drain: a table with no advisory behind
 it and green gates needs no action. When a bump is warranted, re-resolve the same way the job does
-rather than by hand — `rm deno.lock && deno install --frozen=false`, then `deno cache` over the
-tracked sources, then `deno ci` to confirm the result installs frozen. Resolving only one of those
-two halves produces a lockfile that passes `deno check` and fails `deno ci`.
+rather than by hand — remove `pnpm-lock.yaml`, run `pnpm install --lockfile-only`, read the diff the
+refreshed lockfile produces, and commit it; `pnpm install --frozen-lockfile` then confirms the tree
+installs against the resolution you reviewed.
 
 ## Prereleases and installation timing
 
@@ -335,13 +333,13 @@ notes and changelog can reference the current API surface.
 
 ```fish
 # Rebuild the static API site (ignored output)
-deno task docs:api
+pnpm run docs:api
 
 # Run the JSDoc lint ratchet (must be green before release)
-deno task check:api-docs
+pnpm run check:api-docs
 
 # Run both together (Markdown checks + API lint)
-deno task check:docs
+pnpm run check:docs
 ```
 
 The JSDoc ratchet runs **TypeDoc 0.28.20**, pinned exactly in the generated root `package.json`.
@@ -362,8 +360,8 @@ fails before comparing counts and never advises changing the baseline. When the 
 re-measure the count and clean set with the same source graph and validation scope in the same
 change.
 
-`docs:api` and `release:docs` still generate `deno doc --html` output for the website until M111e3.
-The Deno version no longer governs the JSDoc ratchet.
+`docs:api` and `release:docs` generate TypeDoc HTML. The Deno version no longer governs the JSDoc
+ratchet.
 
 Generated output lives under `docs/api/`, which is gitignored. Verify it is not tracked:
 

@@ -52,26 +52,27 @@ where the full validation suite and an optional CodeRabbit review can run. Fork 
 the validated repository-branch PR is the one that can merge. Please do not ask maintainers to run
 those services before the change has been accepted for review.
 
-For work performed in a repository branch, install Node 24, pnpm 12.11.2, and Deno on `PATH`, then
-run `pnpm install --frozen-lockfile`. Deno remains necessary for formatting, lint, type checks,
-repository scripts, Deno CLI subprocess proofs, and the retained runtime lane. The relevant checks
-are:
+For work performed in a repository branch, install Node 24 and pnpm 12.11.2, then run
+`pnpm install --frozen-lockfile`. Deno is on `PATH` only where a Deno runtime is the subject:
+`pnpm run test:deno-lane`, the `fmt`/`fmt:check` pair (which runs `deno fmt` over the five generated
+SDK client fixtures), and the CLI's `--runtime deno` e2e suites that `pnpm test` runs. The relevant
+checks are:
 
 ```bash
-deno task fmt:check
-deno task lint
-deno task check
-deno task test
+pnpm run fmt:check
+pnpm run lint
+pnpm run check
+pnpm run test:tooling
 pnpm test
 pnpm test:coverage
-deno task test:deno-lane
-deno task test:coverage
+pnpm run test:deno-lane
+pnpm run test:tooling:coverage
 ```
 
-Package tests import from `vitest`; root tooling tests retain `@std/testing/bdd` and `@std/expect`
-until M111e. Node coverage is measured per member with a 90% per-file branch/function/line bar; a
+Package tests and root tooling tests import from `vitest`; the root tests run in the `tooling`
+Vitest member. Node coverage is measured per member with a 90% per-file branch/function/line bar; a
 failed targeted run is authoritative. Select members with `pnpm test:coverage cli runtime` or
-`deno task test:coverage:pkg cli runtime`; use the member basename or its workspace path. Running
+`pnpm run test:coverage:pkg cli runtime`; use the member basename or its workspace path. Running
 without selections measures every member.
 
 Changes to a published package also require its documented coverage and publish checks. See
