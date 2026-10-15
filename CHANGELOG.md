@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **CI, examples and website on Node and pnpm (M111e3).** The root `deno.json` and `deno.lock` are
+  gone: every repository command is `pnpm run <name>`, with `pnpm run test:tooling` and
+  `pnpm run test:tooling:coverage` for the root suite that `deno task test` used to run. The
+  authored `pnpm-workspace.yaml` is the workspace list. CI's main job is now "Format / Lint / Check
+  / Test" on Node, and the Deno runtime proofs run in their own "Deno runtime lane" job against a
+  committed `test/deno-lane/deno.lock`; Deno is installed only where it is the subject. The examples
+  under `apps/` join the pnpm workspace and run through `tsx`, `apps/compiled-binary` becomes a Node
+  single executable application, and the repository images move to `node:24-alpine` (268–289 MB) and
+  a Node SEA on distroless (211 MB, previously 44.9 MB as a Deno-compiled binary). The release's
+  `resolved-set.json` now records the resolved set from `pnpm-lock.yaml`:
+  `{ version, lockfileVersion, packages }`, where each `packages` key is an exact `name@version`
+  with its registry `integrity` when present; it no longer embeds `deno.lock`. The generated API
+  reference is TypeDoc HTML, so its page URLs change (`modules/<package>_src.html` replaces
+  `<package>/src/index.ts/index.html`), and the website builds with pnpm.
+
 - **Repository tooling on Node (M111e2).** Repository scripts use Node 24 and a shared subprocess
   helper. Root tests join the Vitest `tooling` member, which enforces the existing script coverage
   inventory per file. Root tasks forward to pnpm; the tooling-only and all-member test commands keep
