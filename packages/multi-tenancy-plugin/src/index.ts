@@ -2,6 +2,8 @@
  * @module
  *
  * `@setu-ts/multi-tenancy-plugin` — multi-tenancy support for Setu-TS.
+ *
+ * This entry point exports the public multi-tenancy capability.
  */
 
 // Re-export types from common for convenience.

@@ -115,10 +115,11 @@ describe('API Documentation Generation', () => {
       const targets = ['packages/common/src/index.ts'];
       const args = buildApiDocArgs(targets, 'generate', 'docs/api');
 
-      expect(args).toContain('doc');
-      expect(args).toContain('--html');
-      expect(args).toContain('--output=docs/api');
-      expect(args).toContain('--name=Setu-TS');
+      expect(args).toContain('docs');
+      expect(args).toContain('--emit');
+      expect(args).toContain('--out');
+      expect(args).toContain('docs/api');
+      expect(args).toContain('Setu-TS');
       expect(args).toContain('packages/common/src/index.ts');
     });
 
@@ -873,7 +874,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('generate', '/tmp/fake-api-docs', fs, cmd);
       expect(result.code).toBe(2);
-      expect(result.findings.some((f) => f.includes('deno doc failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('typedoc HTML failed'))).toBe(true);
       expect(result.findings.some((f) => f.includes('fatal generation error'))).toBe(true);
     });
 
@@ -1403,7 +1404,7 @@ error[private-type-ref]: public type references private type
     it('main() --check exits 0 on the real repository (ratchet passes)', async () => {
       const cmd = runProcess(process.execPath, [
         '--import',
-        './test/node-source-register.ts',
+        './scripts/lib/source-register.ts',
         'scripts/generate-api-docs.ts',
         '--check',
       ]);
@@ -1414,7 +1415,7 @@ error[private-type-ref]: public type references private type
     it('main() generate mode exits 0 and produces docs/api/index.html', async () => {
       const cmd = runProcess(process.execPath, [
         '--import',
-        './test/node-source-register.ts',
+        './scripts/lib/source-register.ts',
         'scripts/generate-api-docs.ts',
       ]);
       const output = await cmd;
@@ -1445,7 +1446,7 @@ describe('cold-cache resilience (the CI-only failure)', () => {
     // Measured: 2 `Download` lines without this flag under a forced cold fetch
     // (`--reload=npm:drizzle-orm`), 0 with it.
     expect(buildApiDocArgs(['a.ts'], 'check', 'docs/api')).toContain('typedoc.check.json');
-    expect(buildApiDocArgs(['a.ts'], 'generate', 'docs/api')).toContain('--quiet');
+    expect(buildApiDocArgs(['a.ts'], 'generate', 'docs/api')).toContain('--emit');
   });
 
   it('classifies real cold-cache stderr as lint debt, not a fatal error', () => {

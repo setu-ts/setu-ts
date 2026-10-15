@@ -1,6 +1,3 @@
-import { stat, readFile, readdir } from 'node:fs/promises';
-import { statSync, type Dirent } from 'node:fs';
-/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Markdown documentation linter — catches the class of defect that renders a
  * committed doc wrong while every other gate stays green.
@@ -56,6 +53,10 @@ import { statSync, type Dirent } from 'node:fs';
  *
  * Exits 1 on any finding.
  */
+import { apiModulePage } from './generate-api-docs.ts';
+import { stat, readFile, readdir } from 'node:fs/promises';
+import { statSync, type Dirent } from 'node:fs';
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 
 interface Finding {
   readonly file: string;
@@ -841,13 +842,7 @@ export function buildGeneratedApiPages(targets: readonly string[]): Set<string> 
   // false-positiving as "does not resolve to a known generated page".
   pages.add('docs/api/index.html');
   for (const target of targets) {
-    // deno doc --html maps packages/<pkg>/src/index.ts →
-    // docs/api/<pkg>/src/index.ts/index.html (the packages/ prefix is stripped).
-    let stripped = target.startsWith('./') ? target.slice(2) : target;
-    if (stripped.startsWith('packages/')) {
-      stripped = stripped.slice('packages/'.length);
-    }
-    pages.add(`docs/api/${stripped}/index.html`);
+    pages.add(`docs/api/${apiModulePage(target)}`);
   }
   return pages;
 }

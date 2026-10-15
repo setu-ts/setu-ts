@@ -1,9 +1,8 @@
 /**
- * Generate the website's API HTML with Deno, or validate repository JSDoc with TypeDoc.
+ * Generate the website's API HTML and validate repository JSDoc with TypeDoc.
  * The check ratchet is measured on the pinned TypeDoc version with every published
  * package explicitly requiring documentation. Any diagnostic in a clean package,
  * an increased count, a decreased count without a baseline update, or a version mismatch fails.
- * HTML generation remains `deno doc --html` until M111e3.
  * @module
  */
 
@@ -440,7 +439,23 @@ export function buildApiDocArgs(
       ...targets,
     ];
   }
-  return ['doc', '--quiet', '--html', '--output=' + outputDir, '--name=Setu-TS', ...targets];
+  return [
+    'node_modules/typedoc/bin/typedoc',
+    '--options',
+    'typedoc.check.json',
+    '--emit',
+    'docs',
+    '--out',
+    outputDir,
+    '--name',
+    'Setu-TS',
+    '--validation.notDocumented',
+    'false',
+    '--validation.notExported',
+    'false',
+    '--entryPoints',
+    ...targets,
+  ];
 }
 
 /**
@@ -766,8 +781,7 @@ export function classifyChildResult(
  * @param cmd - Command execution abstraction
  * @param typedocVersion - The running TypeDoc version, injectable so ratchet tests
  *   are deterministic rather than dependent on the developer's toolchain.
- *   Defaults to `Application.VERSION` from the installed TypeDoc, imported only in check mode so
- *   HTML generation (the website build) needs no root `node_modules`.
+ *   Defaults to `Application.VERSION` from the installed TypeDoc.
  * @returns Exit code and findings
  */
 export async function runApiDocs(
@@ -803,7 +817,7 @@ export async function runApiDocs(
     await fs.mkdir(outputDir, { recursive: true });
   }
 
-  const result = await cmd.run([mode === 'check' ? process.execPath : 'deno', ...args]);
+  const result = await cmd.run([process.execPath, ...args]);
 
   if (mode === 'check') {
     // deno doc --lint outputs diagnostics to stderr; exit code 1 is the
@@ -864,7 +878,7 @@ export async function runApiDocs(
   } else {
     // Propagate child-process failures: non-zero exit code is a failure
     if (result.code !== 0) {
-      findings.push(`deno doc failed with exit code ${result.code}`);
+      findings.push(`typedoc HTML failed with exit code ${result.code}`);
       if (result.stderr) {
         findings.push(`stderr: ${result.stderr}`);
       }
@@ -877,8 +891,9 @@ export async function runApiDocs(
     // Verify output was generated
     try {
       await fs.stat(`${outputDir}/index.html`);
+      for (const target of targets) await fs.stat(`${outputDir}/${apiModulePage(target)}`);
     } catch {
-      findings.push(`Generated output not found at ${outputDir}/index.html`);
+      findings.push(`Generated output missing: ${outputDir}/index.html or a required module page`);
       return { code: 1, findings };
     }
   }
@@ -904,7 +919,8 @@ export async function runApiDocsMain(
 
   const { code } = await runApiDocs(mode, outputDir, fs, cmd);
 
-  return code;
+  if (code !== 0 || mode === 'generate') return code;
+  return (await runApiDocs('generate', outputDir, fs, cmd)).code;
 }
 
 if (import.meta.main) process.exitCode = await runApiDocsMain();
@@ -953,4 +969,18 @@ export function parseTypedocDiagnostics(output: string): DocLintDiagnostic[] {
     });
   }
   return diagnostics;
+}
+
+/** TypeDoc's module page for a configured source entry point. */
+export function apiModulePage(target: string): string {
+  return (
+    'modules/' +
+    target
+      .replace(/^\.\//, '')
+      .replace(/^packages\//, '')
+      .replace(/\/index\.ts$/, '')
+      .replace(/\.ts$/, '')
+      .replaceAll('/', '_') +
+    '.html'
+  );
 }

@@ -52,9 +52,9 @@ describe('rewriteHref', () => {
   it('routes grafted API reference links to the public API tree', () => {
     expect(rewriteHref('./api/', 'README')).toBe('/api/');
     expect(
-      rewriteHref('./api/common/src/index.ts/index.html#IPlugin', 'plugins'),
+      rewriteHref('./api/modules/common_src.html#IPlugin', 'plugins'),
     ).toBe(
-      '/api/common/src/index.ts/index.html#IPlugin',
+      '/api/modules/common_src.html#IPlugin',
     );
   });
 

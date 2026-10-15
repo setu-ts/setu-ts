@@ -610,7 +610,7 @@ describe('documentation gate — package catalog', () => {
   });
 
   it('rejects a missing runtime compatibility table', () => {
-    const section = `### @setu-ts/common\n\n**Purpose:** Test.\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const section = `### @setu-ts/common\n\n**Purpose:** Test.\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/modules/common_src.html)\n`;
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -652,7 +652,7 @@ describe('documentation gate — package catalog', () => {
   });
 
   it('rejects a missing Purpose line', () => {
-    const section = `### @setu-ts/common\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const section = `### @setu-ts/common\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/modules/common_src.html)\n`;
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -876,7 +876,7 @@ describe('documentation gate — local links and anchors', () => {
     const generatedApiPages = buildGeneratedApiPages(targets);
 
     // A real catalog API page (common) must resolve.
-    const realLink = '[API](./api/common/src/index.ts/index.html)';
+    const realLink = '[API](./api/modules/common_src.html)';
     const realSource = realLink;
     const realFindings = await checkLocalLinks('docs/test.md', realSource, [], generatedApiPages);
     expect(realFindings.length).toBe(0);
@@ -911,7 +911,7 @@ describe('documentation gate — local links and anchors', () => {
 
   it('skips generated API links when the page set is null', async () => {
     // When output has not been generated, the gate skips rather than falsely rejecting.
-    const link = '[API](./api/common/src/index.ts/index.html)';
+    const link = '[API](./api/modules/common_src.html)';
     const findings = await checkLocalLinks('docs/test.md', link, [], null);
     expect(findings.length).toBe(0);
   });
@@ -1036,7 +1036,7 @@ describe('documentation gate — script subprocess integration', () => {
   it('check-docs.ts main() exits 0 on a single good file', async () => {
     const cmd = runProcess(process.execPath, [
       '--import',
-      './test/node-source-register.ts',
+      './scripts/lib/source-register.ts',
       'scripts/check-docs.ts',
       'README.md',
     ]);
@@ -1047,7 +1047,7 @@ describe('documentation gate — script subprocess integration', () => {
   it('check-docs.ts main() default scan exits 0 on the real repository', async () => {
     const cmd = runProcess(process.execPath, [
       '--import',
-      './test/node-source-register.ts',
+      './scripts/lib/source-register.ts',
       'scripts/check-docs.ts',
     ]);
     const output = await cmd;
@@ -1061,7 +1061,7 @@ describe('documentation gate — script subprocess integration', () => {
     try {
       const cmd = runProcess(process.execPath, [
         '--import',
-        './test/node-source-register.ts',
+        './scripts/lib/source-register.ts',
         'scripts/check-docs.ts',
         tmpPath,
       ]);
@@ -1328,10 +1328,7 @@ describe('documentation gate — generated API tree links', () => {
    * tree where the output had not been generated. Locally it always passed;
    * CI failed on the first clean checkout. These cases pin both states.
    */
-  const generatedPages = new Set([
-    'docs/api/index.html',
-    'docs/api/kernel/src/index.ts/index.html',
-  ]);
+  const generatedPages = new Set(['docs/api/index.html', 'docs/api/modules/kernel_src.html']);
 
   it('resolves the bare site root to the generated index, tree absent or not', async () => {
     const source = '# Docs\n\n- [Generated API Documentation](./api/)\n';
@@ -1364,7 +1361,7 @@ describe('documentation gate — generated API tree links', () => {
    */
   it('validates the bare site root against the page set, not the filesystem', async () => {
     const source = '# Docs\n\n- [Generated API Documentation](./api/)\n';
-    const withoutIndex = new Set(['docs/api/kernel/src/index.ts/index.html']);
+    const withoutIndex = new Set(['docs/api/modules/kernel_src.html']);
 
     const findings = await checkLocalLinks(
       'docs/README.md',
@@ -1386,7 +1383,7 @@ describe('documentation gate — generated API tree links', () => {
   });
 
   it('still rejects a generated page that the manifest cannot produce', async () => {
-    const source = '# Docs\n\n- [Ghost](./api/no-such-package/src/index.ts/index.html)\n';
+    const source = '# Docs\n\n- [Ghost](./api/modules/no-such-package_src.html)\n';
 
     const findings = await checkLocalLinks(
       'docs/README.md',
