@@ -38,7 +38,7 @@ const OPTIONS: BumpOptions = {
 /** A tree carrying one of every site the bump has to touch. */
 function tree(overrides: Record<string, string | undefined> = {}): Map<string, string> {
   const files = new Map<string, string>([
-    ['deno.json', '{"workspace": ["./packages/common", "./packages/sdk"]}'],
+    ['pnpm-workspace.yaml', '{"packages": ["./packages/common", "./packages/sdk"]}'],
     ['packages/common/deno.json', '{\n  "name": "@setu-ts/common",\n  "version": "0.8.0"\n}\n'],
     // M111a §3.5: the generated npm manifest moves with deno.json; the version
     // constant exists only for a member that reads its version (common here,

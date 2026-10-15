@@ -22,7 +22,7 @@ import {
   normalizeExports,
   renderDenoJson,
   renderPackageJson,
-  renderPnpmWorkspace,
+  renderLaneConfig,
   renderRootPackageJson,
   runNodeManifests,
 } from '../../scripts/node-manifests.ts';
@@ -504,17 +504,35 @@ describe('generateWorkspace — rendered files', () => {
       'packages/runtime',
       'packages/starters/rest-starter',
     ];
-    expect(JSON.parse(files.get('package.json')!).workspaces).toEqual(dirs);
+    expect(JSON.parse(files.get('package.json')!).workspaces).toEqual([...dirs, 'apps/*']);
+    expect(files.has('pnpm-workspace.yaml')).toBe(false);
     expect(JSON.parse(files.get('tsconfig.json')!).references).toEqual(
       dirs.map((dir) => ({ path: `./${dir}` })),
     );
-    for (const dir of dirs) expect(files.get('pnpm-workspace.yaml')).toContain(`  - ${dir}\n`);
   });
 
-  it('denies the two install scripts pnpm 12 refuses to leave undecided', () => {
-    const yaml = renderPnpmWorkspace(['packages/a']);
-    expect(yaml).toContain('allowBuilds:\n  protobufjs: false\n  sse4_crc32: false\n');
-    expect(yaml).toContain('ignoreWorkspaceCycles: true\n');
+  it('keeps authored pnpm install policies', async () => {
+    const yaml = await readFile('pnpm-workspace.yaml', 'utf8');
+    expect(yaml).toContain('  protobufjs: false');
+    expect(yaml).toContain('  sse4_crc32: false');
+    expect(yaml).toContain('ignoreWorkspaceCycles: true');
+  });
+
+  it('generates a standalone lane with every export and preserved scopes', () => {
+    const lane = {
+      imports: { vitest: './vitest-shim.ts' },
+      scopes: { '../../test/': { vitest: './vitest-shim.ts' } },
+    };
+    const generated = JSON.parse(renderLaneConfig([COMMON, kernel], JSON.stringify(lane)));
+    expect(generated.nodeModulesDir).toBe('auto');
+    expect(generated.imports).toMatchObject({
+      vitest: './vitest-shim.ts',
+      '@setu-ts/common': './../../packages/common/src/index.ts',
+      '@setu-ts/kernel/worker': './../../packages/kernel/src/worker/index.ts',
+    });
+    expect(generated.scopes).toEqual(lane.scopes);
+    expect(generated.compilerOptions.strict).toBe(true);
+    expect(generated.compilerOptions.lib).toContain('deno.ns');
   });
 
   it('pins the package manager and the build tools at the root', () => {
@@ -581,7 +599,9 @@ describe('small helpers', () => {
 describe('runNodeManifests — the I/O seam, against a throwaway workspace', () => {
   async function workspace(): Promise<string> {
     const root = await await mkdir('.tmp', { recursive: true }).then(() => mkdtemp('.tmp/test-'));
-    await writeFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
+    await writeFile(`${root}/pnpm-workspace.yaml`, 'packages:\n  - packages/a\n  - apps/*\n');
+    await mkdir(`${root}/test/deno-lane`, { recursive: true });
+    await writeFile(`${root}/test/deno-lane/deno.json`, '{"imports":{},"scopes":{}}');
     await writeFile(`${root}/LICENSE`, 'test license\n');
     await mkdir(`${root}/packages/a/src`, { recursive: true });
     await writeFile(
@@ -623,6 +643,32 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
       await writeFile(`${root}/packages/a/src/index.ts`, "import x from 'left-pad';");
       expect(await runNodeManifests(['--write'], root)).toBe(1);
       await expect(stat(`${root}/packages/a/package.json`)).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('refuses a workspace entry without its member manifest', async () => {
+    const root = await workspace();
+    try {
+      await rm(`${root}/packages/a/deno.json`);
+      await expect(runNodeManifests(['--check'], root)).rejects.toThrow(
+        'packages/a: no parsable deno.json',
+      );
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('reports removed exports as lane config drift', async () => {
+    const root = await workspace();
+    try {
+      await runNodeManifests(['--write'], root);
+      const path = `${root}/packages/a/deno.json`;
+      const manifest = JSON.parse(await readFile(path, 'utf8'));
+      delete manifest.exports;
+      await writeFile(path, JSON.stringify(manifest));
+      expect(await runNodeManifests(['--check'], root)).toBe(1);
     } finally {
       await rm(root, { recursive: true });
     }

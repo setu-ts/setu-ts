@@ -52,6 +52,7 @@
 import { run as runProcess } from './lib/run.ts';
 import { writeFile, readFile } from 'node:fs/promises';
 
+import { workspaceMembers } from './lib/workspace.ts';
 import { findStaleReferences, isSweptPath } from './version-sweep.ts';
 
 /** One file the bump rewrites. */
@@ -592,10 +593,11 @@ export async function main(
   }
 
   const files = await deps.readTracked();
-  const root = JSON.parse(files.get('deno.json') ?? '{}') as {
-    workspace?: readonly string[];
-  };
-  const members = root.workspace ?? [];
+  const members = await workspaceMembers('.', (path) => {
+    const text = files.get(path);
+    if (text === undefined) throw new Error(`${path}: missing tracked workspace inventory`);
+    return Promise.resolve(text);
+  });
   const kernel = JSON.parse(files.get('packages/kernel/deno.json') ?? '{}') as { version?: string };
   const from = kernel.version ?? '';
 

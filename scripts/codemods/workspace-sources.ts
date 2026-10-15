@@ -8,9 +8,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { workspaceMembers } from '../lib/workspace.ts';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const workspace: string[] = JSON.parse(readFileSync(resolve(root, 'deno.json'), 'utf8')).workspace;
+const workspace = await workspaceMembers(root);
 const members = new Map(
   workspace.map((member) => {
     const dir = resolve(root, member);

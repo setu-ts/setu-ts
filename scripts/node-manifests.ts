@@ -3,7 +3,7 @@
  * The Node-manifest generator and drift gate (M111a plan §3.1).
  *
  * Writes every workspace member's `package.json` and `tsconfig.json`, the root
- * solution `tsconfig.json`, `pnpm-workspace.yaml`, and the root `package.json`
+ * solution `tsconfig.json`, Deno lane config, and the root `package.json`
  * `workspaces` field, from four inputs: each member's `deno.json`
  * (`name`/`version`/`exports`), a scan of every TypeScript file under its
  * `src` and `test` trees, the committed external-range table
@@ -40,8 +40,10 @@
  * @module
  */
 
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { type Dirent } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
+import { workspaceMembers } from './lib/workspace.ts';
 
 import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
@@ -521,43 +523,6 @@ export function renderSolutionTsconfig(dirs: readonly string[]): string {
   )}\n`;
 }
 
-/**
- * Renders `pnpm-workspace.yaml`, listing every member explicitly.
- *
- * `ignoreWorkspaceCycles` is load-bearing, not a workaround: the TEST-only
- * workspace edges are cyclic by design (kernel's tests import runtime and
- * testing; runtime's tests import kernel — the plan's §1 probe recorded that
- * 40 of 51 members' tests import packages their src does not), pnpm's
- * resolver allows them, and `pnpm -r` refuses only the topological ORDERING.
- * Each member's build is `tsc -b`, which orders its own project references,
- * so an arbitrary member order is correct.
- *
- * `allowBuilds` DENIES the two dependencies that ship install scripts
- * (`protobufjs`, `sse4_crc32`, both reached only through the Google Cloud
- * SDKs). pnpm 12 fails `install --frozen-lockfile` with ERR_PNPM_IGNORED_BUILDS
- * while a script is undecided, and approving one would run third-party code on
- * every install for a dependency no test exercises for real.
- */
-export function renderPnpmWorkspace(dirs: readonly string[]): string {
-  const lines = dirs.map((dir) => `  - ${dir}`);
-  return (
-    `packages:\n${lines.join('\n')}\n` +
-    '\n' +
-    '# Dev-only workspace edges are cyclic (test-only imports, plan §3.1); each\n' +
-    "# member's build is `tsc -b`, which orders its own references.\n" +
-    'ignoreWorkspaceCycles: true\n' +
-    '\n' +
-    '# Google SDK install scripts are denied: both are transitive deps of\n' +
-    '# the Google Cloud SDKs the tests reach only through fakes and guarded\n' +
-    '# suites. pnpm 12 refuses a frozen install while either is undecided.\n' +
-    'allowBuilds:\n' +
-    '  protobufjs: false\n' +
-    '  sse4_crc32: false\n' +
-    '  # The TC39 decorator transformer requires its native build.\n' +
-    '  esbuild: true\n'
-  );
-}
-
 /** Renders the root `package.json` (private workspace root, §3.2/§3.6). */
 export function renderRootPackageJson(dirs: readonly string[]): string {
   return `${JSON.stringify(
@@ -566,7 +531,7 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
       private: true,
       packageManager: 'pnpm@12.11.2',
       engines: { node: '>=22' },
-      workspaces: dirs,
+      workspaces: [...dirs, 'apps/*'],
       type: 'module',
       scripts: {
         check: 'tsc -p tsconfig.check.json --noEmit',
@@ -620,6 +585,7 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
         ...TEST_DEV_DEPENDENCIES,
         ...LINT_DEV_DEPENDENCIES,
         typedoc: '0.28.20',
+        yaml: '2.9.1',
         hono: EXTERNAL_RANGES.hono,
         zod: EXTERNAL_RANGES['zod-v3']!.replace('npm:zod@', ''),
         graphql: EXTERNAL_RANGES.graphql,
@@ -821,20 +787,55 @@ export function generateWorkspace(members: readonly MemberInput[], license = '')
   files.set('tsconfig.base.json', renderTsconfigBase());
   files.set('tsconfig.check.json', renderCheckTsconfig());
   files.set('tsconfig.json', renderSolutionTsconfig(dirs));
-  files.set('pnpm-workspace.yaml', renderPnpmWorkspace(dirs));
   files.set('package.json', renderRootPackageJson(dirs));
   return { files, refusals };
 }
 
 // ── I/O seam ──────────────────────────────────────────────────────────────────
 
-/** Reads a JSON file, or null when absent/unparseable. */
-async function readJson(path: string): Promise<unknown | null> {
-  try {
-    return JSON.parse(await readFile(path, 'utf8'));
-  } catch {
-    return null;
+/** Generate the standalone native-runtime lane's import map and strict options. */
+export function renderLaneConfig(members: readonly MemberInput[], laneJson: string): string {
+  const lane = JSON.parse(laneJson) as {
+    imports: Record<string, string>;
+    scopes: Record<string, Record<string, string>>;
+  };
+  const imports = { ...lane.imports };
+  for (const member of members) {
+    for (const entry of member.exports) {
+      const name = member.name + (entry.subpath === '.' ? '' : entry.subpath.slice(1));
+      imports[name] = './' + relative(resolve('test/deno-lane'), resolve(member.dir, entry.source));
+    }
   }
+  const base = JSON.parse(renderTsconfigBase()) as {
+    compilerOptions: Record<string, unknown>;
+  };
+  const options: Record<string, unknown> = {};
+  for (const key of [
+    'strict',
+    'noUnusedLocals',
+    'noUnusedParameters',
+    'noImplicitReturns',
+    'noFallthroughCasesInSwitch',
+    'noImplicitOverride',
+    'exactOptionalPropertyTypes',
+    'useUnknownInCatchVariables',
+  ])
+    options[key] = base.compilerOptions[key];
+  return (
+    JSON.stringify(
+      {
+        compilerOptions: {
+          ...options,
+          lib: ['deno.ns', 'deno.window', 'dom', 'dom.iterable', 'esnext'],
+        },
+        nodeModulesDir: 'auto',
+        imports,
+        scopes: lane.scopes,
+      },
+      null,
+      2,
+    ) + '\n'
+  );
 }
 
 /** Every `.ts`/`.tsx` file under `dir`, repository-relative. */
@@ -894,12 +895,10 @@ async function readMember(root: string, dir: string): Promise<MemberInput> {
   };
 }
 
-/** Reads the workspace layout from the `deno.json` under `root`. */
+/** Reads framework members from the authored pnpm workspace inventory. */
 async function readMembers(root: string): Promise<MemberInput[]> {
-  const config = (await readJson(`${root}/deno.json`)) as { workspace?: readonly string[] } | null;
-  if (config?.workspace === undefined) throw new Error('deno.json: no workspace list');
   const members: MemberInput[] = [];
-  for (const entry of config.workspace) {
+  for (const entry of await workspaceMembers(root)) {
     members.push(await readMember(root, entry.replace(/^\.\//, '')));
   }
   return members;
@@ -939,7 +938,15 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
     return 2;
   }
   const members = await readMembers(root);
-  const { files, refusals } = generateWorkspace(members, await readFile(`${root}/LICENSE`, 'utf8'));
+  const { files: generated, refusals } = generateWorkspace(
+    members,
+    await readFile(`${root}/LICENSE`, 'utf8'),
+  );
+  const files = new Map(generated);
+  if (refusals.length === 0) {
+    const lane = await readFile(`${root}/test/deno-lane/deno.json`, 'utf8');
+    files.set('test/deno-lane/lane.config.json', renderLaneConfig(members, lane));
+  }
   if (refusals.length > 0) {
     for (const refusal of refusals) console.error(`✗ ${refusal}`);
     console.error(`${refusals.length} refusal(s).`);
@@ -948,7 +955,10 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
   if (mode === 'write') {
     for (const [path, content] of files) {
       const current = await readFile(`${root}/${path}`, 'utf8').catch(() => null);
-      if (current !== content) await writeFile(`${root}/${path}`, content);
+      if (current !== content) {
+        await mkdir(dirname(`${root}/${path}`), { recursive: true });
+        await writeFile(`${root}/${path}`, content);
+      }
     }
     console.log(`Wrote ${files.size} generated file(s).`);
     return 0;

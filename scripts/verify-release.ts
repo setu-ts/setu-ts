@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Pre-publish consistency check.
@@ -49,6 +48,9 @@ import { readFile } from 'node:fs/promises';
  *    `--allow-quiet-minor` says the quiet minor is deliberate
  *    (`scripts/release-shape.ts`).
  */
+import { readFile } from 'node:fs/promises';
+import { workspaceMembers } from './lib/workspace.ts';
+
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
 import { packedManifestProblems } from './npm-release-gate.ts';
 import { activeHolds } from './publication-hold.ts';
@@ -123,8 +125,7 @@ async function main(): Promise<void> {
 
   // ── 3: the two lists must cover the whole workspace ─────────────────────────
 
-  const root = JSON.parse(await readFile('deno.json', 'utf8')) as { workspace?: readonly string[] };
-  const members = (root.workspace ?? []).map((m) => m.replace(/^\.\//, ''));
+  const members = await workspaceMembers();
   const accounted = new Set([...PUBLISHED_PACKAGES, ...UNPUBLISHED_PACKAGES]);
 
   for (const member of members) {

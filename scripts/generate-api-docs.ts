@@ -11,6 +11,7 @@ import { run as runProcess } from './lib/run.ts';
 import { type Stats } from 'node:fs';
 import { readFile, stat, rm, mkdir } from 'node:fs/promises';
 /* eslint-disable no-console -- repository documentation gate */
+import { workspaceMembers } from './lib/workspace.ts';
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 
 /**
@@ -130,19 +131,13 @@ export interface DocLintDiagnostic {
 }
 
 /**
- * Reads the root deno.json and extracts the workspace array as the authoritative
+ * Reads pnpm-workspace.yaml and extracts framework members as the authoritative
  * workspace set. Returns paths relative to the repo root (e.g. "packages/common").
  */
-export async function readWorkspaceMembers(fs: {
+export function readWorkspaceMembers(fs: {
   readTextFile: (path: string) => Promise<string>;
 }): Promise<string[]> {
-  const content = await fs.readTextFile('deno.json');
-  const root = JSON.parse(content) as { workspace?: string[] };
-  if (!root.workspace) {
-    throw new Error('deno.json has no "workspace" field');
-  }
-  // Normalize: strip leading "./" if present
-  return root.workspace.map((p) => (p.startsWith('./') ? p.slice(2) : p)).sort();
+  return workspaceMembers('.', fs.readTextFile);
 }
 
 /**

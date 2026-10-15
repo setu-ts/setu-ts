@@ -28,7 +28,8 @@ import { run } from './run.ts';
 export const SANDBOX_READ_PATHS: readonly string[] = [
   'packages',
   'node_modules',
-  'deno.json',
+  'pnpm-workspace.yaml',
+  'scripts/lib/workspace.ts',
   'package.json',
   'test/node-source-register.ts',
   'test/node-source-hooks.ts',

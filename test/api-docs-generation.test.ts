@@ -656,8 +656,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           // All manifests return {} (no exports field) → invalid export map
           return Promise.resolve('{}');
@@ -673,8 +673,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           // exports is an empty object → no-export-targets
           return Promise.resolve(JSON.stringify({ exports: {} }));
@@ -846,8 +846,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           // Return valid manifest for published packages
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
@@ -1263,8 +1263,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1291,8 +1291,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1325,7 +1325,7 @@ error[private-type-ref]: public type references private type
     it('throws when workspace members are missing from PUBLISHED_PACKAGES', async () => {
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
+          if (path === 'pnpm-workspace.yaml') {
             // Workspace has an extra package not in PUBLISHED_PACKAGES.
             return Promise.resolve(
               JSON.stringify({
@@ -1352,9 +1352,9 @@ error[private-type-ref]: public type references private type
     it('throws when published packages are missing from workspace', async () => {
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
+          if (path === 'pnpm-workspace.yaml') {
             // Workspace has only one package; PUBLISHED_PACKAGES has more.
-            return Promise.resolve(JSON.stringify({ workspace: ['packages/common'] }));
+            return Promise.resolve(JSON.stringify({ packages: ['packages/common'] }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1376,8 +1376,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1552,7 +1552,8 @@ describe('manifest and diagnostic fail-closed boundaries', () => {
       const fs = {
         readTextFile: async (path: string) => {
           await Promise.resolve();
-          if (path === 'deno.json') return JSON.stringify({ workspace: PUBLISHED_PACKAGES });
+          if (path === 'pnpm-workspace.yaml')
+            return JSON.stringify({ packages: PUBLISHED_PACKAGES });
           if (failure === 'read-error') throw new Error('controlled read failure');
           if (failure === 'read-string') throw 'controlled read failure';
           return failure === 'malformed' ? '{' : JSON.stringify({ exports: {} });

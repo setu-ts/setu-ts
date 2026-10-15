@@ -25,6 +25,7 @@ packages/cli/test/fixtures/devtool-source-shapes.ts
 /tsconfig.base.json
 /tsconfig.check.json
 /pnpm-workspace.yaml
+/test/deno-lane/lane.config.json
 packages/*/package.json
 packages/*/tsconfig.json
 packages/*/deno.json

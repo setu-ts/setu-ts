@@ -7,7 +7,11 @@ import { belowThreshold, parseCoverageTable, validateTargetSet } from './deno-la
 
 if (import.meta.main) {
   await (async () => {
-    const checked = await runProcess('deno', ['check', ...DENO_ONLY_SOURCES], { inherit: true });
+    const checked = await runProcess(
+      'deno',
+      ['check', '--config', 'test/deno-lane/lane.config.json', '--frozen', ...DENO_ONLY_SOURCES],
+      { inherit: true },
+    );
     if (checked.code !== 0) {
       process.exitCode = checked.code;
       return;
@@ -26,7 +30,8 @@ if (import.meta.main) {
         '--allow-sys=hostname,osRelease',
         '--allow-run=deno',
         '--allow-write',
-        '--import-map=test/deno-lane/deno.json',
+        '--config=test/deno-lane/lane.config.json',
+        '--frozen',
         '--coverage=coverage-deno-lane',
         '--coverage-raw-data-only',
         '--junit-path=coverage-deno-lane/tests.xml',
