@@ -543,6 +543,11 @@ jobs:
         with:
           bun-version: 1.4.0
 
+      # The manifest check imports `yaml` (the workspace list reader), so the
+      # repository dependencies are installed first.
+      - name: Frozen dependency install
+        run: pnpm install --frozen-lockfile
+
       - name: Generated manifests agree with the sources
         run: node scripts/node-manifests.ts --check
 

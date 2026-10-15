@@ -27,6 +27,7 @@
 import { run as runProcess } from './lib/run.ts';
 import { readFile, rm, mkdir, realpath, readdir, copyFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { workspaceMembers } from './lib/workspace.ts';
 import {
   classifyLeg,
   decideOutcome,
@@ -84,7 +85,8 @@ async function main(): Promise<void> {
   }
 
   const requireAll = process.argv.slice(2).includes('--require-all');
-  const root = JSON.parse(await readFile('package.json', 'utf8')) as { workspaces: string[] };
+  // The authored pnpm workspace list, framework members only (M111e3).
+  const members = await workspaceMembers();
 
   await step('pnpm install --frozen-lockfile', 'pnpm', ['install', '--frozen-lockfile']);
   await step('tsc -b (solution build)', 'pnpm', ['exec', 'tsc', '-b']);
@@ -94,7 +96,7 @@ async function main(): Promise<void> {
   const packDir = await realpath(PACK_DIR);
   const tarballOf = new Map<string, string>();
   const refusals: string[] = [];
-  for (const dir of root.workspaces) {
+  for (const dir of members) {
     const manifest = JSON.parse(await readFile(`${dir}/package.json`, 'utf8')) as {
       name: string;
       dependencies?: Record<string, string>;

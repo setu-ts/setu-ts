@@ -517,14 +517,13 @@ export function renderSolutionTsconfig(dirs: readonly string[]): string {
 }
 
 /** Renders the root `package.json` (private workspace root, §3.2/§3.6). */
-export function renderRootPackageJson(dirs: readonly string[]): string {
+export function renderRootPackageJson(): string {
   return `${JSON.stringify(
     {
       name: 'setu-ts',
       private: true,
       packageManager: 'pnpm@12.11.2',
       engines: { node: '>=22' },
-      workspaces: [...dirs, 'apps/*'],
       type: 'module',
       scripts: {
         check: 'tsc -p tsconfig.check.json --noEmit',
@@ -779,7 +778,7 @@ export function generateWorkspace(members: readonly MemberInput[], license = '')
   files.set('tsconfig.base.json', renderTsconfigBase());
   files.set('tsconfig.check.json', renderCheckTsconfig());
   files.set('tsconfig.json', renderSolutionTsconfig(dirs));
-  files.set('package.json', renderRootPackageJson(dirs));
+  files.set('package.json', renderRootPackageJson());
   return { files, refusals };
 }
 

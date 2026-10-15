@@ -46,6 +46,10 @@ beforeAll(async () => {
   expect(installed.code, installed.output).toBe(0);
   await command(scaffold, ['run', 'build']);
   await command(`${REPO_ROOT}/apps/full-stack`, ['run', 'build']);
+  // Chromium creates its singleton socket under TMPDIR and refuses to start when the directory
+  // is missing. The path is relative to this process's cwd (the app directory under
+  // `pnpm --filter … exec`), which a fresh checkout does not have.
+  await mkdir('.tmp/browser', { recursive: true });
   // Use the bundled Chromium executable checked by harness.ts, not a system browser.
   browser = await chromium.launch({
     channel: 'chromium',

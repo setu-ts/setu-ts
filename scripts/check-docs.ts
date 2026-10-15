@@ -2054,12 +2054,19 @@ export function checkVersionClaims(
   return findings;
 }
 
-async function collectMarkdown(root: string): Promise<string[]> {
+/**
+ * Lists the Markdown and source files under one scan root, as repository-relative paths.
+ *
+ * @param root - A scan root, relative to `base`
+ * @param base - The directory paths are relative to; the repository root by default
+ * @returns The sorted paths, skipping dot entries, {@link SKIP_DIRS} and {@link SKIP_PATHS}
+ */
+export async function collectMarkdown(root: string, base = '.'): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
     const entries: Dirent[] = [];
     try {
-      for await (const entry of await readdir(dir, { withFileTypes: true })) {
+      for await (const entry of await readdir(`${base}/${dir}`, { withFileTypes: true })) {
         entries.push(entry);
       }
     } catch {

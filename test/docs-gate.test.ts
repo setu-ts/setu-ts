@@ -16,6 +16,7 @@ import { run as runProcess } from './../scripts/lib/run.ts';
 import { readFile, readdir, stat, writeFile, rm, mkdir } from 'node:fs/promises';
 import { readdirSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { tempDir } from './node-helpers.ts';
 
 import {
   anchorFor,
@@ -29,6 +30,7 @@ import {
   checkReadmeApiLink,
   checkRequiredGuides,
   checkVersionClaims,
+  collectMarkdown,
   findMalformedTableRows,
   findSwallowedHeadings,
   POST_ALPHA_MINOR_LINES,
@@ -2363,5 +2365,31 @@ describe('documentation gate — diagnostics field tables match their fences (M1
     const { fields, fence } = diagnosticsSection(source);
     expect(fields).toEqual(['enabled', 'alias']);
     expect(fields.filter((field) => !setsField(fence, field))).toEqual(['alias']);
+  });
+});
+
+describe('documentation walker', () => {
+  it('skips the generated API reference by exact path', async () => {
+    // TypeDoc copies every linked Markdown file into docs/api/media/ and writes
+    // its own scripts beside them; scanning them reported the copies as stale
+    // prose (M111e3). A sibling sharing the prefix is still scanned.
+    const base = await tempDir({ prefix: 'docs-walker-' });
+    try {
+      for (const file of [
+        'docs/guide.md',
+        'docs/api/media/CHANGELOG.md',
+        'docs/api/assets/main.js',
+        'docs/apiary/notes.md',
+      ]) {
+        await mkdir(`${base}/${file.slice(0, file.lastIndexOf('/'))}`, { recursive: true });
+        await writeFile(`${base}/${file}`, '# x\n');
+      }
+      expect(await collectMarkdown('docs', base)).toEqual([
+        'docs/apiary/notes.md',
+        'docs/guide.md',
+      ]);
+    } finally {
+      await rm(base, { recursive: true });
+    }
   });
 });
