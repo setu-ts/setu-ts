@@ -14359,7 +14359,8 @@ the peer is a trusted proxy, or an explicit `publicOrigin` option is added; and 
 no plugin, kernel or `common` change)
 
 **Source:** the maintainer's review of the M104 product (`smoke/M104-FINDINGS.md`, "Module layout
-review"), confirmed against the CLI source and the published `0.9.0` CLI.
+review" and "Generated tests"), confirmed against the CLI source and the published `0.9.0` CLI.
+Closes **V9-79**.
 
 **The problem.** The two generator styles disagree about what a module is:
 
@@ -14405,6 +14406,25 @@ point, and a feature is deleted by deleting its folder.
 5. **The `rest` template's sample becomes `src/modules/greeting/`,** so a new project's first file
    teaches the feature unit. Top-level `g controller` and `g service` remain, for app-wide endpoints
    and services.
+6. **Generated tests a project can grow (V9-79).** Today `setu new` emits one `/health` check
+   through the in-process `inject()`, and each `generate module` emits a test asserting its stub
+   returns `[]`, which stops compiling the moment the service is real — M104's builder deleted all
+   eight. NestJS's `nest new` scaffolds `test/app.e2e-spec.ts` with a `test:e2e` script, and its
+   per-class specs compile against the real DI (the plan verifies NestJS's exact current output
+   before citing it). This milestone ships:
+   - **`setu new` emits `test/e2e/app.e2e.test.ts` and a `test:e2e` task/script** on every socket
+     target: it boots the real `createApp()` on an ephemeral port and drives `/health`, `/ready` and
+     the sample module's routes over a real socket (never `inject()`, which skips the HTTP layer).
+   - **`setu generate module <name>` adds `src/modules/<name>/<name>.e2e.test.ts`,** which drives
+     that module's own routes over HTTP, inside the module folder so deleting the feature deletes
+     its test — per feature, which NestJS does not do.
+   - **The per-module unit test exercises behaviour, not a stub:** it imports the module through its
+     `index.ts` and asserts a contract the generated code and the developer's code both keep (a
+     route answers, a service function exists with its declared signature), so implementing the
+     service does not break it.
+   - The `test` and `test:e2e` scripts are separate, so the fast unit run does not need a socket.
+   - **Optional follow-on, not this milestone:** a browser e2e scaffold (Playwright config plus one
+     page test) for `full-stack`, behind `setu add testing --browser`.
 
 **Compatibility.** Existing projects keep working unchanged: their
 `src/controllers/<name>.routes.ts` files are still scanned and wired by the controllers barrel. Only
@@ -14429,9 +14449,9 @@ newly generated modules move. The CHANGELOG records the generated-layout change 
   `autoDiscover` example (`controllersPath: './src/controllers'` misses module controllers), and the
   CLI README.
 
-**Out of scope:** placing app-wide kinds inside a module, and a configurable layout (`setu.json`
-choosing layer-first or feature-first). Both can follow if users ask; the second is the parked
-"project layout" proposal.
+**Out of scope:** the browser e2e scaffold (item 6's follow-on), placing app-wide kinds inside a
+module, and a configurable layout (`setu.json` choosing layer-first or feature-first). Both can
+follow if users ask; the second is the parked "project layout" proposal.
 
 **Deliverables**
 
@@ -14443,6 +14463,10 @@ choosing layer-first or feature-first). Both can follow if users ask; the second
 - [ ] `rest` sample moved to `src/modules/greeting/`; `src/shared/` documented
 - [ ] A booting e2e: scaffold, `g module`, `g service --module`, request the routes, delete the
       module folder and its barrel line, boot again
+- [ ] Generated `test/e2e/app.e2e.test.ts` + `test:e2e` on `setu new`, and a per-module
+      `<name>.e2e.test.ts` from `g module`; a CLI e2e that scaffolds, generates a module, implements
+      its service with real logic, and runs BOTH generated suites green (the M104 stub-breakage
+      regression), on Node, Deno and Bun
 - [ ] `docs/cli.md`, `docs/decorators.md`, CLI README, CHANGELOG migration note
 - [ ] **ROADMAP.md** — this section and the Progress Tracking row `114`
 
@@ -14714,4 +14738,4 @@ patch by construction and gains nothing new here.
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 113m      | ⬜     | scheduler-plugin + auth-plugin — time the framework does not honour                                                                                                                                                                                                                       |
 | 113n      | ⬜     | http-security-plugin + runtime — security behind a reverse proxy                                                                                                                                                                                                                          |
-| 114       | ⬜     | cli — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`                                                                                                                                                                           |
+| 114       | ⬜     | cli — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, generated e2e tests (V9-79)                                                                                                                                              |
