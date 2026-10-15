@@ -6266,7 +6266,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   archived. Implemented by Codex; its five plan corrections are recorded in the plan. Review found
   three doc claims the source contradicted (a scaffolded project's test told to run the repository
   script, and two type-assertion comments still naming `deno test`), all fixed; three negative
-  controls re-run against the real gate each failed on the rule they plant — complete (PR pending)
+  controls re-run against the real gate each failed on the rule they plant — complete (PR #460)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
