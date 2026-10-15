@@ -418,7 +418,7 @@ export async function collectApiEntrypoints(fs: {
 }
 
 /**
- * Builds the arguments array for `deno doc` command.
+ * Builds the TypeDoc arguments for HTML generation or the lint-only check.
  *
  * @param targets - Array of local export targets
  * @param mode - "generate" for HTML output, "check" for lint-only
@@ -449,6 +449,11 @@ export function buildApiDocArgs(
     outputDir,
     '--name',
     'Setu-TS',
+    // The API index lists modules. TypeDoc would otherwise render the repository README there,
+    // which the website already serves as its home page; its 475 KB logo was the API index's
+    // largest contentful paint (5.1 s under Lighthouse's mobile throttling).
+    '--readme',
+    'none',
     '--validation.notDocumented',
     'false',
     '--validation.notExported',

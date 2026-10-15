@@ -121,6 +121,11 @@ describe('API Documentation Generation', () => {
       expect(args).toContain('docs/api');
       expect(args).toContain('Setu-TS');
       expect(args).toContain('packages/common/src/index.ts');
+      // The index lists modules rather than repeating the README (Lighthouse LCP).
+      expect(args.slice(args.indexOf('--readme'), args.indexOf('--readme') + 2)).toEqual([
+        '--readme',
+        'none',
+      ]);
     });
 
     it('builds check mode arguments correctly', () => {
