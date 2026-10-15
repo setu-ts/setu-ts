@@ -3365,11 +3365,18 @@ only the architectural constraints.
 
 ### 19.1 Images build from the repository root
 
-An application's `deno.json` maps only the packages it imports directly. `@setu-ts/common` reaches
-`@setu-ts/kernel` through the **root workspace**, so a container image must carry the root
-`deno.json` alongside `packages/`. Without it, Deno resolves the workspace member's `jsr:` specifier
-against the registry and the build fails outright. This is why the build context is the repository
-root rather than the application directory.
+An application is a member of the pnpm workspace and depends on `@setu-ts/*` as `workspace:^`. Only
+the root `pnpm-workspace.yaml` and `pnpm-lock.yaml` let a frozen install link those members, so a
+container image must carry both alongside `packages/`; without the lock,
+`pnpm install --frozen-lockfile` refuses to run. This is why the build context is the repository
+root rather than the application directory. The image then compiles the members it needs and copies
+the app out with `pnpm deploy --prod`, so it runs the packed framework (`dist/`) rather than
+workspace source.
+
+The no-shell variant is a Node single executable application on `distroless/cc-debian12`. It is 211
+MB — 4.7× the 44.9 MB Deno-compiled image it replaced — because it embeds the Node runtime; its
+reason to exist is the removed shell and package manager, not size. The binary links against glibc,
+so `distroless/cc` is the smallest base it runs on.
 
 ### 19.2 Health endpoints are the orchestration contract
 
