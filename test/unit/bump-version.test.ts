@@ -59,7 +59,7 @@ function tree(overrides: Record<string, string | undefined> = {}): Map<string, s
       'deno.lock',
       '{\n  "@setu-ts/common@0.8": "jsr:@setu-ts/common@0.8.0",\n  "jsr:@setu-ts/kernel@0.8": {}\n}\n',
     ],
-    ['apps/minimal/deno.lock', '{ "links": { "@setu-ts/common@0.8.0": {} } }\n'],
+    ['test/deno-lane/deno.lock', '{ "links": { "@setu-ts/common@0.8.0": {} } }\n'],
     [
       'README.md',
       [
@@ -272,7 +272,6 @@ describe('planBump', () => {
     expect(paths).toEqual([
       'CHANGELOG.md',
       'README.md',
-      'apps/minimal/deno.lock',
       'deno.lock',
       'docker/Dockerfile',
       'docs/upgrading.md',
@@ -285,6 +284,7 @@ describe('planBump', () => {
       'packages/sdk/package.json',
       'packages/sdk/src/http/observed-fetch.ts',
       'scripts/check-docs.ts',
+      'test/deno-lane/deno.lock',
     ]);
 
     // Manifests: the member version AND both sides of the SDK's pinned mapping.
@@ -308,7 +308,7 @@ describe('planBump', () => {
     expect(content('deno.lock')).toBe(
       '{\n  "@setu-ts/common@0.9": "jsr:@setu-ts/common@0.9.0",\n  "jsr:@setu-ts/kernel@0.9": {}\n}\n',
     );
-    expect(content('apps/minimal/deno.lock')).toContain('@setu-ts/common@0.9.0');
+    expect(content('test/deno-lane/deno.lock')).toContain('@setu-ts/common@0.9.0');
     // README: the install line moves; the worked range's bounds are bare numbers
     // and stay; the history paragraph stays whole.
     expect(content('README.md')).toContain('`deno add jsr:@setu-ts/kernel@^0.9.0`');
@@ -452,7 +452,7 @@ describe('planBump', () => {
     for (const needle of [
       'check:docs',
       'deploy:render',
-      'deno.lock',
+      'pnpm install --lockfile-only',
       'check 9',
       '>=0.9.0 <0.9.0',
     ]) {
@@ -485,8 +485,8 @@ describe('main (the command path, over injected I/O)', () => {
   function realShape(): Map<string, string> {
     const files = tree();
     files.set(
-      'deno.json',
-      '{"workspace": ["./packages/common", "./packages/sdk", "./packages/kernel"]}',
+      'pnpm-workspace.yaml',
+      '{"packages": ["./packages/common", "./packages/sdk", "./packages/kernel"]}',
     );
     files.set('packages/kernel/deno.json', '{\n  "version": "0.8.0"\n}\n');
     files.set('packages/kernel/package.json', '{\n  "version": "0.8.0"\n}\n');
@@ -598,7 +598,7 @@ describe('the real seams', () => {
 
   it('reads tracked text files and skips binaries', async () => {
     const files = await readTrackedText();
-    expect(files.has('deno.json')).toBe(true);
+    expect(files.has('pnpm-workspace.yaml')).toBe(true);
     expect(files.has('scripts/verify-release.ts')).toBe(true);
     for (const path of files.keys()) expect(path.endsWith('.png')).toBe(false);
   });

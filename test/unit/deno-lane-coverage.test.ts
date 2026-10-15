@@ -54,6 +54,14 @@ describe('Deno lane invocations', () => {
       });
     });
     expect(code).toBe(0);
+    expect(calls[1]?.args).toEqual([
+      'install',
+      '--config',
+      'test/deno-lane/lane.config.json',
+      '--frozen',
+      '--entrypoint',
+      'scripts/inspect-local-diagnostics.ts',
+    ]);
     const tests = calls.filter((call) => call.args[0] === 'test');
     expect(tests).toHaveLength(6);
     const files = tests.flatMap((call) => call.args.filter((arg) => arg.endsWith('.test.ts')));
@@ -102,6 +110,17 @@ describe('Deno lane invocations', () => {
         }),
       ),
     ).toBe(3);
+  });
+
+  it('stops before testing when preparation fails', async () => {
+    const calls: string[] = [];
+    expect(
+      await runDenoLane([], (_command, args) => {
+        calls.push(args[0]!);
+        return Promise.resolve({ code: args[0] === 'install' ? 4 : 0, stdout: '', stderr: '' });
+      }),
+    ).toBe(4);
+    expect(calls).toEqual(['check', 'install']);
   });
 });
 

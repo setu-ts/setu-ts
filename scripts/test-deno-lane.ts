@@ -23,6 +23,21 @@ export async function runDenoLane(
   if (checked.code !== 0) {
     return checked.code;
   }
+  // This graph is spawned rather than imported by the tests. Prepare it before
+  // the diagnostics child starts so dependency installation cannot pollute stderr.
+  const prepared = await run(
+    'deno',
+    [
+      'install',
+      '--config',
+      'test/deno-lane/lane.config.json',
+      '--frozen',
+      '--entrypoint',
+      'scripts/inspect-local-diagnostics.ts',
+    ],
+    { inherit: true, env },
+  );
+  if (prepared.code !== 0) return prepared.code;
   await rm('coverage-deno-lane', { recursive: true }).catch((error) => {
     if (!isNotFound(error)) throw error;
   });
