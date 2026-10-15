@@ -176,10 +176,10 @@ describe('prose assertion gate — evaluator', () => {
 
   it('denies reading repository files outside the import grants, such as .git', async () => {
     const proc = 'this.constructor.constructor("return process")()';
-    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${proc}.getBuiltinModule('fs').readFileSync('.git', 'utf8')\` | \`null\` |\n| \`${proc}.getBuiltinModule('fs').readFileSync('README.md', 'utf8')\` | \`null\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${proc}.getBuiltinModule('fs').readFileSync('.git', 'utf8')\` | \`null\` |\n| \`${proc}.getBuiltinModule('fs').readFileSync('README.md', 'utf8')\` | \`null\` |\n| \`${proc}.getBuiltinModule('fs').readFileSync('.env', 'utf8')\` | \`null\` |`;
     const findings = await checkDocument('git.md', source);
 
-    expect(findings.length).toBe(2);
+    expect(findings.length).toBe(3);
     for (const finding of findings) expect(finding.message).toContain('ERR_ACCESS_DENIED');
   });
 
@@ -190,7 +190,9 @@ describe('prose assertion gate — evaluator', () => {
       `${proc}.getBuiltinModule('node:sqlite').DatabaseSync`,
       `${proc}.getBuiltinModule('module').createRequire('/x')('node:sqlite')`,
       `(await import('node:module')).registerHooks`,
+      `new (${proc}.getBuiltinModule('worker_threads').Worker)('void 0', { eval: true })`,
       `Object.defineProperty(${proc}, 'getBuiltinModule', { value: () => 1 })`,
+      `${proc}.dlopen({ exports: {} }, '/dev/null')`,
     ];
     const table = rows.map((row) => `| \`${row}\` | \`null\` |`).join('\n');
     const findings = await checkDocument(
@@ -199,10 +201,12 @@ describe('prose assertion gate — evaluator', () => {
     );
 
     expect(findings.length).toBe(rows.length);
-    for (const finding of findings.slice(0, 4)) {
+    for (const finding of findings.slice(0, 5)) {
       expect(finding.message).toContain('ERR_ACCESS_DENIED');
     }
-    expect(findings[4]?.message).toContain('Cannot redefine property');
+    expect(findings[5]?.message).toContain('Cannot redefine property');
+    // Under --permission, Node refuses every native addon with its own code.
+    expect(findings[6]?.message).toContain('ERR_DLOPEN_DISABLED');
   });
 
   it('fails closed when a claim exits before every result is emitted', async () => {

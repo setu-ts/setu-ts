@@ -81,8 +81,12 @@ export async function trackedSymlinks(root: string): Promise<TrackedSymlink[]> {
   if (listed.code !== 0) throw new Error(`git ls-files failed: ${listed.stderr.trim()}`);
   const links: TrackedSymlink[] = [];
   for (const entry of listed.stdout.split('\0')) {
-    const match = /^120000 [0-9a-f]+ \d+\t(.+)$/.exec(entry);
-    if (match) links.push({ path: match[1]!, target: await readlink(resolve(root, match[1]!)) });
+    // `-z` records end in NUL, so a path may hold any other character, line
+    // terminators included: split on the first tab rather than matching `.`.
+    const tab = entry.indexOf('\t');
+    if (!entry.startsWith('120000 ') || tab === -1) continue;
+    const path = entry.slice(tab + 1);
+    links.push({ path, target: await readlink(resolve(root, path)) });
   }
   return links;
 }

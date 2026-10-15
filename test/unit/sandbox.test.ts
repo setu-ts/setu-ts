@@ -83,6 +83,23 @@ describe('trackedSymlinks', () => {
     }
   });
 
+  it('lists a symlink whose name holds a line terminator', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'sandbox-names-'));
+    try {
+      const git = (...args: string[]) => run('git', args, { cwd: root });
+      await git('init', '-q');
+      await mkdir(join(root, 'packages'));
+      const names = ['packages/a\nb', 'packages/r\rx', 'packages/u\u2028v'];
+      for (const name of names) await symlink('../.git/config', join(root, name));
+      await git('add', '.');
+      const links = await trackedSymlinks(root);
+      expect(links.map((link) => link.path).sort()).toEqual([...names].sort());
+      await expect(sandboxReadFlags(root, [], trackedSymlinks)).rejects.toThrow('tracked symlink');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('fails when git cannot list the repository', async () => {
     const root = await mkdtemp(join(tmpdir(), 'sandbox-nogit-'));
     try {
