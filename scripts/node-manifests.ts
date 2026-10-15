@@ -996,6 +996,10 @@ export function renderCheckTsconfig(): string {
             '@setu-ts/full-stack-starter': ['./packages/starters/full-stack-starter/src/index.ts'],
             '@setu-ts/*': ['./packages/*/src/index.ts'],
             '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
+            '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
+            '@setu-ts/localization-plugin/format': [
+              './packages/localization-plugin/src/format/index.ts',
+            ],
           },
         },
         include: [

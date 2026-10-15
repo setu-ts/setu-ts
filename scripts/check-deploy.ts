@@ -1,6 +1,4 @@
 /* eslint-disable no-console -- this CI script reports progress, drift and skips. */
-import { fileURLToPath } from 'node:url';
-import { startRegistryOverlay } from './registry-overlay.ts';
 
 /**
  * @module
@@ -27,7 +25,10 @@ import { startRegistryOverlay } from './registry-overlay.ts';
  * `scripts/check-apps.ts` reserves — so a missing prerequisite can never read as a pass.
  */
 
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { run as runProcess } from './lib/run.ts';
+import { startRegistryOverlay } from './registry-overlay.ts';
 import { stat, readdir, readFile, mkdir, mkdtemp, rm, writeFile, rename } from 'node:fs/promises';
 
 /** Exit code reserved for "this check reported a skip", matching `scripts/check-apps.ts`. */
@@ -694,9 +695,9 @@ async function checkGenerated(): Promise<CheckOutcome> {
   }
 
   await mkdir('.tmp', { recursive: true });
-  const workspace = await await mkdir('.tmp', { recursive: true }).then(() =>
-    mkdtemp('.tmp/test-'),
-  );
+  // Absolute: the CLI runs with this directory as its cwd, so a relative `--dir` below would be
+  // resolved against it a second time (`.tmp/test-x/.tmp/test-x/acme`).
+  const workspace = resolve(await mkdtemp('.tmp/test-'));
   const root = `${workspace}/${GENERATED_WORKSPACE}`;
   const resources = generatedResources();
   // Nothing is on npm until the cut, and the scaffold pins the CLI's own version, so the

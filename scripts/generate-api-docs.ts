@@ -12,7 +12,6 @@ import { type Stats } from 'node:fs';
 import { readFile, stat, rm, mkdir } from 'node:fs/promises';
 /* eslint-disable no-console -- repository documentation gate */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
-import { Application } from 'typedoc';
 
 /**
  * Packages with zero in-scope TypeDoc diagnostics (see {@linkcode inRatchetScope}),
@@ -772,7 +771,8 @@ export function classifyChildResult(
  * @param cmd - Command execution abstraction
  * @param typedocVersion - The running TypeDoc version, injectable so ratchet tests
  *   are deterministic rather than dependent on the developer's toolchain.
- *   Defaults to `Application.VERSION` from the installed TypeDoc.
+ *   Defaults to `Application.VERSION` from the installed TypeDoc, imported only in check mode so
+ *   HTML generation (the website build) needs no root `node_modules`.
  * @returns Exit code and findings
  */
 export async function runApiDocs(
@@ -787,7 +787,7 @@ export async function runApiDocs(
   cmd: {
     run: (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
   },
-  typedocVersion: string = Application.VERSION,
+  typedocVersion?: string,
 ): Promise<{ code: number; findings: string[] }> {
   const findings: string[] = [];
 
@@ -850,7 +850,10 @@ export async function runApiDocs(
       }
     }
 
-    const verdict = evaluateBaselineRatchet(diagnostics.length, typedocVersion);
+    const verdict = evaluateBaselineRatchet(
+      diagnostics.length,
+      typedocVersion ?? (await import('typedoc')).Application.VERSION,
+    );
     findings.push(...verdict.findings);
 
     if (findings.length > 0) {

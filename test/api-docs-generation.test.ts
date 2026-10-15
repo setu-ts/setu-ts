@@ -1585,3 +1585,13 @@ describe('manifest and diagnostic fail-closed boundaries', () => {
     expect(classifyChildResult(0, output, '').kind).toBe('fatal');
   });
 });
+
+describe('website build dependency', () => {
+  it('imports TypeDoc only in check mode, so HTML generation needs no root node_modules', async () => {
+    // The website workflow and Cloudflare build call `node scripts/generate-api-docs.ts` with
+    // no root install; a static import fails there before any work starts.
+    const source = await readFile('scripts/generate-api-docs.ts', 'utf8');
+    expect(source).not.toMatch(/^import[^;]*from 'typedoc'/m);
+    expect(source).toContain("(await import('typedoc')).Application.VERSION");
+  });
+});

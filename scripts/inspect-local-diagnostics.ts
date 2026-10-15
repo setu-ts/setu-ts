@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { run } from './lib/run.ts';
 /* eslint-disable no-console -- console output is the script's purpose (AI_GUIDELINES §11.6) */
 /**
  * Runnable public consumer for the local diagnostics connector (M98b).
@@ -24,6 +23,7 @@ import { run } from './lib/run.ts';
  */
 
 import { createApplication } from '../packages/kernel/src/index.ts';
+import { run } from './lib/run.ts';
 import { RuntimePlugin } from '../packages/runtime/src/index.ts';
 import {
   createDiagnosticsClient,
