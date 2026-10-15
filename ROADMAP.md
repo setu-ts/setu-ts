@@ -14077,10 +14077,11 @@ artifacts. Deno gates stay authoritative until the later tooling milestones repl
 
 **Source:** the three-stage `v0.9.0` smoke programme, run 2026-10-14/15 against the published npm
 artifacts — the regression run (`smoke/V090-REGRESSION.md`), Part 16's exercise block X67–X73
-(`smoke/X67-X73-FINDINGS.md`) and the M104 client-brief run (`smoke/M104-FINDINGS.md`, with its
-outage and security passes). **62 findings, six High.** V9-1 is the only release regression; every
-other row reproduces on a `0.8.0` control, rides surface that is new in `0.9.0`, or was not
-controlled (each row says which). The register is `smoke/DEFECTS.md`, rows V9-1…V9-62. M104's
+(`smoke/X67-X73-FINDINGS.md`), the M104 client-brief run (`smoke/M104-FINDINGS.md`, with its outage
+and security passes) and the first run of Part 10's confidence block X39–X44
+(`smoke/X39-X44-FINDINGS.md`). **78 findings, nine High.** V9-1 is the only release regression;
+every other row reproduces on a `0.8.0` control, rides surface that is new in `0.9.0`, or was not
+controlled (each row says which). The register is `smoke/DEFECTS.md`, rows V9-1…V9-78. M104's
 product defects (the builder's own code) are recorded in its findings file and are not rows.
 
 **Grouped by SHAPE, not by package** — the rule since M70. The letters are of three kinds, and the
@@ -14089,27 +14090,31 @@ a plan; a **fix** letter's rows are local defects with an obvious fix and may sh
 `fix/…` branches; a **docs** letter ships on one `docs/…` branch. Every row still closes only on a
 re-run against a newly published version.
 
-| Letter    | Kind   | Shape                                                               | Rows                                                  | Packages                                                                                                                                           |
-| --------- | ------ | ------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M113a** | design | brokers that report healthy while down, and publishes with no bound | V9-35 **High**, V9-36 **High**, V9-37, V9-3           | `messaging-plugin`                                                                                                                                 |
-| **M113b** | design | readiness that does not describe the dependency                     | V9-2 **High**, V9-19, V9-32, V9-44                    | `service-discovery`, `health`, `scheduler`, `cache`, `session`, `auth`                                                                             |
-| **M113c** | design | connections that never recover, and a shutdown with no bound        | V9-18 **High**, V9-31                                 | `queue-plugin`, `runtime`                                                                                                                          |
-| **M113d** | design | Workers builds and the edge cache                                   | V9-1 **High, REGRESSION**, V9-23 **High**, V9-4       | `database`, `scheduler`, `cloudflare`, `cli`                                                                                                       |
-| **M113e** | design | identity and session semantics a client cannot predict              | V9-28, V9-27, V9-46, V9-50                            | `auth-plugin`, `session-plugin`                                                                                                                    |
-| **M113f** | design | what reaches logs and public endpoints                              | V9-45, V9-47, V9-43, V9-41, V9-49                     | `exceptions`, `logger`, `database`, `health`, `openapi`                                                                                            |
-| **M113g** | design | database calls and errors under faults and edge inputs              | V9-25, V9-33, V9-26, V9-34, V9-48                     | `database-plugin`                                                                                                                                  |
-| **M113h** | fix    | generated output that is wrong                                      | V9-8, V9-17, V9-38, V9-39, V9-9, V9-11, V9-42         | `cli`                                                                                                                                              |
-| **M113i** | fix    | CLI commands whose refusals and guidance mislead                    | V9-5, V9-12, V9-13, V9-30, V9-40, V9-60, V9-61, V9-62 | `cli`                                                                                                                                              |
-| **M113j** | fix    | outbox and inbox signals                                            | V9-20, V9-21, V9-22                                   | `messaging-plugin`                                                                                                                                 |
-| **M113k** | fix    | the idempotency key from client to server                           | V9-14, V9-15, V9-16                                   | `sdk`, `idempotency`, `http-security`, `database`                                                                                                  |
-| **M113l** | docs   | documentation that does not match the code, or is missing           | V9-6, V9-7, V9-10, V9-24, V9-29, V9-51 … V9-59        | docs of `telemetry`, `localization`, `worker-pool`, `database`, `audit`, `health`, `openapi`, `multi-tenancy`, `config`, `kernel`, `auth`; `docs/` |
+| Letter    | Kind   | Shape                                                                 | Rows                                                                                     | Packages                                                                                                                                           |
+| --------- | ------ | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M113a** | design | brokers that report healthy while down, and publishes with no bound   | V9-35 **High**, V9-36 **High**, V9-37, V9-3                                              | `messaging-plugin`                                                                                                                                 |
+| **M113b** | design | readiness that does not describe the dependency                       | V9-2 **High**, V9-19, V9-32, V9-44, V9-68                                                | `service-discovery`, `health`, `scheduler`, `cache`, `session`, `auth`, `database`, `cli`                                                          |
+| **M113c** | design | connections and jobs that never recover, and a shutdown with no bound | V9-18 **High**, V9-31, V9-64 **High**, V9-71, V9-76                                      | `queue-plugin`, `runtime`                                                                                                                          |
+| **M113d** | design | Workers builds and the edge cache                                     | V9-1 **High, REGRESSION**, V9-23 **High**, V9-4                                          | `database`, `scheduler`, `cloudflare`, `cli`                                                                                                       |
+| **M113e** | design | identity and session semantics a client cannot predict                | V9-28, V9-27, V9-46, V9-50                                                               | `auth-plugin`, `session-plugin`                                                                                                                    |
+| **M113f** | design | what reaches logs and public endpoints                                | V9-45, V9-47, V9-43, V9-41, V9-49                                                        | `exceptions`, `logger`, `database`, `health`, `openapi`                                                                                            |
+| **M113g** | design | database calls and errors under faults and edge inputs                | V9-25, V9-33, V9-26, V9-34, V9-48                                                        | `database-plugin`                                                                                                                                  |
+| **M113h** | fix    | generated output that is wrong                                        | V9-8, V9-17, V9-38, V9-39, V9-9, V9-11, V9-42, V9-67                                     | `cli`, `runtime`                                                                                                                                   |
+| **M113i** | fix    | CLI commands whose refusals and guidance mislead                      | V9-5, V9-12, V9-13, V9-30, V9-40, V9-60, V9-61, V9-62, V9-75                             | `cli`                                                                                                                                              |
+| **M113j** | fix    | outbox and inbox signals                                              | V9-20, V9-21, V9-22                                                                      | `messaging-plugin`                                                                                                                                 |
+| **M113k** | fix    | the idempotency key from client to server                             | V9-14, V9-15, V9-16                                                                      | `sdk`, `idempotency`, `http-security`, `database`                                                                                                  |
+| **M113l** | docs   | documentation that does not match the code, or is missing             | V9-6, V9-7, V9-10, V9-24, V9-29, V9-51 … V9-59, V9-69, V9-72, V9-73, V9-74, V9-77, V9-78 | docs of `telemetry`, `localization`, `worker-pool`, `database`, `audit`, `health`, `openapi`, `multi-tenancy`, `config`, `kernel`, `auth`; `docs/` |
+| **M113m** | design | time the framework does not honour                                    | V9-63 **High**, V9-70                                                                    | `scheduler-plugin`, `auth-plugin`                                                                                                                  |
+| **M113n** | design | security behind a reverse proxy                                       | V9-65 **High**, V9-66                                                                    | `http-security-plugin`, `runtime`                                                                                                                  |
 
 **Sequence.** M113d first — it holds the only regression, which stops every Worker importing
 `database-plugin` or `scheduler-plugin` from building. M113a and M113c next, the remaining Highs on
 the outage path (a hung or stopped Kafka read `up` for 70 s; NATS and the RabbitMQ queue never
-reconnect). M113b after M113a, because the readiness semantics decision (V9-19) reads what the
-brokers report. M113e–M113g are independent design letters. M113h–M113l can start at once, in
-parallel with everything above. Several design letters break a default or an API, so the release
+reconnect). M113m and M113n are High too and independent: the scheduler fires any delay over ~24.8
+days at once (every monthly cron double-fires), and `csrf: {}` refuses every browser mutation behind
+a TLS-terminating proxy. M113b after M113a, because the readiness semantics decision (V9-19) reads
+what the brokers report. M113e–M113g are independent design letters. M113h–M113l can start at once,
+in parallel with everything above. Several design letters break a default or an API, so the release
 that ships them is `0.10.0`, not a patch.
 
 ---
@@ -14156,6 +14161,9 @@ whether `subscribe()` waits for assignment or documents that it does not.
   Redis lock-backend fault while every fire is skipped.
 - **V9-44** — a Redis outage reaches a client as a masked 500 from the session/cache store and the
   rate-limit store, where database and Vault outages map to 503.
+- **V9-68** — `/ready` answers 200 over a database missing a migration, with no application tables,
+  or after a failed restore: the database indicator measures reachability only, and the generated
+  migration runner records nothing it ran (X44).
 
 **Decisions the plan takes:** what `degraded` means for `/ready` (today it fails readiness; a parked
 inbox row is not an outage), whether the scheduler indicator probes its lock backend, and a status
@@ -14163,12 +14171,20 @@ hint for the Redis-backed stores' outage errors on the M90f/M89b pattern.
 
 ---
 
-### Milestone 113c: Connections That Never Recover, and a Shutdown With No Bound
+### Milestone 113c: Connections and Jobs That Never Recover, and a Shutdown With No Bound
 
 **Package(s):** `packages/queue-plugin`, `packages/runtime`
 
 - **V9-18 (High)** — `RabbitMqQueue` never recovers from a broker restart: jobs stop until the
   process restarts (X67, real RabbitMQ 4).
+- **V9-64 (High)** — the Redis queue never reclaims a job whose worker died mid-run: `reserve` moves
+  it into `queue:<name>:processing` and only ack/requeue/deadLetter remove it — no visibility
+  timeout, no stale sweep, no option — while `/health` and `/ready` stay green. Reproduced
+  independently by X40 and X42 (SIGKILL mid-job); a manual move back converges exactly once.
+- **V9-71** — Redis queue keys carry no configurable prefix, so two applications sharing one Redis
+  and a job name consume each other's jobs.
+- **V9-76** — a typed processor `(job: IJob<T>) => …` fails TS2322 inside a
+  `QueueProcessorDefinition`.
 - **V9-31** — on Deno, `app.stop()` is not bounded while a request awaits a long task: after the
   kernel's 10 s drain, `DenoHttpAdapter.close()` awaits `server.shutdown()`, which waits for every
   in-flight request, so `onClose` hooks (the worker pool's termination among them) run only when the
@@ -14253,7 +14269,9 @@ V9-8 (`g service` in a starter-composed project emits an unwired `@Injectable`),
 scaffolds omit `streamSubjects`), V9-38 (`adopt` writes TCP probes for a templated member), V9-39
 (`adopt` leaves `.env` at the root and `.dockerignore` has no `.env` rule), V9-9 (a Workers
 full-stack scaffold fails its own `npm run check`), V9-11 (`.gitignore` omits `.react-router/`),
-V9-42 (`adopt` asks for a hand edit of its own `main.ts`).
+V9-42 (`adopt` asks for a hand edit of its own `main.ts`), V9-67 (a Node project with
+`add websocket` gets no `ws`, and every upgrade then answers 500 with nothing logged — the runtime
+swallows `loadWsModule`'s error).
 
 ### Milestone 113i: CLI Commands Whose Refusals and Guidance Mislead
 
@@ -14264,7 +14282,7 @@ no CLI dependency, and `npx setu` fetches an unrelated package), V9-13 (rollback
 `kill -9`), V9-30 (`add worker-pool` and `add secrets` register nothing and print no line), V9-40
 (`add @setu-ts/<pkg>` refused against its own `--help`), V9-60 (class-based ingress kinds share one
 filename), V9-61 (`--dry-run` reports "would create" for an existing file), V9-62 (the CLI README's
-schematic table).
+schematic table), V9-75 (functional `g job` stays unwired though `QueuePlugin` is registered).
 
 ### Milestone 113j: Outbox and Inbox Signals
 
@@ -14293,14 +14311,45 @@ V9-29 (worker threads exceed `maxWorkers` at a hand-over on every runtime, measu
 and the nine M104 gaps V9-51 … V9-59 (database repository surface, audit storage and read path,
 `/ready` semantics, OpenAPI `exclude`/`operationId`, the localization formatter's limits,
 tenant-from-principal, construction-time configuration, the kernel's "one option" sentence, the
-`ITotpStore` atomicity contract).
+`ITotpStore` atomicity contract), and from X39–X44: V9-69 (no backup/restore guidance anywhere),
+V9-72 (the S3 provider's two SDK packages, named nowhere, and a raw startup crash without the
+presigner), V9-73 (the tier-C idempotency example needs a scheduler), V9-74 (no inbound-webhook
+guidance), V9-77 (a secret in the scaffold's `.env` is invisible to the env provider), V9-78 (the
+deployment guide describes only the Deno image).
+
+### Milestone 113m: Time the Framework Does Not Honour
+
+**Package(s):** `packages/scheduler-plugin`, `packages/auth-plugin`
+
+- **V9-63 (High)** — a delay over 2³¹−1 ms (~24.8 days) is handed to `setTimeout` unchanged, which
+  fires it after ~1 ms on Node, Deno and Bun, and the fire never checks that its instant has come:
+  `delay(30 days)` fires 2 ms after registration, a `0 0 29 2 *` cron fires at once and every 30 s,
+  and every monthly cron double-fires after its first run (X43; `scheduler-service.ts:432-441`). The
+  fix chains timers below the limit and re-checks the due instant on every fire.
+- **V9-70** — a JWT is accepted for up to 1 s after `exp` (`exp < now` with `now` in whole seconds);
+  RFC 7519 rejects at or after `exp`.
+
+### Milestone 113n: Security Behind a Reverse Proxy
+
+**Package(s):** `packages/http-security-plugin`, `packages/runtime`
+
+- **V9-65 (High)** — behind a TLS-terminating proxy, `csrf: {}` refuses every same-origin browser
+  mutation: the middleware trusts only the origin of `ctx.request.url` (`http://…`) while the
+  browser sends `Origin: https://…`, and nothing reads `X-Forwarded-Proto`. Undocumented (X41).
+- **V9-66** — `trustedProxies` checks only the forwarded chain, never the socket peer (`IRequest.ip`
+  is never set by the first-party adapters), so a client reaching the origin directly chooses its
+  own client identity — the half of X32-3 that M90a left.
+
+**Decisions the plan takes:** whether the request origin is derived from forwarded proto/host when
+the peer is a trusted proxy, or an explicit `publicOrigin` option is added; and adapters populating
+`IRequest.ip` so proxy trust can check the peer.
 
 **Deliverables**
 
 - [ ] Each letter's rows closed by a re-run on the next published version, recorded in the next
       regression report
-- [ ] A plan per design letter (M113a–M113g) before implementation
-- [ ] **ROADMAP.md** — this section and the Progress Tracking rows `113` and `113a`–`113l`
+- [ ] A plan per design letter (M113a–M113g, M113m, M113n) before implementation
+- [ ] **ROADMAP.md** — this section and the Progress Tracking rows `113` and `113a`–`113n`
 
 ---
 
@@ -14650,10 +14699,10 @@ patch by construction and gains nothing new here.
 | 111e2     | ✅     | repository scripts and root tests on Node (Vitest); doc gates re-pointed; JSDoc ratchet re-measured on TypeDoc                                                                                                                                                                            |
 | 111e3     | ✅     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                                                                           |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                                                             |
-| 113       | ⬜     | the `v0.9.0` smoke closeout — 62 rows V9-1…V9-62 grouped by shape into M113a–M113l                                                                                                                                                                                                        |
+| 113       | ⬜     | the `v0.9.0` smoke closeout — 78 rows V9-1…V9-78 grouped by shape into M113a–M113n                                                                                                                                                                                                        |
 | 113a      | ⬜     | messaging-plugin — brokers that report healthy while down, and publishes with no bound                                                                                                                                                                                                    |
 | 113b      | ⬜     | service-discovery + health + scheduler + cache + session + auth — readiness that does not describe the dependency                                                                                                                                                                         |
-| 113c      | ⬜     | queue-plugin + runtime — connections that never recover, and a shutdown with no bound                                                                                                                                                                                                     |
+| 113c      | ⬜     | queue-plugin + runtime — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                                            |
 | 113d      | ⬜     | database + scheduler + cloudflare + cli — Workers builds (the V9-1 regression) and the edge cache                                                                                                                                                                                         |
 | 113e      | ⬜     | auth-plugin + session-plugin — identity and session semantics a client cannot predict                                                                                                                                                                                                     |
 | 113f      | ⬜     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints                                                                                                                                                                                                |
@@ -14663,4 +14712,6 @@ patch by construction and gains nothing new here.
 | 113j      | ⬜     | messaging-plugin — outbox and inbox signals (fix branches)                                                                                                                                                                                                                                |
 | 113k      | ⬜     | sdk + idempotency + http-security + database — the idempotency key from client to server (fix branches)                                                                                                                                                                                   |
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
+| 113m      | ⬜     | scheduler-plugin + auth-plugin — time the framework does not honour                                                                                                                                                                                                                       |
+| 113n      | ⬜     | http-security-plugin + runtime — security behind a reverse proxy                                                                                                                                                                                                                          |
 | 114       | ⬜     | cli — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`                                                                                                                                                                           |
