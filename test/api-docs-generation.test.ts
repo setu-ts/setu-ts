@@ -1318,7 +1318,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('generate', '/tmp/fake-api-missing', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('Generated output not found'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Generated output missing'))).toBe(true);
     });
   });
 
@@ -1330,7 +1330,7 @@ error[private-type-ref]: public type references private type
             // Workspace has an extra package not in PUBLISHED_PACKAGES.
             return Promise.resolve(
               JSON.stringify({
-                workspace: ['packages/common', 'packages/extra-pkg'],
+                packages: ['packages/common', 'packages/extra-pkg'],
               }),
             );
           }

@@ -33,7 +33,7 @@ it('keeps both Deno source checking and lane test checking enabled', () => {
   const runner = readFileSync('scripts/test-deno-lane.ts', 'utf8');
   expect(runner).not.toContain('--no-check');
   expect(runner).toContain('DENO_ONLY_SOURCES');
-  expect(runner).toMatch(/runProcess\('deno',\s*\['check'/);
+  expect(runner).toMatch(/run\(\s*'deno',\s*\[\s*'check'/);
 });
 
 it('maps every exported package subpath to its source, not to the unbuilt dist', async () => {

@@ -1,5 +1,8 @@
 import { readFile, readdir, stat, mkdir, writeFile, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { tempDir } from './node-helpers.ts';
 import { workspaceMembers } from '../scripts/lib/workspace.ts';
@@ -795,7 +798,7 @@ describe('real-backend CI wiring', () => {
     // download. Resolving it first pays the install outside the window.
     const smoke = await readFile('apps/realtime-clients/smoke.ts', 'utf8');
     const preflight = smoke.indexOf("await run('npx', ['--yes', 'wrangler', '--version']);");
-    const spawn = smoke.indexOf("new Deno.Command('npx'");
+    const spawn = smoke.indexOf("startHost('npx'");
     expect(preflight).toBeGreaterThan(-1);
     expect(spawn).toBeGreaterThan(preflight);
 
@@ -990,27 +993,42 @@ describe('M111c declared artifact coverage', () => {
 });
 
 describe('Node app gate execution', () => {
-  it('runs declared Node scripts using the source register on a cold app', async () => {
-    const root = await tempDir({ prefix: 'app-command-' });
+  it('resolves @setu-ts/* to source through tsconfig paths on a cold app', async () => {
+    // An app has no dist/ and no import hook: tsx reads the app's generated
+    // tsconfig.json paths. Without the mapping the same app cannot start, so
+    // the second run proves the paths, not a warm build, did the resolving.
+    const tsxCli = createRequire(resolve('apps/minimal/package.json')).resolve('tsx/cli');
+    const common = resolve('packages/common/src/index.ts');
+    // Outside the repository, so no ancestor node_modules can resolve the package to a
+    // previously built dist/ and make the negative half pass for the wrong reason.
+    const root = await tempDir({ prefix: 'app-command-', dir: tmpdir() });
+    const writeApp = async (paths: Record<string, string[]>): Promise<void> => {
+      await writeFile(
+        `${root}/apps/a/tsconfig.json`,
+        JSON.stringify({ compilerOptions: { paths } }),
+      );
+    };
     try {
       await writeFile(`${root}/pnpm-workspace.yaml`, 'packages: [apps/*]');
       await mkdir(`${root}/apps/a`, { recursive: true });
+      const command = `node ${JSON.stringify(tsxCli)} main.ts`;
       await writeFile(
         `${root}/apps/a/package.json`,
-        JSON.stringify({
-          scripts: {
-            start: 'node main.ts',
-            check: 'node --check main.ts',
-            smoke: 'node main.ts',
-          },
-        }),
+        JSON.stringify({ scripts: { start: command, check: command, smoke: command } }),
       );
       await writeFile(
         `${root}/apps/a/main.ts`,
         "import { CAPABILITIES } from '@setu-ts/common'; if (!CAPABILITIES.RUNTIME) throw new Error('Missing source export');\n",
       );
+      await writeApp({ '@setu-ts/common': [common] });
       expect(await checkApps(root)).toBe(false);
+      // `pnpm run` exports NODE_PATH pointing at the repository's virtual store,
+      // which would find a built dist/ instead of failing.
+      vi.stubEnv('NODE_PATH', '');
+      await writeApp({});
+      expect(await checkApps(root)).toBe(true);
     } finally {
+      vi.unstubAllEnvs();
       await rm(root, { recursive: true });
     }
   });

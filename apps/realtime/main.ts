@@ -6,7 +6,7 @@ const app = createRealtimeReplica(process.env['REDIS_URL'] ?? 'redis://127.0.0.1
 await app.start({ port });
 console.log(`Realtime replica listening at http://localhost:${port}`);
 
-// Graceful shutdown. Deno's default SIGTERM action ends the process immediately, so without this
+// Graceful shutdown. The default SIGTERM action ends the process immediately, so without this
 // listener `app.stop()` never runs under Kubernetes — here that would also leave the Redis
 // backplane subscription open rather than closing it. See docs/deployment.md.
 if (process.platform !== 'win32') {

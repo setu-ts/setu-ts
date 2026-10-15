@@ -68,6 +68,13 @@ interface Finding {
 const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'build', '.wrangler', 'dist']);
 
 /**
+ * Generated output skipped by path. TypeDoc copies every linked Markdown file into
+ * `docs/api/media/` and writes its own scripts beside them, so scanning the reference
+ * would report the copies, which carry no `version:history` context, as stale prose.
+ */
+const SKIP_PATHS = new Set(['docs/api']);
+
+/**
  * Roots scanned when no explicit file list is given.
  *
  * The repository root is walked one level deep, so a subdirectory is checked
@@ -827,16 +834,17 @@ export function checkRequiredGuides(files: readonly string[]): readonly Finding[
 }
 
 /**
- * Builds the set of generated API page paths that `deno task docs:api`
- * produces from a list of manifest export targets. Each target
- * `packages/<pkg>/src/<path>.ts` maps to `docs/api/<pkg>/src/<path>.ts/index.html`.
+ * Builds the set of generated API page paths that `pnpm run docs:api`
+ * produces from a list of manifest export targets. Each target maps to the
+ * TypeDoc module page `apiModulePage` names (`packages/<pkg>/src/index.ts` →
+ * `docs/api/modules/<pkg>_src.html`).
  *
  * @param targets - The manifest export targets (from collectApiEntrypoints)
  * @returns The set of generated API page paths
  */
 export function buildGeneratedApiPages(targets: readonly string[]): Set<string> {
   const pages = new Set<string>();
-  // `deno doc --html` always emits a top-level site index at
+  // TypeDoc always emits a top-level site index at
   // docs/api/index.html (the landing page listing every symbol). Include it
   // so a doc that links to the bare top-level index resolves instead of
   // false-positiving as "does not resolve to a known generated page".
@@ -1598,8 +1606,7 @@ export function checkPackageCatalog(
     }
 
     // Required: exact valid generated API link within this section.
-    const apiPathPrefix = pkgPath.includes('starters/') ? `starters/${pkg}` : pkg;
-    const expectedApiLink = `./api/${apiPathPrefix}/src/index.ts/index.html`;
+    const expectedApiLink = `./api/${apiModulePage(`${pkgPath}/src/index.ts`)}`;
     if (!section.includes(`[API Reference](${expectedApiLink})`)) {
       findings.push({
         file: 'docs/plugins.md',
@@ -2063,6 +2070,7 @@ async function collectMarkdown(root: string): Promise<string[]> {
         continue;
       }
       const path = dir === '.' ? entry.name : `${dir}/${entry.name}`;
+      if (SKIP_PATHS.has(path)) continue;
       if (entry.isDirectory()) {
         // The repo root is walked one level deep only; nested roots are listed
         // explicitly in SCAN_ROOTS so an unrelated tree cannot join silently.

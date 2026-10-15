@@ -925,7 +925,8 @@ describe('run — end to end, through the real renderer', () => {
   it('propagates an I/O failure rather than omitting a directory', async () => {
     // Only a missing root is tolerable. Anything else would silently drop a
     // directory's documents and let the gate pass with partial coverage.
-    await expect(scanDocuments(['deno.json'])).rejects.toThrow();
+    // A file passed as a root fails with ENOTDIR, which is not the tolerated ENOENT.
+    await expect(scanDocuments(['package.json'])).rejects.toThrow();
   });
 
   it('reports a document it cannot read', async () => {

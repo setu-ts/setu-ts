@@ -6,7 +6,7 @@ const app = createRestExampleApp();
 await app.start({ port });
 console.log(`REST API listening at http://localhost:${port}`);
 
-// Graceful shutdown. Deno's default SIGTERM action ends the process immediately, so without this
+// Graceful shutdown. The default SIGTERM action ends the process immediately, so without this
 // listener `app.stop()` never runs under Kubernetes and every onStopping/onShutdown hook is
 // skipped. The framework does not install this for you — see docs/deployment.md.
 if (process.platform !== 'win32') {

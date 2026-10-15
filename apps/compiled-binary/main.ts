@@ -6,7 +6,7 @@ const app = createCompiledApp();
 await app.start({ port });
 console.log(`Compiled-binary example listening at http://localhost:${port}/health`);
 
-// Graceful shutdown. Deno's default SIGTERM action ends the process immediately, so without this
+// Graceful shutdown. The default SIGTERM action ends the process immediately, so without this
 // listener `app.stop()` never runs under Kubernetes and every onStopping/onShutdown hook is
 // skipped. The framework does not install this for you — see docs/deployment.md.
 if (process.platform !== 'win32') {

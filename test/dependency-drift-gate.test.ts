@@ -95,6 +95,7 @@ describe('dependency drift gate configuration', () => {
     // tarballs, and imports the tsc-compiled `./dist/controller.js` — no Deno
     // gate resolves it, so the fresh-lock resolution must not either.
     // M111c's generated LICENSE copies are tarball data, not source modules.
+    // `lock`: the Deno lane's committed lockfile (M111e3) is resolution data.
     const nonSource = new Set([
       'json',
       'md',
@@ -105,6 +106,7 @@ describe('dependency drift gate configuration', () => {
       'sql',
       'mjs',
       'license',
+      'lock',
     ]);
     const sources = tracked.filter((file) => !nonSource.has(extensionOf(file)));
     expect(sources.length).toBeGreaterThan(2000);

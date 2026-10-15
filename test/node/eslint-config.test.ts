@@ -195,10 +195,18 @@ describe('ESLint configuration parity with deno lint', () => {
     );
   });
 
-  it('ignores what .gitignore ignores, and the website', async () => {
-    for (const path of ['.tmp/sample.ts', '.claude/worktrees/x/sample.ts', 'website/sample.ts']) {
+  it('ignores what .gitignore ignores and the website build output, not its sources', async () => {
+    for (const path of [
+      '.tmp/sample.ts',
+      '.claude/worktrees/x/sample.ts',
+      'website/dist/sample.js',
+      'website/.astro/sample.ts',
+    ]) {
       expect(await eslint.isPathIgnored(path)).toBe(true);
     }
-    expect(await eslint.isPathIgnored('packages/kernel/src/sample.ts')).toBe(false);
+    // M111e3: the website is linted by the root config like every other source.
+    for (const path of ['packages/kernel/src/sample.ts', 'website/scripts/graft.mjs']) {
+      expect(await eslint.isPathIgnored(path)).toBe(false);
+    }
   });
 });
