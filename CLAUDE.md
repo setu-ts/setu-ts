@@ -6229,8 +6229,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tables change, both correcting `deno doc` output. Four Deno users pass to M111e3. The round-1
   security audit found F1–F2, fixed in `c5c6faaa`; round 2 found one Low, fixed afterwards and NOT
   re-audited — complete (PR #458)
-- **Next milestone** — M111e3 (CI on Node and pnpm, `apps/*` on pnpm, root `deno.json` removed).
-  `v0.9.0` is published to npm (2026-10-14); its smoke run and M104 proceed separately.
+- **Milestone 111e3** (repository tooling — CI, examples and website on Node and pnpm; root
+  `deno.json` and `deno.lock` removed): `pnpm-workspace.yaml` is the one authored workspace list,
+  read through `scripts/lib/workspace.ts`; every command is `pnpm run <name>`, with
+  `pnpm run test:tooling` for the root suite. The Deno lane runs from a generated
+  `test/deno-lane/lane.config.json` (per-member permission sets) and a committed lane lock, in its
+  own "Deno runtime lane" CI job; the main job is renamed "Format / Lint / Check / Test", and Deno
+  is installed only where it is the subject. The 17 apps join the pnpm workspace and run through
+  `tsx` with generated `tsconfig.json` paths; `apps/compiled-binary` is a Node SEA; the images are
+  `node:24-alpine` (268–289 MB) and a SEA on distroless (211 MB); the website is a standalone pnpm
+  project and the API reference is TypeDoc HTML. Implemented by Codex until its usage limit, then
+  taken over; opencode did the governing-document command blocks, and its one false justification
+  (root tests "retain `@std`") was corrected. **A cold clone outside the repository found what the
+  warm tree hid**: the generated root `package.json` still carried a `workspaces` list, which pnpm
+  ignores and Deno adopts as a workspace root, so every Deno project the CLI e2e scaffolds under
+  `.tmp/` failed to resolve (61 tests). It is removed, leaving one list, and `check-node-build.ts`,
+  an eighth reader the plan missed, reads the workspace helper. The same run exposed CI defects no
+  local gate could: the node-build job checked manifests before installing, and the browser test
+  handed Chromium a relative `TMPDIR` that only existed in a warm checkout. TypeDoc rendered the
+  README as the API index, and its 475 KB logo failed the website's Lighthouse budget (0.75); the
+  index now lists modules (0.94–0.95). The `cli` lane permission set given `net: true` fails no lane
+  test, so that scoping is not guarded; dropping `DENO_NO_PACKAGE_JSON` fails earlier than the plan
+  predicted (the first frozen `deno check`) — complete (PR #459)
+- **Next milestone** — M111f (governing documents and the JSR sunset). `v0.9.0` is published to npm
+  (2026-10-14); its smoke run and M104 proceed separately.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
