@@ -79,6 +79,10 @@ One milestone, one PR (maintainer decision, 2026-10-15).
 | **Probe: Deno lane without root manifest** (corrected 2026-10-15 after the first implementation run) | `deno check` + `deno test` with a standalone `test/deno-lane/lane.config.json`, root `deno.json`/`deno.lock` removed                                                                                                                         | The original row claimed "90 passed"; that was wrong. `deno check` of `DENO_ONLY_SOURCES` passes, but the real driver reports **61 passed / 35 failed** (`NotCapable` on sockets): under `-P` the root workspace applied each MEMBER's own `test.permissions` (runtime `net: true`; cli and diagnostics-plugin `net: ["127.0.0.1"]`), and a standalone config carries none. Baseline on the unchanged tree (`7e46d0bb`): **90 passed (491 steps)**. The 55 `@setu-ts/*` mappings and `nodeModulesDir: "auto"` are still required (TS2307 without the mappings; missing `npm:@types/node` with `manual`). |
 | **Probe: named permission sets**                                                                     | Deno 2.9.6, a config with `"permissions": { "loop": { "net": ["127.0.0.1"] }, "wide": { "net": true } }`                                                                                                                                     | `deno test -P=wide` lets a test bind `0.0.0.0`; `-P=loop` and no `-P` both refuse it with `NotCapable`. Named sets apply per invocation and discriminate.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | **Probe: package.json discovery**                                                                    | `deno run` of `scripts/inspect-local-diagnostics.ts` with no root `deno.json`                                                                                                                                                                | Deno falls back to the root `package.json` `workspaces` field: it reads `apps/full-stack/deno.json` as a member (two `nodeModulesDir` warnings) and, with `--config`, still warns that the root `package.json` has no `version`. Those extra stderr lines fail `test/inspect-local-diagnostics.test.ts`. `DENO_NO_PACKAGE_JSON=1` plus `--config test/deno-lane/lane.config.json` leaves only the `Deno.serve` banner; without `--config` the child cannot resolve `hono/router/linear-router`.                                                                                                          |
+| **Probe: cold lane child** (fresh clone of `2214ac5b`)                                               | `deno run` of `scripts/inspect-local-diagnostics.ts` with the lane config, before and after preparation                                                                                                                                      | No preparation: ~500 stderr lines of `Initialize <pkg>` (Codex measured 499; lane 89/490). Bare `deno install --config … --frozen`: exit 1, "lockfile is out of date". `deno install --config … --frozen --entrypoint scripts/inspect-local-diagnostics.ts`: exit 0, then the child's stderr is exactly 1 line (the `Deno.serve` banner).                                                                                                                                                                                                                                                                |
+| **Probe: SDK fixture format**                                                                        | the five `packages/sdk/test/fixtures/*-client.ts`, copied outside the repository                                                                                                                                                             | `deno fmt --no-config --check`: 5 not formatted. With `--line-width=100 --single-quote`: 5 checked, clean.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Probe: version references after the move**                                                         | `grep` over tracked files                                                                                                                                                                                                                    | `test/deno-lane/deno.lock`: 52 `jsr:@setu-ts/<pkg>@0.9.0` link keys. `pnpm-lock.yaml`: 0. Package `src` trees: 0 (M111a made the SDK's specifiers bare).                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Nested-worktree discovery (local only)                                                               | a clone under `.claude/worktrees/<w>/.tmp/`                                                                                                                                                                                                  | Deno walks up to the MAIN checkout's `deno.json` (present on `develop` until this merges) and that repository's `.gitignore`; `deno fmt` there found "No target files". This is why every repository Deno call passes `--config`, or `--no-config` for `fmt`. CI checkouts are not nested.                                                                                                                                                                                                                                                                                                               |
 | Lane lists                                                                                           | `scripts/test-lanes.ts`                                                                                                                                                                                                                      | 41 `DENO_LANE_TESTS`, 5 `DENO_ONLY_SOURCES`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | **Probe: tsx + source register**                                                                     | `packages/cli/node_modules/.bin/tsx --import ./test/node-source-register.ts` on a file under `.tmp/` with no `node_modules` (2026-10-15)                                                                                                     | A decorated `@Controller` class importing `@setu-ts/common` and `@setu-ts/decorator-plugin` runs (`ok logger function`). Control without the register fails `ERR_MODULE_NOT_FOUND` for `@setu-ts/common`, so the register is what resolves it.                                                                                                                                                                                                                                                                                                                                                           |
 | **Probe: pnpm audit**                                                                                | `pnpm audit --audit-level high --json` with no install (2026-10-15)                                                                                                                                                                          | Exit 0, reads `pnpm-lock.yaml` directly; 0 high, 2 moderate (the moderate pair `--audit-level high` hides, as `deno audit --level=high` did).                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -150,6 +154,15 @@ One milestone, one PR (maintainer decision, 2026-10-15).
     file, and the existing per-file coverage gate reads the combined report. A single merged grant
     is rejected: it would widen loopback-only members to `net: true`, and some tests rely on a
     narrow grant refusing an address (the M53 lesson).
+  - **Preparation:** before the first group the driver runs
+    `deno install --config test/deno-lane/lane.config.json --frozen --entrypoint <spawned modules>`,
+    where the spawned modules are every module a lane test starts as a subprocess (today only
+    `scripts/inspect-local-diagnostics.ts`), and the lane lock covers their graph. A spawned module
+    is not imported by any test, so nothing else puts its packages in `node_modules`; in a cold
+    checkout its child printed ~500 `Initialize …` lines and failed the diagnostics stderr assertion
+    (89/490), while warm runs passed only because other groups had installed the same packages
+    first. A bare `deno install` is NOT the fix: it installs every import-map entry and the frozen
+    lock refuses it.
   - **Discovery:** every repository-owned Deno invocation — the driver's `check`/`test` and the
     `deno run` that `test/inspect-local-diagnostics.test.ts` spawns — passes
     `--config test/deno-lane/lane.config.json` and runs with `DENO_NO_PACKAGE_JSON=1`, so Deno never
@@ -218,12 +231,18 @@ One milestone, one PR (maintainer decision, 2026-10-15).
 - **Decision:** `release-resolved-set.ts` reads `pnpm-lock.yaml` through `yaml` and emits
   `{ version, lockfileVersion, packages: { "<name>@<version>": { integrity } } }`, sorted. The
   `ILockfileContents` input type is replaced. `dependency-drift.ts` compares two `pnpm-lock.yaml`
-  files by package name and version. `version-sweep.ts` and `bump-version.ts` stop touching
-  `deno.lock` and keep updating member manifests and the remaining sites; the app `deno.lock` files
-  are deleted with the apps' `deno.json` (§3.7), which removes the "15 app locks" bump site.
+  files by package name and version. `version-sweep.ts` and `bump-version.ts` KEEP reading and
+  rewriting every tracked `deno.lock`: the app `deno.lock` files are deleted with the apps'
+  `deno.json` (§3.7), which removes the "15 app locks" bump site, but `test/deno-lane/deno.lock`
+  records every workspace member in its `links` block at the shipping version (52
+  `jsr:@setu-ts/<pkg>@0.9.0` keys, measured), so it is now the swept file that keeps the sweep's
+  zero-reference guard meaningful. `pnpm-lock.yaml` records workspace packages as `link:` with no
+  version (0 references, measured) and stays unswept. The guard is unchanged; the bump rewrites the
+  lane lock in place, never by regeneration (the v0.5.0 runbook rule).
 - **Why:** `pnpm-lock.yaml` is the lock CI now installs from.
 - **Test home:** `test/unit/release-resolved-set.test.ts`, `test/unit/dependency-drift.test.ts`,
-  `test/version-sweep.test.ts`, `test/unit/bump-version.test.ts`.
+  `test/version-sweep.test.ts` (the lane lock is scanned and a stale `links` key is reported),
+  `test/unit/bump-version.test.ts` (a real dry-run bump sees references and rewrites the lane lock).
 
 ### 3.7 Apps on pnpm and Node
 
@@ -306,8 +325,12 @@ One milestone, one PR (maintainer decision, 2026-10-15).
 ### 3.11 SDK client fixtures keep `deno fmt`
 
 - **Decision:** unchanged from M111e1. The generator's output target is `deno fmt`'s style; the five
-  fixtures are formatted by it. `fmt`/`fmt:check` keep `deno fmt` over those five files, so the
-  `node` job sets up Deno for that step (and for the CLI's Deno-target e2e, §3.5).
+  fixtures are formatted by it. `fmt`/`fmt:check` keep `deno fmt` over those five files, invoked as
+  `deno fmt --no-config --line-width=100 --single-quote <files>` (`--check` for `fmt:check`): the
+  deleted root `deno.json` carried `lineWidth: 100`, `singleQuote: true`, `semiColons: true` (the
+  default), and measured outside the repository the five fixtures fail without the flags and pass
+  with them. `--no-config` stops Deno discovering any ancestor config. The `node` job sets up Deno
+  for that step (and for the CLI's Deno-target e2e, §3.5).
 - **Why:** changing the generator's target format is a behaviour change to generated SDK clients,
   out of scope.
 - **Test home:** `test/node/task-surface.test.ts`.
@@ -390,8 +413,11 @@ No package breaks, so it ships in the next patch (0.9.x) under the 0.9 versionin
 | `test/browser-gate.test.ts`                                    | harness wiring                                  | Joins `tsc`; harness command is `node`.                                                                                                                                                         |
 | `website/test/*.test.ts`                                       | `website/scripts/graft.mjs`, links              | Converted to Vitest; graft targets TypeDoc DOM.                                                                                                                                                 |
 
-Negative controls (each observed failing, then reverted): give the `cli` permission set `net: true`
-and report whether any lane test fails — if none does, say so in the report rather than claiming a
+Negative controls (each observed failing, then reverted): drop the driver's `--entrypoint`
+preparation and run the lane on a cold clone (the diagnostics stderr assertion fails); drop
+`--line-width=100 --single-quote` from `fmt:check` (all five fixtures fail); exclude `deno.lock`
+from the sweep (the zero-reference guard fires); give the `cli` permission set `net: true` and
+report whether any lane test fails — if none does, say so in the report rather than claiming a
 scoping guard; drop `DENO_NO_PACKAGE_JSON` from the driver (`inspect-local-diagnostics` fails on
 extra stderr); restore a root `deno.json` (task-surface fails); drop one `@setu-ts` mapping from the
 lane config (lane `deno check` fails TS2307); remove the source register from `check:apps` (an app
