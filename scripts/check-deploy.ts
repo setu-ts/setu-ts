@@ -292,6 +292,25 @@ export function isClean(report: DriftReport): boolean {
  * @param present - Tool names found on PATH
  * @returns The missing names, so a skip message can say which
  */
+/**
+ * The last lines of a failed step's captured output, indented for the report.
+ *
+ * A quiet step's output is otherwise discarded, so a failed image build printed only a cross
+ * mark: a CI failure then gave no reason to read (M111e3).
+ *
+ * @param output - The step's combined stdout and stderr
+ * @param lines - How many trailing non-blank lines to keep
+ * @returns The indented tail, or an empty string when there was no output
+ */
+export function failureTail(output: string, lines = 30): string {
+  return output
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .slice(-lines)
+    .map((line) => `      ${line}`)
+    .join('\n');
+}
+
 export function missingTools(required: readonly string[], present: readonly string[]): string[] {
   return required.filter((tool) => !present.includes(tool));
 }
@@ -468,7 +487,11 @@ async function checkBuild(): Promise<CheckOutcome> {
       { quiet: true },
     );
     console.log(`  ${built.success ? '✓' : '✗'} ${target.app} → ${target.tag}`);
-    if (!built.success) ok = false;
+    if (!built.success) {
+      ok = false;
+      const tail = failureTail(`${built.stdout}\n${built.stderr}`);
+      if (tail !== '') console.error(tail);
+    }
   }
   return ok ? 'passed' : 'failed';
 }

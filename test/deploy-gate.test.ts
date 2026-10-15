@@ -18,6 +18,7 @@ import {
   PRODUCTION_DEVTOOL_PROBE,
   renderDrift,
   SKIP_EXIT_CODE,
+  failureTail,
 } from '../scripts/check-deploy.ts';
 
 const read = (path: string): string => readFileSync(path, 'utf8');
@@ -538,5 +539,16 @@ describe('the generated deployment gate proves the devtool is excluded (M101f V8
     expect(source).toContain('await cli([...GENERATED_MEMBER_ARGS,');
     expect(source).toContain('for (const layout of GENERATED_LAYOUTS)');
     expect(source).toContain('PRODUCTION_DEVTOOL_PROBE,');
+  });
+});
+
+describe('failed step output', () => {
+  it('keeps the indented tail of a failed build and drops blank lines', () => {
+    const output = ['', ...Array.from({ length: 40 }, (_, i) => `line ${i}`), '', ''].join('\n');
+    const tail = failureTail(output).split('\n');
+    expect(tail).toHaveLength(30);
+    expect(tail[0]).toBe('      line 10');
+    expect(tail.at(-1)).toBe('      line 39');
+    expect(failureTail(' \n\n')).toBe('');
   });
 });
