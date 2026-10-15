@@ -45,13 +45,13 @@ const HEADER =
 describe('Deno lane invocations', () => {
   it('checks the config and runs disjoint member groups with their named grants and a root group without -P', async () => {
     const calls: { command: string; args: readonly string[]; options?: RunOptions }[] = [];
-    const code = await runDenoLane(['--no-check'], async (command, args, options) => {
+    const code = await runDenoLane(['--no-check'], (command, args, options) => {
       calls.push({ command, args, ...(options === undefined ? {} : { options }) });
-      return {
+      return Promise.resolve({
         code: 0,
         stdout: [HEADER, ...DENO_ONLY_SOURCES.map((file) => row(file, 99, 99, 99))].join('\n'),
         stderr: '',
-      };
+      });
     });
     expect(code).toBe(0);
     const tests = calls.filter((call) => call.args[0] === 'test');
@@ -84,9 +84,9 @@ describe('Deno lane invocations', () => {
   it('stops after a failed source check', async () => {
     let calls = 0;
     expect(
-      await runDenoLane([], async () => {
+      await runDenoLane([], () => {
         calls++;
-        return { code: 2, stdout: '', stderr: '' };
+        return Promise.resolve({ code: 2, stdout: '', stderr: '' });
       }),
     ).toBe(2);
     expect(calls).toBe(1);
@@ -94,11 +94,13 @@ describe('Deno lane invocations', () => {
 
   it('retains a test failure while collecting the combined coverage', async () => {
     expect(
-      await runDenoLane([], async (_command, args) => ({
-        code: args[0] === 'test' ? 3 : 0,
-        stdout: '',
-        stderr: '',
-      })),
+      await runDenoLane([], (_command, args) =>
+        Promise.resolve({
+          code: args[0] === 'test' ? 3 : 0,
+          stdout: '',
+          stderr: '',
+        }),
+      ),
     ).toBe(3);
   });
 });
