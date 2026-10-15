@@ -800,7 +800,12 @@ export function renderLaneConfig(members: readonly MemberInput[], laneJson: stri
     scopes: Record<string, Record<string, string>>;
   };
   const imports = { ...lane.imports };
+  const permissions: Record<string, unknown> = {};
   for (const member of members) {
+    if (DENO_LANE_TESTS.some((path) => path.startsWith(`${member.dir}/test/`))) {
+      const manifest = JSON.parse(member.denoJson) as { test: { permissions: unknown } };
+      permissions[member.dir.slice('packages/'.length)] = manifest.test.permissions;
+    }
     for (const entry of member.exports) {
       const name = member.name + (entry.subpath === '.' ? '' : entry.subpath.slice(1));
       imports[name] = './' + relative(resolve('test/deno-lane'), resolve(member.dir, entry.source));
@@ -829,6 +834,7 @@ export function renderLaneConfig(members: readonly MemberInput[], laneJson: stri
           lib: ['deno.ns', 'deno.window', 'dom', 'dom.iterable', 'esnext'],
         },
         nodeModulesDir: 'auto',
+        permissions,
         imports,
         scopes: lane.scopes,
       },

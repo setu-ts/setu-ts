@@ -677,6 +677,24 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
   it('agrees with the committed tree', async () => {
     expect(await runNodeManifests(['--check'])).toBe(0);
   });
+
+  it('copies each lane member permission set verbatim without widening loopback grants', async () => {
+    const config = JSON.parse(await readFile('test/deno-lane/lane.config.json', 'utf8'));
+    const names = [
+      'cli',
+      'diagnostics-plugin',
+      'realtime-backplane-plugin',
+      'runtime',
+      'websocket-plugin',
+    ];
+    expect(Object.keys(config.permissions).sort()).toEqual(names);
+    for (const name of names) {
+      const manifest = JSON.parse(await readFile(`packages/${name}/deno.json`, 'utf8'));
+      expect(config.permissions[name]).toEqual(manifest.test.permissions);
+    }
+    expect(config.permissions.cli.net).toEqual(['127.0.0.1']);
+    expect(config.permissions.runtime.net).toBe(true);
+  });
 });
 
 describe('npm publish metadata', () => {

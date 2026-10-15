@@ -10,6 +10,7 @@ describe('inspect-local-diagnostics demo', () => {
     const command = new Deno.Command(Deno.execPath(), {
       args: [
         'run',
+        '--config=test/deno-lane/lane.config.json',
         '--allow-read',
         '--allow-env',
         '--allow-net=127.0.0.1',
