@@ -14517,6 +14517,58 @@ follow if users ask; the second is the parked "project layout" proposal.
 
 ---
 
+## Milestone 115: The `v0.10.0` Client-Brief Run
+
+**Package(s):** none — an exercise block against the PUBLISHED `0.10.0` artifacts, the M104 method
+applied to a second, deliberately different product. Its findings become `smoke/DEFECTS.md` rows and
+its defects become the `0.10.0` closeout letters.
+
+**Objective:** measure whole-product readiness and delivery speed again, on the surface M104's
+Ledgerline never touched. Ledgerline was one REST service with server-rendered pages, so a second
+brief that repeats it would re-measure the same seams. Unexercised by any product build so far:
+multi-service workspaces and their service discovery, brokered messaging with the outbox and inbox,
+idempotency on incoming webhooks, realtime (WebSocket/SSE, a backplane across replicas), object
+storage uploads, the React Router `full-stack` template, gRPC or GraphQL, and Cloudflare Workers.
+
+**The product shape** (the brief itself is written later, as a client writes one, naming no
+package): a multi-tenant logistics or marketplace product — several services in one workspace
+talking over a broker; carrier webhooks delivered more than once; live shipment tracking pushed to
+browsers; document uploads to S3; a React Router customer portal; a partner API; optionally one edge
+endpoint on Workers.
+
+**Rules that keep it honest.**
+
+1. **Written and frozen before `0.10.0` is cut**, at `smoke/v0.10.0/CLIENT-BRIEF.md`, so it is not
+   tailored to the fixes the release carries or to the defects already known.
+2. **The time measure is decided before the run.** M104's agent took 46 minutes against a human
+   budget of 16 hours, which measures nothing. The brief either budgets in agent wall-clock, or
+   states that agent minutes are a baseline compared only with later agent runs; the ledger records
+   which.
+3. **Same method as M104:** a fresh builder agent with the brief, the operator notes and public docs
+   only; acceptance against the deployed product from a browser and from a client generated from its
+   own `/openapi.json`; an outage pass on throwaways (maintainer approval per run); a fresh-agent
+   security pass per `.roo/skills/security-audit/SKILL.md`; findings by shape; defects,
+   documentation gaps and generator gaps kept as three separate outcomes.
+4. **Ledgerline runs too:** smoke exercise X74 re-runs M104's product on `0.10.0` (regression form),
+   and — because `0.10.0` carries M114's generated modules, schemas and e2e tests — its cold-rebuild
+   form, so the release is measured against the same brief as well as a new one.
+
+**Dependencies.** After the `0.10.0` cut. Preferably after M113's design letters and M114 land,
+since the run is meant to judge them.
+
+**Deliverables**
+
+- [ ] `smoke/v0.10.0/CLIENT-BRIEF.md` written and frozen before the cut, with the time-measure
+      decision
+- [ ] The product built cold against `0.10.0`, with its delivery ledger
+- [ ] Acceptance from a browser and a generated partner client; outage pass; security pass
+- [ ] X74 run on `0.10.0` (both forms)
+- [ ] Findings as rows grouped by shape, the generator-gap list, and the delivery comparison with
+      M104
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `115`
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -14784,3 +14836,4 @@ patch by construction and gains nothing new here.
 | 113m      | ⬜     | scheduler-plugin + auth-plugin — time the framework does not honour                                                                                                                                                                                                                       |
 | 113n      | ⬜     | http-security-plugin + runtime — security behind a reverse proxy                                                                                                                                                                                                                          |
 | 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
+| 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
