@@ -85,10 +85,7 @@ export function rewriteHref(href: string, _sourceName: string): string {
       return withAnchor('/', anchor);
     }
     if (joined.startsWith('/docs/')) {
-      return withAnchor(
-        resolvedMdToRoute(joined.replace(/\.mdx$/, '.md')),
-        anchor,
-      );
+      return withAnchor(resolvedMdToRoute(joined.replace(/\.mdx$/, '.md')), anchor);
     }
     return githubBlob(joined, anchor);
   }
@@ -124,24 +121,22 @@ function decodeHtmlEntities(html: string): string {
     quot: '"',
   };
 
-  return html.replace(
-    /&(#x[0-9a-f]+|#\d+|amp|apos|gt|lt|quot);/gi,
-    (entity, name: string) => {
-      const normalized = name.toLowerCase();
-      if (normalized in namedEntities) {
-        return namedEntities[normalized];
-      }
+  return html.replace(/&(#x[0-9a-f]+|#\d+|amp|apos|gt|lt|quot);/gi, (entity, name: string) => {
+    const normalized = name.toLowerCase();
+    if (normalized in namedEntities) {
+      return namedEntities[normalized];
+    }
 
-      const numeric = normalized.startsWith('#x')
-        ? Number.parseInt(normalized.slice(2), 16)
-        : Number.parseInt(normalized.slice(1), 10);
-      const isScalarValue = Number.isInteger(numeric) &&
-        numeric >= 0 &&
-        numeric <= 0x10ffff &&
-        (numeric < 0xd800 || numeric > 0xdfff);
-      return isScalarValue ? String.fromCodePoint(numeric) : entity;
-    },
-  );
+    const numeric = normalized.startsWith('#x')
+      ? Number.parseInt(normalized.slice(2), 16)
+      : Number.parseInt(normalized.slice(1), 10);
+    const isScalarValue =
+      Number.isInteger(numeric) &&
+      numeric >= 0 &&
+      numeric <= 0x10ffff &&
+      (numeric < 0xd800 || numeric > 0xdfff);
+    return isScalarValue ? String.fromCodePoint(numeric) : entity;
+  });
 }
 
 /** Remove HTML markup and decode the rendered text it contains. */

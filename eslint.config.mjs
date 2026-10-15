@@ -13,7 +13,8 @@ const gitignore = fileURLToPath(new URL('.gitignore', import.meta.url));
 
 export default tseslint.config(
   includeIgnoreFile(gitignore),
-  { ignores: ['website/**'] },
+  // The website's build output and its own installed graph are generated, not authored.
+  { ignores: ['website/dist/**', 'website/.astro/**'] },
   {
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },

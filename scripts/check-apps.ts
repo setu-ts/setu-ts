@@ -1,6 +1,5 @@
 /** Checks every workspace application and runs its mandatory smoke script. */
-import { run as runProcess } from './lib/run.ts';
-import { isNotFound } from './lib/run.ts';
+import { isNotFound, run as runProcess } from './lib/run.ts';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { workspaceApps } from './lib/workspace.ts';
@@ -62,14 +61,9 @@ async function run(
   command: readonly string[],
   cwd: string,
 ): Promise<{ code: number; success: boolean }> {
-  const result = await runProcess(command[0]!, command.slice(1), {
-    cwd,
-    inherit: true,
-    env: {
-      ...process.env,
-      NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --import=${new URL('./lib/source-register.ts', import.meta.url).href}`,
-    },
-  });
+  // An app resolves @setu-ts/* to workspace source through its generated
+  // tsconfig.json paths, which tsx applies itself; no import hook is added here.
+  const result = await runProcess(command[0]!, command.slice(1), { cwd, inherit: true });
   return { code: result.code, success: result.code === 0 };
 }
 

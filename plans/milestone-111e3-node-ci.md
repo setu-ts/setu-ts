@@ -278,8 +278,8 @@ One milestone, one PR (maintainer decision, 2026-10-15).
     app `tsconfig.json` `paths` (measured, §1), so an app runs HEAD source without a `tsc -b` first
     (M37's "drift means HEAD"). `check:apps` does NOT also pass the source-redirect register; that
     register stays (moved to `scripts/lib/source-register.ts`) for the test subprocesses that
-    already use it. Two mechanisms for one resolution would let either hide the other's defect —
-    which is exactly what run 5's control showed.
+    already use it. Two mechanisms for one resolution would let one hide the other's defect — which
+    is exactly what run 5's control showed.
   - `Deno.*` calls in app code become Node equivalents (`process.argv`, `process.on('SIGTERM')`,
     `node:child_process`, `node:fs/promises`), or go through `IRuntimeServices` where the app
     already has one.

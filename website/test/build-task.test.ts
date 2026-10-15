@@ -1,50 +1,58 @@
-import { expect } from '@std/expect';
+import { readFile } from 'node:fs/promises';
+import { expect, it } from 'vitest';
 
-interface WebsiteTasks {
+interface WebsiteScripts {
   readonly build: string;
   readonly dev: string;
   readonly preview: string;
-}
-
-interface WebsiteConfig {
-  readonly tasks: WebsiteTasks;
+  readonly test: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isWebsiteConfig(value: unknown): value is WebsiteConfig {
-  if (!isRecord(value) || !isRecord(value.tasks)) {
-    return false;
-  }
-
-  return [value.tasks.build, value.tasks.dev, value.tasks.preview].every(
-    (task: unknown): task is string => typeof task === 'string',
+function isWebsiteScripts(value: unknown): value is WebsiteScripts {
+  return (
+    isRecord(value) &&
+    [value.build, value.dev, value.preview, value.test].every(
+      (script: unknown): script is string => typeof script === 'string',
+    )
   );
 }
 
-async function readWebsiteConfig(): Promise<WebsiteConfig> {
-  const configUrl = new URL('../deno.json', import.meta.url);
-  const config: unknown = JSON.parse(await Deno.readTextFile(configUrl));
+async function readWebsiteScripts(): Promise<WebsiteScripts> {
+  const manifestUrl = new URL('../package.json', import.meta.url);
+  const manifest: unknown = JSON.parse(await readFile(manifestUrl, 'utf8'));
 
-  if (!isWebsiteConfig(config)) {
+  if (!isRecord(manifest) || !isWebsiteScripts(manifest.scripts)) {
     throw new Error(
-      'website/deno.json must define string dev, build, and preview tasks',
+      'website/package.json must define string dev, build, preview, and test scripts',
     );
   }
 
-  return config;
+  return manifest.scripts;
 }
 
-Deno.test('website tools use Node to resolve transitive npm dependencies', async () => {
-  const { tasks } = await readWebsiteConfig();
+it('builds the API reference from HEAD, then the site, then grafts and indexes it', async () => {
+  const { build } = await readWebsiteScripts();
+  const steps = [
+    'node scripts/generate-api-docs.ts',
+    'astro build',
+    'node scripts/graft.mjs',
+    'pagefind --site dist',
+  ].map((step) => build.indexOf(step));
 
-  expect(tasks.dev).toContain('node node_modules/astro/astro.js dev');
-  expect(tasks.build).toContain('node node_modules/astro/astro.js build');
-  expect(tasks.build).toContain(
-    'node node_modules/pagefind/lib/runner/bin.cjs --site dist',
-  );
-  expect(tasks.preview).toContain('node node_modules/astro/astro.js preview');
-  expect(tasks.build).not.toContain('deno run -A npm:astro');
+  // Every step is present, and each runs after the one before it: the graft copies the
+  // generated reference into Astro's output, and Pagefind indexes the finished `dist`.
+  expect(steps.every((index) => index >= 0)).toBe(true);
+  expect(steps).toEqual([...steps].sort((a, b) => a - b));
+});
+
+it('runs every website tool on Node, never through Deno', async () => {
+  const scripts = await readWebsiteScripts();
+
+  for (const script of Object.values(scripts)) {
+    expect(script).not.toMatch(/\bdeno\b/);
+  }
 });

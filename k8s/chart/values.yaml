@@ -10,15 +10,10 @@ image:
   repository: setu/minimal
   tag: 'm39'
   pullPolicy: IfNotPresent
-  # Container args. The examples read their port from Deno.args[0], never $PORT, so the port is
-  # passed positionally — see docs/deployment.md. This list REPLACES the image's CMD, so it must
-  # carry the permission flags too.
+  # Container args. They REPLACE the image's CMD (`main.ts 3000`); the image's ENTRYPOINT,
+  # `node --import tsx`, stays. The examples read their port from process.argv[2], never $PORT, so
+  # the port is passed positionally — see docs/deployment.md.
   args:
-    - run
-    - --allow-net
-    - --allow-env
-    - --allow-read
-    - --allow-sys
     - main.ts
     - '3000'
 

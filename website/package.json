@@ -3,14 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Public website for Setu-TS. Isolated npm build: outside the Deno workspace, never in a JSR package's dependency graph.",
+  "description": "Public website for Setu-TS. A standalone pnpm project outside the repository workspace, never in a published package's dependency graph.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "astro dev",
-    "build": "cd .. && deno task docs:api && cd website && astro build && node scripts/graft.mjs && pagefind --site dist",
-    "preview": "astro preview"
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "build": "cd .. && node scripts/generate-api-docs.ts && cd website && ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/graft.mjs && pagefind --site dist",
+    "preview": "astro preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.0.0",
@@ -18,6 +19,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "pagefind": "^1.5.2"
+    "pagefind": "^1.5.2",
+    "vitest": "5.0.3"
   }
 }
