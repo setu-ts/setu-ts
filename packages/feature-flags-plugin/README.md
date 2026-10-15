@@ -145,7 +145,7 @@ carries no such caveat — it awaits the SDK and is the accurate entry point whe
 | `FeatureFlagsPluginOptions`   | type      |
 | `FlagProviderType`            | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

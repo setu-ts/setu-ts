@@ -43,7 +43,7 @@ async function main(): Promise<void> {
       'JSR_TOKEN is not set.\n\n' +
         '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
         '  2. Re-run with it in the environment, e.g. (fish):\n' +
-        '       env JSR_TOKEN=jsrp_… deno task release:create-packages\n',
+        '       env JSR_TOKEN=jsrp_… pnpm run release:create-packages\n',
     );
     process.exitCode = 2;
     return;
@@ -135,6 +135,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log('All packages exist. `deno task release:publish` can now run.');
+  console.log('All packages exist. `pnpm run release:publish` can now run.');
 }
 if (import.meta.main) await main();

@@ -326,7 +326,7 @@ describe('documentation gate — CI wiring', () => {
     // Without this the gate is a script nobody executes, and the class of
     // defect it exists for reaches main exactly as it did before.
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
-    expect(workflow).toContain('deno task check:docs');
+    expect(workflow).toContain('pnpm run check:docs');
   });
 
   it('check:docs runs the aggregate gate (docs + api lint)', async () => {

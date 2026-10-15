@@ -115,7 +115,7 @@ and `docs/diagnostics-protocol.md` for the wire shape.
 | `HealthObservationState`            | type      |
 | `HealthStatus`                      | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

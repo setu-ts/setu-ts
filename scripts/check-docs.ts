@@ -982,7 +982,7 @@ export async function checkLocalLinks(
 
       // Generated API links: validate against the manifest-derived page set
       // rather than unconditionally accepting. When the set is null/undefined
-      // (output not yet generated), skip — the gate runs before `deno task docs:api`.
+      // (output not yet generated), skip — the gate runs before `pnpm run docs:api`.
       //
       // The bare site root (`./api/`) must be handled here too. Normalization
       // above drops the trailing slash, so it arrives as `docs/api`, which a
@@ -990,7 +990,7 @@ export async function checkLocalLinks(
       // through to ordinary directory resolution and failed on any tree where
       // `docs/api/` had not been generated. That is every clean checkout,
       // including CI, while every developer machine that had run
-      // `deno task docs:api` passed. `deno doc --html` emits the site index at
+      // `pnpm run docs:api` passed. TypeDoc emits the site index at
       // `docs/api/index.html`, so the directory link resolves to it.
       if (resolvedPath === 'docs/api' || resolvedPath.startsWith('docs/api/')) {
         if (generatedApiPages == null) {
@@ -2302,7 +2302,7 @@ export async function runDocsMain(
             findings.push({
               file: `${pkgPath}/README.md`,
               line: 1,
-              message: `Exports table drift — ${message}. Run \`deno task docs:exports\`.`,
+              message: `Exports table drift — ${message}. Run \`pnpm run docs:exports\`.`,
             });
           }
         }

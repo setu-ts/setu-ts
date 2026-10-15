@@ -19,7 +19,7 @@
  * `node-build-gate.ts`; this file only spawns.
  *
  * Usage:
- *   deno task check:node-build [--require-all]
+ *   pnpm run check:node-build [--require-all]
  *
  * @module
  */

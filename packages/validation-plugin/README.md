@@ -101,7 +101,7 @@ identity and behaviour are unchanged, and removing it would change nothing this 
 | `ErrorFormat`                | type      |
 | `ValidationErrorFormatter`   | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

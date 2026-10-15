@@ -613,5 +613,5 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 | `SseEventMap`                   | type      |
 | `WebSocketFactory`              | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

@@ -10,7 +10,7 @@
  * rot silently, so it is DERIVED from `deno doc --json` over the package's own
  * manifest export targets — the same view JSR renders — and gated for drift.
  *
- * Both the generator (`deno task docs:exports`) and the documentation gate read
+ * Both the generator (`pnpm run docs:exports`) and the documentation gate read
  * this module, so the rendered shape and the checked shape cannot disagree.
  */
 
@@ -167,8 +167,8 @@ export function renderExportsTable(groups: readonly PackageExports[]): string {
   }
 
   lines.push(
-    `Generated from the package barrel by \`deno task docs:exports\`; ` +
-      `\`deno task check:docs\` fails when it drifts.`,
+    `Generated from the package barrel by \`pnpm run docs:exports\`; ` +
+      `\`pnpm run check:docs\` fails when it drifts.`,
   );
   return lines.join('\n');
 }

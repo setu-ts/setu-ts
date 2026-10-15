@@ -4,7 +4,7 @@
  * page.
  *
  * ```
- * JSR_TOKEN=jsrp_… deno task release:set-metadata [--dry-run]
+ * JSR_TOKEN=jsrp_… pnpm run release:set-metadata [--dry-run]
  * ```
  *
  * WHY THIS EXISTS. Both settings live only on the package, never in a published
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
       'JSR_TOKEN is not set.\n\n' +
         '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
         '  2. Re-run with it in the environment, e.g. (fish):\n' +
-        '       env JSR_TOKEN=jsrp_… deno task release:set-metadata\n',
+        '       env JSR_TOKEN=jsrp_… pnpm run release:set-metadata\n',
     );
     process.exitCode = 2;
     return;

@@ -3,7 +3,7 @@
  * Verifies that every release package exists on JSR and is linked to this repository.
  *
  * ```sh
- * deno task release:verify-repos
+ * pnpm run release:verify-repos
  * ```
  *
  * `release:verify` intentionally reads only the workspace. This companion command

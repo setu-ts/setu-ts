@@ -122,7 +122,7 @@ export function validateTargetSet(
 
   if (parsed.byTarget.size === 0) {
     failures.push(
-      'no coverage data found for any target script — run `deno task test:coverage` first.',
+      'no coverage data found for any target script — run `pnpm run test:tooling:coverage` first.',
     );
     return failures;
   }

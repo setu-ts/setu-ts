@@ -124,7 +124,7 @@ set `redact: []` to restore the previous no-default-redaction behaviour.
 | `LoggerTransport`               | type      |
 | `PinoFactory`                   | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

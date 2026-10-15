@@ -497,7 +497,7 @@ checked through the permissions it bundles). They run after `@Roles`/`@Permissio
 | `SetuMethodDecorator`        | type      |
 | `SourceValues`               | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

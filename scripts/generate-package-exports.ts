@@ -3,9 +3,9 @@
  *
  * Writes the `## Exports` table into every published package README.
  *
- * Run with `deno task docs:exports`. The tables are DERIVED from each package's
+ * Run with `pnpm run docs:exports`. The tables are DERIVED from each package's
  * own barrel through one TypeScript compiler program, so they cannot be wrong by
- * hand; `deno task check:docs` fails when a barrel changes and the table does
+ * hand; `pnpm run check:docs` fails when a barrel changes and the table does
  * not follow.
  */
 

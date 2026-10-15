@@ -15,10 +15,10 @@
  * cluster proof is opt-in locally and mandatory in CI:
  *
  * ```
- * deno task check:deploy                 # render + build + compose + generated
- * deno task check:deploy --render        # rendered manifests match the chart
- * deno task check:deploy --cluster       # real kind apply + serve + RBAC
- * deno task check:deploy --generated     # scaffold → build its image → serve it air-gapped
+ * pnpm run check:deploy                 # render + build + compose + generated
+ * pnpm run check:deploy --render        # rendered manifests match the chart
+ * pnpm run check:deploy --cluster       # real kind apply + serve + RBAC
+ * pnpm run check:deploy --generated     # scaffold → build its image → serve it air-gapped
  * ```
  *
  * A mode whose tooling is absent exits with {@linkcode SKIP_EXIT_CODE} (77) — the same code
@@ -423,7 +423,7 @@ async function checkRender(write: boolean): Promise<CheckOutcome> {
     for (const name of report.added) console.error(`      + ${name} (rendered, not committed)`);
     for (const name of report.removed) console.error(`      - ${name} (committed, not rendered)`);
     for (const name of report.changed) console.error(`      ~ ${name} (content differs)`);
-    console.error('    Re-render with: deno task deploy:render');
+    console.error('    Re-render with: pnpm run deploy:render');
     return 'failed';
   } finally {
     await rm(temporary, { recursive: true });

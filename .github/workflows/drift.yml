@@ -17,7 +17,7 @@ jobs:
     # Drift is diagnostic: it must never block ordinary pull requests or a
     # release, but it must remain visibly red when a fresh graph is unhealthy.
     continue-on-error: true
-    # The same backend environment as the `deno` job in ci.yml, because the
+    # The same backend environment as the `node` job in ci.yml, because the
     # gates below re-run that job's suite and it is not the same suite without
     # them. Two things went wrong while this job started none of them. The
     # visible one: GitHub sets CI=true in EVERY workflow, so
@@ -186,11 +186,11 @@ jobs:
         with:
           # The most exposed checkout in this repository, and the reason the
           # credential audit (issue #340) did not stop at ci.yml. This job
-          # deliberately resolves EVERY range fresh (`--reload --frozen=false`)
+          # deliberately resolves EVERY range fresh (the committed lock is removed)
           # and then runs the whole suite against whatever upstream published
           # this week — unreviewed third-party code, by design. It needs no git
-          # credential: every git command it runs is a LOCAL read (`git
-          # ls-files` here, and the suite's `git describe`/`git log` below), and
+          # credential: every git command it runs is a LOCAL read (the suite's
+          # `git describe`/`git log` below), and
           # the issue-filing step gets its token explicitly through GH_TOKEN
           # rather than from the git config.
           persist-credentials: false
@@ -204,6 +204,8 @@ jobs:
           # still held, so dropping it above costs nothing here.
           fetch-depth: 0
 
+      # Deno is a subject here, as in ci.yml: the SDK fixtures' `deno fmt`, the
+      # CLI e2e suites' Deno-target scaffolds, and the Deno runtime lane.
       - uses: denoland/setup-deno@v2
         with:
           deno-version: 2.9.6
@@ -216,20 +218,26 @@ jobs:
         with:
           version: 12.11.2
 
-      # The package suites run on Node since M111b, so they must see this week's
-      # resolution too: installing the committed pnpm-lock.yaml would test the
-      # locked versions and report a drifted ioredis, amqplib, kafkajs, mongodb
-      # or AWS SDK as a green `test` row. The committed lock is kept for the
-      # report's comparison, then removed so pnpm resolves every declared range
-      # fresh. Like the backend steps below it carries continue-on-error, so a
-      # failed resolution reaches the report instead of skipping it.
-      - name: Resolve Node test dependencies fresh
-        id: node-resolve
+      # Every gate below must see this week's resolution: installing the committed
+      # pnpm-lock.yaml would test the locked versions and report a drifted ioredis,
+      # amqplib, kafkajs, mongodb or AWS SDK as a green `test` row. The committed
+      # lock is kept for the report's comparison, then removed so pnpm resolves
+      # every declared range fresh (`--lockfile-only`), and the fresh lock is then
+      # installed frozen, so the gates run against exactly the graph the report
+      # describes. It carries continue-on-error so a failed resolution reaches the
+      # report instead of skipping it. The Deno runtime lane keeps its own committed
+      # test/deno-lane/deno.lock: its JSR graph is not part of this resolution.
+      - name: Resolve every declared range fresh
+        id: resolve
         continue-on-error: true
         run: |
           cp pnpm-lock.yaml "$RUNNER_TEMP/pnpm-lock.committed.yaml"
           rm pnpm-lock.yaml
-          pnpm install --no-frozen-lockfile
+          if ! pnpm install --lockfile-only; then
+            echo "::error title=Dependency range resolution failed::pnpm install --lockfile-only"
+            exit 1
+          fi
+          pnpm install --frozen-lockfile
 
       # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
       # KEYCLOAK_URL. A step rather than a `services:` container because the
@@ -372,104 +380,28 @@ jobs:
           docker logs m70c-minio
           exit 1
 
-      - name: Resolve every source and test range fresh
-        id: resolve
-        run: |
-          sources="$RUNNER_TEMP/dependency-drift-sources.txt"
-          # `git ls-files` and not `rg --files`: ripgrep is NOT installed on the
-          # ubuntu-24.04 runner image, so the original listing exited 127 and
-          # every scheduled run filed a drift issue that had checked nothing
-          # (issue #216). Against a fresh checkout the two listings are
-          # byte-identical -- both are the tracked, non-ignored source set.
-          #
-          # `.tsx` as well as `.ts`: `packages/` carries three of them, one of
-          # which (`view-plugin/test/fixtures/users.tsx`) imports
-          # `@hono/hono/jsx` through the manifest's `jsxImportSource`. Listing
-          # only `.ts` resolved a graph the `check` and `test` gates below then
-          # walked anyway, so the lock those gates were handed was not the lock
-          # that had been resolved -- which surfaces either as a `--frozen`
-          # failure read as drift, or as a silently under-resolved report.
-          # `test/dependency-drift-gate.test.ts` derives this listing from the
-          # tracked tree, so a new source extension cannot slip past it.
-          git ls-files -- 'packages/*.ts' 'packages/*.tsx' 'test/*.ts' \
-            'test/*.tsx' 'scripts/*.ts' 'scripts/*.tsx' > "$sources"
-
-          # The workspace manifests FIRST, then the source graph. Resolving
-          # only the sources produced a lock `deno ci` refuses to install --
-          # measured: it demanded `@std/async`, `@std/data-structures` and
-          # `@std/fs`, none of which any `.ts` file imports by name, so the
-          # "fresh resolution" the gates were handed was one that could never
-          # be committed. It also mis-attributed drift. `@prisma/client` is
-          # declared in `packages/database-plugin/deno.json` and imported by no
-          # source, so a source-only resolve dropped it and `drizzle-orm`'s
-          # optional peer fell 7.10.0 -> 7.8.0 -- reported for weeks as two
-          # rows of upstream drift that no upstream release had caused.
-          # `--lockfile-only`: this job needs the resolutions, not node_modules.
-          #
-          # Reported separately from the source resolution below rather than
-          # chained into it: the per-file retry that follows exists to absorb a
-          # transient batch failure, and a manifest range that genuinely cannot
-          # resolve would sail through it -- every individual file would cache
-          # fine and the step would report a transient blip.
-          if ! deno install --reload --frozen=false --lockfile-only \
-            --lock="$RUNNER_TEMP/dependency-drift.lock"; then
-            echo "::error title=Dependency range resolution failed for the workspace manifests::deno install --lockfile-only"
-            exit 1
-          fi
-
-          if xargs deno cache --reload --frozen=false \
-            --lock="$RUNNER_TEMP/dependency-drift.lock" < "$sources"; then
-            exit 0
-          fi
-
-          # `deno cache` reports the broken specifier, but resolving the
-          # entries one at a time also names the owning workspace package.
-          # That makes a bad range actionable rather than merely a red job.
-          while IFS= read -r source; do
-            if ! deno cache --reload --frozen=false \
-              --lock="$RUNNER_TEMP/dependency-drift.lock" "$source"; then
-              case "$source" in
-                packages/*/*)
-                  package="@setu-ts/${source#packages/}"
-                  package="${package%%/*}"
-                  ;;
-                *) package="workspace root" ;;
-              esac
-              echo "::error title=Dependency range resolution failed for $package::$source"
-              exit 1
-            fi
-          done < "$sources"
-          # The batch failure was transient: every individual resolution
-          # recovered, so this is not dependency drift.
-          exit 0
-
-      # Prettier and ESLint (M111e1) run from the freshly resolved Node install,
-      # so a dependency drift CAN change their result, and both also need that
-      # install to have succeeded: without the node-resolve guard a failed
-      # resolution would report as a format or lint failure. The fixture half
-      # of fmt:check is `deno fmt`, which reads no lockfile.
+      # Every gate runs from the freshly resolved install, so a dependency drift
+      # CAN change its result, and each needs that install to have succeeded:
+      # without the resolve guard a failed resolution would report as a gate
+      # failure. The fixture half of fmt:check is `deno fmt`, which reads no
+      # lockfile.
       - name: Format check
         id: fmt
-        if: always() && steps.resolve.outcome == 'success' && steps.node-resolve.outcome == 'success'
+        if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        run: deno task fmt:check
+        run: pnpm run fmt:check
 
       - name: Lint
         id: lint
-        if: always() && steps.resolve.outcome == 'success' && steps.node-resolve.outcome == 'success'
+        if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        run: deno task lint
+        run: pnpm run lint
 
-      # `DENO_FLAGS` is NOT a Deno environment variable -- Deno ignores it
-      # entirely, so these two steps used to run against the COMMITTED
-      # `deno.lock` while claiming to test the fresh graph (issue #216). Deno
-      # appends a task's extra arguments to its command, and both subcommands
-      # accept `--lock`/`--frozen` after their positional paths.
       - name: Type check against fresh resolution
         id: check
         if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        run: deno task check --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
+        run: pnpm run check
 
       - name: Test against fresh resolution
         id: test
@@ -478,8 +410,8 @@ jobs:
         run: |
           node scripts/codemods/std-to-vitest.ts --check
           pnpm test:coverage
-          deno task test:deno-lane --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
-          deno task test:coverage --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
+          pnpm run test:deno-lane
+          pnpm run test:tooling:coverage
 
       - name: Attribute drift and summarize gates
         id: report
@@ -490,44 +422,23 @@ jobs:
           LINT_OUTCOME: ${{ steps.lint.outcome }}
           CHECK_OUTCOME: ${{ steps.check.outcome }}
           TEST_OUTCOME: ${{ steps.test.outcome }}
-          NODE_RESOLUTION_OUTCOME: ${{ steps.node-resolve.outcome }}
         run: |
           report="$RUNNER_TEMP/dependency-drift.md"
           if [ "$RESOLUTION_OUTCOME" = success ]; then
-            deno task dependency:drift deno.lock "$RUNNER_TEMP/dependency-drift.lock" > "$report"
+            pnpm --silent run dependency:drift "$RUNNER_TEMP/pnpm-lock.committed.yaml" \
+              pnpm-lock.yaml > "$report"
           else
             printf '%s\n' '## Dependency drift' '' \
-              'Fresh resolution failed before the gates could run. The resolve step emits an error annotation naming the owning workspace package and source file.' > "$report"
-          fi
-          # The Node side of the same question: every resolved `name@version`
-          # key (packages and snapshots) the fresh pnpm lock added or dropped
-          # against the committed one. Rows start with "| `" so they raise the
-          # issue exactly as the Deno table's rows do.
-          if [ "$NODE_RESOLUTION_OUTCOME" = success ]; then
-            keys() { sed -n "s/^  '\{0,1\}\([^ ']*@[0-9][^ ']*\)'\{0,1\}:\$/\1/p" "$1" | sort -u; }
-            keys "$RUNNER_TEMP/pnpm-lock.committed.yaml" > "$RUNNER_TEMP/pnpm-keys.committed"
-            keys pnpm-lock.yaml > "$RUNNER_TEMP/pnpm-keys.fresh"
-            {
-              printf '%s\n' '' '## Node dependency drift (pnpm)' ''
-              if cmp -s "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh"; then
-                echo 'The fresh pnpm resolution matches the committed pnpm-lock.yaml.'
-              else
-                printf '%s\n' '| Resolution | Change |' '| --- | --- |'
-                comm -23 "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh" | sed 's/.*/| `&` | removed |/'
-                comm -13 "$RUNNER_TEMP/pnpm-keys.committed" "$RUNNER_TEMP/pnpm-keys.fresh" | sed 's/.*/| `&` | added |/'
-              fi
-            } >> "$report"
+              'Fresh resolution failed before the gates could run. The resolve step emits an error annotation.' > "$report"
           fi
           printf '%s\n' '' '## Fresh-resolution gates' '' \
             '| Gate | Result |' '| --- | --- |' \
             "| resolve | $RESOLUTION_OUTCOME |" \
-            "| node-resolve | $NODE_RESOLUTION_OUTCOME |" \
             "| fmt | $FORMAT_OUTCOME |" \
             "| lint | $LINT_OUTCOME |" \
             "| check | $CHECK_OUTCOME |" \
             "| test | $TEST_OUTCOME |" >> "$report"
           if grep -q '^| `' "$report" || [ "$RESOLUTION_OUTCOME" != success ] || \
-            [ "$NODE_RESOLUTION_OUTCOME" != success ] || \
             [ "$FORMAT_OUTCOME" = failure ] || [ "$LINT_OUTCOME" = failure ] || \
             [ "$CHECK_OUTCOME" = failure ] || [ "$TEST_OUTCOME" = failure ]; then
             echo 'action_required=true' >> "$GITHUB_OUTPUT"

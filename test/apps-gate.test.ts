@@ -39,15 +39,15 @@ describe('application gate configuration', () => {
 
   it('fails CI when the example gate changes tracked application files', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
-    const start = workflow.indexOf('\n  deno:');
+    const start = workflow.indexOf('\n  node:');
     const end = workflow.indexOf('\n  publish-dry-run:');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    const denoJob = workflow.slice(start, end);
+    const nodeJob = workflow.slice(start, end);
     // Same step, immediately after the gate: an assertion elsewhere or a
     // failure-tolerant shell command would let lockfile drift pass again.
-    expect(denoJob).toMatch(
-      /- name: Example applications\n {8}run: \|\n {10}deno task check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
+    expect(nodeJob).toMatch(
+      /- name: Example applications\n {8}run: \|\n {10}pnpm run check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
     );
   });
 
@@ -73,16 +73,16 @@ describe('application gate configuration', () => {
 
   it('keeps the realtime-client exercise out of the CI skip allowlist', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
-    // Scoped to the `deno` job, not the whole file: `node-compat` and
+    // Scoped to the `node` job, not the whole file: `node-compat` and
     // `bun-compat` declare the same two actions, so a repo-wide `toContain`
     // stays green after they are removed from the job that runs `check:apps`.
-    const denoJob = workflow.slice(
-      workflow.indexOf('\n  deno:'),
+    const nodeJob = workflow.slice(
+      workflow.indexOf('\n  node:'),
       workflow.indexOf('\n  publish-dry-run:'),
     );
-    expect(denoJob).not.toBe('');
-    expect(denoJob).toContain('actions/setup-node@v4');
-    expect(denoJob).toContain('oven-sh/setup-bun@v2');
+    expect(nodeJob).not.toBe('');
+    expect(nodeJob).toContain('actions/setup-node@v4');
+    expect(nodeJob).toContain('oven-sh/setup-bun@v2');
     const allowSkip = workflow.match(/ALLOW_SKIP:\s*([^\n]+)/)?.[1] ?? '';
     expect(allowSkip).not.toContain('realtime-clients');
   });
@@ -90,11 +90,11 @@ describe('application gate configuration', () => {
   it('keeps fork pull requests as no-checkout proposals', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const policyStart = workflow.indexOf('\n  fork-contribution-policy:');
-    const denoStart = workflow.indexOf('\n  deno:');
-    const policyJob = workflow.slice(policyStart, denoStart);
+    const nodeStart = workflow.indexOf('\n  node:');
+    const policyJob = workflow.slice(policyStart, nodeStart);
 
     expect(policyStart).not.toBe(-1);
-    expect(denoStart).toBeGreaterThan(policyStart);
+    expect(nodeStart).toBeGreaterThan(policyStart);
     expect(policyJob).toContain('name: Fork contribution policy');
     expect(policyJob).toContain('runs-on: ubuntu-latest');
     expect(policyJob).toContain("github.event_name == 'pull_request'");
@@ -107,7 +107,8 @@ describe('application gate configuration', () => {
     const repositoryBranchOnly =
       "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository";
     for (const job of [
-      'deno',
+      'node',
+      'deno-lane',
       'boundary-compatibility',
       'deploy',
       'publish-dry-run',
@@ -880,7 +881,7 @@ describe('M111c npm workflow boundaries', () => {
       'persist-credentials: false',
       'registry-url: https://registry.npmjs.org',
       'pnpm install --frozen-lockfile --ignore-scripts',
-      'deno task release:publish',
+      'pnpm run release:publish',
     ])
       expect(publish).toContain(fragment);
     expect(publish).not.toContain('secrets.');
@@ -903,7 +904,7 @@ describe('M111c npm workflow boundaries', () => {
     expect(text).not.toMatch(/dry_run|inputs\./);
     expect(publish).not.toContain('--dry-run');
     expect(gates).toMatch(
-      /if: github\.event_name == 'workflow_dispatch'\n\s+run: deno task release:publish --dry-run/,
+      /if: github\.event_name == 'workflow_dispatch'\n\s+run: pnpm run release:publish --dry-run/,
     );
   });
   it('pins every action in the release workflow to a full commit SHA', () => {
@@ -937,34 +938,73 @@ describe('M111c npm workflow boundaries', () => {
 });
 
 describe('M111b workflow lanes', () => {
-  for (const workflow of ['ci', 'release', 'drift']) {
+  /** One job's text, ending where the next job starts. */
+  const jobOf = (source: string, job: string): string | undefined =>
+    source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
+  const commands = [
+    'node scripts/codemods/std-to-vitest.ts --check',
+    'pnpm test:coverage',
+    'pnpm run test:deno-lane',
+    'pnpm run test:tooling:coverage',
+  ];
+  const inOrder = (text: string, expected: readonly string[]): void => {
+    let previous = -1;
+    for (const command of expected) {
+      const index = text.indexOf(command);
+      expect(index, command).toBeGreaterThan(previous);
+      previous = index;
+    }
+  };
+
+  // ci.yml splits the Deno lane into its own required job (M111e3 §3.5); the
+  // release gates and the drift job keep all four in their one test job.
+  it('ci gates the Node lanes in the node job and the Deno lane in its own job', async () => {
+    const source = await readFile('.github/workflows/ci.yml', 'utf8');
+    const node = jobOf(source, 'node');
+    const lane = jobOf(source, 'deno-lane');
+    expect(node).toBeDefined();
+    expect(lane).toBeDefined();
+    inOrder(node!, [commands[0]!, commands[1]!, commands[3]!]);
+    expect(node).not.toContain('test:deno-lane');
+    expect(lane).toContain('name: Deno runtime lane');
+    expect(lane).toContain('pnpm install --frozen-lockfile');
+    expect(lane).toContain('run: pnpm run test:deno-lane');
+    expect(lane).toMatch(/denoland\/setup-deno@v2\n\s+with:\n\s+deno-version: 2\.9\.6/);
+    expect(source).toContain('name: Format / Lint / Check / Test\n');
+    expect(source).not.toContain('(Deno)');
+  });
+
+  it('installs Deno in exactly the jobs where Deno is the subject', async () => {
+    const source = await readFile('.github/workflows/ci.yml', 'utf8');
+    const jobs = [...source.matchAll(/^ {2}([a-z][\w-]*):\n/gm)].map((match) => match[1]!);
+    const withDeno = jobs.filter((job) => jobOf(source, job)?.includes('denoland/setup-deno'));
+    expect(withDeno).toEqual(['node', 'deno-lane', 'deploy', 'deno-view-plugin-resolution']);
+    // No job reaches the repository tooling through Deno any more.
+    expect(source).not.toMatch(/\bdeno (task|ci|run)\b/);
+  });
+
+  for (const [workflow, job] of [
+    ['release', 'gates'],
+    ['drift', 'fresh-resolution'],
+  ] as const) {
     it(`${workflow} gates all four test lanes in the test job`, async () => {
       const source = await readFile(`.github/workflows/${workflow}.yml`, 'utf8');
-      const job =
-        workflow === 'ci' ? 'deno' : workflow === 'release' ? 'gates' : 'fresh-resolution';
-      const testJob = source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
+      const testJob = jobOf(source, job);
       expect(testJob).toBeDefined();
-      const commands = [
-        'node scripts/codemods/std-to-vitest.ts --check',
-        'pnpm test:coverage',
-        'deno task test:deno-lane',
-        'deno task test:coverage',
-      ];
-      let previous = -1;
-      for (const command of commands) {
-        const index = testJob!.indexOf(command);
-        expect(index).toBeGreaterThan(previous);
-        previous = index;
-      }
-      // release.yml pins actions to commit SHAs (security audit F2); the others use the tag.
+      inOrder(testJob!, commands);
+      expect(source).not.toMatch(/\bdeno (task|ci|run)\b/);
+      // release.yml pins actions to commit SHAs (security audit F2); drift uses the tag.
       expect(source).toMatch(/pnpm\/action-setup@(?:v4\b|[0-9a-f]{40} # v4\.)/);
-      // The drift job resolves every declared range fresh, so its package
-      // suites see this week's versions; the PR and release jobs test the
-      // committed lock.
+      // The drift job resolves every declared range fresh, then installs that
+      // fresh lock frozen, so every gate sees this week's versions; the release
+      // gates test the committed lock.
       if (workflow === 'drift') {
-        expect(source).toContain('rm pnpm-lock.yaml');
-        expect(source).toContain('pnpm install --no-frozen-lockfile');
-        expect(source).not.toContain('pnpm install --frozen-lockfile');
+        inOrder(testJob!, [
+          'rm pnpm-lock.yaml',
+          'pnpm install --lockfile-only',
+          'pnpm install --frozen-lockfile',
+        ]);
+        expect(source).not.toContain('--no-frozen-lockfile');
       } else {
         expect(source).toContain('pnpm install --frozen-lockfile');
       }
