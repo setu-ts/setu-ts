@@ -16,7 +16,7 @@ the kernel router.
 ## Installation
 
 ```bash
-deno add npm:graphql@^16 @setu-ts/graphql-plugin
+deno add npm:graphql@^16 npm:@setu-ts/graphql-plugin
 ```
 
 ## Usage

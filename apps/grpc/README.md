@@ -5,8 +5,7 @@ service on one application. The readable `service.proto` accompanies the committ
 no code-generation step is required.
 
 ```bash
-cd apps/grpc
-deno task start
+pnpm --dir apps/grpc run start
 ```
 
 Its smoke check sends a real Connect JSON RPC through the plugin's interception seam and verifies

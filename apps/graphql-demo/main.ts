@@ -4,8 +4,8 @@
  * Starts the demo server for interactive use.
  *
  * ```
- * deno task start          # http://localhost:4000/graphql for GraphiQL
- * deno task start 4100     # or pick a port
+ * pnpm --dir apps/graphql-demo run start          # http://localhost:4000/graphql for GraphiQL
+ * pnpm --dir apps/graphql-demo run start 4100     # or pick a port
  * ```
  *
  * @module

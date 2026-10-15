@@ -6,8 +6,7 @@ uses the public Workers adapters directly so Wrangler's bundled Worker never eva
 or Bun adapters.
 
 ```bash
-cd apps/cloudflare
-deno task start
+pnpm --dir apps/cloudflare run start
 ```
 
 Create a local KV namespace and replace the placeholder id before using this in a real account. The

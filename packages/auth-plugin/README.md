@@ -39,7 +39,7 @@ Without `rbac`, the four authorization guards answer **`501 Not Implemented`** r
 ## Installation
 
 ```bash
-deno add @setu-ts/auth-plugin
+deno add npm:@setu-ts/auth-plugin
 ```
 
 ## Usage

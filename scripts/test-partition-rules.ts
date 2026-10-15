@@ -19,7 +19,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 
-/** Test-file roots, matching what `deno task test` passed positionally. */
+/** Package and root test-file roots used by the suite classifier. */
 export const ROOTS = ['packages', 'test'] as const;
 
 /**
@@ -117,8 +117,8 @@ const SKIP_DIRECTORIES = new Set(['node_modules', 'coverage', 'build', 'dist']);
  * and the difference is load-bearing in both directions. `git ls-files` names
  * files that may not EXIST — an unstaged `rm` or `mv` leaves an index entry
  * whose read throws, and since this runs before the suite it took down
- * `deno task test` entirely with a bare `NotFound`. And it omits UNTRACKED
- * files, which `deno test` still enumerates: a new suite written but not yet
+ * the legacy Deno runner entirely with a bare `NotFound`. And it omits UNTRACKED
+ * files, which the filesystem-based runner still enumerates: a new suite written but not yet
  * staged was therefore classified by neither phase and ran in parallel
  * regardless of what it touched, which also made this module's own claim that a
  * suite is "isolated the moment it is written" false until it was staged.

@@ -6,7 +6,6 @@ opens a transaction, writes a row, throws, and confirms that the rollback leaves
 unchanged.
 
 ```bash
-cd apps/database
-deno task start
-deno task smoke
+pnpm --dir apps/database run start
+pnpm --dir apps/database run smoke
 ```

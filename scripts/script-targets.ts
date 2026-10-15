@@ -1,5 +1,9 @@
 /** Frozen script coverage inventory from before the M111e2 runner retirement. */
 export const SCRIPT_TARGETS: readonly string[] = [
+  'scripts/script-targets.ts',
+  'scripts/set-jsr-metadata.ts',
+  'scripts/jsr-sunset.ts',
+  'scripts/toolchain-prose.ts',
   'scripts/side-effects.ts',
   'scripts/npm-release-gate.ts',
   'scripts/npm-placeholders.ts',

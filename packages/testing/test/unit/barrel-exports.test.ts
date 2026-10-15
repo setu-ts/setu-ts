@@ -87,7 +87,7 @@ describe('barrel exports', () => {
   });
 
   // The kernel re-exports must be the SAME types, not lookalikes. Assignability
-  // in both directions is enforced by `deno task check` at compile time — these
+  // in both directions is enforced by `pnpm run check` at compile time — these
   // bindings exist to make the type-checker prove it. There is no runtime
   // component to assert, so the test asserts the one runtime fact available:
   // the values flow through unchanged.

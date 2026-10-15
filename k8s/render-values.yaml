@@ -1,6 +1,6 @@
 # Values the committed manifests in k8s/manifests/ are rendered from.
 #
-#   deno task check:deploy --render     # re-renders and fails on any difference
+#   pnpm run check:deploy --render     # re-renders and fails on any difference
 #   helm template setu k8s/chart -f k8s/render-values.yaml --output-dir <dir>
 #
 # The chart is the single authored source; k8s/manifests/ is a rendered ARTIFACT, so this file is

@@ -1321,7 +1321,7 @@ describe('package exports table — malformed payload branches', () => {
 describe('documentation gate — generated API tree links', () => {
   /**
    * `docs/api/` is generated and gitignored, so it is ABSENT on every clean
-   * checkout and present on any machine that has run `deno task docs:api`.
+   * checkout and present on any machine that has run `pnpm run docs:api`.
    *
    * The bare site-root link `[Generated API Documentation](./api/)` in
    * `docs/README.md` normalises to `docs/api` — no trailing slash — which the
@@ -1350,7 +1350,7 @@ describe('documentation gate — generated API tree links', () => {
    * The discriminating case, and the only one that can be.
    *
    * `checkLocalLinks` falls back to a disk stat, and `docs/api/` exists on any
-   * machine that has run `deno task docs:api` — so a test asserting the bare
+   * machine that has run `pnpm run docs:api` — so a test asserting the bare
    * root RESOLVES passes with or without the fix locally, for the wrong reason.
    * That is the same warm-state trap the bug itself came from.
    *

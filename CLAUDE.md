@@ -1,12 +1,12 @@
 # Setu-TS — Session Instructions
 
-Plugin-first enterprise backend framework, published to **JSR** under `@setu-ts` and consumable from
-Node/Bun via JSR npm compatibility. Package and root tooling tests run on Node 24 with pnpm and
-Vitest. Repository scripts run on Node; the named native-adapter lane retains Deno proofs.
+Plugin-first enterprise backend framework, published to **npm** under `@setu-ts`, with Node, Deno
+and Bun supported as runtimes. Package and root tooling tests run on Node 24 with pnpm and Vitest.
+Repository scripts run on Node; the named native-adapter lane retains Deno proofs.
 
 The React Router SSR plugin (M44) uses Vite on the Node/npm toolchain for application frontend
 builds. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and never
-appears in any JSR-published package's dependency graph (see AI_GUIDELINES §12.2).
+appears in any published package's dependency graph (see AI_GUIDELINES §12.2).
 
 ## Starting a new milestone — READ THESE FIRST (mandatory)
 
@@ -6553,9 +6553,10 @@ because nothing defined what one was.
 ## Common pitfalls (these fail the gates)
 
 - `exactOptionalPropertyTypes` is on: never assign `undefined` to an optional property — omit it.
-- The `verbatim-module-syntax` lint rule requires `import type { … }` for type-only imports.
+- The ESLint `@typescript-eslint/consistent-type-imports` rule requires `import type { … }` for
+  type-only imports.
 - `no-console` applies everywhere except `packages/cli` and `scripts/` (scripts use
-  `// deno-lint-ignore-file no-console` with a reason).
+  `/* eslint-disable no-console -- reason */`).
 - Unused variables fail lint — delete them; do not underscore-prefix.
 - Run `pnpm run fmt` before `pnpm run fmt:check`; it also reformats markdown — never hand-wrap
   tables.
@@ -6565,10 +6566,9 @@ because nothing defined what one was.
   completion.
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
-- `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). NOTE: `deno lint`'s `no-eval`
-  catches `eval()` but NOT `new Function()` — the gates will not flag it, so this is on you. To load
-  Node builtins in `packages/runtime`, use static `node:` imports (Deno/Node/Bun all support them),
-  never a smuggled `require`.
+- `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). ESLint enforces `no-eval` and a
+  restricted-syntax rule for the Function constructor. To load Node builtins in `packages/runtime`,
+  use static `node:` imports (Deno/Node/Bun all support them), never a smuggled `require`.
 - **Never mix clocks.** `ctx.startTime` is `runtime.hrtime()` — a MONOTONIC reading
   (`performance.now()`, ms since an arbitrary origin), NOT a wall-clock epoch. Compute a request
   duration as `runtime.hrtime() - ctx.startTime` (both monotonic). `Date.now() - ctx.startTime`
@@ -6576,12 +6576,13 @@ because nothing defined what one was.
   EVERY request (and tripping every slow-request threshold). Also: `Date.now()` is a runtime API —
   outside `packages/runtime`, get time only via `IRuntimeServices` (`runtime.now()` /
   `runtime.hrtime()`). The gates do NOT flag `Date.now()`, so this is on you.
-- **A lazily-loaded optional dep must ACTUALLY load.** Use a real `await import('npm:<pkg>')` (or a
-  client/factory injected through plugin options, AI_GUIDELINES §12.2) — never a `globalThis.__x`
-  hook that only tests populate. A global-hook "loader" throws in production even when the package
-  IS installed, because nothing ever imports it: that is a non-functional shim, not a lazy import.
-  If a real `import()` forces the construction path to be async, make it async (`register()` may
-  return a `Promise`); do not fake a sync constructor with a global.
+- **A lazily-loaded optional dep must ACTUALLY load.** Use a real `await import('<pkg>')` with a
+  literal bare package name (or a client/factory injected through plugin options, AI_GUIDELINES
+  §12.2) — never a `globalThis.__x` hook that only tests populate. A global-hook "loader" throws in
+  production even when the package IS installed, because nothing ever imports it: that is a
+  non-functional shim, not a lazy import. If a real `import()` forces the construction path to be
+  async, make it async (`register()` may return a `Promise`); do not fake a sync constructor with a
+  global.
 
 ## Self-review checklist (bugs that slipped through before — check every time)
 
@@ -6690,11 +6691,11 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
 - **Read coverage ANSI-stripped, per file, after EVERY change — including deletions.** The Vitest
   coverage table colorizes output; naive parsing misreads the numbers (a `[33m` prefix turned 75.9
   into a false "OK"). Pipe through `sed 's/\x1b\[[0-9;]*m//g'` and confirm every changed `src` file
-  is ≥90% on branch, function, AND line. The task's exit code is NOT the check — it exits 0 with a
-  file under the bar; the per-file table is. Deleting or rewriting a test can drop an UNRELATED file
-  below the bar, and the aggregate will hide it — re-check per file after refactors and deletions,
-  not just additions. A file that lands exactly at 90 has no margin — prefer a couple of points of
-  headroom.
+  is ≥90% on branch, function, AND line. Vitest enforces per-file thresholds with a nonzero exit;
+  still read the table to verify the measured files and coverage dimensions. Deleting or rewriting a
+  test can drop an UNRELATED file below the bar, and the aggregate will hide it — re-check per file
+  after refactors and deletions, not just additions. A file that lands exactly at 90 has no margin —
+  prefer a couple of points of headroom.
 - **Grep for constructs the gates don't catch**:
   `grep -rn "new Function\|eval(\| require(\|as any\|@ts-ignore\|Date.now()\|globalThis.__" packages/<pkg>/src`
   — must be empty (comments excepted). `Date.now()` outside `packages/runtime` is a runtime-API /
@@ -6750,7 +6751,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `Deno.test` remains banned.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
-  `npm:` imports (AI_GUIDELINES §12.2).
+  bare-package imports (AI_GUIDELINES §12.2).
 - **Two long-lived branches; PRs target `develop` except release and hotfix PRs, which target
   `main`.** `develop` is where milestones, fixes and docs integrate. `main` is the repository's
   DEFAULT branch, so a `gh pr create` without `--base` targets it — always pass `--base develop` (or
@@ -6769,8 +6770,8 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `git worktree add -b <branch> .claude/worktrees/<name> origin/develop` (`origin/main` for a
   hotfix), then work only inside it. The main checkout stays on `develop` and is never edited; a
   resumed task continues in the worktree that already holds its branch (`git worktree list`).
-  `.claude/` is gitignored and invisible to `deno fmt`/`deno lint`; never put a worktree in `/tmp`
-  or beside the repository. Remove it with `git worktree remove` once its PR merges. AI_GUIDELINES
+  `.claude/` is gitignored and invisible to Prettier and ESLint; never put a worktree in `/tmp` or
+  beside the repository. Remove it with `git worktree remove` once its PR merges. AI_GUIDELINES
   §15.4 is canonical.
 - Branches: one `feat/[milestone]-[description]` per milestone — all of that milestone's work and
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in

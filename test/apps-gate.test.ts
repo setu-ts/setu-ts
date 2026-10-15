@@ -380,7 +380,7 @@ describe('real-backend CI wiring', () => {
       // messaging-plugin also carries the RabbitMQ outage suite (M70c §3.7),
       // so it grants the AMQP port too — plus the two cloud emulators
       // `docs/messaging-emulators.md` documents, without which their e2e suites
-      // cannot pass under `deno task test` at all (they failed with
+      // could not pass under the former Deno package runner (they failed with
       // `getaddrinfo EPERM` and gRPC `Name resolution failed` while the doc's
       // standalone `--allow-all` command hid it).
       //

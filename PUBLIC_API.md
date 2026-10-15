@@ -1926,7 +1926,7 @@ member is `(options?: unknown) => unknown`) and its string-and-array `Sort` unio
 `unknown` on `find`/`findOne`, where the adapter builds a `Record`). The claim is pinned by a
 compile-time fixture — `packages/database-plugin/test/types/mongo-seam.assert.ts` assigns a real
 `new MongoClient(...)` to `IMongoClient` with NO cast under a static import of the driver, and fails
-`deno task check` the moment the seam drifts again. The types the client's members reference —
+`pnpm run check` the moment the seam drifts again. The types the client's members reference —
 `IMongoDatabase`, `IMongoSession`, and the `IMongoObjectId` instance shape — are exported alongside
 them so the seam's return types are nameable from the package entry, as are the collection-level
 shapes `IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`,
@@ -14825,7 +14825,7 @@ is safe in a browser bundle.
 
 Applications own their third-party dependency resolution. Setu-TS therefore does not freeze a
 consumer's dependency graph; it declares the third-party values it accepts at an application
-boundary and tests those claims in `deno task check:compat`.
+boundary and tests those claims in `pnpm run check:compat`.
 
 | Third-party value                  | Owning packages                                           | Supported versions                 | Boundary and compatibility rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ---------------------------------- | --------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

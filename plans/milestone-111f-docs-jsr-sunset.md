@@ -91,6 +91,14 @@ adapter, the CLI's `--runtime deno` output and the Deno lane are not touched.
 
 ### 3.2 Toolchain-prose gate
 
+**Implementation correction:** the measured tree contains URL-only fixtures (for example
+`scripts/check-docs.ts`), while `docs/getting-started.md` needs P1 legacy-pin examples but must
+reject the §7 planted JSR URL. Entries therefore explicitly opt into P6 via `allowJsrUrl`; the
+stale-entry ratchet counts a P1 hit or an explicitly allowed P6 hit. The runner includes
+`test/deno-lane/deno.lock` explicitly (the extension filter omitted this named fixture), and uses
+`git ls-files --cached --others --exclude-standard` so new, uncommitted scripts and tests are
+scanned before staging, as required for this handoff.
+
 - **Decision:** a pure module `scripts/toolchain-prose.ts` exporting
   `scanToolchainProse(files: readonly ProseFile[], rules: ToolchainProseRules): ToolchainProseFinding[]`
   over in-memory `{ path, text }` pairs, plus `TOOLCHAIN_PROSE_RULES` (the committed data below),
@@ -139,6 +147,10 @@ adapter, the CLI's `--runtime deno` output and the Deno lane are not touched.
 
 ### 3.3 JSR sunset description
 
+**Implementation correction:** if the required prefix consumes the entire 250-byte budget, return
+the intact prefix without an ellipsis when truncating the base; adding the three-byte ellipsis would
+violate the registry limit. Boundary tests cover this case.
+
 - **Decision:** a pure module `scripts/jsr-sunset.ts` exports `JSR_PACKAGES` (the 49 names on JSR,
   frozen data verified against the registry, §1) and `jsrSunsetDescription(name, base)`, which
   returns `Moved to npm as @setu-ts/<name>; JSR keeps 0.8.0 and earlier. <base>`, cut at the last
@@ -159,6 +171,18 @@ adapter, the CLI's `--runtime deno` output and the Deno lane are not touched.
   set).
 
 ### 3.4 What each governing document says
+
+**Implementation correction:** source checks show `check:apps` now enrolls GraphQL, the full-stack
+app uses Node/Vite and a TypeScript app check, and Node SEA writes `.tmp/compiled-binary/server`.
+Those instructions require semantic rewrites, not only command substitution.
+`docs/runtime-deployment.md`, `docs/react-router-dev.md` and the CLI README also contain valid
+consumer Deno commands and receive `deno-target` allowances. The current ESLint config enforces both
+eval and the Function constructor. `node-manifests.ts` refuses source-level workspace dependency
+cycles (CI runs its `--check` entry); intra-package cycles and runtime API boundaries still require
+source review rather than a nonexistent ESLint rule. The sweep also finds live instructions outside
+comments: `apps/cloudflare/main.ts` prints Wrangler launch advice (its `start` script only prints
+that advice), and `.dockerignore` describes the root build context. Their text now follows the
+actual Node/pnpm Docker inputs and SEA output; the old executable exclusion is identified as legacy.
 
 - **Decision:** `AI_GUIDELINES.md` — §3.7 version source is the member `package.json`; §4.5 drops
   "repository scripts keep their Deno runner until M111e"; §5.1 compiler options live in
@@ -196,6 +220,7 @@ rather than to a generated project.
 | `runToolchainProseCheck`                                    | function | `scripts/check-docs.ts` `runDocsMain` (so `pnpm run check:docs` in CI)   |
 | `TOOLCHAIN_PROSE_RULES`                                     | const    | `runToolchainProseCheck`                                                 |
 | `ProseFile`, `ToolchainProseFinding`, `ToolchainProseRules` | types    | the three functions above and the test                                   |
+| `runSetJsrMetadata`                                         | function | Executable entry and offline update tests                                |
 | `JSR_PACKAGES`                                              | const    | `scripts/set-jsr-metadata.ts` main                                       |
 | `jsrSunsetDescription`                                      | function | `scripts/set-jsr-metadata.ts` main (compare, PATCH body, dry-run output) |
 
@@ -213,7 +238,7 @@ rather than to a generated project.
 | `scripts/jsr-sunset.ts`                 | `JSR_PACKAGES` and `jsrSunsetDescription` (§3.3).                                                                                                            |
 | `scripts/set-jsr-metadata.ts`           | Iterates `JSR_PACKAGES`; sends the sunset description; dry-run prints it.                                                                                    |
 | `scripts/check-docs.ts`                 | Calls `runToolchainProseCheck`.                                                                                                                              |
-| `scripts/script-targets.ts`             | Adds the two new scripts to the coverage inventory.                                                                                                          |
+| `scripts/script-targets.ts`             | Adds both new scripts, the changed metadata runner and the inventory itself to coverage.                                                                     |
 | `packages/starters/*/src/index.ts`      | `@see` link to the npm package page.                                                                                                                         |
 | `website/src/pages/index.astro`         | Both install lines: `deno add npm:@setu-ts/kernel npm:@setu-ts/runtime` and `npm install @setu-ts/kernel @setu-ts/runtime`.                                  |
 | The documents and comments of §0 / §3.4 | Prose rewrite.                                                                                                                                               |
@@ -228,8 +253,14 @@ rather than to a generated project.
 | `test/unit/jsr-sunset.test.ts`          | `scripts/jsr-sunset.ts`                      | `jsrSunsetDescription(name, base): string` ≤250 bytes for every `JSR_PACKAGES` × `PACKAGE_METADATA` pair and for a 300-byte multi-byte base; cut at a space with `…`; throws on a control character; `JSR_PACKAGES` has 49 names, all in `PUBLISHED_PACKAGES`, none of `localization-plugin`, `idempotency-plugin`, `create`.                                                                 |
 | `test/set-jsr-metadata-dry-run.test.ts` | `scripts/set-jsr-metadata.ts` (dry-run path) | Subprocess `node scripts/set-jsr-metadata.ts --dry-run` with no `JSR_TOKEN`: exit 0, 49 packages listed, the `kernel` line carries the exact sunset description.                                                                                                                                                                                                                              |
 
-`scripts/set-jsr-metadata.ts` stays outside `SCRIPT_TARGETS` (it was before; its network path needs
-a token), with its decidable logic moved into the measured `scripts/jsr-sunset.ts`.
+**Implementation correction:** the implementation request requires 90% branch/function/line for
+every changed script, overriding the planned exclusion of `set-jsr-metadata.ts`. It is now in
+`SCRIPT_TARGETS`; `runSetJsrMetadata` is consumed by its executable entry and
+`test/unit/set-jsr-metadata.test.ts`, with injected request/data seams for offline tests of GET,
+separate PATCHes, idempotence, partial failure and refusals. Tests never contact JSR or use a real
+token. The original metadata map remains unchanged. The coverage-inventory expectations in
+`test/unit/deno-lane-coverage.test.ts` and `test/node/vitest-config.test.ts` are updated for the
+four additional measured files (25 canonical targets).
 
 ## 7. Verification gates
 

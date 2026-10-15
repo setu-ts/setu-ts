@@ -3,10 +3,9 @@
 Build the kernel application as a standalone executable.
 
 ```bash
-cd apps/compiled-binary
-deno task compile
-./hono-example
-deno task smoke
+pnpm --dir apps/compiled-binary run build:sea
+./.tmp/compiled-binary/server
+pnpm --dir apps/compiled-binary run smoke
 ```
 
 The smoke task compiles an executable, starts it, and requests `/health`.

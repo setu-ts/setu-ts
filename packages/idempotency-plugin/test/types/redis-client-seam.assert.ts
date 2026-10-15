@@ -2,7 +2,7 @@
  * Compile-time proof that a real ioredis `Redis` is assignable to
  * `IRedisIdempotencyClient` with NO cast (plan §3.5, §6).
  *
- * Never executed: `deno task check` is the assertion. A change to either the
+ * Never executed: `pnpm run check` is the assertion. A change to either the
  * facade or ioredis's surface that breaks the seam stops this file compiling.
  *
  * @module

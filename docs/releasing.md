@@ -327,7 +327,7 @@ smoke check can use `--min-dep-age 0`.
 
 ## API documentation
 
-M38 added a reproducible `deno doc` generator and a JSDoc lint ratchet. The generated HTML is
+The repository uses a reproducible TypeDoc generator and a JSDoc lint ratchet. The generated HTML is
 ignored (not committed), but must be rebuilt before any release artifact is published so the release
 notes and changelog can reference the current API surface.
 
@@ -349,10 +349,10 @@ documentation and unexported references; invalid-link validation is disabled. Th
 
 `DOC_LINT_BASELINE = 237` and `DOC_LINT_BASELINE_TYPEDOC = '0.28.20'` record the M111e2 measurement.
 TypeDoc reported 554 warnings; 317 of them are missing comments on members of anonymous object types
-(`Foo.__type.bar`), which `deno doc --lint` never required, so `inRatchetScope` leaves them out. The
-earlier Deno count of 496 measures a different diagnostic model and is not comparable. The 31
-`CLEAN_PACKAGES` were re-derived from zero in-scope diagnostics and include every package the Deno
-ratchet kept clean. Any diagnostic in a clean package fails independently of the total.
+(`Foo.__type.bar`), which the former documentation tool never required, so `inRatchetScope` leaves
+them out. The earlier Deno count of 496 measures a different diagnostic model and is not comparable.
+The 31 `CLEAN_PACKAGES` were re-derived from zero in-scope diagnostics and include every package the
+Deno ratchet kept clean. Any diagnostic in a clean package fails independently of the total.
 
 A count above the baseline fails. A count below it also fails and instructs you to lower the
 constant in the same commit; do not raise it to accommodate new debt. A TypeDoc version mismatch
@@ -404,3 +404,22 @@ all 52 names: provenance must exist and `latest` must name `0.9.0`. Confirm desc
 links and README on npm. The weekly compat suite installs/imports all 52 and serves real sockets on
 Node/Bun. Before the first publish, its explicit scope probe reports HTTP 404 and skips; HTTP 200
 arms the suite, and any other status fails.
+
+## JSR sunset
+
+JSR retains 0.8.0 and earlier; nothing new is published there. Published version READMEs are
+immutable. The package description is mutable and leads with the npm migration pointer. The 49-name
+inventory in `scripts/jsr-sunset.ts` excludes the three npm-only additions. Descriptions for npm
+continue to use the original metadata.
+
+After this milestone merges, a maintainer performs the one-time metadata update:
+
+```fish
+node scripts/set-jsr-metadata.ts --dry-run
+env JSR_TOKEN=jsrp_… pnpm run release:set-metadata
+```
+
+The dry run lists all 49 descriptions and makes no network requests. The real run needs a maintainer
+personal access token and resumes safely after a partial failure: matching descriptions and runtime
+flags are skipped independently. Do not archive the packages: that would hide the pointer from
+search and block a possible security patch.

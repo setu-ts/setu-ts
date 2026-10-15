@@ -53,6 +53,7 @@
  *
  * Exits 1 on any finding.
  */
+import { runToolchainProseCheck } from './toolchain-prose.ts';
 import { apiModulePage } from './generate-api-docs.ts';
 import { stat, readFile, readdir } from 'node:fs/promises';
 import { statSync, type Dirent } from 'node:fs';
@@ -2156,6 +2157,15 @@ export async function runDocsMain(
   }
 
   const findings: Finding[] = [];
+  if (paths.length === 0) {
+    for (const finding of await runToolchainProseCheck(process.cwd())) {
+      findings.push({
+        file: finding.path,
+        line: finding.line,
+        message: `${finding.rule}: ${finding.message}`,
+      });
+    }
+  }
 
   // Run document checks (fences, anchors, TOC)
   for (const file of files) {

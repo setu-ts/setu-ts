@@ -20,7 +20,7 @@
  * fails it.
  *
  * ```
- * deno task interop
+ * pnpm --dir apps/graphql-demo run interop
  * ```
  *
  * @module

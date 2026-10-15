@@ -17,7 +17,7 @@ drift out of sync.
   or `main`.
 - the documentation you MUST read first (AI_GUIDELINES.md, ROADMAP.md, ARCHITECTURE.md,
   PUBLIC_API.md, and the `@setu-ts/common` interfaces you will implement);
-- the verification gates (`deno task fmt:check` / `lint` / `check` / `test` / `test:coverage` /
+- the verification gates (`pnpm run fmt:check` / `lint` / `check` / `test` / `test:coverage` /
   `audit`);
 - the "Common pitfalls", "Self-review checklist", and "Before reporting a task done (evidence, not
   vibes)" sections;

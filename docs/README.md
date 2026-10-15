@@ -111,7 +111,7 @@ building production-ready applications with our plugin-first, runtime-independen
 - [Generated API Documentation](./api/)
   - Full symbol-level reference
   - Generated from source with `deno doc`
-  - Rebuild with `deno task docs:api`
+  - Rebuild with `pnpm run docs:api`
 
 ## Additional Resources
 

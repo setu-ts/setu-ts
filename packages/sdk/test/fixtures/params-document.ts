@@ -18,7 +18,7 @@
  * - a camelCase `operationId`, whose interior casing must survive derivation;
  * - a `$ref` to a component, whose type name must be PascalCase.
  *
- * The generated file is type-checked by `deno task check` (which covers `test/`),
+ * The generated file is type-checked by `pnpm run check` (which covers `test/`),
  * so a shape that does not compile fails a real gate.
  */
 

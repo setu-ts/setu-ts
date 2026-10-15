@@ -8,7 +8,7 @@
  * decorator migration, one of the survivors being the missing `findPage`).
  *
  * The tripwire is the fixture itself: `test/fixtures/repository-implementor.ts`
- * is type-checked by `deno task check` (which covers `test/`), so adding a
+ * is type-checked by `pnpm run check` (which covers `test/`), so adding a
  * REQUIRED member to `IRepository` without updating the fixture fails the gate
  * at the moment it happens — no reviewer has to notice, and the convention
  * that depends on remembering cannot fail the way this one did.

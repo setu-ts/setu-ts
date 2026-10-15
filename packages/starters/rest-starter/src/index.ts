@@ -8,7 +8,7 @@
  * middleware. Also exposes the option type {@linkcode RestStarterOptions} and the
  * plugin builder {@linkcode buildRestPlugins} for advanced composition.
  *
- * @see {@link https://jsr.io/@setu-ts/rest-starter}
+ * @see {@link https://www.npmjs.com/package/@setu-ts/rest-starter}
  */
 
 export { createRestApp } from './app.ts';

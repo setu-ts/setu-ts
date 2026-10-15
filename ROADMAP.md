@@ -14057,15 +14057,17 @@ Delivered as three PRs, in order:
 
 **Objective:** the documents describe the toolchain the repository actually uses.
 
-- `CLAUDE.md`, `AI_GUIDELINES.md` (the Deno-first statement, §12.2's `npm:` lazy-import wording, the
-  test-style rule), `ARCHITECTURE.md`, `PUBLIC_API.md` install lines, every package README, `docs/`,
-  and the remaining toolchain prose in `docs/releasing.md`.
-- `docs/upgrading.md` entry: switching an existing project from `jsr:@setu-ts/*` / `@jsr/setu-ts__*`
-  to `@setu-ts/*`.
-- Each JSR package's README and description point to npm; the JSR versions stay (JSR versions are
-  immutable, and yanking them would break every existing lockfile).
-- **Exit:** `check:docs` green and a repo-wide search for `deno task`, `jsr:@setu-ts` and
-  `Deno-first` returns only historical records and the Deno adapter.
+- Rewrite the stale JSR publication claim in `CLAUDE.md`, and the compiler, test, documentation,
+  audit and toolchain rules in `AI_GUIDELINES.md`. Update governing commands, app instructions,
+  package READMEs and website install lines against source.
+- The `docs/upgrading.md` JSR-to-npm migration entry was delivered in PR #451; no duplicate entry.
+- Each of the 49 JSR package descriptions points to npm. Published READMEs are immutable; no new JSR
+  version is published, and existing versions remain available. The metadata update is a post-merge
+  maintainer step.
+- `check:docs` runs the categorized, ratcheting toolchain-prose gate.
+- **Exit:** `check:docs` green; a repository-wide search for `deno task`, `jsr:@setu-ts/`,
+  `@jsr/setu-ts__`, `jsr.io/@setu-ts` and `Deno-first` returns only history-exempt text or files in
+  the gate’s allowlist, each with its category.
 
 **Sequencing.** 111a → 111b → 111c (machinery) → 111d (Node-first CLI) → the `v0.9.0` cut →
 111e/111f. The cut is held until both 111c and 111d are complete. M104 is re-pointed at npm
@@ -14096,7 +14098,7 @@ change:
   accumulated to be worth every caret pin moving at once. The deferred list lives in the CHANGELOG's
   `Unreleased` section as entries marked for the next minor, so it is read at every cut.
 
-**Two gates, so the rule does not live in a runbook.** `deno task check:plan` requires every plan's
+**Two gates, so the rule does not live in a runbook.** `pnpm run check:plan` requires every plan's
 "Exported surface" section to carry `**Breaking for implementors:** none` or a statement naming the
 break AND the minor that carries it — the release is chosen when the break is designed.
 `release:verify` check 10 (`scripts/release-shape.ts`) classifies the bump from the previous `v*`

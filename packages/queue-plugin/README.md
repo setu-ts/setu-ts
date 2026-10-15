@@ -5,7 +5,7 @@ Background job queue plugin for Setu-TS with Memory, Redis, RabbitMQ, and SQS ad
 ## Installation
 
 ```bash
-deno add @setu-ts/queue-plugin
+deno add npm:@setu-ts/queue-plugin
 ```
 
 ## Usage
