@@ -175,28 +175,15 @@ export function rewriteReferences(
     String.raw`(@setu-ts/[a-z0-9-]+@[\^~]?)${escapeRegExp(from)}(?![\d.-])`,
     'g',
   );
-  const fromLine = minorLine(from);
-  const toLine = minorLine(to);
-  const short =
-    path.endsWith('deno.lock') && fromLine !== toLine
-      ? new RegExp(String.raw`(@setu-ts/[a-z0-9-]+@)${escapeRegExp(fromLine)}(?![\d.-])`, 'g')
-      : null;
-
   const exempt = exemptLines(path, source);
   const lines = source.split('\n');
   let replacements = 0;
   const out = lines.map((line, index) => {
     if (exempt.has(index)) return line;
-    let next = line.replace(full, (_m, prefix: string) => {
+    const next = line.replace(full, (_m, prefix: string) => {
       replacements += 1;
       return `${prefix}${to}`;
     });
-    if (short !== null) {
-      next = next.replace(short, (_m, prefix: string) => {
-        replacements += 1;
-        return `${prefix}${toLine}`;
-      });
-    }
     return next;
   });
   return { content: out.join('\n'), replacements };
@@ -352,7 +339,7 @@ export function planBump(files: ReadonlyMap<string, string>, options: BumpOption
   //    version it is checked against would fail the test it belongs to).
   //    `check:versions` reads no test file either, so the two agree.
   for (const [path, source] of files) {
-    if (isTestPath(path) || isArchivedPlan(path)) continue;
+    if (path.endsWith('deno.lock') || isTestPath(path) || isArchivedPlan(path)) continue;
     const base = current(path) ?? source;
     const { content, replacements } = rewriteReferences(path, base, from, to);
     if (replacements > 0) stage(path, content, replacements);
@@ -487,12 +474,11 @@ export function planBump(files: ReadonlyMap<string, string>, options: BumpOption
   }
 
   residual.push(
-    'Run `deno task check:docs`: prose claims naming the previous release ("the current release ' +
+    'Run `pnpm run check:docs`: prose claims naming the previous release ("the current release ' +
       'is …") are reported there and corrected by hand — this tool never rewrites a bare number.',
-    "Run `deno task deploy:render` (needs helm) or `deno task check:deploy`: the manifests' " +
+    "Run `pnpm run deploy:render` (needs helm) or `pnpm run check:deploy`: the manifests' " +
       'version label was rewritten to what the chart renders, and the render check confirms it.',
-    'Run the first `deno task check` and commit the root `deno.lock` it leaves — its workspace ' +
-      'member entries were rewritten here, and Deno re-resolves nothing when they already agree.',
+    'Run `pnpm install --lockfile-only` and commit the refreshed pnpm lockfile.',
     'Read the CHANGELOG section once as a whole: no entry filed under a published heading, no ' +
       'contradiction between entries (verify-release check 9 covers the merged-PR half).',
     `Grep for a range whose bounds became equal: grep -rn '>=${to} <${to}' --include='*.md' .`,

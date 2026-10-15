@@ -1,70 +1,8 @@
 /** AST-based exact contract comparison for documented TypeScript interfaces. @module */
 
-import { run as runProcess } from './../../scripts/lib/run.ts';
-import { mkdir, writeFile } from 'node:fs/promises';
+import ts from 'typescript';
 
-interface DocNode {
-  readonly name: string;
-  readonly declarations: readonly DocDeclaration[];
-}
-
-interface DocDeclaration {
-  readonly kind: string;
-  readonly def?: {
-    readonly methods?: readonly DocMethod[];
-    readonly properties?: readonly DocProperty[];
-  };
-}
-
-interface DocMethod {
-  readonly name: string;
-  readonly optional?: boolean;
-  readonly params: readonly DocParameter[];
-  readonly returnType: DocType;
-  readonly typeParams?: readonly {
-    readonly name: string;
-    readonly default?: { readonly repr: string };
-  }[];
-}
-
-interface DocParameter {
-  readonly name: string;
-  readonly optional?: boolean;
-  readonly tsType?: DocType;
-}
-
-interface DocProperty {
-  readonly name: string;
-  readonly readonly?: boolean;
-  readonly optional?: boolean;
-  readonly tsType: DocType;
-}
-
-interface DocType {
-  readonly repr?: string;
-  readonly kind?: string;
-  readonly value?:
-    | string
-    | readonly DocType[]
-    | {
-        readonly typeParams?: readonly DocType[];
-        readonly params?: readonly DocParameter[];
-        readonly tsType?: DocType;
-        readonly operator?: string;
-      };
-}
-
-interface DocTypeValue {
-  readonly typeParams?: readonly DocType[];
-  readonly params?: readonly DocParameter[];
-  readonly tsType?: DocType;
-  readonly operator?: string;
-}
-
-interface DocJson {
-  readonly nodes: Readonly<Record<string, { readonly symbols: readonly DocNode[] }>>;
-}
-
+/** One canonical interface member. */
 export interface ContractMember {
   readonly kind: 'method' | 'property';
   readonly name: string;
@@ -73,120 +11,97 @@ export interface ContractMember {
   readonly signature: string;
 }
 
+/** Order-independent interface shape. */
 export interface ContractAst {
   readonly members: readonly ContractMember[];
 }
 
-function normalizeType(type: DocType): string {
-  if (type.kind === 'union' && Array.isArray(type.value)) {
-    return type.value.map(normalizeType).join('|');
-  }
-  const value: DocTypeValue | undefined =
-    typeof type.value === 'object' && !Array.isArray(type.value)
-      ? (type.value as DocTypeValue)
-      : undefined;
-  if (type.kind === 'array' && value?.tsType !== undefined) {
-    return `${normalizeType(value.tsType)}[]`;
-  }
-  if (type.kind === 'typeOperator' && value?.tsType !== undefined) {
-    return `${value.operator ?? ''} ${normalizeType(value.tsType)}`.trim();
-  }
-  if (type.kind === 'fnOrConstructor' && value?.tsType !== undefined) {
-    const params =
-      value.params
-        ?.map(
-          (parameter) =>
-            `${parameter.name}${parameter.optional === true ? '?' : ''}:` +
-            (parameter.tsType === undefined ? 'unknown' : normalizeType(parameter.tsType)),
-        )
-        .join(',') ?? '';
-    return `(${params})=>${normalizeType(value.tsType)}`;
-  }
-  if (type.repr === undefined) {
-    throw new Error('AST type has no representation');
-  }
-  const base = type.repr.replace(/\s+/g, ' ').trim();
-  const params = value?.typeParams;
-  return params === undefined ? base : `${base}<${params.map(normalizeType).join(',')}>`;
-}
-
-function astFromJson(json: string, interfaceName: string): ContractAst {
-  const parsed = JSON.parse(json) as DocJson;
-  const symbols = Object.values(parsed.nodes).flatMap((node) => node.symbols);
-  const matches = symbols.filter((symbol) => symbol.name === interfaceName);
-  if (matches.length !== 1) {
-    throw new Error(`Expected exactly one interface ${interfaceName}, found ${matches.length}`);
-  }
-  const declarations =
-    matches[0]?.declarations.filter((declaration) => declaration.kind === 'interface') ?? [];
-  if (declarations.length !== 1 || declarations[0]?.def === undefined) {
-    throw new Error(`Expected exactly one interface declaration for ${interfaceName}`);
-  }
-  const def = declarations[0].def;
-  const members: ContractMember[] = [];
-  for (const method of def.methods ?? []) {
-    const typeParams =
-      method.typeParams
-        ?.map((parameter) =>
-          parameter.default === undefined
-            ? parameter.name
-            : `${parameter.name}=${parameter.default.repr.replace(/\s+/g, ' ').trim()}`,
-        )
-        .join(',') ?? '';
-    const params = method.params
-      .map(
-        (parameter) =>
-          `${parameter.name}${parameter.optional === true ? '?' : ''}:` +
-          (parameter.tsType === undefined ? 'unknown' : normalizeType(parameter.tsType)),
-      )
-      .join(',');
-    members.push({
-      kind: 'method',
-      name: method.name,
-      readonly: false,
-      optional: method.optional === true,
-      signature:
-        `${method.name}${method.optional === true ? '?' : ''}` +
-        `${typeParams === '' ? '' : `<${typeParams}>`}(${params}):` +
-        normalizeType(method.returnType),
-    });
-  }
-  for (const property of def.properties ?? []) {
-    members.push({
-      kind: 'property',
-      name: property.name,
-      readonly: property.readonly === true,
-      optional: property.optional === true,
-      signature:
-        `${property.readonly === true ? 'readonly ' : ''}${property.name}` +
-        `${property.optional === true ? '?' : ''}:${normalizeType(property.tsType)}`,
-    });
-  }
-  members.sort(
-    (left, right) => left.name.localeCompare(right.name) || left.kind.localeCompare(right.kind),
-  );
-  const keys = members.map((member) => `${member.kind}:${member.name}`);
-  if (new Set(keys).size !== keys.length) {
-    throw new Error(`Duplicate member in ${interfaceName}`);
-  }
-  return { members };
-}
-
-/** Parse an interface through Deno's TypeScript AST-backed documentation command. */
-export async function contractAst(
+/** Parses syntax without resolving types or executing the input. */
+export function contractAst(
   source: string,
   interfaceName: string,
   scratchName: string,
 ): Promise<ContractAst> {
-  await mkdir('.tmp/contract-ast', { recursive: true });
-  const path = `.tmp/contract-ast/${scratchName}.ts`;
-  await writeFile(path, source);
-  const output = await runProcess('deno', ['doc', '--json', path]);
-  if (!(output.code === 0)) throw new Error(output.stderr);
-  return astFromJson(output.stdout, interfaceName);
+  const file = ts.createSourceFile(scratchName + '.ts', source, ts.ScriptTarget.Latest, true);
+  const diagnostics =
+    ts.transpileModule(source, {
+      fileName: scratchName + '.ts',
+      reportDiagnostics: true,
+      compilerOptions: { target: ts.ScriptTarget.ESNext },
+    }).diagnostics ?? [];
+  if (diagnostics.some((d) => d.category === ts.DiagnosticCategory.Error))
+    throw new Error('Malformed contract syntax');
+  const matches: ts.InterfaceDeclaration[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isInterfaceDeclaration(node) && node.name.text === interfaceName) matches.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  if (matches.length !== 1)
+    throw new Error(`Expected exactly one interface ${interfaceName}, found ${matches.length}`);
+  const printer = ts.createPrinter({ removeComments: true });
+  const text = (node: ts.Node): string =>
+    printer.printNode(ts.EmitHint.Unspecified, node, file).replace(/\s+/g, ' ').trim();
+  const type = (node: ts.TypeNode | undefined): string => {
+    if (!node) return 'unknown';
+    if (ts.isUnionTypeNode(node)) return node.types.map(type).join('|');
+    if (ts.isArrayTypeNode(node)) return type(node.elementType) + '[]';
+    if (ts.isTypeOperatorNode(node)) return ts.tokenToString(node.operator) + ' ' + type(node.type);
+    if (ts.isFunctionTypeNode(node))
+      return '(' + node.parameters.map(parameter).join(',') + ')=>' + type(node.type);
+    if (ts.isTypeReferenceNode(node))
+      return (
+        text(node.typeName) +
+        (node.typeArguments ? '<' + node.typeArguments.map(type).join(',') + '>' : '')
+      );
+    return text(node);
+  };
+  const parameter = (node: ts.ParameterDeclaration): string =>
+    text(node.name) + (node.questionToken ? '?' : '') + ':' + type(node.type);
+  const members: ContractMember[] = [];
+  for (const node of matches[0]!.members) {
+    if (!ts.isMethodSignature(node) && !ts.isPropertySignature(node))
+      throw new Error('Unsupported interface member');
+    const name = text(node.name);
+    const optional = node.questionToken !== undefined;
+    const readonly = node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+    if (ts.isMethodSignature(node)) {
+      const params =
+        node.typeParameters
+          ?.map((p) => p.name.text + (p.default ? '=' + type(p.default) : ''))
+          .join(',') ?? '';
+      members.push({
+        kind: 'method',
+        name,
+        readonly: false,
+        optional,
+        signature:
+          name +
+          (optional ? '?' : '') +
+          (params ? '<' + params + '>' : '') +
+          '(' +
+          node.parameters.map(parameter).join(',') +
+          '):' +
+          type(node.type),
+      });
+    } else {
+      members.push({
+        kind: 'property',
+        name,
+        readonly,
+        optional,
+        signature:
+          (readonly ? 'readonly ' : '') + name + (optional ? '?' : '') + ':' + type(node.type),
+      });
+    }
+  }
+  members.sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
+  if (new Set(members.map((m) => m.kind + ':' + m.name)).size !== members.length)
+    throw new Error('Duplicate member in ' + interfaceName);
+  return Promise.resolve({ members });
 }
 
-/** Compare contracts without depending on source member order or formatting. */
+/** Compares contracts, refusing malformed or ambiguous inputs. */
 export async function contractsMatch(
   source: string,
   documented: string,
@@ -195,9 +110,10 @@ export async function contractsMatch(
 ): Promise<boolean> {
   try {
     const actualSource = source.replace(/^import[^;]+;\s*$/gm, '');
-    const actual = await contractAst(actualSource, interfaceName, `${scratchName}-actual`);
-    const guide = await contractAst(documented, interfaceName, `${scratchName}-guide`);
-    return JSON.stringify(guide) === JSON.stringify(actual);
+    return (
+      JSON.stringify(await contractAst(actualSource, interfaceName, scratchName + '-actual')) ===
+      JSON.stringify(await contractAst(documented, interfaceName, scratchName + '-guide'))
+    );
   } catch {
     return false;
   }

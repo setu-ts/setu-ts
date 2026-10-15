@@ -199,7 +199,7 @@ export function findStaleReferences(
  * @returns `true` when the sweep should read the file
  */
 export function isSweptPath(path: string): boolean {
-  if (path.endsWith('deno.lock')) return true;
+  if (path.endsWith('deno.lock')) return false;
   if (!path.endsWith('.ts')) return false;
   return path.includes('/src/');
 }

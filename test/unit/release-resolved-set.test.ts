@@ -1,46 +1,28 @@
 import { describe, expect, it } from 'vitest';
-
+import { parse } from 'yaml';
 import {
   createReleaseResolvedSet,
   serializeReleaseResolvedSet,
+  type IPnpmLockfile,
 } from '../../scripts/release-resolved-set.ts';
 
-describe('release resolved-set artifact', () => {
-  it('preserves the complete lockfile under the release identity', () => {
-    const lockfile = {
-      version: '5',
-      specifiers: { 'npm:zod@^4.4.0': '4.4.3' },
-      npm: { 'zod@4.4.3': { integrity: 'sha512-example' } },
-    };
-
-    expect(createReleaseResolvedSet('0.1.0-alpha.10', lockfile)).toEqual({
-      schemaVersion: 1,
-      release: '0.1.0-alpha.10',
-      lockfile,
+describe('pnpm release resolved set', () => {
+  it('sorts packages, preserves integrity and excludes importer/snapshot implementation details', () => {
+    const lock = parse(
+      "lockfileVersion: '9.0'\npackages:\n  zod@4.4.3:\n    resolution: {integrity: sha512-example}\n  '@scope/a@1.0.0':\n    resolution: {tarball: https://example.test/a.tgz}\nsnapshots: {}\n",
+    ) as IPnpmLockfile;
+    const result = createReleaseResolvedSet('0.9.0', lock);
+    expect(result).toEqual({
+      version: '0.9.0',
+      lockfileVersion: '9.0',
+      packages: { '@scope/a@1.0.0': {}, 'zod@4.4.3': { integrity: 'sha512-example' } },
     });
+    expect(Object.keys(result.packages)).toEqual(['@scope/a@1.0.0', 'zod@4.4.3']);
+    expect(serializeReleaseResolvedSet(result)).toBe(JSON.stringify(result, null, 2) + '\n');
   });
-
-  it('serializes the artifact as stable, newline-terminated JSON', () => {
-    const serialized = serializeReleaseResolvedSet(
-      createReleaseResolvedSet('1.0.0', { version: '5', specifiers: {} }),
-    );
-
-    expect(serialized).toBe(
-      '{\n' +
-        '  "schemaVersion": 1,\n' +
-        '  "release": "1.0.0",\n' +
-        '  "lockfile": {\n' +
-        '    "version": "5",\n' +
-        '    "specifiers": {}\n' +
-        '  }\n' +
-        '}\n',
-    );
-  });
-
-  it('rejects an empty release or lockfile version', () => {
-    expect(() => createReleaseResolvedSet('', { version: '5', specifiers: {} })).toThrow(TypeError);
-    expect(() => createReleaseResolvedSet('1.0.0', { version: '', specifiers: {} })).toThrow(
-      TypeError,
-    );
+  it('supports a lock with no packages and refuses empty identities', () => {
+    expect(createReleaseResolvedSet('1.0.0', { lockfileVersion: '9.0' }).packages).toEqual({});
+    expect(() => createReleaseResolvedSet('', { lockfileVersion: '9.0' })).toThrow(TypeError);
+    expect(() => createReleaseResolvedSet('1.0.0', { lockfileVersion: '' })).toThrow(TypeError);
   });
 });

@@ -556,7 +556,7 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
         test: 'node scripts/test-node.ts',
         'test:coverage': 'node scripts/test-node.ts --coverage',
         'test:coverage:pkg': 'node scripts/test-node.ts --coverage',
-        audit: 'deno audit --level=high',
+        audit: 'node scripts/audit.ts',
         'audit:ci': 'node scripts/audit.ts',
         'release:verify': 'node scripts/verify-release.ts',
         'release:bump': 'node scripts/bump-version.ts',
