@@ -1,7 +1,6 @@
 /* eslint-disable require-await -- documentation snippet fixtures mirror guide examples */
 // Testing injection from docs/getting-started.md - must compile against the workspace.
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { createTestApp, inject } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 

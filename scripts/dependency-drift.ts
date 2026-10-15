@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 /* eslint-disable no-console -- this CI script emits a human-readable drift report. */
 /**
  * Compares the committed and freshly resolved Deno lockfiles.
@@ -91,7 +92,7 @@ export function formatDependencyDrift(changes: readonly IDependencyDrift[]): str
  * @returns Parsed lockfile specifier resolutions.
  */
 async function readLockfile(path: string): Promise<IDriftLockfile> {
-  return JSON.parse(await Deno.readTextFile(path)) as IDriftLockfile;
+  return JSON.parse(await readFile(path, 'utf8')) as IDriftLockfile;
 }
 
 /**
@@ -100,7 +101,7 @@ async function readLockfile(path: string): Promise<IDriftLockfile> {
  * @returns Process exit status for the command-line caller.
  */
 async function main(): Promise<number> {
-  const [committedPath, freshPath] = Deno.args;
+  const [committedPath, freshPath] = process.argv.slice(2);
   if (committedPath === undefined || freshPath === undefined) {
     console.error('usage: dependency-drift.ts <committed-lock> <fresh-lock>');
     return 2;
@@ -114,5 +115,8 @@ async function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  Deno.exit(await main());
+  await (async () => {
+    process.exitCode = await main();
+    return;
+  })();
 }

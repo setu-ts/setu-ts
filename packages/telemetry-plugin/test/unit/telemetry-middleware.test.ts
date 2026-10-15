@@ -142,7 +142,7 @@ describe('telemetryMiddleware', () => {
       response: {
         snapshot: () => ({
           status: responseStatus,
-          headers: new Headers(responseHeaders) as Headers,
+          headers: new Headers([...responseHeaders]) as Headers,
           body: null,
         }),
         header: (name: string, value: string) => {

@@ -28,6 +28,8 @@
  * @module
  */
 
+import { readFile, readdir, stat } from 'node:fs/promises';
+
 /** A computed (non-literal) `import()` the gate refuses. */
 export interface ComputedImport {
   /**
@@ -144,7 +146,7 @@ export async function auditPackageSources(root: string): Promise<AuditResult> {
   for (const srcDir of srcRootsVisited) {
     for await (const file of walkTsFiles(srcDir)) {
       filesVisited++;
-      const source = await Deno.readTextFile(file);
+      const source = await readFile(file, 'utf8');
       for (const hit of scanSource(source)) {
         if (hit.marked) {
           markedSites++;
@@ -176,8 +178,8 @@ async function collectSrcRoots(root: string): Promise<string[]> {
   const roots: string[] = [];
 
   async function descend(dir: string): Promise<void> {
-    for await (const entry of Deno.readDir(dir)) {
-      if (!entry.isDirectory) continue;
+    for await (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       if (entry.name === 'node_modules') continue;
       const path = `${dir}/${entry.name}`;
       if (entry.name === 'src') {
@@ -485,18 +487,18 @@ function makeSnippet(source: string, start: number): string {
 
 async function isDirectory(path: string): Promise<boolean> {
   try {
-    return (await Deno.stat(path)).isDirectory;
+    return (await stat(path)).isDirectory();
   } catch {
     return false;
   }
 }
 
 async function* walkTsFiles(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       yield* walkTsFiles(path);
-    } else if (entry.isFile && entry.name.endsWith('.ts')) {
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
       yield path;
     }
   }

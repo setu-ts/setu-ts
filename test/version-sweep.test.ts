@@ -1,3 +1,4 @@
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 /**
  * Tests for the residual-version gate (`scripts/version-sweep.ts`).
  *
@@ -6,8 +7,7 @@
  * below lean on the two things that distinguish a working sweep from a dead
  * one: a reference it must REPORT, and the vacuity guard.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   findStaleReferences,
   isSweptPath,
@@ -207,13 +207,13 @@ describe('version sweep — sweepTrackedFiles', () => {
   // directory standing where a swept source should be is the cheapest way to
   // produce a non-NotFound read failure without touching permissions.
   it('rethrows a read failure that is not a missing path', async () => {
-    const base = await Deno.makeTempDir();
+    const base = await await mkdir('.tmp', { recursive: true }).then(() => mkdtemp('.tmp/test-'));
     const dir = `${base}/src/a.ts`;
-    await Deno.mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true });
     try {
       await expect(sweepTrackedFiles('0.3.0', [dir])).rejects.toThrow();
     } finally {
-      await Deno.remove(base, { recursive: true });
+      await rm(base, { recursive: true });
     }
   });
 
@@ -286,7 +286,7 @@ describe('version sweep — entry points', () => {
 });
 
 describe('version sweep — trackedFiles', () => {
-  const enc = (t: string) => new TextEncoder().encode(t);
+  const enc = (t: string) => t;
 
   it('splits the listing and drops the trailing blank', async () => {
     const files = await trackedFiles(() =>

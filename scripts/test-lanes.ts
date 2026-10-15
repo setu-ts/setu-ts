@@ -1,6 +1,8 @@
 /** Single source of truth for the Node and Deno package-test lanes (M111b). */
 /** Converted suites that still prove Deno runtime behavior. */
 export const DENO_LANE_TESTS = [
+  // The loopback diagnostics listener is a Deno-only runtime subject (C4).
+  'test/inspect-local-diagnostics.test.ts',
   'packages/diagnostics-plugin/test/unit/cache-observations.test.ts',
   'packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts',
   'packages/diagnostics-plugin/test/unit/realtime-observations.test.ts',
@@ -47,6 +49,7 @@ export const DENO_LANE_TESTS = [
 
 /** Suites whose subject needs the real Deno host. */
 export const NODE_EXCLUDED_TESTS = [
+  'test/inspect-local-diagnostics.test.ts',
   'packages/websocket-plugin/test/integration/guarded-upgrade.test.ts',
   'packages/websocket-plugin/test/integration/upgrade-body-cap-slot.test.ts',
   'packages/websocket-plugin/test/integration/upgrade-guards.test.ts',

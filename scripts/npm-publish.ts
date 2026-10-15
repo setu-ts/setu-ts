@@ -1,5 +1,8 @@
 /* eslint-disable no-console -- release orchestration prints its checked artifacts. */
 /** Packs, checks, looks up and publishes immutable npm tarballs in dependency order. @module */
+
+import { run as runProcess } from './lib/run.ts';
+import { mkdir, realpath, readFile } from 'node:fs/promises';
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES } from './release-packages.ts';
 import { publicationHoldRefusal } from './publication-hold.ts';
 import {
@@ -18,17 +21,12 @@ export interface PublishOptions {
 }
 
 async function command(cmd: string, args: readonly string[], cwd = '.'): Promise<string> {
-  const result = await new Deno.Command(cmd, {
-    args: [...args],
-    cwd,
-    stdout: 'piped',
-    stderr: 'piped',
-  }).output();
-  const output = new TextDecoder().decode(result.stdout);
+  const result = await runProcess(cmd, args, { cwd });
+  const output = result.stdout;
   console.log(output);
-  const stderr = new TextDecoder().decode(result.stderr);
+  const stderr = result.stderr;
   if (stderr !== '') console.error(stderr);
-  if (!result.success) {
+  if (!(result.code === 0)) {
     throw new Error(`${cmd} failed (exit ${result.code}); stopping before dependents`);
   }
   return output;
@@ -43,12 +41,12 @@ export async function runNpmPublish(options: PublishOptions): Promise<void> {
   const npm = await execute('npm', ['--version']);
   if (!npmSupportsTrustedPublishing(npm)) throw new Error(`npm ${npm.trim()} is older than 11.5.1`);
   await execute('pnpm', ['exec', 'tsc', '-b']);
-  await Deno.mkdir('.tmp/npm-pack', { recursive: true });
-  const packDir = await Deno.realPath('.tmp/npm-pack');
+  await mkdir('.tmp/npm-pack', { recursive: true });
+  const packDir = await realpath('.tmp/npm-pack');
   let skipped = 0;
   let performed = 0;
   for (const [index, dir] of PUBLISHED_PACKAGES.entries()) {
-    const source = JSON.parse(await Deno.readTextFile(`${dir}/package.json`)) as {
+    const source = JSON.parse(await readFile(`${dir}/package.json`, 'utf8')) as {
       name: string;
       version: string;
     };
@@ -104,8 +102,10 @@ export async function runNpmPublish(options: PublishOptions): Promise<void> {
 }
 
 if (import.meta.main) {
-  await runNpmPublish({
-    dryRun: Deno.args.includes('--dry-run'),
-    inCi: Deno.env.get('GITHUB_ACTIONS') === 'true',
-  });
+  await (async () => {
+    await runNpmPublish({
+      dryRun: process.argv.slice(2).includes('--dry-run'),
+      inCi: process.env['GITHUB_ACTIONS'] === 'true',
+    });
+  })();
 }

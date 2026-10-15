@@ -1,5 +1,7 @@
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { run as runProcess } from './../../scripts/lib/run.ts';
+import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import { activeHolds, publicationHoldRefusal } from '../../scripts/publication-hold.ts';
 import {
   PUBLICATION_HOLDS,
@@ -13,14 +15,12 @@ const OTHER = { packageDir: 'packages/also-held', reason: 'waiting on M2' };
 
 /** Runs a release script from the repo root with the release task's grants. */
 async function run(args: readonly string[]): Promise<{ code: number; out: string }> {
-  const { code, stdout, stderr } = await new Deno.Command('deno', {
-    args: [...args],
-    cwd: ROOT,
-    stdout: 'piped',
-    stderr: 'piped',
-  }).output();
-  const decode = new TextDecoder();
-  return { code, out: decode.decode(stdout) + decode.decode(stderr) };
+  const first = args.findIndex((arg) => arg.endsWith('.ts'));
+  if (first < 0) throw new Error('No script argument');
+  const { code, stdout, stderr } = await runProcess(process.execPath, args.slice(first), {
+    cwd: fileURLToPath(ROOT),
+  });
+  return { code, out: stdout + stderr };
 }
 
 describe('activeHolds', () => {
@@ -78,7 +78,7 @@ describe('the release scripts after M98o', () => {
 
   it('release:verify no longer reports the completed hold', async () => {
     const version = (
-      JSON.parse(await Deno.readTextFile(new URL('packages/kernel/deno.json', ROOT))) as {
+      JSON.parse(await readFile(new URL('packages/kernel/deno.json', ROOT), 'utf8')) as {
         version: string;
       }
     ).version;

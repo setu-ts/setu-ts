@@ -230,7 +230,6 @@ approved development dataset: counts aggregate every tenant using the instance.
 
 | Export                        | Kind      |
 | ----------------------------- | --------- |
-| `IAwsS3Client`                | reference |
 | `canSign`                     | function  |
 | `createUploadMiddleware`      | function  |
 | `getUploadedFile`             | function  |
@@ -245,6 +244,7 @@ approved development dataset: counts aggregate every tenant using the instance.
 | `AzureStorageOptions`         | interface |
 | `GcsProviderOptions`          | interface |
 | `GcsStorageOptions`           | interface |
+| `IAwsS3Client`                | interface |
 | `IAzureBlobClient`            | interface |
 | `IGcsClient`                  | interface |
 | `IS3Backend`                  | interface |

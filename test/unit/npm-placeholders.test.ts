@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { placeholderFiles } from '../../scripts/npm-placeholders.ts';
 import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
 import { REPOSITORY_URL } from '../../scripts/npm-release-gate.ts';

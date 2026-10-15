@@ -1,6 +1,6 @@
+import { readFile } from 'node:fs/promises';
 /** Browser skip policy is enforced without requiring a browser in ordinary gates. */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import {
   BROWSER_INSTALL_COMMAND,
   browserAvailabilityCode,
@@ -52,26 +52,26 @@ describe('dedicated browser gate', () => {
       'LOCALAPPDATA',
     ]);
     expect(unreadableCacheMessage('/opt/pw')).toContain('--allow-read=.,/opt/pw,');
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const app = JSON.parse(await readFile('apps/full-stack/deno.json', 'utf8')) as {
       tasks: Record<string, string>;
     };
-    const app = JSON.parse(await Deno.readTextFile('apps/full-stack/deno.json')) as {
-      tasks: Record<string, string>;
-    };
-    for (const task of [manifest.tasks['check:browser'], app.tasks['browser']]) {
+    for (const task of [manifest.scripts['check:browser'], app.tasks['browser']]) {
       expect(task).toContain('$HOME/.cache/ms-playwright');
       expect(task).toContain('$HOME/Library/Caches/ms-playwright');
     }
   });
 
   it('pins CI and the local installer to the suite version, without enrolling browser skips', async () => {
-    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
-    const suite = await Deno.readTextFile('apps/full-stack/browser/full-stack.browser.test.ts');
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const ci = await readFile('.github/workflows/ci.yml', 'utf8');
+    const suite = await readFile('apps/full-stack/browser/full-stack.browser.test.ts', 'utf8');
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
-    expect(manifest.tasks['check:browser']).not.toContain(' -A ');
-    expect(manifest.tasks['check:browser']).toContain('--allow-run=deno');
+    expect(manifest.scripts['check:browser']).not.toContain(' -A ');
+    expect(manifest.scripts['check:browser']).toContain('--allow-run=deno');
     expect(ci).toContain(`playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium`);
     expect(suite).toContain(`npm:playwright@${PLAYWRIGHT_VERSION}`);
     expect(BROWSER_INSTALL_COMMAND).toContain(`playwright@${PLAYWRIGHT_VERSION} install chromium`);

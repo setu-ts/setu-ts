@@ -1,3 +1,5 @@
+import { stat, readFile, readdir } from 'node:fs/promises';
+import { statSync, type Dirent } from 'node:fs';
 /* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Markdown documentation linter — catches the class of defect that renders a
@@ -49,8 +51,8 @@
  * full block parser, and every code sample in this repo's docs is fenced.
  *
  * Usage:
- *   deno run --allow-read scripts/check-docs.ts              # the default set
- *   deno run --allow-read scripts/check-docs.ts a.md b.md    # specific files
+ *   node scripts/check-docs.ts              # the default set
+ *   node scripts/check-docs.ts a.md b.md    # specific files
  *
  * Exits 1 on any finding.
  */
@@ -1022,8 +1024,8 @@ export async function checkLocalLinks(
           resolvedFilePath = knownFiles.has(filePath) ? filePath : `${filePath}.md`;
         } else {
           try {
-            const info = await Deno.stat(filePath);
-            if (info.isFile) {
+            const info = await stat(filePath);
+            if (info.isFile()) {
               resolved = true;
               resolvedFilePath = filePath;
             }
@@ -1050,10 +1052,10 @@ export async function checkLocalLinks(
       // documents, so a fragment on one is not validated against headings.
       if (!resolved) {
         try {
-          const info = await Deno.stat(resolvedPath);
-          if (info.isFile || info.isDirectory) {
+          const info = await stat(resolvedPath);
+          if (info.isFile() || info.isDirectory()) {
             resolved = true;
-            resolvedFilePath = info.isFile ? resolvedPath : null;
+            resolvedFilePath = info.isFile() ? resolvedPath : null;
           }
         } catch {
           // Path doesn't exist
@@ -1068,7 +1070,7 @@ export async function checkLocalLinks(
           // Cross-file anchor: parse the target file's renderer-compatible anchors.
           let targetSource: string;
           try {
-            targetSource = await Deno.readTextFile(resolvedFilePath);
+            targetSource = await readFile(resolvedFilePath, 'utf8');
           } catch {
             targetSource = '';
           }
@@ -1551,7 +1553,7 @@ export function checkPackageCatalog(
       ? `${pkgPath}/README.md`
       : `packages/${pkg}/README.md`;
     try {
-      Deno.statSync(readmePath);
+      statSync(readmePath);
     } catch {
       findings.push({
         file: 'docs/plugins.md',
@@ -2053,9 +2055,9 @@ export function checkVersionClaims(
 async function collectMarkdown(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
-    const entries: Deno.DirEntry[] = [];
+    const entries: Dirent[] = [];
     try {
-      for await (const entry of Deno.readDir(dir)) {
+      for await (const entry of await readdir(dir, { withFileTypes: true })) {
         entries.push(entry);
       }
     } catch {
@@ -2066,7 +2068,7 @@ async function collectMarkdown(root: string): Promise<string[]> {
         continue;
       }
       const path = dir === '.' ? entry.name : `${dir}/${entry.name}`;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         // The repo root is walked one level deep only; nested roots are listed
         // explicitly in SCAN_ROOTS so an unrelated tree cannot join silently.
         if (dir !== '.') {
@@ -2085,8 +2087,11 @@ async function collectMarkdown(root: string): Promise<string[]> {
   return found.sort();
 }
 
-if (import.meta.main) {
-  const args = Deno.args.filter((a) => !a.startsWith('-'));
+/** Repository entry point; returns a status without exiting its caller. */
+export async function runDocsMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const paths = args.filter((a) => !a.startsWith('-'));
   // Two distinct sets, deliberately not one:
   //   `files`      — the DOCUMENTS to check. Markdown only; `checkDocument` is
   //                  a Markdown checker and running it over TypeScript source
@@ -2101,9 +2106,9 @@ if (import.meta.main) {
   // files" — a false count over work that could not find anything.
   let files: string[];
   let linkTargets: string[];
-  if (args.length > 0) {
-    files = args;
-    linkTargets = args;
+  if (paths.length > 0) {
+    files = [...paths];
+    linkTargets = [...paths];
   } else {
     const collected = new Set<string>();
     for (const root of SCAN_ROOTS) {
@@ -2115,7 +2120,7 @@ if (import.meta.main) {
     const docsRoots = ['docs'];
     for (const root of docsRoots) {
       try {
-        for await (const entry of Deno.readDir(root)) {
+        for await (const entry of await readdir(root, { withFileTypes: true })) {
           if (!entry.name.startsWith('.') && entry.name.endsWith('.md')) {
             const path = `${root}/${entry.name}`;
             collected.add(path);
@@ -2133,10 +2138,10 @@ if (import.meta.main) {
   const fileContents = new Map<string, string>();
   for (const file of files) {
     try {
-      fileContents.set(file, await Deno.readTextFile(file));
+      fileContents.set(file, await readFile(file, 'utf8'));
     } catch (error) {
       console.error(`Cannot read ${file}: ${(error as Error).message}`);
-      Deno.exit(1);
+      return 1;
     }
   }
 
@@ -2151,7 +2156,7 @@ if (import.meta.main) {
   // Install snippets that name a version other than the one shipping. The
   // workspace version is read from one manifest rather than passed in, because
   // `release:verify` already proves all 47 agree.
-  const kernelManifest = JSON.parse(await Deno.readTextFile('packages/kernel/deno.json')) as {
+  const kernelManifest = JSON.parse(await readFile('packages/kernel/deno.json', 'utf8')) as {
     version?: string;
   };
   if (kernelManifest.version === undefined) {
@@ -2167,11 +2172,11 @@ if (import.meta.main) {
     // that state a version outside Markdown. Only in default scan mode: an
     // explicit file list is a targeted run, and pulling in files the caller did
     // not name would report findings they cannot act on from that invocation.
-    if (args.length === 0) {
+    if (paths.length === 0) {
       const claimSources = new Map(fileContents);
       for (const artifact of VERSIONED_ARTIFACTS) {
         try {
-          claimSources.set(artifact, await Deno.readTextFile(artifact));
+          claimSources.set(artifact, await readFile(artifact, 'utf8'));
         } catch {
           findings.push({
             file: artifact,
@@ -2190,14 +2195,14 @@ if (import.meta.main) {
   // Skip archived plan files as they may reference historical paths.
   // Collect the deterministic manifest-derived generated API page set so
   // generated links are validated rather than unconditionally accepted.
-  if (args.length === 0) {
+  if (paths.length === 0) {
     let generatedApiPages: Set<string> | null;
     try {
       const { collectApiEntrypoints } = await import('./generate-api-docs.ts');
       const fs = {
-        readTextFile: (path: string) => Deno.readTextFile(path),
-        readDir: (path: string) => Deno.readDir(path),
-        stat: (path: string) => Deno.stat(path),
+        readTextFile: (path: string) => readFile(path, 'utf8'),
+        readDir: async (path: string) => await readdir(path, { withFileTypes: true }),
+        stat: (path: string) => stat(path),
       };
       const { targets } = await collectApiEntrypoints(fs);
       generatedApiPages = buildGeneratedApiPages(targets);
@@ -2221,8 +2226,8 @@ if (import.meta.main) {
     if (examplesContent) {
       try {
         const appDirs: string[] = [];
-        for await (const entry of Deno.readDir('apps')) {
-          if (entry.isDirectory && !entry.name.startsWith('.')) {
+        for await (const entry of await readdir('apps', { withFileTypes: true })) {
+          if (entry.isDirectory() && !entry.name.startsWith('.')) {
             appDirs.push(entry.name);
           }
         }
@@ -2237,8 +2242,8 @@ if (import.meta.main) {
     if (appsReadmeContent) {
       try {
         const appDirs: string[] = [];
-        for await (const entry of Deno.readDir('apps')) {
-          if (entry.isDirectory && !entry.name.startsWith('.')) {
+        for await (const entry of await readdir('apps', { withFileTypes: true })) {
+          if (entry.isDirectory() && !entry.name.startsWith('.')) {
             appDirs.push(entry.name);
           }
         }
@@ -2313,7 +2318,7 @@ if (import.meta.main) {
       `Documentation check passed: ${files.length} markdown files ` +
         `(${linkTargets.length} link targets), 0 findings.`,
     );
-    Deno.exit(0);
+    return 0;
   }
 
   console.error(`Documentation check FAILED: ${findings.length} findings.\n`);
@@ -2321,5 +2326,7 @@ if (import.meta.main) {
     console.error(`  ${finding.file}:${finding.line}`);
     console.error(`    ${finding.message}\n`);
   }
-  Deno.exit(1);
+  return 1;
 }
+
+if (import.meta.main) process.exitCode = await runDocsMain();

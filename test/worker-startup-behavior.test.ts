@@ -1,6 +1,5 @@
 /** Behavioral tests for the actual production Worker startup seam. @module */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createWorkerHandler } from '../apps/cloudflare/worker.ts';
 

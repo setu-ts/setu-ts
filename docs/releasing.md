@@ -108,7 +108,7 @@ patch or a quiet minor unless `--allow-quiet-minor` is deliberate.
 ```fish
 deno task release:bump 0.9.0 --dry-run
 deno task release:bump 0.9.0
-deno run -A scripts/node-manifests.ts --write
+node scripts/node-manifests.ts --write
 ```
 
 The bump refuses a dirty tree. Read its diff and residual sweep; never bump an `@since` tag. Member
@@ -288,7 +288,7 @@ set prerelease
 if string match -q '*-*' "$version"
     set prerelease --prerelease
 end
-mkdir -p .tmp; and deno task release:resolved-set "$version" .tmp/resolved-set.json; and deno run --allow-read scripts/release-notes.ts "$version" > .tmp/notes.md; and gh release create "v$version" --verify-tag --title "v$version" --notes-file .tmp/notes.md .tmp/resolved-set.json#resolved-set.json $prerelease
+mkdir -p .tmp; and deno task release:resolved-set "$version" .tmp/resolved-set.json; and node scripts/release-notes.ts "$version" > .tmp/notes.md; and gh release create "v$version" --verify-tag --title "v$version" --notes-file .tmp/notes.md .tmp/resolved-set.json#resolved-set.json $prerelease
 ```
 
 `--verify-tag` prevents a mistyped version from creating a new tag. The workflow checks whether the
@@ -344,35 +344,26 @@ deno task check:api-docs
 deno task check:docs
 ```
 
-The ratchet (`DOC_LINT_BASELINE = 497`) is frozen in `scripts/generate-api-docs.ts`. If the total
-diagnostic count drops below the baseline, the script prints a message instructing you to lower the
-constant in the same commit — do not ship a lower count without updating the constant, and do not
-raise the constant to accommodate new debt. The ten `CLEAN_PACKAGES` are permanently exempt: any
-finding in those packages fails the gate regardless of the baseline.
+The JSDoc ratchet runs **TypeDoc 0.28.20**, pinned exactly in the generated root `package.json`.
+`typedoc.check.json` requires documentation from every published package and validates missing
+documentation and unexported references; invalid-link validation is disabled. The source graph uses
+`tsconfig.docs.json` and workspace source paths.
 
-**The count is only comparable on the Deno version that produced it.** `deno doc --lint` emits a
-different number per version, and not marginally so: one identical tree reported 752 diagnostics on
-Deno 2.9.5 and 496 on 2.9.6, a 256 difference from the toolchain alone. So the baseline is paired
-with `DOC_LINT_BASELINE_DENO`, which tracks the `deno-version` pin in `.github/workflows/ci.yml`. On
-any other version the gate reports the count and **skips** the comparison rather than failing,
-because failing would block every contributor whose toolchain differs from CI's; clean-package
-findings still fail. Never lower the constant from a run whose output says `SKIPPED`.
+`DOC_LINT_BASELINE = 237` and `DOC_LINT_BASELINE_TYPEDOC = '0.28.20'` record the M111e2 measurement.
+TypeDoc reported 554 warnings; 317 of them are missing comments on members of anonymous object types
+(`Foo.__type.bar`), which `deno doc --lint` never required, so `inRatchetScope` leaves them out. The
+earlier Deno count of 496 measures a different diagnostic model and is not comparable. The 31
+`CLEAN_PACKAGES` were re-derived from zero in-scope diagnostics and include every package the Deno
+ratchet kept clean. Any diagnostic in a clean package fails independently of the total.
 
-The pin is currently **2.9.6**, chosen to match the version developers run, so the ratchet is
-comparable in an ordinary local run and a new diagnostic is visible before a push. While the two
-disagreed it was not: a local run said `SKIPPED`, a contributor learned of a new diagnostic only
-from a red CI job, and finding out _which symbol_ meant reproducing CI's reading in a container. If
-your toolchain differs from the pin, that container is still the way to reproduce it:
+A count above the baseline fails. A count below it also fails and instructs you to lower the
+constant in the same commit; do not raise it to accommodate new debt. A TypeDoc version mismatch
+fails before comparing counts and never advises changing the baseline. When the pin changes,
+re-measure the count and clean set with the same source graph and validation scope in the same
+change.
 
-```bash
-docker run --rm -v "$PWD":/w -w /w -e DENO_DIR=/tmp/dc denoland/deno:2.9.6 \
-  run --allow-read --allow-run --allow-env --allow-write=/tmp/dc \
-  scripts/generate-api-docs.ts --check
-```
-
-When the CI pin moves, re-measure and update both constants in the same change — and say in the
-commit whether a change in the count is paid-down debt or just the new toolchain, because the two
-are indistinguishable from the number alone.
+`docs:api` and `release:docs` still generate `deno doc --html` output for the website until M111e3.
+The Deno version no longer governs the JSDoc ratchet.
 
 Generated output lives under `docs/api/`, which is gitignored. Verify it is not tracked:
 

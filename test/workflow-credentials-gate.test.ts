@@ -40,8 +40,9 @@
  * @module
  */
 
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { readdir, readFile, mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+
+import { describe, expect, it } from 'vitest';
 
 const WORKFLOW_DIR = '.github/workflows';
 
@@ -144,10 +145,10 @@ export function dropsCredential(step: CheckoutStep): boolean {
 /** Every `actions/checkout` step across every workflow, in a stable order. */
 async function checkoutSteps(): Promise<readonly CheckoutStep[]> {
   const steps: CheckoutStep[] = [];
-  for await (const entry of Deno.readDir(WORKFLOW_DIR)) {
-    if (!entry.isFile) continue;
+  for await (const entry of await readdir(WORKFLOW_DIR, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
     if (!WORKFLOW_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) continue;
-    const text = await Deno.readTextFile(`${WORKFLOW_DIR}/${entry.name}`);
+    const text = await readFile(`${WORKFLOW_DIR}/${entry.name}`, 'utf8');
     steps.push(...workflowCheckoutSteps(text, entry.name));
   }
   return steps.sort((a, b) =>
@@ -220,21 +221,23 @@ describe('workflow checkout credentials', () => {
 
     it('sees a step in a `.yaml` workflow', async () => {
       // The extension list is what this covers; the parser is shared.
-      const directory = await Deno.makeTempDir();
+      const directory = await await mkdir('.tmp', { recursive: true }).then(() =>
+        mkdtemp('.tmp/test-'),
+      );
       try {
-        await Deno.writeTextFile(
+        await writeFile(
           `${directory}/probe.yaml`,
           'jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n',
         );
         const names: string[] = [];
-        for await (const entry of Deno.readDir(directory)) {
+        for await (const entry of await readdir(directory, { withFileTypes: true })) {
           if (WORKFLOW_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) {
             names.push(entry.name);
           }
         }
         expect(names).toEqual(['probe.yaml']);
       } finally {
-        await Deno.remove(directory, { recursive: true });
+        await rm(directory, { recursive: true });
       }
     });
 

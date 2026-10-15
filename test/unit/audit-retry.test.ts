@@ -15,8 +15,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import type { AuditDeps, AuditRun } from '../../scripts/audit.ts';
 import { backoffMs, classifyAudit, runAuditLoop, shouldRetry } from '../../scripts/audit.ts';

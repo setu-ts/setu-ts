@@ -7,8 +7,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   auditPackageSources,
   findComputedImports,
@@ -163,11 +164,11 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
    * walker silently skipped while still reporting a healthy file count.
    */
   async function createTree(): Promise<string> {
-    const root = await Deno.makeTempDir({ prefix: 'setu-audit-' });
-    await Deno.mkdir(`${root}/flat/src`, { recursive: true });
-    await Deno.writeTextFile(`${root}/flat/src/a.ts`, "await import('npm:ok@1');\n");
-    await Deno.mkdir(`${root}/group/nested/src/deep`, { recursive: true });
-    await Deno.writeTextFile(`${root}/group/nested/src/deep/b.ts`, 'export const b = 1;\n');
+    const root = await await mkdir('.tmp', { recursive: true }).then(() => mkdtemp('.tmp/test-'));
+    await mkdir(`${root}/flat/src`, { recursive: true });
+    await writeFile(`${root}/flat/src/a.ts`, "await import('npm:ok@1');\n");
+    await mkdir(`${root}/group/nested/src/deep`, { recursive: true });
+    await writeFile(`${root}/group/nested/src/deep/b.ts`, 'export const b = 1;\n');
     return root;
   }
 
@@ -180,14 +181,14 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
       expect(result.filesVisited).toBe(2);
       expect(result.findings).toEqual([]);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 
   it('refuses a computed import in a deeply nested src tree', async () => {
     const root = await createTree();
     try {
-      await Deno.writeTextFile(
+      await writeFile(
         `${root}/group/nested/src/deep/b.ts`,
         'const load = (spec: string) => import(spec);\nexport const l = load;\n',
       );
@@ -195,15 +196,15 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
       expect(result.findings).toHaveLength(1);
       expect(result.findings[0].file).toBe(`${root}/group/nested/src/deep/b.ts`);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 
   it('never audits a vendored node_modules tree', async () => {
     const root = await createTree();
     try {
-      await Deno.mkdir(`${root}/flat/node_modules/dep/src`, { recursive: true });
-      await Deno.writeTextFile(
+      await mkdir(`${root}/flat/node_modules/dep/src`, { recursive: true });
+      await writeFile(
         `${root}/flat/node_modules/dep/src/vendor.ts`,
         'const load = (spec: string) => import(spec);\nexport const l = load;\n',
       );
@@ -214,7 +215,7 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
       expect(result.filesVisited).toBe(2);
       expect(result.findings).toEqual([]);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 

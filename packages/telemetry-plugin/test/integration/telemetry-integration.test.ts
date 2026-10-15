@@ -129,7 +129,7 @@ describe('telemetry integration (fake TracerHost)', () => {
         snapshot() {
           return {
             status: responseStatus,
-            headers: new Headers(responseHeaders) as Headers,
+            headers: new Headers([...responseHeaders]) as Headers,
             body: null,
           };
         },

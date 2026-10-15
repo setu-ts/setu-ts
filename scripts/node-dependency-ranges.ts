@@ -66,6 +66,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@launchdarkly/node-server-sdk': '^9',
   '@node-saml/node-saml': '^5',
   '@types/ws': '^8.18.2',
+  '@types/pg': '^8.23.1',
   '@types/amqplib': '^0.10.8',
   '@prisma/client': '^7.10.0',
   amqplib: '0.10.x',
@@ -96,6 +97,27 @@ export interface Override {
 
 /** The committed overrides (M111a plan §3.1), each with its reason. */
 export const OVERRIDES: readonly Override[] = [
+  {
+    package: 'packages/database-plugin',
+    dependency: '@types/pg',
+    kind: 'dev-dependency-types',
+    reason:
+      'The PostgreSQL test harnesses import pg, which ships no declarations (M111e2 check, TS7016).',
+  },
+  {
+    package: 'packages/idempotency-plugin',
+    dependency: '@types/pg',
+    kind: 'dev-dependency-types',
+    reason:
+      'The real-backend within fixture imports pg and is included in the Node type-check gate (M111e2).',
+  },
+  {
+    package: 'packages/websocket-plugin',
+    dependency: '@types/ws',
+    kind: 'dev-dependency-types',
+    reason:
+      'The declarative route test imports ws; its declarations are required by the Node type-check gate (M111e2).',
+  },
   {
     package: 'packages/cli',
     dependency: 'prettier',

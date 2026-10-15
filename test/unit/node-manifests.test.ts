@@ -8,8 +8,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { mkdir, mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   basePackageName,
   checkDecoratorSideEffects,
@@ -141,6 +142,19 @@ describe('classifyMember — the §3.1 classification table', () => {
 });
 
 describe('classifyMember — the committed overrides', () => {
+  it('adds declarations for packages used only by tests without creating a runtime dependency', () => {
+    for (const [dir, name, dependency, types] of [
+      ['packages/database-plugin', '@setu-ts/database-plugin', 'pg', '@types/pg'],
+      ['packages/idempotency-plugin', '@setu-ts/idempotency-plugin', 'pg', '@types/pg'],
+      ['packages/websocket-plugin', '@setu-ts/websocket-plugin', 'ws', '@types/ws'],
+    ]) {
+      const input = member(dir, name, { 'test/a.test.ts': `import client from '${dependency}';` });
+      const { classified, refusals } = classifyMember(input, new Map());
+      expect(refusals).toEqual([]);
+      expect(classified.devDependencies.has(types)).toBe(true);
+      expect(classified.dependencies.has(dependency)).toBe(false);
+    }
+  });
   const { classified, refusals } = classifyMember(RUNTIME, nameToDir);
 
   it('refuses nothing when every override finds its package', () => {
@@ -566,15 +580,15 @@ describe('small helpers', () => {
 
 describe('runNodeManifests — the I/O seam, against a throwaway workspace', () => {
   async function workspace(): Promise<string> {
-    const root = await Deno.makeTempDir({ dir: '.tmp', prefix: 'setu-node-manifests-' });
-    await Deno.writeTextFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
-    await Deno.writeTextFile(`${root}/LICENSE`, 'test license\n');
-    await Deno.mkdir(`${root}/packages/a/src`, { recursive: true });
-    await Deno.writeTextFile(
+    const root = await await mkdir('.tmp', { recursive: true }).then(() => mkdtemp('.tmp/test-'));
+    await writeFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
+    await writeFile(`${root}/LICENSE`, 'test license\n');
+    await mkdir(`${root}/packages/a/src`, { recursive: true });
+    await writeFile(
       `${root}/packages/a/deno.json`,
       '{"name":"@setu-ts/common","version":"0.8.0","exports":"./src/index.ts"}',
     );
-    await Deno.writeTextFile(`${root}/packages/a/src/index.ts`, "import { Hono } from 'hono';");
+    await writeFile(`${root}/packages/a/src/index.ts`, "import { Hono } from 'hono';");
     return root;
   }
 
@@ -588,29 +602,29 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
       expect(await runNodeManifests(['--check'], root)).toBe(1);
       expect(await runNodeManifests(['--write'], root)).toBe(0);
       expect(await runNodeManifests(['--check'], root)).toBe(0);
-      await Deno.writeTextFile(`${root}/packages/a/LICENSE`, 'drift');
+      await writeFile(`${root}/packages/a/LICENSE`, 'drift');
       expect(await runNodeManifests(['--check'], root)).toBe(1);
-      await Deno.writeTextFile(`${root}/packages/a/LICENSE`, 'test license\n');
+      await writeFile(`${root}/packages/a/LICENSE`, 'test license\n');
       const path = `${root}/packages/a/package.json`;
-      const pkg = JSON.parse(await Deno.readTextFile(path));
+      const pkg = JSON.parse(await readFile(path, 'utf8'));
       expect(pkg.dependencies).toEqual({ hono: '^4.12.30' });
-      const deno = JSON.parse(await Deno.readTextFile(`${root}/packages/a/deno.json`));
+      const deno = JSON.parse(await readFile(`${root}/packages/a/deno.json`, 'utf8'));
       expect(deno.imports).toEqual({ hono: 'npm:hono@^4.12.30' });
-      await Deno.writeTextFile(path, JSON.stringify({ ...pkg, version: '9.9.9' }));
+      await writeFile(path, JSON.stringify({ ...pkg, version: '9.9.9' }));
       expect(await runNodeManifests(['--check'], root)).toBe(1);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 
   it('exits 1 on a refusal before writing anything', async () => {
     const root = await workspace();
     try {
-      await Deno.writeTextFile(`${root}/packages/a/src/index.ts`, "import x from 'left-pad';");
+      await writeFile(`${root}/packages/a/src/index.ts`, "import x from 'left-pad';");
       expect(await runNodeManifests(['--write'], root)).toBe(1);
-      await expect(Deno.stat(`${root}/packages/a/package.json`)).rejects.toThrow();
+      await expect(stat(`${root}/packages/a/package.json`)).rejects.toThrow();
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 

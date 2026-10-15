@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Repository tooling on Node (M111e2).** Repository scripts use Node 24 and a shared subprocess
+  helper. Root tests join the Vitest `tooling` member, which enforces the existing script coverage
+  inventory per file. Root tasks forward to pnpm; the tooling-only and all-member test commands keep
+  their separate scopes. The type-check gate includes package tests and repository tooling. The
+  JSDoc ratchet runs on TypeDoc 0.28.20, and the README export tables and documentation fence
+  compiler use the TypeScript compiler API. Two README tables change as a result, both correcting
+  `deno doc` output: `@setu-ts/cli/main` now lists `runMain`, `nodeProcess`, `emitInterrupt`,
+  `MainProcess` and `MainRuntime` (shipped in 0.9.0, previously rendered as an empty table), and
+  `@setu-ts/storage-plugin`'s deprecated `IAwsS3Client` alias is listed as an `interface` rather
+  than `reference`.
+
 - **Errors keep their cause (M111e1).** Four errors that were thrown from a `catch` without the
   original error now carry it as `error.cause`: the `ConfigPlugin` env-file read failure, both
   `react-router-plugin` server-build load failures (the build module and `react-router`), and the

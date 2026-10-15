@@ -49,6 +49,9 @@
  * `check:versions` uses, so a residual old reference fails the bump itself.
  */
 
+import { run as runProcess } from './lib/run.ts';
+import { writeFile, readFile } from 'node:fs/promises';
+
 import { findStaleReferences, isSweptPath } from './version-sweep.ts';
 
 /** One file the bump rewrites. */
@@ -519,44 +522,28 @@ export interface MainDeps {
 export const productionDeps: MainDeps = {
   readTracked: readTrackedText,
   isClean: workingTreeIsClean,
-  write: Deno.writeTextFile,
+  write: writeFile,
   today: () => new Date().toISOString().slice(0, 10),
   log: console.log,
   error: console.error,
   syncManifests: async () => {
-    const child = new Deno.Command(Deno.execPath(), {
-      args: [
-        'run',
-        '--allow-read',
-        '--allow-write',
-        '--allow-env=TSC_WATCHFILE,TSC_NONPOLLING_WATCHER,TSC_WATCHDIRECTORY,NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,TSC_WATCH_POLLINGINTERVAL_LOW,TSC_WATCH_POLLINGINTERVAL_MEDIUM,TSC_WATCH_POLLINGINTERVAL_HIGH,TSC_WATCH_POLLINGCHUNKSIZE_LOW,TSC_WATCH_POLLINGCHUNKSIZE_MEDIUM,TSC_WATCH_POLLINGCHUNKSIZE_HIGH,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_LOW,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_MEDIUM,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_HIGH',
-        'scripts/node-manifests.ts',
-        '--write',
-      ],
-      stdout: 'inherit',
-      stderr: 'inherit',
-    }).spawn();
-    const status = await child.status;
+    const status = await runProcess(process.execPath, ['scripts/node-manifests.ts', '--write'], {
+      inherit: true,
+    });
     if (status.code !== 0) throw new Error(`node-manifests --write exited ${status.code}`);
   },
 };
 
 /** Files read as text: anything tracked whose bytes carry no NUL. */
 export async function readTrackedText(): Promise<Map<string, string>> {
-  const list = await new Deno.Command('git', {
-    args: ['ls-files', '-z'],
-    stdout: 'piped',
-  }).output();
-  const paths = new TextDecoder()
-    .decode(list.stdout)
-    .split('\0')
-    .filter((p) => p !== '');
+  const list = await runProcess('git', ['ls-files', '-z']);
+  const paths = list.stdout.split('\0').filter((p) => p !== '');
   const files = new Map<string, string>();
   const decoder = new TextDecoder('utf-8', { fatal: true });
   for (const path of paths) {
     let bytes: Uint8Array;
     try {
-      bytes = await Deno.readFile(path);
+      bytes = await readFile(path);
     } catch {
       continue; // a tracked path absent from the working tree (sparse checkout)
     }
@@ -571,11 +558,8 @@ export async function readTrackedText(): Promise<Map<string, string>> {
 }
 
 export async function workingTreeIsClean(): Promise<boolean> {
-  const status = await new Deno.Command('git', {
-    args: ['status', '--porcelain'],
-    stdout: 'piped',
-  }).output();
-  return new TextDecoder().decode(status.stdout).trim() === '';
+  const status = await runProcess('git', ['status', '--porcelain']);
+  return status.stdout.trim() === '';
 }
 
 /**
@@ -664,5 +648,8 @@ export async function main(
 }
 
 if (import.meta.main) {
-  Deno.exit((await main(Deno.args)) ? 0 : 1);
+  await (async () => {
+    process.exitCode = (await main(process.argv.slice(2))) ? 0 : 1;
+    return;
+  })();
 }

@@ -14035,7 +14035,11 @@ Delivered as three PRs, in order:
   after a Node SEA probe, and `deno.json`/`deno.lock` removed from the root. It also moves the
   **website** off Deno: `website/deno.json` (install, test, lint and format tasks) and the six Deno
   steps in `website.yml` move to pnpm, Node and the root Prettier/ESLint config, which already
-  ignores `website/`. Nothing else in M111e owned the website, which is why it is named here.
+  ignores `website/`. Nothing else in M111e owned the website, which is why it is named here. 111e2
+  also leaves it four Deno users, pinned by `test/node/task-surface.test.ts`: `docs:api`'s
+  `deno doc --html` (the website's input), the `check:browser` harness, the contract fixture's
+  `deno doc --json`, and `CHECK_EXCLUDED_UNTIL_APPS_MOVE`, which keeps the app-coupled browser gate
+  test out of `tsc` until the apps move to pnpm.
 - **What stays on Deno, deliberately:** Deno is a supported runtime, not repository tooling. The
   `packages/runtime` Deno adapter, the CLI's `--runtime deno` projects, and the Deno-lane proofs
   (`test:deno-lane`) that keep that support honest all remain. After 111e3 the lane runs as a CI job
@@ -14309,6 +14313,6 @@ patch by construction and gains nothing new here.
 | 111d      | ✅     | cli — Node-first: npm `bin`, Node as the default generated target ([#450](https://github.com/setu-ts/setu-ts/pull/450))                                                                                                                       |
 | 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
 | 111e1     | ✅     | Prettier + ESLint replace deno fmt / deno lint; task names kept                                                                                                                                                                               |
-| 111e2     | ⬜     | repository scripts and root tests on Node (Vitest); doc gates re-pointed                                                                                                                                                                      |
+| 111e2     | ✅     | repository scripts and root tests on Node (Vitest); doc gates re-pointed; JSDoc ratchet re-measured on TypeDoc                                                                                                                                |
 | 111e3     | ⬜     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                               |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |

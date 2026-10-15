@@ -23,6 +23,7 @@ packages/cli/test/fixtures/devtool-source-shapes.ts
 /package.json
 /tsconfig.json
 /tsconfig.base.json
+/tsconfig.check.json
 /pnpm-workspace.yaml
 packages/*/package.json
 packages/*/tsconfig.json

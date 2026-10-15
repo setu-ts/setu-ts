@@ -1,182 +1,95 @@
 /**
- * API documentation generator and JSDoc linter for the Setu-TS workspace.
- *
- * This script provides two modes:
- * 1. **Generate mode** (default): Runs `deno doc --html` over all published package
- *    export targets and outputs the result to `docs/api/`.
- * 2. **Check mode** (`--check`): Runs `deno doc --lint` over the same targets and
- *    reports diagnostics using the ratchet policy from the milestone plan.
- *
- * The ratchet policy (§3.10 of the M38 plan):
- * - Diagnostics are partitioned by owning package path
- * - Any diagnostic in a CLEAN_PACKAGE fails the gate
- * - The total diagnostic count must not exceed DOC_LINT_BASELINE, and only
- *   when the running Deno matches DOC_LINT_BASELINE_DENO — the count is
- *   version-sensitive, so it is skipped rather than compared elsewhere
- * - If the count is BELOW baseline, the script instructs to lower the constant
- *
- * Usage:
- *   deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts
- *   deno run --allow-read --allow-run --allow-env scripts/generate-api-docs.ts --check
- *
+ * Generate the website's API HTML with Deno, or validate repository JSDoc with TypeDoc.
+ * The check ratchet is measured on the pinned TypeDoc version with every published
+ * package explicitly requiring documentation. Any diagnostic in a clean package,
+ * an increased count, a decreased count without a baseline update, or a version mismatch fails.
+ * HTML generation remains `deno doc --html` until M111e3.
  * @module
  */
 
-/* eslint-disable no-console */
+import { run as runProcess } from './lib/run.ts';
+import { type Stats } from 'node:fs';
+import { readFile, stat, rm, mkdir } from 'node:fs/promises';
+/* eslint-disable no-console -- repository documentation gate */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 
-/** The ten packages measured clean in the M38 plan baseline. */
+/**
+ * Packages with zero in-scope TypeDoc diagnostics (see {@linkcode inRatchetScope}),
+ * measured in M111e2. A superset of the set `deno doc --lint` kept clean.
+ */
 export const CLEAN_PACKAGES = new Set([
+  'auth-plugin',
   'common',
   'config-plugin',
   'cqrs-plugin',
+  'create',
+  'decorator-plugin',
+  'di-plugin',
+  'diagnostics-plugin',
   'exceptions',
-  'http-security-plugin',
-  'kernel',
-  'scheduler-plugin',
+  'feature-flags-plugin',
   'full-stack-starter',
+  'http-security-plugin',
+  'idempotency-plugin',
+  'kernel',
+  'localization-plugin',
+  'logger-plugin',
   'microservice-starter',
+  'openapi-plugin',
+  'realtime-backplane-plugin',
+  'resilience-plugin',
   'rest-starter',
+  'scheduler-plugin',
+  'secrets-plugin',
+  'service-discovery-plugin',
+  'session-plugin',
+  'sse-plugin',
+  'static-plugin',
+  'telemetry-plugin',
+  'validation-plugin',
+  'view-plugin',
+  'worker-pool-plugin',
 ]);
-
 /**
- * The frozen baseline diagnostic count.
- *
- * Measured at 776 in the M38 plan (§1.1) against a tree cut before M56–M61.
- * Merging `origin/main` brought the JSDoc improvements those milestones shipped
- * and the real count fell to 775, so the ratchet did its job: it refused the
- * stale constant and named the new number. Lowered here rather than widened,
- * which is the whole point of a ratchet — debt paid down is locked in.
- *
- * M59 added four `missing-jsdoc` diagnostics (constructors carrying `@param`
- * tags but no description) and then removed five by writing the descriptions —
- * one of them on a constructor that predates the milestone. The ratchet refused
- * the run in BOTH directions, which is exactly its job.
- *
- * M70i (X6-3) lowered the count to 764: widening the GraphQL structural
- * facades to accept the real `graphql` package replaced a number of
- * `missing-jsdoc`/`private-type-ref` diagnostics on the old narrow facade
- * members with documented, `unknown`-typed ones.
- *
- * M83 raised the count to 753 for one `private-type-ref`:
- * `MetadataStore.mergeModule` references `ModuleMetadata`, which the plan
- * (§3.1) keeps internal because `IMetadataStore` deliberately hides concrete
- * values and no other package consumes module metadata. Its two siblings,
- * `mergeController`/`ControllerMetadata` and `mergeService`/`ServiceMetadata`,
- * are already in this baseline, so the only fixes available were to contradict
- * that decision or to split one member of a three-member family away from the
- * other two. Recorded rather than concealed, following M67.
- *
- * M79 re-measured against **Deno 2.9.6** when the CI pin moved off 2.9.5, and
- * the count fell to 497. That drop is the TOOLCHAIN, not paid-down debt — 2.9.6
- * reports far fewer diagnostics over an identical tree — so it is neither a
- * ratchet win nor a regression. It is recorded as a re-measurement so a later
- * reader does not mistake 753 -> 497 for 256 documentation fixes. Moving the
- * pin BACK to 2.9.5 requires re-measuring in the same change; the two constants
- * are only meaningful together.
- *
- * M90a lowered it to 496, and the ratchet is what produced the number rather
- * than a target anyone aimed at. Exporting `createMaxNodesRule` and
- * `countResolvedFields` from `graphql-plugin`'s barrel — symmetric with the
- * already-exported `createDepthLimitRule` — added five `private-type-ref`
- * diagnostics, because the rule's signature names three package-private types.
- * Neither symbol had a consumer outside its own test, so both were cut (the M82
- * precedent), and two pre-existing missing-description diagnostics were paid
- * down on files the milestone already touched. Lowered rather than widened,
- * which is the whole point.
- *
- * M109a added `@setu-ts/idempotency-plugin` and the Durable Object idempotency
- * store in `cloudflare-plugin` and left the count where it was. The first draft
- * raised it to 510 and called the new diagnostics unavoidable `private-type-ref`
- * reports; measured, all fourteen were `missing-jsdoc` (`@inheritdoc` alone and
- * `@param`-only constructor blocks carry no description), so each was documented
- * instead. A new package does not license a wider ratchet.
+ * In-scope diagnostics on TypeDoc 0.28.20 (554 before excluding anonymous
+ * object-type members); the previous Deno count is not comparable.
  */
-export const DOC_LINT_BASELINE = 496;
+export const DOC_LINT_BASELINE = 237;
+/** Exact TypeDoc version on which the diagnostic debt was measured. */
+export const DOC_LINT_BASELINE_TYPEDOC = '0.28.20';
 
-/**
- * The Deno version {@linkcode DOC_LINT_BASELINE} was measured on.
- *
- * `deno doc --lint` output is **version-sensitive**, and not marginally so: the
- * identical tree at `22bb5ca9` — the commit that froze the count at 752 —
- * reports **752** diagnostics on Deno 2.9.5 and **496** on 2.9.6, a 256
- * difference from the toolchain alone. So a count is only meaningful against
- * the version that produced the baseline, and comparing across versions is not
- * a stricter check, it is a meaningless one. The baseline now tracks the 2.9.6
- * side of that pair.
- *
- * Before this constant existed the ratchet had no way to know that, so a
- * developer on any other Deno saw a permanently red gate whose message told
- * them, in as many words, to `Update DOC_LINT_BASELINE ... to 496`. Following
- * that instruction would have made CI fail on the next push with *exceeds
- * baseline (496)*, inverting the gate and blocking every PR — a confident
- * instruction that breaks the build is worse than no check at all.
- *
- * Keep this in step with the `deno-version` pin in `.github/workflows/ci.yml`;
- * CI is the authoritative reading. When that pin moves, re-measure and update
- * BOTH constants in the same change.
- *
- * M79 moved that pin from 2.9.5 to 2.9.6 to match the version developers
- * actually run, which makes the ratchet **comparable locally** rather than
- * skipped. That matters beyond convenience: while the two disagreed, a local
- * run reported SKIPPED and a contributor could only learn a new diagnostic's
- * existence from a red CI job, then had to reproduce it through a Docker
- * container to find out which symbol it was. This milestone paid that cost once
- * and closed it.
- */
-export const DOC_LINT_BASELINE_DENO = '2.9.6';
-
-/** The outcome of comparing a diagnostic count against the frozen baseline. */
+/** Ratchet verdict, including whether the toolchain is comparable. */
 export interface BaselineVerdict {
   /** Whether this toolchain can be compared against the baseline at all. */
   readonly comparable: boolean;
-  /** Findings that must fail the gate; empty when satisfied or skipped. */
+  /** Findings that must fail the gate; empty when the ratchet is satisfied. */
   readonly findings: readonly string[];
   /** The line describing the outcome. Always present, never empty. */
   readonly report: string;
 }
 
 /**
- * Applies the ratchet policy to a diagnostic count.
- *
- * Extracted as a pure function so every branch — including the
- * version-mismatch skip, which cannot be reached on a machine matching the
- * baseline — is unit-testable without spawning `deno doc`.
- *
- * A version mismatch is deliberately **not** a failure. Failing would block
- * every contributor whose Deno differs from CI's pin, which is the defect this
- * seam exists to remove; the count is reported and the comparison skipped, and
- * CI remains authoritative. Clean-package findings are unaffected and still
- * fail, because those are specific, named diagnostics rather than a count
- * comparison.
- *
- * @param totalDiagnostics - Diagnostics parsed from this run.
- * @param denoVersion - The Deno version that produced them.
- * @param baseline - The frozen count. Defaults to {@linkcode DOC_LINT_BASELINE}.
- * @param baselineDenoVersion - The version the baseline was measured on.
- *   Defaults to {@linkcode DOC_LINT_BASELINE_DENO}.
- * @returns The verdict; `findings` is empty unless the gate must fail.
+ * Compare only on the pinned TypeDoc version. A mismatch fails without count advice.
+ * Both an increase and a decrease require an explicit baseline decision.
+ * @param totalDiagnostics - Diagnostic count from this run
+ * @param typedocVersion - TypeDoc version producing the diagnostics
+ * @param baseline - Frozen count
+ * @param baselineTypedocVersion - Version on which the baseline was measured
+ * @returns Whether the gate must fail and the explanation
  */
 export function evaluateBaselineRatchet(
   totalDiagnostics: number,
-  denoVersion: string,
+  typedocVersion: string,
   baseline: number = DOC_LINT_BASELINE,
-  baselineDenoVersion: string = DOC_LINT_BASELINE_DENO,
+  baselineTypedocVersion: string = DOC_LINT_BASELINE_TYPEDOC,
 ): BaselineVerdict {
-  if (denoVersion !== baselineDenoVersion) {
+  if (typedocVersion !== baselineTypedocVersion) {
     return {
       comparable: false,
-      findings: [],
-      report:
-        `API JSDoc ratchet SKIPPED: not comparable on this toolchain. ` +
-        `This run is Deno ${denoVersion} and produced ${totalDiagnostics} ` +
-        `diagnostic(s); the baseline of ${baseline} was measured on Deno ` +
-        `${baselineDenoVersion}, and \`deno doc --lint\` output differs by ` +
-        `version. Do NOT update DOC_LINT_BASELINE from this run — CI (Deno ` +
-        `${baselineDenoVersion}) is authoritative. To reproduce its reading: ` +
-        `docker run --rm -v "$PWD":/w -w /w -e DENO_DIR=/tmp/dc ` +
-        `denoland/deno:${baselineDenoVersion} run --allow-read --allow-run ` +
-        `--allow-env --allow-write=/tmp/dc scripts/generate-api-docs.ts --check`,
+      findings: [
+        `TypeDoc version ${typedocVersion} does not match the pinned ${baselineTypedocVersion}.`,
+      ],
+      report: `API JSDoc ratchet failed: TypeDoc version mismatch (${typedocVersion}, expected ${baselineTypedocVersion}). Do NOT update DOC_LINT_BASELINE from this run.`,
     };
   }
 
@@ -404,8 +317,7 @@ export function expandExportTargets(exports: unknown): string[] {
  */
 export async function collectApiEntrypoints(fs: {
   readTextFile: (path: string) => Promise<string>;
-  readDir: (path: string) => AsyncIterable<Deno.DirEntry>;
-  stat: (path: string) => Promise<Deno.FileInfo>;
+  stat: (path: string) => Promise<Pick<Stats, 'isFile' | 'isDirectory' | 'size'>>;
 }): Promise<{
   targets: string[];
   targetsWithPackage: Array<{ target: string; pkg: string }>;
@@ -517,30 +429,23 @@ export async function collectApiEntrypoints(fs: {
  * @param targets - Array of local export targets
  * @param mode - "generate" for HTML output, "check" for lint-only
  * @param outputDir - Output directory for HTML generation
- * @returns Arguments array for Deno.Command
+ * @returns Arguments for the selected documentation engine
  */
-export function buildDenoDocArgs(
+export function buildApiDocArgs(
   targets: readonly string[],
   mode: 'generate' | 'check',
   outputDir: string,
 ): string[] {
-  // `--quiet` suppresses Deno's own progress output. It is load-bearing, not
-  // tidiness: on a COLD npm cache `deno doc` writes `Download https://...` to
-  // stderr for every npm specifier the graph reaches (drizzle-orm, @prisma/
-  // client, …). The classifier treats unrecognized stderr as a fatal child
-  // error, so the gate failed on CI — which always has a cold cache — while
-  // passing on every developer machine, which does not. Measured: 2 Download
-  // lines without the flag under `--reload=npm:drizzle-orm`, 0 with it.
-  const args: string[] = ['doc', '--quiet'];
-
-  if (mode === 'generate') {
-    args.push('--html', '--output=' + outputDir, '--name=Setu-TS');
-  } else {
-    args.push('--lint');
+  if (mode === 'check') {
+    return [
+      'node_modules/typedoc/bin/typedoc',
+      '--options',
+      'typedoc.check.json',
+      '--entryPoints',
+      ...targets,
+    ];
   }
-
-  args.push(...targets);
-  return args;
+  return ['doc', '--quiet', '--html', '--output=' + outputDir, '--name=Setu-TS', ...targets];
 }
 
 /**
@@ -552,6 +457,7 @@ export function buildDenoDocArgs(
  * @returns Parsed diagnostics
  */
 export function parseDocLintDiagnostics(output: string): DocLintDiagnostic[] {
+  if (output.includes('[warning]')) return parseTypedocDiagnostics(output);
   const diagnostics: DocLintDiagnostic[] = [];
   // Strip ANSI escape codes before parsing
   // Use a function that avoids control characters in the regex literal
@@ -701,7 +607,7 @@ const LINT_HINT_PATTERN = /^\s*=\s*hint:/;
  * per npm specifier whenever the cache is cold. CI is always cold and a
  * developer machine rarely is, so treating these as fatal residual made the
  * gate pass locally and fail on every clean runner. `--quiet` now suppresses
- * them at the source (see {@linkcode buildDenoDocArgs}); this pattern is the
+ * them at the source (see {@linkcode buildApiDocArgs}); this pattern is the
  * second line of defence, so a future Deno that prints progress despite
  * `--quiet` degrades to a correct result rather than a false fatal. It is
  * deliberately anchored and limited to Deno's known prefixes — a blanket
@@ -753,6 +659,26 @@ export function classifyChildResult(
   const stdoutStripped = stdout.replace(ansiStripRe, '');
   const stderrStripped = stderr.replace(ansiStripRe, '');
 
+  if (/\[(?:warning|error)\]/.test(stdoutStripped + stderrStripped)) {
+    const combined = stdoutStripped + '\n' + stderrStripped;
+    const diagnostics = parseTypedocDiagnostics(combined);
+    const summaries = [
+      ...combined.matchAll(/\[(?:warning|error)\] Found (\d+) errors? and (\d+) warnings?/g),
+    ];
+    const complete =
+      summaries.length === 1 &&
+      Number(summaries[0]![1]) === 0 &&
+      Number(summaries[0]![2]) === diagnostics.length;
+    const residual = combined
+      .split('\n')
+      .filter((line) => line.trim() && !line.includes('[warning]') && !/^\s*\d+\s/.test(line));
+    const owned = diagnostics.every((diag) => diag.path.startsWith('packages/'));
+    return {
+      kind: code === 0 && complete && owned && !residual.length ? 'lint-debt' : 'fatal',
+      stdoutStripped,
+      stderrStripped,
+    };
+  }
   if (code === 0) {
     return {
       kind: stdoutStripped.trim() === '' && stderrStripped.trim() === '' ? 'success' : 'fatal',
@@ -843,9 +769,10 @@ export function classifyChildResult(
  * @param outputDir - Output directory for HTML generation
  * @param fs - File system abstraction
  * @param cmd - Command execution abstraction
- * @param denoVersion - The running Deno version, injectable so ratchet tests
+ * @param typedocVersion - The running TypeDoc version, injectable so ratchet tests
  *   are deterministic rather than dependent on the developer's toolchain.
- *   Defaults to the live `Deno.version.deno`.
+ *   Defaults to `Application.VERSION` from the installed TypeDoc, imported only in check mode so
+ *   HTML generation (the website build) needs no root `node_modules`.
  * @returns Exit code and findings
  */
 export async function runApiDocs(
@@ -853,23 +780,22 @@ export async function runApiDocs(
   outputDir: string,
   fs: {
     readTextFile: (path: string) => Promise<string>;
-    readDir: (path: string) => AsyncIterable<Deno.DirEntry>;
-    stat: (path: string) => Promise<Deno.FileInfo>;
-    remove: (path: string, options?: { recursive: boolean }) => Promise<void>;
-    mkdir: (path: string, options?: { recursive: boolean }) => Promise<void>;
+    stat: (path: string) => Promise<Pick<Stats, 'isFile' | 'isDirectory' | 'size'>>;
+    remove: (path: string, options?: { recursive: boolean }) => Promise<unknown>;
+    mkdir: (path: string, options?: { recursive: boolean }) => Promise<unknown>;
   },
   cmd: {
     run: (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
   },
-  denoVersion: string = Deno.version.deno,
+  typedocVersion?: string,
 ): Promise<{ code: number; findings: string[] }> {
   const findings: string[] = [];
 
   // Collect entry points
   const { targets } = await collectApiEntrypoints(fs);
 
-  // Build and run deno doc command
-  const args = buildDenoDocArgs(targets, mode, outputDir);
+  // Build the selected documentation command
+  const args = buildApiDocArgs(targets, mode, outputDir);
 
   if (mode === 'generate') {
     // Remove stale output
@@ -882,7 +808,7 @@ export async function runApiDocs(
     await fs.mkdir(outputDir, { recursive: true });
   }
 
-  const result = await cmd.run(['deno', ...args]);
+  const result = await cmd.run([mode === 'check' ? process.execPath : 'deno', ...args]);
 
   if (mode === 'check') {
     // deno doc --lint outputs diagnostics to stderr; exit code 1 is the
@@ -892,16 +818,12 @@ export async function runApiDocs(
     // fatal/error/stack output in either ANSI-stripped stream is fatal.
     const classification = classifyChildResult(result.code, result.stdout, result.stderr);
 
-    if (classification.kind === 'success') {
-      return { code: 0, findings };
-    }
-
     if (classification.kind === 'fatal') {
       // Preserve the raw stdout/stderr (not ANSI-stripped) so the failure is
       // actionable. A fatal must never be converted into a baseline-count
       // message or success — even if stderr also contains zero, partial, or
       // exactly baseline-sized parseable diagnostics.
-      findings.push(`deno doc --lint failed with exit code ${result.code}`);
+      findings.push(`typedoc validation failed with exit code ${result.code}`);
       if (result.stderr) {
         findings.push(`stderr: ${result.stderr}`);
       }
@@ -916,7 +838,9 @@ export async function runApiDocs(
     }
 
     // Ratchet-eligible: parse diagnostics and apply the clean-package + baseline policy.
-    const diagnostics = parseDocLintDiagnostics(result.stderr);
+    const diagnostics = parseDocLintDiagnostics(result.stdout + '\n' + result.stderr).filter(
+      inRatchetScope,
+    );
     const { cleanPackageFindings } = partitionDiagnostics(diagnostics);
 
     if (cleanPackageFindings.length > 0) {
@@ -926,7 +850,10 @@ export async function runApiDocs(
       }
     }
 
-    const verdict = evaluateBaselineRatchet(diagnostics.length, denoVersion);
+    const verdict = evaluateBaselineRatchet(
+      diagnostics.length,
+      typedocVersion ?? (await import('typedoc')).Application.VERSION,
+    );
     findings.push(...verdict.findings);
 
     if (findings.length > 0) {
@@ -937,16 +864,8 @@ export async function runApiDocs(
       return { code: 1, findings };
     }
 
-    // Report the ratchet state on success. A gate that passes in total silence
-    // is indistinguishable from a gate that did nothing, and this one's whole
-    // job is to make a known, frozen debt VISIBLE rather than merely tolerated.
-    // A skipped comparison is reported just as loudly, on stderr, so an
-    // unusable reading is never mistaken for a clean one.
-    if (verdict.comparable) {
-      console.log(verdict.report);
-    } else {
-      console.error(verdict.report);
-    }
+    // Passing debt remains visible rather than indistinguishable from a no-op.
+    console.log(verdict.report);
   } else {
     // Propagate child-process failures: non-zero exit code is a failure
     if (result.code !== 0) {
@@ -973,41 +892,70 @@ export async function runApiDocs(
 }
 
 /** Main entry point. */
-async function main(): Promise<void> {
-  const args = Deno.args;
+export async function runApiDocsMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
   const mode = args.includes('--check') ? 'check' : 'generate';
   const outputDir = 'docs/api';
 
   const fs = {
-    readTextFile: (path: string) => Deno.readTextFile(path),
-    readDir: (path: string) => Deno.readDir(path),
-    stat: (path: string) => Deno.stat(path),
-    remove: (path: string, options?: { recursive: boolean }) => Deno.remove(path, options),
-    mkdir: (path: string, options?: { recursive: boolean }) => Deno.mkdir(path, options),
+    readTextFile: (path: string) => readFile(path, 'utf8'),
+    stat,
+    remove: rm,
+    mkdir,
   };
 
-  const cmd = {
-    run: (command: string[]) => {
-      const process = new Deno.Command(command[0]!, {
-        args: command.slice(1),
-        stdout: 'piped',
-        stderr: 'piped',
-      });
-      return process.output().then((output) => ({
-        code: output.code,
-        stdout: new TextDecoder().decode(output.stdout),
-        stderr: new TextDecoder().decode(output.stderr),
-      }));
-    },
-  };
+  const cmd = { run: (command: string[]) => runProcess(command[0]!, command.slice(1)) };
 
   const { code } = await runApiDocs(mode, outputDir, fs, cmd);
 
-  if (code !== 0) {
-    Deno.exit(code);
-  }
+  return code;
 }
 
-if (import.meta.main) {
-  await main();
+if (import.meta.main) process.exitCode = await runApiDocsMain();
+
+/**
+ * Whether a diagnostic is one the ratchet counts. TypeDoc also reports a missing
+ * comment on each member of an anonymous object type (`Foo.__type.bar`), which
+ * `deno doc --lint` never required; counting those would change the rule this
+ * gate carries over rather than port it, so they are out of scope.
+ */
+export function inRatchetScope(diagnostic: DocLintDiagnostic): boolean {
+  return !(diagnostic.rule === 'notDocumented' && /\.__type\b/.test(diagnostic.message ?? ''));
+}
+
+/** Parse TypeDoc's pinned CLI warning dialect, retaining an owner for every diagnostic. */
+export function parseTypedocDiagnostics(output: string): DocLintDiagnostic[] {
+  const ansi = new RegExp(String.fromCharCode(0x1b) + '\\[[0-9;]*m', 'g');
+  const diagnostics: DocLintDiagnostic[] = [];
+  for (const line of output.replace(ansi, '').split('\n')) {
+    if (!line.includes('[warning]') || /\[warning\] Found \d+ errors? and \d+ warnings?/.test(line))
+      continue;
+    const location = /(?:\.\/)?(packages\/(?:starters\/)?[^\s:]+):(\d+)(?::\d+)?/.exec(line);
+    const declared = /defined in @setu-ts\/([^/\s`]+)\/(src\/[^\s,]+)/.exec(line);
+    const owner = /(?:signature |\[warning\] )([^/\s`]+)\/src/.exec(line);
+    const pkg = declared?.[1] ?? owner?.[1];
+    const directory =
+      pkg === undefined
+        ? undefined
+        : `packages/${pkg.endsWith('-starter') ? 'starters/' : ''}${pkg}`;
+    const path =
+      location?.[1] ??
+      (declared
+        ? `${directory}/${declared[2]}`
+        : directory === undefined
+          ? ''
+          : `${directory}/src`);
+    diagnostics.push({
+      rule: line.includes('does not have any documentation')
+        ? 'notDocumented'
+        : line.includes('not included in the documentation')
+          ? 'notExported'
+          : 'typedoc',
+      path,
+      ...(location ? { line: Number(location[2]) } : {}),
+      message: line.slice(line.indexOf('[warning]') + 9).trim(),
+    });
+  }
+  return diagnostics;
 }

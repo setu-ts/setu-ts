@@ -59,6 +59,7 @@
     "@setu-ts/sdk": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
     "@types/node": "^24",
+    "@types/pg": "^8.23.1",
     "drizzle-orm": "0.45.2",
     "ioredis": "5.x",
     "mongodb": "^6.21.0",

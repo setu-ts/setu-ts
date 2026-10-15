@@ -51,6 +51,8 @@
  * seam. The pure core carries the 90% bar via `SCRIPT_TARGETS`.
  */
 
+import { run as runProcess } from './lib/run.ts';
+
 /** One pull request merged since the previous release tag. */
 export interface MergedPullRequest {
   /** The PR number from the merge commit subject. */
@@ -256,17 +258,11 @@ export type GitRunner = (args: readonly string[]) => Promise<string>;
  * @throws {Error} With git's stderr when the command fails
  */
 export async function runGit(args: readonly string[]): Promise<string> {
-  const output = await new Deno.Command('git', {
-    args: [...args],
-    stdout: 'piped',
-    stderr: 'piped',
-  }).output();
-  if (!output.success) {
-    throw new Error(
-      `git ${args.join(' ')} failed: ${new TextDecoder().decode(output.stderr).trim()}`,
-    );
+  const output = await runProcess('git', [...args]);
+  if (!(output.code === 0)) {
+    throw new Error(`git ${args.join(' ')} failed: ${output.stderr.trim()}`);
   }
-  return new TextDecoder().decode(output.stdout);
+  return output.stdout;
 }
 
 /**

@@ -1,9 +1,8 @@
 # Setu-TS — Session Instructions
 
 Plugin-first enterprise backend framework, published to **JSR** under `@setu-ts` and consumable from
-Node/Bun via JSR npm compatibility. Package tests run on Node 24 with pnpm and Vitest. Deno 2
-workspaces retain repository scripts, root tests, and the named native-adapter test lane until
-M111e.
+Node/Bun via JSR npm compatibility. Package and root tooling tests run on Node 24 with pnpm and
+Vitest. Repository scripts run on Node; the named native-adapter lane retains Deno proofs.
 
 The React Router SSR plugin (M44) uses Vite on the Node/npm toolchain for application frontend
 builds. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and never
@@ -1847,23 +1846,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   while keeping ten clean packages permanently clean, a Markdown documentation gate
   ([`scripts/check-docs.ts`](scripts/check-docs.ts)) with structural package-catalog validation,
   generated-API-link and cross-file-anchor validation, and a dedicated per-file script-coverage gate
-  ([`scripts/script-coverage.ts`](scripts/script-coverage.ts)) enforcing ≥90% branch/function/line
-  on both documentation scripts. The snippet gate mechanically type-checks committed fixtures
-  representing all nine guides plus the architecture registry example, with a negative control
-  proving the compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6
-  service-registry examples (CAPABILITIES constants, no nonexistent `lazy` option,
-  `registerFactory()` for lazy construction) and §16 testing claim (Deno full suite; Node/Bun
-  published-artifact compat). No package source, manifest export, capability token, or plugin option
-  changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the final
-  verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56), derived
-  OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all postdate the
-  guides' first draft. Verification then found the guides still taught the DEPRECATED `'rfc7807'`
-  alias in three files while `PUBLIC_API.md` called it deprecated (every gate passed — the alias
-  still exists, so every fence compiled), a phantom `## HttpClient` section documenting a
-  `@setu-ts/http-client-plugin` that exists nowhere in source, and two drift gates that could not
-  detect their own drift because they matched a bare substring rather than a link. Also: the
-  `PUBLIC_API.md` section anchors now name their package, which is a **breaking change for external
-  deep links** (`#storage` → `#storage-setu-tsstorage-plugin`) — complete (PR #143)
+  (`scripts/script-coverage.ts`, retired in M111e2) enforcing ≥90% branch/function/line on both
+  documentation scripts. The snippet gate mechanically type-checks committed fixtures representing
+  all nine guides plus the architecture registry example, with a negative control proving the
+  compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6 service-registry
+  examples (CAPABILITIES constants, no nonexistent `lazy` option, `registerFactory()` for lazy
+  construction) and §16 testing claim (Deno full suite; Node/Bun published-artifact compat). No
+  package source, manifest export, capability token, or plugin option changed. Developed on a branch
+  cut before M56–M61, so `origin/main` was merged in before the final verification pass and the
+  guides were re-checked against the merged tree — RFC 9457 (M56), derived OpenAPI security (M57),
+  and the `module` schematic plus the M60/M61 CLI wiring all postdate the guides' first draft.
+  Verification then found the guides still taught the DEPRECATED `'rfc7807'` alias in three files
+  while `PUBLIC_API.md` called it deprecated (every gate passed — the alias still exists, so every
+  fence compiled), a phantom `## HttpClient` section documenting a `@setu-ts/http-client-plugin`
+  that exists nowhere in source, and two drift gates that could not detect their own drift because
+  they matched a bare substring rather than a link. Also: the `PUBLIC_API.md` section anchors now
+  name their package, which is a **breaking change for external deep links** (`#storage` →
+  `#storage-setu-tsstorage-plugin`) — complete (PR #143)
 - **Milestone 62** (`packages/cli` — monorepo support: more than one deployable service in a
   repository. The CLI had no workspace concept at all, so a second service meant
   `setu new other --dir .` — a fully independent project with its own manifest, its own lockfile,
@@ -6212,8 +6211,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   output while `prettier --debug-check` reported no AST change — embedded formatting is off, nine
   files restored, and a test guards it. A parity test plants each carried rule's violation —
   complete (PR #455)
-- **Next milestone** — publish `v0.9.0` (placeholders, trust, OIDC tag), then M104, the `v0.9.0`
-  client-brief run; see ROADMAP.md.
+- **Milestone 111e2** (repository tooling — scripts and root tests on Node): every `scripts/*.ts`
+  runs under plain `node` through one subprocess helper (`scripts/lib/run.ts`); root tests run in
+  the Vitest `tooling` member, whose per-file thresholds replace `script-coverage.ts` over the same
+  frozen inventory plus the new helpers; `check` is `tsc` over package sources, package tests,
+  scripts and root tests (the Deno-lane files stay checked by `deno test`); the JSDoc ratchet runs
+  on TypeDoc 0.28.20; README export tables and the fence compiler use the TypeScript compiler API;
+  and the two documentation sandboxes run under `node --permission`. Every `deno task` name still
+  works, forwarding to `pnpm run`. Implemented by Codex (the first milestone of that trial); the
+  review found ten places where the plan did not match the source, each fixed and recorded in the
+  plan's §11. The ratchet is scoped to what `deno doc --lint` enforced: TypeDoc's 554 warnings
+  include 317 on anonymous object-type members, so the baseline is 237 and the clean set grew from
+  10 to 31 packages. Prose claims import the package they describe, as Deno's loader allowed, so the
+  sandbox reads package sources and `node_modules` only — granting the whole repository was tried
+  and rejected because it exposes `.git` and `.env`. `run()` first detached every child, which would
+  have let Ctrl+C orphan a long test run; it now detaches only to enforce a deadline. Two README
+  tables change, both correcting `deno doc` output. Four Deno users pass to M111e3. The round-1
+  security audit found F1–F2, fixed in `c5c6faaa`; round 2 found one Low, fixed afterwards and NOT
+  re-audited — complete (PR #458)
+- **Next milestone** — M111e3 (CI on Node and pnpm, `apps/*` on pnpm, root `deno.json` removed).
+  `v0.9.0` is published to npm (2026-10-14); its smoke run and M104 proceed separately.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -6448,11 +6465,12 @@ deno task check
 deno task test
 ```
 
-These Deno checks cover formatting, lint, types, and the root tooling suite. Package changes also
-require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for the
-retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured source
-file must reach 90% branch/function/line; Node, Deno-lane, and root-script gates enforce their bars
-with nonzero exits. Read the per-file tables as evidence.
+These task names forward to the Node formatting, lint, type and root tooling gates. Package changes
+also require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for
+the retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured
+source file must reach 90% branch/function/line. Root scripts and root tests share the `tooling`
+Vitest coverage report; its per-file thresholds enforce the bar with a nonzero exit. The named Deno
+lane enforces its own bar. Read the per-file tables as evidence.
 
 For the edit loop, `pnpm test:coverage <members…>` measures those members and the Node tooling
 target. Each member owns its source coverage, so a targeted failure is authoritative. A milestone
@@ -6519,8 +6537,9 @@ because nothing defined what one was.
 - Unused variables fail lint — delete them; do not underscore-prefix.
 - Run `deno fmt` before `deno task fmt:check`; it also reformats markdown — never hand-wrap tables.
 - Coverage is per file, across branch, function, and line. The Node runner uses Vitest V8
-  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses
-  `scripts/script-coverage.ts`. Inspect all three tables before claiming completion.
+  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses the `tooling`
+  member's Vitest thresholds over the frozen script inventory. Inspect the reports before claiming
+  completion.
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
 - `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). NOTE: `deno lint`'s `no-eval`
@@ -6702,10 +6721,10 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
   plan-cleanup rule in "Before reporting a task done").
 - Package tests use `describe`, `it`, hooks, and `expect` from `vitest` in
-  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` uses `@std/testing/bdd` and
-  `@std/expect` until M111e. Deno-only package proofs use the same Vitest-shaped files through the
-  Deno-lane import-map shim. Write in the runner style appropriate to that location from the first
-  line; `Deno.test` remains banned.
+  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` also imports `vitest` and runs in
+  the `tooling` member. Deno-only proofs use the same Vitest-shaped files through the Deno-lane
+  import-map shim. Write in the runner style appropriate to that location from the first line;
+  `Deno.test` remains banned.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
   `npm:` imports (AI_GUIDELINES §12.2).

@@ -17,6 +17,8 @@
  * @module
  */
 
+import { readdir, readFile } from 'node:fs/promises';
+
 /** Test-file roots, matching what `deno task test` passed positionally. */
 export const ROOTS = ['packages', 'test'] as const;
 
@@ -129,12 +131,12 @@ const SKIP_DIRECTORIES = new Set(['node_modules', 'coverage', 'build', 'dist']);
 export async function discoverTestFiles(): Promise<readonly string[]> {
   const found: string[] = [];
   const walk = async (directory: string): Promise<void> => {
-    for await (const entry of Deno.readDir(directory)) {
+    for await (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.name.startsWith('.') || SKIP_DIRECTORIES.has(entry.name)) continue;
       const path = `${directory}/${entry.name}`;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         await walk(path);
-      } else if (entry.isFile && TEST_FILE.test(entry.name)) {
+      } else if (entry.isFile() && TEST_FILE.test(entry.name)) {
         found.push(path);
       }
     }
@@ -157,7 +159,7 @@ export async function partitionTests(files?: readonly string[]): Promise<TestPar
   const hermetic: string[] = [];
   const reasons = new Map<string, string>();
   for (const path of paths) {
-    const reason = isolationReason(path, await Deno.readTextFile(path));
+    const reason = isolationReason(path, await readFile(path, 'utf8'));
     if (reason === null) {
       hermetic.push(path);
     } else {

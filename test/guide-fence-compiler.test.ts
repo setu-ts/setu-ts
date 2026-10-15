@@ -19,14 +19,16 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import {
   allFences,
   assembleSource,
   classify,
-  denoCheck,
+  compileFence,
   extractFences,
   fenceExtension,
   GUIDES,
@@ -248,9 +250,10 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
       (e) => e.kind === 'compile-complete' || e.kind === 'compile-fragment',
     );
     expect(toCompile.length).toBeGreaterThan(0);
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
     const failures: string[] = [];
+    const compiler = {};
     for (const classified of toCompile) {
       const fence = classified.fence;
       const safe = fence.guide.replace(/[/.]/g, '_');
@@ -258,8 +261,8 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
         `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}` + `.${fenceExtension(fence.lang)}`;
       const { assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
       const source = assembleSource(fence, classified);
-      await Deno.writeTextFile(file, source);
-      const { code, stderr } = await denoCheck(file);
+      await writeFile(file, source);
+      const { code, stderr } = await compileFence(file, compiler);
       if (code !== 0) {
         failures.push(
           `${fence.guide} fence #${fence.index} at line ${fence.line} (heading: "${fence.heading}") ` +
@@ -334,7 +337,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
       'ctx.request.text(); ctx.lifecycle.onClose(() => {});',
       "ctx.services.register('app:test', {}, { singleton: true, lazy: true });",
     ];
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
     for (const [index, code] of cases.entries()) {
       const fence = {
@@ -346,8 +349,8 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
         code,
       };
       const file = `${SCRATCH_DIR}/context-negative-${index}.ts`;
-      await Deno.writeTextFile(file, assembleSource(fence, classify(fence)));
-      expect((await denoCheck(file)).code).not.toBe(0);
+      await writeFile(file, assembleSource(fence, classify(fence)));
+      expect((await compileFence(file)).code).not.toBe(0);
     }
   });
 
@@ -366,15 +369,15 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     expect(fenceExtension(fence.lang)).toBe('tsx');
     expect(classified.kind).toBe('compile-complete');
 
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     const file = `${SCRATCH_DIR}/jsx-regression.${fenceExtension(fence.lang)}`;
-    await Deno.writeTextFile(file, assembleSource(fence, classified));
-    expect((await denoCheck(file)).code).toBe(0);
+    await writeFile(file, assembleSource(fence, classified));
+    expect((await compileFence(file)).code).toBe(0);
   });
 
   it('executes the documented formData fallback for both encodings and the accessor path', async () => {
     const guide = 'docs/mvc.md';
-    const markdown = await Deno.readTextFile(guide);
+    const markdown = await readFile(guide, 'utf8');
     const fence = extractFences(guide, markdown).find((candidate) =>
       candidate.code.includes('async function readForm'),
     );
@@ -385,10 +388,10 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
 
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     const file = `${SCRATCH_DIR}/mvc-form-fallback.ts`;
     const readForm = fence!.code.slice(start, end);
-    await Deno.writeTextFile(
+    await writeFile(
       file,
       [
         "import { parseFormBody } from '@setu-ts/common';",
@@ -436,11 +439,13 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
       ].join('\n'),
     );
 
-    const result = await new Deno.Command('deno', {
-      args: ['run', '--quiet', '--config', 'test/fixtures/snippets/deno.json', file],
-    }).output();
+    const result = await runProcess(process.execPath, [
+      '--import',
+      './test/node-source-register.ts',
+      file,
+    ]);
     expect(result.code).toBe(0);
-    expect(new TextDecoder().decode(result.stderr)).toBe('');
+    expect(result.stderr).toBe('');
     expect(markdown).toContain('The accessor remains optional');
   });
 
@@ -460,9 +465,9 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     // Synthesize a fence that uses the banned app.get() family and confirm the
     // compiler rejects it — proving the gate is not a no-op.
     const file = `${SCRATCH_DIR}/controlled-negative.ts`;
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
-    await Deno.writeTextFile(
+    await writeFile(
       file,
       [
         "import { createApplication } from '@setu-ts/kernel';",
@@ -472,7 +477,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
         "app.get('/hello', async (ctx) => { return ctx.response.json({ ok: true }); });",
       ].join('\n'),
     );
-    const { code } = await denoCheck(file);
+    const { code } = await compileFence(file);
     expect(code).not.toBe(0);
   });
 
@@ -483,7 +488,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     // mutated source fails, and diagnostic names NONEXISTENT_BROKEN_OPTION.
     const { classify, assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
     const cloudflareGuide = 'docs/runtime-deployment.md';
-    const markdown = await Deno.readTextFile(cloudflareGuide);
+    const markdown = await readFile(cloudflareGuide, 'utf8');
     const fences = extractFences(cloudflareGuide, markdown);
     // Find the CloudflarePlugin registration fence
     const cfFence = fences.find(
@@ -497,12 +502,12 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
 
     // Original source must compile (or be a genuine external/excluded classification)
     if (original.kind === 'compile-complete' || original.kind === 'compile-fragment') {
-      await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+      await mkdir(SCRATCH_DIR, { recursive: true });
       await writeProjectStubs(SCRATCH_DIR);
       const origFile = `${SCRATCH_DIR}/b1-cloudflare-original.ts`;
       const origSource = assembleSource(cfFence!, original);
-      await Deno.writeTextFile(origFile, origSource);
-      const { code: origCode } = await denoCheck(origFile);
+      await writeFile(origFile, origSource);
+      const { code: origCode } = await compileFence(origFile);
       expect(origCode).toBe(0);
     }
 
@@ -521,12 +526,12 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
 
     // The mutated fence must fail compilation through the shared engine
     if (mutated.kind === 'compile-complete' || mutated.kind === 'compile-fragment') {
-      await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+      await mkdir(SCRATCH_DIR, { recursive: true });
       await writeProjectStubs(SCRATCH_DIR);
       const mutFile = `${SCRATCH_DIR}/b1-cloudflare-mutated.ts`;
       const mutSource = assembleSource(mutatedFence, mutated);
-      await Deno.writeTextFile(mutFile, mutSource);
-      const { code: mutCode, stderr } = await denoCheck(mutFile);
+      await writeFile(mutFile, mutSource);
+      const { code: mutCode, stderr } = await compileFence(mutFile);
       expect(mutCode).not.toBe(0);
       // Diagnostic must name the nonexistent option
       expect(stderr).toContain('NONEXISTENT_BROKEN_OPTION');
@@ -539,39 +544,39 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
 
   it('B2: Mutating RuntimePlugin with INVALID_OPTION fails', async () => {
     const file = `${SCRATCH_DIR}/b2-runtime-mutated.ts`;
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
-    await Deno.writeTextFile(
+    await writeFile(
       file,
       [
         "import { RuntimePlugin } from '@setu-ts/runtime';",
         'RuntimePlugin({ INVALID_OPTION: true });',
       ].join('\n'),
     );
-    const { code } = await denoCheck(file);
+    const { code } = await compileFence(file);
     expect(code).not.toBe(0);
   });
 
   it('B3: Mutating createApplication with bad option fails', async () => {
     const file = `${SCRATCH_DIR}/b3-app-mutated.ts`;
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
-    await Deno.writeTextFile(
+    await writeFile(
       file,
       [
         "import { createApplication } from '@setu-ts/kernel';",
         'createApplication({ BAD_OPTION: true });',
       ].join('\n'),
     );
-    const { code } = await denoCheck(file);
+    const { code } = await compileFence(file);
     expect(code).not.toBe(0);
   });
 
   it('B4: ctx.metrics.register() returning value fails (register returns void)', async () => {
     const file = `${SCRATCH_DIR}/b4-metrics-void.ts`;
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
-    await Deno.writeTextFile(
+    await writeFile(
       file,
       [
         "import type { IPlugin, IPluginContext } from '@setu-ts/common';",
@@ -587,7 +592,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
         '}',
       ].join('\n'),
     );
-    const { code } = await denoCheck(file);
+    const { code } = await compileFence(file);
     expect(code).not.toBe(0);
   });
 
@@ -597,9 +602,9 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
 
   it('B7: app.start() with invalid option fails', async () => {
     const file = `${SCRATCH_DIR}/b7-start-invalid.ts`;
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
-    await Deno.writeTextFile(
+    await writeFile(
       file,
       [
         "import { createApplication } from '@setu-ts/kernel';",
@@ -607,7 +612,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
         'await app.start({ port: 3000, INVALID_OPTION: true });',
       ].join('\n'),
     );
-    const { code } = await denoCheck(file);
+    const { code } = await compileFence(file);
     expect(code).not.toBe(0);
   });
 
@@ -617,16 +622,16 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
 
   it('B9: AuthPlugin rejects an invalid JWT secret type', async () => {
     const file = `${SCRATCH_DIR}/b9-auth-missing.ts`;
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
-    await Deno.writeTextFile(
+    await writeFile(
       file,
       [
         "import { AuthPlugin } from '@setu-ts/auth-plugin';",
         'AuthPlugin({ jwt: { secret: 42 } });',
       ].join('\n'),
     );
-    const { code } = await denoCheck(file);
+    const { code } = await compileFence(file);
     expect(code).not.toBe(0);
   });
 

@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { compileRealtimeDiagnosticsAlias } from '../../packages/common/src/diagnostics/realtime-observations.ts';
 import { compileLabelAllowlist } from '../../packages/kernel/src/diagnostics/projection.ts';
 import { isDisplayAlias } from '../../packages/diagnostics-plugin/src/protocol/protocol.ts';

@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import { auditSideEffects, SIDE_EFFECT_MODULES } from '../../scripts/side-effects.ts';
 
 describe('sideEffects audit', () => {
@@ -61,7 +61,7 @@ describe('sideEffects audit', () => {
       'packages/health-plugin/src/services/health-service.ts',
       'packages/scheduler-plugin/src/services/scheduler-service.ts',
     ])
-      files.set(path, await Deno.readTextFile(path));
+      files.set(path, await readFile(path, 'utf8'));
     expect(auditSideEffects(files)).toEqual({ findings: [], refusals: [] });
   });
 });

@@ -3,8 +3,7 @@
  * DTOs, revoke, prove reads are refused, and prove the application still
  * serves — WITHOUT ever printing the session ID/key or environment.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 describe('inspect-local-diagnostics demo', () => {
   it('runs the loopback consumer exercise end-to-end and leaks no credential', async () => {

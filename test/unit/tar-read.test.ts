@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { gunzipBounded, MAX_UNPACKED_TARBALL_BYTES, readTar } from '../../scripts/tar-read.ts';
 import { archive, paxRecord, tarEntry } from '../fixtures/tar-fixture.ts';
 

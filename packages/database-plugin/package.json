@@ -75,6 +75,7 @@
     "@setu-ts/logger-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@types/node": "^24",
+    "@types/pg": "^8.23.1",
     "drizzle-orm": "0.45.2",
     "mongodb": "^6.21.0",
     "pg": "^8.0.0",

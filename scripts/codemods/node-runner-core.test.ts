@@ -28,13 +28,14 @@ describe('Per-member Node test runner', () => {
       '| packages/a/src/a.ts | 91 | 92 | 93 |',
     ]);
   });
-  it('keeps the runner grants scoped to its only subprocess and report directory', async () => {
+  it('runs the Node runner and preserves the tooling-only task boundary', async () => {
     const pkg = JSON.parse(await readFile('package.json', 'utf8'));
-    const expected =
-      'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts';
+    const expected = 'node scripts/test-node.ts';
     expect(pkg.scripts.test).toBe(expected);
     expect(pkg.scripts['test:coverage']).toBe(`${expected} --coverage`);
     const deno = JSON.parse(await readFile('deno.json', 'utf8'));
-    expect(deno.tasks['test:coverage:pkg']).toBe(`${expected} --coverage`);
+    expect(deno.tasks['test:coverage:pkg']).toBe('pnpm run test:coverage:pkg');
+    expect(pkg.scripts['test:coverage:pkg']).toBe(`${expected} --coverage`);
+    expect(deno.tasks.test).toBe('pnpm run test:tooling');
   });
 });

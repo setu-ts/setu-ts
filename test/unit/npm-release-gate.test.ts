@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   distTagFor,
   npmSupportsTrustedPublishing,
@@ -17,7 +17,7 @@ import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
  */
 const WORKSPACE_VERSION = (
   JSON.parse(
-    await Deno.readTextFile(new URL('../../packages/kernel/package.json', import.meta.url)),
+    await readFile(new URL('../../packages/kernel/package.json', import.meta.url), 'utf8'),
   ) as { version: string }
 ).version;
 
@@ -99,7 +99,7 @@ describe('npm release rules', () => {
           return 'packed.tgz';
         }
         if (cmd === 'tar') {
-          const source = JSON.parse(await Deno.readTextFile(`${dir}/package.json`));
+          const source = JSON.parse(await readFile(`${dir}/package.json`, 'utf8'));
           for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
             for (const name of Object.keys(source[field] ?? {})) {
               if (name.startsWith('@setu-ts/')) source[field][name] = `^${WORKSPACE_VERSION}`;

@@ -32,13 +32,14 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import {
   assembleSource,
   classify,
-  denoCheck,
+  compileFence,
   extractFences,
   fenceExtension,
   TS_ALIASES,
@@ -154,7 +155,7 @@ const READMES: Readonly<Record<string, number>> = {
 
 /** Reads every fence the engine would compile from one README. */
 async function compilableFences(readme: string) {
-  const markdown = await Deno.readTextFile(readme);
+  const markdown = await readFile(readme, 'utf8');
   return extractFences(readme, markdown)
     .filter((fence) => TS_ALIASES.has(fence.lang))
     .map((fence) => ({ fence, classified: classify(fence) }))
@@ -196,11 +197,11 @@ const UNGATED: readonly string[] = [
 async function everyPackageReadme(): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
-    for await (const entry of Deno.readDir(dir)) {
-      if (!entry.isDirectory) continue;
+    for await (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       const path = `${dir}/${entry.name}`;
       try {
-        await Deno.stat(`${path}/README.md`);
+        await stat(`${path}/README.md`);
         found.push(`${path}/README.md`);
       } catch {
         // no README here; a grouping directory such as packages/starters
@@ -244,24 +245,25 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // of callouts than to teach every consumer of the scanner about them.
     const offenders: string[] = [];
     for (const readme of [...Object.keys(READMES), ...UNGATED]) {
-      const source = await Deno.readTextFile(readme);
+      const source = await readFile(readme, 'utf8');
       if (/^>\s*```/m.test(source)) offenders.push(readme);
     }
     expect(offenders).toEqual([]);
   });
 
   it('should compile every Setu-TS fence in every listed README', async () => {
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
     const failures: string[] = [];
+    const compiler = {};
 
     for (const readme of Object.keys(READMES)) {
       for (const { fence, classified } of await compilableFences(readme)) {
         const file =
           `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
           `.${fenceExtension(fence.lang)}`;
-        await Deno.writeTextFile(file, assembleSource(fence, classified));
-        const { code, stderr } = await denoCheck(file);
+        await writeFile(file, assembleSource(fence, classified));
+        const { code, stderr } = await compileFence(file, compiler);
         if (code !== 0) {
           failures.push(
             `${readme} fence #${fence.index} at line ${fence.line} ` +

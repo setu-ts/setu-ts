@@ -13,46 +13,52 @@
  */
 import { PUBLISHED_PACKAGES } from './release-packages.ts';
 
-const API = 'https://api.jsr.io';
-const SCOPE = 'setu-ts';
-const OWNER = 'setu-ts';
-const REPOSITORY = 'setu-ts';
+async function main(): Promise<void> {
+  const API = 'https://api.jsr.io';
+  const SCOPE = 'setu-ts';
+  const OWNER = 'setu-ts';
+  const REPOSITORY = 'setu-ts';
 
-interface IJsrPackage {
-  readonly githubRepository?: {
-    readonly owner?: string;
-    readonly name?: string;
-  } | null;
-}
-
-/** `packages/foo-plugin` → `foo-plugin` within the JSR scope. */
-function packageName(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1);
-}
-
-let failures = 0;
-
-for (const path of PUBLISHED_PACKAGES) {
-  const name = packageName(path);
-  const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`);
-
-  if (!response.ok) {
-    console.log('MISSING', name);
-    failures += 1;
-    continue;
+  interface IJsrPackage {
+    readonly githubRepository?: {
+      readonly owner?: string;
+      readonly name?: string;
+    } | null;
   }
 
-  const pkg = (await response.json()) as IJsrPackage;
-  const linked = pkg.githubRepository;
-  if (linked === undefined || linked === null) {
-    console.log('UNLINKED', name);
-    failures += 1;
-  } else if (linked.owner !== OWNER || linked.name !== REPOSITORY) {
-    console.log('WRONG LINK', name, `${linked.owner ?? '?'}/${linked.name ?? '?'}`);
-    failures += 1;
+  /** `packages/foo-plugin` → `foo-plugin` within the JSR scope. */
+  function packageName(path: string): string {
+    return path.slice(path.lastIndexOf('/') + 1);
+  }
+
+  let failures = 0;
+
+  for (const path of PUBLISHED_PACKAGES) {
+    const name = packageName(path);
+    const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`);
+
+    if (!response.ok) {
+      console.log('MISSING', name);
+      failures += 1;
+      continue;
+    }
+
+    const pkg = (await response.json()) as IJsrPackage;
+    const linked = pkg.githubRepository;
+    if (linked === undefined || linked === null) {
+      console.log('UNLINKED', name);
+      failures += 1;
+    } else if (linked.owner !== OWNER || linked.name !== REPOSITORY) {
+      console.log('WRONG LINK', name, `${linked.owner ?? '?'}/${linked.name ?? '?'}`);
+      failures += 1;
+    }
+  }
+
+  console.log('checked', PUBLISHED_PACKAGES.length);
+
+  if (failures > 0) {
+    process.exitCode = 1;
+    return;
   }
 }
-
-console.log('checked', PUBLISHED_PACKAGES.length);
-
-if (failures > 0) Deno.exit(1);
+if (import.meta.main) await main();

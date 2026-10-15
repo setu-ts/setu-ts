@@ -10,8 +10,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 const ROOT = new URL('..', import.meta.url);
 const DOCS = new URL('docs/health-indicators.md', ROOT);
@@ -22,14 +23,14 @@ const EXCLUDED = new Set(['packages/cli/src/schematics/health-indicator.ts']);
 /** Recursively lists every `.ts` file under `dir`, workspace-relative. */
 async function listTsFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
-    if (entry.isFile) {
+  for await (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.isFile()) {
       if (entry.name.endsWith('.ts')) {
         out.push(`${dir}/${entry.name}`);
       }
       continue;
     }
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       out.push(...(await listTsFiles(`${dir}/${entry.name}`)));
     }
   }
@@ -49,15 +50,15 @@ function registrationLines(source: string): number[] {
 
 describe('health-indicator audit (M70c §3.9)', () => {
   it('every ctx.health.register site is classified in docs/health-indicators.md', async () => {
-    const doc = await Deno.readTextFile(DOCS);
+    const doc = await readFile(DOCS, 'utf8');
     const sites: string[] = [];
 
-    for await (const pkg of Deno.readDir('packages')) {
-      if (!pkg.isDirectory) continue;
+    for await (const pkg of await readdir('packages', { withFileTypes: true })) {
+      if (!pkg.isDirectory()) continue;
       const srcDir = `packages/${pkg.name}/src`;
       let exists = true;
       try {
-        await Deno.stat(srcDir);
+        await stat(srcDir);
       } catch {
         exists = false;
       }
@@ -65,7 +66,7 @@ describe('health-indicator audit (M70c §3.9)', () => {
 
       for (const file of await listTsFiles(srcDir)) {
         if (EXCLUDED.has(file)) continue;
-        const source = await Deno.readTextFile(file);
+        const source = await readFile(file, 'utf8');
         for (const line of registrationLines(source)) {
           sites.push(`${file}:${line}`);
         }

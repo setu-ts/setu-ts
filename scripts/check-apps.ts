@@ -1,3 +1,6 @@
+import { run as runProcess } from './lib/run.ts';
+import { isNotFound } from './lib/run.ts';
+import { readFile, readdir, stat } from 'node:fs/promises';
 /* eslint-disable no-console -- this CI script reports progress and skips. */
 /** Checks every standalone application and runs its mandatory smoke task. */
 
@@ -10,7 +13,11 @@ interface AppConfig {
 export type SmokeOutcome = 'passed' | 'skipped' | 'failed';
 
 /** Classifies a smoke command result so skip handling is explicit and testable. */
-export function classifySmokeExitCode(status: Deno.CommandStatus): SmokeOutcome {
+export function classifySmokeExitCode(status: {
+  code: number;
+  success: boolean;
+  signal?: string | null;
+}): SmokeOutcome {
   if (status.code === SKIP_EXIT_CODE) return 'skipped';
   return status.success ? 'passed' : 'failed';
 }
@@ -60,7 +67,7 @@ export function prerequisiteTask(
  * `null` when the error should be rethrown.
  */
 export function malformedAppDirMessage(directory: string, error: unknown): string | null {
-  if (error instanceof Deno.errors.NotFound) {
+  if (isNotFound(error)) {
     return `${directory}: missing deno.json — malformed application directory`;
   }
   if (error instanceof SyntaxError) {
@@ -70,22 +77,21 @@ export function malformedAppDirMessage(directory: string, error: unknown): strin
 }
 
 async function readAppConfig(path: string): Promise<AppConfig> {
-  return JSON.parse(await Deno.readTextFile(path)) as AppConfig;
+  return JSON.parse(await readFile(path, 'utf8')) as AppConfig;
 }
 
-async function run(command: readonly string[], cwd: string): Promise<Deno.CommandStatus> {
-  return await new Deno.Command(command[0], {
-    args: [...command.slice(1)],
-    cwd,
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }).output();
+async function run(
+  command: readonly string[],
+  cwd: string,
+): Promise<{ code: number; success: boolean }> {
+  const result = await runProcess(command[0]!, command.slice(1), { cwd, inherit: true });
+  return { code: result.code, success: result.code === 0 };
 }
 
 async function checkApps(): Promise<boolean> {
   const appDirectories: string[] = [];
-  for await (const entry of Deno.readDir('apps')) {
-    if (entry.isDirectory) {
+  for await (const entry of await readdir('apps', { withFileTypes: true })) {
+    if (entry.isDirectory()) {
       appDirectories.push(entry.name);
     }
   }
@@ -117,10 +123,10 @@ async function checkApps(): Promise<boolean> {
 
     const entryPoints = ['main.ts', 'smoke.ts'];
     try {
-      await Deno.stat(`${cwd}/worker.ts`);
+      await stat(`${cwd}/worker.ts`);
       entryPoints.push('worker.ts');
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
+      if (!isNotFound(error)) {
         throw error;
       }
     }
@@ -167,7 +173,7 @@ async function checkApps(): Promise<boolean> {
   }
 
   // ALLOW_SKIP enforcement
-  const allowRaw = Deno.env.get('ALLOW_SKIP');
+  const allowRaw = process.env['ALLOW_SKIP'];
   if (allowRaw !== undefined) {
     const allowList = allowRaw
       .split(',')
@@ -184,5 +190,5 @@ async function checkApps(): Promise<boolean> {
 }
 
 if (import.meta.main && (await checkApps())) {
-  Deno.exit(1);
+  process.exitCode = 1;
 }

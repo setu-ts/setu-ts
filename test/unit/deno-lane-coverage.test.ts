@@ -15,16 +15,17 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { SCRIPT_TARGETS } from '../../scripts/script-targets.ts';
+import { run as runProcess } from '../../scripts/lib/run.ts';
+import { describe, expect, it } from 'vitest';
 
 import {
   belowThreshold,
   parseCoverageTable,
   parseSuccessfulCoverageChild,
-  SCRIPT_TARGETS,
   validateTargetSet,
-} from '../scripts/script-coverage.ts';
+} from '../../scripts/deno-lane-coverage.ts';
 
 /** A well-formed coverage row for a target, at the given percentages. */
 function row(file: string, branch: number, fn: number, line: number): string {
@@ -120,8 +121,8 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('rejects zero rows (no coverage data)', () => {
-    const parsed = parseCoverageTable(HEADER);
-    const failures = validateTargetSet(parsed);
+    const parsed = parseCoverageTable(HEADER, SCRIPT_TARGETS);
+    const failures = validateTargetSet(parsed, SCRIPT_TARGETS);
     expect(parsed.byTarget.size).toBe(0);
     expect(failures.length).toBe(1);
     expect(failures[0]).toContain('no coverage data');
@@ -129,8 +130,8 @@ describe('script-coverage target-set completeness', () => {
 
   it('rejects only one target row (a target silently dropped)', () => {
     const stdout = HEADER + '\n' + row('scripts/check-docs.ts', 95, 96, 94);
-    const parsed = parseCoverageTable(stdout);
-    const failures = validateTargetSet(parsed);
+    const parsed = parseCoverageTable(stdout, SCRIPT_TARGETS);
+    const failures = validateTargetSet(parsed, SCRIPT_TARGETS);
     expect(parsed.byTarget.size).toBe(1);
     expect(parsed.byTarget.has('scripts/check-docs.ts')).toBe(true);
     expect(parsed.byTarget.has('scripts/generate-api-docs.ts')).toBe(false);
@@ -156,8 +157,8 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/version-sweep.ts', 94, 100, 96) +
       '\n' +
       row('scripts/package-exports.ts', 97, 98, 96);
-    const parsed = parseCoverageTable(stdout);
-    const failures = validateTargetSet(parsed);
+    const parsed = parseCoverageTable(stdout, SCRIPT_TARGETS);
+    const failures = validateTargetSet(parsed, SCRIPT_TARGETS);
     expect(parsed.duplicates).toContain('scripts/check-docs.ts');
     expect(failures.some((f) => f.includes('duplicate'))).toBe(true);
   });
@@ -179,25 +180,28 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/version-sweep.ts', 94, 100, 96) +
       '\n' +
       row('scripts/some-other-script.ts', 99, 99, 99);
-    const parsed = parseCoverageTable(stdout);
-    const failures = validateTargetSet(parsed);
+    const parsed = parseCoverageTable(stdout, SCRIPT_TARGETS);
+    const failures = validateTargetSet(parsed, SCRIPT_TARGETS);
     expect(parsed.extras.length).toBe(1);
     expect(failures.some((f) => f.includes('unknown/extra'))).toBe(true);
   });
 
   it('accepts every target passing (the happy path)', () => {
-    const parsed = parseCoverageTable(fullTable());
-    expect(validateTargetSet(parsed)).toEqual([]);
+    const parsed = parseCoverageTable(fullTable(), SCRIPT_TARGETS);
+    expect(validateTargetSet(parsed, SCRIPT_TARGETS)).toEqual([]);
     expect(parsed.byTarget.size).toBe(SCRIPT_TARGETS.length);
-    expect(belowThreshold(parsed)).toEqual([]);
+    expect(belowThreshold(parsed, 90, SCRIPT_TARGETS)).toEqual([]);
   });
 
   it('flags one target below threshold while the set is complete', () => {
-    const parsed = parseCoverageTable(fullTable({ 'scripts/generate-api-docs.ts': true }));
+    const parsed = parseCoverageTable(
+      fullTable({ 'scripts/generate-api-docs.ts': true }),
+      SCRIPT_TARGETS,
+    );
     // The set is complete — completeness passes.
-    expect(validateTargetSet(parsed)).toEqual([]);
+    expect(validateTargetSet(parsed, SCRIPT_TARGETS)).toEqual([]);
     // But one target is below threshold.
-    const below = belowThreshold(parsed);
+    const below = belowThreshold(parsed, 90, SCRIPT_TARGETS);
     expect(below.length).toBe(1);
     expect(below[0]?.target).toBe('scripts/generate-api-docs.ts');
     expect(below[0]?.coverage.branchPct).toBe(FAILING_COVERAGE.branchPct);
@@ -209,9 +213,10 @@ describe('script-coverage target-set completeness', () => {
         'scripts/check-docs.ts': true,
         'scripts/generate-api-docs.ts': true,
       }),
+      SCRIPT_TARGETS,
     );
-    expect(validateTargetSet(parsed)).toEqual([]);
-    expect(belowThreshold(parsed).length).toBe(2);
+    expect(validateTargetSet(parsed, SCRIPT_TARGETS)).toEqual([]);
+    expect(belowThreshold(parsed, 90, SCRIPT_TARGETS).length).toBe(2);
   });
 
   it('parses ANSI-stripped rows correctly (no false OK from color codes)', () => {
@@ -222,12 +227,12 @@ describe('script-coverage target-set completeness', () => {
       '\n' +
       `| ${ansi}check-docs.ts${String.fromCharCode(0x1b)}[0m` +
       '          |    75.9 |      80.0 |   67.0 |';
-    const parsed = parseCoverageTable(stdout);
+    const parsed = parseCoverageTable(stdout, SCRIPT_TARGETS);
     expect(parsed.byTarget.has('scripts/check-docs.ts')).toBe(true);
     const cov = parsed.byTarget.get('scripts/check-docs.ts');
     expect(cov?.branchPct).toBe(75.9);
     // 75.9 < 90, so this target is below threshold.
-    expect(belowThreshold(parsed).length).toBe(1);
+    expect(belowThreshold(parsed, 90, SCRIPT_TARGETS).length).toBe(1);
   });
 
   it('rejects a failed child before parsing two plausible 99% rows', () => {
@@ -258,19 +263,10 @@ describe('script-coverage gate integration (subprocess)', () => {
   // parsing deterministically; this group covers the wiring: the gate must
   // fail when no coverage data exists at all.
   it('exits non-zero when the coverage directory has no data', async () => {
-    const cmd = new Deno.Command('deno', {
-      args: [
-        'run',
-        '--allow-run=deno',
-        'scripts/script-coverage.ts',
-        '.tmp/nonexistent-coverage-dir-' + Date.now(),
-      ],
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const output = await cmd.output();
+    const cmd = runProcess('deno', ['coverage', '.tmp/nonexistent-coverage-dir-' + Date.now()]);
+    const output = await cmd;
     expect(output.code).not.toBe(0);
-    const stderr = new TextDecoder().decode(output.stderr);
+    const stderr = output.stderr;
     // The gate reports the failure rather than exiting silently.
     expect(stderr.length).toBeGreaterThan(0);
   });

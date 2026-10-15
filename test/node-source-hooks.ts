@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { sourceExport } from '../scripts/codemods/workspace-sources.ts';
 
-type Resolved = { url: string; shortCircuit?: boolean };
+type Resolved = { url: string; shortCircuit?: boolean | undefined };
 
 /** The repository's scratch root; installed test projects live below it. */
 const SCRATCH = fileURLToPath(new URL('../.tmp/', import.meta.url));
@@ -41,6 +41,16 @@ export function installedForImporter(parentURL: string | undefined): boolean {
 }
 
 /** Resolves workspace specifiers to source; defers everything else. */
+export function resolve(
+  specifier: string,
+  context: { parentURL?: string },
+  next: (specifier: string, context: unknown) => Resolved,
+): Resolved;
+export function resolve(
+  specifier: string,
+  context: { parentURL?: string },
+  next: (specifier: string, context: unknown) => Resolved | Promise<Resolved>,
+): Resolved | Promise<Resolved>;
 export function resolve(
   specifier: string,
   context: { parentURL?: string },

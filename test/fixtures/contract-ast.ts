@@ -1,5 +1,8 @@
 /** AST-based exact contract comparison for documented TypeScript interfaces. @module */
 
+import { run as runProcess } from './../../scripts/lib/run.ts';
+import { mkdir, writeFile } from 'node:fs/promises';
+
 interface DocNode {
   readonly name: string;
   readonly declarations: readonly DocDeclaration[];
@@ -175,16 +178,12 @@ export async function contractAst(
   interfaceName: string,
   scratchName: string,
 ): Promise<ContractAst> {
-  await Deno.mkdir('.tmp/contract-ast', { recursive: true });
+  await mkdir('.tmp/contract-ast', { recursive: true });
   const path = `.tmp/contract-ast/${scratchName}.ts`;
-  await Deno.writeTextFile(path, source);
-  const output = await new Deno.Command('deno', {
-    args: ['doc', '--json', path],
-    stdout: 'piped',
-    stderr: 'piped',
-  }).output();
-  if (!output.success) throw new Error(new TextDecoder().decode(output.stderr));
-  return astFromJson(new TextDecoder().decode(output.stdout), interfaceName);
+  await writeFile(path, source);
+  const output = await runProcess('deno', ['doc', '--json', path]);
+  if (!(output.code === 0)) throw new Error(output.stderr);
+  return astFromJson(output.stdout, interfaceName);
 }
 
 /** Compare contracts without depending on source member order or formatting. */

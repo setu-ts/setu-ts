@@ -52,153 +52,161 @@ import { PACKAGE_METADATA, type RuntimeCompat } from './jsr-metadata.ts';
 
 // Overridable so the error paths below can be driven against a local stub — an
 // untested error path is how a release script fails at the worst moment.
-const API = Deno.env.get('JSR_API_BASE') ?? 'https://api.jsr.io';
-const SCOPE = 'setu-ts';
+async function main(): Promise<void> {
+  const API = process.env['JSR_API_BASE'] ?? 'https://api.jsr.io';
+  const SCOPE = 'setu-ts';
 
-const dryRun = Deno.args.includes('--dry-run');
-const token = Deno.env.get('JSR_TOKEN');
+  const dryRun = process.argv.slice(2).includes('--dry-run');
+  const token = process.env['JSR_TOKEN'];
 
-if (!token && !dryRun) {
-  console.error(
-    'JSR_TOKEN is not set.\n\n' +
-      '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
-      '  2. Re-run with it in the environment, e.g. (fish):\n' +
-      '       env JSR_TOKEN=jsrp_… deno task release:set-metadata\n',
+  if (!token && !dryRun) {
+    console.error(
+      'JSR_TOKEN is not set.\n\n' +
+        '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
+        '  2. Re-run with it in the environment, e.g. (fish):\n' +
+        '       env JSR_TOKEN=jsrp_… deno task release:set-metadata\n',
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  /** `packages/foo-plugin` → `foo-plugin` (the JSR package name within the scope). */
+  function packageName(dir: string): string {
+    return dir.slice(dir.lastIndexOf('/') + 1);
+  }
+
+  const names = PUBLISHED_PACKAGES.map(packageName);
+
+  // A package published with no entry here would keep an empty page silently, and
+  // an entry naming a package that is not published is a typo that would otherwise
+  // look like a successful no-op. Both are caught before any request is sent.
+  const undescribed = names.filter((n) => !(n in PACKAGE_METADATA));
+  const unknown = Object.keys(PACKAGE_METADATA).filter((n) => !names.includes(n));
+
+  if (undescribed.length > 0 || unknown.length > 0) {
+    if (undescribed.length > 0) {
+      console.error(
+        `No metadata for ${undescribed.length} published package(s):\n` +
+          undescribed.map((n) => `  ${n}`).join('\n') +
+          '\n\nAdd an entry to scripts/jsr-metadata.ts.',
+      );
+    }
+    if (unknown.length > 0) {
+      console.error(
+        `\nMetadata for ${unknown.length} package(s) that are not published:\n` +
+          unknown.map((n) => `  ${n}`).join('\n'),
+      );
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  /** The description and flags a package currently carries, or undefined if unreadable. */
+  async function current(
+    name: string,
+  ): Promise<{ description: string; runtimeCompat: RuntimeCompat } | undefined> {
+    const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
+      headers: token === undefined ? {} : { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return undefined;
+    return (await response.json()) as { description: string; runtimeCompat: RuntimeCompat };
+  }
+
+  /** Whether the live compat flags already equal the intended ones. */
+  function compatMatches(live: RuntimeCompat, want: RuntimeCompat): boolean {
+    const keys: (keyof RuntimeCompat)[] = ['browser', 'deno', 'node', 'workerd', 'bun'];
+    return keys.every((k) => live[k] === want[k]);
+  }
+
+  /**
+   * Sends one enum variant. Returns the failure, or undefined on success.
+   *
+   * `body` carries exactly one key because the endpoint's request type admits
+   * exactly one — see the module comment.
+   */
+  async function patch(
+    name: string,
+    body: Record<string, unknown>,
+  ): Promise<{ status: number; body: string } | undefined> {
+    const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (response.ok) return undefined;
+    return { status: response.status, body: await response.text() };
+  }
+
+  const updated: string[] = [];
+  const already: string[] = [];
+  const failed: { name: string; status: number; body: string }[] = [];
+
+  console.log(
+    `${dryRun ? 'Simulating' : 'Setting'} description and runtime compat on ` +
+      `${names.length} packages…\n`,
   );
-  Deno.exit(2);
-}
 
-/** `packages/foo-plugin` → `foo-plugin` (the JSR package name within the scope). */
-function packageName(dir: string): string {
-  return dir.slice(dir.lastIndexOf('/') + 1);
-}
+  for (const [index, name] of names.entries()) {
+    const want = PACKAGE_METADATA[name];
+    const position = `[${index + 1}/${names.length}]`;
 
-const names = PUBLISHED_PACKAGES.map(packageName);
+    if (dryRun) {
+      const flags = (['browser', 'deno', 'node', 'workerd', 'bun'] as const)
+        .map((k) => `${k}=${want.runtimeCompat[k] ?? '?'}`)
+        .join(' ');
+      console.log(`${position} would set @${SCOPE}/${name}\n${' '.repeat(9)}${flags}`);
+      continue;
+    }
 
-// A package published with no entry here would keep an empty page silently, and
-// an entry naming a package that is not published is a typo that would otherwise
-// look like a successful no-op. Both are caught before any request is sent.
-const undescribed = names.filter((n) => !(n in PACKAGE_METADATA));
-const unknown = Object.keys(PACKAGE_METADATA).filter((n) => !names.includes(n));
+    const live = await current(name);
+    const needsDescription = live === undefined || live.description !== want.description;
+    const needsCompat =
+      live === undefined || !compatMatches(live.runtimeCompat, want.runtimeCompat);
 
-if (undescribed.length > 0 || unknown.length > 0) {
-  if (undescribed.length > 0) {
-    console.error(
-      `No metadata for ${undescribed.length} published package(s):\n` +
-        undescribed.map((n) => `  ${n}`).join('\n') +
-        '\n\nAdd an entry to scripts/jsr-metadata.ts.',
-    );
+    if (!needsDescription && !needsCompat) {
+      console.log(`${position} current  @${SCOPE}/${name}`);
+      already.push(name);
+      continue;
+    }
+
+    // One request per field: the endpoint accepts a single enum variant.
+    const failure =
+      (needsDescription ? await patch(name, { description: want.description }) : undefined) ??
+      (needsCompat ? await patch(name, { runtimeCompat: want.runtimeCompat }) : undefined);
+
+    if (failure === undefined) {
+      const what = [needsDescription ? 'description' : null, needsCompat ? 'compat' : null]
+        .filter((s) => s !== null)
+        .join(' + ');
+      console.log(`${position} setting  @${SCOPE}/${name} (${what})`);
+      updated.push(name);
+      continue;
+    }
+
+    console.error(`${position} FAILED   @${SCOPE}/${name} — ${failure.status} ${failure.body}`);
+    failed.push({ name, ...failure });
   }
-  if (unknown.length > 0) {
-    console.error(
-      `\nMetadata for ${unknown.length} package(s) that are not published:\n` +
-        unknown.map((n) => `  ${n}`).join('\n'),
-    );
-  }
-  Deno.exit(1);
-}
-
-/** The description and flags a package currently carries, or undefined if unreadable. */
-async function current(
-  name: string,
-): Promise<{ description: string; runtimeCompat: RuntimeCompat } | undefined> {
-  const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
-    headers: token === undefined ? {} : { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) return undefined;
-  return (await response.json()) as { description: string; runtimeCompat: RuntimeCompat };
-}
-
-/** Whether the live compat flags already equal the intended ones. */
-function compatMatches(live: RuntimeCompat, want: RuntimeCompat): boolean {
-  const keys: (keyof RuntimeCompat)[] = ['browser', 'deno', 'node', 'workerd', 'bun'];
-  return keys.every((k) => live[k] === want[k]);
-}
-
-/**
- * Sends one enum variant. Returns the failure, or undefined on success.
- *
- * `body` carries exactly one key because the endpoint's request type admits
- * exactly one — see the module comment.
- */
-async function patch(
-  name: string,
-  body: Record<string, unknown>,
-): Promise<{ status: number; body: string } | undefined> {
-  const response = await fetch(`${API}/scopes/${SCOPE}/packages/${name}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  if (response.ok) return undefined;
-  return { status: response.status, body: await response.text() };
-}
-
-const updated: string[] = [];
-const already: string[] = [];
-const failed: { name: string; status: number; body: string }[] = [];
-
-console.log(
-  `${dryRun ? 'Simulating' : 'Setting'} description and runtime compat on ` +
-    `${names.length} packages…\n`,
-);
-
-for (const [index, name] of names.entries()) {
-  const want = PACKAGE_METADATA[name];
-  const position = `[${index + 1}/${names.length}]`;
 
   if (dryRun) {
-    const flags = (['browser', 'deno', 'node', 'workerd', 'bun'] as const)
-      .map((k) => `${k}=${want.runtimeCompat[k] ?? '?'}`)
-      .join(' ');
-    console.log(`${position} would set @${SCOPE}/${name}\n${' '.repeat(9)}${flags}`);
-    continue;
+    console.log(`\nAll ${names.length} packages simulated.`);
+    process.exitCode = 0;
+    return;
   }
 
-  const live = await current(name);
-  const needsDescription = live === undefined || live.description !== want.description;
-  const needsCompat = live === undefined || !compatMatches(live.runtimeCompat, want.runtimeCompat);
-
-  if (!needsDescription && !needsCompat) {
-    console.log(`${position} current  @${SCOPE}/${name}`);
-    already.push(name);
-    continue;
-  }
-
-  // One request per field: the endpoint accepts a single enum variant.
-  const failure =
-    (needsDescription ? await patch(name, { description: want.description }) : undefined) ??
-    (needsCompat ? await patch(name, { runtimeCompat: want.runtimeCompat }) : undefined);
-
-  if (failure === undefined) {
-    const what = [needsDescription ? 'description' : null, needsCompat ? 'compat' : null]
-      .filter((s) => s !== null)
-      .join(' + ');
-    console.log(`${position} setting  @${SCOPE}/${name} (${what})`);
-    updated.push(name);
-    continue;
-  }
-
-  console.error(`${position} FAILED   @${SCOPE}/${name} — ${failure.status} ${failure.body}`);
-  failed.push({ name, ...failure });
-}
-
-if (dryRun) {
-  console.log(`\nAll ${names.length} packages simulated.`);
-  Deno.exit(0);
-}
-
-console.log(
-  `\nDone: ${updated.length} updated, ${already.length} already current, ${failed.length} failed.`,
-);
-
-if (failed.length > 0) {
-  console.error(
-    '\nSet these by hand at\n' +
-      failed.map((f) => `  https://jsr.io/@${SCOPE}/${f.name}/settings`).join('\n'),
+  console.log(
+    `\nDone: ${updated.length} updated, ${already.length} already current, ${failed.length} failed.`,
   );
-  Deno.exit(1);
+
+  if (failed.length > 0) {
+    console.error(
+      '\nSet these by hand at\n' +
+        failed.map((f) => `  https://jsr.io/@${SCOPE}/${f.name}/settings`).join('\n'),
+    );
+    process.exitCode = 1;
+    return;
+  }
 }
+if (import.meta.main) await main();

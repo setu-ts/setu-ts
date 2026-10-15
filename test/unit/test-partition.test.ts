@@ -16,8 +16,9 @@
  * @module
  */
 
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
+
+import { describe, expect, it } from 'vitest';
 import {
   discoverTestFiles,
   isolationReason,
@@ -87,7 +88,7 @@ describe('test partition', () => {
         leaked.push(`${path} (e2e in the parallel phase)`);
         continue;
       }
-      const source = await Deno.readTextFile(path);
+      const source = await readFile(path, 'utf8');
       const marker = MARKERS.find((name) => source.includes(name));
       if (marker !== undefined) leaked.push(`${path} (${marker})`);
     }
@@ -107,7 +108,7 @@ describe('test partition', () => {
     // touched. Reproduced before the fix. It also made this module's own claim
     // that a suite is isolated "the moment it is written" false until staged.
     const path = 'packages/kernel/test/unit/zz-partition-probe.test.ts';
-    await Deno.writeTextFile(
+    await writeFile(
       path,
       "import { describe, it } from '@std/testing/bdd';\n" +
         "describe('probe', () => { it('REDIS_URL', () => {}); });\n",
@@ -117,7 +118,7 @@ describe('test partition', () => {
       expect(isolated).toContain(path);
       expect(reasons.get(path)).toBe('shared backend (REDIS_URL)');
     } finally {
-      await Deno.remove(path);
+      await rm(path);
     }
   });
 
@@ -128,9 +129,9 @@ describe('test partition', () => {
     // simply not running that file. A walk cannot name a file that is not there,
     // which is the property this asserts: discovered, then removed, then gone.
     const path = 'packages/kernel/test/unit/zz-vanishing-probe.test.ts';
-    await Deno.writeTextFile(path, "import '@std/expect';\n");
+    await writeFile(path, "import '@std/expect';\n");
     expect(await discoverTestFiles()).toContain(path);
-    await Deno.remove(path);
+    await rm(path);
     expect(await discoverTestFiles()).not.toContain(path);
     // And the default path still classifies cleanly with it gone.
     const { isolated, hermetic } = await partitionTests();
@@ -149,15 +150,15 @@ describe('test partition', () => {
     // the pattern back to `*.test.ts` left it green; it now fails.
     const directory = 'packages/kernel/test/unit';
     const shapes = [`${directory}/zz_shape_test.ts`, `${directory}/zz-shape-dir/test.ts`];
-    await Deno.mkdir(`${directory}/zz-shape-dir`, { recursive: true });
-    await Deno.writeTextFile(shapes[0] as string, "import '@std/expect';\n");
-    await Deno.writeTextFile(shapes[1] as string, "import '@std/expect';\n");
+    await mkdir(`${directory}/zz-shape-dir`, { recursive: true });
+    await writeFile(shapes[0] as string, "import '@std/expect';\n");
+    await writeFile(shapes[1] as string, "import '@std/expect';\n");
     try {
       const discovered = await discoverTestFiles();
       for (const shape of shapes) expect(discovered).toContain(shape);
     } finally {
-      await Deno.remove(shapes[0] as string);
-      await Deno.remove(`${directory}/zz-shape-dir`, { recursive: true });
+      await rm(shapes[0] as string);
+      await rm(`${directory}/zz-shape-dir`, { recursive: true });
     }
   });
 

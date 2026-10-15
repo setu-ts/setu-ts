@@ -78,7 +78,7 @@ function fakeResponse(): { response: IResponse; record: { status?: number; body?
       return {
         streaming: false,
         status: record.status ?? 200,
-        headers: new Headers(record.headers),
+        headers: new Headers(record.headers === undefined ? undefined : [...record.headers]),
         body: record.body ?? null,
       };
     },
