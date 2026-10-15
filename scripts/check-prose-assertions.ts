@@ -11,7 +11,7 @@
  */
 
 import { run as runProcess } from './lib/run.ts';
-import { sandboxReadFlags } from './lib/sandbox.ts';
+import { SANDBOX_IMPORTS, sandboxReadFlags } from './lib/sandbox.ts';
 import { type Dirent } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 
@@ -240,14 +240,16 @@ export async function evaluateClaims(
   claims: readonly Claim[],
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<readonly ClaimResult[] | null> {
+  // A tracked symlink escaping the grants refuses the run outright rather than
+  // reading as one unevaluated document.
+  const readFlags = await sandboxReadFlags(process.cwd());
   try {
     const output = await runProcess(
       process.execPath,
       [
         '--permission',
-        ...sandboxReadFlags(process.cwd()),
-        '--import',
-        './test/node-source-register.ts',
+        ...readFlags,
+        ...SANDBOX_IMPORTS,
         '--no-warnings',
         '--input-type=module-typescript',
         '-',

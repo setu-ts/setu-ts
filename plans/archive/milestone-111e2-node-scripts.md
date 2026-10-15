@@ -468,12 +468,16 @@ request in CI.
 1. A claim and a probe receive an empty environment.
 2. A claim and a probe can read only the import grants in `scripts/lib/sandbox.ts` (plus the probe's
    scratch directory): `.git`, the root README and any `.env` are refused.
-3. Neither can write a file or start a child process.
+3. Neither can write a file or start a child process, including through a builtin the permission
+   model does not mediate (`node:sqlite`, `node:wasi`, `node:inspector`), and neither can reach
+   `node:module` to unregister the guards that refuse them.
 4. A hung claim or probe is killed at its deadline, with its process group, and fails the gate.
 5. A failing, malformed or truncated result batch fails closed.
 6. The `@since` gate fetches only `jsr.io` and `registry.npmjs.org`, and keeps its 64 MiB
    decompression cap.
 7. The trusted scripts' dropped permissions (§3.4) cover only repository-authored code.
+8. A git-tracked symlink inside the read grants cannot extend them: the gates refuse to start while
+   one points outside the grants.
 
 A committed-tree security audit runs before merge, per CLAUDE.md, because the two sandboxed gates
 cross a trust boundary. This review was completed during implementation (the M101a precedent).
@@ -494,6 +498,17 @@ shipped is the corrected one.
   denied, and the environment is still empty; `test/prose-assertion-gate.test.ts` asserts each, plus
   a successful package import. The example-behaviour probe uses the same grants plus its scratch
   directory.
+- **Security audit, round 1.** The fresh-context audit failed the branch on one High and one Low.
+  F1: `node:sqlite` opens any path without consulting `--permission`, so a claim could read `.git`
+  and write the working tree (obligations 2 and 3). A preload (`scripts/lib/sandbox-preload.ts`,
+  logic in `installSandboxGuards`) now refuses `sqlite`, `wasi`, `inspector` and `module` through
+  resolution and through a non-configurable `process.getBuiltinModule` wrapper; the prose suite
+  drives each route, and dropping the preload fails it. F2: the permission model checks a path, not
+  a symlink's target, so a committed symlink under `packages/` could read anything.
+  `sandboxReadFlags` now lists tracked symlinks (`git ls-files -s`) and refuses to start while one
+  inside the grants points outside them; there are none today. Observation OBS-2 is fixed too:
+  `run()` refuses a `timeoutMs` that is not an integer in `[1, 2^31 - 1]`, since a larger value
+  fires after 1 ms.
 - **§3.5 example behaviour.** `module.register` starts a loader thread, which `--permission` refuses
   (`ERR_ACCESS_DENIED`, `WorkerThreads`). The source hooks use the synchronous
   `module.registerHooks` instead, so no worker grant is needed.

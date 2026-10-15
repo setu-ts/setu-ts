@@ -16,12 +16,24 @@ export interface RunOptions {
   readonly inherit?: boolean;
 }
 
+/** Largest deadline a Node timer honours. */
+export const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 /** Run one command; a deadline kills its whole process group and returns code 124. */
 export function run(
   command: string,
   args: readonly string[],
   options: RunOptions = {},
 ): Promise<RunResult> {
+  const { timeoutMs } = options;
+  // Above 2^31 - 1 ms a Node timer fires after 1 ms, so an oversized deadline
+  // would kill the child at once; NaN or a fraction is a caller mistake.
+  if (
+    timeoutMs !== undefined &&
+    !(Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= MAX_TIMEOUT_MS)
+  ) {
+    return Promise.reject(new RangeError(`timeoutMs must be an integer in [1, ${MAX_TIMEOUT_MS}]`));
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),

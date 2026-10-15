@@ -64,6 +64,12 @@ describe('repository subprocess helper', () => {
     expect(pid).toBeGreaterThan(0);
     expect(() => process.kill(pid, 0)).toThrow();
   });
+  it('refuses a deadline a Node timer cannot honour, without spawning', async () => {
+    for (const timeoutMs of [0, -1, 1.5, Number.NaN, 2 ** 31]) {
+      await expect(run('definitely-not-a-binary', [], { timeoutMs })).rejects.toThrow(RangeError);
+    }
+  });
+
   it('reports signal termination as failure', async () => {
     expect((await run(process.execPath, ['-e', 'process.kill(process.pid,"SIGTERM")'])).code).toBe(
       1,

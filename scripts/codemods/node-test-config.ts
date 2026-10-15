@@ -119,7 +119,9 @@ export function configurationFor(member: string) {
         exclude: [
           ...DENO_ONLY_SOURCES,
           '**/*.test.ts',
-          ...(member === 'tooling' ? [] : ['**/test/**']),
+          // The sandbox preload is a two-line `--import` entry that only runs in a
+          // permission-restricted child; its logic is measured in `sandbox.ts`.
+          ...(member === 'tooling' ? ['scripts/lib/sandbox-preload.ts'] : ['**/test/**']),
         ],
         reportOnFailure: true,
         reporter: ['text', 'json-summary', 'json'],

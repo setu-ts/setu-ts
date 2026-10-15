@@ -183,6 +183,28 @@ describe('prose assertion gate — evaluator', () => {
     for (const finding of findings) expect(finding.message).toContain('ERR_ACCESS_DENIED');
   });
 
+  it('denies builtins that bypass the permission model, on every route', async () => {
+    const proc = 'this.constructor.constructor("return process")()';
+    const rows = [
+      `(await import('node:sqlite')).DatabaseSync`,
+      `${proc}.getBuiltinModule('node:sqlite').DatabaseSync`,
+      `${proc}.getBuiltinModule('module').createRequire('/x')('node:sqlite')`,
+      `(await import('node:module')).registerHooks`,
+      `Object.defineProperty(${proc}, 'getBuiltinModule', { value: () => 1 })`,
+    ];
+    const table = rows.map((row) => `| \`${row}\` | \`null\` |`).join('\n');
+    const findings = await checkDocument(
+      'sqlite.md',
+      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n${table}`,
+    );
+
+    expect(findings.length).toBe(rows.length);
+    for (const finding of findings.slice(0, 4)) {
+      expect(finding.message).toContain('ERR_ACCESS_DENIED');
+    }
+    expect(findings[4]?.message).toContain('Cannot redefine property');
+  });
+
   it('fails closed when a claim exits before every result is emitted', async () => {
     const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`this.constructor.constructor("return process")().exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
     const findings = await checkDocument('exit.md', source);
