@@ -43,6 +43,7 @@
  * @module
  */
 
+import { workspaceMembers } from './lib/workspace.ts';
 import { type Dirent } from 'node:fs';
 import { readdir, readFile as readSourceFile } from 'node:fs/promises';
 import { isNotFound } from './lib/run.ts';
@@ -540,9 +541,10 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
   };
   const readFile = options.readFile ?? ((path: string) => readSourceFile(path, 'utf8'));
   const listSourceFiles = options.listSourceFiles ?? defaultListSourceFiles;
-  const manifest: WorkspaceManifest =
-    options.manifest ?? (JSON.parse(await readFile('deno.json')) as WorkspaceManifest);
-  const members = (manifest.workspace ?? []).map(normalizeMember);
+  const members =
+    options.manifest === undefined
+      ? await workspaceMembers('.', readFile)
+      : (options.manifest.workspace ?? []).map(normalizeMember);
 
   const findings: SinceFinding[] = [];
   const skipped: SinceSkip[] = [];

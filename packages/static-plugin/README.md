@@ -148,7 +148,7 @@ The plugin registers a health indicator named `static-files`:
 | `IStaticFiles`        | interface |
 | `StaticPluginOptions` | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Example Application

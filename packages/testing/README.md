@@ -392,5 +392,5 @@ in PUBLIC_API.md for the full option tables and notes.
 | `TestContextOptions`  | interface |
 | `TestAppOptions`      | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

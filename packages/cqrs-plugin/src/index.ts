@@ -3,6 +3,8 @@
  *
  * CQRS plugin: command bus, query bus, and pipeline behaviors.
  *
+ * This entry point exports the public cqrs capability.
+ *
  * @example
  * ```typescript
  * import { CqrsPlugin } from '@setu-ts/cqrs-plugin';

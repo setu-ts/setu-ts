@@ -1,20 +1,20 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { isNotFound } from './../scripts/lib/run.ts';
+import { readFile, readdir, stat, mkdir, writeFile, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { tempDir } from './node-helpers.ts';
+import { workspaceMembers } from '../scripts/lib/workspace.ts';
 import {
   classifySmokeExitCode,
   malformedAppDirMessage,
-  prerequisiteTask,
+  checkApps,
   unexpectedSkips,
 } from '../scripts/check-apps.ts';
 
-interface RootConfig {
-  readonly workspace: readonly string[];
-}
-
 interface AppConfig {
-  readonly tasks?: Readonly<Record<string, string>>;
+  readonly scripts?: Readonly<Record<string, string>>;
 }
 
 async function readJson<T>(path: string): Promise<T> {
@@ -39,44 +39,50 @@ describe('application gate configuration', () => {
 
   it('fails CI when the example gate changes tracked application files', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
-    const start = workflow.indexOf('\n  deno:');
+    const start = workflow.indexOf('\n  node:');
     const end = workflow.indexOf('\n  publish-dry-run:');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    const denoJob = workflow.slice(start, end);
+    const nodeJob = workflow.slice(start, end);
     // Same step, immediately after the gate: an assertion elsewhere or a
     // failure-tolerant shell command would let lockfile drift pass again.
-    expect(denoJob).toMatch(
-      /- name: Example applications\n {8}run: \|\n {10}deno task check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
+    expect(nodeJob).toMatch(
+      /- name: Example applications\n {8}run: \|\n {10}pnpm run check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
     );
   });
 
-  it('keeps applications outside the published workspace', async () => {
-    const root = await readJson<RootConfig>('deno.json');
-    expect(root.workspace.some((entry) => entry.includes('apps'))).toBe(false);
+  it('keeps applications outside the published member inventory', async () => {
+    expect((await workspaceMembers()).some((entry) => entry.includes('apps'))).toBe(false);
+    expect(await readFile('pnpm-workspace.yaml', 'utf8')).toContain('apps/*');
   });
 
   it('requires every example application to declare start and smoke tasks', async () => {
     for await (const entry of await readdir('apps', { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const config = await readJson<AppConfig>(`apps/${entry.name}/deno.json`);
-      expect(config.tasks?.start).toBeDefined();
-      expect(config.tasks?.smoke).toBeDefined();
+      const config = await readJson<AppConfig>(`apps/${entry.name}/package.json`);
+      expect(config.scripts?.start).toBeDefined();
+      expect(config.scripts?.smoke).toBeDefined();
+      const pkg = await readJson<{ private: boolean; dependencies: Record<string, string> }>(
+        `apps/${entry.name}/package.json`,
+      );
+      expect(pkg.private).toBe(true);
+      expect(pkg.dependencies.tsx).toBeDefined();
+      await expect(stat(`apps/${entry.name}/deno.json`)).rejects.toThrow();
     }
   });
 
   it('keeps the realtime-client exercise out of the CI skip allowlist', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
-    // Scoped to the `deno` job, not the whole file: `node-compat` and
+    // Scoped to the `node` job, not the whole file: `node-compat` and
     // `bun-compat` declare the same two actions, so a repo-wide `toContain`
     // stays green after they are removed from the job that runs `check:apps`.
-    const denoJob = workflow.slice(
-      workflow.indexOf('\n  deno:'),
+    const nodeJob = workflow.slice(
+      workflow.indexOf('\n  node:'),
       workflow.indexOf('\n  publish-dry-run:'),
     );
-    expect(denoJob).not.toBe('');
-    expect(denoJob).toContain('actions/setup-node@v4');
-    expect(denoJob).toContain('oven-sh/setup-bun@v2');
+    expect(nodeJob).not.toBe('');
+    expect(nodeJob).toContain('actions/setup-node@v4');
+    expect(nodeJob).toContain('oven-sh/setup-bun@v2');
     const allowSkip = workflow.match(/ALLOW_SKIP:\s*([^\n]+)/)?.[1] ?? '';
     expect(allowSkip).not.toContain('realtime-clients');
   });
@@ -84,11 +90,11 @@ describe('application gate configuration', () => {
   it('keeps fork pull requests as no-checkout proposals', async () => {
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const policyStart = workflow.indexOf('\n  fork-contribution-policy:');
-    const denoStart = workflow.indexOf('\n  deno:');
-    const policyJob = workflow.slice(policyStart, denoStart);
+    const nodeStart = workflow.indexOf('\n  node:');
+    const policyJob = workflow.slice(policyStart, nodeStart);
 
     expect(policyStart).not.toBe(-1);
-    expect(denoStart).toBeGreaterThan(policyStart);
+    expect(nodeStart).toBeGreaterThan(policyStart);
     expect(policyJob).toContain('name: Fork contribution policy');
     expect(policyJob).toContain('runs-on: ubuntu-latest');
     expect(policyJob).toContain("github.event_name == 'pull_request'");
@@ -101,7 +107,8 @@ describe('application gate configuration', () => {
     const repositoryBranchOnly =
       "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository";
     for (const job of [
-      'deno',
+      'node',
+      'deno-lane',
       'boundary-compatibility',
       'deploy',
       'publish-dry-run',
@@ -164,52 +171,6 @@ describe('unexpectedSkips', () => {
     // Not the ALLOW_SKIP-unset case: checkApps() never calls this function when
     // the variable is absent, so warn-only mode is the caller's branch, not this one.
     expect(unexpectedSkips(['cloudflare'], [])).toEqual(['cloudflare']);
-  });
-});
-
-describe('prerequisiteTask', () => {
-  it('returns null when the app declares no install task', () => {
-    expect(prerequisiteTask({ start: 'deno run main.ts', smoke: 'deno run smoke.ts' })).toBeNull();
-  });
-
-  it('returns null when the app declares no tasks at all', () => {
-    expect(prerequisiteTask(undefined)).toBeNull();
-  });
-
-  it('returns the install task when one is declared', () => {
-    expect(prerequisiteTask({ install: 'deno install --allow-scripts' })).toBe('install');
-  });
-});
-
-describe('cold-checkout npm resolution', () => {
-  it('gives every app carrying a package.json an install task to run first', async () => {
-    // `check-apps.ts` type-checks an app BEFORE running the smoke that would
-    // create `node_modules`, and a `package.json` switches Deno to
-    // node_modules resolution — so on a cold checkout the check fails on an
-    // npm specifier the example never declared, reached through the
-    // framework's lazily-imported optional drivers. `prerequisiteTask` fixes
-    // the ordering by running the app's OWN declared install task first, which
-    // means an app with a `package.json` and no such task silently keeps the
-    // bug. Asserted here because a warm tree proves nothing: every local run
-    // passes once `node_modules` exists from any earlier build.
-    for await (const entry of await readdir('apps', { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      let hasPackageJson = true;
-      try {
-        await stat(`apps/${entry.name}/package.json`);
-      } catch (error) {
-        // Only absence means "no npm toolchain here". Any other stat failure
-        // is a real problem, and swallowing it would skip the app and pass
-        // the assertion vacuously — `check-apps.ts` itself rethrows a
-        // non-NotFound error from the equivalent `worker.ts` probe.
-        if (!isNotFound(error)) throw error;
-        hasPackageJson = false;
-      }
-      if (!hasPackageJson) continue;
-
-      const config = await readJson<AppConfig>(`apps/${entry.name}/deno.json`);
-      expect(prerequisiteTask(config.tasks)).toBe('install');
-    }
   });
 });
 
@@ -838,7 +799,7 @@ describe('real-backend CI wiring', () => {
     // download. Resolving it first pays the install outside the window.
     const smoke = await readFile('apps/realtime-clients/smoke.ts', 'utf8');
     const preflight = smoke.indexOf("await run('npx', ['--yes', 'wrangler', '--version']);");
-    const spawn = smoke.indexOf("new Deno.Command('npx'");
+    const spawn = smoke.indexOf("startHost('npx'");
     expect(preflight).toBeGreaterThan(-1);
     expect(spawn).toBeGreaterThan(preflight);
 
@@ -877,13 +838,13 @@ describe('real-backend CI wiring', () => {
 });
 
 describe('malformedAppDirMessage', () => {
-  it('formats a missing deno.json message for NotFound', () => {
+  it('formats a missing package.json message for NotFound', () => {
     const msg = malformedAppDirMessage(
       'foo',
       Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
     );
     expect(msg).toContain('foo');
-    expect(msg).toContain('missing deno.json');
+    expect(msg).toContain('missing package.json');
     expect(msg).toContain('malformed application directory');
   });
 
@@ -920,7 +881,7 @@ describe('M111c npm workflow boundaries', () => {
       'persist-credentials: false',
       'registry-url: https://registry.npmjs.org',
       'pnpm install --frozen-lockfile --ignore-scripts',
-      'deno task release:publish',
+      'pnpm run release:publish',
     ])
       expect(publish).toContain(fragment);
     expect(publish).not.toContain('secrets.');
@@ -943,7 +904,7 @@ describe('M111c npm workflow boundaries', () => {
     expect(text).not.toMatch(/dry_run|inputs\./);
     expect(publish).not.toContain('--dry-run');
     expect(gates).toMatch(
-      /if: github\.event_name == 'workflow_dispatch'\n\s+run: deno task release:publish --dry-run/,
+      /if: github\.event_name == 'workflow_dispatch'\n\s+run: pnpm run release:publish --dry-run/,
     );
   });
   it('pins every action in the release workflow to a full commit SHA', () => {
@@ -977,34 +938,73 @@ describe('M111c npm workflow boundaries', () => {
 });
 
 describe('M111b workflow lanes', () => {
-  for (const workflow of ['ci', 'release', 'drift']) {
+  /** One job's text, ending where the next job starts. */
+  const jobOf = (source: string, job: string): string | undefined =>
+    source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
+  const commands = [
+    'node scripts/codemods/std-to-vitest.ts --check',
+    'pnpm test:coverage',
+    'pnpm run test:deno-lane',
+    'pnpm run test:tooling:coverage',
+  ];
+  const inOrder = (text: string, expected: readonly string[]): void => {
+    let previous = -1;
+    for (const command of expected) {
+      const index = text.indexOf(command);
+      expect(index, command).toBeGreaterThan(previous);
+      previous = index;
+    }
+  };
+
+  // ci.yml splits the Deno lane into its own required job (M111e3 §3.5); the
+  // release gates and the drift job keep all four in their one test job.
+  it('ci gates the Node lanes in the node job and the Deno lane in its own job', async () => {
+    const source = await readFile('.github/workflows/ci.yml', 'utf8');
+    const node = jobOf(source, 'node');
+    const lane = jobOf(source, 'deno-lane');
+    expect(node).toBeDefined();
+    expect(lane).toBeDefined();
+    inOrder(node!, [commands[0]!, commands[1]!, commands[3]!]);
+    expect(node).not.toContain('test:deno-lane');
+    expect(lane).toContain('name: Deno runtime lane');
+    expect(lane).toContain('pnpm install --frozen-lockfile');
+    expect(lane).toContain('run: pnpm run test:deno-lane');
+    expect(lane).toMatch(/denoland\/setup-deno@v2\n\s+with:\n\s+deno-version: 2\.9\.6/);
+    expect(source).toContain('name: Format / Lint / Check / Test\n');
+    expect(source).not.toContain('(Deno)');
+  });
+
+  it('installs Deno in exactly the jobs where Deno is the subject', async () => {
+    const source = await readFile('.github/workflows/ci.yml', 'utf8');
+    const jobs = [...source.matchAll(/^ {2}([a-z][\w-]*):\n/gm)].map((match) => match[1]!);
+    const withDeno = jobs.filter((job) => jobOf(source, job)?.includes('denoland/setup-deno'));
+    expect(withDeno).toEqual(['node', 'deno-lane', 'deploy', 'deno-view-plugin-resolution']);
+    // No job reaches the repository tooling through Deno any more.
+    expect(source).not.toMatch(/\bdeno (task|ci|run)\b/);
+  });
+
+  for (const [workflow, job] of [
+    ['release', 'gates'],
+    ['drift', 'fresh-resolution'],
+  ] as const) {
     it(`${workflow} gates all four test lanes in the test job`, async () => {
       const source = await readFile(`.github/workflows/${workflow}.yml`, 'utf8');
-      const job =
-        workflow === 'ci' ? 'deno' : workflow === 'release' ? 'gates' : 'fresh-resolution';
-      const testJob = source.split(`\n  ${job}:`)[1]?.split(/\n {2}[a-zA-Z][\w-]*:/)[0];
+      const testJob = jobOf(source, job);
       expect(testJob).toBeDefined();
-      const commands = [
-        'node scripts/codemods/std-to-vitest.ts --check',
-        'pnpm test:coverage',
-        'deno task test:deno-lane',
-        'deno task test:coverage',
-      ];
-      let previous = -1;
-      for (const command of commands) {
-        const index = testJob!.indexOf(command);
-        expect(index).toBeGreaterThan(previous);
-        previous = index;
-      }
-      // release.yml pins actions to commit SHAs (security audit F2); the others use the tag.
+      inOrder(testJob!, commands);
+      expect(source).not.toMatch(/\bdeno (task|ci|run)\b/);
+      // release.yml pins actions to commit SHAs (security audit F2); drift uses the tag.
       expect(source).toMatch(/pnpm\/action-setup@(?:v4\b|[0-9a-f]{40} # v4\.)/);
-      // The drift job resolves every declared range fresh, so its package
-      // suites see this week's versions; the PR and release jobs test the
-      // committed lock.
+      // The drift job resolves every declared range fresh, then installs that
+      // fresh lock frozen, so every gate sees this week's versions; the release
+      // gates test the committed lock.
       if (workflow === 'drift') {
-        expect(source).toContain('rm pnpm-lock.yaml');
-        expect(source).toContain('pnpm install --no-frozen-lockfile');
-        expect(source).not.toContain('pnpm install --frozen-lockfile');
+        inOrder(testJob!, [
+          'rm pnpm-lock.yaml',
+          'pnpm install --lockfile-only',
+          'pnpm install --frozen-lockfile',
+        ]);
+        expect(source).not.toContain('--no-frozen-lockfile');
       } else {
         expect(source).toContain('pnpm install --frozen-lockfile');
       }
@@ -1017,21 +1017,116 @@ describe('M111c declared artifact coverage', () => {
     const workspace = JSON.parse(await readFile('package.json', 'utf8'));
     const compat = JSON.parse(await readFile('compat/package.json', 'utf8'));
     const expected = await Promise.all(
-      workspace.workspaces.map(
+      (await workspaceMembers()).map(
         async (dir: string) => JSON.parse(await readFile(`${dir}/package.json`, 'utf8')).name,
       ),
     );
     expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
     expect(expected).toHaveLength(52);
     expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
-    const deno = JSON.parse(await readFile('deno.json', 'utf8'));
-    expect(deno.tasks['publish:check']).toBeUndefined();
-    expect(deno.tasks['release:publish']).toBe('pnpm run release:publish');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');
-    expect(deno.tasks['release:placeholders']).toBe('pnpm run release:placeholders');
     expect(workspace.scripts['release:placeholders']).toBe(
       'node scripts/write-npm-placeholders.ts',
     );
     await expect(stat('compat/.npmrc')).rejects.toThrow();
+  });
+});
+
+describe('Node app gate execution', () => {
+  it('resolves @setu-ts/* to source through tsconfig paths on a cold app', async () => {
+    // An app has no dist/ and no import hook: tsx reads the app's generated
+    // tsconfig.json paths. Without the mapping the same app cannot start, so
+    // the second run proves the paths, not a warm build, did the resolving.
+    const tsxCli = createRequire(resolve('apps/minimal/package.json')).resolve('tsx/cli');
+    const common = resolve('packages/common/src/index.ts');
+    // Outside the repository, so no ancestor node_modules can resolve the package to a
+    // previously built dist/ and make the negative half pass for the wrong reason.
+    const root = await tempDir({ prefix: 'app-command-', dir: tmpdir() });
+    const writeApp = async (paths: Record<string, string[]>): Promise<void> => {
+      await writeFile(
+        `${root}/apps/a/tsconfig.json`,
+        JSON.stringify({ compilerOptions: { paths } }),
+      );
+    };
+    try {
+      await writeFile(`${root}/pnpm-workspace.yaml`, 'packages: [apps/*]');
+      await mkdir(`${root}/apps/a`, { recursive: true });
+      const command = `node ${JSON.stringify(tsxCli)} main.ts`;
+      await writeFile(
+        `${root}/apps/a/package.json`,
+        JSON.stringify({ scripts: { start: command, check: command, smoke: command } }),
+      );
+      await writeFile(
+        `${root}/apps/a/main.ts`,
+        "import { CAPABILITIES } from '@setu-ts/common'; if (!CAPABILITIES.RUNTIME) throw new Error('Missing source export');\n",
+      );
+      await writeApp({ '@setu-ts/common': [common] });
+      expect(await checkApps(root)).toBe(false);
+      // `pnpm run` exports NODE_PATH pointing at the repository's virtual store,
+      // which would find a built dist/ instead of failing.
+      vi.stubEnv('NODE_PATH', '');
+      await writeApp({});
+      expect(await checkApps(root)).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('runs check, source-redirected smoke and optional tests; enforces skipped and malformed apps', async () => {
+    const root = await tempDir({ prefix: 'app-gate-' });
+    const diagnostics = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ];
+    try {
+      await writeFile(`${root}/pnpm-workspace.yaml`, 'packages: [apps/*]');
+      await mkdir(`${root}/apps/a`, { recursive: true });
+      await writeFile(
+        `${root}/apps/a/package.json`,
+        JSON.stringify({
+          scripts: { start: 'tsx main.ts', smoke: 'tsx smoke.ts', test: 'vitest', check: 'tsc' },
+        }),
+      );
+      const commands: string[][] = [];
+      let smokeCode = 0;
+      let checkCode = 0;
+      let testCode = 0;
+      const runner = (args: readonly string[], cwd: string) => {
+        commands.push([...args]);
+        expect(cwd).toBe(`${root}/apps/a`);
+        const code =
+          args.at(-1) === 'smoke' ? smokeCode : args.at(-1) === 'test' ? testCode : checkCode;
+        return Promise.resolve({ code, success: code === 0 });
+      };
+      expect(await checkApps(root, runner)).toBe(false);
+      expect(commands).toEqual([
+        ['pnpm', 'run', 'check'],
+        ['pnpm', 'run', 'smoke'],
+        ['pnpm', 'run', 'test'],
+      ]);
+      smokeCode = 77;
+      expect(await checkApps(root, runner, 'a')).toBe(false);
+      expect(await checkApps(root, runner, '')).toBe(true);
+      smokeCode = 1;
+      expect(await checkApps(root, runner)).toBe(true);
+      smokeCode = 0;
+      testCode = 1;
+      expect(await checkApps(root, runner)).toBe(true);
+      testCode = 0;
+      checkCode = 1;
+      expect(await checkApps(root, runner)).toBe(true);
+      checkCode = 0;
+      await writeFile(`${root}/apps/a/package.json`, '{}');
+      expect(await checkApps(root, runner)).toBe(true);
+      await writeFile(`${root}/apps/a/package.json`, '{');
+      expect(await checkApps(root, runner)).toBe(true);
+      await rm(`${root}/apps/a/package.json`);
+      expect(await checkApps(root, runner)).toBe(true);
+    } finally {
+      diagnostics.forEach((spy) => spy.mockRestore());
+      await rm(root, { recursive: true });
+    }
   });
 });

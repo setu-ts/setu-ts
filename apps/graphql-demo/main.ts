@@ -13,7 +13,7 @@
 
 import { createDemoApp } from './src/app.ts';
 
-const port = Number(Deno.args[0] ?? 4000);
+const port = Number(process.argv[2] ?? 4000);
 const app = createDemoApp();
 await app.start({ port });
 

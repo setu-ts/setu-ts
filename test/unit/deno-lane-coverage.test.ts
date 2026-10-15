@@ -19,6 +19,9 @@
 import { SCRIPT_TARGETS } from '../../scripts/script-targets.ts';
 import { run as runProcess } from '../../scripts/lib/run.ts';
 import { describe, expect, it } from 'vitest';
+import { runDenoLane } from '../../scripts/test-deno-lane.ts';
+import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from '../../scripts/test-lanes.ts';
+import type { RunOptions } from '../../scripts/lib/run.ts';
 
 import {
   belowThreshold,
@@ -38,6 +41,88 @@ function row(file: string, branch: number, fn: number, line: number): string {
 /** The two-line header `deno coverage` prints before the table rows. */
 const HEADER =
   'File\n| File                         | Branch % | Function % | Line % |\n| ---------------------------- | -------- | ---------- | ------ |';
+
+describe('Deno lane invocations', () => {
+  it('checks the config and runs disjoint member groups with their named grants and a root group without -P', async () => {
+    const calls: { command: string; args: readonly string[]; options?: RunOptions }[] = [];
+    const code = await runDenoLane(['--no-check'], (command, args, options) => {
+      calls.push({ command, args, ...(options === undefined ? {} : { options }) });
+      return Promise.resolve({
+        code: 0,
+        stdout: [HEADER, ...DENO_ONLY_SOURCES.map((file) => row(file, 99, 99, 99))].join('\n'),
+        stderr: '',
+      });
+    });
+    expect(code).toBe(0);
+    expect(calls[1]?.args).toEqual([
+      'install',
+      '--config',
+      'test/deno-lane/lane.config.json',
+      '--frozen',
+      '--entrypoint',
+      'scripts/inspect-local-diagnostics.ts',
+    ]);
+    const tests = calls.filter((call) => call.args[0] === 'test');
+    expect(tests).toHaveLength(6);
+    const files = tests.flatMap((call) => call.args.filter((arg) => arg.endsWith('.test.ts')));
+    expect(files.sort()).toEqual([...DENO_LANE_TESTS, 'test/deno-lane/vitest-shim.test.ts'].sort());
+    const junit = new Set<string>();
+    for (const call of calls) {
+      expect(call.command).toBe('deno');
+      expect(call.options?.env?.DENO_NO_PACKAGE_JSON).toBe('1');
+      if (call.args[0] === 'coverage') continue;
+      expect(
+        call.args.some(
+          (arg) => arg === '--config' || arg === '--config=test/deno-lane/lane.config.json',
+        ),
+      ).toBe(true);
+      expect(call.args).toContain('--frozen');
+      if (call.args[0] !== 'test') continue;
+      const path = call.args.find((arg) => arg.endsWith('.test.ts'))!;
+      expect(call.args.filter((arg) => arg.startsWith('-P'))).toEqual(
+        path.startsWith('packages/') ? [`-P=${path.split('/')[1]}`] : [],
+      );
+      expect(call.args).toContain('--coverage=coverage-deno-lane');
+      expect(call.args).toContain('--no-check');
+      junit.add(call.args.find((arg) => arg.startsWith('--junit-path='))!);
+    }
+    expect(junit.size).toBe(6);
+  });
+
+  it('stops after a failed source check', async () => {
+    let calls = 0;
+    expect(
+      await runDenoLane([], () => {
+        calls++;
+        return Promise.resolve({ code: 2, stdout: '', stderr: '' });
+      }),
+    ).toBe(2);
+    expect(calls).toBe(1);
+  });
+
+  it('retains a test failure while collecting the combined coverage', async () => {
+    expect(
+      await runDenoLane([], (_command, args) =>
+        Promise.resolve({
+          code: args[0] === 'test' ? 3 : 0,
+          stdout: '',
+          stderr: '',
+        }),
+      ),
+    ).toBe(3);
+  });
+
+  it('stops before testing when preparation fails', async () => {
+    const calls: string[] = [];
+    expect(
+      await runDenoLane([], (_command, args) => {
+        calls.push(args[0]!);
+        return Promise.resolve({ code: args[0] === 'install' ? 4 : 0, stdout: '', stderr: '' });
+      }),
+    ).toBe(4);
+    expect(calls).toEqual(['check', 'install']);
+  });
+});
 
 const FAILING_COVERAGE = { branchPct: 80.0, functionPct: 70.0, linePct: 60.0 };
 

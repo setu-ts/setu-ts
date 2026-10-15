@@ -35,7 +35,7 @@ export async function tempDir(options: { prefix?: string; dir?: string } = {}): 
 export const NODE_SOURCE_ARGS: readonly string[] = [
   '--experimental-transform-types',
   '--import',
-  new URL('./node-source-register.ts', import.meta.url).href,
+  new URL('../scripts/lib/source-register.ts', import.meta.url).href,
 ];
 
 /** The running Deno executable, or `undefined` under any other runtime. */

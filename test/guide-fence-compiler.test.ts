@@ -441,7 +441,7 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
 
     const result = await runProcess(process.execPath, [
       '--import',
-      './test/node-source-register.ts',
+      './scripts/lib/source-register.ts',
       file,
     ]);
     expect(result.code).toBe(0);

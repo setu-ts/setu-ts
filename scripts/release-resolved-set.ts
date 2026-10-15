@@ -1,85 +1,68 @@
+/* eslint-disable no-console -- release artifact writer */
+/** Captures the installed pnpm dependency set attached to a release. @module */
+
 import { readFile, writeFile } from 'node:fs/promises';
-/* eslint-disable no-console -- this release script reports its output path. */
-/**
- * Captures the complete lockfile resolved set attached to a GitHub Release.
- *
- * A release's `deno.lock` is the reproducibility authority. This artifact
- * records it with the release version so a consumer can recover the exact set
- * without inferring which repository commit a tag named.
- */
+import { parsePnpmLock } from './lib/pnpm-lock.ts';
 
-/** The lockfile fields preserved verbatim in a release resolved-set artifact. */
-export interface ILockfileContents {
-  readonly version: string;
-  readonly specifiers: Readonly<Record<string, string>>;
-  readonly jsr?: Readonly<Record<string, unknown>>;
-  readonly npm?: Readonly<Record<string, unknown>>;
-  readonly remote?: Readonly<Record<string, unknown>>;
-  readonly redirects?: Readonly<Record<string, string>>;
-  readonly workspace?: Readonly<Record<string, unknown>>;
+/** The resolved-package portion of a pnpm lockfile. */
+export interface IPnpmLockfile {
+  readonly lockfileVersion: string;
+  readonly packages?: Readonly<
+    Record<string, { readonly resolution: { readonly integrity?: string } }>
+  >;
 }
 
-/** The versioned, self-describing artifact attached to each GitHub Release. */
+/** Versioned resolved set; keys are exact package names and versions. */
 export interface IReleaseResolvedSet {
-  readonly schemaVersion: 1;
-  readonly release: string;
-  readonly lockfile: ILockfileContents;
+  readonly version: string;
+  readonly lockfileVersion: string;
+  readonly packages: Readonly<Record<string, { readonly integrity?: string }>>;
 }
 
-/**
- * Converts a parsed Deno lockfile to its release artifact form.
- *
- * @param release - Release version, without the leading `v` tag prefix.
- * @param lockfile - Parsed `deno.lock` contents.
- * @returns Stable release artifact content.
- * @throws {TypeError} If the release or lockfile lacks its required identity.
- */
+/** Returns the sorted resolved set, retaining registry integrity when present. */
 export function createReleaseResolvedSet(
-  release: string,
-  lockfile: ILockfileContents,
+  version: string,
+  lockfile: IPnpmLockfile,
 ): IReleaseResolvedSet {
-  if (release === '') throw new TypeError('release version must not be empty');
-  if (lockfile.version === '') throw new TypeError('deno.lock version must not be empty');
-
+  if (version === '') throw new TypeError('release version must not be empty');
+  if (lockfile.lockfileVersion === '')
+    throw new TypeError('pnpm lockfile version must not be empty');
   return {
-    schemaVersion: 1,
-    release,
-    lockfile,
+    version,
+    lockfileVersion: lockfile.lockfileVersion,
+    packages: Object.fromEntries(
+      Object.entries(lockfile.packages ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, value]) => [
+          name,
+          value.resolution.integrity === undefined ? {} : { integrity: value.resolution.integrity },
+        ]),
+    ),
   };
 }
 
-/**
- * Serializes a resolved set deterministically for artifact upload.
- *
- * @param resolvedSet - Artifact content to serialize.
- * @returns Indented JSON ending in one newline.
- */
+/** Stable, newline-terminated JSON for release upload. */
 export function serializeReleaseResolvedSet(resolvedSet: IReleaseResolvedSet): string {
-  return `${JSON.stringify(resolvedSet, null, 2)}\n`;
+  return JSON.stringify(resolvedSet, null, 2) + '\n';
 }
 
-/**
- * Runs the command-line artifact writer.
- *
- * @returns Process exit status for the command-line caller.
- */
-async function main(): Promise<number> {
-  const [release, output] = process.argv.slice(2);
-  if (release === undefined || output === undefined || release === '' || output === '') {
+/** Writes a release asset from the repository lock without exiting its caller. */
+export async function runResolvedSetMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const [version, output] = args;
+  if (!version || !output) {
     console.error('usage: release-resolved-set.ts <version> <output-path>');
     return 2;
+  } else {
+    const lockfile = parsePnpmLock(await readFile('pnpm-lock.yaml', 'utf8'));
+    await writeFile(
+      output,
+      serializeReleaseResolvedSet(createReleaseResolvedSet(version, lockfile)),
+    );
+    console.log(`Wrote resolved dependency set for ${version} to ${output}.`);
+    return 0;
   }
-
-  const parsed = JSON.parse(await readFile('deno.lock', 'utf8')) as ILockfileContents;
-  const artifact = createReleaseResolvedSet(release, parsed);
-  await writeFile(output, serializeReleaseResolvedSet(artifact));
-  console.log(`Wrote resolved dependency set for ${release} to ${output}.`);
-  return 0;
 }
 
-if (import.meta.main) {
-  await (async () => {
-    process.exitCode = await main();
-    return;
-  })();
-}
+if (import.meta.main) process.exitCode = await runResolvedSetMain();

@@ -1,6 +1,3 @@
-import { stat, readFile, readdir } from 'node:fs/promises';
-import { statSync, type Dirent } from 'node:fs';
-/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Markdown documentation linter — catches the class of defect that renders a
  * committed doc wrong while every other gate stays green.
@@ -56,6 +53,10 @@ import { statSync, type Dirent } from 'node:fs';
  *
  * Exits 1 on any finding.
  */
+import { apiModulePage } from './generate-api-docs.ts';
+import { stat, readFile, readdir } from 'node:fs/promises';
+import { statSync, type Dirent } from 'node:fs';
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 
 interface Finding {
   readonly file: string;
@@ -65,6 +66,13 @@ interface Finding {
 
 /** Directories whose markdown is not part of the maintained documentation. */
 const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'build', '.wrangler', 'dist']);
+
+/**
+ * Generated output skipped by path. TypeDoc copies every linked Markdown file into
+ * `docs/api/media/` and writes its own scripts beside them, so scanning the reference
+ * would report the copies, which carry no `version:history` context, as stale prose.
+ */
+const SKIP_PATHS = new Set(['docs/api']);
 
 /**
  * Roots scanned when no explicit file list is given.
@@ -826,28 +834,23 @@ export function checkRequiredGuides(files: readonly string[]): readonly Finding[
 }
 
 /**
- * Builds the set of generated API page paths that `deno task docs:api`
- * produces from a list of manifest export targets. Each target
- * `packages/<pkg>/src/<path>.ts` maps to `docs/api/<pkg>/src/<path>.ts/index.html`.
+ * Builds the set of generated API page paths that `pnpm run docs:api`
+ * produces from a list of manifest export targets. Each target maps to the
+ * TypeDoc module page `apiModulePage` names (`packages/<pkg>/src/index.ts` →
+ * `docs/api/modules/<pkg>_src.html`).
  *
  * @param targets - The manifest export targets (from collectApiEntrypoints)
  * @returns The set of generated API page paths
  */
 export function buildGeneratedApiPages(targets: readonly string[]): Set<string> {
   const pages = new Set<string>();
-  // `deno doc --html` always emits a top-level site index at
+  // TypeDoc always emits a top-level site index at
   // docs/api/index.html (the landing page listing every symbol). Include it
   // so a doc that links to the bare top-level index resolves instead of
   // false-positiving as "does not resolve to a known generated page".
   pages.add('docs/api/index.html');
   for (const target of targets) {
-    // deno doc --html maps packages/<pkg>/src/index.ts →
-    // docs/api/<pkg>/src/index.ts/index.html (the packages/ prefix is stripped).
-    let stripped = target.startsWith('./') ? target.slice(2) : target;
-    if (stripped.startsWith('packages/')) {
-      stripped = stripped.slice('packages/'.length);
-    }
-    pages.add(`docs/api/${stripped}/index.html`);
+    pages.add(`docs/api/${apiModulePage(target)}`);
   }
   return pages;
 }
@@ -979,7 +982,7 @@ export async function checkLocalLinks(
 
       // Generated API links: validate against the manifest-derived page set
       // rather than unconditionally accepting. When the set is null/undefined
-      // (output not yet generated), skip — the gate runs before `deno task docs:api`.
+      // (output not yet generated), skip — the gate runs before `pnpm run docs:api`.
       //
       // The bare site root (`./api/`) must be handled here too. Normalization
       // above drops the trailing slash, so it arrives as `docs/api`, which a
@@ -987,7 +990,7 @@ export async function checkLocalLinks(
       // through to ordinary directory resolution and failed on any tree where
       // `docs/api/` had not been generated. That is every clean checkout,
       // including CI, while every developer machine that had run
-      // `deno task docs:api` passed. `deno doc --html` emits the site index at
+      // `pnpm run docs:api` passed. TypeDoc emits the site index at
       // `docs/api/index.html`, so the directory link resolves to it.
       if (resolvedPath === 'docs/api' || resolvedPath.startsWith('docs/api/')) {
         if (generatedApiPages == null) {
@@ -1603,8 +1606,7 @@ export function checkPackageCatalog(
     }
 
     // Required: exact valid generated API link within this section.
-    const apiPathPrefix = pkgPath.includes('starters/') ? `starters/${pkg}` : pkg;
-    const expectedApiLink = `./api/${apiPathPrefix}/src/index.ts/index.html`;
+    const expectedApiLink = `./api/${apiModulePage(`${pkgPath}/src/index.ts`)}`;
     if (!section.includes(`[API Reference](${expectedApiLink})`)) {
       findings.push({
         file: 'docs/plugins.md',
@@ -2052,12 +2054,19 @@ export function checkVersionClaims(
   return findings;
 }
 
-async function collectMarkdown(root: string): Promise<string[]> {
+/**
+ * Lists the Markdown and source files under one scan root, as repository-relative paths.
+ *
+ * @param root - A scan root, relative to `base`
+ * @param base - The directory paths are relative to; the repository root by default
+ * @returns The sorted paths, skipping dot entries, {@link SKIP_DIRS} and {@link SKIP_PATHS}
+ */
+export async function collectMarkdown(root: string, base = '.'): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
     const entries: Dirent[] = [];
     try {
-      for await (const entry of await readdir(dir, { withFileTypes: true })) {
+      for await (const entry of await readdir(`${base}/${dir}`, { withFileTypes: true })) {
         entries.push(entry);
       }
     } catch {
@@ -2068,6 +2077,7 @@ async function collectMarkdown(root: string): Promise<string[]> {
         continue;
       }
       const path = dir === '.' ? entry.name : `${dir}/${entry.name}`;
+      if (SKIP_PATHS.has(path)) continue;
       if (entry.isDirectory()) {
         // The repo root is walked one level deep only; nested roots are listed
         // explicitly in SCAN_ROOTS so an unrelated tree cannot join silently.
@@ -2299,7 +2309,7 @@ export async function runDocsMain(
             findings.push({
               file: `${pkgPath}/README.md`,
               line: 1,
-              message: `Exports table drift — ${message}. Run \`deno task docs:exports\`.`,
+              message: `Exports table drift — ${message}. Run \`pnpm run docs:exports\`.`,
             });
           }
         }

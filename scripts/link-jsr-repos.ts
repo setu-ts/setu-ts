@@ -4,7 +4,7 @@
  * lets the tag-triggered workflow publish without a token.
  *
  * ```
- * JSR_TOKEN=jsrp_… deno task release:link-repos [--dry-run]
+ * JSR_TOKEN=jsrp_… pnpm run release:link-repos [--dry-run]
  * ```
  *
  * WHY THIS EXISTS. Tokenless publishing from GitHub Actions authenticates with
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
       'JSR_TOKEN is not set.\n\n' +
         '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
         '  2. Re-run with it in the environment, e.g. (fish):\n' +
-        '       env JSR_TOKEN=jsrp_… deno task release:link-repos\n',
+        '       env JSR_TOKEN=jsrp_… pnpm run release:link-repos\n',
     );
     process.exitCode = 2;
     return;

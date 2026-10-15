@@ -65,7 +65,7 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
 ## Writing a milestone plan (`plans/*.md`) — checks the plan must survive
 
 **Start from the template and lint it.** Copy `plans/TEMPLATE.md` to
-`plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run `deno task check:plan`. It
+`plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run `pnpm run check:plan`. It
 mechanically enforces the structure — required sections present (including the "Contracts verified
 from SOURCE" and "Exported surface — every symbol names its consumer" tables), no unfilled
 placeholders, no undecided-alternative markers left in a design decision, and only the one canonical
@@ -6229,8 +6229,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tables change, both correcting `deno doc` output. Four Deno users pass to M111e3. The round-1
   security audit found F1–F2, fixed in `c5c6faaa`; round 2 found one Low, fixed afterwards and NOT
   re-audited — complete (PR #458)
-- **Next milestone** — M111e3 (CI on Node and pnpm, `apps/*` on pnpm, root `deno.json` removed).
-  `v0.9.0` is published to npm (2026-10-14); its smoke run and M104 proceed separately.
+- **Milestone 111e3** (repository tooling — CI, examples and website on Node and pnpm; root
+  `deno.json` and `deno.lock` removed): `pnpm-workspace.yaml` is the one authored workspace list,
+  read through `scripts/lib/workspace.ts`; every command is `pnpm run <name>`, with
+  `pnpm run test:tooling` for the root suite. The Deno lane runs from a generated
+  `test/deno-lane/lane.config.json` (per-member permission sets) and a committed lane lock, in its
+  own "Deno runtime lane" CI job; the main job is renamed "Format / Lint / Check / Test", and Deno
+  is installed only where it is the subject. The 17 apps join the pnpm workspace and run through
+  `tsx` with generated `tsconfig.json` paths; `apps/compiled-binary` is a Node SEA; the images are
+  `node:24-alpine` (268–289 MB) and a SEA on distroless (211 MB); the website is a standalone pnpm
+  project and the API reference is TypeDoc HTML. Implemented by Codex until its usage limit, then
+  taken over; opencode did the governing-document command blocks, and its one false justification
+  (root tests "retain `@std`") was corrected. **A cold clone outside the repository found what the
+  warm tree hid**: the generated root `package.json` still carried a `workspaces` list, which pnpm
+  ignores and Deno adopts as a workspace root, so every Deno project the CLI e2e scaffolds under
+  `.tmp/` failed to resolve (61 tests). It is removed, leaving one list, and `check-node-build.ts`,
+  an eighth reader the plan missed, reads the workspace helper. The same run exposed CI defects no
+  local gate could: the node-build job checked manifests before installing, and the browser test
+  handed Chromium a relative `TMPDIR` that only existed in a warm checkout. TypeDoc rendered the
+  README as the API index, and its 475 KB logo failed the website's Lighthouse budget (0.75); the
+  index now lists modules (0.94–0.95). The `cli` lane permission set given `net: true` fails no lane
+  test, so that scoping is not guarded; dropping `DENO_NO_PACKAGE_JSON` fails earlier than the plan
+  predicted (the first frozen `deno check`) — complete (PR #459)
+- **Next milestone** — M111f (governing documents and the JSR sunset). `v0.9.0` is published to npm
+  (2026-10-14); its smoke run and M104 proceed separately.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -6459,18 +6481,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 ## Verification (run before declaring any work done)
 
 ```bash
-deno task fmt:check
-deno task lint
-deno task check
-deno task test
+pnpm run fmt:check
+pnpm run lint
+pnpm run check
+pnpm run test:tooling
 ```
 
-These task names forward to the Node formatting, lint, type and root tooling gates. Package changes
-also require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for
-the retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured
-source file must reach 90% branch/function/line. Root scripts and root tests share the `tooling`
-Vitest coverage report; its per-file thresholds enforce the bar with a nonzero exit. The named Deno
-lane enforces its own bar. Read the per-file tables as evidence.
+These are the Node formatting, lint, type and root tooling gates. Package changes also require
+`pnpm test` and `pnpm test:coverage` on Node 24, plus `pnpm run test:deno-lane` for the retained
+Deno runtime proofs. `pnpm run test:tooling:coverage` measures root tooling. Every measured source
+file must reach 90% branch/function/line. Root scripts and root tests share the `tooling` Vitest
+coverage report; its per-file thresholds enforce the bar with a nonzero exit. The named Deno lane
+enforces its own bar. Read the per-file tables as evidence.
 
 For the edit loop, `pnpm test:coverage <members…>` measures those members and the Node tooling
 target. Each member owns its source coverage, so a targeted failure is authoritative. A milestone
@@ -6492,8 +6514,8 @@ for is unobservable under a blanket grant.
 see a publish-blocking defect.**
 
 ```bash
-deno task release:publish --dry-run  # pack, packed-manifest rules, npm lookup and publish dry run
-deno task release:verify <version>  # versions, source workspace ranges, metadata, release contracts
+pnpm run release:publish --dry-run  # pack, packed-manifest rules, npm lookup and publish dry run
+pnpm run release:verify <version>  # versions, source workspace ranges, metadata, release contracts
 ```
 
 M51 shipped three separate defects that every one of the four gates and the per-file coverage bar
@@ -6535,7 +6557,8 @@ because nothing defined what one was.
 - `no-console` applies everywhere except `packages/cli` and `scripts/` (scripts use
   `// deno-lint-ignore-file no-console` with a reason).
 - Unused variables fail lint — delete them; do not underscore-prefix.
-- Run `deno fmt` before `deno task fmt:check`; it also reformats markdown — never hand-wrap tables.
+- Run `pnpm run fmt` before `pnpm run fmt:check`; it also reformats markdown — never hand-wrap
+  tables.
 - Coverage is per file, across branch, function, and line. The Node runner uses Vitest V8
   thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses the `tooling`
   member's Vitest thresholds over the frozen script inventory. Inspect the reports before claiming
@@ -6664,8 +6687,8 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   and show the data returns. An implementation variant that cannot run against its real backend is
   driven with an injected fake that records calls — if the calls never arrive, the deliverable is
   not delivered. Checking a ROADMAP box is a behavioral claim, not a files-exist claim.
-- **Read coverage ANSI-stripped, per file, after EVERY change — including deletions.**
-  `deno coverage` colorizes output; naive parsing misreads the numbers (a `[33m` prefix turned 75.9
+- **Read coverage ANSI-stripped, per file, after EVERY change — including deletions.** The Vitest
+  coverage table colorizes output; naive parsing misreads the numbers (a `[33m` prefix turned 75.9
   into a false "OK"). Pipe through `sed 's/\x1b\[[0-9;]*m//g'` and confirm every changed `src` file
   is ≥90% on branch, function, AND line. The task's exit code is NOT the check — it exits 0 with a
   file under the bar; the per-file table is. Deleting or rewriting a test can drop an UNRELATED file
@@ -6684,8 +6707,8 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
   NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
   points, confirm one test drives BOTH under a non-default configuration.
-- **Run the two publish gates on the committed tree.** `deno task release:publish --dry-run` and
-  `deno task release:verify <version>` — see the Verification section for the three M51 defects that
+- **Run the two publish gates on the committed tree.** `pnpm run release:publish --dry-run` and
+  `pnpm run release:verify <version>` — see the Verification section for the three M51 defects that
   every other gate passed over. A milestone whose package cannot publish is not done, and CI's
   `npm publish dry-run` job will say so on the PR after you have handed it back.
 - **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table, the

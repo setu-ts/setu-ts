@@ -1,0 +1,43 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "isolatedDeclarations": false,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "typeRoots": [
+      "./node_modules/@types",
+      "./packages/runtime/node_modules/@types"
+    ],
+    "types": [
+      "node",
+      "deno"
+    ],
+    "paths": {
+      "@setu-ts/rest-starter": [
+        "./packages/starters/rest-starter/src/index.ts"
+      ],
+      "@setu-ts/microservice-starter": [
+        "./packages/starters/microservice-starter/src/index.ts"
+      ],
+      "@setu-ts/full-stack-starter": [
+        "./packages/starters/full-stack-starter/src/index.ts"
+      ],
+      "@setu-ts/*": [
+        "./packages/*/src/index.ts"
+      ],
+      "@setu-ts/runtime/worker": [
+        "./packages/runtime/src/worker/define-worker-task.ts"
+      ],
+      "@setu-ts/cli/main": [
+        "./packages/cli/src/main.ts"
+      ],
+      "@setu-ts/localization-plugin/format": [
+        "./packages/localization-plugin/src/format/index.ts"
+      ]
+    }
+  }
+}

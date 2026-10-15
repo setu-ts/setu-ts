@@ -15,7 +15,7 @@
  *
  * The comparison is the README `## Exports` table rather than the barrel
  * itself, and that is what makes the gate cheap: those tables are DERIVED from
- * the barrel by `deno task docs:exports` and already gated for drift, so the
+ * the barrel by `pnpm run docs:exports` and already gated for drift, so the
  * committed table is the barrel's contents — checked — in a form two git
  * revisions can be diffed in without a TypeScript parser, a `deno doc` run per
  * package, or a network call. {@linkcode parseExportsTable} does the reading,

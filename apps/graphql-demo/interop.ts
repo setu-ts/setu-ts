@@ -26,15 +26,10 @@
  * @module
  */
 
-import { createClient } from 'npm:graphql-ws@^6.0.0';
-import {
-  ApolloClient,
-  gql,
-  HttpLink,
-  InMemoryCache,
-} from 'npm:@apollo/client@^3.13.0/core/index.js';
-import { createPersistedQueryLink } from 'npm:@apollo/client@^3.13.0/link/persisted-queries/index.js';
-import { sha256 } from 'npm:js-sha256@^0.11.0';
+import { createClient } from 'graphql-ws';
+import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client/core/index.js';
+import { createPersistedQueryLink } from '@apollo/client/link/persisted-queries/index.js';
+import { sha256 } from 'js-sha256';
 import { createDemoApp, freePort } from './src/app.ts';
 import { INTERNAL_SECRET } from './src/schema.ts';
 
@@ -55,7 +50,7 @@ async function until(predicate: () => boolean, ms = 5000): Promise<boolean> {
   return predicate();
 }
 
-const port = freePort();
+const port = await freePort();
 const app = createDemoApp();
 await app.start({ port });
 const http = `http://localhost:${port}/graphql`;
@@ -314,5 +309,5 @@ try {
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);
 if (failed.length > 0) {
-  Deno.exit(1);
+  process.exit(1);
 }

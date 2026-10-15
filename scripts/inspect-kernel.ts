@@ -14,7 +14,7 @@
  * imports, no application configuration, no secret capture.
  *
  * Usage:
- *   node --import ./test/node-source-register.ts scripts/inspect-kernel.ts
+ *   node --import ./scripts/lib/source-register.ts scripts/inspect-kernel.ts
  *
  * @module
  */

@@ -7,9 +7,9 @@ import {
   registerGreetingResponder,
 } from './src/app.ts';
 
-const serviceAPort = Number(Deno.args[0] ?? 3000);
-const serviceBPort = Number(Deno.args[1] ?? 3001);
-const redisUrl = Deno.env.get('REDIS_URL');
+const serviceAPort = Number(process.argv[2] ?? 3000);
+const serviceBPort = Number(process.argv[3] ?? 3001);
+const redisUrl = process.env['REDIS_URL'];
 const serviceB = createServiceB(redisUrl);
 const serviceA = createServiceA(serviceBPort, redisUrl);
 await serviceB.start({ port: serviceBPort });

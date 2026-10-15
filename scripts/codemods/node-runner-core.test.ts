@@ -33,9 +33,7 @@ describe('Per-member Node test runner', () => {
     const expected = 'node scripts/test-node.ts';
     expect(pkg.scripts.test).toBe(expected);
     expect(pkg.scripts['test:coverage']).toBe(`${expected} --coverage`);
-    const deno = JSON.parse(await readFile('deno.json', 'utf8'));
-    expect(deno.tasks['test:coverage:pkg']).toBe('pnpm run test:coverage:pkg');
     expect(pkg.scripts['test:coverage:pkg']).toBe(`${expected} --coverage`);
-    expect(deno.tasks.test).toBe('pnpm run test:tooling');
+    expect(pkg.scripts['test:tooling']).toBe('SETU_TEST_MEMBER=tooling vitest run');
   });
 });

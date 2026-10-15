@@ -1,15 +1,8 @@
+import { freePort } from '../smoke-helpers.ts';
 import { createEchoClient, createGrpcApp } from './src/app.ts';
 
-function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
-}
-
 const app = createGrpcApp();
-const port = unusedPort();
+const port = await freePort();
 await app.start({ port });
 try {
   // M70i: `basePath` defaults to the ROOT, so a Connect client points at the

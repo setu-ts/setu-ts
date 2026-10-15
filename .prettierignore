@@ -7,7 +7,6 @@ docs/api/
 .verify-milestone/
 k8s/chart/templates/
 k8s/manifests/
-website/
 
 # Carried from deno.json global `exclude`. Not carried: scripts/codemods, which
 # Deno excludes because it cannot resolve that Node code; Prettier can.
@@ -24,7 +23,10 @@ packages/cli/test/fixtures/devtool-source-shapes.ts
 /tsconfig.json
 /tsconfig.base.json
 /tsconfig.check.json
+/tsconfig.apps.json
+apps/*/tsconfig.json
 /pnpm-workspace.yaml
+/test/deno-lane/lane.config.json
 packages/*/package.json
 packages/*/tsconfig.json
 packages/*/deno.json

@@ -39,11 +39,6 @@ spec:
           image: "setu/rest-api:m39"
           imagePullPolicy: IfNotPresent
           args:
-            - run
-            - --allow-net
-            - --allow-env
-            - --allow-read
-            - --allow-sys
             - main.ts
             - "3000"
           securityContext:

@@ -13,17 +13,12 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-
-/** Every workspace member directory, read from the root manifest. */
-async function members(): Promise<string[]> {
-  const root = JSON.parse(await readFile('deno.json', 'utf8')) as { workspace: string[] };
-  return root.workspace.map((entry) => entry.replace(/^\.\//, ''));
-}
+import { workspaceMembers } from '../scripts/lib/workspace.ts';
 
 /** The members that read their own version, which are the ones carrying the constant. */
 async function membersWithConstant(): Promise<string[]> {
   const found: string[] = [];
-  for (const dir of await members()) {
+  for (const dir of await workspaceMembers()) {
     const exists = await stat(`${dir}/src/version.ts`).then(
       () => true,
       () => false,

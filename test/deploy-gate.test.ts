@@ -18,6 +18,7 @@ import {
   PRODUCTION_DEVTOOL_PROBE,
   renderDrift,
   SKIP_EXIT_CODE,
+  failureTail,
 } from '../scripts/check-deploy.ts';
 
 const read = (path: string): string => readFileSync(path, 'utf8');
@@ -196,30 +197,44 @@ describe('Dockerfiles', () => {
   const runtime = read('docker/Dockerfile');
   const compiled = read('docker/Dockerfile.compiled');
 
-  it('pins the SAME Deno version in both, so a bump is a one-line change', () => {
-    const version = (source: string): string | undefined =>
-      source.match(/ARG DENO_VERSION=([\d.]+)/)?.[1];
-    expect(version(runtime)).toBeDefined();
-    expect(version(runtime)).toBe(version(compiled));
+  it('pins the SAME Node major and pnpm version in both, so a bump is a one-line change', () => {
+    const node = (source: string): string[] =>
+      [...source.matchAll(/^FROM node:(\d+)-/gm)].map((match) => match[1]!);
+    const pnpm = (source: string): string | undefined =>
+      source.match(/npm install --global pnpm@([\d.]+)/)?.[1];
+    expect(node(runtime)).toEqual(['24', '24']);
+    expect(node(compiled)).toEqual(['24']);
+    expect(pnpm(runtime)).toBeDefined();
+    expect(pnpm(runtime)).toBe(pnpm(compiled));
+    // The root manifest pins the same pnpm the images install.
+    expect(read('package.json')).toContain(`"packageManager": "pnpm@${pnpm(runtime)}"`);
   });
 
-  it('pins a Deno version rather than a floating tag', () => {
-    // A floating tag makes an "unsupported lockfile version" failure arrive on an unrelated day.
-    expect(runtime).not.toMatch(/FROM denoland\/deno:(alpine|latest)\s*$/m);
+  it('pins a Node version rather than a floating tag', () => {
+    // A floating tag makes a runtime upgrade arrive on an unrelated day.
+    for (const source of [runtime, compiled]) {
+      expect(source).not.toMatch(/^FROM node(:latest|:lts[^\s]*)?(\s|$)/m);
+    }
   });
 
-  it('copies the workspace root BEFORE packages, which resolution requires', () => {
-    // Without deno.json the build fails: an example maps only its direct dependencies, so
-    // @setu-ts/common resolves against JSR instead of the local workspace member.
-    const rootCopy = runtime.indexOf('COPY deno.json');
-    const packagesCopy = runtime.indexOf('COPY packages');
-    expect(rootCopy).toBeGreaterThan(-1);
-    expect(packagesCopy).toBeGreaterThan(rootCopy);
+  it('copies the workspace manifest and lock BEFORE packages, which a frozen install requires', () => {
+    // `pnpm install --frozen-lockfile` refuses to run without the lock, and the workspace file is
+    // what lets `--filter <app>...` see the framework members the app depends on.
+    for (const source of [runtime, compiled]) {
+      const lock = source.indexOf('pnpm-lock.yaml');
+      const workspace = source.indexOf('pnpm-workspace.yaml');
+      const packagesCopy = source.indexOf('COPY packages');
+      expect(lock).toBeGreaterThan(-1);
+      expect(workspace).toBeGreaterThan(-1);
+      expect(packagesCopy).toBeGreaterThan(lock);
+      expect(packagesCopy).toBeGreaterThan(workspace);
+      expect(source).toContain('pnpm install --frozen-lockfile');
+    }
   });
 
-  it('builds the compiled binary on a glibc base, since distroless/cc is glibc', () => {
-    // An alpine build stage links against musl and the binary will not run on distroless/cc.
-    expect(compiled).toMatch(/FROM denoland\/deno:\$\{DENO_VERSION\} AS build/);
+  it('builds the SEA on a glibc base, since distroless/cc is glibc', () => {
+    // An alpine builder copies a musl node binary, which will not run on distroless/cc.
+    expect(compiled).toMatch(/^FROM node:24-bookworm AS build$/m);
     expect(compiled).toContain('gcr.io/distroless/cc-debian12');
   });
 
@@ -305,7 +320,7 @@ describe('skip contract', () => {
     const denoDir = process.execPath.replace(/\/[^/]+$/, '');
     const result = await runProcess(
       process.execPath,
-      ['--import', './test/node-source-register.ts', 'scripts/check-deploy.ts', '--render'],
+      ['--import', './scripts/lib/source-register.ts', 'scripts/check-deploy.ts', '--render'],
       { env: { ...process.env, ...{ PATH: denoDir } } },
     );
 
@@ -365,13 +380,13 @@ describe('graceful shutdown in the containerized examples', () => {
   ];
 
   it('every containerized example installs a SIGTERM handler', () => {
-    // Without one, Deno's default action ends the process immediately (measured: 144 ms, exit
+    // Without one, the default action ends the process immediately (measured: 144 ms, exit
     // 143) and app.stop() never runs, making terminationGracePeriodSeconds decorative.
     for (const path of MATRIX_ENTRY_POINTS) {
       const source = read(path);
-      // Either the Deno listener or the portable `IRuntimeServices.onSignal`
+      // Either a Node `process.on` listener or the portable `IRuntimeServices.onSignal`
       // seam (M70h) that `setu new` emits — both register the handler.
-      expect(source).toMatch(/addSignalListener\(|\bonSignal\?\.\(/);
+      expect(source).toMatch(/\bprocess\.on\(|\bonSignal\?\.\(/);
       expect(source).toContain('SIGTERM');
       expect(source).toContain('app.stop()');
     }
@@ -524,5 +539,16 @@ describe('the generated deployment gate proves the devtool is excluded (M101f V8
     expect(source).toContain('await cli([...GENERATED_MEMBER_ARGS,');
     expect(source).toContain('for (const layout of GENERATED_LAYOUTS)');
     expect(source).toContain('PRODUCTION_DEVTOOL_PROBE,');
+  });
+});
+
+describe('failed step output', () => {
+  it('keeps the indented tail of a failed build and drops blank lines', () => {
+    const output = ['', ...Array.from({ length: 40 }, (_, i) => `line ${i}`), '', ''].join('\n');
+    const tail = failureTail(output).split('\n');
+    expect(tail).toHaveLength(30);
+    expect(tail[0]).toBe('      line 10');
+    expect(tail.at(-1)).toBe('      line 39');
+    expect(failureTail(' \n\n')).toBe('');
   });
 });

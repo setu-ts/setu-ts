@@ -3,15 +3,16 @@ import { readFile, mkdir, rm } from 'node:fs/promises';
 import { isNotFound } from './lib/run.ts';
 /* eslint-disable no-console -- repository test runner */
 /** Per-member Node runs bound memory use and enforce coverage in each package's own suite. */
+import { workspaceMembers } from './lib/workspace.ts';
 import { coverageRows, runTargets, selectMembers } from './codemods/node-runner-core.ts';
 export { coverageRows, runTargets, selectMembers } from './codemods/node-runner-core.ts';
 
 if (import.meta.main) {
   await (async () => {
     const coverage = process.argv.slice(2).includes('--coverage');
-    const manifest = JSON.parse(await readFile('deno.json', 'utf8')) as { workspace: string[] };
+    const workspace = await workspaceMembers();
     const selection = process.argv.slice(2).filter((arg) => arg !== '--coverage');
-    const members = selectMembers(manifest.workspace, selection);
+    const members = selectMembers(workspace, selection);
     const result = await runTargets(members, async (member) => {
       const target = member.split('/').pop()!;
       await mkdir(`coverage-node/${target}`, { recursive: true });

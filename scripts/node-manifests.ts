@@ -3,7 +3,7 @@
  * The Node-manifest generator and drift gate (M111a plan §3.1).
  *
  * Writes every workspace member's `package.json` and `tsconfig.json`, the root
- * solution `tsconfig.json`, `pnpm-workspace.yaml`, and the root `package.json`
+ * solution `tsconfig.json`, app type-check configs, Deno lane config, and the root `package.json`
  * `workspaces` field, from four inputs: each member's `deno.json`
  * (`name`/`version`/`exports`), a scan of every TypeScript file under its
  * `src` and `test` trees, the committed external-range table
@@ -40,8 +40,10 @@
  * @module
  */
 
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { type Dirent } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
+import { workspaceApps, workspaceMembers } from './lib/workspace.ts';
 
 import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
@@ -54,13 +56,6 @@ import {
   OVERRIDES,
   WORKSPACE_SCOPE,
 } from './node-dependency-ranges.ts';
-
-/**
- * Root tests that import an app's Deno entry point, whose `npm:` specifiers `tsc`
- * cannot resolve. They still run under Vitest; M111e3 moves the apps to pnpm and
- * empties this list.
- */
-export const CHECK_EXCLUDED_UNTIL_APPS_MOVE: readonly string[] = ['test/browser-gate.test.ts'];
 
 // ── Pure core ─────────────────────────────────────────────────────────────────
 
@@ -521,58 +516,19 @@ export function renderSolutionTsconfig(dirs: readonly string[]): string {
   )}\n`;
 }
 
-/**
- * Renders `pnpm-workspace.yaml`, listing every member explicitly.
- *
- * `ignoreWorkspaceCycles` is load-bearing, not a workaround: the TEST-only
- * workspace edges are cyclic by design (kernel's tests import runtime and
- * testing; runtime's tests import kernel — the plan's §1 probe recorded that
- * 40 of 51 members' tests import packages their src does not), pnpm's
- * resolver allows them, and `pnpm -r` refuses only the topological ORDERING.
- * Each member's build is `tsc -b`, which orders its own project references,
- * so an arbitrary member order is correct.
- *
- * `allowBuilds` DENIES the two dependencies that ship install scripts
- * (`protobufjs`, `sse4_crc32`, both reached only through the Google Cloud
- * SDKs). pnpm 12 fails `install --frozen-lockfile` with ERR_PNPM_IGNORED_BUILDS
- * while a script is undecided, and approving one would run third-party code on
- * every install for a dependency no test exercises for real.
- */
-export function renderPnpmWorkspace(dirs: readonly string[]): string {
-  const lines = dirs.map((dir) => `  - ${dir}`);
-  return (
-    `packages:\n${lines.join('\n')}\n` +
-    '\n' +
-    '# Dev-only workspace edges are cyclic (test-only imports, plan §3.1); each\n' +
-    "# member's build is `tsc -b`, which orders its own references.\n" +
-    'ignoreWorkspaceCycles: true\n' +
-    '\n' +
-    '# Google SDK install scripts are denied: both are transitive deps of\n' +
-    '# the Google Cloud SDKs the tests reach only through fakes and guarded\n' +
-    '# suites. pnpm 12 refuses a frozen install while either is undecided.\n' +
-    'allowBuilds:\n' +
-    '  protobufjs: false\n' +
-    '  sse4_crc32: false\n' +
-    '  # The TC39 decorator transformer requires its native build.\n' +
-    '  esbuild: true\n'
-  );
-}
-
 /** Renders the root `package.json` (private workspace root, §3.2/§3.6). */
-export function renderRootPackageJson(dirs: readonly string[]): string {
+export function renderRootPackageJson(): string {
   return `${JSON.stringify(
     {
       name: 'setu-ts',
       private: true,
       packageManager: 'pnpm@12.11.2',
       engines: { node: '>=22' },
-      workspaces: dirs,
       type: 'module',
       scripts: {
         check: 'tsc -p tsconfig.check.json --noEmit',
         'check:apps': 'node scripts/check-apps.ts',
-        'check:browser':
-          'deno run --allow-read=.,$HOME/.cache/ms-playwright,$HOME/Library/Caches/ms-playwright,/etc/os-release,/etc/lsb-release --allow-write=.tmp/browser --allow-env --allow-sys=hostname,cpus,osRelease,uid,gid,homedir --allow-run=deno apps/full-stack/browser/harness.ts',
+        'check:browser': 'node apps/full-stack/browser/harness.ts',
         'check:docs':
           'node scripts/check-docs.ts && node scripts/check-prose-assertions.ts && node scripts/check-example-behaviour.ts && node scripts/check-since-tags.ts && node scripts/check-changelog-coverage.ts && node scripts/generate-api-docs.ts --check',
         'check:since-tags': 'node scripts/check-since-tags.ts',
@@ -591,7 +547,7 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
         test: 'node scripts/test-node.ts',
         'test:coverage': 'node scripts/test-node.ts --coverage',
         'test:coverage:pkg': 'node scripts/test-node.ts --coverage',
-        audit: 'deno audit --level=high',
+        audit: 'node scripts/audit.ts',
         'audit:ci': 'node scripts/audit.ts',
         'release:verify': 'node scripts/verify-release.ts',
         'release:bump': 'node scripts/bump-version.ts',
@@ -605,9 +561,9 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
         'release:archive-old-scope': 'node scripts/archive-old-scope.ts',
         'release:set-metadata': 'node scripts/set-jsr-metadata.ts',
         lint: 'eslint .',
-        fmt: 'pnpm exec prettier --write . && deno fmt packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
+        fmt: 'pnpm exec prettier --write . && deno fmt --no-config --line-width=100 --single-quote packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
         'fmt:check':
-          'pnpm exec prettier --check . && deno fmt --check packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
+          'pnpm exec prettier --check . && deno fmt --no-config --line-width=100 --single-quote --check packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
         'docs:exports': 'node scripts/generate-package-exports.ts',
         'test:deno-lane': 'node scripts/test-deno-lane.ts',
         'test:tooling': 'SETU_TEST_MEMBER=tooling vitest run',
@@ -620,6 +576,7 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
         ...TEST_DEV_DEPENDENCIES,
         ...LINT_DEV_DEPENDENCIES,
         typedoc: '0.28.20',
+        yaml: '2.9.1',
         hono: EXTERNAL_RANGES.hono,
         zod: EXTERNAL_RANGES['zod-v3']!.replace('npm:zod@', ''),
         graphql: EXTERNAL_RANGES.graphql,
@@ -821,20 +778,61 @@ export function generateWorkspace(members: readonly MemberInput[], license = '')
   files.set('tsconfig.base.json', renderTsconfigBase());
   files.set('tsconfig.check.json', renderCheckTsconfig());
   files.set('tsconfig.json', renderSolutionTsconfig(dirs));
-  files.set('pnpm-workspace.yaml', renderPnpmWorkspace(dirs));
-  files.set('package.json', renderRootPackageJson(dirs));
+  files.set('package.json', renderRootPackageJson());
   return { files, refusals };
 }
 
 // ── I/O seam ──────────────────────────────────────────────────────────────────
 
-/** Reads a JSON file, or null when absent/unparseable. */
-async function readJson(path: string): Promise<unknown | null> {
-  try {
-    return JSON.parse(await readFile(path, 'utf8'));
-  } catch {
-    return null;
+/** Generate the standalone native-runtime lane's import map and strict options. */
+export function renderLaneConfig(members: readonly MemberInput[], laneJson: string): string {
+  const lane = JSON.parse(laneJson) as {
+    imports: Record<string, string>;
+    scopes: Record<string, Record<string, string>>;
+  };
+  const imports = { ...lane.imports };
+  const permissions: Record<string, unknown> = {};
+  for (const member of members) {
+    if (DENO_LANE_TESTS.some((path) => path.startsWith(`${member.dir}/test/`))) {
+      const manifest = JSON.parse(member.denoJson) as { test: { permissions: unknown } };
+      permissions[member.dir.slice('packages/'.length)] = manifest.test.permissions;
+    }
+    for (const entry of member.exports) {
+      const name = member.name + (entry.subpath === '.' ? '' : entry.subpath.slice(1));
+      imports[name] = './' + relative(resolve('test/deno-lane'), resolve(member.dir, entry.source));
+    }
   }
+  const base = JSON.parse(renderTsconfigBase()) as {
+    compilerOptions: Record<string, unknown>;
+  };
+  const options: Record<string, unknown> = {};
+  for (const key of [
+    'strict',
+    'noUnusedLocals',
+    'noUnusedParameters',
+    'noImplicitReturns',
+    'noFallthroughCasesInSwitch',
+    'noImplicitOverride',
+    'exactOptionalPropertyTypes',
+    'useUnknownInCatchVariables',
+  ])
+    options[key] = base.compilerOptions[key];
+  return (
+    JSON.stringify(
+      {
+        compilerOptions: {
+          ...options,
+          lib: ['deno.ns', 'deno.window', 'dom', 'dom.iterable', 'esnext'],
+        },
+        nodeModulesDir: 'auto',
+        permissions,
+        imports,
+        scopes: lane.scopes,
+      },
+      null,
+      2,
+    ) + '\n'
+  );
 }
 
 /** Every `.ts`/`.tsx` file under `dir`, repository-relative. */
@@ -894,12 +892,10 @@ async function readMember(root: string, dir: string): Promise<MemberInput> {
   };
 }
 
-/** Reads the workspace layout from the `deno.json` under `root`. */
+/** Reads framework members from the authored pnpm workspace inventory. */
 async function readMembers(root: string): Promise<MemberInput[]> {
-  const config = (await readJson(`${root}/deno.json`)) as { workspace?: readonly string[] } | null;
-  if (config?.workspace === undefined) throw new Error('deno.json: no workspace list');
   const members: MemberInput[] = [];
-  for (const entry of config.workspace) {
+  for (const entry of await workspaceMembers(root)) {
     members.push(await readMember(root, entry.replace(/^\.\//, '')));
   }
   return members;
@@ -939,7 +935,19 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
     return 2;
   }
   const members = await readMembers(root);
-  const { files, refusals } = generateWorkspace(members, await readFile(`${root}/LICENSE`, 'utf8'));
+  const { files: generated, refusals } = generateWorkspace(
+    members,
+    await readFile(`${root}/LICENSE`, 'utf8'),
+  );
+  const files = new Map(generated);
+  if (refusals.length === 0) {
+    const lane = await readFile(`${root}/test/deno-lane/deno.json`, 'utf8');
+    files.set('test/deno-lane/lane.config.json', renderLaneConfig(members, lane));
+    files.set('tsconfig.apps.json', renderAppsTsconfig());
+    for (const app of await workspaceApps(root)) {
+      files.set(`${app}/tsconfig.json`, renderAppTsconfig(app));
+    }
+  }
   if (refusals.length > 0) {
     for (const refusal of refusals) console.error(`✗ ${refusal}`);
     console.error(`${refusals.length} refusal(s).`);
@@ -948,7 +956,10 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
   if (mode === 'write') {
     for (const [path, content] of files) {
       const current = await readFile(`${root}/${path}`, 'utf8').catch(() => null);
-      if (current !== content) await writeFile(`${root}/${path}`, content);
+      if (current !== content) {
+        await mkdir(dirname(`${root}/${path}`), { recursive: true });
+        await writeFile(`${root}/${path}`, content);
+      }
     }
     console.log(`Wrote ${files.size} generated file(s).`);
     return 0;
@@ -988,19 +999,7 @@ export function renderCheckTsconfig(): string {
           jsx: 'react-jsx',
           jsxImportSource: 'hono/jsx',
           types: ['node', './packages/runtime/node_modules/@types/deno'],
-          paths: {
-            '@setu-ts/rest-starter': ['./packages/starters/rest-starter/src/index.ts'],
-            '@setu-ts/microservice-starter': [
-              './packages/starters/microservice-starter/src/index.ts',
-            ],
-            '@setu-ts/full-stack-starter': ['./packages/starters/full-stack-starter/src/index.ts'],
-            '@setu-ts/*': ['./packages/*/src/index.ts'],
-            '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
-            '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
-            '@setu-ts/localization-plugin/format': [
-              './packages/localization-plugin/src/format/index.ts',
-            ],
-          },
+          paths: sourcePaths(),
         },
         include: [
           'packages/*/src',
@@ -1015,7 +1014,76 @@ export function renderCheckTsconfig(): string {
           ...DENO_ONLY_SOURCES,
           'test/deno-lane',
           'test/fixtures/snippets',
-          ...CHECK_EXCLUDED_UNTIL_APPS_MOVE,
+        ],
+      },
+      null,
+      2,
+    ) + '\n'
+  );
+}
+
+/** The shared source aliases for repository and app type checking. */
+export function sourcePaths(prefix = './'): Record<string, string[]> {
+  const paths = {
+    '@setu-ts/rest-starter': ['./packages/starters/rest-starter/src/index.ts'],
+    '@setu-ts/microservice-starter': ['./packages/starters/microservice-starter/src/index.ts'],
+    '@setu-ts/full-stack-starter': ['./packages/starters/full-stack-starter/src/index.ts'],
+    '@setu-ts/*': ['./packages/*/src/index.ts'],
+    '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
+    '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
+    '@setu-ts/localization-plugin/format': ['./packages/localization-plugin/src/format/index.ts'],
+  };
+  return Object.fromEntries(
+    Object.entries(paths).map(([key, values]) => [
+      key,
+      values.map((value) => prefix + value.slice(2)),
+    ]),
+  );
+}
+
+/** Root options for apps that consume source without emitting it. */
+export function renderAppsTsconfig(): string {
+  return (
+    JSON.stringify(
+      {
+        extends: './tsconfig.base.json',
+        compilerOptions: {
+          noEmit: true,
+          composite: false,
+          declaration: false,
+          declarationMap: false,
+          isolatedDeclarations: false,
+          allowImportingTsExtensions: true,
+          rewriteRelativeImportExtensions: false,
+          typeRoots: ['./node_modules/@types', './packages/runtime/node_modules/@types'],
+          types: ['node', 'deno'],
+          paths: sourcePaths(),
+        },
+      },
+      null,
+      2,
+    ) + '\n'
+  );
+}
+
+/** Generated per-app roots; full-stack replaces paths to add its React route alias. */
+export function renderAppTsconfig(app: string): string {
+  return (
+    JSON.stringify(
+      {
+        extends: '../../tsconfig.apps.json',
+        ...(app === 'apps/full-stack'
+          ? {
+              compilerOptions: {
+                jsx: 'react-jsx',
+                paths: { ...sourcePaths('../../'), '~/*': ['./app/*'] },
+              },
+            }
+          : {}),
+        include: [
+          '**/*.ts',
+          '**/*.tsx',
+          ...(app === 'apps/full-stack' ? ['node_modules/vite/client.d.ts'] : []),
         ],
       },
       null,

@@ -3,6 +3,8 @@
  *
  * Job scheduling plugin: cron, delayed, recurring jobs with distributed locking.
  *
+ * This entry point exports the public scheduler capability.
+ *
  * @since 0.1.0
  */
 export { SchedulerUnavailableError } from './errors.ts';

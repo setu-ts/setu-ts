@@ -1,16 +1,9 @@
 /* eslint-disable no-console -- a skipped prerequisite must be visible in CI. */
-const redisUrl = Deno.env.get('REDIS_URL');
+import { freePort, startHost, SOURCE_HOST_ARGS } from '../smoke-helpers.ts';
+const redisUrl = process.env['REDIS_URL'];
 if (redisUrl === undefined) {
   console.warn('SKIP: set REDIS_URL to run the two-replica realtime backplane smoke check.');
-  Deno.exit(77);
-}
-
-function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
+  process.exit(77);
 }
 
 /**
@@ -21,13 +14,11 @@ function unusedPort(): number {
  * transport, so the check would stay green with no cross-replica delivery at
  * all — the exact demonstration this example exists to make.
  */
-function spawnReplica(port: number, url: string): Deno.ChildProcess {
-  return new Deno.Command('deno', {
-    args: ['run', '-A', 'main.ts', String(port)],
-    env: { REDIS_URL: url },
-    stdout: 'null',
-    stderr: 'inherit',
-  }).spawn();
+function spawnReplica(port: number, url: string) {
+  return startHost(process.execPath, [...SOURCE_HOST_ARGS, 'main.ts', String(port)], {
+    ...process.env,
+    REDIS_URL: url,
+  });
 }
 
 async function waitForReady(port: number): Promise<void> {
@@ -62,8 +53,8 @@ async function readMessage(
   }
 }
 
-const replicaAPort = unusedPort();
-const replicaBPort = unusedPort();
+const replicaAPort = await freePort();
+const replicaBPort = await freePort();
 const replicaA = spawnReplica(replicaAPort, redisUrl);
 const replicaB = spawnReplica(replicaBPort, redisUrl);
 const streaming = new AbortController();

@@ -18,8 +18,8 @@ describe('Package test lane boundaries', () => {
       const scope = file.startsWith('test/') ? '../../test/' : `../../packages/${member}/test/`;
       expect(lane.scopes[scope]?.vitest).toBe('./vitest-shim.ts');
     }
-    const config = JSON.parse(await readFile('deno.json', 'utf8'));
-    expect(config.tasks.test).toBe('pnpm run test:tooling');
+    const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+    expect(pkg.scripts['test:tooling']).toBe('SETU_TEST_MEMBER=tooling vitest run');
     const runner = await readFile('scripts/codemods/node-test-config.ts', 'utf8');
     expect(runner).toContain("testFiles('test')");
     expect(runner).toContain("testFiles('scripts')");

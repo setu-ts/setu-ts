@@ -21,6 +21,8 @@ import { type Stats } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import {
+  apiModuleName,
+  apiModulePage,
   buildApiDocArgs,
   classifyChildResult,
   CLEAN_PACKAGES,
@@ -115,11 +117,39 @@ describe('API Documentation Generation', () => {
       const targets = ['packages/common/src/index.ts'];
       const args = buildApiDocArgs(targets, 'generate', 'docs/api');
 
-      expect(args).toContain('doc');
-      expect(args).toContain('--html');
-      expect(args).toContain('--output=docs/api');
-      expect(args).toContain('--name=Setu-TS');
+      expect(args).toContain('docs');
+      expect(args).toContain('--emit');
+      expect(args).toContain('--out');
+      expect(args).toContain('docs/api');
+      expect(args).toContain('Setu-TS');
       expect(args).toContain('packages/common/src/index.ts');
+      // The index lists modules rather than repeating the README (Lighthouse LCP).
+      expect(args.slice(args.indexOf('--readme'), args.indexOf('--readme') + 2)).toEqual([
+        '--readme',
+        'none',
+      ]); // Every module is a sidebar leaf, named exactly as TypeDoc names the module.
+      expect(
+        args.slice(args.indexOf('--navigationLeaves'), args.indexOf('--navigationLeaves') + 2),
+      ).toEqual(['--navigationLeaves', 'common/src']);
+    });
+
+    it('derives the module page from the module name, for every entry-point shape', () => {
+      for (const [target, name, page] of [
+        ['packages/kernel/src/index.ts', 'kernel/src', 'modules/kernel_src.html'],
+        [
+          'packages/runtime/src/worker/define-worker-task.ts',
+          'runtime/src/worker/define-worker-task',
+          'modules/runtime_src_worker_define-worker-task.html',
+        ],
+        [
+          './packages/starters/rest-starter/src/index.ts',
+          'starters/rest-starter/src',
+          'modules/starters_rest-starter_src.html',
+        ],
+      ] as const) {
+        expect(apiModuleName(target)).toBe(name);
+        expect(apiModulePage(target)).toBe(page);
+      }
     });
 
     it('builds check mode arguments correctly', () => {
@@ -656,8 +686,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           // All manifests return {} (no exports field) → invalid export map
           return Promise.resolve('{}');
@@ -673,8 +703,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           // exports is an empty object → no-export-targets
           return Promise.resolve(JSON.stringify({ exports: {} }));
@@ -846,8 +876,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           // Return valid manifest for published packages
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
@@ -873,7 +903,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('generate', '/tmp/fake-api-docs', fs, cmd);
       expect(result.code).toBe(2);
-      expect(result.findings.some((f) => f.includes('deno doc failed'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('typedoc HTML failed'))).toBe(true);
       expect(result.findings.some((f) => f.includes('fatal generation error'))).toBe(true);
     });
 
@@ -1263,8 +1293,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1291,8 +1321,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1317,7 +1347,7 @@ error[private-type-ref]: public type references private type
       };
       const result = await runApiDocs('generate', '/tmp/fake-api-missing', fs, cmd);
       expect(result.code).toBe(1);
-      expect(result.findings.some((f) => f.includes('Generated output not found'))).toBe(true);
+      expect(result.findings.some((f) => f.includes('Generated output missing'))).toBe(true);
     });
   });
 
@@ -1325,11 +1355,11 @@ error[private-type-ref]: public type references private type
     it('throws when workspace members are missing from PUBLISHED_PACKAGES', async () => {
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
+          if (path === 'pnpm-workspace.yaml') {
             // Workspace has an extra package not in PUBLISHED_PACKAGES.
             return Promise.resolve(
               JSON.stringify({
-                workspace: ['packages/common', 'packages/extra-pkg'],
+                packages: ['packages/common', 'packages/extra-pkg'],
               }),
             );
           }
@@ -1352,9 +1382,9 @@ error[private-type-ref]: public type references private type
     it('throws when published packages are missing from workspace', async () => {
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
+          if (path === 'pnpm-workspace.yaml') {
             // Workspace has only one package; PUBLISHED_PACKAGES has more.
-            return Promise.resolve(JSON.stringify({ workspace: ['packages/common'] }));
+            return Promise.resolve(JSON.stringify({ packages: ['packages/common'] }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1376,8 +1406,8 @@ error[private-type-ref]: public type references private type
       const { PUBLISHED_PACKAGES } = await import('../scripts/release-packages.ts');
       const fs = {
         readTextFile: (path: string) => {
-          if (path === 'deno.json') {
-            return Promise.resolve(JSON.stringify({ workspace: PUBLISHED_PACKAGES }));
+          if (path === 'pnpm-workspace.yaml') {
+            return Promise.resolve(JSON.stringify({ packages: PUBLISHED_PACKAGES }));
           }
           return Promise.resolve(JSON.stringify({ exports: { '.': './src/index.ts' } }));
         },
@@ -1403,7 +1433,7 @@ error[private-type-ref]: public type references private type
     it('main() --check exits 0 on the real repository (ratchet passes)', async () => {
       const cmd = runProcess(process.execPath, [
         '--import',
-        './test/node-source-register.ts',
+        './scripts/lib/source-register.ts',
         'scripts/generate-api-docs.ts',
         '--check',
       ]);
@@ -1414,7 +1444,7 @@ error[private-type-ref]: public type references private type
     it('main() generate mode exits 0 and produces docs/api/index.html', async () => {
       const cmd = runProcess(process.execPath, [
         '--import',
-        './test/node-source-register.ts',
+        './scripts/lib/source-register.ts',
         'scripts/generate-api-docs.ts',
       ]);
       const output = await cmd;
@@ -1445,7 +1475,7 @@ describe('cold-cache resilience (the CI-only failure)', () => {
     // Measured: 2 `Download` lines without this flag under a forced cold fetch
     // (`--reload=npm:drizzle-orm`), 0 with it.
     expect(buildApiDocArgs(['a.ts'], 'check', 'docs/api')).toContain('typedoc.check.json');
-    expect(buildApiDocArgs(['a.ts'], 'generate', 'docs/api')).toContain('--quiet');
+    expect(buildApiDocArgs(['a.ts'], 'generate', 'docs/api')).toContain('--emit');
   });
 
   it('classifies real cold-cache stderr as lint debt, not a fatal error', () => {
@@ -1552,7 +1582,8 @@ describe('manifest and diagnostic fail-closed boundaries', () => {
       const fs = {
         readTextFile: async (path: string) => {
           await Promise.resolve();
-          if (path === 'deno.json') return JSON.stringify({ workspace: PUBLISHED_PACKAGES });
+          if (path === 'pnpm-workspace.yaml')
+            return JSON.stringify({ packages: PUBLISHED_PACKAGES });
           if (failure === 'read-error') throw new Error('controlled read failure');
           if (failure === 'read-string') throw 'controlled read failure';
           return failure === 'malformed' ? '{' : JSON.stringify({ exports: {} });

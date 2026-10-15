@@ -3909,6 +3909,12 @@ because a library cannot deliver `app/` files into a user's project. See Milesto
 > M23 delivered), and let streaming/SSE examples (M42/M43) demonstrate `IResponse.stream()`. The
 > existing `deno compile` binary example is unaffected.
 
+> **M111e3 note.** The examples now join the **pnpm workspace** (`apps/*` in `pnpm-workspace.yaml`)
+> and run through `tsx`; `apps/compiled-binary` became a Node single executable application. M37
+> kept them out of the Deno workspace because a Deno workspace would resolve an example's npm
+> dependencies into a published package's graph. pnpm has no such property: a published package's
+> graph is its own `package.json`, which no app touches, and the root lockfile is not published.
+
 ### Examples
 
 1. **Minimal** — Kernel + runtime with one `200` route
@@ -14039,7 +14045,9 @@ Delivered as three PRs, in order:
   also leaves it four Deno users, pinned by `test/node/task-surface.test.ts`: `docs:api`'s
   `deno doc --html` (the website's input), the `check:browser` harness, the contract fixture's
   `deno doc --json`, and `CHECK_EXCLUDED_UNTIL_APPS_MOVE`, which keeps the app-coupled browser gate
-  test out of `tsc` until the apps move to pnpm.
+  test out of `tsc` until the apps move to pnpm. Renaming the CI job changes the required check:
+  before 111e3 merges, both rulesets ("protect develop", "protect main") replace "Format / Lint /
+  Check / Test (Deno)" with "Format / Lint / Check / Test" and add "Deno runtime lane".
 - **What stays on Deno, deliberately:** Deno is a supported runtime, not repository tooling. The
   `packages/runtime` Deno adapter, the CLI's `--runtime deno` projects, and the Deno-lane proofs
   (`test:deno-lane`) that keep that support honest all remain. After 111e3 the lane runs as a CI job
@@ -14314,5 +14322,5 @@ patch by construction and gains nothing new here.
 | 111e      | ⬜     | root tooling + apps — Prettier + ESLint, scripts on Node, CI on pnpm; no `deno` binary required                                                                                                                                               |
 | 111e1     | ✅     | Prettier + ESLint replace deno fmt / deno lint; task names kept                                                                                                                                                                               |
 | 111e2     | ✅     | repository scripts and root tests on Node (Vitest); doc gates re-pointed; JSDoc ratchet re-measured on TypeDoc                                                                                                                                |
-| 111e3     | ⬜     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                               |
+| 111e3     | ✅     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                               |
 | 111f      | ⬜     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes                                                                                                                                                                 |

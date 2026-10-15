@@ -1,5 +1,4 @@
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { describe, expect, it } from 'vitest';
 import {
   extractDescription,
   extractTableOfContents,
@@ -11,9 +10,7 @@ import {
 
 describe('rewriteHref', () => {
   it('maps a sibling guide link from the hub to its route', () => {
-    expect(rewriteHref('./getting-started.md', 'README')).toBe(
-      '/docs/getting-started/',
-    );
+    expect(rewriteHref('./getting-started.md', 'README')).toBe('/docs/getting-started/');
   });
 
   it('maps the hub link from a guide back to /docs/', () => {
@@ -51,24 +48,16 @@ describe('rewriteHref', () => {
 
   it('routes grafted API reference links to the public API tree', () => {
     expect(rewriteHref('./api/', 'README')).toBe('/api/');
-    expect(
-      rewriteHref('./api/common/src/index.ts/index.html#IPlugin', 'plugins'),
-    ).toBe(
-      '/api/common/src/index.ts/index.html#IPlugin',
+    expect(rewriteHref('./api/modules/common_src.html#IPlugin', 'plugins')).toBe(
+      '/api/modules/common_src.html#IPlugin',
     );
   });
 
   it('leaves hashes, absolute URLs, and site-absolute paths untouched', () => {
     expect(rewriteHref('#section', 'cli')).toBe('#section');
-    expect(rewriteHref('https://jsr.io/@setu-ts', 'cli')).toBe(
-      'https://jsr.io/@setu-ts',
-    );
-    expect(rewriteHref('http://localhost:3000', 'cli')).toBe(
-      'http://localhost:3000',
-    );
-    expect(rewriteHref('mailto:x@example.com', 'cli')).toBe(
-      'mailto:x@example.com',
-    );
+    expect(rewriteHref('https://jsr.io/@setu-ts', 'cli')).toBe('https://jsr.io/@setu-ts');
+    expect(rewriteHref('http://localhost:3000', 'cli')).toBe('http://localhost:3000');
+    expect(rewriteHref('mailto:x@example.com', 'cli')).toBe('mailto:x@example.com');
     expect(rewriteHref('/docs/cli/', 'cli')).toBe('/docs/cli/');
   });
 });
@@ -79,9 +68,7 @@ describe('resolvedMdToRoute', () => {
   });
 
   it('routes guides under /docs/<name>/', () => {
-    expect(resolvedMdToRoute('/docs/getting-started.md')).toBe(
-      '/docs/getting-started/',
-    );
+    expect(resolvedMdToRoute('/docs/getting-started.md')).toBe('/docs/getting-started/');
   });
 
   it('routes the root README to the landing page', () => {
@@ -106,9 +93,7 @@ describe('rewriteDocsHtml', () => {
 
 describe('extractTitle', () => {
   it('extracts the first h1 text', () => {
-    expect(extractTitle('<h1 id="x">Getting Started</h1><p>rest</p>')).toBe(
-      'Getting Started',
-    );
+    expect(extractTitle('<h1 id="x">Getting Started</h1><p>rest</p>')).toBe('Getting Started');
   });
 
   it('decodes entities in the title', () => {

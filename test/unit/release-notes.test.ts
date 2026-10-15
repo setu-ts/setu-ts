@@ -269,7 +269,7 @@ describe('release workflow wiring', () => {
     // version if it were missed.
     const job = jobBlock(workflow, 'publish-dry-run');
     expect(job).toMatch(
-      /^ +run: deno task release:verify "\$\(jq -r \.version packages\/kernel\/deno\.json\)"$/m,
+      /^ +run: pnpm run release:verify "\$\(jq -r \.version packages\/kernel\/package\.json\)"$/m,
     );
   });
 
@@ -287,12 +287,10 @@ describe('release workflow wiring', () => {
     // Asserted as real `run:` lines inside their jobs, since a bare
     // `toContain` is satisfied by a commented-out line.
     const ci = await readFile('.github/workflows/ci.yml', 'utf8');
-    expect(jobBlock(ci, 'publish-dry-run')).toMatch(/^ +run: deno task check:versions$/m);
+    expect(jobBlock(ci, 'publish-dry-run')).toMatch(/^ +run: pnpm run check:versions$/m);
 
     const release = await readFile('.github/workflows/release.yml', 'utf8');
-    expect(release).toMatch(
-      /^ +run: deno run --allow-read --allow-run=git scripts\/version-sweep\.ts "\$\{GITHUB_REF_NAME#v\}"$/m,
-    );
+    expect(release).toMatch(/^ +run: pnpm run check:versions "\$\{GITHUB_REF_NAME#v\}"$/m);
   });
 
   it('fetches full history in every workflow that runs the suite', async () => {
@@ -303,7 +301,7 @@ describe('release workflow wiring', () => {
     // Required of the PR job too, as the reference the consumers follow.
     const depth = activeLine('fetch-depth: 0');
     const ci = await readFile('.github/workflows/ci.yml', 'utf8');
-    expect(jobBlock(ci, 'deno')).toMatch(depth);
+    expect(jobBlock(ci, 'node')).toMatch(depth);
     for (const consumer of SUITE_CONSUMERS) {
       const workflow = await readFile(consumer.workflow, 'utf8');
       expect({
@@ -328,7 +326,7 @@ describe('release workflow wiring', () => {
     // list is what drifted: a backend added to the PR job is automatically
     // required in every consumer below.
     const ci = await readFile('.github/workflows/ci.yml', 'utf8');
-    const prJob = jobBlock(ci, 'deno');
+    const prJob = jobBlock(ci, 'node');
 
     // Matched as ACTIVE lines rather than substrings: commenting a declaration
     // out leaves the `key: value` text intact, so a `toContain` passes while

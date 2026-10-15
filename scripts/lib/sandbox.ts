@@ -28,10 +28,11 @@ import { run } from './run.ts';
 export const SANDBOX_READ_PATHS: readonly string[] = [
   'packages',
   'node_modules',
-  'deno.json',
+  'pnpm-workspace.yaml',
+  'scripts/lib/workspace.ts',
   'package.json',
-  'test/node-source-register.ts',
-  'test/node-source-hooks.ts',
+  'scripts/lib/source-register.ts',
+  'scripts/lib/source-hooks.ts',
   'scripts/codemods/workspace-sources.ts',
   'scripts/lib/sandbox-preload.ts',
   'scripts/lib/sandbox.ts',
@@ -119,7 +120,7 @@ export async function sandboxReadFlags(
 /** The `--import` arguments every documentation sandbox loads, in order. */
 export const SANDBOX_IMPORTS: readonly string[] = [
   '--import',
-  './test/node-source-register.ts',
+  './scripts/lib/source-register.ts',
   '--import',
   './scripts/lib/sandbox-preload.ts',
 ];

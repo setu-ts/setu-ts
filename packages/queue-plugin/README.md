@@ -468,7 +468,7 @@ the adapter has no liveness check.
 | `QueueAdapterType`             | type      |
 | `QueueProcessorEntry`          | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

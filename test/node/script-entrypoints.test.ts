@@ -16,7 +16,7 @@ it('loads every pure script and exercises the harmless entry points under plain 
     const args = explicit[file] ?? (!source.includes('import.meta.main') ? [] : undefined);
     if (args === undefined) continue;
     const hook = /from\s+['"]@setu-ts\//.test(source)
-      ? ['--import', './test/node-source-register.ts']
+      ? ['--import', './scripts/lib/source-register.ts']
       : [];
     const result = await run(process.execPath, [...hook, `scripts/${file}`, ...args], {
       timeoutMs: 30_000,

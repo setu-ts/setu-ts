@@ -153,7 +153,8 @@ describe('version sweep — isSweptPath', () => {
     expect(isSweptPath('packages/sdk/src/http/client.ts')).toBe(true);
     expect(isSweptPath('packages/starters/rest-starter/src/index.ts')).toBe(true);
     expect(isSweptPath('deno.lock')).toBe(true);
-    expect(isSweptPath('apps/minimal/deno.lock')).toBe(true);
+    expect(isSweptPath('test/deno-lane/deno.lock')).toBe(true);
+    expect(isSweptPath('test/deno-lane/deno.lock')).toBe(true);
   });
 
   it('leaves manifests to release:verify and Markdown to check:docs', () => {
@@ -186,7 +187,7 @@ describe('version sweep — sweepTrackedFiles', () => {
   // imports), so the lockfiles are the real files left that the sweep reads.
   it('reads the real tree and reports both vacuity guards', async () => {
     const result = await sweepTrackedFiles(await workspaceVersion(), [
-      'apps/minimal/deno.lock',
+      'test/deno-lane/deno.lock',
       'packages/sdk/deno.json', // filtered out by isSweptPath
     ]);
     expect(result.filesScanned).toBe(1);
@@ -218,7 +219,7 @@ describe('version sweep — sweepTrackedFiles', () => {
   });
 
   it('reports a stale reference found in a real file', async () => {
-    const result = await sweepTrackedFiles('9.9.9', ['apps/minimal/deno.lock']);
+    const result = await sweepTrackedFiles('9.9.9', ['test/deno-lane/deno.lock']);
     expect(result.findings.length).toBeGreaterThan(0);
     expect(result.findings.map((f) => f.pkg)).toContain('common');
   });
@@ -254,7 +255,7 @@ describe('version sweep — reportSweep', () => {
       {
         findings: [
           { file: 'packages/sdk/src/a.ts', line: 3, pkg: 'common', version: '0.2.0' },
-          { file: 'apps/minimal/deno.lock', line: 9, pkg: 'kernel', version: '0.2' },
+          { file: 'test/deno-lane/deno.lock', line: 9, pkg: 'kernel', version: '0.2' },
         ],
         filesScanned: 767,
         referencesSeen: 2245,
@@ -264,7 +265,7 @@ describe('version sweep — reportSweep', () => {
     expect(failed).toBe(true);
     expect(lines[0]).toContain('2 reference(s)');
     expect(lines[1]).toBe('  packages/sdk/src/a.ts:3  @setu-ts/common@0.2.0');
-    expect(lines[2]).toBe('  apps/minimal/deno.lock:9  @setu-ts/kernel@0.2');
+    expect(lines[2]).toBe('  test/deno-lane/deno.lock:9  @setu-ts/kernel@0.2');
     expect(lines[3]).toContain('version:history');
   });
 });
@@ -311,7 +312,7 @@ describe('version sweep — trackedFiles', () => {
   // fail during the very change that introduces it.
   it('reaches the real git lister by default', async () => {
     const files = await trackedFiles();
-    expect(files).toContain('deno.json');
+    expect(files).toContain('pnpm-workspace.yaml');
     expect(files).toContain('scripts/check-docs.ts');
   });
 });

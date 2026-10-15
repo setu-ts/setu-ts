@@ -29,3 +29,9 @@ apps/compiled-binary/hono-example
 .vscode
 .idea
 **/.DS_Store
+
+# Repository tooling scratch and build output never enter an image.
+.tmp
+coverage-node
+coverage-deno-lane
+**/dist

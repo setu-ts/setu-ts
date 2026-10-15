@@ -22,8 +22,11 @@ import {
   normalizeExports,
   renderDenoJson,
   renderPackageJson,
-  renderPnpmWorkspace,
+  renderLaneConfig,
   renderRootPackageJson,
+  renderAppsTsconfig,
+  renderAppTsconfig,
+  renderCheckTsconfig,
   runNodeManifests,
 } from '../../scripts/node-manifests.ts';
 
@@ -497,35 +500,56 @@ describe('generateWorkspace — rendered files', () => {
     }
   });
 
-  it('lists the same members in pnpm-workspace.yaml, the root workspaces and the solution', () => {
+  it('lists the members once, in pnpm-workspace.yaml, and in the solution', () => {
     const dirs = [
       'packages/common',
       'packages/kernel',
       'packages/runtime',
       'packages/starters/rest-starter',
     ];
-    expect(JSON.parse(files.get('package.json')!).workspaces).toEqual(dirs);
+    // No root `workspaces` field: pnpm reads pnpm-workspace.yaml, and Deno treats a
+    // package.json `workspaces` list as a workspace root, which captured every Deno
+    // project scaffolded under .tmp/ and broke its module resolution (M111e3).
+    expect(JSON.parse(files.get('package.json')!)).not.toHaveProperty('workspaces');
+    expect(files.has('pnpm-workspace.yaml')).toBe(false);
     expect(JSON.parse(files.get('tsconfig.json')!).references).toEqual(
       dirs.map((dir) => ({ path: `./${dir}` })),
     );
-    for (const dir of dirs) expect(files.get('pnpm-workspace.yaml')).toContain(`  - ${dir}\n`);
   });
 
-  it('denies the two install scripts pnpm 12 refuses to leave undecided', () => {
-    const yaml = renderPnpmWorkspace(['packages/a']);
-    expect(yaml).toContain('allowBuilds:\n  protobufjs: false\n  sse4_crc32: false\n');
-    expect(yaml).toContain('ignoreWorkspaceCycles: true\n');
+  it('keeps authored pnpm install policies', async () => {
+    const yaml = await readFile('pnpm-workspace.yaml', 'utf8');
+    expect(yaml).toContain('  protobufjs: false');
+    expect(yaml).toContain('  sse4_crc32: false');
+    expect(yaml).toContain('ignoreWorkspaceCycles: true');
+  });
+
+  it('generates a standalone lane with every export and preserved scopes', () => {
+    const lane = {
+      imports: { vitest: './vitest-shim.ts' },
+      scopes: { '../../test/': { vitest: './vitest-shim.ts' } },
+    };
+    const generated = JSON.parse(renderLaneConfig([COMMON, kernel], JSON.stringify(lane)));
+    expect(generated.nodeModulesDir).toBe('auto');
+    expect(generated.imports).toMatchObject({
+      vitest: './vitest-shim.ts',
+      '@setu-ts/common': './../../packages/common/src/index.ts',
+      '@setu-ts/kernel/worker': './../../packages/kernel/src/worker/index.ts',
+    });
+    expect(generated.scopes).toEqual(lane.scopes);
+    expect(generated.compilerOptions.strict).toBe(true);
+    expect(generated.compilerOptions.lib).toContain('deno.ns');
   });
 
   it('pins the package manager and the build tools at the root', () => {
-    const root = JSON.parse(renderRootPackageJson(['packages/a']));
+    const root = JSON.parse(renderRootPackageJson());
     expect(root.private).toBe(true);
     expect(root.packageManager).toBe('pnpm@12.11.2');
     expect(root.devDependencies.typescript).toBe('6.0.3');
   });
 
   it('carries the formatter and linter at the root, with their scripts', () => {
-    const root = JSON.parse(renderRootPackageJson(['packages/a']));
+    const root = JSON.parse(renderRootPackageJson());
     expect(root.scripts).toMatchObject({
       format: 'prettier --write .',
       'format:check': 'prettier --check .',
@@ -581,8 +605,12 @@ describe('small helpers', () => {
 describe('runNodeManifests — the I/O seam, against a throwaway workspace', () => {
   async function workspace(): Promise<string> {
     const root = await await mkdir('.tmp', { recursive: true }).then(() => mkdtemp('.tmp/test-'));
-    await writeFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
+    await writeFile(`${root}/pnpm-workspace.yaml`, 'packages:\n  - packages/a\n  - apps/*\n');
+    await mkdir(`${root}/test/deno-lane`, { recursive: true });
+    await writeFile(`${root}/test/deno-lane/deno.json`, '{"imports":{},"scopes":{}}');
     await writeFile(`${root}/LICENSE`, 'test license\n');
+    await mkdir(`${root}/apps/minimal`, { recursive: true });
+    await writeFile(`${root}/apps/minimal/package.json`, '{}');
     await mkdir(`${root}/packages/a/src`, { recursive: true });
     await writeFile(
       `${root}/packages/a/deno.json`,
@@ -602,6 +630,12 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
       expect(await runNodeManifests(['--check'], root)).toBe(1);
       expect(await runNodeManifests(['--write'], root)).toBe(0);
       expect(await runNodeManifests(['--check'], root)).toBe(0);
+      for (const path of ['tsconfig.apps.json', 'apps/minimal/tsconfig.json']) {
+        const original = await readFile(`${root}/${path}`, 'utf8');
+        await writeFile(`${root}/${path}`, '{}');
+        expect(await runNodeManifests(['--check'], root)).toBe(1);
+        await writeFile(`${root}/${path}`, original);
+      }
       await writeFile(`${root}/packages/a/LICENSE`, 'drift');
       expect(await runNodeManifests(['--check'], root)).toBe(1);
       await writeFile(`${root}/packages/a/LICENSE`, 'test license\n');
@@ -628,8 +662,95 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
     }
   });
 
+  it('refuses a workspace entry without its member manifest', async () => {
+    const root = await workspace();
+    try {
+      await rm(`${root}/packages/a/deno.json`);
+      await expect(runNodeManifests(['--check'], root)).rejects.toThrow(
+        'packages/a: no parsable deno.json',
+      );
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('reports removed exports as lane config drift', async () => {
+    const root = await workspace();
+    try {
+      await runNodeManifests(['--write'], root);
+      const path = `${root}/packages/a/deno.json`;
+      const manifest = JSON.parse(await readFile(path, 'utf8'));
+      delete manifest.exports;
+      await writeFile(path, JSON.stringify(manifest));
+      expect(await runNodeManifests(['--check'], root)).toBe(1);
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
   it('agrees with the committed tree', async () => {
     expect(await runNodeManifests(['--check'])).toBe(0);
+  });
+
+  it('copies each lane member permission set verbatim without widening loopback grants', async () => {
+    const config = JSON.parse(await readFile('test/deno-lane/lane.config.json', 'utf8'));
+    const names = [
+      'cli',
+      'diagnostics-plugin',
+      'realtime-backplane-plugin',
+      'runtime',
+      'websocket-plugin',
+    ];
+    expect(Object.keys(config.permissions).sort()).toEqual(names);
+    for (const name of names) {
+      const manifest = JSON.parse(await readFile(`packages/${name}/deno.json`, 'utf8'));
+      expect(config.permissions[name]).toEqual(manifest.test.permissions);
+    }
+    expect(config.permissions.cli.net).toEqual(['127.0.0.1']);
+    expect(config.permissions.runtime.net).toBe(true);
+  });
+});
+
+describe('app type-check configurations', () => {
+  it('shares source aliases and uses the plan-prescribed non-emitting Node options', () => {
+    const apps = JSON.parse(renderAppsTsconfig());
+    const check = JSON.parse(renderCheckTsconfig());
+    expect(apps.extends).toBe('./tsconfig.base.json');
+    expect(apps.compilerOptions).toEqual({
+      noEmit: true,
+      composite: false,
+      declaration: false,
+      declarationMap: false,
+      isolatedDeclarations: false,
+      allowImportingTsExtensions: true,
+      rewriteRelativeImportExtensions: false,
+      typeRoots: ['./node_modules/@types', './packages/runtime/node_modules/@types'],
+      types: ['node', 'deno'],
+      paths: check.compilerOptions.paths,
+    });
+  });
+
+  it('replaces the complete alias map only for the React full-stack app', () => {
+    const minimal = JSON.parse(renderAppTsconfig('apps/minimal'));
+    expect(minimal).toEqual({
+      extends: '../../tsconfig.apps.json',
+      include: ['**/*.ts', '**/*.tsx'],
+    });
+    const full = JSON.parse(renderAppTsconfig('apps/full-stack'));
+    expect(full.extends).toBe(minimal.extends);
+    expect(full.include).toEqual([...minimal.include, 'node_modules/vite/client.d.ts']);
+    expect(full.compilerOptions.jsx).toBe('react-jsx');
+    const { '~/*': alias, ...paths } = full.compilerOptions.paths;
+    expect(alias).toEqual(['./app/*']);
+    const root = JSON.parse(renderAppsTsconfig()).compilerOptions.paths;
+    expect(paths).toEqual(
+      Object.fromEntries(
+        Object.entries(root).map(([key, values]) => [
+          key,
+          (values as string[]).map((value) => '../../' + value.slice(2)),
+        ]),
+      ),
+    );
   });
 });
 

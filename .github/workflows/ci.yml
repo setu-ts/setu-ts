@@ -29,10 +29,6 @@ jobs:
         with:
           # Browser validation runs contributor code but needs no Git credential.
           persist-credentials: false
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: 2.9.6
-      # `deno task <name>` forwards to `pnpm run <name>` since M111e2.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -42,7 +38,7 @@ jobs:
       - name: Install Chromium for the pinned browser suite
         run: npx --yes playwright@1.63.0 install --with-deps chromium
       - name: Browser gate (example and fresh scaffold)
-        run: deno task check:browser
+        run: pnpm run check:browser
   # This is deliberately the only job a fork PR can run. It does not check out contributor code,
   # start a service, or receive secrets. A failure prevents GitHub from treating the skipped,
   # resource-intensive jobs below as successful required checks. It has no checkout step, so there
@@ -64,9 +60,9 @@ jobs:
 
   # Fork PRs remain visible for maintainer triage but do not start repository validation jobs or
   # service containers. An accepted contribution is validated from a trusted repository branch.
-  deno:
+  node:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    name: Format / Lint / Check / Test (Deno)
+    name: Format / Lint / Check / Test
     runs-on: ubuntu-latest
     env:
       # Includes guarded messaging Redis Streams restart/redelivery tests.
@@ -221,9 +217,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Executes third-party code: `deno ci` resolves the whole graph, the
-          # suite lazily imports `npm:` drivers, and `check:apps` installs
-          # dependencies into the example projects. No step needs a credential
+          # Executes third-party code: `pnpm install` resolves the whole graph,
+          # the suite lazily imports npm drivers, and `check:apps` runs every
+          # example application. No step needs a credential
           # afterwards — git only reads local objects and checks for app
           # lockfile drift; none of these commands touches the remote.
           persist-credentials: false
@@ -234,6 +230,9 @@ jobs:
           # above costs the gate nothing.
           fetch-depth: 0
 
+      # Deno is a subject here, not tooling: the SDK fixtures are formatted with
+      # `deno fmt` (their generator's target), and the CLI e2e suites scaffold and
+      # run `--runtime deno` projects.
       - uses: denoland/setup-deno@v2
         with:
           deno-version: 2.9.6
@@ -248,18 +247,14 @@ jobs:
         with:
           version: 12.11.2
 
-      - name: Install Node test dependencies
+      # Requires the committed lockfile and refuses a dependency graph that
+      # would alter it, so the tests run only against the reviewed resolution.
+      - name: Frozen dependency install
         run: pnpm install --frozen-lockfile
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-
-      # Requires the committed lockfile and refuses a dependency graph that
-      # would alter it. The tests below therefore run only against the reviewed
-      # resolution rather than silently absorbing a new range result.
-      - name: Frozen dependency install
-        run: deno ci
 
       # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
       # KEYCLOAK_URL. A step rather than a `services:` container because the
@@ -427,24 +422,24 @@ jobs:
           exit 1
 
       - name: Format check
-        run: deno task fmt:check
+        run: pnpm run fmt:check
 
       - name: Lint
-        run: deno task lint
+        run: pnpm run lint
 
       - name: Type check
-        run: deno task check
+        run: pnpm run check
 
       # Catches a committed doc that renders wrong while every other gate stays
       # green: a runaway code fence swallowing the rest of the file, an anchor
       # link pointing at a heading that no longer exists, or a section absent
-      # from its own table of contents. `deno fmt` accepts all three.
+      # from its own table of contents. Prettier accepts all three.
       - name: Documentation check
-        run: deno task check:docs
+        run: pnpm run check:docs
 
       - name: Example applications
         run: |
-          deno task check:apps
+          pnpm run check:apps
           git diff --exit-code -- apps
         env:
           ALLOW_SKIP: cloudflare
@@ -455,11 +450,40 @@ jobs:
       - name: Node package tests with coverage
         run: pnpm test:coverage
 
-      - name: Deno runtime proofs with coverage
-        run: deno task test:deno-lane
-
       - name: Root and script tests with coverage
-        run: deno task test:coverage
+        run: pnpm run test:tooling:coverage
+
+  deno-lane:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    name: Deno runtime lane
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Executes third-party code (the lane's npm graph) but runs no git command.
+          persist-credentials: false
+
+      # The lane's subject: Deno-only runtime proofs, checked and run against the
+      # committed test/deno-lane/deno.lock.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
+
+      # The driver is a Node script, and the lane imports the workspace's
+      # installed npm graph.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+
+      - name: Frozen dependency install
+        run: pnpm install --frozen-lockfile
+
+      - name: Deno runtime proofs with coverage
+        run: pnpm run test:deno-lane
 
   boundary-compatibility:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -471,10 +495,6 @@ jobs:
           # Executes third-party code: this job exists to install and exercise
           # several supported third-party majors. It runs no git command at all.
           persist-credentials: false
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: 2.9.6
 
       # The matrix files are Vitest suites since M111b, so they run on Node.
       - uses: actions/setup-node@v4
@@ -492,7 +512,7 @@ jobs:
       # installed. This targeted matrix makes the declared boundary claims
       # independently visible in CI.
       - name: Boundary compatibility matrix
-        run: deno task check:compat
+        run: pnpm run check:compat
 
   # M111a §3.10: every member builds with tsc, packs with pnpm, and installs
   # with PLAIN npm into an empty project that then serves a request and a
@@ -511,10 +531,6 @@ jobs:
           # it runs no git command at all.
           persist-credentials: false
 
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: 2.9.6
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -527,14 +543,19 @@ jobs:
         with:
           bun-version: 1.4.0
 
+      # The manifest check imports `yaml` (the workspace list reader), so the
+      # repository dependencies are installed first.
+      - name: Frozen dependency install
+        run: pnpm install --frozen-lockfile
+
       - name: Generated manifests agree with the sources
-        run: deno run --allow-read --allow-env=TSC_WATCHFILE,TSC_NONPOLLING_WATCHER,TSC_WATCHDIRECTORY,NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,TSC_WATCH_POLLINGINTERVAL_LOW,TSC_WATCH_POLLINGINTERVAL_MEDIUM,TSC_WATCH_POLLINGINTERVAL_HIGH,TSC_WATCH_POLLINGCHUNKSIZE_LOW,TSC_WATCH_POLLINGCHUNKSIZE_MEDIUM,TSC_WATCH_POLLINGCHUNKSIZE_HIGH,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_LOW,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_MEDIUM,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_HIGH scripts/node-manifests.ts --check
+        run: node scripts/node-manifests.ts --check
 
       - name: Pack and boot on Node 24, Node 22 and Bun
-        run: deno task check:node-build --require-all
+        run: pnpm run check:node-build --require-all
 
-  # Deployment artifacts are YAML and Dockerfiles: `deno fmt`, `deno lint` and
-  # `deno check` cannot see a defect in any of them. Only building the images
+  # Deployment artifacts are YAML and Dockerfiles: the format, lint and type
+  # gates cannot see a defect in any of them. Only building the images
   # and applying the manifests to a real cluster can, and each of these has
   # already caught something the other gates passed over — a probe path that
   # 404s, an image whose non-numeric user Kubernetes refuses, a RoleBinding
@@ -547,11 +568,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Executes third-party code: the image builds run `deno cache`, which
-          # resolves and compiles the dependency graph, and the cluster gate
+          # Executes third-party code: the image builds run `pnpm install`, which
+          # resolves the dependency graph, and the cluster gate
           # drives kind, kubectl and helm. It runs no git command at all.
           persist-credentials: false
 
+      # `check:deploy --generated` scaffolds and builds a Deno-target project.
       - uses: denoland/setup-deno@v2
         with:
           deno-version: 2.9.6
@@ -593,7 +615,7 @@ jobs:
 
       # Render drift, image builds, the Compose model, and the generated workspace.
       - name: Deployment gate
-        run: deno task check:deploy
+        run: pnpm run check:deploy
 
       # The real proof: apply the COMMITTED manifests to the cluster, wait for
       # a rollout (which only completes if the readiness probe passes), serve a
@@ -602,7 +624,7 @@ jobs:
       # kind-action already created the cluster, so the gate reuses it.
       # KEEP_CLUSTER stops the gate deleting a cluster the action owns.
       - name: Cluster end-to-end
-        run: deno task check:deploy --cluster
+        run: pnpm run check:deploy --cluster
         env:
           KEEP_CLUSTER: '1'
 
@@ -619,23 +641,19 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v4
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: 2.9.6
       - name: Install without lifecycle scripts (same flags as publish)
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Publish dry-run
-        run: deno task release:publish --dry-run
+        run: pnpm run release:publish --dry-run
       - name: Release consistency
-        run: deno task release:verify "$(jq -r .version packages/kernel/deno.json)"
+        run: pnpm run release:verify "$(jq -r .version packages/kernel/package.json)"
       - name: Sweep for residual version references
-        run: deno task check:versions
+        run: pnpm run check:versions
 
-  # Node/Bun compat lives in compat.yml and consumes all 51 published npm
-  # packages at latest, testing the last release independently of HEAD. It
-  # probes the unpublished scope and arms itself on the first npm release.
-  # This separate Deno job keeps proving resolution of the historical JSR
-  # view-plugin release and its transitive JSR graph.
+  # Node/Bun compat lives in compat.yml and consumes the published npm packages
+  # at latest, testing the last release independently of HEAD. This separate
+  # job proves a Deno project resolves the npm view-plugin release, records it
+  # as an `npm:` import and in the lock, and imports it.
   deno-view-plugin-resolution:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Deno view-plugin resolution
@@ -658,16 +676,16 @@ jobs:
           temporary="$(mktemp -d)"
           cd "$temporary"
           deno init --quiet
-          deno add --minimum-dependency-age=0 jsr:@setu-ts/view-plugin
-          deno eval --allow-read --config deno.json '
+          deno add --minimum-dependency-age=0 npm:@setu-ts/view-plugin
+          deno eval --allow-read --allow-env --config deno.json '
             const config = JSON.parse(await Deno.readTextFile("deno.json"));
             const specifier = config.imports?.["@setu-ts/view-plugin"];
-            if (typeof specifier !== "string" || !specifier.startsWith("jsr:@setu-ts/view-plugin@")) {
-              throw new Error("deno add did not record the view-plugin JSR dependency");
+            if (typeof specifier !== "string" || !specifier.startsWith("npm:@setu-ts/view-plugin@")) {
+              throw new Error("deno add did not record the view-plugin npm dependency");
             }
             const lock = JSON.parse(await Deno.readTextFile("deno.lock"));
-            if (!Object.keys(lock.jsr ?? {}).some((key) => key.startsWith("@setu-ts/view-plugin@"))) {
-              throw new Error("deno add did not lock the view-plugin JSR dependency");
+            if (!Object.keys(lock.npm ?? {}).some((key) => key.startsWith("@setu-ts/view-plugin@"))) {
+              throw new Error("deno add did not lock the view-plugin npm dependency");
             }
             await import("@setu-ts/view-plugin");
           '
@@ -679,17 +697,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Does NOT execute third-party code — it reads `deno.lock` and queries
+          # Does NOT execute third-party code — it reads `pnpm-lock.yaml` and queries
           # the advisory endpoints — but it needs no credential either, so the
           # default persistence is a credential in reach for no benefit. It runs
           # no git command at all.
           persist-credentials: false
 
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: 2.9.6
-
-      # `deno task <name>` forwards to `pnpm run <name>` since M111e2.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -697,14 +710,13 @@ jobs:
         with:
           version: 12.11.2
 
-      # Native dependency audit (JSR + npm deps in deno.lock).
-      # OSV-Scanner is not used: it has no deno.lock support.
+      # `pnpm audit` over pnpm-lock.yaml.
       #
       # `audit:ci`, not `audit`: the npm advisory endpoint flakes, and a bare
-      # `deno audit` then fails having scanned nothing. The wrapper retries a
+      # `pnpm audit` then fails having scanned nothing. The wrapper retries a
       # REGISTRY failure and fails immediately on a real advisory — and still
       # fails if every attempt is a registry failure, because "could not scan"
       # is not "no vulnerabilities". See scripts/audit.ts for why
       # `--ignore-registry-errors` is deliberately not used.
       - name: Audit
-        run: deno task audit:ci
+        run: pnpm run audit:ci

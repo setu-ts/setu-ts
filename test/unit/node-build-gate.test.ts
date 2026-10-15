@@ -116,7 +116,7 @@ describe('the CI job runs the gate strictly (M111a §3.10)', () => {
   }
 
   it('passes --require-all, so a missing runtime fails instead of skipping', async () => {
-    expect(await nodeBuildJob()).toContain('run: deno task check:node-build --require-all');
+    expect(await nodeBuildJob()).toContain('run: pnpm run check:node-build --require-all');
   });
 
   it('installs every runtime a leg needs, and drift-checks the manifests', async () => {
@@ -124,12 +124,8 @@ describe('the CI job runs the gate strictly (M111a §3.10)', () => {
     expect(job).toContain('uses: actions/setup-node@v4');
     expect(job).toContain('uses: oven-sh/setup-bun@v2');
     expect(job).toContain('run: corepack enable');
-    // TypeScript reads its watch variables at load, so the drift check needs env access,
-    // scoped to those names rather than granted wholesale.
-    const drift = job.match(
-      /run: deno run --allow-read (--allow-env=\S+) scripts\/node-manifests\.ts --check/,
-    );
-    expect(drift).not.toBeNull();
-    expect(drift![1]).toContain('TSC_WATCHFILE');
+    // The manifest drift check runs under Node (M111e3); Deno is not set up in this job.
+    expect(job).toMatch(/^ +run: node scripts\/node-manifests\.ts --check$/m);
+    expect(job).not.toContain('setup-deno');
   });
 });

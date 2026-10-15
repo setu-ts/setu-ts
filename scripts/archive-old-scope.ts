@@ -3,7 +3,7 @@
  * Archives every package in the retired `@hono-enterprise` JSR scope.
  *
  * ```
- * JSR_TOKEN=jsrp_… deno task release:archive-old-scope [--dry-run]
+ * JSR_TOKEN=jsrp_… pnpm run release:archive-old-scope [--dry-run]
  * ```
  *
  * WHY THIS EXISTS. `v0.1.0-alpha.5` renamed the project to Setu-TS and
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       'JSR_TOKEN is not set.\n\n' +
         '  1. Create a personal access token at https://jsr.io/account/tokens\n' +
         '  2. Re-run with it in the environment, e.g. (fish):\n' +
-        '       env JSR_TOKEN=jsrp_… deno task release:archive-old-scope\n',
+        '       env JSR_TOKEN=jsrp_… pnpm run release:archive-old-scope\n',
     );
     process.exitCode = 2;
     return;

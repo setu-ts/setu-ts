@@ -3,7 +3,7 @@
 How to package a Setu-TS application as a container image and run it under Docker Compose or
 Kubernetes, plus the Cloudflare Workers path, which is not a container at all.
 
-Everything here is exercised by `deno task check:deploy`, which builds the images for real,
+Everything here is exercised by `pnpm run check:deploy`, which builds the images for real,
 re-renders the Kubernetes manifests from the chart, and — with `--cluster` — applies them to a live
 [kind](https://kind.sigs.k8s.io/) cluster and serves a request through them.
 
@@ -23,7 +23,7 @@ Two Dockerfiles cover every example, selected with `--build-arg APP=<name>`:
 
 | File                                                          | Base                            | Use it when                                                            |
 | ------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------- |
-| [`docker/Dockerfile`](../docker/Dockerfile)                   | `denoland/deno:alpine`          | The general case. Ships the Deno runtime and the module cache.         |
+| [`docker/Dockerfile`](../docker/Dockerfile)                   | `node:24-alpine`                | The general case. Ships Node and the app's production dependencies.    |
 | [`docker/Dockerfile.compiled`](../docker/Dockerfile.compiled) | `gcr.io/distroless/cc-debian12` | You want no shell, no package manager and no interpreter in the image. |
 
 ```bash
@@ -37,47 +37,50 @@ docker build -f docker/Dockerfile.compiled --build-arg APP=compiled-binary -t se
 ### The build context must be the repository root
 
 Note the trailing `.` above: the context is the repo root, not the application directory, and this
-is a correctness requirement rather than a convention. An example's `deno.json` maps only the
-packages it imports **directly** — `@setu-ts/common` reaches `@setu-ts/kernel` through the root
-workspace. Build without the root `deno.json` and Deno resolves that specifier against JSR instead
-of the local workspace member:
-
-<!-- version:history -->
-
-```
-error: Could not find version of '@setu-ts/common' that matches specified version constraint '^0.8.0'
-```
+is a correctness requirement rather than a convention. An example is a member of the pnpm workspace:
+it depends on `@setu-ts/*` as `workspace:^`, and only the root `pnpm-workspace.yaml` and
+`pnpm-lock.yaml` let `pnpm install --frozen-lockfile --filter <app>...` link those members. The
+build stage compiles the members the app needs with `tsc -b`, and `pnpm deploy --prod` copies the
+app with each workspace dependency's packed `dist/`, so the runtime stage runs the built framework
+rather than its source.
 
 Building from source also means an image tracks your working tree rather than a published snapshot,
-which is what you want during a version bump, when the pinned version is not on JSR yet.
+which is what you want during a version bump, when the pinned version is not on npm yet.
 
-### Pin the base image to your Deno version
+### Pin the base image and pnpm
 
-Both Dockerfiles read one `ARG DENO_VERSION`. It must be at least the version that wrote your
-committed lockfiles — an older base fails with `Unsupported lockfile version '5'`, and a floating
-tag makes that failure arrive on an unrelated day.
+Both Dockerfiles use a `node:24` base and install the same pnpm version the root `package.json` pins
+in `packageManager`. A floating tag makes a runtime upgrade arrive on an unrelated day.
 
 ### Image size
 
-`deno compile` does **not** produce a small image. Measured on the `compiled-binary` example:
+The compiled variant is a Node
+[single executable application](https://nodejs.org/api/single-executable-applications.html) (SEA):
+the app is bundled with esbuild and injected into a copy of the `node` binary. It does **not**
+produce a small image. Measured with `docker images`:
 
-| Image                               | Size    |
-| ----------------------------------- | ------- |
-| `deno compile` → `distroless/cc`    | 44.9 MB |
-| `denoland/deno:alpine` + `deno run` | 52.4 MB |
+| Image                                          | Size   |
+| ---------------------------------------------- | ------ |
+| Node SEA → `distroless/cc` (`compiled-binary`) | 211 MB |
+| `node:24-alpine` + `tsx` (`minimal`)           | 268 MB |
+| `node:24-alpine` + `tsx` (`rest-api`)          | 289 MB |
 
-The compiled binary embeds the whole Deno runtime, so the win is modest. Prefer the compiled variant
-for its **reduced attack surface** — no shell, no package manager, nothing to exec — not for size.
+The SEA embeds the whole Node runtime, so the win over the alpine image is modest, and it is about
+4.7× the 44.9 MB the Deno-compiled image measured before the move to Node. Prefer the compiled
+variant for its **reduced attack surface** — no shell, no package manager, nothing to exec — not for
+size.
 
-`scratch` is not an option: the compiled binary is dynamically linked against glibc (`libc.so.6`,
-`libgcc_s.so.1`, and four more), so it needs a base that provides it. `distroless/cc-debian12` is
-the floor. For the same reason the compile stage uses the **Debian** Deno image, not Alpine — an
-Alpine build links against musl and the result will not run on a glibc base.
+`scratch` is not an option: the binary is dynamically linked against glibc (`libc`, `libstdc++`,
+`libgcc_s` and three more), so it needs a base that provides them. `distroless/cc-debian12` is the
+floor. For the same reason the SEA is built on the **Debian** Node image, not Alpine — an Alpine
+builder copies a musl `node` binary, which will not run on a glibc base.
 
 ### Ports are arguments, not `$PORT`
 
-The examples read their port from `Deno.args[0]`, defaulting to 3000, so the image passes it
-positionally and Kubernetes overrides the container `args`. There is no `PORT` environment variable.
+The examples read their port from `process.argv[2]`, defaulting to 3000, so the image passes it
+positionally and Kubernetes overrides the container `args`. The image's `ENTRYPOINT` is
+`node --import tsx` and its `CMD` is `main.ts 3000`, so the chart's `args` repeat the script name
+before the port. There is no `PORT` environment variable.
 
 ## Local development with Compose
 
@@ -128,8 +131,8 @@ helm install setu k8s/chart --namespace setu --create-namespace \
   --set image.repository=my-registry/my-app --set image.tag=1.0.0
 ```
 
-The two never disagree: `deno task check:deploy --render` re-renders and fails on any difference,
-and `deno task deploy:render` regenerates the committed copy.
+The two never disagree: `pnpm run check:deploy --render` re-renders and fails on any difference, and
+`pnpm run deploy:render` regenerates the committed copy.
 
 Both directories are in `.prettierignore`, for different reasons. `k8s/chart/templates` is not valid
 YAML before rendering — `{{ }}` and block conditionals — so a formatter cannot parse it at all.
@@ -242,7 +245,7 @@ requires a **numeric** `runAsUser`. Numeric is not optional: with `runAsNonRoot`
 an image whose user is a name, because it cannot verify a name is not root —
 
 ```
-container has runAsNonRoot and image has non-numeric user (deno), cannot verify user is non-root
+container has runAsNonRoot and image has non-numeric user (node), cannot verify user is non-root
 ```
 
 — and Docker resolves the name happily, so this fails **only** under Kubernetes. Match the value to
@@ -250,51 +253,47 @@ your image:
 
 | Image                        | `podSecurityContext.runAsUser` |
 | ---------------------------- | ------------------------------ |
-| `docker/Dockerfile`          | `1000` (the `deno` user)       |
+| `docker/Dockerfile`          | `1000` (the `node` user)       |
 | `docker/Dockerfile.compiled` | `65532` (distroless `nonroot`) |
 
-Because the root filesystem is read-only, `/tmp` is mounted as an `emptyDir`. Do **not** add an
-`emptyDir` at `/deno-dir`: the image caches its entire module graph there at build time, and
-mounting an empty volume over it masks the cache, so the container tries to re-resolve from jsr.io
-and npm at startup and dies with `JSR package manifest for '@hono/hono' failed to load` — fatal in
-an air-gapped cluster.
+Because the root filesystem is read-only, `/tmp` is mounted as an `emptyDir`. Do **not** mount a
+volume over `/srv`: the image holds the app and its installed dependencies there, and an empty
+volume would hide them, so the container could not start.
 
 ## Graceful shutdown
 
 **A project scaffolded by `setu new` now installs one for you**; anything older, and any entry you
 wrote yourself, needs the handler below.
 
-Deno's default action for `SIGTERM` ends the process immediately: measured in a container,
+The default action for `SIGTERM` ends the process immediately: measured in a container,
 `docker stop` returned in 144 ms with exit code 143, meaning `app.stop()` never ran. In that state
 `terminationGracePeriodSeconds` is decorative, in-flight requests are cut, and every
 `onStopping`/`onShutdown` hook — service-discovery deregistration, database and broker disconnects —
 is skipped. A generated project reproduced that exactly until the CLI began emitting the listener.
 
 The framework itself still does not install it: a library that grabs process signals has a side
-effect at import time, and the API is runtime-specific — the CLI emits `Deno.addSignalListener` or
-`process.on` depending on the target, and nothing at all for Cloudflare Workers, which has no
-process to signal.
+effect at import time. The handler goes through `IRuntimeServices.onSignal`, which is absent where
+no signal can be caught (Windows, Cloudflare Workers), so the same block runs on Node, Deno and Bun.
 
 This is what a generated `main.ts` carries, and what to add to an entry you wrote:
 
 ```typescript
+const runtime = createRuntimeServices();
 const app = createApp();
 await app.start({ port });
 
-if (Deno.build.os !== 'windows') {
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    Deno.addSignalListener(signal, () => {
-      // A rejecting onShutdown hook makes stop() reject; without .catch the process dies with
-      // an unhandled rejection instead of reporting why.
-      void app
-        .stop()
-        .then(() => Deno.exit(0))
-        .catch((error: unknown) => {
-          console.error('Graceful shutdown failed:', error);
-          Deno.exit(1);
-        });
-    });
-  }
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
+    // A rejecting onShutdown hook makes stop() reject; without .catch the process dies with
+    // an unhandled rejection instead of reporting why.
+    void app
+      .stop()
+      .then(() => runtime.exit(0))
+      .catch((error: unknown) => {
+        console.error('Graceful shutdown failed:', error);
+        runtime.exit(1);
+      });
+  });
 }
 ```
 
@@ -471,11 +470,11 @@ application through `CloudflarePlugin`. Nothing on this page — probes, gracefu
 ## The deployment gate
 
 ```bash
-deno task check:deploy               # render drift + image builds + compose + generated
-deno task check:deploy --render      # just the manifest/chart drift check
-deno task check:deploy --cluster     # real kind cluster: apply, roll out, serve, check RBAC
-deno task check:deploy --generated   # scaffold a workspace, build ITS image, serve it air-gapped
-deno task deploy:render              # regenerate k8s/manifests/ from the chart
+pnpm run check:deploy               # render drift + image builds + compose + generated
+pnpm run check:deploy --render      # just the manifest/chart drift check
+pnpm run check:deploy --cluster     # real kind cluster: apply, roll out, serve, check RBAC
+pnpm run check:deploy --generated   # scaffold a workspace, build ITS image, serve it air-gapped
+pnpm run deploy:render              # regenerate k8s/manifests/ from the chart
 ```
 
 `--cluster` creates a kind cluster, loads the locally built image, applies the **committed**
@@ -495,14 +494,14 @@ gate uses, so a missing prerequisite can never be mistaken for a pass.
 Each check is known to discriminate — every one of these was broken deliberately and observed
 failing:
 
-| Break                                         | What fails                                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Probe path → `/health/live`                   | Rollout never completes; ready replicas stay 0.                                       |
-| Remove `COPY deno.json` from the Dockerfile   | Build fails resolving `@setu-ts/common`.                                              |
-| Restore `--no-lock` in the generated `CMD`    | The air-gapped `--generated` run dies fetching an uncached npm transitive dependency. |
-| Hand-edit a committed manifest                | `--render` fails and names the file.                                                  |
-| Drop `watch` from the discovery Role          | `kubectl auth can-i watch` answers `no`.                                              |
-| Point the Service selector at a missing label | Endpoints go empty and the request is refused — while `kubectl apply` still succeeds. |
+| Break                                            | What fails                                                                                   |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Probe path → `/health/live`                      | Rollout never completes; ready replicas stay 0.                                              |
+| Remove `COPY pnpm-lock.yaml` from the Dockerfile | `pnpm install --frozen-lockfile` refuses: `ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE`. |
+| Restore `--no-lock` in the generated `CMD`       | The air-gapped `--generated` run dies fetching an uncached npm transitive dependency.        |
+| Hand-edit a committed manifest                   | `--render` fails and names the file.                                                         |
+| Drop `watch` from the discovery Role             | `kubectl auth can-i watch` answers `no`.                                                     |
+| Point the Service selector at a missing label    | Endpoints go empty and the request is refused — while `kubectl apply` still succeeds.        |
 
 The generated-image gate builds commented `deno.json`, `deno.jsonc`, and inherited-import layouts,
 inspecting each image for the development entry and connector cache. It then boots a real Redis

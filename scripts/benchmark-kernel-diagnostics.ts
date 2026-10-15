@@ -22,8 +22,8 @@
  * workstation is around 5% even at a full window.
  *
  * Usage:
- *   node --import ./test/node-source-register.ts scripts/benchmark-kernel-diagnostics.ts --mode=disabled
- *   node --import ./test/node-source-register.ts scripts/benchmark-kernel-diagnostics.ts --mode=enabled
+ *   node --import ./scripts/lib/source-register.ts scripts/benchmark-kernel-diagnostics.ts --mode=disabled
+ *   node --import ./scripts/lib/source-register.ts scripts/benchmark-kernel-diagnostics.ts --mode=enabled
  *
  * @module
  */

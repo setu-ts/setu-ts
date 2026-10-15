@@ -1,11 +1,6 @@
+import { freePort, startHost, SOURCE_HOST_ARGS } from '../smoke-helpers.ts';
+import { run as runProcess } from '../../scripts/lib/run.ts';
 import { exerciseRealtimeClients } from './driver.ts';
-
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr as Deno.NetAddr;
-  listener.close();
-  return address.port;
-}
 
 /**
  * Waits for a server to answer, naming it if it never does.
@@ -31,21 +26,13 @@ async function waitForServer(baseUrl: string, label: string): Promise<void> {
 }
 
 async function run(command: string, args: readonly string[]): Promise<void> {
-  const outcome = await new Deno.Command(command, {
-    args: [...args],
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }).output();
-  if (!outcome.success) throw new Error(`${command} realtime driver failed.`);
+  const outcome = await runProcess(command, args, { inherit: true });
+  if (outcome.code !== 0) throw new Error(`${command} realtime driver failed.`);
 }
 
-const serverPort = freePort();
+const serverPort = await freePort();
 const baseUrl = `http://127.0.0.1:${serverPort}`;
-const server = new Deno.Command('deno', {
-  args: ['run', '-A', 'main.ts', String(serverPort)],
-  stdout: 'null',
-  stderr: 'inherit',
-}).spawn();
+const server = startHost(process.execPath, [...SOURCE_HOST_ARGS, 'main.ts', String(serverPort)]);
 
 try {
   await waitForServer(baseUrl, 'Realtime client server');
@@ -66,12 +53,16 @@ try {
   // this one runs.
   await run('npx', ['--yes', 'wrangler', '--version']);
 
-  const workerdPort = freePort();
-  const worker = new Deno.Command('npx', {
-    args: ['wrangler', 'dev', 'worker.ts', '--port', String(workerdPort), '--log-level', 'error'],
-    stdout: 'null',
-    stderr: 'inherit',
-  }).spawn();
+  const workerdPort = await freePort();
+  const worker = startHost('npx', [
+    'wrangler',
+    'dev',
+    'worker.ts',
+    '--port',
+    String(workerdPort),
+    '--log-level',
+    'error',
+  ]);
   try {
     await waitForServer(`http://127.0.0.1:${workerdPort}`, 'workerd client host');
     const response = await fetch(

@@ -228,5 +228,5 @@ package fits the plugin architecture.
 | ------------------ | -------- |
 | `defineWorkerTask` | function |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
