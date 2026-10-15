@@ -454,6 +454,11 @@ export function buildApiDocArgs(
     // largest contentful paint (5.1 s under Lighthouse's mobile throttling).
     '--readme',
     'none',
+    // Each module is a leaf of the sidebar: its page still lists every symbol, but the sidebar no
+    // longer holds every symbol of every package. Expanded, main.js built 15,907 DOM elements on
+    // every page, which put the API index's Lighthouse performance at 0.82-0.87 on CI runners
+    // against the website's 0.9 budget.
+    ...targets.flatMap((target) => ['--navigationLeaves', apiModuleName(target)]),
     '--validation.notDocumented',
     'false',
     '--validation.notExported',
@@ -976,16 +981,16 @@ export function parseTypedocDiagnostics(output: string): DocLintDiagnostic[] {
   return diagnostics;
 }
 
+/** TypeDoc's module name for a configured source entry point (`packages/kernel/src/index.ts` → `kernel/src`). */
+export function apiModuleName(target: string): string {
+  return target
+    .replace(/^\.\//, '')
+    .replace(/^packages\//, '')
+    .replace(/\/index\.ts$/, '')
+    .replace(/\.ts$/, '');
+}
+
 /** TypeDoc's module page for a configured source entry point. */
 export function apiModulePage(target: string): string {
-  return (
-    'modules/' +
-    target
-      .replace(/^\.\//, '')
-      .replace(/^packages\//, '')
-      .replace(/\/index\.ts$/, '')
-      .replace(/\.ts$/, '')
-      .replaceAll('/', '_') +
-    '.html'
-  );
+  return `modules/${apiModuleName(target).replaceAll('/', '_')}.html`;
 }

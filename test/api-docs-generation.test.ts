@@ -21,6 +21,8 @@ import { type Stats } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import {
+  apiModuleName,
+  apiModulePage,
   buildApiDocArgs,
   classifyChildResult,
   CLEAN_PACKAGES,
@@ -125,7 +127,29 @@ describe('API Documentation Generation', () => {
       expect(args.slice(args.indexOf('--readme'), args.indexOf('--readme') + 2)).toEqual([
         '--readme',
         'none',
-      ]);
+      ]); // Every module is a sidebar leaf, named exactly as TypeDoc names the module.
+      expect(
+        args.slice(args.indexOf('--navigationLeaves'), args.indexOf('--navigationLeaves') + 2),
+      ).toEqual(['--navigationLeaves', 'common/src']);
+    });
+
+    it('derives the module page from the module name, for every entry-point shape', () => {
+      for (const [target, name, page] of [
+        ['packages/kernel/src/index.ts', 'kernel/src', 'modules/kernel_src.html'],
+        [
+          'packages/runtime/src/worker/define-worker-task.ts',
+          'runtime/src/worker/define-worker-task',
+          'modules/runtime_src_worker_define-worker-task.html',
+        ],
+        [
+          './packages/starters/rest-starter/src/index.ts',
+          'starters/rest-starter/src',
+          'modules/starters_rest-starter_src.html',
+        ],
+      ] as const) {
+        expect(apiModuleName(target)).toBe(name);
+        expect(apiModulePage(target)).toBe(page);
+      }
     });
 
     it('builds check mode arguments correctly', () => {
