@@ -633,11 +633,11 @@ export async function buildGeneratedImage(
   execute: typeof run = run,
 ): ReturnType<typeof run> {
   const env = { NPM_CONFIG_REGISTRY: registry };
-  const installed = await execute([process.execPath, 'install'], { quiet: true, cwd: root, env });
+  const installed = await execute(['deno', 'install'], { quiet: true, cwd: root, env });
   if (!installed.success) return installed;
 
   const cached = await execute(
-    [process.execPath, 'cache', '--lock=deno.lock', `apps/${GENERATED_MEMBER}/main.ts`],
+    ['deno', 'cache', '--lock=deno.lock', `apps/${GENERATED_MEMBER}/main.ts`],
     { quiet: true, cwd: root, env },
   );
   if (!cached.success) return cached;

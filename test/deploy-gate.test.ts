@@ -301,7 +301,7 @@ describe('skip contract', () => {
     // cluster mode honoured it; render/build/compose exited 1, so a contributor without helm got
     // a hard FAILED and CI could not tell "tool missing" from "gate genuinely failed".
     //
-    // PATH is narrowed to Deno's own directory so `helm` cannot be found while `deno` still can.
+    // PATH is narrowed to Node's own directory so `helm` cannot be found while `node` still can.
     const denoDir = process.execPath.replace(/\/[^/]+$/, '');
     const result = await runProcess(
       process.execPath,
@@ -431,12 +431,12 @@ describe('generated deployment install ordering', () => {
     // and the image's own install step through the build argument.
     const env = { NPM_CONFIG_REGISTRY: REGISTRY };
     expect(calls[0]).toEqual({
-      command: [process.execPath, 'install'],
+      command: ['deno', 'install'],
       cwd: '/workspace/acme',
       env,
     });
     expect(calls[1]).toEqual({
-      command: [process.execPath, 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+      command: ['deno', 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
       cwd: '/workspace/acme',
       env,
     });
@@ -471,7 +471,7 @@ describe('generated deployment install ordering', () => {
       },
     );
     expect(result).toBe(failure);
-    expect(commands).toEqual([[process.execPath, 'install']]);
+    expect(commands).toEqual([['deno', 'install']]);
   });
 
   it('never builds an image after entry point caching fails', async () => {
@@ -490,8 +490,8 @@ describe('generated deployment install ordering', () => {
     );
     expect(result).toBe(failure);
     expect(commands).toEqual([
-      [process.execPath, 'install'],
-      [process.execPath, 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+      ['deno', 'install'],
+      ['deno', 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
     ]);
   });
 });
