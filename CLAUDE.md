@@ -6226,8 +6226,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   sandbox reads package sources and `node_modules` only — granting the whole repository was tried
   and rejected because it exposes `.git` and `.env`. `run()` first detached every child, which would
   have let Ctrl+C orphan a long test run; it now detaches only to enforce a deadline. Two README
-  tables change, both correcting `deno doc` output. Four Deno users pass to M111e3 — complete (PR
-  pending)
+  tables change, both correcting `deno doc` output. Four Deno users pass to M111e3. The round-1
+  security audit found F1–F2, fixed in `c5c6faaa`; round 2 is not yet run — complete (PR #458)
 - **Next milestone** — M111e3 (CI on Node and pnpm, `apps/*` on pnpm, root `deno.json` removed).
   `v0.9.0` is published to npm (2026-10-14); its smoke run and M104 proceed separately.
 
