@@ -1,0 +1,19 @@
+{
+  "name": "setu-ts-example-cqrs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tsx": "^4.20.6",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/cqrs-plugin": "workspace:^"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "tsx main.ts",
+    "smoke": "tsx smoke.ts",
+    "check": "tsc -p tsconfig.json --noEmit"
+  }
+}

@@ -8,8 +8,13 @@
     "isolatedDeclarations": false,
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": false,
+    "typeRoots": [
+      "./node_modules/@types",
+      "./packages/runtime/node_modules/@types"
+    ],
     "types": [
-      "node"
+      "node",
+      "deno"
     ],
     "paths": {
       "@setu-ts/rest-starter": [

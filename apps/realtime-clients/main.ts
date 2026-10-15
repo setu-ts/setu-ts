@@ -1,9 +1,9 @@
 import { createRealtimeClientApp } from './src/app.ts';
 
-const port = Number(Deno.args[0] ?? 3000);
+const port = Number(process.argv[2] ?? 3000);
 const app = createRealtimeClientApp();
 await app.start({ hostname: '127.0.0.1', port });
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-  Deno.addSignalListener(signal, () => void app.stop().then(() => Deno.exit()));
+  process.on(signal, () => void app.stop().then(() => process.exit()));
 }

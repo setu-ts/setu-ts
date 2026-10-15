@@ -1,5 +1,4 @@
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { describe, it, expect } from 'vitest';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { createTestApp } from '@setu-ts/testing';
 import { GreetingPlugin } from '../src/greeting-plugin.ts';

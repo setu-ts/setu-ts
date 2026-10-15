@@ -82,7 +82,7 @@ it('widens tooling and preserves the frozen pre-retirement script coverage set',
   const frozen = [
     'scripts/codemods/*.ts',
     'test/node-helpers.ts',
-    'test/node-source-hooks.ts',
+    'scripts/lib/source-hooks.ts',
     'scripts/pack-members.ts',
     'scripts/registry-overlay.ts',
     'scripts/side-effects.ts',

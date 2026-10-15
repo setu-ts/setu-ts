@@ -55,7 +55,7 @@ export function configurationFor(member: string) {
           'scripts/codemods/*.ts',
           'test/node-helpers.ts',
           // Decides which importers a source redirect may NOT touch (M111d).
-          'test/node-source-hooks.ts',
+          'scripts/lib/source-hooks.ts',
           // The scaffold-install gates' packer and local registry (M111d): `node:`
           // APIs only, and the overlay binds a real socket, which the root Deno lane
           // grants no permission for.
@@ -106,7 +106,7 @@ export function configurationFor(member: string) {
       // member's built `dist/` (absent on a fresh checkout, stale after an edit).
       // The hook maps it to source exactly as `sourceExport` does here, and a
       // Worker inherits these flags from the fork.
-      execArgv: ['--import', new URL('../../test/node-source-register.ts', import.meta.url).href],
+      execArgv: ['--import', new URL('../../scripts/lib/source-register.ts', import.meta.url).href],
       // Deno's former root suite had no default deadline. Full fence inventories
       // compile hundreds of programs; keep their assertions, with a finite budget.
       testTimeout: member === 'tooling' ? 600_000 : 30_000,

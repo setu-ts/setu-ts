@@ -1,4 +1,5 @@
 /* eslint-disable no-console -- a skipped prerequisite must be visible in CI. */
+import { freePort } from '../smoke-helpers.ts';
 import {
   brokeredGreeting,
   callServiceB,
@@ -7,16 +8,8 @@ import {
   registerGreetingResponder,
 } from './src/app.ts';
 
-function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
-}
-
-const serviceBPort = unusedPort();
-const redisUrl = Deno.env.get('REDIS_URL');
+const serviceBPort = await freePort();
+const redisUrl = process.env['REDIS_URL'];
 const serviceB = createServiceB(redisUrl);
 const serviceA = createServiceA(serviceBPort, redisUrl);
 await serviceB.start({ port: serviceBPort });
@@ -28,7 +21,7 @@ try {
   }
   if (redisUrl === undefined) {
     console.warn('SKIP: set REDIS_URL to run the cross-service Redis request/reply smoke check.');
-    Deno.exitCode = 77;
+    process.exitCode = 77;
   } else {
     unsubscribe = await registerGreetingResponder(serviceB);
     if ((await brokeredGreeting(serviceA)) !== 'Hello, service-a!') {

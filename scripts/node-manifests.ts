@@ -57,12 +57,6 @@ import {
   WORKSPACE_SCOPE,
 } from './node-dependency-ranges.ts';
 
-/**
- * Root tests importing an app's Deno entry point remain excluded until the
- * app/browser migration in M111e3 is complete.
- */
-export const CHECK_EXCLUDED_UNTIL_APPS_MOVE: readonly string[] = ['test/browser-gate.test.ts'];
-
 // ── Pure core ─────────────────────────────────────────────────────────────────
 
 /** A member's `deno.json` exports entry, normalised to subpath → source path. */
@@ -535,8 +529,7 @@ export function renderRootPackageJson(dirs: readonly string[]): string {
       scripts: {
         check: 'tsc -p tsconfig.check.json --noEmit',
         'check:apps': 'node scripts/check-apps.ts',
-        'check:browser':
-          'deno run --allow-read=.,$HOME/.cache/ms-playwright,$HOME/Library/Caches/ms-playwright,/etc/os-release,/etc/lsb-release --allow-write=.tmp/browser --allow-env --allow-sys=hostname,cpus,osRelease,uid,gid,homedir --allow-run=deno apps/full-stack/browser/harness.ts',
+        'check:browser': 'node apps/full-stack/browser/harness.ts',
         'check:docs':
           'node scripts/check-docs.ts && node scripts/check-prose-assertions.ts && node scripts/check-example-behaviour.ts && node scripts/check-since-tags.ts && node scripts/check-changelog-coverage.ts && node scripts/generate-api-docs.ts --check',
         'check:since-tags': 'node scripts/check-since-tags.ts',
@@ -1022,7 +1015,6 @@ export function renderCheckTsconfig(): string {
           ...DENO_ONLY_SOURCES,
           'test/deno-lane',
           'test/fixtures/snippets',
-          ...CHECK_EXCLUDED_UNTIL_APPS_MOVE,
         ],
       },
       null,
@@ -1064,7 +1056,8 @@ export function renderAppsTsconfig(): string {
           isolatedDeclarations: false,
           allowImportingTsExtensions: true,
           rewriteRelativeImportExtensions: false,
-          types: ['node'],
+          typeRoots: ['./node_modules/@types', './packages/runtime/node_modules/@types'],
+          types: ['node', 'deno'],
           paths: sourcePaths(),
         },
       },
@@ -1088,7 +1081,11 @@ export function renderAppTsconfig(app: string): string {
               },
             }
           : {}),
-        include: ['**/*.ts', '**/*.tsx'],
+        include: [
+          '**/*.ts',
+          '**/*.tsx',
+          ...(app === 'apps/full-stack' ? ['node_modules/vite/client.d.ts'] : []),
+        ],
       },
       null,
       2,

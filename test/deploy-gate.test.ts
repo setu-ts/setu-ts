@@ -305,7 +305,7 @@ describe('skip contract', () => {
     const denoDir = process.execPath.replace(/\/[^/]+$/, '');
     const result = await runProcess(
       process.execPath,
-      ['--import', './test/node-source-register.ts', 'scripts/check-deploy.ts', '--render'],
+      ['--import', './scripts/lib/source-register.ts', 'scripts/check-deploy.ts', '--render'],
       { env: { ...process.env, ...{ PATH: denoDir } } },
     );
 

@@ -184,4 +184,4 @@ try {
 // not a handle the framework or this example owns; and the same script with the
 // `reactRouter` arm removed exits cleanly. `main.ts` is unaffected — a server is
 // supposed to keep running.
-Deno.exit(0);
+process.exit(0);

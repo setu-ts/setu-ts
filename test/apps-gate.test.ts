@@ -1,20 +1,17 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { isNotFound } from './../scripts/lib/run.ts';
+import { readFile, readdir, stat, mkdir, writeFile, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { tempDir } from './node-helpers.ts';
+import { workspaceMembers } from '../scripts/lib/workspace.ts';
 import {
   classifySmokeExitCode,
   malformedAppDirMessage,
-  prerequisiteTask,
+  checkApps,
   unexpectedSkips,
 } from '../scripts/check-apps.ts';
 
-interface RootConfig {
-  readonly workspace: readonly string[];
-}
-
 interface AppConfig {
-  readonly tasks?: Readonly<Record<string, string>>;
+  readonly scripts?: Readonly<Record<string, string>>;
 }
 
 async function readJson<T>(path: string): Promise<T> {
@@ -51,17 +48,23 @@ describe('application gate configuration', () => {
     );
   });
 
-  it('keeps applications outside the published workspace', async () => {
-    const root = await readJson<RootConfig>('deno.json');
-    expect(root.workspace.some((entry) => entry.includes('apps'))).toBe(false);
+  it('keeps applications outside the published member inventory', async () => {
+    expect((await workspaceMembers()).some((entry) => entry.includes('apps'))).toBe(false);
+    expect(await readFile('pnpm-workspace.yaml', 'utf8')).toContain('apps/*');
   });
 
   it('requires every example application to declare start and smoke tasks', async () => {
     for await (const entry of await readdir('apps', { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const config = await readJson<AppConfig>(`apps/${entry.name}/deno.json`);
-      expect(config.tasks?.start).toBeDefined();
-      expect(config.tasks?.smoke).toBeDefined();
+      const config = await readJson<AppConfig>(`apps/${entry.name}/package.json`);
+      expect(config.scripts?.start).toBeDefined();
+      expect(config.scripts?.smoke).toBeDefined();
+      const pkg = await readJson<{ private: boolean; dependencies: Record<string, string> }>(
+        `apps/${entry.name}/package.json`,
+      );
+      expect(pkg.private).toBe(true);
+      expect(pkg.dependencies.tsx).toBeDefined();
+      await expect(stat(`apps/${entry.name}/deno.json`)).rejects.toThrow();
     }
   });
 
@@ -164,52 +167,6 @@ describe('unexpectedSkips', () => {
     // Not the ALLOW_SKIP-unset case: checkApps() never calls this function when
     // the variable is absent, so warn-only mode is the caller's branch, not this one.
     expect(unexpectedSkips(['cloudflare'], [])).toEqual(['cloudflare']);
-  });
-});
-
-describe('prerequisiteTask', () => {
-  it('returns null when the app declares no install task', () => {
-    expect(prerequisiteTask({ start: 'deno run main.ts', smoke: 'deno run smoke.ts' })).toBeNull();
-  });
-
-  it('returns null when the app declares no tasks at all', () => {
-    expect(prerequisiteTask(undefined)).toBeNull();
-  });
-
-  it('returns the install task when one is declared', () => {
-    expect(prerequisiteTask({ install: 'deno install --allow-scripts' })).toBe('install');
-  });
-});
-
-describe('cold-checkout npm resolution', () => {
-  it('gives every app carrying a package.json an install task to run first', async () => {
-    // `check-apps.ts` type-checks an app BEFORE running the smoke that would
-    // create `node_modules`, and a `package.json` switches Deno to
-    // node_modules resolution — so on a cold checkout the check fails on an
-    // npm specifier the example never declared, reached through the
-    // framework's lazily-imported optional drivers. `prerequisiteTask` fixes
-    // the ordering by running the app's OWN declared install task first, which
-    // means an app with a `package.json` and no such task silently keeps the
-    // bug. Asserted here because a warm tree proves nothing: every local run
-    // passes once `node_modules` exists from any earlier build.
-    for await (const entry of await readdir('apps', { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      let hasPackageJson = true;
-      try {
-        await stat(`apps/${entry.name}/package.json`);
-      } catch (error) {
-        // Only absence means "no npm toolchain here". Any other stat failure
-        // is a real problem, and swallowing it would skip the app and pass
-        // the assertion vacuously — `check-apps.ts` itself rethrows a
-        // non-NotFound error from the equivalent `worker.ts` probe.
-        if (!isNotFound(error)) throw error;
-        hasPackageJson = false;
-      }
-      if (!hasPackageJson) continue;
-
-      const config = await readJson<AppConfig>(`apps/${entry.name}/deno.json`);
-      expect(prerequisiteTask(config.tasks)).toBe('install');
-    }
   });
 });
 
@@ -877,13 +834,13 @@ describe('real-backend CI wiring', () => {
 });
 
 describe('malformedAppDirMessage', () => {
-  it('formats a missing deno.json message for NotFound', () => {
+  it('formats a missing package.json message for NotFound', () => {
     const msg = malformedAppDirMessage(
       'foo',
       Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
     );
     expect(msg).toContain('foo');
-    expect(msg).toContain('missing deno.json');
+    expect(msg).toContain('missing package.json');
     expect(msg).toContain('malformed application directory');
   });
 
@@ -1017,21 +974,101 @@ describe('M111c declared artifact coverage', () => {
     const workspace = JSON.parse(await readFile('package.json', 'utf8'));
     const compat = JSON.parse(await readFile('compat/package.json', 'utf8'));
     const expected = await Promise.all(
-      workspace.workspaces.map(
+      (await workspaceMembers()).map(
         async (dir: string) => JSON.parse(await readFile(`${dir}/package.json`, 'utf8')).name,
       ),
     );
     expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
     expect(expected).toHaveLength(52);
     expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
-    const deno = JSON.parse(await readFile('deno.json', 'utf8'));
-    expect(deno.tasks['publish:check']).toBeUndefined();
-    expect(deno.tasks['release:publish']).toBe('pnpm run release:publish');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');
-    expect(deno.tasks['release:placeholders']).toBe('pnpm run release:placeholders');
     expect(workspace.scripts['release:placeholders']).toBe(
       'node scripts/write-npm-placeholders.ts',
     );
     await expect(stat('compat/.npmrc')).rejects.toThrow();
+  });
+});
+
+describe('Node app gate execution', () => {
+  it('runs declared Node scripts using the source register on a cold app', async () => {
+    const root = await tempDir({ prefix: 'app-command-' });
+    try {
+      await writeFile(`${root}/pnpm-workspace.yaml`, 'packages: [apps/*]');
+      await mkdir(`${root}/apps/a`, { recursive: true });
+      await writeFile(
+        `${root}/apps/a/package.json`,
+        JSON.stringify({
+          scripts: {
+            start: 'node main.ts',
+            check: 'node --check main.ts',
+            smoke: 'node main.ts',
+          },
+        }),
+      );
+      await writeFile(
+        `${root}/apps/a/main.ts`,
+        "import { CAPABILITIES } from '@setu-ts/common'; if (!CAPABILITIES.RUNTIME) throw new Error('Missing source export');\n",
+      );
+      expect(await checkApps(root)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('runs check, source-redirected smoke and optional tests; enforces skipped and malformed apps', async () => {
+    const root = await tempDir({ prefix: 'app-gate-' });
+    const diagnostics = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ];
+    try {
+      await writeFile(`${root}/pnpm-workspace.yaml`, 'packages: [apps/*]');
+      await mkdir(`${root}/apps/a`, { recursive: true });
+      await writeFile(
+        `${root}/apps/a/package.json`,
+        JSON.stringify({
+          scripts: { start: 'tsx main.ts', smoke: 'tsx smoke.ts', test: 'vitest', check: 'tsc' },
+        }),
+      );
+      const commands: string[][] = [];
+      let smokeCode = 0;
+      let checkCode = 0;
+      let testCode = 0;
+      const runner = (args: readonly string[], cwd: string) => {
+        commands.push([...args]);
+        expect(cwd).toBe(`${root}/apps/a`);
+        const code =
+          args.at(-1) === 'smoke' ? smokeCode : args.at(-1) === 'test' ? testCode : checkCode;
+        return Promise.resolve({ code, success: code === 0 });
+      };
+      expect(await checkApps(root, runner)).toBe(false);
+      expect(commands).toEqual([
+        ['pnpm', 'run', 'check'],
+        ['pnpm', 'run', 'smoke'],
+        ['pnpm', 'run', 'test'],
+      ]);
+      smokeCode = 77;
+      expect(await checkApps(root, runner, 'a')).toBe(false);
+      expect(await checkApps(root, runner, '')).toBe(true);
+      smokeCode = 1;
+      expect(await checkApps(root, runner)).toBe(true);
+      smokeCode = 0;
+      testCode = 1;
+      expect(await checkApps(root, runner)).toBe(true);
+      testCode = 0;
+      checkCode = 1;
+      expect(await checkApps(root, runner)).toBe(true);
+      checkCode = 0;
+      await writeFile(`${root}/apps/a/package.json`, '{}');
+      expect(await checkApps(root, runner)).toBe(true);
+      await writeFile(`${root}/apps/a/package.json`, '{');
+      expect(await checkApps(root, runner)).toBe(true);
+      await rm(`${root}/apps/a/package.json`);
+      expect(await checkApps(root, runner)).toBe(true);
+    } finally {
+      diagnostics.forEach((spy) => spy.mockRestore());
+      await rm(root, { recursive: true });
+    }
   });
 });

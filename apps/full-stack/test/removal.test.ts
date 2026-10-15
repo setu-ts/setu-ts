@@ -15,8 +15,9 @@
  * That distinction is the whole claim, so it is asserted rather than asserted
  * in a comment.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { readFile, stat } from 'node:fs/promises';
+import { isNotFound } from '../../../scripts/lib/run.ts';
+import { describe, it, expect } from 'vitest';
 
 const APP_ROOT = new URL('../app/', import.meta.url);
 
@@ -32,10 +33,10 @@ const REPLACED_BY_CAPABILITIES: readonly string[] = [
 /** Reports whether a path exists under `app/`. */
 async function exists(relativePath: string): Promise<boolean> {
   try {
-    await Deno.stat(new URL(relativePath, APP_ROOT));
+    await stat(new URL(relativePath, APP_ROOT));
     return true;
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return false;
+    if (isNotFound(error)) return false;
     throw error;
   }
 }
@@ -51,7 +52,7 @@ describe('the full-stack example', () => {
   });
 
   it('keeps no module-level cache in its service accessors', async () => {
-    const source = await Deno.readTextFile(new URL('config/services.server.ts', APP_ROOT));
+    const source = await readFile(new URL('config/services.server.ts', APP_ROOT), 'utf8');
 
     // Column zero only: an indented `let` inside a function body is ordinary
     // local state, while one at the top level is process-lifetime state that
@@ -79,9 +80,9 @@ describe('the full-stack example', () => {
     // A key set in populateLoadContext but never read is dead surface; a key
     // read but never set silently returns its default and renders an empty
     // page. Both directions are checked, because neither type-checks.
-    const keys = await Deno.readTextFile(new URL('lib/context-keys.server.ts', APP_ROOT));
-    const accessors = await Deno.readTextFile(new URL('config/services.server.ts', APP_ROOT));
-    const config = await Deno.readTextFile(new URL('../setu.config.ts', import.meta.url));
+    const keys = await readFile(new URL('lib/context-keys.server.ts', APP_ROOT), 'utf8');
+    const accessors = await readFile(new URL('config/services.server.ts', APP_ROOT), 'utf8');
+    const config = await readFile(new URL('../setu.config.ts', import.meta.url), 'utf8');
 
     const exported = [...keys.matchAll(/export const (\w+Context)\b/g)].map((match) => match[1]);
     expect(exported.length).toBeGreaterThan(0);
@@ -105,7 +106,7 @@ describe('the full-stack example', () => {
     // from source — so a `{ defaultValue }` literal produces two distinct key
     // objects, every read falls back to its default, and the page renders
     // empty with no error anywhere.
-    const source = await Deno.readTextFile(new URL('lib/context-keys.server.ts', APP_ROOT));
+    const source = await readFile(new URL('lib/context-keys.server.ts', APP_ROOT), 'utf8');
 
     expect(source).toContain('contextKeyFor');
     expect(source).not.toMatch(/=\s*\{\s*defaultValue/);

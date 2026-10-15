@@ -721,7 +721,8 @@ describe('app type-check configurations', () => {
       isolatedDeclarations: false,
       allowImportingTsExtensions: true,
       rewriteRelativeImportExtensions: false,
-      types: ['node'],
+      typeRoots: ['./node_modules/@types', './packages/runtime/node_modules/@types'],
+      types: ['node', 'deno'],
       paths: check.compilerOptions.paths,
     });
   });
@@ -734,7 +735,7 @@ describe('app type-check configurations', () => {
     });
     const full = JSON.parse(renderAppTsconfig('apps/full-stack'));
     expect(full.extends).toBe(minimal.extends);
-    expect(full.include).toEqual(minimal.include);
+    expect(full.include).toEqual([...minimal.include, 'node_modules/vite/client.d.ts']);
     expect(full.compilerOptions.jsx).toBe('react-jsx');
     const { '~/*': alias, ...paths } = full.compilerOptions.paths;
     expect(alias).toEqual(['./app/*']);

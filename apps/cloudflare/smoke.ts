@@ -1,11 +1,6 @@
 /* eslint-disable no-console -- an unavailable external prerequisite must be visible in CI. */
-function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
-}
+import { freePort, startHost } from '../smoke-helpers.ts';
+import { run as runProcess } from '../../scripts/lib/run.ts';
 
 async function waitForReady(baseUrl: string): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -22,51 +17,60 @@ async function waitForReady(baseUrl: string): Promise<void> {
   throw new Error('Wrangler did not start within five seconds.');
 }
 
-let check: Deno.CommandStatus | null = null;
+let check: { code: number } | null = null;
 try {
-  check = await new Deno.Command('wrangler', { args: ['--version'] }).output();
+  check = await runProcess('wrangler', ['--version']);
 } catch (error) {
-  if (!(error instanceof Deno.errors.NotFound)) {
+  if (!(
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  )) {
     throw error;
   }
 }
-if (check === null || !check.success) {
+if (check === null || check.code !== 0) {
   console.warn('SKIP: Wrangler is not installed; Cloudflare smoke check was not run.');
-  Deno.exit(77);
+  process.exit(77);
 }
 
-const port = unusedPort();
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
-const bundle = await new Deno.Command('deno', {
-  args: ['bundle', 'worker.ts', '-o', '../../.tmp/m37-cloudflare-worker.mjs'],
-  stdout: 'null',
-  stderr: 'inherit',
-}).output();
-if (!bundle.success) {
-  throw new Error('Deno could not bundle the Cloudflare Worker.');
-}
-const worker = new Deno.Command('wrangler', {
-  args: [
-    'dev',
-    '../../.tmp/m37-cloudflare-worker.mjs',
-    '--config',
-    'wrangler.toml',
-    '--local',
-    '--test-scheduled',
-    '--compatibility-date',
-    '2025-09-01',
-    '--compatibility-flag',
-    'nodejs_compat',
-    '--persist-to',
-    '../../.tmp/m37-cloudflare-smoke',
-    '--port',
-    String(port),
-    '--log-level',
-    'error',
+const bundle = await runProcess(
+  'pnpm',
+  [
+    'exec',
+    'esbuild',
+    'worker.ts',
+    '--bundle',
+    '--format=esm',
+    '--platform=browser',
+    '--tsconfig=../../tsconfig.apps.json',
+    '--external:node:*',
+    '--outfile=../../.tmp/m37-cloudflare-worker.mjs',
   ],
-  stdout: 'null',
-  stderr: 'null',
-}).spawn();
+  { inherit: true },
+);
+if (bundle.code !== 0) throw new Error('esbuild could not bundle the Cloudflare Worker.');
+const worker = startHost('wrangler', [
+  'dev',
+  '../../.tmp/m37-cloudflare-worker.mjs',
+  '--config',
+  'wrangler.toml',
+  '--local',
+  '--test-scheduled',
+  '--compatibility-date',
+  '2025-09-01',
+  '--compatibility-flag',
+  'nodejs_compat',
+  '--persist-to',
+  '../../.tmp/m37-cloudflare-smoke',
+  '--port',
+  String(port),
+  '--log-level',
+  'error',
+]);
 
 try {
   await waitForReady(baseUrl);

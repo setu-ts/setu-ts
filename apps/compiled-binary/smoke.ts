@@ -1,45 +1,31 @@
-const output = await new Deno.Command('deno', {
-  args: ['compile', '--allow-net', '--allow-env', '--output', '../../.tmp/hono-example', 'main.ts'],
-  stdout: 'inherit',
-  stderr: 'inherit',
-}).output();
-if (!output.success) {
-  throw new Error('deno compile did not produce the example binary.');
-}
+/** Build the single executable and exercise its real HTTP listener. */
+import { fileURLToPath } from 'node:url';
+import { run } from '../../scripts/lib/run.ts';
+import { freePort, startHost } from '../smoke-helpers.ts';
 
-function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
-}
-
-const port = unusedPort();
-const server = new Deno.Command('.tmp/hono-example', {
-  cwd: '../..',
-  stdout: 'piped',
-  stderr: 'piped',
-  args: [String(port)],
-}).spawn();
-let cleanupError: unknown;
+const built = await run('pnpm', ['run', 'build:sea'], { inherit: true });
+if (built.code !== 0) throw new Error('Node SEA build failed.');
+const port = await freePort();
+const server = startHost(
+  fileURLToPath(new URL('../../.tmp/compiled-binary/server', import.meta.url)),
+  [String(port)],
+);
 try {
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const response = await fetch(`http://127.0.0.1:${port}/health`);
-  if (!response.ok || ((await response.json()) as { status: string }).status !== 'ok') {
-    throw new Error('The compiled binary did not serve GET /health.');
-  }
-} finally {
-  try {
-    server.kill('SIGTERM');
-  } catch (error) {
-    if (!(error instanceof TypeError) || error.message !== 'Child process has already terminated') {
-      cleanupError = error;
+  let ready = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`);
+      if (!response.ok || ((await response.json()) as { status: string }).status !== 'ok') {
+        throw new Error('The SEA did not serve GET /health.');
+      }
+      ready = true;
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
+  if (!ready) throw new Error('The SEA did not start within five seconds.');
+} finally {
+  server.kill();
   await server.status;
-}
-
-if (cleanupError !== undefined) {
-  throw cleanupError;
 }

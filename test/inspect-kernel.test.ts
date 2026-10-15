@@ -18,7 +18,7 @@ async function runInspectScript(): Promise<{ stdout: string; stderr: string; cod
     process.execPath,
     [
       '--import',
-      './test/node-source-register.ts',
+      './scripts/lib/source-register.ts',
       '--import',
       './.tmp/inspect-kernel/deny-bind.mjs',
       'scripts/inspect-kernel.ts',

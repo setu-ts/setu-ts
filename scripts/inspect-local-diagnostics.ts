@@ -17,7 +17,7 @@
  * this script.
  *
  * Usage:
- *   node --import ./test/node-source-register.ts scripts/inspect-local-diagnostics.ts
+ *   node --import ./scripts/lib/source-register.ts scripts/inspect-local-diagnostics.ts
  *
  * @module
  */

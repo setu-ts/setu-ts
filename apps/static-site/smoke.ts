@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /**
  * Smoke check for the static-file example.
  *
@@ -9,6 +8,9 @@
  * weak. A smoke that only requests the paths its author already believed
  * worked is not coverage, so each of those is requested explicitly here.
  */
+import { stat } from 'node:fs/promises';
+/* eslint-disable no-console */
+
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { StaticPlugin } from '@setu-ts/static-plugin';
@@ -190,7 +192,7 @@ async function main() {
   );
 
   // The bytes on the wire really are the compressed sidecar, not the source.
-  const sidecarSize = (await Deno.stat('./public/assets/app-a1b2c3d4.js.br')).size;
+  const sidecarSize = (await stat('./public/assets/app-a1b2c3d4.js.br')).size;
   check(
     'serves the compressed bytes',
     brotliBytes.byteLength === sidecarSize,
@@ -218,7 +220,7 @@ async function main() {
 
   if (failures > 0) {
     console.error(`\n${failures} smoke check(s) failed`);
-    Deno.exit(1);
+    process.exit(1);
   }
   console.log('\nAll smoke tests passed');
 }

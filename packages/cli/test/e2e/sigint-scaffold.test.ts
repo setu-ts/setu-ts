@@ -15,7 +15,7 @@ function spawnFixture(root: string, mode: 'handled' | 'unhandled' | 'prompt') {
   return spawnProcess(process.execPath, {
     args: [
       '--import',
-      new URL('../../../../test/node-source-register.ts', import.meta.url).href,
+      new URL('../../../../scripts/lib/source-register.ts', import.meta.url).href,
       '--import',
       pathToFileURL(tsx).href,
       fileURLToPath(new URL('../fixtures/sigint-scaffold.ts', import.meta.url)),

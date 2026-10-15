@@ -24,7 +24,7 @@ describe('programmatic API injection examples', () => {
       await writeFile(path, code);
       const output = await runProcess(process.execPath, [
         '--import',
-        './test/node-source-register.ts',
+        './scripts/lib/source-register.ts',
         path,
       ]);
       expect(output.stderr).toBe('');

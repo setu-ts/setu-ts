@@ -49,10 +49,4 @@ export function createDemoApp(): IKernelApplication {
   });
 }
 
-/** Reserves a free port by binding one and releasing it immediately. */
-export function freePort(): number {
-  const listener = Deno.listen({ port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
-}
+export { freePort } from '../../smoke-helpers.ts';

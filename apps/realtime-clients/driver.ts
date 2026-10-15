@@ -61,7 +61,7 @@ if (import.meta.main) {
       readonly process?: { readonly argv?: string[] };
     }
   ).process?.argv;
-  const baseUrl = nodeArgs?.[2] ?? (typeof Deno === 'undefined' ? undefined : Deno.args[0]);
+  const baseUrl = nodeArgs?.[2] ?? (typeof Deno === 'undefined' ? undefined : process.argv[2]);
   if (baseUrl === undefined) {
     throw new Error('Expected the realtime server URL.');
   }

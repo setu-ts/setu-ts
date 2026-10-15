@@ -3,7 +3,7 @@ import { createRuntimeServices } from '@setu-ts/runtime';
 import { createMinimalApp } from './src/app.ts';
 
 const runtime = createRuntimeServices();
-const port = Number(Deno.args[0] ?? 3000);
+const port = Number(process.argv[2] ?? 3000);
 const app = createMinimalApp();
 await app.start({ port });
 console.log(`Minimal app listening at http://localhost:${port}`);

@@ -575,7 +575,7 @@ export function nativeFilePath(fileUrl: URL): string {
 export const CLI_COMMAND: readonly string[] = [
   'node',
   '--import',
-  new URL('../test/node-source-register.ts', import.meta.url).href,
+  new URL('../scripts/lib/source-register.ts', import.meta.url).href,
   '--import',
   new URL('../packages/cli/node_modules/tsx/dist/esm/index.mjs', import.meta.url).href,
   nativeFilePath(new URL('../packages/cli/src/bin.ts', import.meta.url)),

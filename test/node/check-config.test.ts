@@ -1,10 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from '../../scripts/test-lanes.ts';
-import {
-  CHECK_EXCLUDED_UNTIL_APPS_MOVE,
-  renderCheckTsconfig,
-} from '../../scripts/node-manifests.ts';
+import { renderCheckTsconfig } from '../../scripts/node-manifests.ts';
 
 it('generates the check exclusions from the authoritative Deno lane lists', () => {
   const config = JSON.parse(readFileSync('tsconfig.check.json', 'utf8'));
@@ -14,9 +11,8 @@ it('generates the check exclusions from the authoritative Deno lane lists', () =
     ...DENO_ONLY_SOURCES,
     'test/deno-lane',
     'test/fixtures/snippets',
-    ...CHECK_EXCLUDED_UNTIL_APPS_MOVE,
   ]);
-  expect(CHECK_EXCLUDED_UNTIL_APPS_MOVE).toEqual(['test/browser-gate.test.ts']);
+  expect(config.exclude).not.toContain('test/browser-gate.test.ts');
   expect(config.include).toEqual([
     'packages/*/src',
     'packages/*/test',
