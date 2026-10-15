@@ -6251,8 +6251,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   index now lists modules (0.94–0.95). The `cli` lane permission set given `net: true` fails no lane
   test, so that scoping is not guarded; dropping `DENO_NO_PACKAGE_JSON` fails earlier than the plan
   predicted (the first frozen `deno check`) — complete (PR #459)
-- **Next milestone** — M111f (governing documents and the JSR sunset). `v0.9.0` is published to npm
-  (2026-10-14); its smoke run and M104 proceed separately.
+- **Milestone 111f** (governing documents, docs and `scripts/` — the JSR sunset): every repository
+  instruction names a `pnpm run` script that exists, now that M111e3 removed the root `deno.json`.
+  `scripts/toolchain-prose.ts`, run by `check:docs`, refuses `deno task`, `jsr:@setu-ts/`,
+  `@jsr/setu-ts__`, `jsr.io/@setu-ts` and "Deno-first" outside history and a categorized allowlist
+  that ratchets (an unused entry fails). It also refuses a repository-only `deno task`, a bare
+  `deno add`/`jsr add` of `@setu-ts/…` (both resolve from JSR), a `pnpm run` naming a missing
+  script, and `deno lint`/`doc`/`audit` in the governing files. The three bare `deno add` README
+  lines, the website's two JSR install lines and the starters' jsr.io links now point at npm.
+  `set-jsr-metadata.ts` walks only the 49 packages on JSR (it would have 404ed on three) and sends a
+  description derived by `jsrSunsetDescription` — the npm pointer, cut to JSR's 250-byte limit —
+  leaving the shared npm descriptions unchanged; applying it is the maintainer's post-merge step,
+  documented in `docs/releasing.md`. Nothing new is published to JSR and the packages are not
+  archived. Implemented by Codex; its five plan corrections are recorded in the plan. Review found
+  three doc claims the source contradicted (a scaffolded project's test told to run the repository
+  script, and two type-assertion comments still naming `deno test`), all fixed; three negative
+  controls re-run against the real gate each failed on the rule they plant — complete (PR pending)
+- **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
+  separately.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
