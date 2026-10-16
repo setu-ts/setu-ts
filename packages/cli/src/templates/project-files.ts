@@ -419,6 +419,12 @@ function configModule(runtime: TargetRuntime, host: ResolvedHost): string {
       parameter === undefined ? '' : `\n * @param ${parameterName} - ${parameter.doc}`;
     const factoryParameterLine =
       parameter === undefined ? '' : `\n  ${parameterName}?: ${parameter.type},`;
+    // M113d §3.8: on Workers the platform sink is the SECOND parameter of every
+    // generated factory, so the entry can pass it positionally whether or not
+    // this composition reads it. Underscore-prefixed where nothing reads it.
+    const workersWaitUntilLine = runtime === 'cloudflare-workers'
+      ? `\n  _waitUntil?: (promise: Promise<unknown>) => void,`
+      : '';
     return `${imports}
 
 /**
@@ -429,14 +435,20 @@ function configModule(runtime: TargetRuntime, host: ResolvedHost): string {
  *
  * @param env - The discovery environment \`setu commands\` passes positionally
  * on every target; the starter reads configuration itself, so this is
- * forwarded through unchanged.
+ * forwarded through unchanged.${
+          runtime === 'cloudflare-workers'
+            ? `\n * @param _waitUntil - The platform's post-response sink, from \`src/index.ts\`,` +
+              `\n * accepted for one signature on every target; the starter owns its construction,` +
+              `\n * so nothing here reads it.`
+            : ''
+        }
  * @param _devtool - Accepted for one signature on every target. The starter
  * owns its construction, so a devtool composition cannot be honored here —
  * the CLI refuses the devtool opt-in on this template by name.${factoryParameterDoc}
  * @returns The configured, unstarted application
  */
 export async function ${CONFIG_EXPORT}(
-  env?: Readonly<Record<string, unknown>>,
+  env?: Readonly<Record<string, unknown>>,${workersWaitUntilLine}
   _${DEVTOOL_PARAMETER}${factoryParameterLine}
 ): Promise<IKernelApplication> {
   const app = await ${appFactory.symbol}(${
@@ -474,7 +486,12 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
     ...(onWorkers ? [] : ['      ...(devtool?.plugins ?? []),']),
   ].join('\n');
 
-  const wantsWaitUntil = onWorkers && consumesWaitUntil(plugins);
+  // M113d §3.8: on Workers the parameter is ALWAYS declared, so the entry can
+  // pass the platform sink positionally whether or not the plugin list
+  // consumes it. It is underscore-prefixed only when nothing in the factory
+  // reads it, so a project that never registers CloudflarePlugin passes its
+  // own lint.
+  const waitUntilParameter = consumesWaitUntil(plugins) ? 'waitUntil' : '_waitUntil';
   // The devtool composition is the SECOND parameter on every target, never
   // the first: `setu commands` calls this factory with its inert discovery
   // env as the FIRST positional argument on every target (`app-loader.ts`), so
@@ -488,11 +505,9 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
   // (M63/D6).
   const factoryParam = !onWorkers
     ? `\n  _env?: Readonly<Record<string, unknown>>,\n  ${DEVTOOL_PARAMETER}\n`
-    : wantsWaitUntil
-      ? '\n  env: Readonly<Record<string, unknown>> = {},' +
-        '\n  waitUntil?: (promise: Promise<unknown>) => void,' +
-        `\n  _${DEVTOOL_PARAMETER}\n`
-      : `\n  env: Readonly<Record<string, unknown>> = {},\n  _${DEVTOOL_PARAMETER}\n`;
+    : '\n  env: Readonly<Record<string, unknown>> = {},' +
+      `\n  ${waitUntilParameter}?: (promise: Promise<unknown>) => void,` +
+      `\n  _${DEVTOOL_PARAMETER}\n`;
   // The kernel-diagnostics option is gated on the SAME condition as the plugin
   // spread above: on Workers the parameter is rendered `_devtool`, so emitting
   // a reference to `devtool` there produced a `setu.config.ts` that failed its
@@ -513,13 +528,10 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
       `\n * parameter deliberately: \`setu commands\` passes its inert discovery env as the` +
       `\n * FIRST argument on every target, which the unused \`_env\` above absorbs.`;
   const envDoc = onWorkers
-    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler${
-        wantsWaitUntil
-          ? `\n * @param waitUntil - The platform's post-response sink, from \`src/index.ts\`.` +
-            `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
-            `\n * which cannot resolve \`cloudflare:workers\` at all.`
-          : ''
-      }${devtoolDoc}`
+    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler` +
+      `\n * @param ${waitUntilParameter} - The platform's post-response sink, from \`src/index.ts\`.` +
+      `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
+      `\n * which cannot resolve \`cloudflare:workers\` at all.${devtoolDoc}`
     : `\n * @param _env - The discovery environment \`setu commands\` passes positionally on` +
       `\n * every target; accepted and unused, because a socket project reads configuration` +
       `\n * from the process environment.${devtoolDoc}`;
@@ -765,7 +777,6 @@ ${cases}
 function workersEntry(
   workerExports: readonly WorkerExport[],
   entryReExports: readonly string[],
-  wantsWaitUntil: boolean,
 ): string {
   // `env` is threaded in on BOTH paths. On Workers the environment is not
   // process-wide — bindings and variables arrive as the `env` argument below —
@@ -780,10 +791,13 @@ function workersEntry(
   // the plugin README's only usage example shows, breaks the CLI outright with
   // `Unsupported scheme "cloudflare"`. This entry module is never loaded by
   // `setu`, so it is the one place the specifier is safe.
-  const waitUntilImport = wantsWaitUntil ? "import { waitUntil } from 'cloudflare:workers';\n" : '';
+  // M113d §3.8: the sink is imported and passed on EVERY Workers project — a
+  // factory that never reads it takes it as `_waitUntil`, so the positional
+  // pass type-checks either way and a plugin added later needs no entry edit.
+  const waitUntilImport = "import { waitUntil } from 'cloudflare:workers';\n";
   const bootSignature =
     'async function boot(env: Record<string, unknown>): Promise<IKernelApplication> {';
-  const bootCall = `${CONFIG_EXPORT}(env${wantsWaitUntil ? ', waitUntil' : ''})`;
+  const bootCall = `${CONFIG_EXPORT}(env, waitUntil)`;
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
@@ -1928,11 +1942,7 @@ describe('application composition', () => {
   if (runtime === 'cloudflare-workers') {
     files.push({
       path: 'src/index.ts',
-      contents: workersEntry(
-        host.workerExports,
-        host.entryReExports,
-        consumesWaitUntil(host.plugins),
-      ),
+      contents: workersEntry(host.workerExports, host.entryReExports),
     });
     files.push({
       path: 'wrangler.toml',

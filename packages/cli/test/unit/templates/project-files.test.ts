@@ -369,14 +369,17 @@ describe('the Cloudflare Workers target', () => {
     expect(config).toContain('...(waitUntil ? { waitUntil } : {})');
   });
 
-  it('emits no waitUntil parameter for a host that consumes none', () => {
-    // Otherwise a REST project on Workers gains an unused parameter, which its
-    // own type-check rejects.
+  it('declares the waitUntil parameter underscore-prefixed for a host that consumes none (M113d §3.8)', () => {
+    // The entry always passes the platform sink positionally, so the parameter
+    // is declared on every Workers project — but underscore-prefixed where
+    // nothing reads it, so the generated project passes its own lint.
     const config = contentsOf(filesOf(rest), 'setu.config.ts');
     const entry = contentsOf(filesOf(rest), 'src/index.ts');
 
-    expect(config).not.toContain('waitUntil');
-    expect(entry).not.toContain('cloudflare:workers');
+    expect(config).toContain('_waitUntil?: (promise: Promise<unknown>) => void');
+    expect(config).not.toContain('...(_waitUntil');
+    expect(entry).toContain("import { waitUntil } from 'cloudflare:workers';");
+    expect(entry).toContain('createApp(env, waitUntil)');
   });
 
   it('starts with deno serve, which actually binds (X9-7)', () => {

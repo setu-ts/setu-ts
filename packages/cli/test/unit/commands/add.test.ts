@@ -567,7 +567,11 @@ describe('runAddCommand', () => {
     }
     const worker = harness({ '/app/deno.json': DENO_MANIFEST, '/app/wrangler.jsonc': '{}' });
     expect(await worker.run(['cloudflare']), worker.err.join('\n')).toBe(0);
-    expect(worker.out.join('\n')).toContain('Register CloudflarePlugin({ env })');
+    expect(worker.out.join('\n')).toContain(
+      'Register CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })',
+    );
+    // The upgrade pointer for projects scaffolded before the threading (M113d §3.8).
+    expect(worker.out.join('\n')).toContain('docs/upgrading.md');
   });
 
   it('prints only registrations that type-check against their plugin option types', async () => {
