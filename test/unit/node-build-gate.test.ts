@@ -9,6 +9,7 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
+  workersBundleDriver,
   workersBundleEntry,
   workersBundleMembers,
   workersBundleOptions,
@@ -171,6 +172,21 @@ describe('workersBundleOptions (M113d §3.4)', () => {
       conditions: ['workerd', 'worker', 'browser'],
       mainFields: ['browser', 'module', 'main'],
       external: ['node:*', 'cloudflare:*'],
+      preserveSymlinks: true,
     });
+  });
+});
+
+describe('workersBundleDriver (M113d §3.4)', () => {
+  it('imports esbuild by the given URL and passes every option through', () => {
+    const driver = workersBundleDriver('file:///repo/node_modules/esbuild/lib/main.js');
+    expect(driver).toContain(
+      'import { build } from "file:///repo/node_modules/esbuild/lib/main.js";',
+    );
+    expect(driver).toContain("entryPoints: ['worker-entry.mjs'],");
+    expect(driver).toContain('  bundle: true,');
+    for (const [key, value] of Object.entries(workersBundleOptions())) {
+      expect(driver).toContain(`  ${key}: ${JSON.stringify(value)},`);
+    }
   });
 });

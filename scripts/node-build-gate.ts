@@ -63,6 +63,14 @@ export interface WorkersBundleOptions {
   readonly mainFields: readonly string[];
   /** Node built-ins and Cloudflare's platform modules stay runtime imports. */
   readonly external: readonly string[];
+  /**
+   * Resolve through the bundle directory's `node_modules` link rather than its
+   * target. The installed tarballs live inside the repository, and following
+   * the link would let resolution walk up into the repository's own
+   * `node_modules`, where a hoisted optional peer (`graphql` is one) would
+   * satisfy an import a Worker author's install cannot.
+   */
+  readonly preserveSymlinks: true;
 }
 
 /**
@@ -79,7 +87,31 @@ export function workersBundleOptions(): WorkersBundleOptions {
     conditions: ['workerd', 'worker', 'browser'],
     mainFields: ['browser', 'module', 'main'],
     external: ['node:*', 'cloudflare:*'],
+    preserveSymlinks: true,
   };
+}
+
+/**
+ * The script that bundles {@linkcode workersBundleEntry} with
+ * {@linkcode workersBundleOptions}. It imports esbuild by URL because it runs in
+ * a directory outside the repository, where a bare `esbuild` does not resolve.
+ *
+ * @param esbuildUrl - A `file:` URL of the repository's esbuild entry module
+ * @returns The driver module source
+ */
+export function workersBundleDriver(esbuildUrl: string): string {
+  const options = workersBundleOptions();
+  return [
+    `import { build } from ${JSON.stringify(esbuildUrl)};`,
+    'await build({',
+    "  entryPoints: ['worker-entry.mjs'],",
+    "  outfile: 'worker-bundled.mjs',",
+    '  bundle: true,',
+    "  logLevel: 'error',",
+    ...Object.entries(options).map(([key, value]) => `  ${key}: ${JSON.stringify(value)},`),
+    '});',
+    '',
+  ].join('\n');
 }
 
 /**
