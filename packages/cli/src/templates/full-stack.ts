@@ -297,9 +297,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
 # file in it answers instead of an application route with the same path, and
 # the application's middleware never sees that request: no security headers, no
 # authentication. Keep only public files here. It holds the hashed bundles under
-# /assets/, any files from public/, and Vite's .vite/manifest.json (asset names
-# only, which the bundles already reveal); every other path reaches the
-# application.
+# /assets/ and any files from public/; every other path reaches the application.
 [assets]
 directory = "./build/client"
 
