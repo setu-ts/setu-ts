@@ -405,7 +405,7 @@ async function store(
       try {
         await put;
       } catch (error: unknown) {
-        reportWriteFailure(ctx, key, error);
+        reportWriteFailure(ctx, error);
       }
       return;
     }
@@ -418,18 +418,26 @@ async function store(
   try {
     await put;
   } catch (error: unknown) {
-    reportWriteFailure(ctx, key, error);
+    reportWriteFailure(ctx, error);
   }
 }
 
-/** Reports a cache-write failure through the logger, when one is registered. */
-function reportWriteFailure(ctx: IRequestContext, key: string, error: unknown): void {
+/**
+ * Reports a cache-write failure through the logger, when one is registered.
+ *
+ * The record names the request PATH, never the cache key (M113d §10, D1). The
+ * default key is the full URL with its query string plus the tenant id and
+ * locale, and a custom `key` function may build any string; a query string can
+ * carry a credential and a tenant id identifies a customer, so neither belongs
+ * in a log an operator reads to learn which route failed.
+ */
+function reportWriteFailure(ctx: IRequestContext, error: unknown): void {
   if (!ctx.services.has(CAPABILITIES.LOGGER)) return;
 
   ctx.services
     .get<ILogger>(CAPABILITIES.LOGGER)
     .error('cloudflare-cache-api: edge cache write failed, response served uncached', {
-      key,
+      path: ctx.request.path,
       error: error instanceof Error ? error.message : String(error),
     });
 }

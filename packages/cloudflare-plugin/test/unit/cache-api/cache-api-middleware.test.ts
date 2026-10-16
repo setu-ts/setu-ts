@@ -812,6 +812,30 @@ describe('cacheApiMiddleware — the write path', () => {
     expect(logger.records.at(0)?.meta).toMatchObject({ error: 'Response body too large' });
   });
 
+  it('logs the request path, never the key with its query string or tenant (M113d D1)', async () => {
+    const failing: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: () => Promise.reject(new Error('quota')),
+      delete: () => Promise.resolve(false),
+    };
+    const logger = new RecordingLogger();
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.LOGGER, logger);
+    const ctx = contextFor('https://example.test/orders?token=canary-secret', {
+      services,
+      tenant: 'tenant-canary',
+    });
+
+    await cacheApiMiddleware({ cache: failing })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    const meta = logger.records.at(0)?.meta;
+    expect(meta).toEqual({ path: '/orders', error: 'quota' });
+    expect(JSON.stringify(logger.records)).not.toContain('canary');
+  });
+
   it('reports a non-Error rejection as a string', async () => {
     const failing: ICacheApi = {
       match: () => Promise.resolve(undefined),
