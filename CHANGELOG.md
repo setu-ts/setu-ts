@@ -71,6 +71,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Kafka shutdown with sends in flight.** With publishes abandoned at `publishTimeoutMs` during a
+  broker pause, `app.stop()` waited on kafkajs's pending-request drain (about 26 s) and the process
+  never exited, because the abandoned sends kept retrying and reopened connections. The producer
+  close is now bounded at 10 s, and a second close runs once those sends settle.
+
 - **npm installation pointers (M111f).** Auth, queue and GraphQL README Deno install commands now
   select npm explicitly. The website install commands resolve the npm packages.
 

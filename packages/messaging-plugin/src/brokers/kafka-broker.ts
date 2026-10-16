@@ -217,6 +217,15 @@ const MAX_CAUSE_DEPTH = 5;
 const JOIN_SETTLE_TIMEOUT_MS = 10_000;
 
 /**
+ * How long `disconnect()` waits for the producer to close. kafkajs's
+ * `producer.disconnect()` first waits for every pending request — up to its
+ * 30 s request timeout against a hung broker — so an unbounded wait held
+ * `app.stop()` for ~26 s whenever sends were in flight. The close continues
+ * after the bound; see {@link KafkaBroker.disconnect}.
+ */
+const PRODUCER_RELEASE_TIMEOUT_MS = 10_000;
+
+/**
  * kafkajs's consumer `retry` default (`kafkajs/src/index.js:149`), which any
  * consumer-level `retry` REPLACES. Passed beside the restart hook so the
  * consumer keeps the retry count it had before the hook existed (M101b
@@ -420,6 +429,8 @@ export class KafkaBroker implements MessageBrokerAdapter {
   #probe: (() => Promise<boolean | undefined>) | null = null;
   #factory: IKafkaFactory | null = null;
   #producer: unknown | null = null;
+  /** The underlying `producer.send()` calls not yet settled, bound or not. */
+  #inFlightSends = new Set<Promise<unknown>>();
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
@@ -596,15 +607,58 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#groupAdminConnect = null;
 
     if (this.#producer) {
-      try {
-        await (this.#producer as unknown as { disconnect(): Promise<void> }).disconnect();
-      } catch {
-        // Ignore errors during shutdown
-      }
+      await this.#releaseProducer(this.#producer as unknown as { disconnect(): Promise<void> }, [
+        ...this.#inFlightSends,
+      ]);
     }
     this.#producer = null;
     this.#factory = null;
     this.#ready = false;
+  }
+
+  /**
+   * Records an underlying `send()` until it settles. A publish rejected at
+   * `publishTimeoutMs` leaves its send running inside kafkajs; shutdown needs
+   * to know it is still there.
+   */
+  #trackSend<T>(send: Promise<T>): Promise<T> {
+    this.#inFlightSends.add(send);
+    const settle = (): void => {
+      this.#inFlightSends.delete(send);
+    };
+    send.then(settle, settle);
+    return send;
+  }
+
+  /**
+   * Closes the producer within {@link PRODUCER_RELEASE_TIMEOUT_MS}, and closes it
+   * AGAIN once every send in flight at shutdown has settled.
+   *
+   * Two kafkajs behaviours, both measured against a paused Kafka 4.0: its
+   * `disconnect()` waits for pending requests (up to the 30 s request timeout),
+   * and a send abandoned at its bound keeps retrying after the disconnect and
+   * reopens connections nothing closes again — the process then never exits.
+   * The second `disconnect()` after the sends settle is what closes those; on a
+   * healthy broker it finds nothing to close.
+   */
+  async #releaseProducer(
+    producer: { disconnect(): Promise<void> },
+    inFlight: readonly Promise<unknown>[],
+  ): Promise<void> {
+    const release = producer.disconnect().catch(() => {});
+    let timer: unknown;
+    const released = await Promise.race([
+      release.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = this.#runtime.setTimeout(() => resolve(false), PRODUCER_RELEASE_TIMEOUT_MS);
+      }),
+    ]);
+    this.#runtime.clearTimeout(timer);
+    if (inFlight.length > 0 || !released) {
+      void Promise.allSettled([release, ...inFlight])
+        .then(() => producer.disconnect())
+        .catch(() => {});
+    }
   }
 
   /**
@@ -708,18 +762,20 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
     await withDeadline(
       () =>
-        realProducer.send({
-          topic,
-          messages: [
-            {
-              value: serialized,
-              // Kafka's native mapping: the message key decides the partition, so the
-              // same ordering key reaches one partition and stays in publish order.
-              ...(validated.orderingKey !== undefined ? { key: validated.orderingKey } : {}),
-              headers: wireHeaders,
-            },
-          ],
-        }),
+        this.#trackSend(
+          realProducer.send({
+            topic,
+            messages: [
+              {
+                value: serialized,
+                // Kafka's native mapping: the message key decides the partition, so the
+                // same ordering key reaches one partition and stays in publish order.
+                ...(validated.orderingKey !== undefined ? { key: validated.orderingKey } : {}),
+                headers: wireHeaders,
+              },
+            ],
+          }),
+        ),
       {
         timeoutMs: this.#publishTimeoutMs,
         onTimeout: () =>

@@ -209,6 +209,59 @@ describe('M113a Kafka bounds and start position', () => {
     expect(factory.admins[0]!.calls.filter((c) => c.method === 'disconnect')).toHaveLength(1);
   });
 
+  it('bounds the producer close at 10 s and closes again once in-flight sends settle (audit O1)', async () => {
+    vi.useFakeTimers();
+    const factory = new FakeKafkaFactory();
+    const producer = factory.producer();
+    let settleSend: (() => void) | undefined;
+    vi.spyOn(producer, 'send').mockImplementation(
+      () => new Promise<void>((resolve) => (settleSend = resolve)),
+    );
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      publishTimeoutMs: 100,
+    });
+    try {
+      await broker.connect();
+      const publish = broker.publish('orders', {}).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(String(await publish)).toContain('publishTimeoutMs');
+      // kafkajs waits for pending requests (up to its request timeout) before it closes.
+      let finishClose: (() => void) | undefined;
+      const close = vi
+        .spyOn(producer, 'disconnect')
+        .mockImplementationOnce(() => new Promise<void>((resolve) => (finishClose = resolve)));
+      let done = false;
+      const disconnected = broker.disconnect().then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(9999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await disconnected;
+      expect(close).toHaveBeenCalledTimes(1);
+      // Later the first close finishes and the abandoned send settles (its retries
+      // reconnected): the broker closes again.
+      finishClose!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(close).toHaveBeenCalledTimes(1);
+      settleSend!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(close).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes the producer once when nothing was in flight', async () => {
+    const factory = new FakeKafkaFactory();
+    const close = vi.spyOn(factory.producer(), 'disconnect');
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    await broker.publish('orders', {});
+    await broker.disconnect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('bounds a stuck metadata probe at 2 seconds using runtime timers', async () => {
     vi.useFakeTimers();
     const factory = new FakeKafkaFactory();

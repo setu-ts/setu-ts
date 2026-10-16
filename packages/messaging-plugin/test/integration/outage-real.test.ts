@@ -200,6 +200,63 @@ describe('M113a REAL Kafka metadata outage', { skip: !process.env['KAFKA_BROKERS
   }, 90000);
 });
 
+describe(
+  'REAL Kafka shutdown with sends in flight (audit O1)',
+  { skip: !process.env['KAFKA_BROKERS'] },
+  () => {
+    const brokers = (process.env['KAFKA_BROKERS'] ?? '').split(',');
+    const port = Number(brokers[0]!.split(':').at(-1));
+    /** Open sockets to the broker held by this process. */
+    const brokerSockets = (): number =>
+      (process as unknown as { _getActiveHandles(): unknown[] })
+        ._getActiveHandles()
+        .filter((handle) => (handle as { remotePort?: number }).remotePort === port).length;
+
+    it('app.stop() returns at the release bound and leaves no broker connection open', async () => {
+      const container = await containerIdForPort(port);
+      await waitKafkaReady(brokers);
+      const { app, broker } = await startM113App({
+        broker: 'kafka',
+        brokers,
+        publishTimeoutMs: 350,
+      });
+      const topic = `o1.stop.${crypto.randomUUID()}`;
+      await broker.publish(topic, {});
+      let paused = false;
+      let stopped = false;
+      try {
+        await docker(['pause', container]);
+        paused = true;
+        const sends = await Promise.allSettled([1, 2, 3].map((i) => broker.publish(topic, { i })));
+        expect(sends.map((r) => r.status)).toEqual(['rejected', 'rejected', 'rejected']);
+        const stopStarted = performance.now();
+        await app.stop();
+        stopped = true;
+        const stopMs = performance.now() - stopStarted;
+        // kafkajs waits for pending requests up to its 30 s request timeout; the
+        // broker bounds that wait at 10 s (was ~26 s).
+        expect(stopMs).toBeLessThan(12000);
+        await docker(['unpause', container]);
+        paused = false;
+        // The abandoned sends retry after the first disconnect and reconnect; the
+        // broker closes again once they settle, so nothing keeps the process alive.
+        await waitTrue(
+          () => brokerSockets() === 0,
+          'no open broker socket after stop',
+          45000,
+        );
+      } finally {
+        if (paused) await docker(['unpause', container]);
+        try {
+          await waitKafkaReady(brokers);
+        } finally {
+          if (!stopped) await app.stop();
+        }
+      }
+    }, 120000);
+  },
+);
+
 describe('M113a REAL NATS reconnect', { skip: !process.env['NATS_URL'] }, () => {
   it('recovers after a 26 second outage and an existing consumer delivers again', async () => {
     const url = process.env['NATS_URL']!;
