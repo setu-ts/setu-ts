@@ -6306,6 +6306,28 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   M113o. Implemented by Codex, which stopped on a plan contradiction (§3.3 typed the lock probe
   `Promise<boolean>` while requiring "unknown"); opencode's read-only sweep found three stale doc
   and comment sites — complete (PR #463)
+- **Milestone 113d** (`common` + `react-router-plugin` + `cloudflare-plugin` + `cli` + the loaders
+  of 14 published packages — Workers builds and the edge cache; V9-1, V9-23, V9-4): a Worker
+  importing any Setu-TS package builds whether or not its optional peers are installed. Every bare
+  `import()` in `packages/*/src` is awaited inside the `try` of a same-function `try`/`catch`, whose
+  `catch` throws the new `OptionalDependencyUnavailableError`; the audit's `findUnguardedImports`
+  refuses every other shape, and a `check:node-build` leg bundles all 50 library members with
+  Wrangler's resolution from a directory outside the repository (inside it, a hoisted optional peer
+  such as `graphql` would satisfy the bundle). The rule was set by measurement, against the plan:
+  esbuild tolerates the import only as the operand of `await` (or a `.catch` target, which the rule
+  still refuses for one shape); `const p = import('x')`, `return import('x')` and
+  `Promise.all([import('x')])` fail the build inside a `try`. The edge cache awaits its write when
+  `CloudflarePlugin` has no `waitUntil` host, which warns once on Workers; every generated Workers
+  factory takes `waitUntil` second; `ReactRouterPluginOptions` becomes a union with a `serverBuild`
+  module arm (breaking for implementors who extend it); and the full-stack Workers template, which
+  built but could not start, passes its server build from the entry and gains `.dev.vars` plus
+  `[assets]`/`[build]`. Implemented by Zoo code until it looped, then taken over. Review fixed the
+  audit's rule, the bundle leg's isolation, a `setu add cloudflare` line that did not compile in a
+  `rest` project (its parameter is `_waitUntil`; the command now says to rename it), stray
+  indentation in the generated entry, a wrong config path and a false "the entry already passes it"
+  in the upgrade guide, and overstated package counts. A new e2e builds four Workers templates and
+  boots `rest` (printed and hostless wirings) and `full-stack` on real workerd; not verified against
+  a deployed Worker — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
@@ -6637,12 +6659,14 @@ because nothing defined what one was.
   production even when the package IS installed, because nothing ever imports it: that is a
   non-functional shim, not a lazy import. If a real `import()` forces the construction path to be
   async, make it async (`register()` may return a `Promise`); do not fake a sync constructor with a
-  global. **And the literal import sits inside the `try` block of a `try`/`catch` in the SAME
-  function** (M113d): Wrangler bundles Workers with esbuild, which resolves a bare string-literal
-  `import()` at build time, so an unguarded import fails every Worker that imports the package —
-  even one that never loads the driver. The `catch` throws `OptionalDependencyUnavailableError` (or
-  the package's own named load error carrying it as `cause`); the M113d audit
-  (`findUnguardedImports`) refuses the unguarded shape.
+  global. **And the literal import is AWAITED inside the `try` block of a `try`/`catch` in the SAME
+  function** (`mod = await import('ioredis')`, M113d): Wrangler bundles Workers with esbuild, which
+  resolves a bare string-literal `import()` at build time, so an unguarded import fails every Worker
+  that imports the package — even one that never loads the driver — and an unawaited import fails it
+  even inside the `try` (measured: `const p = import('x')` and `Promise.all([import('x')])` both
+  do). The `catch` throws `OptionalDependencyUnavailableError` (or the package's own named load
+  error carrying it as `cause`); the M113d audit (`findUnguardedImports`) refuses the unguarded
+  shape.
 
 ## Self-review checklist (bugs that slipped through before — check every time)
 
