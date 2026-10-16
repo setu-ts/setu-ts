@@ -137,6 +137,14 @@ export class FakeKafkaConsumer {
   seek(options: { topic: string; partition: number; offset: string }): void {
     this.#record('seek', [options]);
   }
+  /** Records the pause; kafkajs pauses synchronously, ahead of its next fetch. */
+  pause(topics: Array<{ topic: string; partitions?: number[] }>): void {
+    this.#record('pause', [topics]);
+  }
+  /** Records the resume. */
+  resume(topics: Array<{ topic: string; partitions?: number[] }>): void {
+    this.#record('resume', [topics]);
+  }
 
   #subscribedTopics: string[];
   #runOptions: {

@@ -878,6 +878,8 @@ export class KafkaBroker implements MessageBrokerAdapter {
         }) => Promise<void>,
       ): unknown;
       seek(options: { topic: string; partition: number; offset: string }): void;
+      pause?(topics: Array<{ topic: string; partitions?: number[] }>): void;
+      resume?(topics: Array<{ topic: string; partitions?: number[] }>): void;
       stop(): Promise<void>;
       disconnect(): Promise<void>;
     };
@@ -994,6 +996,22 @@ export class KafkaBroker implements MessageBrokerAdapter {
       if (!firstJoin) return;
       firstJoin = false;
       if (start === null || !activeConsumer.running) return;
+      // kafkajs emits GROUP_JOIN synchronously before its first fetch but does
+      // not await this listener, so the assignment is paused here — before the
+      // first await — and resumed once the seeks are applied. Without the
+      // pause, records fetched from the latest offset could be delivered first
+      // and then delivered again after the seek moves the partition back.
+      const partitions = payload.memberAssignment[topic] ?? [];
+      const assignment = [{ topic, partitions }];
+      let paused = false;
+      if (partitions.length > 0) {
+        try {
+          consumerTyped.pause?.(assignment);
+          paused = consumerTyped.pause !== undefined;
+        } catch (error) {
+          warn(error);
+        }
+      }
       try {
         const admin = this.#groupAdmin!;
         const current = await admin.fetchOffsets({ groupId, topics: [topic] });
@@ -1016,13 +1034,21 @@ export class KafkaBroker implements MessageBrokerAdapter {
               entry.partitions.filter((p) => p.offset === '-1').map((p) => p.partition),
             ),
         );
-        for (const partition of payload.memberAssignment[topic] ?? []) {
+        for (const partition of partitions) {
           if (uncommitted.has(partition) && Object.hasOwn(minimum, partition)) {
             consumerTyped.seek({ topic, partition, offset: minimum[partition]! });
           }
         }
       } catch (error) {
         warn(error);
+      } finally {
+        if (paused) {
+          try {
+            consumerTyped.resume?.(assignment);
+          } catch (error) {
+            warn(error);
+          }
+        }
       }
     });
     this.#activeConsumers.set(subscriptionId, activeConsumer);
