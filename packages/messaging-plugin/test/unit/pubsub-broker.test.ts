@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import type { IPubSubSubscription, IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
@@ -1479,5 +1479,31 @@ describe('GcpPubSubBroker — delivered metadata (X28-4)', () => {
     // undefined.
     expect('messageId' in metadata).toBe(false);
     expect('timestamp' in metadata).toBe(false);
+  });
+});
+
+describe('GcpPubSubBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { GcpPubSubBroker } = await import('../../src/brokers/pubsub-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('@google-cloud/pubsub', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), { projectId: 'test-project' });
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@google-cloud/pubsub');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@google-cloud/pubsub');
+    }
   });
 });

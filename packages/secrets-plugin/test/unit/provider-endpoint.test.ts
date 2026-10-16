@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { adaptAwsModule, AwsKmsProvider, type AwsSdkModule } from '../../src/providers/aws-kms.ts';
 import {
@@ -189,4 +189,73 @@ describe('GcpSecretManagerProvider endpoint (M99d)', () => {
       expect(configs).toHaveLength(0);
     });
   }
+});
+
+describe('the guarded SDK imports (M113d §3.1)', () => {
+  it('loadAwsModule rejects with OptionalDependencyUnavailableError when absent', async () => {
+    const { loadAwsModule } = await import('../../src/providers/aws-kms.ts');
+    vi.doMock('@aws-sdk/client-secrets-manager', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadAwsModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@aws-sdk/client-secrets-manager');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-secrets-manager');
+    }
+  });
+
+  it('loadAzureModule rejects with OptionalDependencyUnavailableError when a package is absent', async () => {
+    const { loadAzureModule } = await import('../../src/providers/azure-key-vault.ts');
+    vi.doMock('@azure/keyvault-secrets', () => {
+      throw new Error('Cannot find package');
+    });
+    vi.doMock('@azure/identity', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadAzureModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(['@azure/keyvault-secrets', '@azure/identity']).toContain(loadError.dependency);
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@azure/keyvault-secrets');
+      vi.doUnmock('@azure/identity');
+    }
+  });
+
+  it('loadGcpModule rejects with OptionalDependencyUnavailableError when absent', async () => {
+    const { loadGcpModule } = await import('../../src/providers/gcp-secret-manager.ts');
+    vi.doMock('@google-cloud/secret-manager', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadGcpModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@google-cloud/secret-manager');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@google-cloud/secret-manager');
+    }
+  });
 });

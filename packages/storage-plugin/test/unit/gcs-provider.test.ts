@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IGcsClient } from '../../src/interfaces/index.ts';
 import {
   adaptGcsModule,
@@ -1460,5 +1460,28 @@ describe('GcsProvider getStream — injected client stream shapes', () => {
     expect(threwSync).toBe(false);
     await expect(promise).rejects.toThrow(/GcsProvider: createReadStream\(\) for 'no-shape'/);
     await expect(promise).rejects.toThrow(/neither async-iterable nor an event emitter/);
+  });
+});
+
+describe('loadGcsModule — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    const { loadGcsModule } = await import('../../src/providers/gcs-provider.ts');
+    vi.doMock('@google-cloud/storage', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadGcsModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@google-cloud/storage');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@google-cloud/storage');
+    }
   });
 });

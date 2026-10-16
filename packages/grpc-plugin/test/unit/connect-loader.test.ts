@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
  * literal-argument property is what static analysis can see.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   adaptConnectModule,
   type ConnectImporters,
@@ -246,6 +246,37 @@ describe('loadConnectModule', () => {
         'utf8',
       );
       expect(source).toContain(`import('${SPECIFIER_BY_KEY[key]}')`);
+    }
+  });
+});
+
+describe('DEFAULT_IMPORTERS — the guarded imports (M113d §3.1)', () => {
+  it('each default importer rejects with OptionalDependencyUnavailableError naming its specifier', async () => {
+    const { DEFAULT_IMPORTERS } = await import('../../src/transports/connect-loader.ts');
+    const cases: ReadonlyArray<[keyof typeof DEFAULT_IMPORTERS, string]> = [
+      ['connect', '@connectrpc/connect'],
+      ['protocol', '@connectrpc/connect/protocol'],
+      ['protobuf', '@bufbuild/protobuf'],
+      ['wkt', '@bufbuild/protobuf/wkt'],
+    ];
+    for (const [key, specifier] of cases) {
+      vi.doMock(specifier, () => {
+        throw new Error('Cannot find package');
+      });
+      try {
+        let caught: unknown;
+        try {
+          await DEFAULT_IMPORTERS[key]();
+        } catch (error) {
+          caught = error;
+        }
+        const loadError = caught as Error & { dependency: string; cause: unknown };
+        expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+        expect(loadError.dependency).toBe(specifier);
+        expect(loadError.cause).toBeInstanceOf(Error);
+      } finally {
+        vi.doUnmock(specifier);
+      }
     }
   });
 });

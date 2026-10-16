@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   adaptNodemailerModule,
@@ -146,6 +146,29 @@ describe('SmtpProvider', () => {
       expect(provider.isReady()).toBe(true);
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
+    }
+  });
+});
+
+describe('loadNodemailerModule — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    const { loadNodemailerModule } = await import('../../src/providers/smtp-provider.ts');
+    vi.doMock('nodemailer', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadNodemailerModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('nodemailer');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('nodemailer');
     }
   });
 });

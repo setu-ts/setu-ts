@@ -3,10 +3,11 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { IdempotencyConfigurationError } from '../../src/errors.ts';
 import {
   createRedisIdempotencyClient,
+  loadIoredis,
   validateInjectedClient,
 } from '../../src/stores/redis-client.ts';
 import type { RedisCtor } from '../../src/stores/redis-client.ts';
@@ -98,6 +99,31 @@ describe('validateInjectedClient (M109a §3.5)', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(IdempotencyConfigurationError);
       expect((error as IdempotencyConfigurationError).option).toBe('store.client');
+    }
+  });
+});
+
+describe('loadIoredis — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package \'ioredis\'');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadIoredis();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      // The original rejection rides as `cause` (vitest wraps the mock
+      // factory's own throw, so only its Error-ness is asserted here).
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
     }
   });
 });

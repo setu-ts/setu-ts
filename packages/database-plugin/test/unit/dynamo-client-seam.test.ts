@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { serializeError } from '@setu-ts/common';
 import {
   adaptDynamoSdkModule,
@@ -310,5 +310,27 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
     expect(() =>
       createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://127.0.0.1:8000' }),
     ).not.toThrow();
+  });
+});
+
+describe('createLazyDynamoLoader — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the SDK is absent', async () => {
+    vi.doMock('@aws-sdk/client-dynamodb', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await createLazyDynamoLoader({ region: 'us-east-1' }).load();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@aws-sdk/client-dynamodb');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-dynamodb');
+    }
   });
 });

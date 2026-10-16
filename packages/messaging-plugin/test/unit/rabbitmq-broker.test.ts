@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Buffer } from 'node:buffer';
 import { RabbitMqBroker, validateClient } from '../../src/brokers/rabbitmq-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -657,5 +657,31 @@ describe('RabbitMqBroker request-reply delegation', () => {
     }
     expect(caught).toBeInstanceOf(RequestTimeoutError);
     await broker.disconnect();
+  });
+});
+
+describe('RabbitMqBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { RabbitMqBroker } = await import('../../src/brokers/rabbitmq-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('amqplib', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer());
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('amqplib');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('amqplib');
+    }
   });
 });

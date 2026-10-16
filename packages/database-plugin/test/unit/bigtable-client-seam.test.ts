@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   BigtableFilter,
   IBigtableClient,
@@ -268,4 +268,26 @@ it('preserves both interleaved filter arms on the SDK read wire', async () => {
       filter: { interleave: [[{ all: true }], [{ family: 'cf' }]] },
     });
   expect(log.reads).toEqual([{ filter: { interleave: [[{ all: true }], [{ family: 'cf' }]] } }]);
+});
+
+describe('createLazyBigtableLoader — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the SDK is absent', async () => {
+    vi.doMock('@google-cloud/bigtable', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await createLazyBigtableLoader({ projectId: 'p' }).load();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@google-cloud/bigtable');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@google-cloud/bigtable');
+    }
+  });
 });
