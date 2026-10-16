@@ -17,6 +17,46 @@ import {
 } from '../../src/errors.ts';
 
 describe('M113a Kafka bounds and start position', () => {
+  it('releases the connected producer when the probe admin cannot connect', async () => {
+    const factory = new FakeKafkaFactory();
+    const producer = factory.producer();
+    const disconnect = vi.spyOn(producer, 'disconnect');
+    vi.spyOn(FakeKafkaAdmin.prototype, 'connect').mockRejectedValueOnce(new Error('admin down'));
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    try {
+      await expect(broker.connect()).rejects.toThrow('admin down');
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(broker.isReady()).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('retries the group admin connect on the next subscribe after one failure', async () => {
+    const factory = new FakeKafkaFactory();
+    const warn = vi.fn();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      logger: { error: vi.fn(), warn },
+    });
+    await broker.connect();
+    const connect = vi
+      .spyOn(FakeKafkaAdmin.prototype, 'connect')
+      .mockRejectedValueOnce(new Error('transient'));
+    try {
+      await broker.subscribe('first', () => {}, { queue: 'g1' });
+      expect(warn).toHaveBeenCalledTimes(1);
+      await broker.subscribe('second', () => {}, { queue: 'g2' });
+      // A third admin (probe, failed group admin, retried group admin) did the read.
+      expect(factory.admins).toHaveLength(3);
+      expect(factory.admins[2]!.calls.some((c) => c.method === 'fetchOffsets')).toBe(true);
+      expect(connect).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.restoreAllMocks();
+      await broker.disconnect();
+    }
+  });
+
   it.each([false, true])(
     'seeks assigned uncommitted partitions once (own-offset fallback=%s)',
     async (fallback) => {

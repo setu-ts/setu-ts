@@ -11,6 +11,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import { createCachedProbe, resolveProbeTiming, withDeadline } from '@setu-ts/common';
 import {
   minimumStartOffsets,
+  isKafkaStartModule,
   optionalKafkaStartModule,
   startAwareRoundRobin,
 } from './kafka-start-offsets.ts';
@@ -48,6 +49,13 @@ export const KAFKA_PRODUCER_DISCONNECT = 'producer.disconnect';
  * {@linkcode KAFKA_PRODUCER_DISCONNECT} for why this is a literal.
  */
 export const KAFKA_PRODUCER_CONNECT = 'producer.connect';
+
+/**
+ * The wire value of kafkajs's `consumer.events.GROUP_JOIN`. A literal for the
+ * reason {@linkcode KAFKA_PRODUCER_DISCONNECT} is; pinned against the real
+ * module's own map by `test/unit/kafka-real-import.test.ts`.
+ */
+export const KAFKA_CONSUMER_GROUP_JOIN = 'consumer.group_join';
 
 /**
  * Consumer-group prefix for reply inboxes. Each broker instance derives a
@@ -134,7 +142,7 @@ async function resolveClient(
   return {
     factory: kafka,
     probeAdmin: healthKafka.admin(),
-    startModule: kafkajs as unknown as IKafkaStartModule,
+    startModule: isKafkaStartModule(kafkajs) ? kafkajs : null,
   };
 }
 
@@ -512,7 +520,21 @@ export class KafkaBroker implements MessageBrokerAdapter {
     await (this.#producer as unknown as { connect(): Promise<void> }).connect();
     const admin = this.#probeAdmin;
     if (admin !== null) {
-      await admin.connect();
+      try {
+        await admin.connect();
+      } catch (error) {
+        // The producer is already connected: release it, or a failed start()
+        // leaves a live connection that keeps the process running (M101b class).
+        try {
+          await (this.#producer as unknown as { disconnect(): Promise<void> }).disconnect();
+        } catch {
+          // The admin failure is what the caller needs.
+        }
+        this.#producer = null;
+        this.#factory = null;
+        this.#probeAdmin = null;
+        throw error;
+      }
       this.#probe = createCachedProbe<boolean | undefined>({
         probe: async () => {
           try {
@@ -912,7 +934,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
       },
     };
     let firstJoin = true;
-    consumerTyped.on?.('consumer.group_join', async ({ payload }) => {
+    consumerTyped.on?.(KAFKA_CONSUMER_GROUP_JOIN, async ({ payload }) => {
       if (!firstJoin) return;
       firstJoin = false;
       if (start === null || !activeConsumer.running) return;
@@ -977,11 +999,20 @@ export class KafkaBroker implements MessageBrokerAdapter {
     if (typeof factory?.admin !== 'function') return null;
     try {
       if (this.#groupAdmin === null) {
-        this.#groupAdmin = factory.admin() as IKafkaAdmin;
-        this.#groupAdminConnect = this.#groupAdmin.connect();
+        const created = factory.admin() as IKafkaAdmin;
+        this.#groupAdmin = created;
+        // A failed connect is forgotten, so the next subscribe tries again
+        // instead of every later subscription inheriting one transient failure.
+        this.#groupAdminConnect = created.connect().catch((error: unknown) => {
+          if (this.#groupAdmin === created) {
+            this.#groupAdmin = null;
+            this.#groupAdminConnect = null;
+          }
+          throw error;
+        });
       }
-      await this.#groupAdminConnect;
       const admin = this.#groupAdmin;
+      await this.#groupAdminConnect;
       const offsets = await admin.fetchOffsets({ groupId, topics: [topic] });
       if (offsets.every((entry) => entry.partitions.every((p) => p.offset === '-1'))) {
         return Object.fromEntries(

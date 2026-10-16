@@ -3,6 +3,7 @@ import { AssignerProtocol, PartitionAssigners } from 'kafkajs';
 import type { PartitionAssigner } from 'kafkajs';
 import {
   minimumStartOffsets,
+  isKafkaStartModule,
   optionalKafkaStartModule,
   startAwareRoundRobin,
 } from '../../src/brokers/kafka-start-offsets.ts';
@@ -87,5 +88,30 @@ describe('Kafka start-offset internal seams against real kafkajs', () => {
     expect(
       await optionalKafkaStartModule(() => Promise.reject(new Error('not installed'))),
     ).toBeNull();
+    // A loadable module without the two members falls back instead of failing consumers later.
+    expect(await optionalKafkaStartModule(() => Promise.resolve({ Kafka: class {} }))).toBeNull();
+  });
+
+  it.each([
+    [null, false],
+    ['kafkajs', false],
+    [
+      {
+        PartitionAssigners: {},
+        AssignerProtocol: { MemberMetadata: { encode() {}, decode() {} } },
+      },
+      false,
+    ],
+    [{ PartitionAssigners: { roundRobin() {} }, AssignerProtocol: {} }, false],
+    [
+      {
+        PartitionAssigners: { roundRobin() {} },
+        AssignerProtocol: { MemberMetadata: { encode() {} } },
+      },
+      false,
+    ],
+    [module, true],
+  ] as const)('recognises a usable kafkajs module shape (%#)', (value, expected) => {
+    expect(isKafkaStartModule(value)).toBe(expected);
   });
 });

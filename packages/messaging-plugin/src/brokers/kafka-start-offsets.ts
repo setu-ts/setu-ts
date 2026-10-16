@@ -88,9 +88,32 @@ export function minimumStartOffsets(
 export async function optionalKafkaStartModule(
   load: () => Promise<unknown>,
 ): Promise<IKafkaStartModule | null> {
+  let module: unknown;
   try {
-    return (await load()) as IKafkaStartModule;
+    module = await load();
   } catch {
     return null;
   }
+  return isKafkaStartModule(module) ? module : null;
+}
+
+/**
+ * Structural check for the two members the start-offset path reads, so a
+ * kafkajs build lacking them falls back to own-offset seeks rather than
+ * failing consumer construction.
+ *
+ * @param value - The loaded module
+ * @returns `true` when both members are present with the right shapes
+ */
+export function isKafkaStartModule(value: unknown): value is IKafkaStartModule {
+  if (value === null || typeof value !== 'object') return false;
+  const { PartitionAssigners, AssignerProtocol } = value as {
+    PartitionAssigners?: { roundRobin?: unknown };
+    AssignerProtocol?: { MemberMetadata?: { encode?: unknown; decode?: unknown } };
+  };
+  return (
+    typeof PartitionAssigners?.roundRobin === 'function' &&
+    typeof AssignerProtocol?.MemberMetadata?.encode === 'function' &&
+    typeof AssignerProtocol.MemberMetadata.decode === 'function'
+  );
 }

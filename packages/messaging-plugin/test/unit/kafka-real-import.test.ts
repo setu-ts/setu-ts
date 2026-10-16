@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   KAFKA_PRODUCER_CONNECT,
+  KAFKA_CONSUMER_GROUP_JOIN,
   KAFKA_PRODUCER_DISCONNECT,
   kafkaHealthClientConfig,
 } from '../../src/brokers/kafka-broker.ts';
@@ -50,6 +51,9 @@ describe('REAL kafkajs producer events (guarded)', () => {
     const events = producer.events;
     expect(events.DISCONNECT).toBe(KAFKA_PRODUCER_DISCONNECT);
     expect(events.CONNECT).toBe(KAFKA_PRODUCER_CONNECT);
+    expect(kafka.consumer({ groupId: 'm113a-real-import' }).events.GROUP_JOIN).toBe(
+      KAFKA_CONSUMER_GROUP_JOIN,
+    );
     expect(events.DISCONNECT).toBe('producer.disconnect');
     expect(events.CONNECT).toBe('producer.connect');
 
