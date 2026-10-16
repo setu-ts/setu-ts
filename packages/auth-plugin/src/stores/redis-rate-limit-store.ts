@@ -7,7 +7,11 @@
  * @module
  */
 
-import { attachConnectionErrorReporter, isConnectionFault } from '@setu-ts/common';
+import {
+  attachConnectionErrorReporter,
+  deadlineRangeError,
+  isConnectionFault,
+} from '@setu-ts/common';
 import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
 import { RateLimitStoreUnavailableError } from '../errors.ts';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
@@ -231,11 +235,10 @@ export class RedisRateLimitStore implements RateLimitStore {
 /** Validates the built client's command bound; internal construction seam. */
 export function resolveCommandTimeoutMs(value: number | undefined): number {
   const bound = value ?? 15_000;
-  if (typeof bound !== 'number' || !Number.isFinite(bound) || bound < 0 || bound > 2_147_483_647) {
-    throw new RangeError(
-      'auth-plugin: commandTimeoutMs must be a number from 0 to 2147483647 (0 disables the bound)',
-    );
-  }
+  // One validator for every bound (M101a): the shared check refuses NaN, a
+  // non-number, a negative value and anything past the largest timer delay.
+  const error = deadlineRangeError('auth-plugin: commandTimeoutMs', bound);
+  if (error !== null) throw error;
   return bound;
 }
 
