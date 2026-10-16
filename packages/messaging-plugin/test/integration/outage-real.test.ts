@@ -240,11 +240,7 @@ describe(
         paused = false;
         // The abandoned sends retry after the first disconnect and reconnect; the
         // broker closes again once they settle, so nothing keeps the process alive.
-        await waitTrue(
-          () => brokerSockets() === 0,
-          'no open broker socket after stop',
-          45000,
-        );
+        await waitTrue(() => brokerSockets() === 0, 'no open broker socket after stop', 45000);
       } finally {
         if (paused) await docker(['unpause', container]);
         try {
