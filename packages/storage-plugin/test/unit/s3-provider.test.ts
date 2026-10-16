@@ -1489,7 +1489,9 @@ describe('loadAwsS3Module — the guarded imports (M113d §3.1)', () => {
       }
       const loadError = caught as Error & { dependency: string; cause: unknown };
       expect(loadError.name).toBe('OptionalDependencyUnavailableError');
-      expect(['@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner']).toContain(loadError.dependency);
+      expect(['@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner']).toContain(
+        loadError.dependency,
+      );
       expect(loadError.cause).toBeInstanceOf(Error);
     } finally {
       vi.doUnmock('@aws-sdk/client-s3');

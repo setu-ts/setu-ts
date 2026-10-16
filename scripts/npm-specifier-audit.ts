@@ -178,7 +178,13 @@ export function findUnguardedImports(
   source: string,
   scriptKind: ts.ScriptKind = ts.ScriptKind.TS,
 ): readonly UnguardedImport[] {
-  const sourceFile = ts.createSourceFile('audit.ts', source, ts.ScriptTarget.Latest, true, scriptKind);
+  const sourceFile = ts.createSourceFile(
+    'audit.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind,
+  );
   const hits: { line: number; snippet: string }[] = [];
 
   const visit = (node: ts.Node): void => {
@@ -223,11 +229,20 @@ function isBarePackageSpecifier(specifier: string): boolean {
 }
 
 /**
- * True when the `import()` call at `node` sits inside the `try` block of a
- * `try`/`catch` in the SAME function — the one shape esbuild leaves as a
- * runtime import (M113d §3.1). The walk stops at the first function-like
- * node, so a `try` of an ENCLOSING function does not guard; a `catch` block
- * and a `.catch()` chain are not accepted either.
+ * True when the `import()` call at `node` is a DIRECT expression in the `try`
+ * block of a `try`/`catch` in the SAME function — the shape esbuild leaves as
+ * a runtime import (M113d §3.1, probed against esbuild 0.28.2). The walk stops
+ * at the first function-like node, so a `try` of an ENCLOSING function does not
+ * guard.
+ *
+ * “Direct” is the load-bearing word: esbuild tolerates the import as a
+ * statement, a variable initializer, a `return`, or a `.catch()` / two-argument
+ * `.then()` chain (where the import is the CALLEE, not an argument). It REFUSES
+ * the import nested in a `Promise.all([…])` argument, a bare `[…]` array
+ * literal, or an object property — there it resolves the sub-expression at build
+ * time and errors on the unresolvable specifier. So the walk also refuses the
+ * import when the path to the `tryBlock` passes through an array literal (as an
+ * element), a call’s arguments (as an argument), or an object property.
  */
 function isGuardedBySameFunctionTry(node: ts.Node): boolean {
   let current: ts.Node = node;
@@ -235,6 +250,9 @@ function isGuardedBySameFunctionTry(node: ts.Node): boolean {
     const parent: ts.Node = current.parent;
     if (isFunctionLikeNode(parent)) return false;
     if (ts.isTryStatement(parent) && parent.tryBlock === current) return true;
+    if (ts.isArrayLiteralExpression(parent) && parent.elements.includes(current)) return false;
+    if (ts.isCallExpression(parent) && parent.arguments.includes(current)) return false;
+    if (ts.isPropertyAssignment(parent) && parent.initializer === current) return false;
     current = parent;
   }
   return false;
