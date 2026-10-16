@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Messaging broker bounds and recovery (M113a, `@setu-ts/messaging-plugin`).** Kafka and Pub/Sub
+  publishes now reject after 15000 ms by default, including RPC and outbox traffic; set
+  `publishTimeoutMs` higher or to `0` for the previous unbounded wait, and account for possible late
+  delivery before retrying. Kafka factories without `admin` now report unknown reachability instead
+  of true; supply an admin-capable factory for a probe. Lazy NATS connections reconnect forever; set
+  `reconnect: { maxAttempts: 10, waitMs: 2000 }` to restore the finite budget, or configure injected
+  connections in the application. Fresh Kafka groups now start at the high watermark captured at
+  subscribe time: remove join sleeps and publish retries used to avoid losing the first message.
+  First joins seek assigned uncommitted partitions to the minimum start offset advertised by the
+  current members, covering concurrent first starts without replaying history before the first
+  subscription. Existing committed groups are untouched. Without admin the step is skipped; injected
+  factories without a loadable kafkajs module seek only their own offsets, so concurrent starts can
+  miss messages. A member crashing before the join takes its start offsets with it; admin/metadata
+  failures warn once per subscription and remain non-fatal.
+
 - **Governing toolchain instructions (M111f).** Repository commands use pnpm, Node, Vitest, ESLint,
   Prettier and TypeDoc. A categorized prose gate prevents obsolete instructions. JSR metadata
   tooling derives npm migration pointers for the 49 existing JSR packages; applying them is a
@@ -44,6 +59,13 @@ All notable changes to this project are documented here. The format follows
   `react-router-plugin` server-build load failures (the build module and `react-router`), and the
   `localization-plugin` refusal of an invalid `exposeCatalogues.cacheControl`. Messages are
   unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
+
+### Added
+
+- **Messaging reachability probes (M113a).** Kafka uses a dedicated short-timeout metadata client;
+  Pub/Sub uses bounded `getTopics`. Both cache probes for 5 s and bound them at 2 s, including
+  direct health calls. Kafka/Pub/Sub gain `publishTimeoutMs`; NATS gains validated `reconnect`.
+  Stopped Kafka/Pub/Sub report down; a hung probe reports unknown, which still leaves health up.
 
 ### Fixed
 

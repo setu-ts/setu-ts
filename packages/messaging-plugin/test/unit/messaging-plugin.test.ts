@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -23,6 +23,92 @@ import { FakeAmqpConnection } from '../../test/fixtures/fake-amqplib-client.ts';
 import { FakeNatsConnection } from '../../test/fixtures/fake-nats-client.ts';
 import { FakeKafkaFactory } from '../../test/fixtures/fake-kafkajs-client.ts';
 import manifest from '../../deno.json' with { type: 'json' };
+import type { IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
+
+describe('M113a plugin option forwarding', () => {
+  it.each(['kafka', 'pubsub'] as const)(
+    'refuses invalid %s publishTimeoutMs at construction',
+    (broker) => {
+      for (const publishTimeoutMs of [-1, NaN, Infinity, 2147483648]) {
+        expect(() =>
+          MessagingPlugin({
+            broker,
+            projectId: 'test',
+            publishTimeoutMs,
+          } as import('../../src/interfaces/index.ts').MessagingPluginOptions),
+        ).toThrow(RangeError);
+      }
+    },
+  );
+  it('validates NATS reconnect at plugin construction', () => {
+    expect(() => MessagingPlugin({ broker: 'nats', reconnect: { maxAttempts: -2 } })).toThrow(
+      RangeError,
+    );
+    expect(() => MessagingPlugin({ broker: 'nats', reconnect: { waitMs: 0 } })).toThrow(RangeError);
+    expect(() =>
+      MessagingPlugin({ broker: 'nats', client: new FakeNatsConnection(), reconnect: {} }),
+    ).toThrow(TypeError);
+  });
+  it.each(['kafka', 'pubsub'] as const)(
+    'forwards non-default %s publishTimeoutMs through both publish entry points',
+    async (kind) => {
+      vi.useFakeTimers();
+      const { ctx, onCloseHandlers } = createFakeContext();
+      const kafka = new FakeKafkaFactory();
+      vi.spyOn(kafka.producer(), 'send').mockImplementation(() => new Promise(() => {}));
+      const pubsub: IPubSubTransport = {
+        publish: () => new Promise(() => {}),
+        open: () => Promise.resolve({ close: async () => {} }),
+        createSubscription: async () => {},
+        deleteSubscription: async () => {},
+        close: async () => {},
+      };
+      const options =
+        kind === 'kafka'
+          ? { broker: 'kafka' as const, client: kafka, publishTimeoutMs: 29 }
+          : { broker: 'pubsub' as const, client: pubsub, publishTimeoutMs: 29 };
+      try {
+        await MessagingPlugin(options).register(ctx);
+        const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+        let rejected = 0;
+        const results = [
+          broker.publish('orders', {}),
+          broker.publish('orders', {}, { headers: { test: 'value' } }),
+        ].map((p) =>
+          p.catch((e: Error) => {
+            rejected++;
+            return e.message;
+          }),
+        );
+        await vi.advanceTimersByTimeAsync(29);
+        expect(rejected).toBe(2);
+        for (const message of await Promise.all(results))
+          expect(message).toContain('29 ms (publishTimeoutMs)');
+      } finally {
+        for (const close of onCloseHandlers) await close();
+        vi.useRealTimers();
+      }
+    },
+  );
+  it('forwards non-default NATS reconnect to lazy connect', async () => {
+    const connect = vi.fn(() => Promise.resolve(new FakeNatsConnection()));
+    vi.doMock('nats', () => ({ connect, headers: () => ({}) }));
+    const { ctx, onCloseHandlers } = createFakeContext();
+    try {
+      await MessagingPlugin({ broker: 'nats', reconnect: { maxAttempts: 7, waitMs: 31 } }).register(
+        ctx,
+      );
+      expect(connect).toHaveBeenCalledWith({
+        servers: 'nats://localhost:4222',
+        maxReconnectAttempts: 7,
+        reconnectTimeWait: 31,
+      });
+    } finally {
+      for (const close of onCloseHandlers) await close();
+      vi.doUnmock('nats');
+    }
+  });
+});
 
 /**
  * Creates a fake context for testing MessagingPlugin.

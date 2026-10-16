@@ -38,6 +38,15 @@ function makeKafka(events: boolean): FakeKafka {
   const client = {
     producer: () => producer,
     consumer: () => ({}),
+    ...(events
+      ? {
+          admin: () => ({
+            connect: async () => {},
+            disconnect: async () => {},
+            describeCluster: () => Promise.resolve({}),
+          }),
+        }
+      : {}),
   } as unknown as IKafkaFactory;
   return {
     client,
@@ -94,7 +103,7 @@ describe('KafkaBroker health (M70c)', () => {
     expect(await broker.isHealthy()).toBe(true);
   });
 
-  it('reports unknown when the producer lacks an event surface', async () => {
+  it('reports unknown when the factory lacks admin', async () => {
     const { client } = makeKafka(false);
     const broker = makeBroker(client);
     await broker.connect();

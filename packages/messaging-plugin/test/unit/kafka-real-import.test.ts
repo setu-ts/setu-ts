@@ -18,9 +18,29 @@ import { describe, expect, it } from 'vitest';
 import {
   KAFKA_PRODUCER_CONNECT,
   KAFKA_PRODUCER_DISCONNECT,
+  kafkaHealthClientConfig,
 } from '../../src/brokers/kafka-broker.ts';
 
 describe('REAL kafkajs producer events (guarded)', () => {
+  it('builds a dedicated short-timeout admin with the measured methods', async () => {
+    const config = kafkaHealthClientConfig(['127.0.0.1:19092'], 'example');
+    expect(config).toEqual({
+      brokers: ['127.0.0.1:19092'],
+      clientId: 'example-health',
+      retry: { retries: 0 },
+      requestTimeout: 1500,
+      connectionTimeout: 1000,
+    });
+    const { Kafka } = await import('kafkajs');
+    const admin = new Kafka(config).admin();
+    for (const method of [
+      'describeCluster',
+      'fetchOffsets',
+      'fetchTopicOffsets',
+      'describeGroups',
+    ] as const)
+      expect(typeof admin[method]).toBe('function');
+  });
   it('accepts the wire values the broker attaches, and rejects the uppercase keys', async () => {
     const kafkajs = await import('kafkajs');
 

@@ -21,6 +21,11 @@ import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
 import { PipelinedBroker } from '../../src/pipeline/pipelined-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMessageBroker } from '@setu-ts/common';
+import type { MessagingPluginOptions } from '../../src/interfaces/index.ts';
+import type { MessageBrokerAdapter } from '../../src/brokers/message-broker.ts';
+import { kafkaHealthClientConfig } from '../../src/brokers/kafka-broker.ts';
 
 // ── Docker stop/start helpers (inlined; no cross-package dep) ──────────────
 
@@ -39,6 +44,30 @@ async function containerIdForPort(port: number): Promise<string> {
     throw new Error(`no container publishing port ${port}`);
   }
   return ids.split('\n')[0];
+}
+
+/** A started Kafka container can take seconds to answer metadata; restore the service too. */
+async function waitKafkaReady(brokers: string[]): Promise<void> {
+  const { Kafka, logLevel } = await import('kafkajs');
+  await waitTrue(
+    async () => {
+      const admin = new Kafka({
+        ...kafkaHealthClientConfig(brokers, 'm113a-restore'),
+        logLevel: logLevel.NOTHING,
+      }).admin();
+      try {
+        await admin.connect();
+        await admin.describeCluster();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        await admin.disconnect();
+      }
+    },
+    'Kafka metadata service restored',
+    60000,
+  );
 }
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -82,6 +111,141 @@ function makeRuntime(): IRuntimeServices {
     clearInterval: (h: unknown) => clearInterval(h as number),
   } as IRuntimeServices;
 }
+
+/** Real kernel path, including the registered health indicator. */
+async function startM113App(options: MessagingPluginOptions) {
+  const { createApplication } = await import('@setu-ts/kernel');
+  const { RuntimePlugin } = await import('@setu-ts/runtime');
+  const { HealthPlugin } = await import('@setu-ts/health-plugin');
+  const { MessagingPlugin } = await import('../../src/index.ts');
+  const app = createApplication({
+    plugins: [RuntimePlugin(), MessagingPlugin(options), HealthPlugin()],
+  });
+  await app.start();
+  const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+  const health = async () => {
+    const body = await (
+      await app.inject({ method: 'GET', url: 'http://localhost/health' })
+    ).json<{
+      checks: Record<string, { status: string; data: { reachable: boolean | 'unknown' } }>;
+    }>();
+    return body.checks.messaging!;
+  };
+  const reachability = () => (broker as MessageBrokerAdapter).reachability();
+  return { app, broker, health, reachability };
+}
+
+describe('M113a REAL Kafka metadata outage', { skip: !process.env['KAFKA_BROKERS'] }, () => {
+  const brokers = (process.env['KAFKA_BROKERS'] ?? '').split(',');
+  it('stopped Kafka reports false and indicator down inside the probe bound, then recovers', async () => {
+    const port = Number(brokers[0]!.split(':').at(-1));
+    const container = await containerIdForPort(port);
+    await waitKafkaReady(brokers);
+    const { app, broker, health, reachability } = await startM113App({ broker: 'kafka', brokers });
+    try {
+      expect(await broker.isHealthy!()).toBe(true);
+      await docker(['stop', container]);
+      await wait(5100); // age the broker's cached healthy result
+      const started = performance.now();
+      expect(await reachability()).toBe(false);
+      expect(performance.now() - started).toBeLessThan(2500);
+      expect(await health()).toMatchObject({ status: 'down', data: { reachable: false } });
+      await docker(['start', container]);
+      await waitTrue(async () => (await health()).data.reachable === true, 'Kafka recovery', 60000);
+    } finally {
+      await docker(['start', container]);
+      try {
+        await waitKafkaReady(brokers);
+      } finally {
+        await app.stop();
+      }
+    }
+  }, 90000);
+
+  it('paused Kafka reports unknown and publish rejects at its configured bound', async () => {
+    const container = await containerIdForPort(Number(brokers[0]!.split(':').at(-1)));
+    await waitKafkaReady(brokers);
+    const { app, broker, health } = await startM113App({
+      broker: 'kafka',
+      brokers,
+      publishTimeoutMs: 350,
+    });
+    let paused = false;
+    try {
+      expect(await broker.isHealthy!()).toBe(true);
+      await docker(['pause', container]);
+      paused = true;
+      await wait(5100);
+      const started = performance.now();
+      expect(await health()).toMatchObject({ status: 'up', data: { reachable: 'unknown' } });
+      expect(performance.now() - started).toBeLessThan(2500);
+      const publishStarted = performance.now();
+      await expect(broker.publish(`m113a.paused.${crypto.randomUUID()}`, {})).rejects.toThrow(
+        '350 ms (publishTimeoutMs); it may still be delivered',
+      );
+      expect(performance.now() - publishStarted).toBeGreaterThanOrEqual(300);
+      expect(performance.now() - publishStarted).toBeLessThan(1500);
+      await docker(['unpause', container]);
+      paused = false;
+      await waitTrue(async () => (await health()).data.reachable === true, 'Kafka unpause', 30000);
+    } finally {
+      if (paused) await docker(['unpause', container]);
+      await docker(['start', container]);
+      try {
+        await waitKafkaReady(brokers);
+      } finally {
+        await app.stop();
+      }
+    }
+  }, 90000);
+});
+
+describe('M113a REAL NATS reconnect', { skip: !process.env['NATS_URL'] }, () => {
+  it('recovers after a 26 second outage and an existing consumer delivers again', async () => {
+    const url = process.env['NATS_URL']!;
+    const container = await containerIdForPort(Number(new URL(url).port || 4222));
+    const suffix = crypto.randomUUID().replaceAll('-', '');
+    const subject = `m113a.${suffix}.orders`;
+    const streamName = `M113A_${suffix}`;
+    const { app, broker, health } = await startM113App({
+      broker: 'nats',
+      url,
+      streamName,
+      streamSubjects: [`m113a.${suffix}.>`],
+    });
+    const received: unknown[] = [];
+    try {
+      await broker.subscribe(subject, (message) => {
+        received.push(message);
+      });
+      await broker.publish(subject, { before: true });
+      await waitTrue(() => received.length === 1, 'baseline NATS delivery', 10000);
+      expect((await health()).data.reachable).toBe(true);
+      await docker(['stop', container]);
+      await waitTrue(async () => (await health()).status === 'down', 'NATS down', 15000);
+      await wait(26000);
+      await docker(['start', container]);
+      await waitTrue(
+        async () => (await health()).data.reachable === true,
+        'NATS recovery after 26s',
+        25000,
+      );
+      await broker.publish(subject, { after: true });
+      await waitTrue(() => received.length >= 2, 'pre-outage consumer delivery', 15000);
+      expect(received).toEqual([{ before: true }, { after: true }]);
+    } finally {
+      await docker(['start', container]);
+      await app.stop();
+      const nats = await import('nats');
+      const cleanup = await nats.connect({ servers: url });
+      try {
+        await (await cleanup.jetstreamManager()).streams.delete(streamName);
+      } finally {
+        await cleanup.close();
+      }
+    }
+  }, 100000);
+});
 
 // ── RabbitMQ outage ─────────────────────────────────────────────────────────
 

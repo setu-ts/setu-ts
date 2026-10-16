@@ -8,6 +8,15 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { createCachedProbe, resolveProbeTiming, withDeadline } from '@setu-ts/common';
+import {
+  minimumStartOffsets,
+  optionalKafkaStartModule,
+  startAwareRoundRobin,
+} from './kafka-start-offsets.ts';
+import type { IKafkaStartModule, KafkaStartOffsets } from './kafka-start-offsets.ts';
+import type { PartitionAssigner } from 'kafkajs';
+import { resolvePublishTimeoutMs } from './publish-timeout.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { normalizeTransportHeaders } from './header-normalize.ts';
@@ -92,7 +101,11 @@ async function resolveClient(
   clientId: string,
   injectedClient?: IKafkaFactory,
   retry?: KafkaOptions['retry'],
-): Promise<IKafkaFactory> {
+): Promise<{
+  factory: IKafkaFactory;
+  probeAdmin: IKafkaAdmin | null;
+  startModule: IKafkaStartModule | null;
+}> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
       throw new Error(
@@ -100,7 +113,14 @@ async function resolveClient(
           '(needs: producer, consumer)',
       );
     }
-    return injectedClient;
+    return {
+      factory: injectedClient,
+      startModule: await optionalKafkaStartModule(loadKafkajs),
+      probeAdmin:
+        typeof injectedClient.admin === 'function'
+          ? (injectedClient.admin({ retry: { retries: 0 } }) as IKafkaAdmin)
+          : null,
+    };
   }
   const kafkajs = await loadKafkajs();
   // M101b: `retry` is forwarded verbatim — kafkajs owns the metadata retry,
@@ -110,7 +130,65 @@ async function resolveClient(
     brokers: brokers as string[],
     ...(retry !== undefined ? { retry } : {}),
   });
-  return kafka as unknown as IKafkaFactory;
+  const healthKafka = new kafkajs.Kafka(kafkaHealthClientConfig(brokers, clientId));
+  return {
+    factory: kafka,
+    probeAdmin: healthKafka.admin(),
+    startModule: kafkajs as unknown as IKafkaStartModule,
+  };
+}
+
+/**
+ * Builds the dedicated short-timeout metadata client; never changes producer retries.
+ * @param brokers - Bootstrap addresses
+ * @param clientId - Main client ID, suffixed with -health
+ * @returns The separate metadata client configuration
+ */
+export function kafkaHealthClientConfig(
+  brokers: readonly string[],
+  clientId: string,
+): {
+  brokers: string[];
+  clientId: string;
+  retry: { retries: number };
+  requestTimeout: number;
+  connectionTimeout: number;
+} {
+  return {
+    brokers: [...brokers],
+    clientId: `${clientId}-health`,
+    retry: { retries: 0 },
+    requestTimeout: 1500,
+    connectionTimeout: 1000,
+  };
+}
+
+/** Internal subset of the admin shared by real and injected factories. Offsets are strings. */
+interface IKafkaAdmin {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  describeCluster(): Promise<unknown>;
+  fetchOffsets(options: { groupId: string; topics: string[] }): Promise<
+    Array<{
+      topic: string;
+      partitions: Array<{ partition: number; offset: string }>;
+    }>
+  >;
+  fetchTopicOffsets(topic: string): Promise<Array<{ partition: number; offset: string }>>;
+  describeGroups(
+    groups: string[],
+  ): Promise<{ groups: Array<{ members: Array<{ memberMetadata: Uint8Array }> }> }>;
+}
+
+/** A request timeout, including a retrier's bounded cause chain, cannot prove unreachability. */
+function isRequestTimeout(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current !== null; depth++) {
+    if (typeof current !== 'object') return false;
+    if ((current as { name?: unknown }).name === 'KafkaJSRequestTimeoutError') return true;
+    current = (current as { cause?: unknown }).cause ?? null;
+  }
+  return false;
 }
 
 /** kafkajs's protocol error type for a topic the broker does not know. */
@@ -325,7 +403,13 @@ export class KafkaBroker implements MessageBrokerAdapter {
   #generation = 0;
   /** Cancels each pending subscribe-retry wait, so `disconnect()` holds no timer open. */
   #retryWaits = new Set<() => void>();
-  #logger: { error: (msg: string) => void } | undefined;
+  #logger: KafkaOptions['logger'];
+  #publishTimeoutMs: number;
+  #startModule: IKafkaStartModule | null = null;
+  #probeAdmin: IKafkaAdmin | null = null;
+  #groupAdmin: IKafkaAdmin | null = null;
+  #groupAdminConnect: Promise<void> | null = null;
+  #probe: (() => Promise<boolean | undefined>) | null = null;
   #factory: IKafkaFactory | null = null;
   #producer: unknown | null = null;
   #ready = false;
@@ -351,6 +435,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#retry = options?.retry;
     this.#subscribeRetry = resolveSubscribeRetry(options?.retry);
     this.#logger = options?.logger;
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
@@ -374,8 +459,8 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * Opens this broker's reply inbox on the shared reply topic.
    *
    * Kafka cannot use the per-instance topic {@link createTopicInbox} mints: a
-   * topic here is a durable, partitioned cluster resource, and `IKafkaFactory`
-   * exposes no admin surface to create or drop one. Instead every instance
+   * topic here is a durable, partitioned cluster resource; the broker's admin
+   * is used only for metadata and group offsets. Instead every instance
    * reads ONE reply topic under a consumer group unique to itself, so delivery
    * is exclusive rather than load-balanced across the shared default group.
    * Replies addressed to other instances arrive here too and are dropped by
@@ -411,17 +496,38 @@ export class KafkaBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    this.#factory = await resolveClient(
+    const resolved = await resolveClient(
       this.#brokers,
       this.#clientId,
       this.#injectedClient,
       this.#retry,
     );
+    this.#factory = resolved.factory;
+    this.#startModule = resolved.startModule;
+    this.#probeAdmin = resolved.probeAdmin;
 
     // Build producer unconditionally from the resolved factory
     const realFactory = this.#factory as unknown as { producer(): unknown };
     this.#producer = realFactory.producer();
     await (this.#producer as unknown as { connect(): Promise<void> }).connect();
+    const admin = this.#probeAdmin;
+    if (admin !== null) {
+      await admin.connect();
+      this.#probe = createCachedProbe<boolean | undefined>({
+        probe: async () => {
+          try {
+            await admin.describeCluster();
+            return true;
+          } catch (error) {
+            return isRequestTimeout(error) ? undefined : false;
+          }
+        },
+        fallback: undefined,
+        ttlMs: 5000,
+        timeoutMs: 2000,
+        ...resolveProbeTiming(this.#runtime),
+      });
+    }
 
     this.#ready = true;
     this.#supervisor.start();
@@ -435,6 +541,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
    */
   async disconnect(): Promise<void> {
     this.#supervisor.stop();
+    this.#probe = null;
     // M101b: end every subscribe retry waiting out its backoff now, rather
     // than leaving its timer to hold the process for up to `maxRetryTime`.
     this.#generation++;
@@ -458,6 +565,13 @@ export class KafkaBroker implements MessageBrokerAdapter {
       ...[...this.#activeConsumers.values()].map((consumer) => this.#releaseConsumer(consumer)),
     ]);
     this.#activeConsumers.clear();
+
+    // A group admin may still be connecting for a subscribe racing shutdown.
+    await this.#groupAdminConnect?.catch(() => {});
+    await Promise.allSettled([this.#probeAdmin?.disconnect(), this.#groupAdmin?.disconnect()]);
+    this.#probeAdmin = null;
+    this.#groupAdmin = null;
+    this.#groupAdminConnect = null;
 
     if (this.#producer) {
       try {
@@ -484,16 +598,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
   /**
    * Tri-state backend reachability (M70c).
    *
-   * kafkajs retries internally, so the broker runs the supervisor in
-   * **observe** mode: the producer's `producer.disconnect`/`producer.connect`
-   * events (the VALUES of kafkajs's `producer.events.DISCONNECT` /
-   * `producer.events.CONNECT` — the uppercase KEYS are not accepted listener
-   * names and kafkajs throws for them, X28-1) mark the fault window
-   * (`consumer.crash` with `restart: false` is terminal and surfaces as a
-   * `producer.disconnect` the client does not recover from). `false` while the
-   * window is active, `true` otherwise, `undefined` when the producer exposes
-   * no event surface (a minimal fake) — the indicator then reports
-   * `reachable: 'unknown'`.
+   * Faulted supervisor → false immediately. Otherwise a dedicated admin's
+   * describeCluster round trip is cached for 5 s and bounded at 2 s. A
+   * KafkaJSRequestTimeoutError (including a nested cause) or an expired bound
+   * yields undefined; other errors yield false. Without admin on an injected
+   * factory reachability is unknown. Injected admin timeouts are the application's.
    *
    * @returns `true`/`false`/`undefined` as described
    * @since 0.1.0
@@ -502,11 +611,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     if (this.#supervisor.faulted) {
       return Promise.resolve(false);
     }
-    const producer = this.#producer;
-    if (producer === null || typeof (producer as IKafkaEventEmitter).on !== 'function') {
-      return Promise.resolve(undefined);
-    }
-    return Promise.resolve(true);
+    return this.#probe?.() ?? Promise.resolve(undefined);
   }
 
   /**
@@ -579,18 +684,29 @@ export class KafkaBroker implements MessageBrokerAdapter {
       send(options: { topic: string; messages: unknown }): Promise<void>;
     };
 
-    await realProducer.send({
-      topic,
-      messages: [
-        {
-          value: serialized,
-          // Kafka's native mapping: the message key decides the partition, so the
-          // same ordering key reaches one partition and stays in publish order.
-          ...(validated.orderingKey !== undefined ? { key: validated.orderingKey } : {}),
-          headers: wireHeaders,
-        },
-      ],
-    });
+    await withDeadline(
+      () =>
+        realProducer.send({
+          topic,
+          messages: [
+            {
+              value: serialized,
+              // Kafka's native mapping: the message key decides the partition, so the
+              // same ordering key reaches one partition and stays in publish order.
+              ...(validated.orderingKey !== undefined ? { key: validated.orderingKey } : {}),
+              headers: wireHeaders,
+            },
+          ],
+        }),
+      {
+        timeoutMs: this.#publishTimeoutMs,
+        onTimeout: () =>
+          new Error(
+            `Kafka did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
+          ),
+        timing: resolveProbeTiming(this.#runtime),
+      },
+    );
   }
 
   /**
@@ -618,10 +734,27 @@ export class KafkaBroker implements MessageBrokerAdapter {
     const generation = this.#generation;
     const groupId = options?.queue ?? deriveDefaultGroupId(this.#defaultQueue, topic);
 
+    let start: KafkaStartOffsets | null = null;
+    let warned = false;
+    const warn = (error: unknown): void => {
+      if (warned) return;
+      warned = true;
+      try {
+        const logger = this.#logger;
+        (logger?.warn ?? logger?.error)?.call(
+          logger,
+          `Kafka could not initialize topic ${JSON.stringify(topic)} (group ${JSON.stringify(groupId)}): ${describeError(error)}`,
+        );
+      } catch {
+        /* Reporting must remain non-fatal. */
+      }
+    };
+    const startModule = this.#startModule;
     // Create consumer unconditionally from the resolved factory
     const realFactory = this.#factory as unknown as {
       consumer(options: {
         groupId: string;
+        partitionAssigners?: PartitionAssigner[];
         retry: { retries: number; restartOnFailure(error: Error): Promise<boolean> };
       }): unknown;
     };
@@ -636,6 +769,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // An injected factory may ignore the field.
     const realConsumer = realFactory.consumer({
       groupId,
+      ...(startModule
+        ? { partitionAssigners: [startAwareRoundRobin(startModule, () => start)] }
+        : {}),
       retry: {
         retries: KAFKAJS_CONSUMER_RETRIES,
         restartOnFailure: (error: Error) => {
@@ -657,6 +793,13 @@ export class KafkaBroker implements MessageBrokerAdapter {
           message: unknown;
         }) => Promise<void>;
       }): Promise<void>;
+      on?(
+        event: string,
+        listener: (event: {
+          payload: { memberAssignment: Record<string, number[]> };
+        }) => Promise<void>,
+      ): unknown;
+      seek(options: { topic: string; partition: number; offset: string }): void;
       stop(): Promise<void>;
       disconnect(): Promise<void>;
     };
@@ -664,6 +807,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     try {
       await consumerTyped.connect();
       await this.#subscribeWithRetry(consumerTyped, topic, generation);
+      start = await this.#captureGroupStart(topic, groupId, warn);
       // A disconnect() that landed while the consumer was connecting, or during
       // a first attempt that then succeeded, must not leave a consumer running
       // after shutdown (security audit O1). The catch below releases it.
@@ -767,6 +911,41 @@ export class KafkaBroker implements MessageBrokerAdapter {
         });
       },
     };
+    let firstJoin = true;
+    consumerTyped.on?.('consumer.group_join', async ({ payload }) => {
+      if (!firstJoin) return;
+      firstJoin = false;
+      if (start === null || !activeConsumer.running) return;
+      try {
+        const admin = this.#groupAdmin!;
+        const current = await admin.fetchOffsets({ groupId, topics: [topic] });
+        let minimum = start;
+        if (startModule !== null) {
+          const { groups } = await admin.describeGroups([groupId]);
+          minimum = minimumStartOffsets(
+            start,
+            groups.flatMap((group) => group.members),
+            startModule,
+            warn,
+          );
+        }
+        if (!activeConsumer.running || generation !== this.#generation) return;
+        const uncommitted = new Set(
+          current
+            .filter((entry) => entry.topic === topic)
+            .flatMap((entry) =>
+              entry.partitions.filter((p) => p.offset === '-1').map((p) => p.partition),
+            ),
+        );
+        for (const partition of payload.memberAssignment[topic] ?? []) {
+          if (uncommitted.has(partition) && Object.hasOwn(minimum, partition)) {
+            consumerTyped.seek({ topic, partition, offset: minimum[partition]! });
+          }
+        }
+      } catch (error) {
+        warn(error);
+      }
+    });
     this.#activeConsumers.set(subscriptionId, activeConsumer);
     activeConsumer.run();
 
@@ -786,6 +965,36 @@ export class KafkaBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  /** Captures a fresh group’s watermarks before run; never writes committed offsets. */
+  async #captureGroupStart(
+    topic: string,
+    groupId: string,
+    warn: (error: unknown) => void,
+  ): Promise<KafkaStartOffsets | null> {
+    const factory = this.#factory;
+    if (typeof factory?.admin !== 'function') return null;
+    try {
+      if (this.#groupAdmin === null) {
+        this.#groupAdmin = factory.admin() as IKafkaAdmin;
+        this.#groupAdminConnect = this.#groupAdmin.connect();
+      }
+      await this.#groupAdminConnect;
+      const admin = this.#groupAdmin;
+      const offsets = await admin.fetchOffsets({ groupId, topics: [topic] });
+      if (offsets.every((entry) => entry.partitions.every((p) => p.offset === '-1'))) {
+        return Object.fromEntries(
+          (await admin.fetchTopicOffsets(topic)).map(({ partition, offset }) => [
+            partition,
+            offset,
+          ]),
+        );
+      }
+    } catch (error) {
+      warn(error);
+    }
+    return null;
   }
 
   /**
@@ -932,7 +1141,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
    *
    * Replies arrive on the shared reply topic ({@link KafkaOptions.replyTopic},
    * default `'messaging.replies'`), which **must exist** — this broker creates
-   * no topics, because `IKafkaFactory` exposes no admin surface. Either
+   * no topics; its admin is used only for metadata and group offsets. Either
    * pre-create it or enable `auto.create.topics.enable`; otherwise the
    * underlying producer error surfaces from this call rather than hanging until
    * the timeout.

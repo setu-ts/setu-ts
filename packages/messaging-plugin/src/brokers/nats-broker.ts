@@ -115,6 +115,7 @@ interface ResolvedNatsClient {
  */
 async function resolveClient(
   url: string,
+  reconnect: ReturnType<typeof resolveNatsReconnect>,
   injectedClient?: INatsConnection,
 ): Promise<ResolvedNatsClient> {
   if (injectedClient !== undefined) {
@@ -127,11 +128,40 @@ async function resolveClient(
     return { connection: injectedClient };
   }
   const nats = await loadNats();
-  const connection = await nats.connect({ servers: url });
+  const connection = await nats.connect({ servers: url, ...reconnect });
   return {
     connection: connection as unknown as INatsConnection,
     headersFactory: () => nats.headers() as unknown as INatsHeaders,
   };
+}
+
+/**
+ * Validates and resolves the lazy connection policy for plugin and broker construction.
+ * @param options - Connection and reconnect options
+ * @returns The nats.connect reconnect fields with defaults applied
+ * @throws {RangeError} For an invalid reconnect field
+ * @throws {TypeError} When reconnect is supplied with an injected connection
+ */
+export function resolveNatsReconnect(options: NatsOptions = {}): {
+  maxReconnectAttempts: number;
+  reconnectTimeWait: number;
+} {
+  if (options.client !== undefined && options.reconnect !== undefined) {
+    throw new TypeError('NatsBroker: reconnect has no effect with an injected client');
+  }
+  const maxReconnectAttempts = options.reconnect?.maxAttempts ?? -1;
+  const reconnectTimeWait = options.reconnect?.waitMs ?? 2000;
+  if (!Number.isInteger(maxReconnectAttempts) || maxReconnectAttempts < -1) {
+    throw new RangeError('NatsBroker: reconnect.maxAttempts must be an integer >= -1');
+  }
+  if (
+    !Number.isInteger(reconnectTimeWait) ||
+    reconnectTimeWait < 1 ||
+    reconnectTimeWait > 2147483647
+  ) {
+    throw new RangeError('NatsBroker: reconnect.waitMs must be an integer 1–2147483647');
+  }
+  return { maxReconnectAttempts, reconnectTimeWait };
 }
 
 /**
@@ -172,6 +202,7 @@ export class NatsBroker implements MessageBrokerAdapter {
   #runtime: IRuntimeServices;
   #serializer: ISerializer;
   #url: string;
+  #reconnect: ReturnType<typeof resolveNatsReconnect>;
   #injectedClient: INatsConnection | undefined;
   #streamName: string;
   #streamSubjects: readonly string[] | undefined;
@@ -197,6 +228,7 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @param options - NATS connection and configuration options
    */
   constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: NatsOptions) {
+    this.#reconnect = resolveNatsReconnect(options);
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#url = options?.url ?? 'nats://localhost:4222';
@@ -265,7 +297,7 @@ export class NatsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    const resolved = await resolveClient(this.#url, this.#injectedClient);
+    const resolved = await resolveClient(this.#url, this.#reconnect, this.#injectedClient);
     this.#connection = resolved.connection;
     // An explicitly supplied factory wins; the module's own is the fallback.
     this.#headersFactory ??= resolved.headersFactory;

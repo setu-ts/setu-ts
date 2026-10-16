@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import type { IPubSubSubscription, IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
 import { CloudBrokerUnavailableError } from '../../src/errors.ts';
 import type { MessagingPluginOptions } from '../../src/index.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 
 function createRuntime(platform: string = 'node'): IRuntimeServices {
   return {
@@ -24,6 +26,96 @@ function createRuntime(platform: string = 'node'): IRuntimeServices {
     exit: () => {},
   } as unknown as IRuntimeServices;
 }
+
+describe('M113a Pub/Sub bounds', () => {
+  function transport(): IPubSubTransport {
+    return {
+      publish: async () => {},
+      open: () => Promise.resolve({ close: async () => {} }),
+      createSubscription: async () => {},
+      deleteSubscription: async () => {},
+      close: async () => {},
+      isHealthy: () => Promise.resolve(true),
+    };
+  }
+  it('caches, coalesces and drops the probe on disconnect', async () => {
+    let now = 0;
+    const client = transport();
+    const health = vi.spyOn(client, 'isHealthy');
+    const broker = new GcpPubSubBroker(
+      { ...createFakeRuntime(), hrtime: () => now },
+      new JsonSerializer(),
+      { client },
+    );
+    await broker.connect();
+    expect(await Promise.all([broker.reachability(), broker.reachability()])).toEqual([true, true]);
+    expect(health).toHaveBeenCalledTimes(1);
+    now = 5001;
+    health.mockResolvedValue(false);
+    expect(await broker.reachability()).toBe(false);
+    expect(await broker.isHealthy()).toBe(false);
+    expect(health).toHaveBeenCalledTimes(2);
+    await broker.disconnect();
+    expect(await broker.reachability()).toBeUndefined();
+    await broker.connect();
+    health.mockResolvedValue(true);
+    expect(await broker.reachability()).toBe(true);
+    expect(health).toHaveBeenCalledTimes(3);
+    await broker.disconnect();
+  });
+  it('bounds a never-settling probe at 2 seconds', async () => {
+    vi.useFakeTimers();
+    const client = transport();
+    client.isHealthy = () => new Promise(() => {});
+    const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    try {
+      await broker.connect();
+      const pending = broker.reachability();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await pending).toBeUndefined();
+    } finally {
+      await broker.disconnect();
+      vi.useRealTimers();
+    }
+  });
+  it.each([0, 37])('bounds both publish entry points with timeout %s', async (timeout) => {
+    vi.useFakeTimers();
+    const client = transport();
+    const deferred = Promise.withResolvers<void>();
+    const send = vi.spyOn(client, 'publish').mockReturnValue(deferred.promise);
+    const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      publishTimeoutMs: timeout,
+    });
+    try {
+      await broker.connect();
+      let settled = 0;
+      const pending = [
+        broker.publish('orders', {}),
+        broker.publishWithHeaders('orders', {}, {}),
+      ].map((p) =>
+        p.catch((e: Error) => {
+          settled++;
+          return e.message;
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(36);
+      expect(settled).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(timeout ? 2 : 0);
+      if (timeout)
+        for (const message of await Promise.all(pending))
+          expect(message).toMatch(/Pub\/Sub.*orders.*37.*it may still be delivered$/);
+      deferred.resolve();
+      if (!timeout) expect(await Promise.all(pending)).toEqual([undefined, undefined]);
+      send.mockResolvedValue();
+      await broker.publish('fast', {});
+    } finally {
+      await broker.disconnect();
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('GcpPubSubBroker', () => {
   describe('connect()', () => {
@@ -1036,6 +1128,9 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
     mod.subscriptions = new Map();
 
     mod.PubSub = class {
+      getTopics(): Promise<unknown[]> {
+        return Promise.resolve([[]]);
+      }
       constructor(options: { projectId: string; credentials?: unknown }) {
         // The real SDK reports topics under the project it was built for.
         fakeProjectId = options.projectId;

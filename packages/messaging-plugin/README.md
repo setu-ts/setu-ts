@@ -392,6 +392,13 @@ MessagingPlugin({
 
 An existing stream is never touched, with or without `streamSubjects`.
 
+A lazily built NATS connection reconnects forever by default
+(`reconnect: { maxAttempts: -1, waitMs: 2000 }`). Set a finite `maxAttempts` to cap attempts; when
+exhausted, the connection closes and health stays down until the application replaces it.
+`maxAttempts` must be an integer ≥ -1; `waitMs` an integer 1–2147483647. Invalid values throw
+`RangeError` at plugin or broker construction. `reconnect` with an injected `client` throws
+`TypeError`: configure that connection in the application instead.
+
 **`publish()` resolves once JetStream has stored the message.** It waits for the server's
 acknowledgement, so a publish to a subject no stream captures rejects with an error naming the
 subject (the server answers `503`), and an unresponsive server rejects after the client's own 5 s
@@ -438,6 +445,15 @@ subscription. Pub/Sub reserves no character in a name, so unlike Kafka's colon t
 not recoverable by splitting. A derived or supplied name over 255 characters is refused at
 `subscribe()`. Topics must already exist; the broker creates none.
 
+### Kafka and Pub/Sub publish bounds
+
+Both brokers bound each transport publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded),
+including RPC requests/replies and outbox relay publishes. A value outside 0–2147483647, `NaN` or
+Infinity throws `RangeError` at plugin and broker construction. A timeout names the broker, topic
+and bound and says it may still be delivered: it does not cancel the transport or prove the message
+was dropped. Configure a longer bound for slow brokers, or `0` to restore the previous unbounded
+wait; account for possible delivery before retrying.
+
 ### Kafka consumer groups
 
 When `queue` is not supplied, each subscription's consumer group is derived per topic —
@@ -451,6 +467,23 @@ may not contain `:` (the broker refuses one at creation), while a group id may, 
 `defaultQueue: 'orders-eu'` + topic `created` and `defaultQueue: 'orders'` + topic `eu-created` both
 produce `orders-eu-created`, putting two differently-subscribed consumers into one group and
 restoring the empty-assignment failure this derivation exists to prevent.
+
+A new group with no committed partition offsets captures the topic high watermarks during
+`subscribe()`, before `run()`. On its first group join each member seeks only its assigned,
+still-uncommitted partitions to the minimum start offset advertised by the current members. A
+message published after `subscribe()` resolves on any member is delivered to the group, including
+when several members first start together; nothing published before the first member’s `subscribe()`
+is replayed. `subscribe()` returns without waiting for the join. A group with any committed offset
+captures nothing; committed partitions and subsequent joins are left untouched.
+
+This requires an admin-capable factory and a loadable `kafkajs` module. With an injected factory,
+the module is tried once at `connect()` for the round-robin wrapper and metadata codec. If absent,
+each member seeks to its own watermark, so concurrent first starts can miss messages. Without
+`admin()` the step is skipped and kafkajs latest-offset behavior retains its start-position window.
+A member that crashes between subscribing and joining takes its start offsets with it. Admin or
+metadata failures warn once per subscription with topic and group (falling back to `logger.error`);
+bad member metadata is skipped individually while other usable snapshots still contribute to the
+minimum. Admin or seek failures leave affected partitions with latest-offset behavior.
 
 ### Kafka topics
 
@@ -1714,14 +1747,31 @@ changes, and the first has **two layers** because the health indicator is not th
 indicator wraps every arm's `reachability()` in its own `createCachedProbe` (5-second TTL, 2-second
 bound), which is the universal outer bound: a probe that cannot answer — a **hung** broker, the
 condition a stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health`
-open. `RabbitMqBroker` and `ServiceBusBroker` additionally build their own cached, bounded probes,
-which is what `isHealthy()` reads; that inner layer is what protects a **direct** caller, such as
-`realtime-backplane-plugin`'s `'messaging'` transport, which resolves the broker itself and never
-passes through this indicator. Second, the RabbitMQ probe is a real round trip (a throwaway channel
-open/close), replacing the connection-fault flag read that a hung broker never trips. Residual
-exposure, stated rather than implied: a deployment whose Service Bus management plane is unreachable
-and that publishes nothing keeps reporting `reachable: 'unknown'` with status `up` until its first
-publish — an operator who needs the signal can publish synthetically.
+open. `RabbitMqBroker`, `ServiceBusBroker`, `KafkaBroker` and `GcpPubSubBroker` additionally build
+their own cached, bounded probes, which is what `isHealthy()` reads; that inner layer is what
+protects a **direct** caller, such as `realtime-backplane-plugin`'s `'messaging'` transport, which
+resolves the broker itself and never passes through this indicator. Second, the RabbitMQ probe is a
+real round trip (a throwaway channel open/close), replacing the connection-fault flag read that a
+hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
+Bus management plane is unreachable and that publishes nothing keeps reporting
+`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
+can publish synthetically.
+
+The Kafka probe uses a second client (`<clientId>-health`) with zero retries, a 1500 ms request
+timeout and 1000 ms connection timeout; one probe admin connects at startup and closes at shutdown.
+An injected factory supplies `admin({ retry: { retries: 0 } })` with its own timeouts; without
+`admin`, Kafka reachability is unknown. A separate group admin connects on the first subscription,
+shared across concurrent subscriptions, and closes at shutdown.
+
+| Broker  | Round trip                                                                                 | Stopped                    | Hung                                                   |
+| ------- | ------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------ |
+| Kafka   | `describeCluster()` on the dedicated admin                                                 | `false` / `down`           | request timeout or 2 s bound → `undefined` / `unknown` |
+| Pub/Sub | `getTopics({ pageSize: 1, autoPaginate: false, gaxOpts: { timeout: 1500, retry: null } })` | gRPC 14 → `false` / `down` | gRPC 4 or 2 s bound → `undefined` / `unknown`          |
+
+Pub/Sub treats any other numeric gRPC code, including 7 (permission denied) and 16
+(unauthenticated), as reachable: a publisher-only account need not have `pubsub.topics.list`, and an
+authorization response proves the server answered. A failure without a numeric code is `false`.
+Unknown reachability still reports `up`; changing readiness for unknown is outside this milestone.
 
 ## Exports
 

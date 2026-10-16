@@ -5648,6 +5648,8 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
 // version:history — the `@since` below records when the member appeared, not the
 // current release; an `@since` is never bumped.
 interface NatsMessagingOptions extends MessagingCommonOptions {
+  /** Lazy connection only: defaults -1 (forever) / 2000 ms. @since 0.10.0 */
+  reconnect?: { maxAttempts?: number; waitMs?: number };
   broker: 'nats';
   /** NATS connection URL. */
   url?: string;
@@ -5685,6 +5687,9 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
 
 // ── Kafka ────────────────────────────────────────────────────────────────────────────
 interface KafkaMessagingOptions extends MessagingCommonOptions {
+  /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'kafka';
   /** Kafka bootstrap brokers. */
   brokers?: readonly string[];
@@ -5727,6 +5732,9 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
 
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
 interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'pubsub';
   /** Injected transport (bypasses the lazy SDK load). Required for this arm. */
   client: IPubSubTransport;
@@ -5757,6 +5765,9 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
 interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'pubsub';
   /** GCP project ID. Required for production. */
   projectId: string;
@@ -6424,6 +6435,49 @@ a hung broker never trips. Residual exposure, stated rather than implied: a depl
 Bus management plane is unreachable and that publishes nothing keeps reporting
 `reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
 can publish synthetically.
+
+Kafka and Pub/Sub also own cached probes (5 s TTL, 2 s bound), protecting direct `isHealthy()`
+callers. Kafka uses `describeCluster()` on a second `<clientId>-health` client (zero retries, 1500
+ms request timeout, 1000 ms connection timeout); a request-timeout error anywhere within five cause
+links means unknown, another rejection means false. A faulted supervisor returns false immediately.
+An injected `IKafkaFactory.admin?(options?: { retry?: { retries: number } }): unknown` provides the
+probe admin; injected timeouts belong to the application. Without it reachability is unknown. The
+probe admin connects at startup and disconnects at shutdown. The separate group admin connects
+lazily through one memoized promise and closes at shutdown.
+
+Pub/Sub uses
+`getTopics({ pageSize: 1, autoPaginate: false, gaxOpts: { timeout: 1500, retry: null } })`.
+`PubSubSdkModule` includes this SDK member; `IPubSubTransport.isHealthy?()` returns
+`Promise<boolean | undefined>`. Resolution means true; gRPC 14 means false, 4 means unknown, any
+other numeric code (including 7/16 authorization responses) means true; no numeric code means false.
+An omitted transport probe means unknown. Unknown still reports up. See the
+[per-broker probe table](packages/messaging-plugin/README.md#health-indicator).
+
+`KafkaOptions` and `PubSubOptions`, as well as both Pub/Sub plugin arms and the Kafka plugin arm,
+accept `publishTimeoutMs` (default 15000 ms, `0` unbounded). Out-of-range or non-finite values throw
+`RangeError` at plugin and broker construction. Both publish entry points, RPC and outbox relay
+publishes use the bound; the timeout error names broker, topic and bound and warns that delivery may
+still occur. It does not cancel the transport.
+
+Fresh Kafka groups whose every partition offset is `-1` capture high watermarks before `run()`. On
+the first join, members seek assigned, still-uncommitted partitions to the minimum start offset
+advertised by current members. Messages published after any member’s `subscribe()` resolves reach
+the group even during concurrent first starts; history before the first member’s subscription is not
+replayed. `subscribe()` does not wait for the join. Existing committed groups and later joins are
+untouched. This requires `admin` and a loadable `kafkajs` module. Injected factories try loading the
+module once at `connect()`; without it members seek only their own offsets and concurrent first
+starts can miss messages. Without `admin` the step is skipped. A member crashing before the join
+takes its start offsets with it. Admin/metadata failures warn once per subscription through
+`KafkaOptions.logger.warn?` (fallback `error`), naming topic/group; invalid member metadata is
+skipped individually while usable snapshots still contribute to the minimum. Admin or seek failures
+leave affected partitions with latest-offset behavior.
+
+`NatsOptions.reconnect` and `NatsMessagingOptions.reconnect` configure only lazily built
+connections: `maxAttempts` defaults to -1 (unbounded), `waitMs` to 2000; forwarded as
+`maxReconnectAttempts` / `reconnectTimeWait`. The former must be an integer ≥ -1; the latter an
+integer 1–2147483647, else construction throws `RangeError` naming the field. Supplying an injected
+`client` together with `reconnect` throws `TypeError`. A finite exhausted budget closes the
+connection; the indicator stays down until the application replaces it.
 
 ### Integration event contracts
 

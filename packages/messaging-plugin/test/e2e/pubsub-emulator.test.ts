@@ -25,9 +25,78 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin, PubSubSubscriptionBoundElsewhereError } from '../../src/index.ts';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
+import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
+import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 
 const emulatorHost = process.env['PUBSUB_EMULATOR_HOST'];
 const projectId = process.env['PUBSUB_PROJECT_ID'] ?? 'he-test';
+
+describe('M113a REAL Pub/Sub probe outage', { skip: !emulatorHost }, () => {
+  it('getTopics distinguishes pause from stop, bounds publish, and recovers', async () => {
+    const docker = async (args: string[]) => {
+      const result = await runProcess('docker', { args });
+      if (!result.success) throw new Error(new TextDecoder().decode(result.stderr));
+      return new TextDecoder().decode(result.stdout).trim();
+    };
+    const port = Number(new URL(`http://${emulatorHost}`).port || 8085);
+    const container = (await docker(['ps', '-q', '--filter', `publish=${port}`])).split('\n')[0]!;
+    if (!container) throw new Error(`No emulator container publishing ${port}`);
+    const { PubSub } = await import('@google-cloud/pubsub');
+    const admin = new PubSub({ projectId });
+    const topic = `m113a-outage-${crypto.randomUUID()}`;
+    const broker = new GcpPubSubBroker(createNodeRuntimeServices(), new JsonSerializer(), {
+      projectId,
+      publishTimeoutMs: 350,
+    });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const fresh = async () => {
+      await wait(5100);
+      const start = performance.now();
+      const reachable = await broker.reachability();
+      expect(performance.now() - start).toBeLessThan(2500);
+      return reachable;
+    };
+    let paused = false;
+    try {
+      await admin.createTopic(topic);
+      await broker.connect();
+      expect(await broker.reachability()).toBe(true);
+      await docker(['pause', container]);
+      paused = true;
+      expect(await fresh()).toBeUndefined();
+      const start = performance.now();
+      await expect(broker.publish(topic, {})).rejects.toThrow(
+        '350 ms (publishTimeoutMs); it may still be delivered',
+      );
+      expect(performance.now() - start).toBeGreaterThanOrEqual(300);
+      expect(performance.now() - start).toBeLessThan(1500);
+      await docker(['unpause', container]);
+      paused = false;
+      expect(await fresh()).toBe(true);
+      await docker(['stop', container]);
+      expect(await fresh()).toBe(false);
+      await docker(['start', container]);
+      // The emulator needs a few seconds to bind its listener after restart.
+      const deadline = Date.now() + 45000;
+      let recovered: boolean | undefined;
+      do {
+        recovered = await fresh();
+      } while (recovered !== true && Date.now() < deadline);
+      expect(recovered).toBe(true);
+    } finally {
+      if (paused) await docker(['unpause', container]);
+      await docker(['start', container]);
+      await broker.disconnect();
+      await admin
+        .topic(topic)
+        .delete()
+        .catch(() => {});
+      await admin.close();
+    }
+  }, 100000);
+});
 
 /** Unique per run so repeated runs never share emulator state. */
 const runId = crypto.randomUUID().slice(0, 8);
