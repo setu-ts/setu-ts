@@ -105,19 +105,19 @@ export function adaptAzureModule(
  * @throws {Error} If the packages cannot be resolved
  */
 export async function loadAzureModule(): Promise<AzureSdkModule> {
+  // Two guards, one per import, so the error names the package that actually
+  // failed rather than sniffing a rejection message (M113d §3.1).
   let secretsMod: typeof import('@azure/keyvault-secrets');
+  try {
+    secretsMod = await import('@azure/keyvault-secrets');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/keyvault-secrets', { cause: error });
+  }
   let identityMod: typeof import('@azure/identity');
   try {
-    [secretsMod, identityMod] = await Promise.all([
-      import('@azure/keyvault-secrets'),
-      import('@azure/identity'),
-    ]);
+    identityMod = await import('@azure/identity');
   } catch (error) {
-    const dependency =
-      error instanceof Error && error.message.includes('@azure/identity')
-        ? '@azure/identity'
-        : '@azure/keyvault-secrets';
-    throw new OptionalDependencyUnavailableError(dependency, { cause: error });
+    throw new OptionalDependencyUnavailableError('@azure/identity', { cause: error });
   }
   return {
     SecretClient: secretsMod.SecretClient,

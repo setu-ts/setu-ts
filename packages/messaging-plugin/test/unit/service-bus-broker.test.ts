@@ -1626,7 +1626,9 @@ describe('ServiceBusBroker — the guarded import (M113d §3.1)', () => {
       throw new Error('Cannot find package');
     });
     try {
-      const broker = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), { connectionString: 'Endpoint=sb://example/;SharedAccessKeyName=k;SharedAccessKey=v' });
+      const broker = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
+        connectionString: 'Endpoint=sb://example/;SharedAccessKeyName=k;SharedAccessKey=v',
+      });
       let caught: unknown;
       try {
         await broker.connect();

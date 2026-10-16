@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Workers builds and the edge cache (M113d).** A Cloudflare Worker importing a Setu-TS package now
+  builds and deploys whether or not that package's optional peers are installed. Every bare dynamic
+  `import()` in `packages/*/src` sits inside the `try` block of a same-function `try`/`catch` (18
+  published packages converted), and the `catch` throws the new `OptionalDependencyUnavailableError`
+  from `@setu-ts/common` — a missing optional dependency now rejects with that named error (the
+  original rejection as `cause`) instead of the runtime's raw error. `cacheApiMiddleware` stores the
+  body it serves with or without a `waitUntil` host, and `CloudflarePlugin` warns once on Workers
+  when no host was passed. A newly scaffolded Workers project's factory takes `waitUntil` as its
+  second parameter, threaded from the entry; a full-stack Workers project passes its compiled server
+  build from the entry (the new `ReactRouterPluginOptions.serverBuild` option), renders `.dev.vars`,
+  and its `wrangler.toml` carries `[assets]` and `[build]` stanzas. `setu add cloudflare` prints the
+  `waitUntil` form on a Workers project. `ReactRouterPluginOptions` changes from an `interface` to a
+  union `type` (`serverBuildPath` | `serverBuild`, exactly one required) — breaking for implementors
+  who `extends` it; a caller passing `serverBuildPath` is unaffected. Ships in minor `0.10.0`.
+
 - **Governing toolchain instructions (M111f).** Repository commands use pnpm, Node, Vitest, ESLint,
   Prettier and TypeDoc. A categorized prose gate prevents obsolete instructions. JSR metadata
   tooling derives npm migration pointers for the 49 existing JSR packages; applying them is a

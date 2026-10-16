@@ -230,7 +230,7 @@ describe('the guarded SDK imports (M113d §3.1)', () => {
       }
       const loadError = caught as Error & { dependency: string; cause: unknown };
       expect(loadError.name).toBe('OptionalDependencyUnavailableError');
-      expect(['@azure/keyvault-secrets', '@azure/identity']).toContain(loadError.dependency);
+      expect(loadError.dependency).toBe('@azure/keyvault-secrets');
       expect(loadError.cause).toBeInstanceOf(Error);
     } finally {
       vi.doUnmock('@azure/keyvault-secrets');
@@ -256,6 +256,35 @@ describe('the guarded SDK imports (M113d §3.1)', () => {
       expect(loadError.cause).toBeInstanceOf(Error);
     } finally {
       vi.doUnmock('@google-cloud/secret-manager');
+    }
+  });
+});
+
+describe('loadAzureModule — the identity branch (M113d §3.1)', () => {
+  it('names @azure/identity when the identity import is the one that failed', async () => {
+    const { loadAzureModule } = await import('../../src/providers/azure-key-vault.ts');
+    // keyvault-secrets resolves; identity rejects with a message naming it, so
+    // the dependency named in the error is the identity package.
+    vi.doMock('@azure/keyvault-secrets', () => ({
+      SecretClient: class {},
+    }));
+    vi.doMock('@azure/identity', () => {
+      throw new Error("Cannot find package '@azure/identity'");
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadAzureModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@azure/identity');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@azure/keyvault-secrets');
+      vi.doUnmock('@azure/identity');
     }
   });
 });

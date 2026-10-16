@@ -204,8 +204,8 @@ describe('server-build', () => {
 describe('loadRequestHandler — the module arm (M113d §3.10)', () => {
   const fakeRR = (): Record<string, unknown> =>
     ({
-      createRequestHandler: (build: unknown, mode: string) =>
-        (_request: Request) => Promise.resolve(new Response(`${mode}:${String(build)}`)),
+      createRequestHandler: (build: unknown, mode: string) => (_request: Request) =>
+        Promise.resolve(new Response(`${mode}:${String(build)}`)),
       RouterContextProvider: class {},
     }) as unknown as Record<string, unknown>;
 
@@ -213,10 +213,7 @@ describe('loadRequestHandler — the module arm (M113d §3.10)', () => {
     const tmp = await tempDir({ prefix: 'rr-module-arm-' });
     try {
       const buildPath = `${tmp}/build.mjs`;
-      await nodeFs.writeFile(
-        buildPath,
-        'export default { routes: {} };\n',
-      );
+      await nodeFs.writeFile(buildPath, 'export default { routes: {} };\n');
       const byPath = await loadRequestHandler(buildPath, 'production', {
         rrImportHook: () => Promise.resolve(fakeRR()),
       });

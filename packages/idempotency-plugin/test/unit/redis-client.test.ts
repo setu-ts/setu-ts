@@ -106,7 +106,7 @@ describe('validateInjectedClient (M109a §3.5)', () => {
 describe('loadIoredis — the guarded import (M113d §3.1)', () => {
   it('rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
     vi.doMock('ioredis', () => {
-      throw new Error('Cannot find package \'ioredis\'');
+      throw new Error("Cannot find package 'ioredis'");
     });
     try {
       let caught: unknown;

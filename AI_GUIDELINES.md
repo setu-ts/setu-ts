@@ -779,7 +779,14 @@ A public API is any export from a package's `src/index.ts` file.
   - accept a **client instance injected via plugin options** (preferred — e.g.,
     `DatabasePlugin({ type: 'prisma', options: { prismaClient } })`), or
   - **lazily load** the driver via a dynamic `import()` whose argument is the LITERAL bare package
-    name (`import('ioredis')`), failing with a clear error if it is not installed.
+    name (`import('ioredis')`), failing with a clear error if it is not installed. The literal MUST
+    sit inside the `try` block of a `try`/`catch` in the SAME function (M113d): a bundler that
+    resolves dynamic imports at build time — esbuild inside Wrangler, for a Cloudflare Worker —
+    otherwise fails the application's build on the first unresolvable specifier. The `catch` throws
+    `OptionalDependencyUnavailableError` (`@setu-ts/common`) with the original rejection as `cause`,
+    or the package's own named load error carrying it. A `catch` block, a `.catch()` chain, or a
+    `try` of an ENCLOSING function does NOT satisfy the rule; the M113d source gate
+    (`scripts/npm-specifier-audit.ts`, `unguarded`) refuses the shape.
 - The framework never installs a database driver by default.
 - Users install the driver for the adapter they choose.
 - **Boundary-type compatibility.** When a public option accepts an application-created third-party
@@ -900,9 +907,10 @@ A public API is any export from a package's `src/index.ts` file.
 
 - Each package must be as small as possible.
 - Heavy dependencies (database drivers, broker clients, cloud SDKs) are never bundled or eagerly
-  imported — adapters load them via a dynamic `import()` of the LITERAL bare package name (§12.2;
-  `npm:`/`jsr:` specifiers in `src` are refused by the M111a audit), or accept a client instance
-  injected through plugin options.
+  imported — adapters load them via a dynamic `import()` of the LITERAL bare package name, guarded
+  inside the `try` block of a same-function `try`/`catch` (§12.2, as amended by M113d; `npm:`/`jsr:`
+  specifiers in `src` are refused by the M111a audit, and an unguarded bare import by the M113d
+  audit), or accept a client instance injected through plugin options.
 - Use feature detection to avoid bundling unused code.
 - Bundle size is monitored in CI.
 

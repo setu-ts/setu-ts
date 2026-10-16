@@ -10,6 +10,33 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Workers projects: thread `waitUntil` through the factory
+
+A newly scaffolded Workers project's `src/setu.config.ts` factory takes `waitUntil` as its SECOND
+parameter, and `src/index.ts` imports it from `cloudflare:workers` and passes it. A project
+scaffolded before this change has a factory without the parameter, so `setu add cloudflare`'s
+printed registration does not type-check there. Add the parameter by hand:
+
+```typescript
+// src/setu.config.ts — BEFORE
+export function createApp(env: Record<string, unknown> = {}, _devtool?: DevtoolComposition) {
+
+// src/setu.config.ts — AFTER
+export function createApp(
+  env: Record<string, unknown> = {},
+  waitUntil?: (promise: Promise<unknown>) => void,
+  _devtool?: DevtoolComposition,
+) {
+```
+
+`src/index.ts` already imports `waitUntil` from `cloudflare:workers` and passes it positionally, so
+no entry change is needed. A full-stack Workers project additionally passes its compiled server
+build from the entry (`import * as serverBuild from '../build/server/index.js'`, supplied to
+`ReactRouterPlugin` as `serverBuild`) — the plugin's `serverBuildPath` cannot resolve in a bundled
+Worker.
+
 ## 0.9.0
 
 ### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`

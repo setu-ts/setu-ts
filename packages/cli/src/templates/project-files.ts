@@ -422,9 +422,10 @@ function configModule(runtime: TargetRuntime, host: ResolvedHost): string {
     // M113d §3.8: on Workers the platform sink is the SECOND parameter of every
     // generated factory, so the entry can pass it positionally whether or not
     // this composition reads it. Underscore-prefixed where nothing reads it.
-    const workersWaitUntilLine = runtime === 'cloudflare-workers'
-      ? `\n  _waitUntil?: (promise: Promise<unknown>) => void,`
-      : '';
+    const workersWaitUntilLine =
+      runtime === 'cloudflare-workers'
+        ? `\n  _waitUntil?: (promise: Promise<unknown>) => void,`
+        : '';
     return `${imports}
 
 /**
@@ -436,12 +437,12 @@ function configModule(runtime: TargetRuntime, host: ResolvedHost): string {
  * @param env - The discovery environment \`setu commands\` passes positionally
  * on every target; the starter reads configuration itself, so this is
  * forwarded through unchanged.${
-          runtime === 'cloudflare-workers'
-            ? `\n * @param _waitUntil - The platform's post-response sink, from \`src/index.ts\`,` +
-              `\n * accepted for one signature on every target; the starter owns its construction,` +
-              `\n * so nothing here reads it.`
-            : ''
-        }
+   runtime === 'cloudflare-workers'
+     ? `\n * @param _waitUntil - The platform's post-response sink, from \`src/index.ts\`,` +
+       `\n * accepted for one signature on every target; the starter owns its construction,` +
+       `\n * so nothing here reads it.`
+     : ''
+ }
  * @param _devtool - Accepted for one signature on every target. The starter
  * owns its construction, so a devtool composition cannot be honored here —
  * the CLI refuses the devtool opt-in on this template by name.${factoryParameterDoc}
@@ -1769,9 +1770,7 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
     // build artifact — the generated file used to list only `coverage/` and the
     // env file, which left a minified bundle tracked (D2).
     manifest?.npmBuild === undefined ? '' : `${manifest.npmBuild.outputDir}/\n`
-  }${
-    manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`
-  }${
+  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}${
     // M113d §3.10: on Workers the local variables live in `.dev.vars` (the file
     // `wrangler dev` reads), never committed.
     runtime === 'cloudflare-workers' && (manifest?.envVariables?.length ?? 0) > 0

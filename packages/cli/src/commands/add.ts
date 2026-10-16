@@ -793,7 +793,7 @@ export async function runAddCommand(
     // type-check there. The upgrade entry carries the edit.
     deps.log(
       '  Scaffolded before 0.10? Add the waitUntil parameter to createApp in src/setu.config.ts —',
-      );
+    );
     deps.log('  see docs/upgrading.md ("Workers projects: thread waitUntil through the factory").');
   }
   printPermissionNote(specifier, deps.log);

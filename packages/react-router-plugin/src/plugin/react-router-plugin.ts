@@ -237,7 +237,8 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
           status: 'up',
           data: {
             mode,
-            serverBuildPath: 'serverBuildPath' in options ? options.serverBuildPath : '<serverBuild>',
+            serverBuildPath:
+              'serverBuildPath' in options ? options.serverBuildPath : '<serverBuild>',
           },
         }),
       );

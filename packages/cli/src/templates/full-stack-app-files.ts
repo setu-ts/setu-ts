@@ -792,8 +792,8 @@ Client modules cannot import a Deno workspace library: the browser bundle has no
 
 ## Deploying to Cloudflare Workers
 
-\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret
-is a Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per
-environment before the first deploy. Local development reads \`.dev.vars\` instead, which the
-scaffold creates with a labelled-insecure development value.
+\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret is a
+Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
+before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
+with a labelled-insecure development value.
 `;

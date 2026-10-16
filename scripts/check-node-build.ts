@@ -175,7 +175,12 @@ async function main(): Promise<void> {
     '',
   ].join('\n');
   await writeFile(`${BOOT_DIR}/workers-bundle.mjs`, driver);
-  await step('esbuild workerd bundle (Wrangler resolution)', 'node', ['workers-bundle.mjs'], BOOT_DIR);
+  await step(
+    'esbuild workerd bundle (Wrangler resolution)',
+    'node',
+    ['workers-bundle.mjs'],
+    BOOT_DIR,
+  );
 
   const legs: LegResult[] = [];
   const runLeg = async (name: string, cmd: string, args: readonly string[], probe: string[]) => {

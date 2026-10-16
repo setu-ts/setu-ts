@@ -98,9 +98,8 @@ it('contains a host registration that throws a scalar reason', async () => {
 
 describe('loadAsyncLocalStorageContextManager — the guarded import (M113d §3.1)', () => {
   it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
-    const { loadAsyncLocalStorageContextManager } = await import(
-      '../../src/tracing/context-manager.ts'
-    );
+    const { loadAsyncLocalStorageContextManager } =
+      await import('../../src/tracing/context-manager.ts');
     vi.doMock('@opentelemetry/context-async-hooks', () => {
       throw new Error('Cannot find package');
     });

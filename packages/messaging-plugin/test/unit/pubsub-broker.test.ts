@@ -1491,7 +1491,9 @@ describe('GcpPubSubBroker — the guarded import (M113d §3.1)', () => {
       throw new Error('Cannot find package');
     });
     try {
-      const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), { projectId: 'test-project' });
+      const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), {
+        projectId: 'test-project',
+      });
       let caught: unknown;
       try {
         await broker.connect();

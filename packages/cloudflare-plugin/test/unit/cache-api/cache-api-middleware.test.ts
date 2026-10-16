@@ -869,9 +869,8 @@ describe('cacheApiMiddleware — the write path with a hostless registry (M113d 
     // Imported here so the marker helpers stay module-internal to the package.
     return (async () => {
       const { BindingRegistry } = await import('../../../src/bindings/binding-registry.ts');
-      const { markHostlessRegistry, resolveWaitUntil } = await import(
-        '../../../src/background/wait-until.ts'
-      );
+      const { markHostlessRegistry, resolveWaitUntil } =
+        await import('../../../src/background/wait-until.ts');
       const registry = new BindingRegistry(
         {},
         {},

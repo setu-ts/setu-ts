@@ -22,7 +22,7 @@ describe('OptionalDependencyUnavailableError', () => {
   });
 
   it('carries `name`, `cause` identity and `instanceof Error`', () => {
-    const cause = new Error('Cannot find package \'ioredis\'');
+    const cause = new Error("Cannot find package 'ioredis'");
     const error = new OptionalDependencyUnavailableError('ioredis', { cause });
 
     expect(error.name).toBe('OptionalDependencyUnavailableError');

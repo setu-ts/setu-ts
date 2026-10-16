@@ -6598,7 +6598,12 @@ because nothing defined what one was.
   production even when the package IS installed, because nothing ever imports it: that is a
   non-functional shim, not a lazy import. If a real `import()` forces the construction path to be
   async, make it async (`register()` may return a `Promise`); do not fake a sync constructor with a
-  global.
+  global. **And the literal import sits inside the `try` block of a `try`/`catch` in the SAME
+  function** (M113d): Wrangler bundles Workers with esbuild, which resolves a bare string-literal
+  `import()` at build time, so an unguarded import fails every Worker that imports the package —
+  even one that never loads the driver. The `catch` throws `OptionalDependencyUnavailableError` (or
+  the package's own named load error carrying it as `cause`); the M113d audit
+  (`findUnguardedImports`) refuses the unguarded shape.
 
 ## Self-review checklist (bugs that slipped through before — check every time)
 

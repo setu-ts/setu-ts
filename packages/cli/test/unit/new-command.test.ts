@@ -406,7 +406,9 @@ describe('runNewCommand', () => {
       // The local variables render `.dev.vars` on Workers (M113d §3.10).
       expect(h.fs.has('/work/shop/.dev.vars')).toBe(true);
       expect(h.fs.has('/work/shop/.dev.vars.example')).toBe(true);
-      expect(h.fs.read('/work/shop/.dev.vars')).toContain('SESSION_SECRET=dev-only-insecure-session-secret-change-me');
+      expect(h.fs.read('/work/shop/.dev.vars')).toContain(
+        'SESSION_SECRET=dev-only-insecure-session-secret-change-me',
+      );
       expect(h.fs.read('/work/shop/.gitignore')).toContain('.dev.vars');
     });
 

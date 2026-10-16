@@ -450,3 +450,9 @@ Adding one of the twelve safe zero-configuration providers wires its emitted plu
 either style. Starter compositions instead name their option arm; configure that arm to avoid a
 duplicate registration. Manifest updates preserve existing key order. Deno frontend projects update
 imports without adding unused framework dependencies to their frontend package.json.
+
+On a `cloudflare-workers` project, `setu add cloudflare` prints the registration in the form the
+generated factory accepts — `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` —
+because the factory takes `waitUntil` as its second parameter (M113d §3.8) and the entry already
+passes it. A project scaffolded before that change needs the parameter added by hand; the command
+points at [docs/upgrading.md](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md).

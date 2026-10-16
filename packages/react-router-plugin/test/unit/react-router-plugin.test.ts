@@ -429,3 +429,60 @@ function addRoute(routes: Map<string, string[]>, path: string, method: string) {
   if (!m.includes(method)) m.push(method);
   routes.set(path, m);
 }
+
+describe('the module arm (M113d §3.10)', () => {
+  // A minimal context: register() with the default loader touches the router,
+  // the service registry, the health registry and the runtime platform.
+  function moduleArmCtx(): Any {
+    const registered = new Map<string, unknown>();
+    const routes = new Map<string, string[]>();
+    const add =
+      (method: string) =>
+      (path: string): void => {
+        const m = routes.get(path) ?? [];
+        m.push(method);
+        routes.set(path, m);
+      };
+    const router: Record<string, unknown> = {
+      get: add('GET'),
+      post: add('POST'),
+      put: add('PUT'),
+      patch: add('PATCH'),
+      delete: add('DELETE'),
+      head: add('HEAD'),
+      options: add('OPTIONS'),
+      group() {},
+      listRoutes() {
+        return Array.from(routes.entries());
+      },
+    };
+    return {
+      services: {
+        register(_token: unknown, service: unknown): void {
+          registered.set('ssr', service);
+        },
+        get(): unknown {
+          return registered.get('ssr');
+        },
+      },
+      router,
+      runtime: { platform: () => 'deno' as const },
+      health: { register(): void {} },
+    } as Any;
+  }
+
+  it('register() uses the default loader with the supplied module, no path import', async () => {
+    // The build arrives as a module — the form a bundled Cloudflare Worker
+    // uses. The default loader must use it directly, never import a path.
+    const plugin = ReactRouterPlugin({
+      serverBuild: { default: { routes: {} } },
+    });
+
+    const fakeCtx = moduleArmCtx();
+    await plugin.register(fakeCtx);
+
+    const ssrService = fakeCtx.services.get(CAPABILITIES.SSR);
+    expect(ssrService).toBeDefined();
+    expect(typeof (ssrService as SsrService).render).toBe('function');
+  });
+});

@@ -94,14 +94,9 @@ export interface SsrRuntime {
 export type PopulateLoadContext = (ctx: IRequestContext, context: RouterLoadContext) => void;
 
 /**
- * Options for the React Router plugin.
- *
- * @since 0.1.0
- */
-/**
  * The options shared by both arms of {@linkcode ReactRouterPluginOptions}.
  *
- * @since 0.1.0
+ * @since 0.10.0
  */
 export interface ReactRouterCommonOptions {
   /**
@@ -181,7 +176,7 @@ export interface ReactRouterCommonOptions {
 /**
  * The path arm: the server build is loaded by `await import(serverBuildPath)`.
  *
- * @since 0.1.0
+ * @since 0.10.0
  */
 export interface ReactRouterPathOptions extends ReactRouterCommonOptions {
   /**

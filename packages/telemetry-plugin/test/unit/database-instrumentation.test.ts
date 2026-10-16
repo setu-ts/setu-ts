@@ -70,9 +70,8 @@ describe('database-instrumentation', () => {
 
 describe('loadIORedisInstrumentation — the guarded default import (M113d §3.1)', () => {
   it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
-    const { loadIORedisInstrumentation } = await import(
-      '../../src/instrumentation/database-instrumentation.ts'
-    );
+    const { loadIORedisInstrumentation } =
+      await import('../../src/instrumentation/database-instrumentation.ts');
     vi.doMock('@opentelemetry/instrumentation-ioredis', () => {
       throw new Error('Cannot find package');
     });
@@ -92,5 +91,3 @@ describe('loadIORedisInstrumentation — the guarded default import (M113d §3.1
     }
   });
 });
-
-

@@ -128,7 +128,10 @@ async function loadEntry(): Promise<{ worker: WorkerModule['default']; log: Boot
     "from './cloudflare-workers-stub.mjs'",
   );
   await nodeFs.writeFile(`${dir}/src/index.ts`, rendered);
-  await nodeFs.writeFile(`${dir}/src/cloudflare-workers-stub.mjs`, 'export function waitUntil() {}\n');
+  await nodeFs.writeFile(
+    `${dir}/src/cloudflare-workers-stub.mjs`,
+    'export function waitUntil() {}\n',
+  );
   await nodeFs.writeFile(
     `${dir}/setu.config.ts`,
     `export const log = {

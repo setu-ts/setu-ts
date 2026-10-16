@@ -107,9 +107,8 @@ describe('http-instrumentation', () => {
 
 describe('the guarded default imports (M113d §3.1)', () => {
   it('loadHttpInstrumentation rejects when the http instrumentation is absent', async () => {
-    const { loadHttpInstrumentation } = await import(
-      '../../src/instrumentation/http-instrumentation.ts'
-    );
+    const { loadHttpInstrumentation } =
+      await import('../../src/instrumentation/http-instrumentation.ts');
     vi.doMock('@opentelemetry/instrumentation-http', () => {
       throw new Error('Cannot find package');
     });
@@ -130,9 +129,8 @@ describe('the guarded default imports (M113d §3.1)', () => {
   });
 
   it('loadFetchInstrumentation rejects when the undici instrumentation is absent', async () => {
-    const { loadFetchInstrumentation } = await import(
-      '../../src/instrumentation/http-instrumentation.ts'
-    );
+    const { loadFetchInstrumentation } =
+      await import('../../src/instrumentation/http-instrumentation.ts');
     vi.doMock('@opentelemetry/instrumentation-undici', () => {
       throw new Error('Cannot find package');
     });

@@ -70,28 +70,28 @@ longer; only `waitUntil` needs the newer date.
 
 ## Options
 
-| Option                           | Type                     | Default      | Description                                                       |
-| -------------------------------- | ------------------------ | ------------ | ----------------------------------------------------------------- |
-| `env`                            | `Record<string,unknown>` | —            | Required. The Worker's `env`.                                     |
-| `waitUntil`                      | `WaitUntilHost`          | —            | The platform sink. Omit off Workers.                              |
-| `requireBindings`                | `string[]`               | `[]`         | Bindings that must exist; `register()` throws naming absent ones. |
-| `cache.binding`                  | `string`                 | —            | KV namespace serving `CAPABILITIES.CACHE`.                        |
-| `cache.name`                     | `string`                 | `'default'`  | Derives `cache.<name>` when not `'default'`.                      |
-| `cache.prefix`                   | `string`                 | —            | Key prefix. **Required to call `clear()`.**                       |
-| `cache.defaultTtlSeconds`        | `number`                 | —            | TTL applied when `set` omits one.                                 |
-| `storage.binding`                | `string`                 | —            | R2 bucket serving `CAPABILITIES.STORAGE`.                         |
-| `storage.name`                   | `string`                 | `'default'`  | Derives `storage.<name>` when not `'default'`.                    |
-| `storage.prefix`                 | `string`                 | —            | Object-key prefix.                                                |
-| `queue.binding`                  | `string`                 | —            | Queues producer binding serving `CAPABILITIES.QUEUE`.             |
-| `queue.name`                     | `string`                 | `'default'`  | Derives `queue.<name>` when not `'default'`.                      |
-| `queue.maxDelaySeconds`          | `number`                 | `86400`      | A larger `delayMs` throws rather than being truncated.            |
-| `messaging.binding`              | `string`                 | —            | Queues producer binding serving `CAPABILITIES.MESSAGING`.         |
-| `messaging.name`                 | `string`                 | `'default'`  | Derives `messaging.<name>` when not `'default'`.                  |
-| `messaging.rpc.binding`          | `string`                 | —            | DO namespace serving RPC reply inboxes. Absent, RPC throws.       |
-| `messaging.rpc.defaultTimeoutMs` | `number`                 | `5000`       | Reply budget when `RequestOptions.timeoutMs` is omitted.          |
-| `durableObject.binding`          | `string`                 | —            | DO namespace serving `CAPABILITIES.REALTIME_BACKPLANE`.           |
-| `durableObject.name`             | `string`                 | `'default'`  | Derives `realtime-backplane.<name>` when not `'default'`.         |
-| `durableObject.topic`            | `string`                 | `'realtime'` | The object every replica shares. Differ it per application.       |
+| Option                           | Type                     | Default      | Description                                                                                                                                                                                                                                                                 |
+| -------------------------------- | ------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env`                            | `Record<string,unknown>` | —            | Required. The Worker's `env`.                                                                                                                                                                                                                                               |
+| `waitUntil`                      | `WaitUntilHost`          | —            | The platform sink. Omit off Workers. Without it on Workers, work passed to `bindings.waitUntil()` may be cut off when the response is sent, and one warning says so at startup — pass `import { waitUntil } from 'cloudflare:workers'` from your entry through the factory. |
+| `requireBindings`                | `string[]`               | `[]`         | Bindings that must exist; `register()` throws naming absent ones.                                                                                                                                                                                                           |
+| `cache.binding`                  | `string`                 | —            | KV namespace serving `CAPABILITIES.CACHE`.                                                                                                                                                                                                                                  |
+| `cache.name`                     | `string`                 | `'default'`  | Derives `cache.<name>` when not `'default'`.                                                                                                                                                                                                                                |
+| `cache.prefix`                   | `string`                 | —            | Key prefix. **Required to call `clear()`.**                                                                                                                                                                                                                                 |
+| `cache.defaultTtlSeconds`        | `number`                 | —            | TTL applied when `set` omits one.                                                                                                                                                                                                                                           |
+| `storage.binding`                | `string`                 | —            | R2 bucket serving `CAPABILITIES.STORAGE`.                                                                                                                                                                                                                                   |
+| `storage.name`                   | `string`                 | `'default'`  | Derives `storage.<name>` when not `'default'`.                                                                                                                                                                                                                              |
+| `storage.prefix`                 | `string`                 | —            | Object-key prefix.                                                                                                                                                                                                                                                          |
+| `queue.binding`                  | `string`                 | —            | Queues producer binding serving `CAPABILITIES.QUEUE`.                                                                                                                                                                                                                       |
+| `queue.name`                     | `string`                 | `'default'`  | Derives `queue.<name>` when not `'default'`.                                                                                                                                                                                                                                |
+| `queue.maxDelaySeconds`          | `number`                 | `86400`      | A larger `delayMs` throws rather than being truncated.                                                                                                                                                                                                                      |
+| `messaging.binding`              | `string`                 | —            | Queues producer binding serving `CAPABILITIES.MESSAGING`.                                                                                                                                                                                                                   |
+| `messaging.name`                 | `string`                 | `'default'`  | Derives `messaging.<name>` when not `'default'`.                                                                                                                                                                                                                            |
+| `messaging.rpc.binding`          | `string`                 | —            | DO namespace serving RPC reply inboxes. Absent, RPC throws.                                                                                                                                                                                                                 |
+| `messaging.rpc.defaultTimeoutMs` | `number`                 | `5000`       | Reply budget when `RequestOptions.timeoutMs` is omitted.                                                                                                                                                                                                                    |
+| `durableObject.binding`          | `string`                 | —            | DO namespace serving `CAPABILITIES.REALTIME_BACKPLANE`.                                                                                                                                                                                                                     |
+| `durableObject.name`             | `string`                 | `'default'`  | Derives `realtime-backplane.<name>` when not `'default'`.                                                                                                                                                                                                                   |
+| `durableObject.topic`            | `string`                 | `'realtime'` | The object every replica shares. Differ it per application.                                                                                                                                                                                                                 |
 
 ## Queues, Cron Triggers, and the edge cache
 
@@ -437,6 +437,10 @@ job.
 - **A failed cache write never fails your response.** `Cache.put` rejects for an oversized body or a
   quota error; the response is already built by then, so the failure is reported and the request
   succeeds uncached.
+- **The write lands with or without a `waitUntil` host.** When the plugin received no host the
+  middleware awaits `Cache.put` itself before the response returns — the write delays the response
+  instead of being abandoned when the isolate is released (V9-23). Passing `waitUntil` moves the
+  write off the response path; the plugin warns at startup when it is missing on Workers.
 - **`caches.default` is per-datacenter.** `cacheApiMiddleware` is a latency optimisation, not a
   shared store: a hit in one colo says nothing about another, and a `delete` does not evict
   globally. It reports under `X-Cache-Api`, so it composes with `cache-plugin`'s `cacheMiddleware`

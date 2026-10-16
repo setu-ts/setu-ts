@@ -266,7 +266,7 @@ describe('a template with a frontend build, on a Deno target', () => {
   it('hands the development SSR runtime to the plugin in place of assetsDir', () => {
     const config = contentsOf([...projectFiles('shop', 'deno', host)], 'setu.config.ts');
     expect(config).toContain(
-      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'> & { serverBuild?: unknown },",
+      "  ssr?: { serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
     );
     expect(config).toContain(
       "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
@@ -311,9 +311,9 @@ describe('a template with a frontend build, on a Deno target', () => {
     // server build, so the parameter is READ (M113d §3.10) and the arm is
     // chosen at runtime.
     expect(workers).toContain(
-      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'> & { serverBuild?: unknown },",
+      "  ssr?: { serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
     );
-    expect(workers).toContain('ssr?.serverBuild !== undefined');
+    expect(workers).toContain("'serverBuild' in ssr");
     const scripts = (
       JSON.parse(contentsOf(files, 'package.json')) as {
         scripts: Record<string, string>;
