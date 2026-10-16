@@ -259,7 +259,8 @@ Three things to know:
 - **A DI mistake fails every page, not startup.** An unlisted service, a misspelled token, or a
   missing `di` arm starts cleanly and answers `/health` with 200, then throws in
   `populateLoadContext` on every server-rendered request. The smoke test `setu new` generates
-  requests `/` as well as `/health`, so `deno task test` catches it; keep that request in.
+  requests `/` as well as `/health`, so the project's own test script catches it; keep that request
+  in.
 
 ## Composing from configuration
 

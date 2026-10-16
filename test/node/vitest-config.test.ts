@@ -80,6 +80,10 @@ it('widens tooling and preserves the frozen pre-retirement script coverage set',
   expect(files).toContain('scripts/codemods/std-to-vitest.test.ts');
   expect(files.some((f) => f.startsWith('test/deno-lane/'))).toBe(false);
   const frozen = [
+    'scripts/toolchain-prose.ts',
+    'scripts/jsr-sunset.ts',
+    'scripts/set-jsr-metadata.ts',
+    'scripts/script-targets.ts',
     'scripts/codemods/*.ts',
     'test/node-helpers.ts',
     'scripts/lib/source-hooks.ts',

@@ -18,16 +18,16 @@ In Architect mode, for a milestone start, do exactly this and nothing more:
    section, ARCHITECTURE.md, PUBLIC_API.md, the `@setu-ts/common` source you implement, and the
    source of any package you extend).
 3. Copy `plans/TEMPLATE.md` to `plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run
-   `deno task check:plan` until it lints clean. Apply the prose judgment in the CLAUDE.md "Writing a
+   `pnpm run check:plan` until it lints clean. Apply the prose judgment in the CLAUDE.md "Writing a
    milestone plan" section (contracts verified from SOURCE, a test file for every `src/` file, real
    npm specifiers, token grammar, resolved doc conflicts, no dead options/surface).
-4. **STOP.** Present the plan path + the clean `deno task check:plan` output + a short summary of
-   the key design decisions, and wait for review/approval.
+4. **STOP.** Present the plan path + the clean `pnpm run check:plan` output + a short summary of the
+   key design decisions, and wait for review/approval.
 
 ## Hard constraints during a milestone-start pass
 
 - **Produce the ONE plan file only.** Do NOT write, edit, or scaffold any `src/` or `test/` code,
-  and do NOT create a `deno.json`, a broker/service class, or a test file in this pass. Architect
+  and do NOT create a `package.json`, a broker/service class, or a test file in this pass. Architect
   mode's markdown-only editing is intentional — respect it.
 - **Do NOT switch to Code mode or begin implementing until the plan has been reviewed and
   approved.** Orchestration here works by switching modes rather than by spawning subtasks (see

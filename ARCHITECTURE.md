@@ -1759,7 +1759,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Dependencies**     | `microservice-starter`, `cache-plugin`, `cqrs-plugin`, `storage-plugin`, `react-router-plugin`                                          |
 | **Public API**       | `createFullStackApp()`; `createFullStackAppFromConfig()`; `FullStackStarterOptions`                                                     |
 | **Extension Points** | `reactRouter`, `session`, `database` arms; config-driven composition via `ConfigPlugin`                                                 |
-| **Rules**            | Vite is an app-level build tool; `deno.json` compiler options must include `exactOptionalPropertyTypes`                                 |
+| **Rules**            | Vite is an app-level build tool; `tsconfig.base.json` enables `exactOptionalPropertyTypes`                                 |
 
 ---
 ````

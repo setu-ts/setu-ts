@@ -6,7 +6,7 @@ Zod-compatible request validation. Registers a validation service under `CAPABIL
 Schemas are duck-typed through `safeParse`, so any Zod-compatible validator works. Both **zod v3
 (`>=3.24.0 <4`) and zod v4 (`>=4.4.0 <5`)** are supported (each provides public `safeParse`); there
 is no version pin on the plugin — an application uses whichever major it installs, and
-`@setu-ts/openapi-plugin` recognizes either when documenting routes. `deno task check:compat`
+`@setu-ts/openapi-plugin` recognizes either when documenting routes. `pnpm run check:compat`
 exercises each declared major independently.
 
 ## Installation

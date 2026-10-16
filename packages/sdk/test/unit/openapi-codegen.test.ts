@@ -1158,7 +1158,7 @@ describe('fixture equality', () => {
  * `deno check` on a temp file.
  *
  * `packages/sdk/test/fixtures/params-client.ts` is real generator output for
- * `paramsDocument`, and `deno task check` type-checks `test/` (verified), so any
+ * `paramsDocument`, and `pnpm run check` type-checks `test/` (verified), so any
  * emitted shape that does not compile fails one of the repo's four gates. The
  * previous subprocess approach needed `--allow-write` and `--allow-run`, which
  * the `test` task does not grant, so the whole suite errored out — and a

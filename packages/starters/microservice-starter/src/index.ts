@@ -8,7 +8,7 @@
  * middleware. Also exposes the option type {@linkcode MicroserviceStarterOptions} and the
  * plugin builder {@linkcode buildMicroservicePlugins} for advanced composition.
  *
- * @see {@link https://jsr.io/@setu-ts/microservice-starter}
+ * @see {@link https://www.npmjs.com/package/@setu-ts/microservice-starter}
  */
 
 export { createMicroserviceApp } from './app.ts';

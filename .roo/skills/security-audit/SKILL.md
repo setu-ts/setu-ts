@@ -138,25 +138,32 @@ file), at the real surface — a kernel application, the real connector, the rea
 **Run every probe sandboxed, never with `-A`.** The driver imports the code under audit, so whatever
 the probe is granted, that code is granted too — and `-A` gives an untrusted branch the host's
 files, environment, and network. Run from the repository (or worktree) root so `.` is the tree under
-audit. Fetch dependencies first, then run with an emptied environment and grants scoped to the
-probe:
+audit. Install dependencies first with `pnpm install --frozen-lockfile`, then run the probe under
+Node's permission model with a clean environment. The read grants are the ones the documentation
+sandbox uses (`SANDBOX_READ_PATHS` in `scripts/lib/sandbox.ts`) plus the probe's own directory, and
+the preload refuses the builtins that bypass the permission model:
 
 ```bash
-deno cache .verify-<N>/driver.ts
-env -i PATH="$PATH" HOME="$HOME" deno run --no-prompt \
-  --allow-read=. --allow-write=.verify-<N> --allow-net=127.0.0.1 --allow-env \
-  .verify-<N>/driver.ts
+PROBE=.verify-111f   # this milestone's id
+R=(); for p in packages node_modules pnpm-workspace.yaml package.json scripts/lib/workspace.ts \
+  scripts/lib/source-register.ts scripts/lib/source-hooks.ts scripts/codemods/workspace-sources.ts \
+  scripts/lib/sandbox-preload.ts scripts/lib/sandbox.ts scripts/lib/run.ts "$PROBE"; do
+  R+=("--allow-fs-read=$PWD/$p"); done
+env -i PATH="$PATH" HOME="$HOME" node --permission "${R[@]}" \
+  --allow-fs-write="$PWD/$PROBE" \
+  --import ./scripts/lib/source-register.ts --import ./scripts/lib/sandbox-preload.ts \
+  "$PROBE/driver.ts"
 ```
 
-`--allow-env` is safe only because `env -i` empties the environment first: `RuntimePlugin` reads the
-whole environment at `start()`, so a list of names is not enough, and the host's variables must not
-be what it reads. Pass the variables the probe needs explicitly after `env -i` (`REDIS_URL=…`). Add
-`--allow-run=docker` only for a probe that stops or starts a container. Framework code outside the
-diff may need more (the health plugin's self-indicator reads the hostname, so it needs
-`--allow-sys=hostname`): take those grants from the package's own `test.permissions` in its
-`deno.json`, which is the permission set its tests already justify. A `NotCapable` error is
-evidence, not an obstacle: when code in the audited diff asks for access that neither that baseline
-nor the design review accounts for, record it as a finding rather than widening the grant.
+The code under audit can then read only the package sources and `node_modules`, never `.git`, a
+local `.env` or the rest of the host, and write only the probe's scratch directory. Pass only the
+variables the probe needs after `env -i` (`REDIS_URL=…`). Node 24's permission model does not
+restrict the network: a probe whose audited code must not reach the host's network runs in a
+container instead, on a Docker network holding only the disposable backend (`--network <isolated>`,
+the repository mounted read-only). Grant child processes or workers (`--allow-child-process`,
+`--allow-worker`) only when the design review accounts for them. A permission error is evidence, not
+an obstacle: when audited code asks for access neither this baseline nor the design review accounts
+for, record it as a finding rather than widening the grant.
 
 Every probe has two halves, and both are mandatory:
 
@@ -247,8 +254,8 @@ arise in this diff). A class left unaddressed is an incomplete audit.
     entry with migration text naming what restores the old behavior.
 15. **Deployment surface.** A listener binds loopback unless the design says otherwise (M98b binds
     `127.0.0.1` only); Deno permissions in `deno.json` tasks are scoped to exact hosts, variables,
-    and paths rather than blanket grants; a new npm dependency passes `deno task audit:ci`; and
-    every lazy import is a literal specifier (`scripts/npm-specifier-audit.ts`, M70e).
+    and paths rather than blanket grants; a new npm dependency passes `pnpm run audit:ci`; and every
+    lazy import is a literal specifier (`scripts/npm-specifier-audit.ts`, M70e).
 
 **Wire-level probes must use a raw socket.** The Fetch spec forbids a caller from setting `Host`,
 `Content-Length`, `Connection`, `Transfer-Encoding`, `Upgrade` and similar headers, and `fetch()`
@@ -257,8 +264,8 @@ A `fetch`-based probe of a refusal on framing, authority, or a duplicate header 
 something other than what it claims. It has cut both ways here: on M98b a `fetch` probe reported a
 wrong-`Host` request served `200` when the raw-socket probe got `400`, and only the raw-socket
 rewrite found that a forwarding header the plan said to refuse was being served. Write those
-requests as bytes on a `Deno.connect` socket with `Connection: close` and read the raw response;
-keep `fetch` for the happy path and for a client library's own code path.
+requests as bytes on a `node:net` socket (`createConnection`) with `Connection: close` and read the
+raw response; keep `fetch` for the happy path and for a client library's own code path.
 
 # Step 5 — Negative controls for every new control
 
@@ -267,12 +274,12 @@ revert that control in the working tree, re-run the probe that is supposed to co
 probe FAIL, then restore the file and confirm `git status --short` is empty again.
 
 **The probe must run the reverted code, not code loaded before the revert.** A driver that imports
-the package fresh on each `deno run` picks the revert up. An application already running — a server
-a socket probe connects to, a started connector, a container built from the tree — still executes
-what it loaded, so a probe against it passes with the control gone on disk. Stop every such target,
-start it again from the reverted tree, and only then run the probe. After restoring the file,
-restart the target once more before any later probe, so nothing downstream runs against the reverted
-build.
+the package fresh on each Node invocation picks the revert up. An application already running — a
+server a socket probe connects to, a started connector, a container built from the tree — still
+executes what it loaded, so a probe against it passes with the control gone on disk. Stop every such
+target, start it again from the reverted tree, and only then run the probe. After restoring the
+file, restart the target once more before any later probe, so nothing downstream runs against the
+reverted build.
 
 A probe that still passes with its control removed was never testing it. Record each control, the
 revert applied, the observed failure, and the restore. This step is the only one that edits tracked

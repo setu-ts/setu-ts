@@ -362,7 +362,7 @@ describe('generated mode (M95a)', () => {
 
   it('is absent from CI\u2019s only skip allowlist, so a dropped proof cannot read as a pass', async () => {
     // The M37c lesson: an exemption is a one-word edit, and a bare grep cannot
-    // see its own allowlist grow. CI runs this gate (`deno task check:deploy`)
+    // see its own allowlist grow. CI runs this gate (`pnpm run check:deploy`)
     // with no skip allowance at all — a skip must surface as exit 77, never as
     // a listed name.
     const workflow = await readFile('.github/workflows/ci.yml', 'utf8');

@@ -322,7 +322,7 @@ rewrites the same attribute to
 A reader arriving with a correct-for-React mental model is wrong here, and nothing in this framework
 will correct it for them.
 
-**This is checked, not just asserted.** `deno task check:docs` runs
+**This is checked, not just asserted.** `pnpm run check:docs` runs
 [`scripts/check-example-behaviour.ts`](../scripts/check-example-behaviour.ts), which renders every
 component this repository documents — including the two above — through the framework's own renderer
 twice: once with `<script>alert(1)</script>` substituted into its props, which escaping must

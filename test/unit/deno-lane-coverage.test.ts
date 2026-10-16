@@ -153,8 +153,8 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly twenty-one canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(21);
+  it('has exactly twenty-five canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(25);
     // M111a: the manifest generator whole, and the boot gate's core but not
     // its spawning runner.
     for (const file of ['side-effects', 'npm-release-gate', 'npm-placeholders', 'tar-read']) {

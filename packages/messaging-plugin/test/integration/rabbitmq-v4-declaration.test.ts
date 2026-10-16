@@ -11,7 +11,7 @@
  *
  * ```bash
  * docker run -d --name m70l-rabbit -p 5672:5672 rabbitmq:4-management-alpine
- * RABBITMQ_URL=amqp://localhost:5672 deno task test
+ * RABBITMQ_URL=amqp://localhost:5672 pnpm run test
  * ```
  *
  * @module

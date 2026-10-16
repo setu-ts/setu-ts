@@ -2,10 +2,11 @@
  * Compile-time assertion that the secrets provider option interfaces carry the
  * `endpoint` option (M99d §4.1).
  *
- * `deno task check` type-checks every module under `packages/`, and this file
- * is deliberately NOT named `*.test.ts`, so `deno test` never executes it: the
- * assertion is the type-check itself. A narrowing of either interface — dropping
- * `endpoint` or making it required — is a `deno check` failure here rather than
+ * `pnpm run check` type-checks the package `test/` trees `tsconfig.check.json`
+ * includes, and this file is deliberately NOT named `*.test.ts`, so the test
+ * runner never executes it: the assertion is the type-check itself. A narrowing
+ * of either interface — dropping `endpoint` or making it required — is a
+ * `pnpm run check` failure here rather than
  * a silent runtime change, and the real-emulator test's guard is the behavioural
  * half of the same control.
  *

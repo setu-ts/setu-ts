@@ -968,7 +968,7 @@ setu g command-handler place-order
 setu g query-handler get-order
 setu g event-handler order-placed
 setu g job send-receipt
-deno task start
+npm run start
 ```
 
 The generated ingress classes land in `src/ingress/` and are listed in the managed

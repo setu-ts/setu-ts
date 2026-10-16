@@ -9,7 +9,6 @@ does **not** create a DI scope per request; applications that need request scopi
 carry that scope themselves.
 
 ```bash
-cd apps/di-decorators
-deno task start
-deno task smoke
+pnpm --dir apps/di-decorators run start
+pnpm --dir apps/di-decorators run smoke
 ```
