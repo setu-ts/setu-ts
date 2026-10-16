@@ -9,6 +9,10 @@
  * slow count is not an outage (the messaging indicator's V5-2 rule), which
  * matters where the count is a scan.
  *
+ * Parked rows stay `up` with `parked-rows` in data.reasons. The health plugin's
+ * determineStatusCode withdraws every non-up replica from /ready; one parked
+ * delivery does not stop this replica serving requests.
+ *
  * `data` carries the parked count only — never a consumer, a topic, an
  * envelope id or error text.
  *
@@ -71,7 +75,7 @@ export function createInboxHealthIndicator(
     }
     const reasons = stats.parked > 0 ? ['parked-rows'] : [];
     return {
-      status: reasons.length > 0 ? 'degraded' : 'up',
+      status: 'up',
       data: { ready: true, reachable: true, parked: stats.parked, reasons },
     };
   };

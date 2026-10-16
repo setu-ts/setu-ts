@@ -41,6 +41,15 @@ export interface IDistributedLock {
    * @param token - The token returned by `acquire`
    */
   release(key: string, token: string): Promise<void>;
+
+  /**
+   * Probe the lock backend without acquiring a lock.
+   *
+   * @returns `true` if reachable, `false` if unreachable, or `undefined`
+   *   when reachability cannot be determined
+   * @since 0.10.0
+   */
+  isHealthy?(): Promise<boolean | undefined>;
 }
 
 /**
@@ -400,6 +409,8 @@ export type RegistryEntry<T = unknown> =
  * Minimal ioredis client shape required by RedisLock.
  */
 export interface IRedisLockClient {
+  /** Optional reachability probe; a resolved PING means reachable. @since 0.10.0 */
+  ping?(): Promise<unknown>;
   /** SET key value [NX] [PX ttl] - PX is the milliseconds flag */
   set(key: string, value: string, option: string, px: 'PX', ttl: number): Promise<string | null>;
   /** Quit the connection */

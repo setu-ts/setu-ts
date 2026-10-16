@@ -39,6 +39,7 @@
     "@setu-ts/common": "workspace:^"
   },
   "devDependencies": {
+    "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/metrics-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",

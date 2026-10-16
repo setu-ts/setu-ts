@@ -6,8 +6,13 @@
  *
  * @module
  */
-import { attachConnectionErrorReporter, OptionalDependencyUnavailableError } from '@setu-ts/common';
+import {
+  attachConnectionErrorReporter,
+  isConnectionFault,
+  OptionalDependencyUnavailableError,
+} from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
+import { CacheStoreUnavailableError } from '../errors.ts';
 import type { CacheStore } from './cache-store.ts';
 import type { IRedisClient } from '../interfaces/index.ts';
 
@@ -256,63 +261,83 @@ export class RedisStore implements CacheStore {
   }
 
   async get<T>(key: string): Promise<T | null> {
-    if (!this.#client) {
-      return null;
-    }
-    const raw = await this.#client.get(key);
-    if (raw === null) {
-      return null;
-    }
     try {
-      return JSON.parse(raw) as T;
-    } catch {
-      // If deserialization fails, return raw string
-      return raw as T;
+      if (!this.#client) {
+        return null;
+      }
+      const raw = await this.#client.get(key);
+      if (raw === null) {
+        return null;
+      }
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        // If deserialization fails, return raw string
+        return raw as T;
+      }
+    } catch (error) {
+      throw isConnectionFault(error) ? new CacheStoreUnavailableError(error) : error;
     }
   }
 
   async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
-    if (!this.#client) {
-      throw new Error('RedisStore is not connected');
-    }
-    const serialized = JSON.stringify(value);
-    if (ttlSeconds !== undefined && ttlSeconds > 0) {
-      await this.#client.set(key, serialized, 'EX', ttlSeconds);
-    } else {
-      await this.#client.set(key, serialized);
+    try {
+      if (!this.#client) {
+        throw new Error('RedisStore is not connected');
+      }
+      const serialized = JSON.stringify(value);
+      if (ttlSeconds !== undefined && ttlSeconds > 0) {
+        await this.#client.set(key, serialized, 'EX', ttlSeconds);
+      } else {
+        await this.#client.set(key, serialized);
+      }
+    } catch (error) {
+      throw isConnectionFault(error) ? new CacheStoreUnavailableError(error) : error;
     }
   }
 
   async delete(key: string): Promise<boolean> {
-    if (!this.#client) {
-      return false;
+    try {
+      if (!this.#client) {
+        return false;
+      }
+      const result = await this.#client.del(key);
+      return result > 0;
+    } catch (error) {
+      throw isConnectionFault(error) ? new CacheStoreUnavailableError(error) : error;
     }
-    const result = await this.#client.del(key);
-    return result > 0;
   }
 
   async has(key: string): Promise<boolean> {
-    if (!this.#client) {
-      return false;
+    try {
+      if (!this.#client) {
+        return false;
+      }
+      const result = await this.#client.exists(key);
+      return result === 1;
+    } catch (error) {
+      throw isConnectionFault(error) ? new CacheStoreUnavailableError(error) : error;
     }
-    const result = await this.#client.exists(key);
-    return result === 1;
   }
 
   async clear(): Promise<void> {
-    if (!this.#client) {
-      return;
-    }
-    // SCAN MATCH ${prefix}* to scope deletion to this instance's keys.
-    // A bare SCAN * would wipe the whole Redis server.
-    const pattern = this.#prefix ? `${this.#prefix}*` : '*';
-    let cursor = '0';
-    do {
-      const [nextCursor, keys] = await this.#client.scan(cursor, 'MATCH', pattern);
-      if (keys.length > 0) {
-        await this.#client.del(...keys);
+    try {
+      if (!this.#client) {
+        return;
       }
-      cursor = nextCursor;
-    } while (cursor !== '0');
+      // SCAN MATCH ${prefix}* to scope deletion to this instance's keys.
+      // A bare SCAN * would wipe the whole Redis server.
+      const pattern = this.#prefix ? `${this.#prefix}*` : '*';
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await this.#client.scan(cursor, 'MATCH', pattern);
+        if (keys.length > 0) {
+          await this.#client.del(...keys);
+        }
+        cursor = nextCursor;
+      } while (cursor !== '0');
+    } catch (error) {
+      throw isConnectionFault(error) ? new CacheStoreUnavailableError(error) : error;
+    }
   }
 }

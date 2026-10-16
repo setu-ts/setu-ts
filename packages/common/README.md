@@ -207,6 +207,8 @@ package fits the plugin architecture.
 | `fromNullable`                        | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
+| `isConnectionFault`                   | function  |
+| `isConnectionFaultCode`               | function  |
 | `isErr`                               | function  |
 | `isLexicallyContained`                | function  |
 | `isNone`                              | function  |
@@ -736,3 +738,14 @@ package fits the plugin architecture.
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+## Readiness and dependency outages (M113b)
+
+`isConnectionFault(error: unknown): boolean` walks up to five cause objects, stops at cycles, and
+recognises the eight node/net connection-fault codes plus measured ioredis 5 outage rejections. It
+never mutates errors. Command errors such as WRONGTYPE remain unclassified.
+
+`isConnectionFaultCode(code: unknown): boolean` returns true only for a string in the module-private
+set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
+`EAI_AGAIN`, `EPIPE`. Use the predicate instead of the removed, unreleased `CONNECTION_FAULT_CODES`
+export; callers cannot mutate the classification vocabulary.

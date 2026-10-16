@@ -26,6 +26,7 @@ import type { IDatabaseService, IUnitOfWork } from '@setu-ts/database-plugin';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { HealthPlugin } from '@setu-ts/health-plugin';
 import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 
 import {
@@ -204,6 +205,7 @@ describe('inbox through a real kernel app', () => {
     const calls: string[] = [];
     const app = buildApp({
       inbox: { maxAttempts: 2 },
+      before: [HealthPlugin()],
       subscriptions: [
         onIntegrationEvent(
           hired,
@@ -224,6 +226,13 @@ describe('inbox through a real kernel app', () => {
     await settle();
     const [parked] = await inbox.parked();
     expect(parked).toMatchObject({ consumer: 'payroll', envelopeId: 'e-1', attempts: 2 });
+
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json<{ checks: Record<string, unknown> }>().checks.inbox).toMatchObject({
+      status: 'up',
+      data: { parked: 1, reasons: ['parked-rows'] },
+    });
 
     // Parked: a redelivery is skipped.
     await publish(app, 'e-1');

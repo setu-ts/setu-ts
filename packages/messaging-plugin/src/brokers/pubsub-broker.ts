@@ -25,7 +25,13 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import {
+  createCachedProbe,
+  OptionalDependencyUnavailableError,
+  resolveProbeTiming,
+  withDeadline,
+} from '@setu-ts/common';
+import { resolvePublishTimeoutMs } from './publish-timeout.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError } from './describe-error.ts';
@@ -96,6 +102,12 @@ function isSameTopic(boundTopic: string, requestedTopic: string, projectId: stri
  */
 export interface PubSubSdkModule {
   PubSub: new (options: { projectId: string; credentials?: unknown }) => {
+    /** Bounded metadata round trip, with retries disabled. */
+    getTopics(options: {
+      pageSize: number;
+      autoPaginate: false;
+      gaxOpts: { timeout: number; retry: null };
+    }): Promise<unknown>;
     topic(
       topicName: string,
       options?: { messageOrdering?: boolean },
@@ -198,12 +210,14 @@ export interface IPubSubTransport {
   /**
    * Reports whether the Pub/Sub backend is reachable (optional, M70c).
    *
-   * The real adapter calls the SDK's `topic.exists()`; a transport without a
-   * liveness check omits it and the broker reports `unknown` reachability.
+   * The real adapter calls getTopics (pageSize 1, no pagination, 1500 ms,
+   * no retries): resolved → true, gRPC 14 → false, gRPC 4 → undefined,
+   * other numeric codes (including permission/auth failures) → true,
+   * no numeric code → false. A transport without a probe reports unknown.
    * The SDK owns streaming-pull reconnection, so the broker issues no
    * reconnect loop of its own.
    */
-  isHealthy?(): Promise<boolean>;
+  isHealthy?(): Promise<boolean | undefined>;
 }
 
 /** Handle for an open Pub/Sub subscription. */
@@ -216,6 +230,8 @@ export interface IPubSubSubscription {
  * Options for GCP Pub/Sub broker.
  */
 export interface PubSubOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
   /** GCP project ID. Required unless {@link client} is injected. */
   projectId?: string;
   /** Service-account credentials (object or key path). SDK ADC is used when omitted. */
@@ -305,6 +321,21 @@ export function adaptPubSubModule(
   };
 
   return {
+    isHealthy: async (): Promise<boolean | undefined> => {
+      try {
+        await pubsub.getTopics({
+          pageSize: 1,
+          autoPaginate: false,
+          gaxOpts: { timeout: 1500, retry: null },
+        });
+        return true;
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === 14) return false;
+        if (code === 4) return undefined;
+        return typeof code === 'number';
+      }
+    },
     publish: async (
       topic: string,
       bytes: Uint8Array,
@@ -446,8 +477,11 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
   #ready = false;
   #subscriptions: Map<string, IPubSubSubscription>;
   #rr: RequestReplyCore;
+  #publishTimeoutMs: number;
+  #probe: (() => Promise<boolean | undefined>) | null = null;
 
   constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: PubSubOptions) {
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#runtime = runtime;
     this.#serializer = serializer;
     // Empty is a sentinel for "not supplied", checked in connect(). The plugin's
@@ -562,10 +596,21 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       });
     }
 
+    const transport = this.#transport;
+    if (typeof transport.isHealthy === 'function') {
+      this.#probe = createCachedProbe<boolean | undefined>({
+        probe: () => transport.isHealthy!(),
+        fallback: undefined,
+        ttlMs: 5000,
+        timeoutMs: 2000,
+        ...resolveProbeTiming(this.#runtime),
+      });
+    }
     this.#ready = true;
   }
 
   async disconnect(): Promise<void> {
+    this.#probe = null;
     await this.#rr.close();
 
     for (const sub of this.#subscriptions.values()) {
@@ -588,21 +633,16 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
    * Tri-state backend reachability (M70c).
    *
    * The GCP SDK owns streaming-pull reconnection, so the broker issues no
-   * reconnect loop of its own; the probe delegates to the transport's
-   * `isHealthy?()` (the real adapter calls the SDK's `topic.exists()`).
-   * `true`/`false` from the transport, `undefined` when the transport omits
-   * the member (a minimal fake) — the indicator then reports
-   * `reachable: 'unknown'`.
+   * reconnect loop of its own. The transport's isHealthy round trip is cached
+   * for 5 s and bounded at 2 s. The real adapter uses getTopics: gRPC 14 →
+   * false, 4 → undefined, other numeric codes → true, no code → false.
+   * An expired bound or an absent transport probe means unknown reachability.
    *
    * @returns `true`/`false`/`undefined` as described
    * @since 0.1.0
    */
-  async reachability(): Promise<boolean | undefined> {
-    const transport = this.#transport;
-    if (transport === null || typeof transport.isHealthy !== 'function') {
-      return undefined;
-    }
-    return await transport.isHealthy();
+  reachability(): Promise<boolean | undefined> {
+    return this.#probe?.() ?? Promise.resolve(undefined);
   }
 
   /**
@@ -635,7 +675,15 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     const bytes = new TextEncoder().encode(serialized);
-    await this.#transport.publish(topic, bytes, wireHeaders, validated.orderingKey);
+    const transport = this.#transport;
+    await withDeadline(() => transport.publish(topic, bytes, wireHeaders, validated.orderingKey), {
+      timeoutMs: this.#publishTimeoutMs,
+      onTimeout: () =>
+        new Error(
+          `Pub/Sub did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
+        ),
+      timing: resolveProbeTiming(this.#runtime),
+    });
   }
 
   async subscribe<T>(

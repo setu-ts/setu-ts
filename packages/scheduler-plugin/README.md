@@ -124,6 +124,22 @@ Behaviours run inside that lock. A replica that does not acquire it runs neither
 nor the job handler; a behaviour throw follows the job's existing retry policy. With no behaviours,
 the handler receives its original job directly and no chain is allocated.
 
+## Health
+
+The `scheduler` indicator reports `up` while the scheduler is connected and `down` after disconnect.
+Its `data` includes `connected` and `lock: { reachable }`, where `reachable` is `true`, `false`, or
+`'unknown'`. A shared lock outage stops job fires while request serving can continue, so
+reachability does not change lifecycle status or remove the replica from readiness. Alert on
+`data.lock.reachable` to detect lock outages.
+
+`IDistributedLock.isHealthy?(): Promise<boolean | undefined>` is optional: an absent probe, an
+`undefined` answer, or a probe that does not settle within 2 s reports `'unknown'`. The indicator
+caches each answer for 5 s, uses runtime clocks and timers, and probes only while connected.
+`MemoryLock` always answers `true`. `RedisLock` answers `false` before connect and after disconnect;
+while connected it calls the optional `IRedisLockClient.ping?(): Promise<unknown>`. A resolved PING
+means `true`, a rejected PING means `false`, and a client without PING means `'unknown'`. A built
+client's PING also uses its configured `commandTimeout`.
+
 ## Execution observations
 
 `SchedulerPlugin({ diagnostics: { enabled: true, alias, jobs } })` registers one

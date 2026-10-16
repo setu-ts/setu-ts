@@ -147,14 +147,21 @@ export class ConsulProvider implements DiscoveryProvider {
   /**
    * M70c: probes the agent's leader endpoint — `GET /v1/status/leader` — through
    * the existing `IDiscoveryHttp` seam. 2xx means the agent is reachable; any
-   * other status or a transport failure means it is not.
+   * other status or a transport failure means it is not. The runtime aborts
+   * the request after 2 s so a hung agent cannot hold the connection open.
    */
   async isHealthy(): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = this.#runtime.setTimeout(() => controller.abort(), 2000);
     try {
-      const response = await this.#http.request(`${this.#base}/v1/status/leader`);
+      const response = await this.#http.request(`${this.#base}/v1/status/leader`, {
+        signal: controller.signal,
+      });
       return response.ok;
     } catch {
       return false;
+    } finally {
+      this.#runtime.clearTimeout(timer);
     }
   }
 

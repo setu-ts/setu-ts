@@ -47,6 +47,16 @@ export class MemoryLock implements IDistributedLock {
   }
 
   /**
+   * The process-local backend is always reachable.
+   *
+   * @returns `true`
+   * @since 0.10.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  /**
    * Attempt to acquire the lock.
    *
    * Sweeps EVERY expired entry before its own lookup, not just the key being

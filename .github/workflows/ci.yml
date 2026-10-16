@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes the run already going for it, so that
+# run is cancelled rather than finishing a result nobody will read. Pushes to
+# `main` and `develop` each get a group of their own (the run id), so no
+# integration run is ever cancelled or queued behind another.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Credential persistence (issue #340). `actions/checkout` writes GITHUB_TOKEN into the local git
 # config by default, so anything the job runs afterwards can read it — including third-party code
 # this workflow resolves, installs and in places imports. Every job below was reviewed one at a
@@ -60,10 +68,26 @@ jobs:
 
   # Fork PRs remain visible for maintainer triage but do not start repository validation jobs or
   # service containers. An accepted contribution is validated from a trusted repository branch.
+  # The gates and the test suite run as parallel shards of one job, each on its
+  # own runner with the full set of backends; `node-gate` below reports them
+  # under the one required check name. Every package measures and enforces its
+  # own per-file coverage in its own Vitest run, so splitting by package needs
+  # no report merging: the shards together run exactly what the single job ran.
+  #   static     — format, lint, type check, docs, examples, async guard
+  #   cli        — the CLI suite, the longest single member
+  #   messaging  — messaging-plugin, the second longest
+  #   packages   — every other member (a new member lands here by default)
+  #   tooling    — root and script tests
   node:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    name: Format / Lint / Check / Test
+    name: Format / Lint / Check / Test (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      # One failing shard must not cancel the others: the full picture is what
+      # saves a second push.
+      fail-fast: false
+      matrix:
+        shard: [static, cli, messaging, packages, tooling]
     env:
       # Includes guarded messaging Redis Streams restart/redelivery tests.
       REDIS_URL: redis://localhost:6379
@@ -422,12 +446,15 @@ jobs:
           exit 1
 
       - name: Format check
+        if: matrix.shard == 'static'
         run: pnpm run fmt:check
 
       - name: Lint
+        if: matrix.shard == 'static'
         run: pnpm run lint
 
       - name: Type check
+        if: matrix.shard == 'static'
         run: pnpm run check
 
       # Catches a committed doc that renders wrong while every other gate stays
@@ -435,9 +462,11 @@ jobs:
       # link pointing at a heading that no longer exists, or a section absent
       # from its own table of contents. Prettier accepts all three.
       - name: Documentation check
+        if: matrix.shard == 'static'
         run: pnpm run check:docs
 
       - name: Example applications
+        if: matrix.shard == 'static'
         run: |
           pnpm run check:apps
           git diff --exit-code -- apps
@@ -445,13 +474,47 @@ jobs:
           ALLOW_SKIP: cloudflare
 
       - name: Async assertion guard
+        if: matrix.shard == 'static'
         run: node scripts/codemods/std-to-vitest.ts --check
 
-      - name: Node package tests with coverage
-        run: pnpm test:coverage
+      # `pnpm test:coverage` with no options also runs the tooling target, so
+      # each package shard passes `--no-tooling` and the tooling shard runs it
+      # exactly once. The `packages` shard is every member except the ones with
+      # a shard of their own; a misspelt `--skip` refuses rather than running.
+      - name: Node package tests with coverage (cli)
+        if: matrix.shard == 'cli'
+        run: pnpm test:coverage --no-tooling cli
+
+      - name: Node package tests with coverage (messaging-plugin)
+        if: matrix.shard == 'messaging'
+        run: pnpm test:coverage --no-tooling messaging-plugin
+
+      - name: Node package tests with coverage (all other members)
+        if: matrix.shard == 'packages'
+        run: pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin
 
       - name: Root and script tests with coverage
+        if: matrix.shard == 'tooling'
         run: pnpm run test:tooling:coverage
+
+  # The required status check. A matrix reports one check per shard, under
+  # names the rulesets do not list, so this job carries the name they do. It
+  # runs `always()`: a skipped required check counts as passing, so without it
+  # a failed shard would leave this job skipped and the pull request mergeable.
+  # Fork pull requests skip it exactly as they skipped the single job before;
+  # the fork contribution policy job is what fails them.
+  node-gate:
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    name: Format / Lint / Check / Test
+    needs: node
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed
+        env:
+          RESULT: ${{ needs.node.result }}
+        run: |
+          echo "node shards: $RESULT"
+          test "$RESULT" = success
 
   deno-lane:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

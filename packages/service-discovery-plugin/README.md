@@ -238,8 +238,8 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 - `everResolved` — `false` until the first successful provider read, so a backend that was never
   reached is `down`, not `up` (the X10-3 fix).
 - `degraded` — a refresh failed and a stale snapshot is being served.
-- `isHealthy()` — the provider's live reachability probe (Consul `GET /v1/status/leader`, Kubernetes
-  a `limit=1` EndpointSlice LIST).
+- `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
+  `limit=1` EndpointSlice LIST).
 
 | Status     | Meaning                                                              |
 | ---------- | -------------------------------------------------------------------- |
@@ -293,3 +293,15 @@ MIT
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+## Readiness and dependency outages (M113b)
+
+Provider reachability probes are invoked as methods, retaining their receiver. Healthy Kubernetes
+and Consul providers therefore report reachable and allow `/ready` to return 200. Stale-cache
+`degraded` semantics remain unchanged.
+
+The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
+at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an
+`AbortSignal` aborted after 2 s by runtime timers, cleared on completion. Health reads now issue at
+most one backend probe request per 5 s window per service instance. Before M113b, the detached
+provider call threw before I/O and issued none.

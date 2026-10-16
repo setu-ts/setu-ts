@@ -694,3 +694,6 @@ export { hasForbiddenAliasCharacter } from './diagnostics/alias.ts';
 
 export type { WritePrecondition, WritePreconditionCheck } from './services/write-precondition.ts';
 export { checkWritePrecondition } from './services/write-precondition.ts';
+
+/** Shared connection-outage classifier and network errno vocabulary. */
+export { isConnectionFault, isConnectionFaultCode } from './errors/connection-fault.ts';

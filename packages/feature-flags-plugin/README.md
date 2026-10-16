@@ -152,3 +152,9 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#feature-flags-setu-tsfeature-flags-plugin).
+
+## Readiness and dependency outages (M113b)
+
+A failed provider keeps `feature-flags` `up` with `data.healthy: false` and `data.detail` when
+available. `/ready` stays 200 while the last good snapshot serves. Alert on `data.healthy` instead
+of the overall health status.

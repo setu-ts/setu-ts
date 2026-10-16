@@ -175,6 +175,8 @@ export interface IKafkaFactory {
   producer(): unknown;
   /** Create a consumer. */
   consumer(options: { groupId: string }): unknown;
+  /** Optional admin for reachability and fresh-group offsets. Injected client timeouts apply. @since 0.10.0 */
+  admin?(options?: { retry?: { retries: number } }): unknown;
 }
 
 /**
@@ -523,6 +525,15 @@ export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface NatsMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Lazy connection reconnect policy. Defaults: maxAttempts -1 (forever), waitMs 2000.
+   * maxAttempts must be an integer >= -1; waitMs an integer 1–2147483647.
+   * Invalid values throw RangeError at construction; an injected client with this option
+   * throws TypeError. Exhausting a finite budget closes the connection and health stays down.
+   * @since 0.10.0
+   */
+  reconnect?: { maxAttempts?: number; waitMs?: number };
+
   broker: 'nats';
   url?: string;
   client?: INatsConnection;
@@ -573,6 +584,9 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface KafkaMessagingOptions extends MessagingCommonOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'kafka';
   brokers?: readonly string[];
   client?: IKafkaFactory;
@@ -591,6 +605,9 @@ export interface KafkaMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'pubsub';
   /** Injected transport (bypasses lazy SDK load). Required for this arm. */
   client: import('../brokers/pubsub-broker.ts').IPubSubTransport;
@@ -617,6 +634,9 @@ export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'pubsub';
   /** GCP project ID. Required for production. */
   projectId: string;
@@ -835,6 +855,15 @@ export interface RabbitMqOptions {
  * @since 0.1.0
  */
 export interface NatsOptions {
+  /**
+   * Lazy connection reconnect policy. Defaults: maxAttempts -1 (forever), waitMs 2000.
+   * maxAttempts must be an integer >= -1; waitMs an integer 1–2147483647.
+   * Invalid values throw RangeError at construction; an injected client with this option
+   * throws TypeError. Exhausting a finite budget closes the connection and health stays down.
+   * @since 0.10.0
+   */
+  reconnect?: { maxAttempts?: number; waitMs?: number };
+
   /** NATS connection URL(s). */
   url?: string;
   /** Injected NATS connection. */
@@ -874,6 +903,9 @@ export interface INatsHeaders {
  * @since 0.1.0
  */
 export interface KafkaOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   /** Kafka bootstrap brokers. */
   brokers?: readonly string[];
   /** Injected Kafka factory. */
@@ -934,8 +966,10 @@ export interface KafkaOptions {
    * Optional logger. Reads a consumer whose `consumer.run()` rejects —
    * kafkajs's crash handler rethrows a disconnect that fails — which would
    * otherwise be an unhandled rejection.
+   * Fresh-group initialization failures use `warn` when supplied, else `error`,
+   * and name the topic and group. The subscription remains active.
    */
-  logger?: { error: (msg: string) => void };
+  logger?: { error: (msg: string) => void; warn?: (msg: string) => void };
 }
 
 /**

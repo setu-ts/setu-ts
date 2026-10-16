@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { adaptPubSubModule } from '../../src/brokers/pubsub-broker.ts';
 import type { PubSubSdkModule } from '../../src/brokers/pubsub-broker.ts';
 import { PubSubSubscriptionBoundElsewhereError } from '../../src/errors.ts';
@@ -71,6 +71,9 @@ describe('adaptPubSubModule', () => {
     mod.failNextPublish = false;
 
     mod.PubSub = class {
+      getTopics(): Promise<unknown[]> {
+        return Promise.resolve([[]]);
+      }
       constructor(options: { projectId: string; credentials?: unknown }) {
         // The real SDK reports topics under the project it was built for.
         fakeProjectId = options.projectId;
@@ -181,6 +184,34 @@ describe('adaptPubSubModule', () => {
     expect(topic).toBeDefined();
     expect(topic!.messages).toHaveLength(1);
     expect(topic!.messages[0].data).toEqual(bytes);
+  });
+
+  it.each([
+    [undefined, true],
+    [14, false],
+    [4, undefined],
+    [7, true],
+    [16, true],
+    [5, true],
+    ['14', false],
+    [null, false],
+  ] as const)('getTopics maps code %s to %s', async (code, expected) => {
+    const sdk = createFakeSdkModule();
+    const Base = sdk.PubSub;
+    const getTopics = vi.fn(() => {
+      if (code !== undefined) return Promise.reject(code === null ? null : { code });
+      return Promise.resolve([[]]);
+    });
+    sdk.PubSub = class extends Base {
+      override getTopics = getTopics;
+    };
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+    expect(await transport.isHealthy!()).toBe(expected);
+    expect(getTopics).toHaveBeenCalledWith({
+      pageSize: 1,
+      autoPaginate: false,
+      gaxOpts: { timeout: 1500, retry: null },
+    });
   });
 
   it('caches one Topic per name, created with messageOrdering: true (M106 §3.5)', async () => {

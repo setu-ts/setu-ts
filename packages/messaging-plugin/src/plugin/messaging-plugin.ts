@@ -26,10 +26,10 @@ import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
 import {
   RabbitMqBroker,
   resolveConsumerOptions,
-  resolvePublishTimeoutMs,
   validateConsumerQueue,
 } from '../brokers/rabbitmq-broker.ts';
-import { NatsBroker } from '../brokers/nats-broker.ts';
+import { resolvePublishTimeoutMs } from '../brokers/publish-timeout.ts';
+import { NatsBroker, resolveNatsReconnect } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
 import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
 import { ServiceBusBroker } from '../brokers/service-bus-broker.ts';
@@ -164,9 +164,12 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
   // Refused HERE, before any application exists, like every other bound
   // (the M90a/M101a rule) — not at `start()`, where a typo would surface as a
   // boot failure far from the line that caused it.
+  if (brokerType === 'kafka' || brokerType === 'pubsub' || brokerType === 'rabbitmq') {
+    resolvePublishTimeoutMs((options as { publishTimeoutMs?: number }).publishTimeoutMs);
+  }
+  if (brokerType === 'nats') resolveNatsReconnect(options as NatsOptions);
   if (brokerType === 'rabbitmq') {
     const rabbit = options as RabbitMqMessagingOptions;
-    resolvePublishTimeoutMs(rabbit.publishTimeoutMs);
     rabbitConsumerOptions = resolveConsumerOptions(rabbit);
     if (rabbit.persistentMessages !== undefined && typeof rabbit.persistentMessages !== 'boolean') {
       throw new TypeError('messaging-plugin: persistentMessages must be a boolean');
@@ -389,8 +392,10 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           streamSubjects?: NatsOptions['streamSubjects'];
           defaultQueue?: string;
           headersFactory?: NatsOptions['headersFactory'];
+          reconnect?: NatsOptions['reconnect'];
         };
         const natsOptions: NatsOptions = {};
+        if (opts.reconnect !== undefined) natsOptions.reconnect = opts.reconnect;
         if (opts.url !== undefined) natsOptions.url = opts.url;
         if (opts.client !== undefined) natsOptions.client = opts.client;
         if (opts.streamName !== undefined) natsOptions.streamName = opts.streamName;
@@ -407,6 +412,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           defaultQueue?: string;
           replyTopic?: string;
           retry?: KafkaOptions['retry'];
+          publishTimeoutMs?: number;
         };
         const kafkaOptions: KafkaOptions = {};
         if (opts.brokers !== undefined) kafkaOptions.brokers = opts.brokers;
@@ -415,6 +421,8 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         if (opts.defaultQueue !== undefined) kafkaOptions.defaultQueue = opts.defaultQueue;
         if (opts.replyTopic !== undefined) kafkaOptions.replyTopic = opts.replyTopic;
         if (opts.retry !== undefined) kafkaOptions.retry = opts.retry;
+        if (opts.publishTimeoutMs !== undefined)
+          kafkaOptions.publishTimeoutMs = opts.publishTimeoutMs;
         if (logger !== undefined) kafkaOptions.logger = logger;
         broker = new KafkaBroker(ctx.runtime, serializer, kafkaOptions);
       } else if (brokerType === 'pubsub') {
@@ -425,12 +433,15 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           defaultQueue?: string;
           replyTopic?: string;
           enableMessageOrdering?: boolean;
+          publishTimeoutMs?: number;
         };
         const pubSubOptions: import('../brokers/pubsub-broker.ts').PubSubOptions = {};
         if (pubSubOpts.projectId !== undefined) pubSubOptions.projectId = pubSubOpts.projectId;
         if (pubSubOpts.credentials !== undefined) {
           pubSubOptions.credentials = pubSubOpts.credentials;
         }
+        if (pubSubOpts.publishTimeoutMs !== undefined)
+          pubSubOptions.publishTimeoutMs = pubSubOpts.publishTimeoutMs;
         if (pubSubOpts.client !== undefined) pubSubOptions.client = pubSubOpts.client;
         if (pubSubOpts.defaultQueue !== undefined) {
           pubSubOptions.defaultQueue = pubSubOpts.defaultQueue;

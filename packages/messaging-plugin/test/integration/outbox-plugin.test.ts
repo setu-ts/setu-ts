@@ -453,8 +453,14 @@ describe('MessagingPlugin outbox wiring', () => {
         .getRepository<Record<string, unknown>, string>('Outbox')
         .update(id, { status: 'failed' });
       const check = await readOutbox(degraded);
-      expect(check?.status).toBe('degraded');
+      expect(check?.status).toBe('up');
       expect(check?.data?.['reasons']).toEqual(['failed-rows']);
+      const ready = await degraded.inject({ method: 'GET', url: '/ready' });
+      expect(ready.statusCode).toBe(200);
+      expect(ready.json<{ checks: Record<string, unknown> }>().checks.outbox).toMatchObject({
+        status: 'up',
+        data: { reasons: ['failed-rows'] },
+      });
     } finally {
       await degraded.stop();
     }

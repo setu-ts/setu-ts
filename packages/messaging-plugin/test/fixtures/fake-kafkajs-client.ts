@@ -1,3 +1,5 @@
+import type { PartitionAssigner } from 'kafkajs';
+import { AssignerProtocol } from 'kafkajs';
 /**
  * Fake Kafka client for testing KafkaBroker.
  *
@@ -116,6 +118,26 @@ export class FakeKafkaMessage {
  * Fake Kafka consumer.
  */
 export class FakeKafkaConsumer {
+  readonly events = { GROUP_JOIN: 'consumer.group_join' } as const;
+  #joinListeners: Array<
+    (event: { payload: { memberAssignment: Record<string, number[]> } }) => Promise<void>
+  > = [];
+  on(
+    event: string,
+    listener: (event: { payload: { memberAssignment: Record<string, number[]> } }) => Promise<void>,
+  ): void {
+    if (event !== this.events.GROUP_JOIN) throw new Error('Invalid consumer event');
+    this.#joinListeners.push(listener);
+  }
+  async join(memberAssignment: Record<string, number[]>): Promise<void> {
+    await Promise.all(
+      this.#joinListeners.map((listener) => listener({ payload: { memberAssignment } })),
+    );
+  }
+  seek(options: { topic: string; partition: number; offset: string }): void {
+    this.#record('seek', [options]);
+  }
+
   #subscribedTopics: string[];
   #runOptions: {
     eachMessage: (data: {
@@ -386,11 +408,16 @@ export class FakeKafkaProducer {
  * Fake Kafka factory for testing.
  */
 export class FakeKafkaFactory {
+  readonly admins: FakeKafkaAdmin[] = [];
   #options: FakeKafkaOptions;
   #calls: Array<{ method: string; args: unknown[] }>;
   #producers: FakeKafkaProducer[];
   #consumers: Map<string, FakeKafkaConsumer>; // groupId -> consumer
   #offset = 0;
+  readonly consumerOptions = new Map<
+    string,
+    { groupId: string; partitionAssigners?: PartitionAssigner[] }
+  >();
 
   constructor(options: FakeKafkaOptions = {}) {
     this.#options = options;
@@ -423,6 +450,13 @@ export class FakeKafkaFactory {
     return this.#producers[0];
   }
 
+  admin(options?: { retry?: { retries: number } }): FakeKafkaAdmin {
+    this.#record('admin', [options]);
+    const admin = new FakeKafkaAdmin();
+    this.admins.push(admin);
+    return admin;
+  }
+
   /**
    * Delivers a produced message to every consumer subscribed to `topic`,
    * preserving the per-`groupId` consumer map and the commit-on-resolve
@@ -442,7 +476,11 @@ export class FakeKafkaFactory {
     }
   }
 
-  consumer(options: { groupId: string }): FakeKafkaConsumer {
+  consumer(options: {
+    groupId: string;
+    partitionAssigners?: PartitionAssigner[];
+  }): FakeKafkaConsumer {
+    if (options.partitionAssigners) this.consumerOptions.set(options.groupId, options);
     this.#record('consumer', [options]);
     // Return existing consumer for this groupId, or create a new one
     if (!this.#consumers.has(options.groupId)) {
@@ -481,5 +519,48 @@ export class FakeKafkaFactory {
         }
       }
     }
+  }
+}
+
+/** Real kafkajs return shapes: topic records, partition records, and STRING offsets. */
+export class FakeKafkaAdmin {
+  readonly calls: Array<{ method: string; args: unknown[] }> = [];
+  offsets = [{ topic: 'test.topic', partitions: [{ partition: 0, offset: '-1' }] }];
+  watermarks = [{ partition: 0, offset: '0', high: '0', low: '0' }];
+
+  connect(): Promise<void> {
+    this.calls.push({ method: 'connect', args: [] });
+    return Promise.resolve();
+  }
+  disconnect(): Promise<void> {
+    this.calls.push({ method: 'disconnect', args: [] });
+    return Promise.resolve();
+  }
+  describeCluster(): Promise<{ brokers: unknown[]; controller: number; clusterId: string }> {
+    this.calls.push({ method: 'describeCluster', args: [] });
+    return Promise.resolve({ brokers: [], controller: 0, clusterId: 'fake' });
+  }
+  fetchOffsets(options: { groupId: string; topics: string[] }): Promise<typeof this.offsets> {
+    this.calls.push({ method: 'fetchOffsets', args: [options] });
+    return Promise.resolve(this.offsets.map((entry) => ({ ...entry, topic: options.topics[0]! })));
+  }
+  fetchTopicOffsets(topic: string): Promise<typeof this.watermarks> {
+    this.calls.push({ method: 'fetchTopicOffsets', args: [topic] });
+    return Promise.resolve(this.watermarks);
+  }
+  members = [
+    {
+      memberMetadata: AssignerProtocol.MemberMetadata.encode({
+        version: 0,
+        topics: ['test.topic'],
+        userData: Buffer.from('{}'),
+      }),
+    },
+  ];
+  describeGroups(
+    groups: string[],
+  ): Promise<{ groups: Array<{ members: Array<{ memberMetadata: Uint8Array }> }> }> {
+    this.calls.push({ method: 'describeGroups', args: [groups] });
+    return Promise.resolve({ groups: [{ members: this.members }] });
   }
 }

@@ -6267,6 +6267,45 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   three doc claims the source contradicted (a scaffolded project's test told to run the repository
   script, and two type-assertion comments still naming `deno test`), all fixed; three negative
   controls re-run against the real gate each failed on the rule they plant — complete (PR #460)
+- **Milestone 113a** (`packages/messaging-plugin` — brokers that report healthy while down, and
+  publishes with no bound; V9-35, V9-36, V9-37, V9-3): Kafka and Pub/Sub reachability is a real
+  round trip cached 5 s and bounded 2 s — Kafka `describeCluster()` on a dedicated client with a 1.5
+  s request timeout (kafkajs's default 30 s made a stopped broker look hung), Pub/Sub `getTopics`
+  with `gaxOpts` (without them both pause and stop hung). Stopped reads `down`; paused reads
+  `'unknown'` per the existing rule, whose readiness meaning M113b owns. Kafka and Pub/Sub gain
+  `publishTimeoutMs` (default 15 s, shared resolver with RabbitMQ); lazy NATS reconnects forever
+  through a validated `reconnect` option, refused beside an injected client. **V9-3 was redesigned
+  after the first pass**: Codex found kafkajs `admin.setOffsets` runs a temporary consumer costing
+  ~5 s per new group (every reply inbox is one). A new group now captures its watermarks at
+  `subscribe()`, advertises them in group-join metadata through a round-robin wrapper, and on its
+  first join seeks uncommitted partitions to the members' minimum — measured on real Kafka: 0/4
+  delivered with no handling, 4/4 in 12/12 trials, `subscribe()` ~5–60 ms, and 6/6 for two members
+  starting together where own-offset seeks lost 3/6 (the Spring Kafka `onPartitionsAssigned`
+  pattern). Implemented by Codex in two passes; review fixed a producer left connected when the
+  probe admin failed and a failed group-admin connect memoized for the broker's life. The
+  join-metadata seek reads offsets other group members write; the committed-tree security audit ran
+  two fresh-context rounds. Round 2 failed on R2-F4 (Low): the docs claimed a member that can join
+  can already commit, false under split group/topic ACLs. The docs now state that case, that the
+  lowering is unlogged, and the group-ACL remedy; re-accepted and NOT re-audited, at the
+  maintainer's direction — complete (PR #462).
+- **Milestone 113b** (`service-discovery-plugin` + `health-plugin` docs + `scheduler-plugin` +
+  `cache-plugin` + `session-plugin` + `auth-plugin` + `messaging-plugin` +
+  `realtime-backplane-plugin` + `worker-pool-plugin` + `static-plugin` + `feature-flags-plugin` +
+  `common` + `database-plugin` — readiness that does not describe the dependency; V9-2, V9-19,
+  V9-32, V9-44): Kubernetes and Consul discovery probes are called as methods, so a working backend
+  no longer fails every replica's `/ready`. The `/ready` rule stays (maintainer decision,
+  2026-10-16): `degraded` means "take this replica out of rotation", and seven indicators whose
+  `degraded` contradicted it — inbox parked rows, outbox reasons, backplane fan-out, worker-pool on
+  Workers, static-files without a file system, stale auth key sets, a stale feature-flag snapshot —
+  now report `up` with the condition in `data`. The scheduler indicator reports its lock backend's
+  reachability through an optional tri-state `IDistributedLock.isHealthy?`; status stays lifecycle,
+  since a shared lock outage stops fires, not serving. Redis cache (and cache-backed session) and
+  rate-limit outages answer `503` through `CacheStoreUnavailableError`/
+  `RateLimitStoreUnavailableError` over one measured `isConnectionFault` in `common`, and the
+  rate-limit client gains `commandTimeoutMs`. V9-68 and the discovery stale-cache case move to
+  M113o. Implemented by Codex, which stopped on a plan contradiction (§3.3 typed the lock probe
+  `Promise<boolean>` while requiring "unknown"); opencode's read-only sweep found three stale doc
+  and comment sites — complete (PR #463)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

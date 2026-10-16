@@ -197,9 +197,9 @@ disagreed — X7-8).
 
 Since M70c the plugin indicators for `messaging`, `realtime-backplane`, `storage`, `mail`, `queue`,
 and `service-discovery` report **reachability** as well as lifecycle — a backend that is configured
-but unreachable is `down` (or `degraded` for the backplane, whose local delivery still works), not
-`up`. The full classification of every indicator in the framework is in
-[health-indicators.md](health-indicators.md).
+but unreachable is `down`, not `up` — except the backplane, which stays `up` with
+`data.reachable: false` because local delivery still works. The full classification of every
+indicator in the framework is in [health-indicators.md](health-indicators.md).
 
 ### Nothing in the request pipeline may refuse a probe
 

@@ -122,3 +122,12 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#health-setu-tshealth-plugin).
+
+## What `degraded` means
+
+`/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
+return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live` remains 200.
+
+Use `degraded` when this replica should stop taking traffic. A shared problem that does not stop
+request serving belongs in the indicator's `data`: draining every replica would remove healthy
+serving capacity. Alert on those data fields.

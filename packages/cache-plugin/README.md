@@ -96,22 +96,23 @@ programmatic read-through calls.
 
 ## Exports
 
-| Export                    | Kind      |
-| ------------------------- | --------- |
-| `cacheMiddleware`         | function  |
-| `CachePlugin`             | function  |
-| `CacheService`            | class     |
-| `MemoryStore`             | class     |
-| `NoopStore`               | class     |
-| `RedisStore`              | class     |
-| `CacheDiagnosticsOptions` | interface |
-| `CachedResponsePayload`   | interface |
-| `CacheMiddlewareOptions`  | interface |
-| `CachePluginOptions`      | interface |
-| `CacheStoreOptions`       | interface |
-| `ICacheStore`             | interface |
-| `IRedisClient`            | interface |
-| `CacheStoreType`          | type      |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `cacheMiddleware`            | function  |
+| `CachePlugin`                | function  |
+| `CacheService`               | class     |
+| `CacheStoreUnavailableError` | class     |
+| `MemoryStore`                | class     |
+| `NoopStore`                  | class     |
+| `RedisStore`                 | class     |
+| `CacheDiagnosticsOptions`    | interface |
+| `CachedResponsePayload`      | interface |
+| `CacheMiddlewareOptions`     | interface |
+| `CachePluginOptions`         | interface |
+| `CacheStoreOptions`          | interface |
+| `ICacheStore`                | interface |
+| `IRedisClient`               | interface |
+| `CacheStoreType`             | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
@@ -120,3 +121,10 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cacheplugin-setu-tscache-plugin).
+
+## Readiness and dependency outages (M113b)
+
+`RedisStore.get/set/delete/has/clear` wrap recognised connection faults in
+`CacheStoreUnavailableError`, preserving the original as `cause`. With the exceptions
+`errorHandler`, this returns 503 and the fixed detail `The cache is temporarily unavailable.` Other
+errors propagate unchanged. Inspect `cause` for driver diagnostics.

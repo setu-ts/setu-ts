@@ -37,6 +37,50 @@ build from the entry (`import * as serverBuild from '../build/server/index.js'`,
 `ReactRouterPlugin` as `serverBuild`) — the plugin's `serverBuildPath` cannot resolve in a bundled
 Worker.
 
+### Readiness and `RedisRateLimitStore` outage migration (M113b)
+
+- **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
+  previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
+  changes overall status for these conditions. Migrate alerts to inbox `data.parked` /
+  `data.reasons`, outbox `data.reasons` (all six reasons), realtime-backplane `data.reachable`,
+  worker-pool `data.available`, static-files `data.fs`, auth `data.current` / `data.issuers`, and
+  feature-flags `data.healthy` / `data.detail`. `degraded` still means out of rotation: `/ready`
+  503, `/health` 200. Healthy Kubernetes and Consul discovery probes now preserve their receiver and
+  allow readiness.
+- **Breaking Redis outage responses (M113b).** Cache and rate-limit connection faults now carry 503
+  status hints instead of reaching `errorHandler` as masked 500s; cache-backed sessions inherit the
+  cache response. Update response handling to accept 503 and inspect `cause` instead of checking raw
+  driver errors. WRONGTYPE/programming errors are unchanged.
+- **Breaking rate-limit wait bound (M113b).** Built `RedisRateLimitStore` clients now use a 15000 ms
+  command bound. Configure `commandTimeoutMs` higher for slow Redis, or `0` for the previous
+  unbounded wait; configure injected clients directly.
+
+### Messaging `publishTimeoutMs`, `reconnect` and Kafka group starts (M113a)
+
+- Kafka and Pub/Sub now bound publishes at 15000 ms, including RPC and outbox publishes. Set
+  `publishTimeoutMs` higher for slow brokers or to `0` for the previous unbounded wait. A timeout
+  does not prove rejection: the message may still arrive, so retries need de-duplication.
+- An injected Kafka factory without `admin()` reports unknown reachability. Supply an admin-capable
+  factory for a probe; its timeouts remain your responsibility. Lazy clients build a separate
+  short-timeout health client. Pub/Sub transports may return `undefined` from `isHealthy()`; code
+  consuming that member directly must handle unknown. Existing boolean implementations still fit.
+- Lazy NATS connections reconnect forever by default. To retain the previous budget use
+  `reconnect: { maxAttempts: 10, waitMs: 2000 }`; exhausted connections stay down. Configure an
+  injected connection yourself: combining `client` and `reconnect` throws `TypeError`.
+- Fresh Kafka groups start at the high watermark captured during `subscribe()`. Remove sleeps or
+  repeated publishes that worked around losing the first message; a single post-subscribe publish is
+  delivered once the consumer joins, without replaying earlier history. Existing committed groups
+  are unchanged. The first join seeks assigned uncommitted partitions to the minimum start offsets
+  advertised by current members, so concurrent first starts also deliver messages published after
+  any member’s subscription resolves, without replaying history before the first subscription. Group
+  members are trusted for this: joining needs only Read on the group, so a principal without topic
+  Read can still make a new group replay unlogged; restrict who can join the consumer group (Kafka
+  group ACLs) where a replayed history matters. Without admin the step is skipped. Injected
+  factories try importing kafkajs once at connect; if unavailable, members seek their own offsets
+  and concurrent first starts can miss messages. A member crashing before the join takes its start
+  offsets with it. Admin/metadata failures warn once per subscription with topic/group and remain
+  non-fatal.
+
 ## 0.9.0
 
 ### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`

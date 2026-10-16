@@ -22,6 +22,47 @@ All notable changes to this project are documented here. The format follows
   `waitUntil` form on a Workers project. `ReactRouterPluginOptions` changes from an `interface` to a
   union `type` (`serverBuildPath` | `serverBuild`, exactly one required) — breaking for implementors
   who `extends` it; a caller passing `serverBuildPath` is unaffected. Ships in minor `0.10.0`.
+- **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
+  previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
+  changes overall status for these conditions. Migrate alerts to inbox `data.parked` /
+  `data.reasons`, outbox `data.reasons` (all six reasons), realtime-backplane `data.reachable`,
+  worker-pool `data.available`, static-files `data.fs`, auth `data.current` / `data.issuers`, and
+  feature-flags `data.healthy` / `data.detail`. `degraded` still means out of rotation: `/ready`
+  503, `/health` 200. Healthy Kubernetes and Consul discovery probes now preserve their receiver and
+  allow readiness. The discovery probe is cached for 5 s, coalesced, and bounded at 2 s, with
+  runtime-timed request cancellation for Consul and Kubernetes. Health reads now issue at most one
+  backend probe request per 5 s window per service instance; before M113b they issued none because
+  the detached provider call threw before I/O.
+- **Connection-fault code predicate (M113b).** The unreleased `CONNECTION_FAULT_CODES` export is
+  removed so callers cannot mutate shared outage classification. Replace `.has(code)` with
+  `isConnectionFaultCode(code)` from `@setu-ts/common`; only the same eight string codes match.
+  Database classifier behaviour is unchanged.
+- **Breaking Redis outage responses (M113b).** Cache and rate-limit connection faults now carry 503
+  status hints instead of reaching `errorHandler` as masked 500s; cache-backed sessions inherit the
+  cache response. Update response handling to accept 503 and inspect `cause` instead of checking raw
+  driver errors. WRONGTYPE/programming errors are unchanged.
+- **Breaking rate-limit wait bound (M113b).** Built `RedisRateLimitStore` clients now use a 15000 ms
+  command bound. Configure `commandTimeoutMs` higher for slow Redis, or `0` for the previous
+  unbounded wait; configure injected clients directly.
+
+- **Messaging broker bounds and recovery (M113a, `@setu-ts/messaging-plugin`).** Kafka and Pub/Sub
+  publishes now reject after 15000 ms by default, including RPC and outbox traffic; set
+  `publishTimeoutMs` higher or to `0` for the previous unbounded wait, and account for possible late
+  delivery before retrying. Kafka factories without `admin` now report unknown reachability instead
+  of true; supply an admin-capable factory for a probe. Lazy NATS connections reconnect forever; set
+  `reconnect: { maxAttempts: 10, waitMs: 2000 }` to restore the finite budget, or configure injected
+  connections in the application. Fresh Kafka groups now start at the high watermark captured at
+  subscribe time: remove join sleeps and publish retries used to avoid losing the first message.
+  First joins seek assigned uncommitted partitions to the minimum start offset advertised by the
+  current members, covering concurrent first starts without replaying history before the first
+  subscription when every group member is trusted (a client able to join the group, which needs only
+  group Read, can move the start earlier without a log line; advertisements are keyed by topic and
+  bounded at 64 KiB and 19-digit offsets). Existing committed groups are untouched; a group
+  subscribing before the broker's coordinator is ready still captures its watermarks, since the
+  first join re-checks which partitions are committed. Without admin the step is skipped; injected
+  factories without a loadable kafkajs module seek only their own offsets, so concurrent starts can
+  miss messages. A member crashing before the join takes its start offsets with it; admin/metadata
+  failures warn once per subscription and remain non-fatal.
 
 - **Governing toolchain instructions (M111f).** Repository commands use pnpm, Node, Vitest, ESLint,
   Prettier and TypeDoc. A categorized prose gate prevents obsolete instructions. JSR metadata
@@ -60,7 +101,30 @@ All notable changes to this project are documented here. The format follows
   `localization-plugin` refusal of an invalid `exposeCatalogues.cacheControl`. Messages are
   unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
 
+### Added
+
+- **Scheduler lock reachability (M113b).** `IDistributedLock` gains optional
+  `isHealthy?(): Promise<boolean | undefined>` and `IRedisLockClient` gains optional
+  `ping?(): Promise<unknown>`. The scheduler indicator adds `data.lock.reachable` (`true` / `false`
+  / `'unknown'`), cached for 5 s and bounded at 2 s while connected. Status remains lifecycle;
+  shared lock outages do not change readiness. Memory locks report reachable; Redis locks probe PING
+  and clients without it report unknown.
+
+- **Redis outage vocabulary (M113b).** `@setu-ts/common` exports `isConnectionFault` and
+  `isConnectionFaultCode`; cache-plugin exports `CacheStoreUnavailableError`; auth-plugin exports
+  `RateLimitStoreUnavailableError`. `RedisRateLimitStore` gains `commandTimeoutMs`.
+
+- **Messaging reachability probes (M113a).** Kafka uses a dedicated short-timeout metadata client;
+  Pub/Sub uses bounded `getTopics`. Both cache probes for 5 s and bound them at 2 s, including
+  direct health calls. Kafka/Pub/Sub gain `publishTimeoutMs`; NATS gains validated `reconnect`.
+  Stopped Kafka/Pub/Sub report down; a hung probe reports unknown, which still leaves health up.
+
 ### Fixed
+
+- **Kafka shutdown with sends in flight.** With publishes abandoned at `publishTimeoutMs` during a
+  broker pause, `app.stop()` waited on kafkajs's pending-request drain (about 26 s) and the process
+  never exited, because the abandoned sends kept retrying and reopened connections. The producer
+  close is now bounded at 10 s, and a second close runs once those sends settle.
 
 - **npm installation pointers (M111f).** Auth, queue and GraphQL README Deno install commands now
   select npm explicitly. The website install commands resolve the npm packages.
