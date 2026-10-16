@@ -136,7 +136,8 @@ The plugin registers a health indicator named `static-files`:
 
 - `up` when the root directory exists
 - `down` when the root is not a directory or stat fails
-- `degraded` when no filesystem is available (e.g., Cloudflare Workers)
+- `up` with `data: { fs: false, detail }` when no filesystem is available (e.g., Cloudflare Workers)
+  — no route is registered, and `/ready` stays 200
 
 ## Exports
 
@@ -160,3 +161,9 @@ complete example.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#static-files-plugin-setu-tsstatic-plugin).
+
+## Readiness and dependency outages (M113b)
+
+On runtimes without a filesystem, `static-files` reports `up` with
+`data: { fs: false, detail: 'no file system on this runtime' }`, keeping `/ready` at 200. No static
+route is registered. Monitor `data.fs` if files are required.

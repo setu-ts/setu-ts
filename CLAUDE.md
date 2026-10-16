@@ -6288,6 +6288,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   can already commit, false under split group/topic ACLs. The docs now state that case, that the
   lowering is unlogged, and the group-ACL remedy; re-accepted and NOT re-audited, at the
   maintainer's direction — complete (PR #462).
+- **Milestone 113b** (`service-discovery-plugin` + `health-plugin` docs + `scheduler-plugin` +
+  `cache-plugin` + `session-plugin` + `auth-plugin` + `messaging-plugin` +
+  `realtime-backplane-plugin` + `worker-pool-plugin` + `static-plugin` + `feature-flags-plugin` +
+  `common` + `database-plugin` — readiness that does not describe the dependency; V9-2, V9-19,
+  V9-32, V9-44): Kubernetes and Consul discovery probes are called as methods, so a working backend
+  no longer fails every replica's `/ready`. The `/ready` rule stays (maintainer decision,
+  2026-10-16): `degraded` means "take this replica out of rotation", and seven indicators whose
+  `degraded` contradicted it — inbox parked rows, outbox reasons, backplane fan-out, worker-pool on
+  Workers, static-files without a file system, stale auth key sets, a stale feature-flag snapshot —
+  now report `up` with the condition in `data`. The scheduler indicator reports its lock backend's
+  reachability through an optional tri-state `IDistributedLock.isHealthy?`; status stays lifecycle,
+  since a shared lock outage stops fires, not serving. Redis cache (and cache-backed session) and
+  rate-limit outages answer `503` through `CacheStoreUnavailableError`/
+  `RateLimitStoreUnavailableError` over one measured `isConnectionFault` in `common`, and the
+  rate-limit client gains `commandTimeoutMs`. V9-68 and the discovery stale-cache case move to
+  M113o. Implemented by Codex, which stopped on a plan contradiction (§3.3 typed the lock probe
+  `Promise<boolean>` while requiring "unknown"); opencode's read-only sweep found three stale doc
+  and comment sites — complete (PR #463)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

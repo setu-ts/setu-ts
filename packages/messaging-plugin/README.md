@@ -1263,10 +1263,10 @@ bridge refuses sources without native conditional writes.
 
 The overlap kinds are `fenced` (the pre-publish check refused an expired claim), `claim-lost` (a
 status write found another version) and `duplicate` (`markSent` found the row already sent). Any
-kind, including a dispatch sweep, degrades health with `relay-overlap` inside the configured window.
-Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0` disables
-only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator diagnostic, and
-is absent from transition outcomes.
+kind, including a dispatch sweep, adds the health reason `relay-overlap` inside the configured
+window. Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0`
+disables only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator
+diagnostic, and is absent from transition outcomes.
 
 On DynamoDB a stale GSI page cannot cause a publish: the claim's conditional write checks the latest
 base item. This follows AWS's documented model and is exercised against DynamoDB Local, not the
@@ -1326,7 +1326,7 @@ set by default.
 ### Health and metrics
 
 The `outbox` indicator reads the store's counts through a cached, bounded probe (5 s TTL, 2 s
-bound): `down` when the store does not answer, otherwise `degraded` with `data.reasons` from a fixed
+bound): `down` when the store does not answer, otherwise `up` with `data.reasons` from a fixed
 vocabulary, else `up`. `data` carries counts, ages in ms and the last local sweep's counts — never a
 tenant id, ordering key, topic or error text.
 
@@ -1601,8 +1601,9 @@ messaging behaviour chain. A re-publish reaches every consumer group of the topi
 inbox skip it, groups without one process it again. `parked()` never returns an envelope, and the
 health indicator carries a count only. Parked rows are purged by `retainMs` like every other row,
 envelope included, so a parked row does not outlive the window: release or discard a parked delivery
-within that window (the `inbox` health indicator reports `degraded` while any row is parked), and
-`discard` clears one sooner. These are operator capabilities — gate any route that calls them.
+within that window (the `inbox` indicator stays `up` with parked rows in `data.parked` and
+`data.reasons`), and `discard` clears one sooner. These are operator capabilities — gate any route
+that calls them.
 
 ### Backends
 
@@ -1904,3 +1905,10 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#messaging-setu-tsmessaging-plugin).
+
+## Readiness and dependency outages (M113b)
+
+Inbox parked rows and all six outbox reasons keep the indicator `up` and `/ready` at 200. Alert on
+inbox `data.parked` / `data.reasons` and outbox `data.reasons` (`oldest-pending-age`, `failed-rows`,
+`failed-scan-cap`, `blocked-key-cap`, `store-write-failing`, `relay-overlap`). Lifecycle and
+unreachable-store `down` arms remain.

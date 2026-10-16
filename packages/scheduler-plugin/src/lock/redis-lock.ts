@@ -214,6 +214,26 @@ export class RedisLock implements IDistributedLock {
   }
 
   /**
+   * Probe Redis while connected, containing PING failures.
+   *
+   * A built client's PING is bounded by its `commandTimeout`.
+   *
+   * @returns `false` before connect or after disconnect, `undefined` for a
+   *   client without PING, otherwise whether PING resolves
+   * @since 0.10.0
+   */
+  async isHealthy(): Promise<boolean | undefined> {
+    if (this.#client === null) return false;
+    if (this.#client.ping === undefined) return undefined;
+    try {
+      await this.#client.ping();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Attempt to acquire the lock.
    *
    * Uses `SET key token NX PX ttl` — returns the token if acquired,

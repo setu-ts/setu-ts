@@ -250,3 +250,22 @@ describe('HealthPlugin integration (through the real kernel)', () => {
     }
   });
 });
+
+it('pins degraded as /ready 503 and /health 200', async () => {
+  const app = await boot(contributingPlugin('replica', 'degraded'));
+  try {
+    for (const [url, status] of [
+      ['/ready', 503],
+      ['/health', 200],
+    ] as const) {
+      const result = await app.inject({ method: 'GET', url });
+      expect(result.statusCode).toBe(status);
+      expect(result.json<HealthReport>().checks.replica).toMatchObject({
+        status: 'degraded',
+        data: { probe: 'replica' },
+      });
+    }
+  } finally {
+    await app.stop();
+  }
+});

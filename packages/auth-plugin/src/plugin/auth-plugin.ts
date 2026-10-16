@@ -275,8 +275,8 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
             keySet.close();
           }
         });
-        // Reads cached state only — no I/O — and never reports `down`, because
-        // an identity-provider outage must not restart the application.
+        // Reads cached state only. Shared issuer faults stay in data:
+        // determineStatusCode withdraws every non-up replica from /ready.
         ctx.health.register('auth', () => {
           const states: Record<string, string> = {};
           let current = true;
@@ -286,8 +286,8 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
             current &&= state === 'current';
           });
           return Promise.resolve({
-            status: current ? 'up' : 'degraded',
-            data: { issuers: states },
+            status: 'up',
+            data: { issuers: states, current },
           });
         });
       }

@@ -222,7 +222,9 @@ export interface IDiscoveryHttp {
    * Performs a request and reads the whole body.
    *
    * A non-2xx response is returned with `ok: false`, never thrown — callers
-   * decide what a 404 or a 410 means.
+   * decide what a 404 or a 410 means. An implementation must honour
+   * `init.signal`: the reachability probe aborts after 2 s, and a transport
+   * that ignores the signal leaves a hung request open.
    *
    * @param url - Absolute URL
    * @param init - Standard fetch init

@@ -226,17 +226,10 @@ where `pools` is one `{ taskModule, workers, busy, queued, completed, failed }` 
 pools' worker slots. It counts slots, not threads: on Deno a timed-out CPU-bound worker can keep
 running after its slot is released (see Sizing).
 
-The status derives from `available`:
-
-| `available` | Status     | Meaning                                                                              |
-| ----------- | ---------- | ------------------------------------------------------------------------------------ |
-| `true`      | `up`       | A worker host is present, so tasks can run.                                          |
-| `false`     | `degraded` | No worker host: every `run()` rejects with `WorkerPoolUnavailableError`. The payload |
-|             |            | adds a `reason` saying so.                                                           |
-
-`degraded` rather than `down` because registering this plugin on Cloudflare Workers is deliberate —
-the runtime has no threads, the capability resolves and refuses, and `degraded` keeps `/ready` at
-200 while still surfacing in the payload. Reporting `down` would 503 every such deployment.
+The status is `up` even when `data.available` is false: registering this plugin on Cloudflare
+Workers is deliberate, and the absence of threads does not stop the app serving requests. Every
+`run()` still rejects with `WorkerPoolUnavailableError` on that runtime, and `data.reason` explains
+why. Alert on `data.available` when workers are required by your application.
 
 The pool counters are DATA, never a threshold. `failed` is cumulative, so any status derived from it
 would need a failure rate this plugin cannot choose on an application's behalf; watch it through the

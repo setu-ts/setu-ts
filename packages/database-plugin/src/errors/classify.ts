@@ -20,7 +20,7 @@
  *
  * @module
  */
-import { DuplicateKeyError } from '@setu-ts/common';
+import { isConnectionFaultCode, DuplicateKeyError } from '@setu-ts/common';
 import { DatabaseUnavailableError, SerializationConflictError } from '../errors.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
@@ -91,26 +91,6 @@ const SQLITE_UNIQUE_ANCHOR = 'UNIQUE constraint failed';
 
 /** SQLSTATE `57P03` — `cannot_connect_now`, refused by the server itself. */
 const PG_CANNOT_CONNECT_NOW = '57P03';
-
-/**
- * The node/net errno strings that mean "temporarily unreachable" (M90f).
- *
- * Measured against DynamoDB Local through the AWS SDK: a connect refusal
- * surfaces as the BARE net error — `name` still `"Error"`, but
- * `code: "ECONNREFUSED"` — so the SDK's own `TimeoutError`/`NetworkingError`
- * names never fire for the commonest outage shape. SQLSTATE strings are
- * digits, so no collision is possible with the class-40/class-08 arms.
- */
-const UNAVAILABLE_ERRNOS: ReadonlySet<string> = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'ETIMEDOUT',
-  'EHOSTUNREACH',
-  'ENETUNREACH',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'EPIPE',
-]);
 
 /**
  * The message anchor for node-postgres pool exhaustion, which carries **no
@@ -295,7 +275,9 @@ function classifyStructured(
     if (code === PRISMA_WRITE_CONFLICT) return 'conflict';
     if (code === '40001' || code === '40P01') return 'conflict';
     if (code.startsWith('08')) return 'unavailable';
-    if (UNAVAILABLE_ERRNOS.has(code)) return 'unavailable';
+    // A bare net error (e.g. DynamoDB Local refusing a connection) carries
+    // errno rather than the SDK's TimeoutError/NetworkingError name.
+    if (isConnectionFaultCode(code)) return 'unavailable';
   }
 
   // 3. MongoDB carries its conflict signal as an error LABEL, not a code —

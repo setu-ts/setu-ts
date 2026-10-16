@@ -78,3 +78,6 @@ export type { CachedResponsePayload } from './interfaces/index.ts';
  * The committed cache store interface (5 methods: get, set, delete, has, clear).
  */
 export type { ICacheStore } from '@setu-ts/common';
+
+/** A cache connection outage carrying a value-free HTTP 503 status hint. */
+export { CacheStoreUnavailableError } from './errors.ts';

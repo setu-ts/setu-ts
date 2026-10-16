@@ -122,14 +122,16 @@ export function FeatureFlagsPlugin(options: FeatureFlagsPluginOptions): IPlugin 
         // Only include detail when the custom provider actually returned one
         if (status.detail !== undefined) {
           return Promise.resolve({
-            status: 'degraded',
-            data: { provider: provider.type, detail: status.detail },
+            status: 'up',
+            data: { provider: provider.type, healthy: false, detail: status.detail },
           });
         }
 
+        // determineStatusCode withdraws non-up replicas; shared provider
+        // faults remain visible in data while the cached snapshot serves.
         return Promise.resolve({
-          status: 'degraded',
-          data: { provider: provider.type },
+          status: 'up',
+          data: { provider: provider.type, healthy: false },
         });
       };
 

@@ -462,9 +462,9 @@ AuthPlugin({
   indefinitely while its endpoint is unreachable. Each fetch is bounded by `keySet.fetchTimeoutMs`
   (default 5 s), 64 KiB and 64 keys, and does not follow redirects. `ttlMs` may not exceed
   `maxStaleMs`. Fetches in flight are aborted when the application begins stopping.
-- **Health.** An `auth` indicator reports `up` when every issuer's key set is current, and
-  `degraded` with each issuer's state (`stale`, `expired`, `unfetched`) otherwise — never `down`, so
-  a provider outage does not restart the application. It reads cached state and performs no I/O, so
+- **Health.** The `auth` indicator stays `up`; `data.current` is true only when every issuer's key
+  set is current. `data.issuers` carries `stale`, `expired` and `unfetched` states. Shared issuer
+  faults do not withdraw this replica from `/ready`. It reads cached state and performs no I/O, so
   it reports `unfetched` until the first token from that issuer arrives.
 - **Failures** return no principal and are logged at `debug` with a fixed reason code, never the
   token.
@@ -1324,6 +1324,7 @@ MIT
 | `MemorySamlRequestStore`            | class     |
 | `MemoryTotpStore`                   | class     |
 | `PasswordHasher`                    | class     |
+| `RateLimitStoreUnavailableError`    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
 | `SamlRuntimeLoadError`              | class     |
@@ -1411,3 +1412,12 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#authplugin-setu-tsauth-plugin).
+
+## Readiness and dependency outages (M113b)
+
+`RedisRateLimitStore.increment/reset` wrap recognised connection faults in
+`RateLimitStoreUnavailableError`, preserving `cause`. With `errorHandler`, clients receive 503 and
+`Rate limiting is temporarily unavailable.` Other errors propagate unchanged. The constructor's
+`commandTimeoutMs` defaults to 15000, accepts 0–2147483647, and throws `RangeError` for invalid
+values including NaN. Zero omits ioredis's bound; an injected client keeps its own settings.
+Configure a larger bound when necessary.

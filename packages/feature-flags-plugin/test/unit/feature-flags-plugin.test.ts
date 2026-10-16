@@ -130,7 +130,7 @@ describe('FeatureFlagsPlugin', () => {
     expect(result.data).toEqual({ provider: 'custom' });
   });
 
-  it('health indicator returns "degraded" for an unhealthy provider', async () => {
+  it('health indicator returns "up" for an unhealthy provider', async () => {
     const fakeProvider: FlagProvider = {
       type: 'custom',
       isEnabled: (): boolean => false,
@@ -150,8 +150,8 @@ describe('FeatureFlagsPlugin', () => {
 
     const indicator = ctx.healthIndicators.get('feature-flags');
     const result = await indicator!();
-    expect(result.status).toBe('degraded');
-    expect(result.data).toEqual({ provider: 'custom', detail: 'poll failed' });
+    expect(result.status).toBe('up');
+    expect(result.data).toEqual({ provider: 'custom', healthy: false, detail: 'poll failed' });
   });
 
   it('health indicator omits detail when an unhealthy provider reports none', async () => {
@@ -173,10 +173,10 @@ describe('FeatureFlagsPlugin', () => {
 
     const indicator = ctx.healthIndicators.get('feature-flags');
     const result = await indicator!();
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     // `detail` must be ABSENT, not present-and-undefined (exactOptionalPropertyTypes).
-    expect(result.data).toEqual({ provider: 'custom' });
-    expect(Object.keys(result.data as Record<string, unknown>)).toEqual(['provider']);
+    expect(result.data).toEqual({ provider: 'custom', healthy: false });
+    expect(Object.keys(result.data as Record<string, unknown>)).toEqual(['provider', 'healthy']);
   });
 
   it('onClose calls service.stop()', async () => {

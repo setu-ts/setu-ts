@@ -12,6 +12,24 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Readiness and `RedisRateLimitStore` outage migration (M113b)
+
+- **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
+  previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
+  changes overall status for these conditions. Migrate alerts to inbox `data.parked` /
+  `data.reasons`, outbox `data.reasons` (all six reasons), realtime-backplane `data.reachable`,
+  worker-pool `data.available`, static-files `data.fs`, auth `data.current` / `data.issuers`, and
+  feature-flags `data.healthy` / `data.detail`. `degraded` still means out of rotation: `/ready`
+  503, `/health` 200. Healthy Kubernetes and Consul discovery probes now preserve their receiver and
+  allow readiness.
+- **Breaking Redis outage responses (M113b).** Cache and rate-limit connection faults now carry 503
+  status hints instead of reaching `errorHandler` as masked 500s; cache-backed sessions inherit the
+  cache response. Update response handling to accept 503 and inspect `cause` instead of checking raw
+  driver errors. WRONGTYPE/programming errors are unchanged.
+- **Breaking rate-limit wait bound (M113b).** Built `RedisRateLimitStore` clients now use a 15000 ms
+  command bound. Configure `commandTimeoutMs` higher for slow Redis, or `0` for the previous
+  unbounded wait; configure injected clients directly.
+
 ### Messaging `publishTimeoutMs`, `reconnect` and Kafka group starts (M113a)
 
 - Kafka and Pub/Sub now bound publishes at 15000 ms, including RPC and outbox publishes. Set
