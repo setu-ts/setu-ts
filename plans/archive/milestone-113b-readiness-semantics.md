@@ -297,3 +297,108 @@ pointed at it, paused/stopped by the tests.
 - A fail-open rate-limit policy on store outage — no letter; would need its own decision.
 - A per-indicator readiness option on `IHealthApi` — rejected by the maintainer in favour of §3.2.
 - Outbox/inbox signal content beyond the status mapping — M113j.
+
+## 10. Design security review (recorded after implementation, at the maintainer's direction)
+
+This plan scheduled no audit, so no review guided the design. It is recorded after implementation
+and verification (the M101a §11 precedent), before the committed-tree audit, so that audit has a
+review to check the code against rather than writing one from the code. It is a review of the
+shipped design, not a claim that the design was threat-modelled first.
+
+**Flows reviewed.**
+
+1. A Redis cache, cache-backed session or rate-limit command that fails, through `isConnectionFault`
+   → `CacheStoreUnavailableError` / `RateLimitStoreUnavailableError` → the status hint →
+   `errorHandler` → the response body and the log record.
+2. Health indicator results through `HealthService` to the public `/health` and `/ready` bodies, for
+   the seven re-mapped indicators and the new `data.lock` member.
+3. The scheduler lock probe: `createCachedProbe` → `RedisLock.isHealthy()` → `ping` on the lock's
+   own connection.
+4. The discovery provider probe, now actually invoked: `ConsulProvider.isHealthy()` and
+   `KubernetesProvider.isHealthy()` over `IDiscoveryHttp`.
+5. Construction-time validation of `RedisRateLimitStoreOptions.commandTimeoutMs`.
+
+**Assets.** Availability (no request or probe held by a dead or hung Redis beyond its bound); the
+rate limiter's protection (an outage must never admit traffic); the truthfulness of `/ready` (it
+must not drain every replica for a shared, non-serving condition, and must still drain one for a
+condition that stops serving); confidentiality of driver diagnostics, Redis addresses and
+credentials, and backend error text in client-visible bodies; the Consul ACL token and the
+Kubernetes service-account token.
+
+**Attackers.**
+
+- **A remote client** who sends requests while Redis is degraded, and reads every response body and
+  status.
+- **A party able to publish to a consumed topic**, who can park inbox rows with poison messages or
+  fail outbox publishes.
+- **A reader of `/health` and `/ready`.** These are public on the application port (V9-47).
+- **An operator misconfiguration**, such as a non-numeric or out-of-range `commandTimeoutMs`,
+  commonly `Number(env.X)` evaluating to `NaN`.
+- **A slow, hung or hostile dependency**: a paused Redis, a refused connection, or a Consul agent
+  that answers non-2xx.
+- **In-process code that pollutes `Object.prototype`, or forges a `Symbol.for` brand.**
+
+**Approved budgets.**
+
+- **Lock probe:** cached 5 s and bounded 2 s, with concurrent callers coalesced into one `ping`.
+- **Rate-limit Redis command bound:** defaults to 15 000 ms; `0` is the documented "unbounded".
+- **Outage-wait cost:** a paused Redis holds each affected request for at most its command bound.
+  Under a flood that is up to 15 s of held request capacity per request. This is accepted and
+  documented, as the price of not failing a request on a single slow command.
+
+**Obligations for the implementation audit.**
+
+1. **Outage bodies.**
+   - Every outage `503` body is exactly the documented fixed sentence. No driver message, Redis
+     address, key, prefix or stack reaches it.
+   - Prove it with a canary planted in the driver error's `message`, in its `cause`, and in the
+     Redis URL's userinfo. Each canary must be absent from the body.
+   - The canary may appear in the server log only through the unmasked cause chain, and never with
+     the URL's password.
+2. **Non-outage errors stay masked.** A non-outage driver error (`WRONGTYPE`, a programming error)
+   still answers the masked `500`, with the canary absent from the body. Classification must never
+   widen what a client sees.
+3. **The rate limiter fails closed.** On every outage shape (paused, stopped, refused, closed) the
+   request is refused and the handler never runs. Count handler executions; the count must be zero.
+4. **`isConnectionFault` never throws and terminates.** Drive it with hostile values:
+   - a throwing getter on `code`, `errno`, `name`, `message` and `cause`;
+   - a revoked `Proxy`;
+   - a cyclic cause chain, and a chain deeper than the 5-level cap;
+   - a non-object, and an own `__proto__` key.
+
+   It must return a boolean in bounded time.
+
+5. **Readiness re-mapping changes reporting only.** No re-mapped indicator changes an access
+   decision:
+   - With an issuer key set stale or unreachable, token verification behaves exactly as on
+     `develop`, refusing past `maxStaleMs`; drive one valid and one forged token both ways.
+   - With a feature-flag provider unhealthy, flag evaluation is unchanged.
+6. **The changed indicators remain drainable where it matters.** The indicators that still mean
+   "this replica cannot serve" (database, service-discovery, cloudflare, the gRPC bridge) still
+   report `degraded` or `down`, and `/ready` still answers 503 for them. Prove this with one hung
+   database probe.
+7. **The lock probe is coalesced and cached.** 100 concurrent `/ready` requests inside one TTL cause
+   at most one `ping`. A hung `ping` resolves `'unknown'` within the bound. The probe never acquires
+   or releases a lock, and never runs a job.
+8. **`commandTimeoutMs` is refused at construction** for `NaN`, a numeric string, a negative value,
+   `2147483648` and `Infinity`. `0` and `2147483647` are accepted.
+9. **No new secret-bearing field reaches `/health`.**
+   - The new members are auth `data.current`, feature-flags `data.healthy`, static-files
+     `data.fs`/`data.detail` and scheduler `data.lock`. Each carries only a boolean, a fixed string
+     or the tri-state.
+   - The discovery probe sends no ACL token. `ConsulProvider.isHealthy()` calls `/v1/status/leader`
+     without `headers()`, so calling it as a method exposes nothing that was not exposed before.
+10. **Status hints are not authorization.** The `Symbol.for` hint on the two new error classes is
+    read only for status mapping. A forged hint can change a status code, never an access decision.
+
+**Findings.**
+
+| #   | Finding                                                                                                                                                                                                                                                                | Disposition                                                                                                                                                          |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | No design review in this plan                                                                                                                                                                                                                                          | Closed by this section                                                                                                                                               |
+| S1  | Before M113b, a party able to publish one poison message per consumed topic could park an inbox row and pull **every** replica out of rotation, because parked rows reported `degraded`. This was a cross-replica denial of service through the readiness probe.       | Fixed by §3.2: parked rows report `up`. A security improvement, not only a semantic one                                                                              |
+| S2  | The feature-flags `data.detail` is the flag store's raw `err.message`, published on the public `/health` (`database-provider.ts:124`). It can carry backend error text, such as a connection string or SQL. This predates M113b; M113b only stops it failing `/ready`. | Deferred to **M113f** (V9-47, what reaches public endpoints). Not widened here                                                                                       |
+| S3  | A paused Redis holds each affected request for up to the command bound (15 s default), so a flood during a pause ties up request capacity.                                                                                                                             | Accepted and documented (`commandTimeoutMs`); lower the bound for latency-sensitive routes                                                                           |
+| S4  | A stopped Redis delays the cache's `503` by about 10.5 s while ioredis retries, outside `commandTimeoutMs` (measured in verification).                                                                                                                                 | Accepted as pre-existing ioredis behaviour; recorded for a later letter                                                                                              |
+| S5  | Polluting `Object.prototype.code = 'ECONNREFUSED'` would classify every error as an outage, so masked 500s become 503s.                                                                                                                                                | Accepted: it changes a status code, never a body's content beyond the fixed sentence, nor an access decision. The classifier's own reads are a lead for obligation 4 |
+| S6  | The `503` detail says the deployment has a cache or rate-limit backend.                                                                                                                                                                                                | Accepted: the M90f `DatabaseUnavailableError` precedent; the class of dependency, not its address                                                                    |
