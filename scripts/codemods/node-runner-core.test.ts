@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { coverageRows, runTargets, selectMembers } from './node-runner-core.ts';
+import { coverageRows, parseRunnerArgs, runTargets, selectMembers } from './node-runner-core.ts';
 
 describe('Per-member Node test runner', () => {
   it('resolves member paths and short names, deduplicates and refuses unknown members', () => {
@@ -10,6 +10,46 @@ describe('Per-member Node test runner', () => {
       members,
     );
     expect(() => selectMembers(members, ['../outside'])).toThrow('Unknown workspace member');
+  });
+  it('leaves out skipped members and refuses an unknown skip', () => {
+    const members = ['./packages/cli', './packages/common', './packages/runtime'];
+    expect(selectMembers(members, [], ['cli', 'packages/runtime'])).toEqual(['./packages/common']);
+    expect(selectMembers(members, ['cli', 'common'], ['cli'])).toEqual(['./packages/common']);
+    expect(() => selectMembers(members, [], ['clii'])).toThrow('Unknown workspace member: clii');
+  });
+  it('parses coverage, tooling and repeated skip options', () => {
+    expect(parseRunnerArgs([])).toEqual({
+      coverage: false,
+      tooling: true,
+      selection: [],
+      skip: [],
+    });
+    expect(
+      parseRunnerArgs([
+        '--coverage',
+        '--no-tooling',
+        '--skip',
+        'cli',
+        'common',
+        '--skip',
+        'kernel',
+      ]),
+    ).toEqual({ coverage: true, tooling: false, selection: ['common'], skip: ['cli', 'kernel'] });
+    expect(() => parseRunnerArgs(['--skip'])).toThrow('--skip requires a workspace member');
+    expect(() => parseRunnerArgs(['--skip', '--coverage'])).toThrow('--skip requires');
+    expect(() => parseRunnerArgs(['--shard'])).toThrow('Unknown option: --shard');
+  });
+  it('omits the tooling target when asked', async () => {
+    const calls: string[] = [];
+    await runTargets(
+      ['packages/common'],
+      (member) => {
+        calls.push(member);
+        return Promise.resolve({ code: 0, rows: [] });
+      },
+      false,
+    );
+    expect(calls).toEqual(['packages/common']);
   });
   it('runs tooling after every member and propagates any failure', async () => {
     const calls: string[] = [];
