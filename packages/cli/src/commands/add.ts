@@ -226,7 +226,7 @@ const STARTER_ARMS = [
 ] as const;
 
 /** The concrete registration to show when configuration belongs to the application. */
-function registrationLine(bare: string, runtime: TargetRuntime): string | undefined {
+function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
   if (zero !== undefined) return `${zero.symbol}()`;
   // `rbac` is what registers the authorization service a generated guard asks;
@@ -251,14 +251,11 @@ function registrationLine(bare: string, runtime: TargetRuntime): string | undefi
     return "ServiceDiscoveryPlugin({ provider: 'static', services: {} })";
   }
   if (bare === 'cloudflare-plugin') {
-    // M113d §3.8: on a Workers project the printed form must type-check in the
-    // generated config, whose factory takes `waitUntil` as its second
-    // parameter. The spread is required under `exactOptionalPropertyTypes`:
-    // `setu commands` calls the factory with no `waitUntil`, so assigning
-    // `undefined` to the plugin's optional `waitUntil` option would not compile.
-    return runtime === 'cloudflare-workers'
-      ? 'CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })'
-      : 'CloudflarePlugin({ env })';
+    // M113d §3.8: `setu add cloudflare` is accepted only on cloudflare-workers,
+    // whose generated factory takes the platform sink as its second parameter.
+    // The spread is required under `exactOptionalPropertyTypes`: `setu commands`
+    // calls the factory with no `waitUntil`.
+    return 'CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })';
   }
   return undefined;
 }
@@ -268,7 +265,6 @@ function printWiringNote(
   source: string | undefined,
   bare: string,
   log: (line: string) => void,
-  runtime: TargetRuntime,
 ): void {
   const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
@@ -285,7 +281,7 @@ function printWiringNote(
       return;
     }
   }
-  const registration = registrationLine(bare, runtime);
+  const registration = registrationLine(bare);
   const factory = registration?.slice(0, registration.indexOf('('));
   const binding =
     source === undefined || factory === undefined
@@ -786,15 +782,16 @@ export async function runAddCommand(
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
-  printWiringNote(configSource, bare, deps.log, runtime);
-  if (bare === 'cloudflare-plugin' && runtime === 'cloudflare-workers') {
-    // M113d §3.8: projects scaffolded before the waitUntil threading have a
-    // factory without the second parameter, so the printed form would not
-    // type-check there. The upgrade entry carries the edit.
-    deps.log(
-      '  Scaffolded before 0.10? Add the waitUntil parameter to createApp in src/setu.config.ts —',
-    );
-    deps.log('  see docs/upgrading.md ("Workers projects: thread waitUntil through the factory").');
+  printWiringNote(configSource, bare, deps.log);
+  if (bare === 'cloudflare-plugin') {
+    // M113d §3.8: the generated factory names its second parameter `_waitUntil`
+    // while nothing reads it (a read-free parameter must be underscored to pass
+    // the project's own lint), and a project scaffolded before 0.10.0 has no
+    // such parameter at all. The printed registration reads `waitUntil`, so
+    // both cases are named here rather than detected in the developer's file.
+    deps.log("  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.");
+    deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
+    deps.log('  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").');
   }
   printPermissionNote(specifier, deps.log);
   return EXIT_OK;

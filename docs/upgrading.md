@@ -14,28 +14,52 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ### Workers projects: thread `waitUntil` through the factory
 
-A newly scaffolded Workers project's `src/setu.config.ts` factory takes `waitUntil` as its SECOND
-parameter, and `src/index.ts` imports it from `cloudflare:workers` and passes it. A project
-scaffolded before this change has a factory without the parameter, so `setu add cloudflare`'s
-printed registration does not type-check there. Add the parameter by hand:
+A Workers project scaffolded by 0.10.0 passes the platform's `waitUntil` from `src/index.ts` into
+`createApp` in `setu.config.ts` as its SECOND parameter, on every template. The CLI does not edit an
+existing project, so a project scaffolded by 0.9.0 or earlier keeps what it had: only the
+`microservice` template threaded `waitUntil`, and the others call `createApp(env)`.
+
+`setu add cloudflare` prints a registration that reads `waitUntil`. To use it in an older `rest`,
+`class-based` or `full-stack` Workers project, make two edits:
 
 ```typescript
-// src/setu.config.ts — BEFORE
-export function createApp(env: Record<string, unknown> = {}, _devtool?: DevtoolComposition) {
-
-// src/setu.config.ts — AFTER
+// setu.config.ts — add the second parameter
 export function createApp(
-  env: Record<string, unknown> = {},
+  env: Readonly<Record<string, unknown>> = {},
   waitUntil?: (promise: Promise<unknown>) => void,
-  _devtool?: DevtoolComposition,
-) {
+  _devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+): IKernelApplication {
+
+// src/index.ts — import the sink and pass it
+import { waitUntil } from 'cloudflare:workers';
+// …
+return createApp(env, waitUntil);
 ```
 
-`src/index.ts` already imports `waitUntil` from `cloudflare:workers` and passes it positionally, so
-no entry change is needed. A full-stack Workers project additionally passes its compiled server
-build from the entry (`import * as serverBuild from '../build/server/index.js'`, supplied to
-`ReactRouterPlugin` as `serverBuild`) — the plugin's `serverBuildPath` cannot resolve in a bundled
-Worker.
+A project scaffolded by 0.10.0 already has the parameter, named `_waitUntil` while nothing reads it;
+rename it to `waitUntil` when you add the registration.
+
+Without `waitUntil`, `CloudflarePlugin` now logs one warning at startup on Workers, and
+`cacheApiMiddleware` awaits its cache write before answering instead of losing it.
+
+### Full-stack Workers projects: pass the server build as a module
+
+A `full-stack` Workers project scaffolded by 0.9.0 builds but cannot start: its `setu.config.ts`
+locates the server build with `new URL('./build/server/index.js', import.meta.url)`, which a bundled
+Worker cannot resolve. Scaffolding a new project is simplest. To repair an existing one:
+
+- In `src/index.ts`, add `import * as serverBuild from '../build/server/index.js';` and call
+  `createApp(env, waitUntil, undefined, { serverBuild })`.
+- In `setu.config.ts`, give `createApp` a second `_waitUntil` parameter and widen the `ssr`
+  parameter to
+  `{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>`. In the
+  `reactRouter` options, pass `serverBuild: ssr.serverBuild` when `ssr` carries one, and keep
+  `serverBuildPath` otherwise (`setu commands` loads this file without the entry).
+- In `wrangler.toml`, add `[assets]` with `directory = "./build/client"` and `[build]` with
+  `command = "npm run build"`, so the client bundle is served and the server build exists before the
+  Worker is bundled.
+- Create `.dev.vars` with `SESSION_SECRET` for `wrangler dev`, add it to `.gitignore`, and set the
+  production value with `npx wrangler secret put SESSION_SECRET`.
 
 ### Readiness and `RedisRateLimitStore` outage migration (M113b)
 

@@ -570,7 +570,10 @@ describe('runAddCommand', () => {
     expect(worker.out.join('\n')).toContain(
       'Register CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })',
     );
-    // The upgrade pointer for projects scaffolded before the threading (M113d §3.8).
+    // The printed line reads `waitUntil`, while a 0.10.0 factory names the
+    // unread parameter `_waitUntil` and an older one has none (M113d §3.8):
+    // both steps are printed, and the file itself is never classified.
+    expect(worker.out.join('\n')).toContain("rename the '_waitUntil' parameter to 'waitUntil'");
     expect(worker.out.join('\n')).toContain('docs/upgrading.md');
   });
 

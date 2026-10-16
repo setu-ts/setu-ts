@@ -963,8 +963,8 @@ ${indent(renderRoutes(entry), '  ')}
   const reExportBlock = entryReExports.length === 0 ? '' : `\n${entryReExports.join('\n')}\n`;
 
   return `import type { IKernelApplication } from '@setu-ts/kernel';
-  import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
-  ${waitUntilImport}${ssrImport}${exportImports === '' ? '' : `${exportImports}\n`}
+import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
+${waitUntilImport}${ssrImport}${exportImports === '' ? '' : `${exportImports}\n`}
 ${cacheBlock}
 
 export default {

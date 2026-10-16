@@ -293,10 +293,11 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
       removePackages: [],
       addPlugins: [],
       wranglerToml: `
-# The client build is served as platform assets before the Worker runs; the
-# application's routes answer everything else. The client build emits only under
-# /assets/ plus a manifest, so a client file cannot shadow an application route
-# of the same path.
+# The client build is served as platform assets before the Worker runs, so a
+# file in it answers instead of an application route with the same path. It holds
+# the hashed bundles under /assets/, any files from public/, and Vite's
+# .vite/manifest.json (asset names only, which the bundles already reveal); every
+# other path reaches the application.
 [assets]
 directory = "./build/client"
 

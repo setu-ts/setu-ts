@@ -13,17 +13,21 @@
  * workerd, and no fake can show them:
  *
  * - `rest`, with `setu add database` and `setu add cloudflare` applied and a
- *   route behind `cacheApiMiddleware`: `/` and `/health` answer 200, and the
- *   cached route answers its full body on a second request with
- *   `X-Cache-Api: HIT` (V9-1's CLI reproduction plus V9-23).
+ *   route behind `cacheApiMiddleware`, booted TWICE from one install: wired
+ *   exactly as `setu add cloudflare` instructs (the `waitUntil` threading,
+ *   §3.8), then as the bare `CloudflarePlugin({ env })` with no host — the V9-23
+ *   reproduction, which only the hostless await (§3.6) makes cache a body. In
+ *   both, `/` and `/health` answer 200 and the cached route answers its full
+ *   body on a second request with `X-Cache-Api: HIT`.
  * - `full-stack`, pristine: `/` answers SSR HTML, `/health` reports `up`,
  *   and the client entry chunk under `/assets/` answers 200
  *   `text/javascript` (§3.10).
  *
- * The `rest` case follows the guidance `setu add` prints (§3.8's form,
- * adapted to the generated factory's `_waitUntil` parameter name) to wire
- * the two added plugins in, because `setu add` pins the package and prints
- * the registration rather than rewriting a non-starter configuration.
+ * The `rest` case follows the guidance `setu add` prints, word for word —
+ * the printed registration plus the rename of the factory's `_waitUntil`
+ * parameter — because `setu add` pins the package and prints the registration
+ * rather than rewriting a non-starter configuration. Following it literally is
+ * what proves the printed line compiles in the project it is printed for.
  *
  * Guarded like `workers-install-e2e`: skips without `npm` off CI, fails on
  * CI.
@@ -227,17 +231,26 @@ async function withWranglerDev<T>(
   return { result: result!, output: server.output() };
 }
 
+/** How the `rest` case registers `CloudflarePlugin`. */
+type CloudflareWiring = 'printed' | 'hostless';
+
 /**
  * Wires the two `setu add`-ed plugins into the generated `rest`
- * configuration, following the guidance `setu add cloudflare` prints (§3.8)
- * and the one the `database` guidance names, and puts one route behind
- * `cacheApiMiddleware`.
+ * configuration and puts one route behind `cacheApiMiddleware`.
+ *
+ * `printed` follows `setu add cloudflare` literally: the printed registration,
+ * and the rename of the factory's `_waitUntil` parameter it names. `hostless`
+ * registers `CloudflarePlugin({ env })`, the line 0.9.0 printed (V9-23).
  *
  * @param project - The scaffolded project directory
+ * @param source - The generated configuration, before any wiring
+ * @param wiring - Which registration to apply
  */
-async function wireRestConfig(project: string): Promise<void> {
-  const path = `${project}/setu.config.ts`;
-  const source = await nodeFs.readFile(path, 'utf8');
+async function wireRestConfig(
+  project: string,
+  source: string,
+  wiring: CloudflareWiring,
+): Promise<void> {
   let out = source;
 
   const importAnchor = "import { OpenApiPlugin } from '@setu-ts/openapi-plugin';";
@@ -247,6 +260,16 @@ async function wireRestConfig(project: string): Promise<void> {
     `${importAnchor}\nimport { DatabasePlugin } from '@setu-ts/database-plugin';\nimport { CloudflarePlugin, cacheApiMiddleware } from '@setu-ts/cloudflare-plugin';`,
   );
 
+  const registration =
+    wiring === 'printed'
+      ? 'CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })'
+      : 'CloudflarePlugin({ env })';
+  if (wiring === 'printed') {
+    const parameter = '_waitUntil?: (promise: Promise<unknown>) => void,';
+    expect(out, 'the generated factory lost its _waitUntil parameter').toContain(parameter);
+    out = out.replace(parameter, 'waitUntil?: (promise: Promise<unknown>) => void,');
+  }
+
   const pluginAnchor = '...GENERATED_PLUGINS,';
   const anchorIndex = out.indexOf(pluginAnchor);
   expect(anchorIndex, 'the generated config lost its plugin anchor').toBeGreaterThanOrEqual(0);
@@ -254,8 +277,7 @@ async function wireRestConfig(project: string): Promise<void> {
   const indent = out.slice(lineStart, anchorIndex);
   out =
     out.slice(0, anchorIndex) +
-    `${indent}DatabasePlugin({ type: 'memory' }),\n` +
-    `${indent}CloudflarePlugin({ env, ...(_waitUntil ? { waitUntil: _waitUntil } : {}) }),\n` +
+    `DatabasePlugin({ type: 'memory' }),\n${indent}${registration},\n${indent}` +
     out.slice(anchorIndex);
 
   const routeRe =
@@ -263,17 +285,62 @@ async function wireRestConfig(project: string): Promise<void> {
   expect(out, 'the generated config lost its hello-world route').toMatch(routeRe);
   out = out.replace(
     routeRe,
-    (_match, indent: string) =>
-      `${indent}app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));\n` +
-      `${indent}app.router.get('/cached', {\n` +
-      `${indent}  handler: (ctx) => ctx.response.json({ message: 'cached-body', n: 1 }),\n` +
-      `${indent}  // ttlSeconds gives the stored copy a Cache-Control, which the\n` +
-      `${indent}  // platform's Cache API requires before a stored entry will match.\n` +
-      `${indent}  middleware: [cacheApiMiddleware({ ttlSeconds: 300 })],\n` +
-      `${indent}});`,
+    (_match, lead: string) =>
+      `${lead}app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));\n` +
+      `${lead}app.router.get('/cached', {\n` +
+      `${lead}  handler: (ctx) => ctx.response.json({ message: 'cached-body', n: 1 }),\n` +
+      `${lead}  // ttlSeconds gives the stored copy a Cache-Control, which the\n` +
+      `${lead}  // platform's Cache API requires before a stored entry will match.\n` +
+      `${lead}  middleware: [cacheApiMiddleware({ ttlSeconds: 300 })],\n` +
+      `${lead}});`,
   );
 
-  await nodeFs.writeFile(path, out);
+  await nodeFs.writeFile(`${project}/setu.config.ts`, out);
+}
+
+/**
+ * Boots the wired `rest` project and asserts `/`, `/health` and an edge-cache
+ * HIT whose body is byte-identical to the MISS that stored it.
+ *
+ * @param project - The installed, wired project directory
+ */
+async function assertRestServesAndCaches(project: string): Promise<void> {
+  const { result, output } = await withWranglerDev(project, async (origin) => {
+    const home = await fetch(`${origin}/`);
+    const homeBody = await home.text();
+    const health = await fetch(`${origin}/health`);
+    const healthBody = await health.text();
+    const first = await fetch(`${origin}/cached`);
+    const firstBody = await first.text();
+    // With a host the write settles in the background, after the response;
+    // a moment lets it land before the second request asks for the HIT.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const second = await fetch(`${origin}/cached`);
+    const secondBody = await second.text();
+    return {
+      homeStatus: home.status,
+      homeBody,
+      healthStatus: health.status,
+      healthBody,
+      firstHeader: first.headers.get('x-cache-api'),
+      firstBody,
+      secondStatus: second.status,
+      secondHeader: second.headers.get('x-cache-api'),
+      secondBody,
+    };
+  });
+
+  expect(result.homeStatus, output).toBe(200);
+  expect(result.homeBody, output).toContain('Hello, World!');
+  expect(result.healthStatus, output).toBe(200);
+  expect(result.healthBody, output).toContain('"status"');
+  expect(result.firstHeader, output).toBe('MISS');
+  expect(result.firstBody, output).toContain('cached-body');
+  expect(result.secondStatus, output).toBe(200);
+  expect(result.secondHeader, output).toBe('HIT');
+  // The full body, replayed from the edge cache: byte-identical. V9-23 was an
+  // empty body here, under a 200 and a HIT.
+  expect(result.secondBody, output).toBe(result.firstBody);
 }
 
 describe("the CLI's Workers templates build and boot on workerd", () => {
@@ -311,45 +378,17 @@ describe("the CLI's Workers templates build and boot on workerd", () => {
       // can resolve them.
       const reinstall = await npmInstall(project, overlay);
       expect(reinstall.code, reinstall.output).toBe(0);
-      await wireRestConfig(project);
+      const generated = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
+
+      await wireRestConfig(project, generated, 'printed');
       await wranglerDryRun(project);
+      await assertRestServesAndCaches(project);
 
-      const { result, output } = await withWranglerDev(project, async (origin) => {
-        const home = await fetch(`${origin}/`);
-        const homeBody = await home.text();
-        const health = await fetch(`${origin}/health`);
-        const healthBody = await health.text();
-        const first = await fetch(`${origin}/cached`);
-        const firstBody = await first.text();
-        // The write goes to the waitUntil sink (the entry passes the
-        // platform's waitUntil through), so it settles in the background;
-        // give it a moment before the second request asks for the HIT.
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        const second = await fetch(`${origin}/cached`);
-        const secondBody = await second.text();
-        return {
-          homeStatus: home.status,
-          homeBody,
-          healthStatus: health.status,
-          healthBody,
-          firstStatus: first.headers.get('x-cache-api'),
-          firstBody,
-          secondStatus: second.status,
-          secondHeader: second.headers.get('x-cache-api'),
-          secondBody,
-        };
-      });
-
-      expect(result.homeStatus, output).toBe(200);
-      expect(result.homeBody, output).toContain('Hello, World!');
-      expect(result.healthStatus, output).toBe(200);
-      expect(result.healthBody, output).toContain('"status"');
-      expect(result.firstStatus, output).toBe('MISS');
-      expect(result.firstBody, output).toContain('cached-body');
-      expect(result.secondStatus, output).toBe(200);
-      expect(result.secondHeader, output).toBe('HIT');
-      // The full body, replayed from the edge cache: byte-identical.
-      expect(result.secondBody, output).toBe(result.firstBody);
+      // A fresh cache: wrangler dev persists `caches.default` under .wrangler,
+      // and a HIT left by the first boot would satisfy the second.
+      await nodeFs.rm(`${project}/.wrangler`, { recursive: true, force: true });
+      await wireRestConfig(project, generated, 'hostless');
+      await assertRestServesAndCaches(project);
     },
   );
 
