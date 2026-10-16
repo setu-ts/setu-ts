@@ -397,11 +397,15 @@ count proves the guarded suites ran.
 - **Gaps in the reviewed plan the first pass did not report:** the realtime-backplane citation was
   unverified (now `transports/messaging-backplane.ts:95`); §6 omitted `rabbitmq-durability.test.ts`
   and `kafka-broker-health.test.ts`, both of which the change touches; and the plan did not decide
-  whether a committed-tree security audit is needed. **Decision: none required** — no inbound trust
-  boundary changes; the new surfaces are outbound client options, a health probe that sends no
-  credentials beyond the client's own, and consumer-group `userData` carrying only partition offsets
-  (no topic payload, no identifiers), which every group member could already read through the
-  group's committed offsets.
+  whether a committed-tree security audit is needed. **Decision: an audit IS required** (corrected
+  during verification — an earlier revision said none). The first-join seek reads every group
+  member's join metadata, which other Kafka clients write, and seeks to the lowest offset any member
+  advertises; anything able to join the group can steer where a new group starts, and the JSON is
+  parsed with no size bound. The audit decides whether that is acceptable given that group
+  membership is already privileged.
+- **Verification finding (doc):** the first publish to an auto-created topic right after a broker
+  restart took over 2 s (leader election inside kafkajs's send), so a small `publishTimeoutMs` can
+  reject it; the default 15 s does not. The README now says the bound covers that wait.
 
 - **Implementation correction for the redesign:** the §6 test matrix and §8 risk still described
   offset writes after §3.3 was rewritten. They now name capture-before-run, first-join seeks,

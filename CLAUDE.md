@@ -6282,8 +6282,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   delivered with no handling, 4/4 in 12/12 trials, `subscribe()` ~5–60 ms, and 6/6 for two members
   starting together where own-offset seeks lost 3/6 (the Spring Kafka `onPartitionsAssigned`
   pattern). Implemented by Codex in two passes; review fixed a producer left connected when the
-  probe admin failed and a failed group-admin connect memoized for the broker's life. No security
-  audit: nothing inbound changes — complete (PR pending).
+  probe admin failed and a failed group-admin connect memoized for the broker's life. The
+  join-metadata seek reads offsets other group members write, so a committed-tree security audit
+  runs before the PR — complete (PR pending).
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

@@ -1757,6 +1757,10 @@ Bus management plane is unreachable and that publishes nothing keeps reporting
 `reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
 can publish synthetically.
 
+A Kafka publish bound covers everything `send()` waits for, including leader election for a topic
+the broker auto-creates on first use — measured at over 2 s right after a broker restart — so keep
+`publishTimeoutMs` well above that when topics are created on demand.
+
 The Kafka probe uses a second client (`<clientId>-health`) with zero retries, a 1500 ms request
 timeout and 1000 ms connection timeout; one probe admin connects at startup and closes at shutdown.
 An injected factory supplies `admin({ retry: { retries: 0 } })` with its own timeouts; without
