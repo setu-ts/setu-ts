@@ -6305,7 +6305,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   rate-limit client gains `commandTimeoutMs`. V9-68 and the discovery stale-cache case move to
   M113o. Implemented by Codex, which stopped on a plan contradiction (§3.3 typed the lock probe
   `Promise<boolean>` while requiring "unknown"); opencode's read-only sweep found three stale doc
-  and comment sites — complete (PR pending)
+  and comment sites — complete (PR #463)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
