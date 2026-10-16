@@ -109,7 +109,19 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
       // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
       // and a relative specifier there would resolve against the PLUGIN's
       // module rather than this project.
-      serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,${assets}
+      // M113d §3.10: the arm is chosen at runtime. On Workers the entry passes
+      // the compiled server build as a MODULE — a bundled Worker cannot resolve
+      // \`new URL(…, import.meta.url)\` against the application. On the socket
+      // targets — and for \`setu commands\`, which loads this config without
+      // the entry — the path arm is unchanged.
+      ...(ssr?.serverBuild !== undefined
+        ? { serverBuild: ssr.serverBuild }
+        : {
+            // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
+            // and a relative specifier there would resolve against the PLUGIN's
+            // module rather than this project.
+            serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+          }),${assets}
       populateLoadContext: (ctx, context) => {
         // The bridge between the kernel request context and a React Router
         // loader: getSession() needs the kernel context, which a loader never
@@ -182,9 +194,9 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin'],
     parameter: {
       name: 'ssr',
-      type: "Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
-      doc: 'The development SSR runtime `dev.ts` supplies; omitted in production.',
-      readOn: ['deno', 'node', 'bun'],
+      type: "Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'> & { serverBuild?: unknown }",
+      doc: 'The development SSR runtime `dev.ts` supplies; on Workers the entry passes the compiled server build module.',
+      readOn: ['deno', 'node', 'bun', 'cloudflare-workers'],
     },
   },
   routes: [
@@ -258,6 +270,30 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // fails on its first request. `--allow-sys` is for `HealthPlugin`, which the
     // full-stack starter composes — its `self` indicator reads the hostname.
     denoPermissions: ['--allow-read', '--allow-sys'],
+  },
+  runtimeSwaps: {
+    // M113d §3.10: the full-stack Workers project builds before it bundles.
+    // The static import of the server build in src/index.ts cannot resolve
+    // until `react-router build` has run, and the client bundle must be served
+    // as platform assets — no socket target needs either stanza.
+    'cloudflare-workers': {
+      removePackages: [],
+      addPlugins: [],
+      wranglerToml: `
+# The client build is served as platform assets before the Worker runs; the
+# application's routes answer everything else. The client build emits only under
+# /assets/ plus a manifest, so a client file cannot shadow an application route
+# of the same path.
+[assets]
+directory = "./build/client"
+
+# \`wrangler dev\` and \`wrangler deploy\` build the client and server BEFORE
+# bundling the Worker — the static import in src/index.ts cannot resolve until
+# the server build exists. The frontend build runs on every \`wrangler dev\`
+# start; for this template that is well under a second.
+[build]
+command = "npm run build"`,
+    },
   },
   // Every runtime is supported: a missing filesystem makes the asset handler
   // answer 404 rather than throw, and this template omits the asset route

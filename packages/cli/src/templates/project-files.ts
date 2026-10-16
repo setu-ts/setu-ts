@@ -777,6 +777,7 @@ ${cases}
 function workersEntry(
   workerExports: readonly WorkerExport[],
   entryReExports: readonly string[],
+  ssr?: { readonly importLine: string; readonly argument: string },
 ): string {
   // `env` is threaded in on BOTH paths. On Workers the environment is not
   // process-wide — bindings and variables arrive as the `env` argument below —
@@ -795,9 +796,16 @@ function workersEntry(
   // factory that never reads it takes it as `_waitUntil`, so the positional
   // pass type-checks either way and a plugin added later needs no entry edit.
   const waitUntilImport = "import { waitUntil } from 'cloudflare:workers';\n";
+  // M113d §3.10: a starter-composed host reads its `ssr` argument on Workers
+  // too, so the entry statically imports the compiled server build and passes
+  // it — the module arm, the only form a bundled Worker can supply.
+  const ssrImport = ssr === undefined ? '' : `${ssr.importLine}\n`;
   const bootSignature =
     'async function boot(env: Record<string, unknown>): Promise<IKernelApplication> {';
-  const bootCall = `${CONFIG_EXPORT}(env, waitUntil)`;
+  const bootCall =
+    ssr === undefined
+      ? `${CONFIG_EXPORT}(env, waitUntil)`
+      : `${CONFIG_EXPORT}(env, waitUntil, undefined, ${ssr.argument})`;
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
@@ -954,8 +962,8 @@ ${indent(renderRoutes(entry), '  ')}
   const reExportBlock = entryReExports.length === 0 ? '' : `\n${entryReExports.join('\n')}\n`;
 
   return `import type { IKernelApplication } from '@setu-ts/kernel';
-import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
-${waitUntilImport}${exportImports === '' ? '' : `${exportImports}\n`}
+  import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
+  ${waitUntilImport}${ssrImport}${exportImports === '' ? '' : `${exportImports}\n`}
 ${cacheBlock}
 
 export default {
@@ -1761,7 +1769,15 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
     // build artifact — the generated file used to list only `coverage/` and the
     // env file, which left a minified bundle tracked (D2).
     manifest?.npmBuild === undefined ? '' : `${manifest.npmBuild.outputDir}/\n`
-  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}`;
+  }${
+    manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`
+  }${
+    // M113d §3.10: on Workers the local variables live in `.dev.vars` (the file
+    // `wrangler dev` reads), never committed.
+    runtime === 'cloudflare-workers' && (manifest?.envVariables?.length ?? 0) > 0
+      ? '.dev.vars\n'
+      : ''
+  }`;
 
   const files: GeneratedFile[] = [
     { path: 'README.md', contents: readme },
@@ -1937,12 +1953,37 @@ describe('application composition', () => {
       path: `${manifest.envFilePath}.example`,
       contents: envExampleContents(manifest.envFilePath, manifest.envVariables ?? []),
     });
+  } else if (
+    runtime === 'cloudflare-workers' &&
+    manifest?.envVariables !== undefined &&
+    manifest.envVariables.length > 0
+  ) {
+    // M113d §3.10: on Workers the manifest's envFilePath is removed (a Worker
+    // has no filesystem to read `.env` from), so the same envVariables render
+    // `.dev.vars` — the file `wrangler dev` reads — and a committed example.
+    files.push({
+      path: '.dev.vars',
+      contents: envFileContents(manifest.envVariables ?? []),
+    });
+    files.push({
+      path: '.dev.vars.example',
+      contents: envExampleContents('.dev.vars', manifest.envVariables ?? []),
+    });
   }
 
   if (runtime === 'cloudflare-workers') {
     files.push({
       path: 'src/index.ts',
-      contents: workersEntry(host.workerExports, host.entryReExports),
+      contents: workersEntry(
+        host.workerExports,
+        host.entryReExports,
+        host.appFactory?.parameter === undefined
+          ? undefined
+          : {
+              importLine: "import * as serverBuild from '../build/server/index.js';",
+              argument: '{ serverBuild }',
+            },
+      ),
     });
     files.push({
       path: 'wrangler.toml',

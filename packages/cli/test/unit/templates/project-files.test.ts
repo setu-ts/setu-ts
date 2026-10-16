@@ -266,7 +266,7 @@ describe('a template with a frontend build, on a Deno target', () => {
   it('hands the development SSR runtime to the plugin in place of assetsDir', () => {
     const config = contentsOf([...projectFiles('shop', 'deno', host)], 'setu.config.ts');
     expect(config).toContain(
-      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'> & { serverBuild?: unknown },",
     );
     expect(config).toContain(
       "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
@@ -307,11 +307,13 @@ describe('a template with a frontend build, on a Deno target', () => {
     const files = [...projectFiles('shop', 'cloudflare-workers', workersHost)];
     expect(files.some((file) => file.path === 'dev.ts')).toBe(false);
     const workers = contentsOf(files, 'setu.config.ts');
-    // One signature on every target; Workers reads none of it.
+    // One signature on every target; on Workers the entry supplies the compiled
+    // server build, so the parameter is READ (M113d §3.10) and the arm is
+    // chosen at runtime.
     expect(workers).toContain(
-      "  _ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'> & { serverBuild?: unknown },",
     );
-    expect(workers).not.toContain('ssr === undefined');
+    expect(workers).toContain('ssr?.serverBuild !== undefined');
     const scripts = (
       JSON.parse(contentsOf(files, 'package.json')) as {
         scripts: Record<string, string>;

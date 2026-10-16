@@ -133,9 +133,8 @@ queue.process<{ to: string }>(
 );
 
 // The expression must match wrangler.toml `[triggers] crons` exactly.
-// Pass a logger: an unmatched trigger is reported ONLY through it, so without
-// one that path is silent. A failing handler is different — it fails the
-// invocation whether or not a logger is configured.
+// An unmatched trigger FAILS the invocation. A logger adds a structured
+// warning naming the registered expressions; it never changes the outcome.
 const cron = new WorkersCron({ logger });
 cron.on('0 3 * * *', () => queue.add('rebuild-reports', {}));
 
@@ -428,9 +427,9 @@ job.
   eight methods throw.
 - **A cron expression registered here but absent from `wrangler.toml` never fires.** Nothing in the
   process can read that file. `cron.expressions()` lets you assert your own coverage. An unmatched
-  trigger is reported through the logger you pass to `WorkersCron` — construct it without one and
-  the path is silent; a failing handler fails the invocation regardless of logging. Matching is
-  exact — whitespace is not normalized.
+  trigger fails the invocation; the logger you pass to `WorkersCron` adds a structured warning
+  naming the registered expressions, but the outcome is the same without one. Matching is exact —
+  whitespace is not normalized.
 - **Only GET requests touch the edge cache.** The cache key is a URL, which the Cache API resolves
   as a GET request, so a `POST` to a cached path would otherwise be served the cached GET body and
   never reach your handler. Non-GET requests pass through with `X-Cache-Api: BYPASS`. This matters
