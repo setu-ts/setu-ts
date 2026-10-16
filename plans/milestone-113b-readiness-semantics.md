@@ -122,18 +122,25 @@ report `up` with the problem in `data`.
 ### 3.3 V9-32 — the scheduler indicator probes its lock backend; status stays lifecycle
 
 - **Decision:**
-  - `IDistributedLock` gains an OPTIONAL `isHealthy?(): Promise<boolean>`.
+  - `IDistributedLock` gains an OPTIONAL `isHealthy?(): Promise<boolean | undefined>` — `true`
+    reachable, `false` unreachable, `undefined` "cannot tell". The tri-state follows the M95b
+    `RabbitMqBroker.reachability()` precedent. (Corrected at implementation: an earlier revision
+    typed it `Promise<boolean>` while also asking it to answer "unknown", which no implementation
+    could satisfy; Codex stopped on the contradiction.)
   - `IRedisLockClient` gains an OPTIONAL `ping?(): Promise<unknown>`.
-  - `RedisLock.isHealthy()` answers `false` before `connect()` and after `disconnect()`. Otherwise
-    it answers `true` iff `ping` resolves and `false` if it rejects, bounded by the client's own
-    `commandTimeout`. An injected client without `ping` gets no `isHealthy` result: `RedisLock`
-    exposes the member, and returns `undefined` through a tri-state internal helper.
+  - `RedisLock.isHealthy()`: before `connect()` and after `disconnect()` → `false`; client without
+    `ping` → `undefined`; otherwise `ping` resolves → `true`, rejects → `false` (the rejection is
+    caught inside `isHealthy`, so it never reaches the probe helper's fallback). A built client's
+    `ping` is bounded by its own `commandTimeout`.
   - `MemoryLock.isHealthy()` answers `true`.
-  - `SchedulerService.createHealthIndicator()` reads the lock through `createCachedProbe` (5 s TTL,
-    2 s bound, runtime clock/timers). It reports
-    `{ status: connected ? 'up' : 'down', data: { connected, lock: { reachable: true | false | 'unknown' } } }`,
-    where `'unknown'` covers a lock without `isHealthy`, a client without `ping`, or a probe that
-    timed out.
+  - `SchedulerService.createHealthIndicator()` reads the lock through
+    `createCachedProbe<boolean | undefined>({ fallback: undefined, … })` (5 s TTL, 2 s bound,
+    runtime clock/timers — the widened overload, whose `fallback: undefined` the helper keeps by
+    membership rather than `??`). It reports
+    `{ status: connected ? 'up' : 'down', data: { connected, lock: { reachable: true | false | 'unknown' } } }`;
+    `'unknown'` covers a lock without `isHealthy`, an `undefined` answer, and a probe that timed
+    out. The probe runs only while `connected`; a disconnected service reports `down` without
+    probing.
 - **Why:** the finding is visibility. Status stays lifecycle because the lock is shared by every
   replica: `degraded` would pull them all for an outage that stops cron fires, not request serving
   (§3.2's rule). Both new members are optional, so no implementor breaks; the M90b cache precedent
@@ -195,14 +202,14 @@ CHANGELOG'd under Changed with migration text, ships in minor 0.10.0:
 - A Redis outage now answers 503 instead of 500.
 - The rate-limit client now has a 15 s `commandTimeout` by default.
 
-| Exported symbol                                                 | Kind      | Consumer / real code path that READS it                                                          |
-| --------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------ |
-| `isConnectionFault` (`@setu-ts/common`)                         | fn        | `RedisStore` (cache-plugin) and `RedisRateLimitStore` (auth-plugin) catch blocks                 |
-| `CONNECTION_FAULT_CODES` (`@setu-ts/common`)                    | const set | `isConnectionFault`; `database-plugin` `classify.ts` errno membership                            |
-| `CacheStoreUnavailableError` (`@setu-ts/cache-plugin`)          | class     | thrown by `RedisStore`; read by `errorHandler` through the status hint; `instanceof` for callers |
-| `RateLimitStoreUnavailableError` (`@setu-ts/auth-plugin`)       | class     | thrown by `RedisRateLimitStore`; same readers                                                    |
-| `IDistributedLock.isHealthy?` (scheduler-plugin, existing type) | member    | `SchedulerService.createHealthIndicator`                                                         |
-| `IRedisLockClient.ping?` (scheduler-plugin, existing type)      | member    | `RedisLock.isHealthy`                                                                            |
+| Exported symbol                                                                                  | Kind      | Consumer / real code path that READS it                                                          |
+| ------------------------------------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------ |
+| `isConnectionFault` (`@setu-ts/common`)                                                          | fn        | `RedisStore` (cache-plugin) and `RedisRateLimitStore` (auth-plugin) catch blocks                 |
+| `CONNECTION_FAULT_CODES` (`@setu-ts/common`)                                                     | const set | `isConnectionFault`; `database-plugin` `classify.ts` errno membership                            |
+| `CacheStoreUnavailableError` (`@setu-ts/cache-plugin`)                                           | class     | thrown by `RedisStore`; read by `errorHandler` through the status hint; `instanceof` for callers |
+| `RateLimitStoreUnavailableError` (`@setu-ts/auth-plugin`)                                        | class     | thrown by `RedisRateLimitStore`; same readers                                                    |
+| `IDistributedLock.isHealthy?` (`Promise<boolean \| undefined>`, scheduler-plugin, existing type) | member    | `SchedulerService.createHealthIndicator`                                                         |
+| `IRedisLockClient.ping?` (scheduler-plugin, existing type)                                       | member    | `RedisLock.isHealthy`                                                                            |
 
 ### 4.1 Options — every option names its consumer
 
