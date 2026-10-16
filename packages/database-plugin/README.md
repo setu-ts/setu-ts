@@ -1281,4 +1281,5 @@ Every export and option is documented in
 ## Readiness and dependency outages (M113b)
 
 The database driver's existing unavailable-errno classification uses the shared
-`CONNECTION_FAULT_CODES` from `@setu-ts/common`. Its status classification is unchanged.
+`isConnectionFaultCode(code)` predicate from `@setu-ts/common`. The eight-code set is
+module-private; status classification is unchanged.

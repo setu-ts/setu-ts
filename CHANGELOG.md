@@ -15,7 +15,14 @@ All notable changes to this project are documented here. The format follows
   worker-pool `data.available`, static-files `data.fs`, auth `data.current` / `data.issuers`, and
   feature-flags `data.healthy` / `data.detail`. `degraded` still means out of rotation: `/ready`
   503, `/health` 200. Healthy Kubernetes and Consul discovery probes now preserve their receiver and
-  allow readiness.
+  allow readiness. The discovery probe is cached for 5 s, coalesced, and bounded at 2 s, with
+  runtime-timed request cancellation for Consul and Kubernetes. Health reads now issue at most one
+  backend probe request per 5 s window per service instance; before M113b they issued none because
+  the detached provider call threw before I/O.
+- **Connection-fault code predicate (M113b).** The unreleased `CONNECTION_FAULT_CODES` export is
+  removed so callers cannot mutate shared outage classification. Replace `.has(code)` with
+  `isConnectionFaultCode(code)` from `@setu-ts/common`; only the same eight string codes match.
+  Database classifier behaviour is unchanged.
 - **Breaking Redis outage responses (M113b).** Cache and rate-limit connection faults now carry 503
   status hints instead of reaching `errorHandler` as masked 500s; cache-backed sessions inherit the
   cache response. Update response handling to accept 503 and inspect `cause` instead of checking raw
@@ -90,7 +97,7 @@ All notable changes to this project are documented here. The format follows
   and clients without it report unknown.
 
 - **Redis outage vocabulary (M113b).** `@setu-ts/common` exports `isConnectionFault` and
-  `CONNECTION_FAULT_CODES`; cache-plugin exports `CacheStoreUnavailableError`; auth-plugin exports
+  `isConnectionFaultCode`; cache-plugin exports `CacheStoreUnavailableError`; auth-plugin exports
   `RateLimitStoreUnavailableError`. `RedisRateLimitStore` gains `commandTimeoutMs`.
 
 - **Messaging reachability probes (M113a).** Kafka uses a dedicated short-timeout metadata client;

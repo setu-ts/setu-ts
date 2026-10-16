@@ -7,6 +7,7 @@
  *
  * @module
  */
+import { createCachedProbe, resolveProbeTiming } from '@setu-ts/common';
 import type {
   IRuntimeServices,
   IServiceDiscovery,
@@ -39,6 +40,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   readonly #options: ResolvedDiscoveryOptions;
   readonly #balancer: LoadBalancer;
   readonly #ejection: EjectionTracker | null;
+  readonly #probe: () => Promise<boolean>;
 
   readonly #cache = new Map<string, CacheEntry>();
   readonly #inFlight = new Map<string, Promise<readonly ServiceInstance[]>>();
@@ -68,6 +70,18 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#balancer = createLoadBalancer(options.strategy, runtime);
     this.#ejection =
       options.ejection === false ? null : new EjectionTracker(runtime, options.ejection);
+    this.#probe = createCachedProbe({
+      probe: async () => {
+        try {
+          return (await this.#provider.isHealthy?.()) ?? true;
+        } catch {
+          return false;
+        }
+      },
+      ttlMs: 5000,
+      timeoutMs: 2000,
+      ...resolveProbeTiming(runtime),
+    });
   }
 
   /** The backend id, for the health indicator. */
@@ -109,13 +123,10 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * to the provider's optional `isHealthy?()`; a provider that cannot probe
    * (no member) is treated as reachable so the indicator can fall back on
    * `everResolved`/`degraded` — absence is never reported as `false`.
+   * Cached for 5 s, coalesced, and bounded at 2 s; timeout or rejection is false.
    */
   async isHealthy(): Promise<boolean> {
-    try {
-      return (await this.#provider.isHealthy?.()) ?? true;
-    } catch {
-      return false;
-    }
+    return await this.#probe();
   }
 
   async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {

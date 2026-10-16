@@ -1,8 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { CONNECTION_FAULT_CODES, isConnectionFault } from '../../src/index.ts';
+import { isConnectionFault, isConnectionFaultCode } from '../../src/index.ts';
+
+const CODES = [
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EPIPE',
+];
+
+describe('isConnectionFaultCode', () => {
+  it.each(CODES)('recognises %s', (code) => {
+    expect(isConnectionFaultCode(code)).toBe(true);
+  });
+
+  it.each([null, undefined, 42, false, {}, ['ECONNREFUSED'], 'UNKNOWN', 'econnrefused'])(
+    'refuses non-strings and unknown codes: %s',
+    (code) => {
+      expect(isConnectionFaultCode(code)).toBe(false);
+    },
+  );
+});
 
 describe('isConnectionFault', () => {
-  it.each([...CONNECTION_FAULT_CODES])('recognises code and errno %s', (code) => {
+  it.each(CODES)('recognises code and errno %s', (code) => {
     expect(isConnectionFault({ code })).toBe(true);
     expect(isConnectionFault({ errno: code })).toBe(true);
     expect(isConnectionFault(new Error('wrapper', { cause: { code } }))).toBe(true);

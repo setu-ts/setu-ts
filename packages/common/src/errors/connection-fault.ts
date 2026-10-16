@@ -4,9 +4,8 @@
  * Node/net codes meaning a backend is temporarily unreachable (M90f).
  * Shared with database-plugin so Redis and database outage classification use
  * the same eight-code vocabulary.
- * @since 0.10.0
  */
-export const CONNECTION_FAULT_CODES: ReadonlySet<string> = new Set([
+const CONNECTION_FAULT_CODES: ReadonlySet<string> = new Set([
   'ECONNREFUSED',
   'ECONNRESET',
   'ETIMEDOUT',
@@ -16,6 +15,18 @@ export const CONNECTION_FAULT_CODES: ReadonlySet<string> = new Set([
   'EAI_AGAIN',
   'EPIPE',
 ]);
+
+/**
+ * Recognises the eight node/net codes shared by backend outage classifiers.
+ * Keeps the code set private so callers cannot change classification policy.
+ *
+ * @param code - The driver code to inspect
+ * @returns Whether the value is a string in the connection-fault code set
+ * @since 0.10.0
+ */
+export function isConnectionFaultCode(code: unknown): boolean {
+  return typeof code === 'string' && CONNECTION_FAULT_CODES.has(code);
+}
 
 /** Maximum number of objects inspected, including the original error. */
 const MAX_CAUSE_DEPTH = 5;
@@ -51,8 +62,8 @@ export function isConnectionFault(error: unknown): boolean {
     try {
       const entry = current as Record<string, unknown>;
       if (
-        (typeof entry.code === 'string' && CONNECTION_FAULT_CODES.has(entry.code)) ||
-        (typeof entry.errno === 'string' && CONNECTION_FAULT_CODES.has(entry.errno)) ||
+        isConnectionFaultCode(entry.code) ||
+        isConnectionFaultCode(entry.errno) ||
         entry.name === 'MaxRetriesPerRequestError' ||
         (entry.name === 'Error' &&
           (entry.message === 'Command timed out' ||

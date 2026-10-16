@@ -189,18 +189,24 @@ export class KubernetesProvider implements DiscoveryProvider {
    * M70c: probes the API server with a `limit=1` EndpointSlice LIST through the
    * existing seam. This is the probe that makes X10-3 visible: an `UnknownIssuer`
    * TLS rejection surfaces here as `down`. 2xx means the API is reachable.
+   * The runtime aborts the request after 2 s, including a hung response body.
    */
   async isHealthy(): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = this.#runtime.setTimeout(() => controller.abort(), 2000);
     try {
       const url =
         `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
         `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
       const response = await this.#http.request(url, {
         headers: { Authorization: await this.authHeader() },
+        signal: controller.signal,
       });
       return response.ok;
     } catch {
       return false;
+    } finally {
+      this.#runtime.clearTimeout(timer);
     }
   }
 

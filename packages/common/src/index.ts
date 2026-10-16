@@ -695,4 +695,4 @@ export type { WritePrecondition, WritePreconditionCheck } from './services/write
 export { checkWritePrecondition } from './services/write-precondition.ts';
 
 /** Shared connection-outage classifier and network errno vocabulary. */
-export { isConnectionFault, CONNECTION_FAULT_CODES } from './errors/connection-fault.ts';
+export { isConnectionFault, isConnectionFaultCode } from './errors/connection-fault.ts';
