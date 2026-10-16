@@ -25,7 +25,7 @@
  */
 
 import { run as runProcess } from './lib/run.ts';
-import { readFile, rm, mkdir, realpath, readdir, copyFile } from 'node:fs/promises';
+import { readFile, rm, mkdir, realpath, readdir, copyFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { workspaceMembers } from './lib/workspace.ts';
 import {
@@ -33,6 +33,9 @@ import {
   decideOutcome,
   type LegResult,
   workspaceProtocolSpecifiers,
+  workersBundleEntry,
+  workersBundleMembers,
+  workersBundleOptions,
 } from './node-build-gate.ts';
 
 async function main(): Promise<void> {
@@ -144,6 +147,35 @@ async function main(): Promise<void> {
   // stays scoped by command name rather than by a resolved `.bin` path.
   const tsc = await realpath('node_modules/typescript/bin/tsc');
   await step('tsc the decorated controller', 'node', [tsc, '-p', 'tsconfig.json'], BOOT_DIR);
+
+  // M113d §3.4 — the Workers bundle leg: a Worker author's exact situation
+  // (published tarballs, a plain `npm install`, the optional peers absent),
+  // bundled the way Wrangler's esbuild pass resolves. The entry imports every
+  // published library member's barrel; the options are the pure gate's.
+  const bundleDirs = workersBundleMembers(members);
+  const bundleNames: string[] = [];
+  for (const dir of bundleDirs) {
+    const manifest = JSON.parse(await readFile(`${dir}/package.json`, 'utf8')) as { name: string };
+    bundleNames.push(manifest.name);
+  }
+  await writeFile(`${BOOT_DIR}/worker-entry.mjs`, workersBundleEntry(bundleNames));
+  const options = workersBundleOptions();
+  const driver = [
+    "import { build } from 'esbuild';",
+    'await build({',
+    "  entryPoints: ['worker-entry.mjs'],",
+    "  outfile: 'worker-bundled.mjs',",
+    '  bundle: true,',
+    `  format: ${JSON.stringify(options.format)},`,
+    `  platform: ${JSON.stringify(options.platform)},`,
+    `  conditions: ${JSON.stringify(options.conditions)},`,
+    `  mainFields: ${JSON.stringify(options.mainFields)},`,
+    `  external: ${JSON.stringify(options.external)},`,
+    '});',
+    '',
+  ].join('\n');
+  await writeFile(`${BOOT_DIR}/workers-bundle.mjs`, driver);
+  await step('esbuild workerd bundle (Wrangler resolution)', 'node', ['workers-bundle.mjs'], BOOT_DIR);
 
   const legs: LegResult[] = [];
   const runLeg = async (name: string, cmd: string, args: readonly string[], probe: string[]) => {
