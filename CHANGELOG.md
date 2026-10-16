@@ -16,15 +16,15 @@ All notable changes to this project are documented here. The format follows
   missing optional dependency now rejects with that named error (the original rejection as `cause`)
   instead of the runtime's raw error. `cacheApiMiddleware` stores the body it serves with or without
   a `waitUntil` host, and `CloudflarePlugin` warns once on Workers when no host was passed. A newly
-  scaffolded Workers project's factory takes `waitUntil` as its second parameter, threaded from the
-  entry; a full-stack Workers project passes its compiled server build from the entry (the new
-  `ReactRouterPluginOptions.serverBuild` option), renders `.dev.vars`, and its `wrangler.toml`
-  carries `[assets]` and `[build]` stanzas. `setu add cloudflare` prints the `waitUntil` form and
-  tells you to rename the factory's `_waitUntil` parameter; `docs/upgrading.md` carries the edits
-  for projects scaffolded by 0.9.0 or earlier. `ReactRouterPluginOptions` changes from an
-  `interface` to a union `type` (`serverBuildPath` | `serverBuild`, exactly one required) — breaking
-  for implementors who `extends` it; a caller passing `serverBuildPath` is unaffected. Ships in
-  minor `0.10.0`.
+  scaffolded Workers project's entry passes the platform's `waitUntil` to `createApp` as its second
+  parameter (named `_waitUntil` until something reads it); a full-stack Workers project passes its
+  compiled server build from the entry (the new `ReactRouterPluginOptions.serverBuild` option),
+  renders `.dev.vars`, and its `wrangler.toml` carries `[assets]` and `[build]` stanzas.
+  `setu add cloudflare` prints the `waitUntil` form and tells you to rename the factory's
+  `_waitUntil` parameter; `docs/upgrading.md` carries the edits for projects scaffolded by 0.9.0 or
+  earlier. `ReactRouterPluginOptions` changes from an `interface` to a union `type`
+  (`serverBuildPath` | `serverBuild`, exactly one required) — breaking for implementors who
+  `extends` it; a caller passing `serverBuildPath` is unaffected. Ships in minor `0.10.0`.
 - **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
   previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
   changes overall status for these conditions. Migrate alerts to inbox `data.parked` /

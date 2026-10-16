@@ -14218,8 +14218,8 @@ storage, telemetry)
   `waitUntil`, and the scaffold gives no working way to pass it (the README's
   `import { waitUntil } from 'cloudflare:workers'` breaks `setu commands`; the generated entry takes
   no execution context). Fixed on both halves: the cache write is awaited when the registry has no
-  sink, and every generated Workers factory takes `waitUntil` as its second parameter, threaded from
-  the entry.
+  sink, and every generated Workers entry passes `waitUntil` to `createApp` as its second parameter
+  (named `_waitUntil` in the factory until something reads it).
 - **V9-4** — an unmatched cron trigger throws a 500 on workerd. The behaviour is right (M70l); the
   README said it is silent and is corrected.
 
