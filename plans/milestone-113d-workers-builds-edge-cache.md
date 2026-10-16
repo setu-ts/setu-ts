@@ -410,3 +410,87 @@ pnpm run release:verify 0.9.0
 - Rewriting `setu.config.ts` or `src/index.ts` in existing Workers projects (the CLI does not edit a
   developer-owned file; `docs/upgrading.md` carries the steps).
 - A per-package "runs on Workers" matrix — documentation drift, M113l.
+
+## 10. Design security review (recorded after implementation, before the audit)
+
+The plan did not schedule an audit. Verification showed the diff crossing two trust boundaries the
+plan did not review: the generated project now writes a local secrets file and publishes a directory
+to the open internet, and the edge-cache path now logs request data for hostless applications. This
+review is recorded after implementation (the M101a/M98h precedent), so it is not presented as having
+guided the design; it fixes what the committed-tree audit must hold the code to.
+
+**Flows reviewed.**
+
+1. A request to a Worker that reaches `cacheApiMiddleware` with `CloudflarePlugin` registered and no
+   `waitUntil` host: the cache key is built from the request URL, tenant and locale, the write is
+   awaited on the response path, and a failed write is logged.
+2. The generated `full-stack` Workers project's local and deployed secrets: `.dev.vars` (a fixed,
+   published development `SESSION_SECRET`), `.dev.vars.example`, `.gitignore`, and
+   `npx wrangler secret put` for production.
+3. The generated `[assets] directory = "./build/client"`: every file the client build writes is
+   served before the Worker runs, so framework middleware never sees those requests.
+4. The generated `[build] command = "npm run build"`, run by `wrangler dev` and `wrangler deploy`.
+5. A missing optional dependency, now rejected with `OptionalDependencyUnavailableError` (the
+   original rejection as `cause`), on the paths where a loader runs during a request.
+6. The `check:node-build` bundle leg: a temporary directory, a `node_modules` symlink, a generated
+   entry, and its removal.
+
+**Assets.** The production `SESSION_SECRET` (it signs and encrypts session cookies); server-only
+code and configuration (`setu.config.ts`, `.server.ts` modules, `build/server`, `.dev.vars`);
+request data that can carry credentials (query strings, the tenant id); the availability of a
+Worker's request path; the integrity of edge-cache entries.
+
+**Attackers.**
+
+- An internet client of a deployed Worker: chooses paths, query strings and headers, and can request
+  any path the asset directory might hold.
+- Anyone who has read this repository or a scaffolded project: knows the development
+  `SESSION_SECRET` value, since it is a published constant.
+- An operator mistake: deploying without `wrangler secret put SESSION_SECRET`, placing a private
+  file in `public/`, committing `.dev.vars` with a real value.
+- A reader of the application's logs who should not see end-user request data.
+
+**Approved budgets.** None new. The hostless await adds the duration of `Cache.put` to the response
+of a cache MISS, only when the application passes no `waitUntil` host; with a host nothing is added.
+
+**Obligations for the committed-tree audit.** Each is driven against a scaffolded project or a
+kernel application this run starts locally, with a positive control.
+
+1. **The development secret never reaches a deployment.** The `wrangler deploy --dry-run` output
+   contains no part of the `.dev.vars` value, and the generated `wrangler.toml` declares no `[vars]`
+   entry for it. With `.dev.vars` removed and no secret set, a full-stack Worker fails closed: `/`
+   answers 503 from the boot failure and no response carries `Set-Cookie`. Positive control: with
+   `.dev.vars` present, `/login` sets a session cookie.
+2. **`.dev.vars` is ignored by Git** in a scaffolded project (`git check-ignore .dev.vars` succeeds)
+   and `.dev.vars.example` is not.
+3. **The asset directory holds only client output.** After `react-router build`, plant a canary
+   string in a `.server.ts` module and in `setu.config.ts`, rebuild, and show the canary in no file
+   under `build/client`. Under `wrangler dev`, `/.dev.vars`, `/setu.config.ts`,
+   `/build/server/index.js`, `/wrangler.toml`, `/src/index.ts` and an encoded `..` path do not
+   return those files' contents. Positive control: a hashed asset under `/assets/` answers 200.
+4. **The asset bypass is stated where a developer reads it.** A request served from `[assets]` does
+   not pass through the application's middleware (security headers, authentication); the generated
+   `wrangler.toml` comment and the full-stack README say so. Observe an asset response under
+   `wrangler dev` without the headers `HttpSecurityPlugin` adds to an application route, so the
+   statement describes measured behaviour.
+5. **A failed edge-cache write logs no query string, fragment or tenant id.** Drive a write failure
+   with a URL carrying `?token=canary` under a tenant and show the canary absent from every log
+   record. Positive control: the record still names the failing route's path.
+6. **A missing optional dependency is opaque to a client.** Make one loader that runs during a
+   request fail, and show the response body names neither the package nor the remedy text under the
+   default `errorHandler` and under no `errorHandler`. Positive control: the log record carries
+   both.
+7. **The bundle leg touches only its own directory.** It creates its directory with `mkdtemp`,
+   removes only that path, and writes package names only into a generated entry file, never into a
+   command line.
+
+**Findings.**
+
+| #   | Finding                                                                                                                                                                                                                                                                                                        | Disposition                                                                                                                                               |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | The edge-cache write-failure log carries the full cache key: the request URL with its query string, plus the tenant id and locale. Pre-existing on the no-plugin path since M52b; this milestone routes hostless `CloudflarePlugin` applications to it, where before their failure was logged without the key. | Fix before the audit: log the key's origin and path only, on both branches (obligation 5)                                                                 |
+| D2  | `[assets]` serves the client build before the Worker, so security headers and authentication middleware do not apply to those files. Correct for public bundles, and stated nowhere.                                                                                                                           | Fix before the audit: state it in the generated `wrangler.toml` comment and the full-stack README (obligation 4)                                          |
+| D3  | `.dev.vars` carries a published constant as `SESSION_SECRET`.                                                                                                                                                                                                                                                  | Accepted, the M67 precedent: the value is labelled insecure, the file is ignored by Git, and a deployment without a secret fails closed (obligations 1–2) |
+| D4  | The hostless await holds the response for as long as `Cache.put` takes; a custom `ICacheApi` that never settles holds it forever.                                                                                                                                                                              | Accepted: identical to the no-plugin path since M52b, and `Cache.put` on Workers is platform storage; `waitUntil` removes the wait                        |
+| D5  | `.vite/manifest.json` is public under `[assets]`.                                                                                                                                                                                                                                                              | Accepted: it lists asset names the bundles already reveal                                                                                                 |
+| D6  | The `react-router` health indicator reports `serverBuildPath`, an absolute file URL, on the socket targets.                                                                                                                                                                                                    | Pre-existing since M44, not changed here (Workers reports `'<serverBuild>'`); out of scope, noted for M113f                                               |
