@@ -250,8 +250,15 @@ function isGuardedBySameFunctionTry(node: ts.Node): boolean {
     const parent: ts.Node = current.parent;
     if (isFunctionLikeNode(parent)) return false;
     if (ts.isTryStatement(parent) && parent.tryBlock === current) return true;
-    if (ts.isArrayLiteralExpression(parent) && parent.elements.includes(current)) return false;
-    if (ts.isCallExpression(parent) && parent.arguments.includes(current)) return false;
+    if (
+      ts.isArrayLiteralExpression(parent) &&
+      parent.elements.some((element) => element === current)
+    ) {
+      return false;
+    }
+    if (ts.isCallExpression(parent) && parent.arguments.some((argument) => argument === current)) {
+      return false;
+    }
     if (ts.isPropertyAssignment(parent) && parent.initializer === current) return false;
     current = parent;
   }
