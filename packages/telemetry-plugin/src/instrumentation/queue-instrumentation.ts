@@ -13,6 +13,8 @@
  * @since 0.2.0
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+
 /** The package specifier the amqplib loader resolves. */
 const AMQLIB_SPECIFIER = '@opentelemetry/instrumentation-amqplib';
 
@@ -44,8 +46,15 @@ export function createAmqplibInstrumentation(
  */
 export async function loadAmqplibInstrumentation(
   configArg: unknown | undefined,
-  importFn: () => Promise<Record<string, unknown>> = () =>
-    import('@opentelemetry/instrumentation-amqplib'),
+  importFn: () => Promise<Record<string, unknown>> = async () => {
+    try {
+      return await import('@opentelemetry/instrumentation-amqplib');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-amqplib', {
+        cause: error,
+      });
+    }
+  },
 ): Promise<{ instance: unknown; specifier: string }> {
   const mod = await importFn();
   const instance = createAmqplibInstrumentation(mod, configArg);
@@ -77,8 +86,15 @@ export function createKafkaJsInstrumentation(
  */
 export async function loadKafkaJsInstrumentation(
   configArg: unknown | undefined,
-  importFn: () => Promise<Record<string, unknown>> = () =>
-    import('@opentelemetry/instrumentation-kafkajs'),
+  importFn: () => Promise<Record<string, unknown>> = async () => {
+    try {
+      return await import('@opentelemetry/instrumentation-kafkajs');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-kafkajs', {
+        cause: error,
+      });
+    }
+  },
 ): Promise<{ instance: unknown; specifier: string }> {
   const mod = await importFn();
   const instance = createKafkaJsInstrumentation(mod, configArg);

@@ -7,6 +7,7 @@
  * @module
  */
 import type { PutObjectOptions } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IAzureBlobClient, StorageProvider } from '../interfaces/index.ts';
 import { createEagerIterableStream } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
@@ -315,7 +316,11 @@ export function adaptAzureModule(
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadAzureModule(): Promise<AzureSdkModule> {
-  return (await import('@azure/storage-blob')) as unknown as AzureSdkModule;
+  try {
+    return (await import('@azure/storage-blob')) as unknown as AzureSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/storage-blob', { cause: error });
+  }
 }
 
 /**

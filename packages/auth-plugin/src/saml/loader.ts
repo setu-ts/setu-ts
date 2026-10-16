@@ -11,6 +11,7 @@
  * @module
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { SamlRuntimeLoadError } from '../errors.ts';
 import type { SamlModule } from '../interfaces/index.ts';
 import type { SamlConstructor } from './engine.ts';
@@ -18,9 +19,17 @@ import type { SamlConstructor } from './engine.ts';
 /** The specifier the lazy import loads; named in every load failure. */
 export const SAML_SPECIFIER = '@node-saml/node-saml';
 
-/** Imports the real library. A literal specifier, so JSR's npm rewrite reaches it. */
-export function importSamlModule(): Promise<unknown> {
-  return import('@node-saml/node-saml');
+/**
+ * Imports the real library. A literal specifier, so JSR's npm rewrite reaches
+ * it and esbuild (Wrangler) leaves it as a runtime import when the package is
+ * absent — the guard is in the SAME function, per AI_GUIDELINES §12.2.
+ */
+export async function importSamlModule(): Promise<unknown> {
+  try {
+    return await import('@node-saml/node-saml');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError(SAML_SPECIFIER, { cause: error });
+  }
 }
 
 /**

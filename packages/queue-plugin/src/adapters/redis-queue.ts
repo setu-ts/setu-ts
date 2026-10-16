@@ -8,6 +8,7 @@
  */
 
 import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import {
@@ -38,8 +39,12 @@ type RetentionCommands = { expire: NonNullable<IRedisQueueClient['expire']> };
  * @throws {Error} If the ioredis package cannot be resolved
  */
 async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
-  const mod = await import('ioredis');
-  return mod.Redis;
+  try {
+    const mod = await import('ioredis');
+    return mod.Redis;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+  }
 }
 
 /**

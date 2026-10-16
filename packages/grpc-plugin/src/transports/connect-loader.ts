@@ -19,6 +19,7 @@
  * @module
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../errors/grpc-errors.ts';
 import type {
   ConnectRouterLike,
@@ -171,10 +172,36 @@ export interface ConnectImporters {
  * assertion pinned and the published artifact lost.
  */
 export const DEFAULT_IMPORTERS: ConnectImporters = {
-  connect: () => import('@connectrpc/connect'),
-  protocol: () => import('@connectrpc/connect/protocol'),
-  protobuf: () => import('@bufbuild/protobuf'),
-  wkt: () => import('@bufbuild/protobuf/wkt'),
+  connect: async () => {
+    try {
+      return await import('@connectrpc/connect');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@connectrpc/connect', { cause: error });
+    }
+  },
+  protocol: async () => {
+    try {
+      return await import('@connectrpc/connect/protocol');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@connectrpc/connect/protocol', {
+        cause: error,
+      });
+    }
+  },
+  protobuf: async () => {
+    try {
+      return await import('@bufbuild/protobuf');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf', { cause: error });
+    }
+  },
+  wkt: async () => {
+    try {
+      return await import('@bufbuild/protobuf/wkt');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf/wkt', { cause: error });
+    }
+  },
 };
 
 /**

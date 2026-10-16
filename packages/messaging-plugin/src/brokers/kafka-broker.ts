@@ -8,6 +8,7 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { normalizeTransportHeaders } from './header-normalize.ts';
@@ -54,8 +55,11 @@ const REPLY_GROUP_PREFIX = 'rr-inbox-';
  * @throws {Error} If the kafkajs package cannot be resolved
  */
 async function loadKafkajs(): Promise<typeof import('kafkajs')> {
-  const mod = await import('kafkajs');
-  return mod;
+  try {
+    return await import('kafkajs');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('kafkajs', { cause: error });
+  }
 }
 
 /**

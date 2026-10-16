@@ -12,6 +12,7 @@
  */
 
 import type { IRuntimeServices } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { QueueAdapter } from './queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import {
@@ -110,8 +111,11 @@ export interface SqsQueueOptions {
  * Lazy-load the AWS SQS SDK v3.
  */
 export async function loadSqsModule(): Promise<SqsSdkModule> {
-  const mod = await import('@aws-sdk/client-sqs');
-  return mod as unknown as SqsSdkModule;
+  try {
+    return (await import('@aws-sdk/client-sqs')) as unknown as SqsSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sqs', { cause: error });
+  }
 }
 
 /**

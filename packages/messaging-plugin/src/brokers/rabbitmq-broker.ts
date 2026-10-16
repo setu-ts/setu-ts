@@ -9,6 +9,7 @@ import type {
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { createCachedProbe, deadlineRangeError, withDeadline } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError, describeLogText } from './describe-error.ts';
@@ -32,8 +33,11 @@ import { Buffer } from 'node:buffer';
  * @throws {Error} If the amqplib package cannot be resolved
  */
 async function loadAmqplib(): Promise<typeof import('amqplib')> {
-  const mod = await import('amqplib');
-  return mod;
+  try {
+    return await import('amqplib');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('amqplib', { cause: error });
+  }
 }
 
 /**

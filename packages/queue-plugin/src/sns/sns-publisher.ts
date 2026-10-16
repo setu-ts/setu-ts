@@ -8,6 +8,8 @@
  * @module
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+
 /**
  * Declares the constructors used from the real AWS SNS SDK v3.
  */
@@ -53,8 +55,11 @@ export interface SnsPublisherOptions {
  * Lazy-load the AWS SNS SDK v3.
  */
 export async function loadSnsModule(): Promise<SnsSdkModule> {
-  const mod = await import('@aws-sdk/client-sns');
-  return mod as unknown as SnsSdkModule;
+  try {
+    return (await import('@aws-sdk/client-sns')) as unknown as SnsSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sns', { cause: error });
+  }
 }
 
 /**

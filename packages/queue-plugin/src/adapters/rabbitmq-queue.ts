@@ -23,6 +23,7 @@ import type {
 } from '../interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { deadlineRangeError, withDeadline } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 
 /**
  * Lazily load amqplib at runtime. Pin to 0.10.x for stability.
@@ -31,8 +32,11 @@ import { deadlineRangeError, withDeadline } from '@setu-ts/common';
  * @throws {Error} If the amqplib package cannot be resolved
  */
 async function loadAmqplib(): Promise<typeof import('amqplib')> {
-  const mod = await import('amqplib');
-  return mod;
+  try {
+    return await import('amqplib');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('amqplib', { cause: error });
+  }
 }
 
 /**

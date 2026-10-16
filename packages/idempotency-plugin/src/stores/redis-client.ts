@@ -8,7 +8,7 @@
  * @module
  */
 import type { ConnectionErrorReporter } from '@setu-ts/common';
-import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { attachConnectionErrorReporter, OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { IdempotencyConfigurationError } from '../errors.ts';
 import type { IBuiltRedisIdempotencyClient, IRedisIdempotencyClient } from '../interfaces/index.ts';
 
@@ -29,7 +29,12 @@ export type RedisCtor = new (
  * @since 0.9.0
  */
 export async function loadIoredis(): Promise<RedisCtor> {
-  const module = await import('ioredis');
+  let module: typeof import('ioredis');
+  try {
+    module = await import('ioredis');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+  }
   // Interop boundary: the module namespace is narrowed once, here, so no `any`
   // escapes into the store (AI_GUIDELINES §5.2 external-interop exception).
   return module.Redis as unknown as RedisCtor;

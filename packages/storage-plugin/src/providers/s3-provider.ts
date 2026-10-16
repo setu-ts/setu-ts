@@ -11,6 +11,7 @@
  * @module
  */
 import type { PutObjectOptions } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IS3Backend, StorageProvider } from '../interfaces/index.ts';
 import { createBoundedNodeStream, looksLikeNodeReadable } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
@@ -241,10 +242,20 @@ export function adaptAwsS3Module(mod: AwsStorageSdkModule, options: S3ProviderOp
  * @throws {Error} If the packages cannot be resolved
  */
 export async function loadAwsS3Module(): Promise<AwsStorageSdkModule> {
-  const [s3Mod, presignerMod] = await Promise.all([
-    import('@aws-sdk/client-s3') as unknown as Promise<AwsSdkModule>,
-    import('@aws-sdk/s3-request-presigner') as Promise<PresignerSdkModule>,
-  ]);
+  let s3Mod: AwsSdkModule;
+  let presignerMod: PresignerSdkModule;
+  try {
+    [s3Mod, presignerMod] = await Promise.all([
+      import('@aws-sdk/client-s3') as unknown as Promise<AwsSdkModule>,
+      import('@aws-sdk/s3-request-presigner') as Promise<PresignerSdkModule>,
+    ]);
+  } catch (error) {
+    const dependency =
+      error instanceof Error && error.message.includes('@aws-sdk/s3-request-presigner')
+        ? '@aws-sdk/s3-request-presigner'
+        : '@aws-sdk/client-s3';
+    throw new OptionalDependencyUnavailableError(dependency, { cause: error });
+  }
   return { s3: s3Mod, presigner: presignerMod };
 }
 
