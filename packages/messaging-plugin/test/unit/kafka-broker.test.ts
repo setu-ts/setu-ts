@@ -141,6 +141,37 @@ describe('M113a Kafka bounds and start position', () => {
     },
   );
 
+  it('captures watermarks when the subscribe-time group read fails (cold coordinator)', async () => {
+    const load = vi.spyOn(startOffsets, 'optionalKafkaStartModule').mockResolvedValue(null);
+    const factory = new FakeKafkaFactory();
+    const admin = new FakeKafkaAdmin();
+    admin.offsets[0]!.partitions = [{ partition: 0, offset: '-1' }];
+    admin.watermarks = [{ partition: 0, offset: '42', high: '42', low: '0' }];
+    vi.spyOn(factory, 'admin').mockReturnValue(admin);
+    // A fresh broker's coordinator answers NOT_COORDINATOR to the first read.
+    vi.spyOn(admin, 'fetchOffsets').mockRejectedValueOnce(
+      Object.assign(new Error('This is not the correct coordinator for this group'), { code: 16 }),
+    );
+    const warn = vi.fn();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      logger: { error: vi.fn(), warn },
+    });
+    try {
+      await broker.connect();
+      await broker.subscribe('orders', () => {}, { queue: 'workers' });
+      const consumer = factory.consumer({ groupId: 'workers' });
+      await consumer.join({ orders: [0] });
+      expect(
+        consumer.calls.filter((call) => call.method === 'seek').map((call) => call.args[0]),
+      ).toEqual([{ topic: 'orders', partition: 0, offset: '42' }]);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      await broker.disconnect();
+      load.mockRestore();
+    }
+  });
+
   it('does not seek when a release races the first join or removes its assignment', async () => {
     const factory = new FakeKafkaFactory();
     const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });

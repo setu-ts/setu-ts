@@ -1070,8 +1070,20 @@ export class KafkaBroker implements MessageBrokerAdapter {
       }
       const admin = this.#groupAdmin;
       await this.#groupAdminConnect;
-      const offsets = await admin.fetchOffsets({ groupId, topics: [topic] });
-      if (offsets.every((entry) => entry.partitions.every((p) => p.offset === '-1'))) {
+      // On a broker whose group coordinator is not ready yet — the first group
+      // on a fresh broker, measured on Kafka 4.0 — this read fails with
+      // NOT_COORDINATOR. Returning null then skipped every message published
+      // before the join. The watermarks are captured anyway: the first-join
+      // step re-reads committed offsets and seeks only partitions still
+      // uncommitted, so a group that turns out to be committed seeks nothing.
+      let isNew = true;
+      try {
+        const offsets = await admin.fetchOffsets({ groupId, topics: [topic] });
+        isNew = offsets.every((entry) => entry.partitions.every((p) => p.offset === '-1'));
+      } catch (error) {
+        warn(error);
+      }
+      if (isNew) {
         return Object.fromEntries(
           (await admin.fetchTopicOffsets(topic)).map(({ partition, offset }) => [
             partition,
