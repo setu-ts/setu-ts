@@ -67,24 +67,25 @@ Then read, in order:
 # Step 2 — Run the gates
 
 ```bash
-deno task fmt:check && deno task lint && deno task check && deno task test
+pnpm run fmt:check && pnpm run lint && pnpm run check && pnpm run test
 ```
 
 All four must pass. Record the test count. A failure here ends the review: report it, do not
 continue to "partial verification".
 
-# Step 3 — Per-file coverage (the gate will NOT do this for you)
+# Step 3 — Read per-file coverage evidence
 
-`deno task test:coverage` exits 0 even with a file under the bar, and its output is colorized. Strip
+`pnpm run test:coverage` enforces Vitest per-file thresholds, and its output is colorized. Strip
 ANSI and read the per-file table yourself:
 
 ```bash
-deno task test:coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E "<package>|File|---"
+pnpm run test:coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E "<package>|File|---"
 ```
 
-Coverage evidence for this step comes from `deno task test:coverage` only.
-`deno task test:coverage:pkg` measures a subset of the suite, so its table cannot support a verified
-verdict — even when it reports every changed file above the bar.
+Coverage evidence includes `pnpm run test:coverage`, `pnpm run test:tooling:coverage` and
+`pnpm run test:deno-lane` for the retained native proofs. `pnpm run test:coverage:pkg` measures a
+subset of the suite, so its table cannot support a verified verdict — even when it reports every
+changed file above the bar.
 
 Every file under the package's `src/` must be **≥90% on branch, function, AND line** — all three,
 per file, not aggregate. Files under `test/` (fixtures) are excluded from the bar. A file at exactly
@@ -97,8 +98,8 @@ grep -rn "new Function\|eval(\| require(\|as any\|@ts-ignore\|Date.now()\|global
 ```
 
 Must be empty (comments excepted). `Date.now()` outside `packages/runtime` is clock-mixing;
-`globalThis.__` is a fake lazy import; the rest are §13.5 / no-`any` violations `deno lint` misses.
-Paste the (empty) result.
+`globalThis.__` is a fake lazy import; the rest are §13.5 / no-`any` violations requiring source
+review. Paste the (empty) result.
 
 # Step 5 — Contract & claims review (read the code, not just the diff)
 
@@ -159,18 +160,19 @@ const res = await app.inject({ method: 'POST', url: 'http://localhost/probe', bo
 // NOTE: ctx.request has NO .body — use `await ctx.request.json<T>()`.
 ```
 
-Run with `deno run -A .verify-<milestone>/driver.ts` (it does NOT type-check — cross-check contract
-shapes in `packages/common/src/` by reading them). **The driver is a plain top-level-`await` script,
-NOT a test file** — bare `import`s, then `await app.start()` / `app.inject()` at the top level. Do
-NOT wrap it in `Deno.test(...)`, and do NOT reach for `describe`/`it` from `@std/testing/bdd`: this
-is a runtime probe, not the test suite, so it uses NEITHER harness. (Repo test files use
-`@std/testing/bdd` — `describe`/`it` + `expect`, never `Deno.test`; a verify driver uses neither.
-Scaffolding in a test framework and then rewriting to a plain script just burns the edit — write it
-as a plain script from the first line.) Signal failure by letting an assertion `throw`. **Paste BOTH
-the driver source AND its raw stdout verbatim** into the report — not a hand-written "✓ works"
-summary. A summarized probe result is worthless: it cannot be distinguished from a probe that never
-ran, asserted nothing, or was written to pass. The raw `res.json()` / `res.body` output must be
-visible so the failure modes below are impossible to paper over.
+Run with `node --import ./scripts/lib/source-register.ts .verify-<milestone>/driver.ts` (it does NOT
+type-check — cross-check contract shapes in `packages/common/src/` by reading them). **The driver is
+a plain top-level-`await` script, NOT a test file** — bare `import`s, then `await app.start()` /
+`app.inject()` at the top level. Do NOT wrap it in `Deno.test(...)`, and do NOT reach for
+`describe`/`it` from `@std/testing/bdd`: this is a runtime probe, not the test suite, so it uses
+NEITHER harness. (Repo test files use `vitest` — `describe`/`it` + `expect`, never `Deno.test`; a
+verify driver uses neither. Scaffolding in a test framework and then rewriting to a plain script
+just burns the edit — write it as a plain script from the first line.) Signal failure by letting an
+assertion `throw`. **Paste BOTH the driver source AND its raw stdout verbatim** into the report —
+not a hand-written "✓ works" summary. A summarized probe result is worthless: it cannot be
+distinguished from a probe that never ran, asserted nothing, or was written to pass. The raw
+`res.json()` / `res.body` output must be visible so the failure modes below are impossible to paper
+over.
 
 **Production defaults, never the test-only seam.** If a component has an injectable seam that tests
 use (a `clock`, a fake client, an in-memory stand-in), your behavioral probe must construct it with

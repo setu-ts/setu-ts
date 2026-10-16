@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Governing toolchain instructions (M111f).** Repository commands use pnpm, Node, Vitest, ESLint,
+  Prettier and TypeDoc. A categorized prose gate prevents obsolete instructions. JSR metadata
+  tooling derives npm migration pointers for the 49 existing JSR packages; applying them is a
+  post-merge maintainer step. npm descriptions are unchanged.
+
 - **CI, examples and website on Node and pnpm (M111e3).** The root `deno.json` and `deno.lock` are
   gone: every repository command is `pnpm run <name>`, with `pnpm run test:tooling` and
   `pnpm run test:tooling:coverage` for the root suite that `deno task test` used to run. The
@@ -39,6 +44,11 @@ All notable changes to this project are documented here. The format follows
   `react-router-plugin` server-build load failures (the build module and `react-router`), and the
   `localization-plugin` refusal of an invalid `exposeCatalogues.cacheControl`. Messages are
   unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
+
+### Fixed
+
+- **npm installation pointers (M111f).** Auth, queue and GraphQL README Deno install commands now
+  select npm explicitly. The website install commands resolve the npm packages.
 
 ## [0.9.0] — 2026-10-12
 

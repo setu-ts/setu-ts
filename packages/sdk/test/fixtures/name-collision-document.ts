@@ -9,8 +9,8 @@
  * yield (M99c §3.1) this document aborted generation with
  * `Duplicate generated name 'GetItemsResponse200'`. It is committed as the
  * third generated-output fixture (the M70m X11-9 precedent): the emitted
- * client is type-checked by `deno task check`, format-checked by
- * `deno task fmt:check`, and compared byte-for-byte by
+ * client is type-checked by `pnpm run check`, format-checked by
+ * `pnpm run fmt:check`, and compared byte-for-byte by
  * `codegen-name-collision.test.ts`, so the fallback's emitted shape stays
  * under the repo's own gates.
  *

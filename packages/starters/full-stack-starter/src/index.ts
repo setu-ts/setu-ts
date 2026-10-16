@@ -8,7 +8,7 @@
  * middleware. Also exposes the option type {@linkcode FullStackStarterOptions} and the
  * plugin builder {@linkcode buildFullStackPlugins} for advanced composition.
  *
- * @see {@link https://jsr.io/@setu-ts/full-stack-starter}
+ * @see {@link https://www.npmjs.com/package/@setu-ts/full-stack-starter}
  */
 
 export { createFullStackApp } from './app.ts';

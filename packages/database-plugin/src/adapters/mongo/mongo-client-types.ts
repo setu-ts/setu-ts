@@ -243,7 +243,7 @@ export interface IMongoClient {
    * value, so `unknown` is the widest return an implementation may specialise —
    * a fake resolving `void` still satisfies it. The assignment is pinned by the
    * compile-time fixture `test/types/mongo-seam.assert.ts`, which fails
-   * `deno task check` the moment this facade drifts from the driver again.
+   * `pnpm run check` the moment this facade drifts from the driver again.
    */
   connect(): Promise<unknown>;
 

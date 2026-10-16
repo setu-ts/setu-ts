@@ -4,8 +4,7 @@ Shows a small but complete plugin: a custom capability token, an internal servic
 resolves the service, and a test using `@setu-ts/testing`.
 
 ```bash
-cd apps/plugin-development
-deno task start
-deno task smoke
-deno task test
+pnpm --dir apps/plugin-development run start
+pnpm --dir apps/plugin-development run smoke
+pnpm --dir apps/plugin-development run test
 ```

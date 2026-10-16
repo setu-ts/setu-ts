@@ -367,7 +367,7 @@ graph TB
 
 ## Repository Structure
 
-A Deno 2 workspace. Every package is published independently to npm; releases before `v0.9.0` were
+A pnpm workspace. Every package is published independently to npm; releases before `v0.9.0` were
 published to JSR.
 
 ```
@@ -382,7 +382,7 @@ setu-ts/
 │   ├── cli/               # CLI tool — `setu`, project scaffolding and code generation
 │   ├── sdk/               # Client SDK — HTTP client, interceptors, resilience, OpenAPI codegen
 │   └── starters/          # Plugin bundles — REST, microservice, full-stack starters (M36)
-├── scripts/               # Coverage, plan linting, JSR release tooling
+├── scripts/               # Coverage, plan linting, npm release tooling
 ├── docs/                  # Operator guides (releasing, telemetry fan-out, …)
 ├── docker/                # Docker and OpenTelemetry Collector configurations
 ├── k8s/                   # Helm chart and the manifests it renders (M39)
@@ -412,7 +412,7 @@ be replaced without touching the others.
 | [**AI_GUIDELINES.md**](AI_GUIDELINES.md)   | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
 | [**ROADMAP.md**](ROADMAP.md)               | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
 | [**CHANGELOG.md**](CHANGELOG.md)           | Everyone                | What each release contains, and its known limitations                    |
-| [**docs/releasing.md**](docs/releasing.md) | Maintainers             | JSR release runbook — setup, quotas, and the per-release sequence        |
+| [**docs/releasing.md**](docs/releasing.md) | Maintainers             | npm release runbook — setup, trust, and the per-release sequence         |
 
 Each package also carries its own README with options, semantics, and a worked example.
 

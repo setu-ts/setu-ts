@@ -1,10 +1,10 @@
 /**
  * Compile-time contract tests for the M90i queue header channel (X34-1).
  *
- * These assertions are decided by `deno task check`: if `IJob.headers` or
+ * These assertions are decided by `pnpm run check`: if `IJob.headers` or
  * `AddJobOptions.headers` becomes required, changes shape, or loses its
  * `readonly`, this file stops compiling. Runtime expectations are asserted
- * alongside so it also fails loudly under `deno task test`.
+ * alongside so it also fails loudly under `pnpm run test`.
  *
  * The point of the file is the OPTIONALITY. A required member would break every
  * out-of-repo `IQueue` implementor with no deprecation path, and it would also
@@ -82,8 +82,8 @@ const withChannel: IJob<{ id: number }> = {
 
 describe('IJob / AddJobOptions header channel', () => {
   it('pins the contract shape at compile time', () => {
-    // The assertions above are decided by `deno task check`; reading them here
-    // makes the file fail loudly under `deno task test` too.
+    // The assertions above are decided by `pnpm run check`; reading them here
+    // makes the file fail loudly under `pnpm run test` too.
     expect(jobHeadersMirrorMessageMetadata).toBe(true);
     expect(addOptionsHeadersMirrorMessageMetadata).toBe(true);
     expect(jobHeadersOptionalReadonly).toBe(true);

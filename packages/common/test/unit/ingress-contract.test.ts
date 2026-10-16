@@ -2,10 +2,10 @@
  * Compile-time contract tests for the M86 ingress behaviour contract
  * (plan §3.1–§3.3).
  *
- * These assertions are decided by `deno task check` — if the envelope gains a
+ * These assertions are decided by `pnpm run check` — if the envelope gains a
  * member (`state`, `services`), loses a `readonly`, or the kind union drifts,
  * this file stops compiling. Runtime expectations are asserted alongside so
- * the file also fails loudly under `deno task test`.
+ * the file also fails loudly under `pnpm run test`.
  *
  * `IPipelineBehavior` (services/cqrs.ts) is UNTOUCHED by M86: the assertions
  * below prove it still carries its committed signature AND satisfies
@@ -143,7 +143,7 @@ describe('IngressContext contract (M86 §3.3)', () => {
 
   it('rejects an explicit `attempt: undefined` at compile time', () => {
     // Decided at compile time by the @ts-expect-error directive above; the
-    // runtime assertion keeps the file failing loudly under `deno task test`.
+    // runtime assertion keeps the file failing loudly under `pnpm run test`.
     expect(rejectsUndefinedAttempt.name).toBe('email.send');
     expect(admitsUndefinedAttempt.attempt).toBeUndefined();
   });

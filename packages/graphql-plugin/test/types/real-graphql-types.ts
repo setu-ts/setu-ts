@@ -10,7 +10,7 @@
  * - the real `graphql` module is assignable to `GraphqlModuleLike`, i.e.
  *   `adaptGraphqlModule(graphql)` type-checks without a cast.
  *
- * Compiled by `deno task check`; not executed as a test.
+ * Compiled by `pnpm run check`; not executed as a test.
  */
 import * as graphql from 'graphql';
 import type { GraphqlModuleLike, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';

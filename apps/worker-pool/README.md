@@ -1,7 +1,8 @@
 # Worker pool example
 
-Run `deno task start` here, then request `GET /health` on port 3000 (`PORT` overrides it). Run
-`deno task smoke` to exercise the unstarted factory in `src/app.ts`.
+Run `pnpm --dir apps/worker-pool run start` here, then request `GET /health` on port 3000 (`PORT`
+overrides it). Run `pnpm --dir apps/worker-pool run smoke` to exercise the unstarted factory in
+`src/app.ts`.
 
 The app registers RuntimePlugin, HealthPlugin and WorkerPoolPlugin with `maxWorkers: 1`. Its two
 task modules share that slot: `spin.ts` does CPU-bound work off the event loop; `fill.ts` writes a

@@ -16,7 +16,7 @@ import {
  *
  * A real deployment uses `config.getOrThrow<string>('SESSION_SECRET')` and
  * fails to boot without one — which is what `setu new --template full-stack`
- * emits. This example falls back so that `deno task smoke` runs with no
+ * emits. This example falls back so that `pnpm --dir apps/full-stack run smoke` runs with no
  * environment at all; the value is public, in a public repository, and is
  * therefore worth exactly nothing.
  */

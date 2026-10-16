@@ -3,25 +3,21 @@
 A runnable application exercising `@setu-ts/graphql-plugin` end to end, and an interop suite that
 drives it with **real third-party GraphQL clients**.
 
-> **Scope.** This is an example app, not a published package. It is deliberately **outside the Deno
-> workspace** — it resolves the framework through relative paths in its own `deno.json`, and it
-> depends on npm client libraries (`graphql-ws`, `@apollo/client`) that must never enter a published
-> package's dependency graph. Milestone 37 owns the broader `apps/*` examples story; this one landed
-> early because M51b needed interop evidence the in-repo suite structurally cannot give.
+> **Scope.** This is a private pnpm workspace app, not a published package. Its generated TypeScript
+> paths resolve framework source from this checkout. Third-party GraphQL clients live in this app’s
+> dependencies and never enter a framework package’s dependency graph.
 
 ## Running it
 
 ```bash
-cd apps/graphql-demo
+pnpm --dir apps/graphql-demo run start          # http://localhost:4000/graphql — open in a browser for GraphiQL
+pnpm --dir apps/graphql-demo run start 4100     # or pick a port
 
-deno task start          # http://localhost:4000/graphql — open in a browser for GraphiQL
-deno task start 4100     # or pick a port
-
-deno task interop        # the interop suite; exits non-zero on any failure
+pnpm --dir apps/graphql-demo run interop        # the interop suite; exits non-zero on any failure
 ```
 
-`deno task interop` boots its own application on an ephemeral port, so it needs no running server
-and leaves nothing behind.
+`pnpm --dir apps/graphql-demo run interop` boots its own application on an ephemeral port, so it
+needs no running server and leaves nothing behind.
 
 ## What the demo serves
 
@@ -75,9 +71,7 @@ with third-party clients, which is the part that cannot move in-repo.
 
 ## Relationship to the gates
 
-The app is not a workspace member, so `deno task check`, `deno task test`, `test:coverage`,
-`release:publish --dry-run`, and `release:verify` do not see it. Prettier and ESLint
-(`deno task fmt:check`, `deno task lint`) do, and it is kept clean under both. The trade-off is
-deliberate and worth stating plainly: **the interop suite is not run by CI**, so a framework change
-can break it without turning anything red. Run `deno task interop` by hand when changing the GraphQL
-transports.
+The app is a private pnpm workspace member. `pnpm run check:apps` runs its `check` and `smoke`
+scripts; the root formatter and linter also cover it. The interop suite remains a separate manual
+check: run `pnpm --dir apps/graphql-demo run interop` when changing the GraphQL transports. Release
+scripts publish framework packages, not this app.

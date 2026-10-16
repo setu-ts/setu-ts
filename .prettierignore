@@ -14,7 +14,7 @@ apps/full-stack/build/
 
 # Generator output whose exact bytes another gate owns (M111e1 §3.1).
 # - The SDK client fixtures: byte-compared by openapi-codegen.test.ts and
-#   written to `deno fmt`'s output; `deno task fmt:check` keeps checking them.
+#   written to `deno fmt`'s output; `pnpm run fmt:check` keeps checking them.
 packages/sdk/test/fixtures/*-client.ts
 # - The CLI's devtool-source fixture, compared against the generator's own output.
 packages/cli/test/fixtures/devtool-source-shapes.ts

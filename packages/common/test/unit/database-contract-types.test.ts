@@ -1,7 +1,7 @@
 /**
  * Compile-time contract tests for the M79 portable data-access contract additions.
  *
- * These assertions are decided by `deno task check` — if a required member is
+ * These assertions are decided by `pnpm run check` — if a required member is
  * ever dropped or an optional one is narrowed away, this file stops compiling.
  */
 import { describe, expect, it } from 'vitest';

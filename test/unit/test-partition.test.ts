@@ -125,7 +125,7 @@ describe('test partition', () => {
   it('never yields a path that is not on disk', async () => {
     // The other half of the same finding: `git ls-files` names a path left by an
     // unstaged `rm`, and reading it threw a bare `NotFound` — which, because this
-    // runs before the suite, took `deno task test` down entirely rather than
+    // runs before the suite, took the legacy Deno runner down entirely rather than
     // simply not running that file. A walk cannot name a file that is not there,
     // which is the property this asserts: discovered, then removed, then gone.
     const path = 'packages/kernel/test/unit/zz-vanishing-probe.test.ts';

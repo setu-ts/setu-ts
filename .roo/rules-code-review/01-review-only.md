@@ -28,10 +28,10 @@ probes never exercise.
   new guard or limit, read the code that runs BEFORE it, because a bound applied after the cost it
   exists to prevent has already been paid is not a bound. Both shipped here; in one the addition was
   three lines and the defect was its interaction with an unchanged method eight lines above.
-- **Run only the read-only gates to inform findings** — `deno task lint`, `deno task check`, and the
-  ANSI-stripped per-file coverage table
-  (`deno task test:coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g'`). These are inputs to your review, not
-  the review itself; a green gate has shipped real bugs in this repo.
+- **Run only the read-only gates to inform findings** — `pnpm run lint`, `pnpm run check`, and the
+  ANSI-stripped per-file coverage table (`pnpm run test:coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g'`).
+  These are inputs to your review, not the review itself; a green gate has shipped real bugs in this
+  repo.
 - **Never push or open a PR.** Those are human-only steps.
 
 ## Start from "this code is buggy" — finding out how is the whole job

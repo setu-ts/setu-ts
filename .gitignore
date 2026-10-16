@@ -1,5 +1,5 @@
-# Coverage output (root `deno task test:coverage` writes coverage/; per-package
-# runs with `--coverage=.coverage` write .coverage/ — ignore both at any depth).
+# Coverage output (legacy Deno reports; current Vitest reports use coverage-node/
+# and the native runtime lane uses coverage-deno-lane/).
 coverage/
 .coverage/
 .cov/
@@ -10,7 +10,7 @@ coverage.lcov
 docs/api/
 
 # Verification reports + scratch drivers (verify-milestone skill output — scratch,
-# never committed per CLAUDE.md's plan-cleanup rule; also fmt-excluded in deno.json).
+# never committed per CLAUDE.md's plan-cleanup rule; also excluded by Prettier).
 .verify/
 .verify-*/
 
@@ -41,13 +41,13 @@ packages/starters/*/pnpm-lock.yaml
 .tmp/
 
 # Wrangler's local state, written by apps/cloudflare's smoke check. Untracked it
-# would dirty the tree and make a following `deno task publish:check` abort.
+# would dirty the tree and make a subsequent clean-tree release check abort.
 .wrangler/
 
 # The frontend build and its resolved npm graph, written by apps/full-stack's
 # smoke check (which builds for real rather than committing a ServerBuild
 # fixture). Same reason as .wrangler/ above: untracked output dirties the tree
-# ahead of `publish:check`. The lockfile is ignored deliberately — CI resolves
+# ahead of clean-tree release checks. The lockfile is ignored deliberately — CI resolves
 # the declared ranges fresh, so a range that stops working fails loudly instead
 # of being pinned around.
 apps/full-stack/build/
@@ -74,10 +74,9 @@ compat/bun.lockb
 # `npx prisma@7.10.0 generate` from packages/database-plugin/test/fixtures.
 packages/database-plugin/test/fixtures/prisma-client-generated/
 
-# Website build output and Astro's generated types (the isolated npm build under
-# website/, outside the Deno workspace — see website/README.md). node_modules/ is
-# already ignored above; deno.lock is gitignored deliberately, on the same reasoning
-# as apps/full-stack/deno.lock: CI resolves the declared ranges fresh.
+# Website build output and Astro generated types (see website/README.md).
+# node_modules/ is already ignored above. Legacy per-directory Deno lockfiles
+# remain ignored; the pnpm workspace lockfile is committed.
 website/dist/
 website/.astro/
 website/deno.lock

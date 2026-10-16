@@ -86,7 +86,7 @@ async function echo(body: InjectBody, headers?: Record<string, string>): Promise
 }
 
 // Every arm of the published union, asserted at COMPILE time. A row deleted
-// from `InjectRequest.body` fails `deno task check` on the matching line — the
+// from `InjectRequest.body` fails `pnpm run check` on the matching line — the
 // `echo()` calls below exercise the same arms at runtime, but a test helper can
 // always be re-typed, so the union's shape is pinned here independently.
 const _acceptsString: InjectBody = 'a=1';
