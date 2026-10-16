@@ -28,7 +28,9 @@ report `up` with the problem in `data`.
   - **Service-discovery's `degraded` on a stale cache.** Every replica shares the discovery backend,
     so a backend blip pulls all of them at once — the correlated-failure shape V8-3 removed from the
     database indicator. That indicator is consistent with the rule, so it is left alone here and
-    recorded in §8 for a later letter.
+    moves to **M113o** beside V9-68, at the maintainer's direction (2026-10-16): both are readiness
+    that answers from the wrong evidence — one too optimistic (no schema check), one too pessimistic
+    (a shared-backend blip pulls every replica while a warm cache still serves).
   - Outbox/inbox signal changes beyond their status mapping — M113j.
 
 ## 1. Contracts verified from SOURCE (not names)
@@ -63,12 +65,12 @@ report `up` with the problem in `data`.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                                                | Resolution (picked side)                           | Doc deliverable (same PR)                                                                                                                                                                                                                                            |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1  | `PUBLIC_API.md:4150` (realtime-backplane: "`degraded` — local delivery still works, so `/ready` keeps serving") and `:8614`/`:8635` (`/ready` 503 on `degraded`) contradict each other. | `:8614` — the code's rule, kept by the maintainer. | Backplane section rewritten to the new `up` + `data.reachable: false` mapping; worker-pool, static-files, auth, feature-flags, inbox and outbox PUBLIC_API sections updated the same way (§3.2 table).                                                               |
-| C2  | Six source comments (§1) claim `degraded` keeps `/ready` at 200.                                                                                                                        | The rule.                                          | Every one rewritten to state the corrected mapping and cite `determineStatusCode`.                                                                                                                                                                                   |
-| C3  | `packages/health-plugin/README.md` never states the readiness rule or what `degraded` is for.                                                                                           | State it.                                          | README gains a "What `degraded` means" section: `/ready` fails on anything not `up`; an indicator reports `degraded` only for "this replica should not take traffic", and a problem every replica shares belongs in `data`. Mirrored in PUBLIC_API's health section. |
-| C4  | ROADMAP M113b lists V9-68 and `cli`; the table row lists `database`, `cli`.                                                                                                             | V9-68 moves to M113o.                              | ROADMAP: M113b section + table row package list corrected (§5 list), a new `### Milestone 113o` section for V9-68, a table row and a Progress row `113o`, and the Deliverables "plan per design letter" bullet gains M113o.                                          |
+| #   | Conflict                                                                                                                                                                                | Resolution (picked side)                                        | Doc deliverable (same PR)                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | `PUBLIC_API.md:4150` (realtime-backplane: "`degraded` — local delivery still works, so `/ready` keeps serving") and `:8614`/`:8635` (`/ready` 503 on `degraded`) contradict each other. | `:8614` — the code's rule, kept by the maintainer.              | Backplane section rewritten to the new `up` + `data.reachable: false` mapping; worker-pool, static-files, auth, feature-flags, inbox and outbox PUBLIC_API sections updated the same way (§3.2 table).                                                                                                                                                                                                                                         |
+| C2  | Six source comments (§1) claim `degraded` keeps `/ready` at 200.                                                                                                                        | The rule.                                                       | Every one rewritten to state the corrected mapping and cite `determineStatusCode`.                                                                                                                                                                                                                                                                                                                                                             |
+| C3  | `packages/health-plugin/README.md` never states the readiness rule or what `degraded` is for.                                                                                           | State it.                                                       | README gains a "What `degraded` means" section: `/ready` fails on anything not `up`; an indicator reports `degraded` only for "this replica should not take traffic", and a problem every replica shares belongs in `data`. Mirrored in PUBLIC_API's health section.                                                                                                                                                                           |
+| C4  | ROADMAP M113b lists V9-68 and `cli`; the table row lists `database`, `cli`.                                                                                                             | V9-68 and the service-discovery stale-cache case move to M113o. | ROADMAP: M113b section + table row package list corrected (§5 list), a new `### Milestone 113o` section carrying V9-68 AND the service-discovery stale-cache readiness case (packages `database-plugin`, `cli`, `service-discovery-plugin`; its plan decides whether a warm-cache backend outage is `up` with `data.degraded: true`), a table row and a Progress row `113o`, and the Deliverables "plan per design letter" bullet gains M113o. |
 
 ## 3. Design decisions
 
@@ -277,15 +279,14 @@ pointed at it, paused/stopped by the tests.
   now carries it.
 - The ioredis outage error shapes differ from the expected candidates → measured against a real
   Redis before `isConnectionFault` is written (§3.4); the measured list goes in the report.
-- Service-discovery's stale-cache `degraded` keeps pulling every replica on a shared-backend blip
-  (the same shape §3.2 removes elsewhere) → recorded, not fixed here; raised with the maintainer in
-  the hand-off as a candidate for a later letter.
 - Rewrapping a cache error hides an `instanceof` check a caller made on the raw ioredis error → the
   original stays reachable as `cause`, as with M90f.
 
 ## 9. Out of scope
 
 - V9-68 migration ledger and schema-aware readiness — **M113o**.
+- Service-discovery's stale-cache `degraded` pulling every replica on a shared-backend blip —
+  **M113o**.
 - A fail-open rate-limit policy on store outage — no letter; would need its own decision.
 - A per-indicator readiness option on `IHealthApi` — rejected by the maintainer in favour of §3.2.
 - Outbox/inbox signal content beyond the status mapping — M113j.
