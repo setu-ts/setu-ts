@@ -478,10 +478,13 @@ captures nothing; committed partitions and subsequent joins are left untouched.
 
 **Group members are trusted.** The minimum is taken over what every current member advertises, so
 any client able to join the group can move a new group's start earlier, which replays history to it;
-it can never move the start later. That client can already commit the group's offsets, so this
-grants nothing new, but restrict group membership (Kafka ACLs on the group) where replay matters.
-Advertisements are keyed by topic, member metadata above 64 KiB is skipped, and an offset longer
-than 19 digits is refused, each with one warning.
+it can never move the start later. Kafka authorizes joining a group with Read on the group alone,
+while committing offsets also needs Read on the topic, so where group and topic ACLs are split a
+principal that cannot commit the group's offsets (and cannot read the topic) can still make a new
+group replay the topic's retained history. The lowering is not logged. Restrict group membership
+(Kafka Read ACLs on the group, not only on the topic) where replay matters. Advertisements are keyed
+by topic, member metadata above 64 KiB is skipped, and an offset longer than 19 digits is refused;
+only the first refusal per subscription is logged.
 
 This requires an admin-capable factory and a loadable `kafkajs` module. With an injected factory,
 the module is tried once at `connect()` for the round-robin wrapper and metadata codec. If absent,

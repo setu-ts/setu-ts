@@ -765,7 +765,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
         const logger = this.#logger;
         (logger?.warn ?? logger?.error)?.call(
           logger,
-          `Kafka could not initialize topic ${JSON.stringify(topic)} (group ${JSON.stringify(groupId)}): ${describeError(error)}`,
+          `Kafka start-offset setup for topic ${JSON.stringify(topic)} (group ${JSON.stringify(groupId)}): ${describeError(error)}`,
         );
       } catch {
         /* Reporting must remain non-fatal. */

@@ -6283,8 +6283,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   starting together where own-offset seeks lost 3/6 (the Spring Kafka `onPartitionsAssigned`
   pattern). Implemented by Codex in two passes; review fixed a producer left connected when the
   probe admin failed and a failed group-admin connect memoized for the broker's life. The
-  join-metadata seek reads offsets other group members write, so a committed-tree security audit
-  runs before the PR — complete (PR pending).
+  join-metadata seek reads offsets other group members write; the committed-tree security audit ran
+  two fresh-context rounds. Round 2 failed on R2-F4 (Low): the docs claimed a member that can join
+  can already commit, false under split group/topic ACLs. The docs now state that case, that the
+  lowering is unlogged, and the group-ACL remedy; re-accepted and NOT re-audited, at the
+  maintainer's direction — complete (PR pending).
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

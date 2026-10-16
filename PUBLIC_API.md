@@ -6464,15 +6464,18 @@ the first join, members seek assigned, still-uncommitted partitions to the minim
 advertised by current members. Messages published after any member’s `subscribe()` resolves reach
 the group even during concurrent first starts; history before the first member’s subscription is not
 replayed, provided every group member is trusted: any client able to join the group can move a new
-group's start earlier (never later). Advertisements are keyed by topic; member metadata above 64 KiB
-and offsets longer than 19 digits are refused with a warning. `subscribe()` does not wait for the
-join. Existing committed groups and later joins are untouched. This requires `admin` and a loadable
-`kafkajs` module. Injected factories try loading the module once at `connect()`; without it members
-seek only their own offsets and concurrent first starts can miss messages. Without `admin` the step
-is skipped. A member crashing before the join takes its start offsets with it. Admin/metadata
-failures warn once per subscription through `KafkaOptions.logger.warn?` (fallback `error`), naming
-topic/group; invalid member metadata is skipped individually while usable snapshots still contribute
-to the minimum. Admin or seek failures leave affected partitions with latest-offset behavior.
+group's start earlier (never later), without a log line. Joining needs only Read on the group while
+committing also needs Read on the topic, so under split ACLs a principal that cannot commit can
+still cause that replay; restrict group membership. Advertisements are keyed by topic; member
+metadata above 64 KiB and offsets longer than 19 digits are refused, and the first refusal per
+subscription is logged. `subscribe()` does not wait for the join. Existing committed groups and
+later joins are untouched. This requires `admin` and a loadable `kafkajs` module. Injected factories
+try loading the module once at `connect()`; without it members seek only their own offsets and
+concurrent first starts can miss messages. Without `admin` the step is skipped. A member crashing
+before the join takes its start offsets with it. Admin/metadata failures warn once per subscription
+through `KafkaOptions.logger.warn?` (fallback `error`), naming topic/group; invalid member metadata
+is skipped individually while usable snapshots still contribute to the minimum. Admin or seek
+failures leave affected partitions with latest-offset behavior.
 
 `NatsOptions.reconnect` and `NatsMessagingOptions.reconnect` configure only lazily built
 connections: `maxAttempts` defaults to -1 (unbounded), `waitMs` to 2000; forwarded as

@@ -18,12 +18,12 @@ All notable changes to this project are documented here. The format follows
   subscribe time: remove join sleeps and publish retries used to avoid losing the first message.
   First joins seek assigned uncommitted partitions to the minimum start offset advertised by the
   current members, covering concurrent first starts without replaying history before the first
-  subscription when every group member is trusted (a client able to join the group can move the
-  start earlier; advertisements are keyed by topic and bounded at 64 KiB and 19-digit offsets).
-  Existing committed groups are untouched. Without admin the step is skipped; injected factories
-  without a loadable kafkajs module seek only their own offsets, so concurrent starts can miss
-  messages. A member crashing before the join takes its start offsets with it; admin/metadata
-  failures warn once per subscription and remain non-fatal.
+  subscription when every group member is trusted (a client able to join the group, which needs only
+  group Read, can move the start earlier without a log line; advertisements are keyed by topic and
+  bounded at 64 KiB and 19-digit offsets). Existing committed groups are untouched. Without admin
+  the step is skipped; injected factories without a loadable kafkajs module seek only their own
+  offsets, so concurrent starts can miss messages. A member crashing before the join takes its start
+  offsets with it; admin/metadata failures warn once per subscription and remain non-fatal.
 
 - **Governing toolchain instructions (M111f).** Repository commands use pnpm, Node, Vitest, ESLint,
   Prettier and TypeDoc. A categorized prose gate prevents obsolete instructions. JSR metadata

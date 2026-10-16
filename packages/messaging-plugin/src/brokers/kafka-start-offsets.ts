@@ -78,9 +78,11 @@ export function startAwareRoundRobin(
  * metadata cannot discard the others.
  *
  * Group members are TRUSTED here: a client able to join the group can move a
- * new group's start earlier (never later), which replays history. That client
- * can already commit the group's offsets, so this grants nothing new; the
- * README states the trust.
+ * new group's start earlier (never later), which replays history, and the
+ * lowering is not logged. Joining needs only Read on the group, while
+ * committing offsets also needs Read on the topic, so under split ACLs this
+ * gives a principal that cannot commit a way to make a new group replay. The
+ * README states the trust and that restricting group membership is the remedy.
  *
  * @param own - This member's snapshot for `topic`
  * @param topic - The topic whose advertisements are read
