@@ -837,3 +837,8 @@ describe('scoped RBAC exports (M110b)', () => {
     ]);
   });
 });
+
+it('exports connection fault classification', () => {
+  expect(common.isConnectionFault({ code: 'ECONNREFUSED' })).toBe(true);
+  expect(common.CONNECTION_FAULT_CODES.size).toBe(8);
+});

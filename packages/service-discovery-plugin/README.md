@@ -293,3 +293,9 @@ MIT
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+## Readiness and dependency outages (M113b)
+
+Provider reachability probes are invoked as methods, retaining their receiver. Healthy Kubernetes
+and Consul providers therefore report reachable and allow `/ready` to return 200. Stale-cache
+`degraded` semantics remain unchanged.

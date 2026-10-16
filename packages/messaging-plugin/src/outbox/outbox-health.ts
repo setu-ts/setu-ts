@@ -37,7 +37,9 @@ const STATS_TTL_MS = 5000;
 const STATS_TIMEOUT_MS = 2000;
 
 /**
- * Why the indicator reports `degraded` — a fixed vocabulary.
+ * Conditions exposed in data.reasons while status stays up — a fixed vocabulary.
+ * determineStatusCode withdraws non-up replicas; shared relay signals do not
+ * stop this replica serving requests.
  *
  * @internal
  */
@@ -153,7 +155,7 @@ export function createOutboxHealthIndicator(deps: OutboxHealthDeps): HealthIndic
     if (signals.relayOverlap) reasons.push('relay-overlap');
     const last = signals.lastSweep;
     return {
-      status: reasons.length > 0 ? 'degraded' : 'up',
+      status: 'up',
       data: {
         ready: true,
         reachable: true,

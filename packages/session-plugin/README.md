@@ -405,3 +405,9 @@ drifts.
 ## License
 
 MIT
+
+## Readiness and dependency outages (M113b)
+
+A cache-backed session inherits `CacheStoreUnavailableError` from Redis cache operations. With
+`errorHandler`, an outage answers 503 with value-free cache detail; the original driver failure
+stays in `cause`. Cookie-only sessions are unchanged.

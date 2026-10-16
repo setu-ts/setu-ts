@@ -38,7 +38,7 @@ describe('inbox health indicator', () => {
     other.activate(second);
     const result = await fresh();
     expect(result).toEqual({
-      status: 'degraded',
+      status: 'up',
       data: { ready: true, reachable: true, parked: 2, reasons: ['parked-rows'] },
     });
     expect(JSON.stringify(result)).not.toContain('payroll');

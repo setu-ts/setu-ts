@@ -20,9 +20,14 @@ import { run as runProcess } from '../../../../test/node-helpers.ts';
  */
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { ISchedulerDiagnosticsSource, SchedulerDiagnosticsRecord } from '@setu-ts/common';
+import type {
+  HealthReport,
+  ISchedulerDiagnosticsSource,
+  SchedulerDiagnosticsRecord,
+} from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { HealthPlugin } from '@setu-ts/health-plugin';
 
 import { SchedulerPlugin } from '../../src/index.ts';
 import { RedisLock } from '../../src/lock/redis-lock.ts';
@@ -62,6 +67,47 @@ async function waitFor<T>(read: () => T, done: (value: T) => boolean): Promise<T
 }
 
 describe('REAL Redis scheduler lock outage (M101a V8-24)', { skip: redisUrl === undefined }, () => {
+  it('M113b: lock reachability tracks paused Redis and recovery while /ready stays 200', async () => {
+    const { url, port } = target();
+    const containerId = await containerIdForPort(port);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HealthPlugin(),
+        SchedulerPlugin({
+          distributedLock: { enabled: true, storage: 'redis', url, commandTimeoutMs: BOUND_MS },
+        }),
+      ],
+    });
+    let paused = false;
+    try {
+      await app.start();
+      const read = async () => {
+        const response = await app.inject({ method: 'GET', url: '/ready' });
+        expect(response.statusCode).toBe(200);
+        const scheduler = response.json<HealthReport>().checks['scheduler'];
+        expect(scheduler).toMatchObject({ status: 'up', data: { connected: true } });
+        return scheduler?.data?.lock;
+      };
+
+      expect(await read()).toEqual({ reachable: true });
+      await docker(['pause', containerId]);
+      paused = true;
+      // Age out the indicator's 5 s cache before asking the REAL PING again.
+      await new Promise((resolve) => setTimeout(resolve, 5100));
+      const outage = await read();
+      expect([{ reachable: false }, { reachable: 'unknown' }]).toContainEqual(outage);
+
+      await docker(['unpause', containerId]);
+      paused = false;
+      await new Promise((resolve) => setTimeout(resolve, 5100));
+      expect(await read()).toEqual({ reachable: true });
+    } finally {
+      if (paused) await docker(['unpause', containerId]);
+      await app.stop();
+    }
+  });
+
   it('paused Redis → fires settle lock-failed within the bound → unpaused → dispatches resume', async () => {
     const { url, port } = target();
     const containerId = await containerIdForPort(port);

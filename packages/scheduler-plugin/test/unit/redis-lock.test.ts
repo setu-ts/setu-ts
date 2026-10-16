@@ -9,6 +9,7 @@ import {
   validateClient,
 } from '../../src/lock/redis-lock.ts';
 import type { RedisLockClientOptions } from '../../src/lock/redis-lock.ts';
+import type { IRedisLockClient } from '../../src/interfaces/index.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
 
 describe('RedisLock', () => {
@@ -100,8 +101,7 @@ describe('RedisLock', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: badClient as any,
+      client: badClient as unknown as IRedisLockClient,
     });
     try {
       await lock.connect();
@@ -148,14 +148,57 @@ describe('RedisLock', () => {
   });
 });
 
+describe('RedisLock reachability (M113b)', () => {
+  it('does not PING before connect or after disconnect', async () => {
+    let calls = 0;
+    const client = Object.assign(new FakeRedisClient(), {
+      ping: () => {
+        calls++;
+        return Promise.resolve('PONG');
+      },
+    });
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client });
+    expect(await lock.isHealthy()).toBe(false);
+    expect(calls).toBe(0);
+    await lock.connect();
+    expect(await lock.isHealthy()).toBe(true);
+    expect(calls).toBe(1);
+    await lock.disconnect();
+    expect(await lock.isHealthy()).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it('contains a PING rejection and reports unreachable', async () => {
+    const client = Object.assign(new FakeRedisClient(), {
+      ping: () => Promise.reject(new Error('Command timed out')),
+    });
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client });
+    await lock.connect();
+    try {
+      expect(await lock.isHealthy()).toBe(false);
+    } finally {
+      await lock.disconnect();
+    }
+  });
+
+  it('accepts a client without PING and reports unknown', async () => {
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: new FakeRedisClient() });
+    await lock.connect();
+    try {
+      expect(await lock.isHealthy()).toBeUndefined();
+    } finally {
+      await lock.disconnect();
+    }
+  });
+});
+
 describe('validateClient', () => {
   it('returns true for valid client', () => {
     expect(validateClient(new FakeRedisClient())).toBe(true);
   });
 
   it('returns false for null', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(validateClient(null as any)).toBe(false);
+    expect(validateClient(null)).toBe(false);
   });
 
   it('returns false for missing method', () => {
@@ -179,8 +222,7 @@ describe('validateClient', () => {
   });
 
   it('returns false for undefined', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(validateClient(undefined as any)).toBe(false);
+    expect(validateClient(undefined)).toBe(false);
   });
 
   it('returns false for non-object (string)', () => {
@@ -280,8 +322,7 @@ describe('RedisLock N2 - error message', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      client: badClient as any,
+      client: badClient as unknown as IRedisLockClient,
     });
     try {
       await lock.connect();

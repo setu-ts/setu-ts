@@ -207,6 +207,7 @@ package fits the plugin architecture.
 | `fromNullable`                        | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
+| `isConnectionFault`                   | function  |
 | `isErr`                               | function  |
 | `isLexicallyContained`                | function  |
 | `isNone`                              | function  |
@@ -268,6 +269,7 @@ package fits the plugin architecture.
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
+| `CONNECTION_FAULT_CODES`              | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |
@@ -735,3 +737,9 @@ package fits the plugin architecture.
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+## Readiness and dependency outages (M113b)
+
+`isConnectionFault(error: unknown): boolean` walks up to five cause objects, stops at cycles, and
+recognises the eight `CONNECTION_FAULT_CODES` plus measured ioredis 5 outage rejections. It never
+mutates errors. Command errors such as WRONGTYPE remain unclassified.

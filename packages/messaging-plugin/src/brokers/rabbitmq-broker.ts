@@ -462,8 +462,9 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * real AMQP round trip it meant one channel open per health poll, and a
    * HUNG broker — the `docker pause` condition X51-2 exists for — left that
    * indicator to hit `HealthPlugin`'s `indicatorTimeoutMs` and report `down`,
-   * taking `/ready` to 503 for a fan-out failure its own contract says is
-   * `degraded` at worst. Caching in the broker is what makes the backplane's
+   * taking `/ready` to 503 for a fan-out failure its own contract kept at
+   * `degraded` at worst (and, since M113b, reports `up` with
+   * `data.reachable: false`). Caching in the broker is what makes the backplane's
    * documented assumption true again, for every caller at once.
    */
   #probe: (() => Promise<boolean | undefined>) | null = null;

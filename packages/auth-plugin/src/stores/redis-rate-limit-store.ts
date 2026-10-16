@@ -7,8 +7,9 @@
  * @module
  */
 
-import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { attachConnectionErrorReporter, isConnectionFault } from '@setu-ts/common';
 import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
+import { RateLimitStoreUnavailableError } from '../errors.ts';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
 
 /**
@@ -59,6 +60,7 @@ async function resolveClient(
   url: string,
   injectedClient: IRateLimitRedisClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
+  commandTimeoutMs: number,
 ): Promise<IRateLimitRedisClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -70,7 +72,7 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  const client = new RedisCtor(url);
+  const client = createRateLimitRedisClient(RedisCtor, url, commandTimeoutMs);
   // Attached synchronously after construction: this client connects eagerly,
   // but a connect failure is emitted asynchronously, so none is missed.
   if (reporter !== undefined) {
@@ -109,6 +111,7 @@ export class RedisRateLimitStore implements RateLimitStore {
   #runtime: IRuntimeServices;
   #keyPrefix: string;
   #reporter: ConnectionErrorReporter | undefined;
+  #commandTimeoutMs: number;
 
   /**
    * Builds the store. The client is resolved lazily on first use, so
@@ -145,7 +148,14 @@ export class RedisRateLimitStore implements RateLimitStore {
      * @since 0.8.0
      */
     connectionErrorReporter?: ConnectionErrorReporter | undefined;
+    /**
+     * Bound on a built client's command, in ms; defaults to 15000.
+     * 0 omits the bound. Ignored for an injected client.
+     * @since 0.10.0
+     */
+    commandTimeoutMs?: number;
   }) {
+    this.#commandTimeoutMs = resolveCommandTimeoutMs(options.commandTimeoutMs);
     this.#url = options.url ?? 'redis://localhost:6379';
     this.#injectedClient = options.client;
     this.#runtime = options.runtime;
@@ -165,33 +175,46 @@ export class RedisRateLimitStore implements RateLimitStore {
     if (this.#client !== null) {
       return this.#client;
     }
-    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
+    this.#client = await resolveClient(
+      this.#url,
+      this.#injectedClient,
+      this.#reporter,
+      this.#commandTimeoutMs,
+    );
     return this.#client;
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitResult> {
-    const client = await this.ensureClient();
-    const now = this.#runtime.now();
-    const namespaced = this.#namespaced(key);
+    try {
+      const client = await this.ensureClient();
+      const now = this.#runtime.now();
+      const namespaced = this.#namespaced(key);
 
-    // INCR returns 1 on first call (key created), >1 on subsequent calls
-    const count = await client.incr(namespaced);
+      // INCR returns 1 on first call (key created), >1 on subsequent calls
+      const count = await client.incr(namespaced);
 
-    // PEXPIRE only on first increment (count === 1)
-    if (count === 1) {
-      await client.pexpire(namespaced, windowMs);
+      // PEXPIRE only on first increment (count === 1)
+      if (count === 1) {
+        await client.pexpire(namespaced, windowMs);
+      }
+
+      // PTTL returns time-to-live in ms (relative); convert to absolute resetTime
+      const pttl = await client.pttl(namespaced);
+      const resetTime = now + pttl;
+
+      return { count, resetTime };
+    } catch (error) {
+      throw isConnectionFault(error) ? new RateLimitStoreUnavailableError(error) : error;
     }
-
-    // PTTL returns time-to-live in ms (relative); convert to absolute resetTime
-    const pttl = await client.pttl(namespaced);
-    const resetTime = now + pttl;
-
-    return { count, resetTime };
   }
 
   async reset(key: string): Promise<void> {
-    const client = await this.ensureClient();
-    await client.del(this.#namespaced(key));
+    try {
+      const client = await this.ensureClient();
+      await client.del(this.#namespaced(key));
+    } catch (error) {
+      throw isConnectionFault(error) ? new RateLimitStoreUnavailableError(error) : error;
+    }
   }
 
   /**
@@ -203,4 +226,28 @@ export class RedisRateLimitStore implements RateLimitStore {
       this.#client = null;
     }
   }
+}
+
+/** Validates the built client's command bound; internal construction seam. */
+export function resolveCommandTimeoutMs(value: number | undefined): number {
+  const bound = value ?? 15_000;
+  if (typeof bound !== 'number' || !Number.isFinite(bound) || bound < 0 || bound > 2_147_483_647) {
+    throw new RangeError(
+      'auth-plugin: commandTimeoutMs must be a number from 0 to 2147483647 (0 disables the bound)',
+    );
+  }
+  return bound;
+}
+
+/** Builds a bounded ioredis client; 0 preserves ioredis's unbounded default. */
+export function createRateLimitRedisClient(
+  RedisCtor: new (url: string, options?: { commandTimeout: number }) => unknown,
+  url: string,
+  commandTimeoutMs: number,
+): IRateLimitRedisClient {
+  return (
+    commandTimeoutMs === 0
+      ? new RedisCtor(url)
+      : new RedisCtor(url, { commandTimeout: commandTimeoutMs })
+  ) as IRateLimitRedisClient;
 }

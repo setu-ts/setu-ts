@@ -445,3 +445,7 @@ describe('scoped RBAC exports (M110b)', () => {
     }
   });
 });
+
+it('exports RateLimitStoreUnavailableError', () => {
+  expect(new auth.RateLimitStoreUnavailableError(null).name).toBe('RateLimitStoreUnavailableError');
+});

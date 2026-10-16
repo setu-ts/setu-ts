@@ -111,12 +111,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * `everResolved`/`degraded` — absence is never reported as `false`.
    */
   async isHealthy(): Promise<boolean> {
-    const probe = this.#provider.isHealthy;
-    if (typeof probe !== 'function') {
-      return true;
-    }
     try {
-      return await probe();
+      return (await this.#provider.isHealthy?.()) ?? true;
     } catch {
       return false;
     }

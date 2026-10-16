@@ -11,6 +11,15 @@ describe('MemoryLock', () => {
     return { lock: new MemoryLock(runtime), runtime };
   }
 
+  it('is always reachable, including while a key is held', async () => {
+    const { lock } = createLock();
+    expect(await lock.isHealthy()).toBe(true);
+    const token = await lock.acquire('key1', 5000);
+    expect(await lock.isHealthy()).toBe(true);
+    await lock.release('key1', token!);
+    expect(await lock.isHealthy()).toBe(true);
+  });
+
   it('acquires lock on free key', async () => {
     const { lock } = createLock();
     const token = await lock.acquire('key1', 5000);

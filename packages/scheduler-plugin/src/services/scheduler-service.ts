@@ -12,7 +12,12 @@
  *
  * @module
  */
-import { deadlineRangeError, resolveProbeTiming, withDeadline } from '@setu-ts/common';
+import {
+  createCachedProbe,
+  deadlineRangeError,
+  resolveProbeTiming,
+  withDeadline,
+} from '@setu-ts/common';
 import type {
   HealthCheckResult,
   HealthIndicatorFn,
@@ -210,12 +215,23 @@ export class SchedulerService implements IScheduler {
    * Create a health indicator function.
    */
   createHealthIndicator(): HealthIndicatorFn {
+    const probe = createCachedProbe<boolean | undefined>({
+      probe: async () => this.#lock.isHealthy?.(),
+      fallback: undefined,
+      ttlMs: 5000,
+      timeoutMs: 2000,
+      ...this.#timing,
+    });
     return async (): Promise<HealthCheckResult> => {
       const connected = this.#connected;
+      const reachable = connected ? await probe() : undefined;
       return {
+        // A shared lock outage stops job fires, not request serving. Keep
+        // readiness tied to lifecycle and expose reachability for alerting.
         status: connected ? 'up' : 'down',
         data: {
           connected,
+          lock: { reachable: reachable ?? 'unknown' },
         },
       };
     };

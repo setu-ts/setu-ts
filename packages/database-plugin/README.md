@@ -1277,3 +1277,8 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#databaseplugin-setu-tsdatabase-plugin).
+
+## Readiness and dependency outages (M113b)
+
+The database driver's existing unavailable-errno classification uses the shared
+`CONNECTION_FAULT_CODES` from `@setu-ts/common`. Its status classification is unchanged.

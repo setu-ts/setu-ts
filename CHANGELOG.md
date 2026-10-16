@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
+  previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
+  changes overall status for these conditions. Migrate alerts to inbox `data.parked` /
+  `data.reasons`, outbox `data.reasons` (all six reasons), realtime-backplane `data.reachable`,
+  worker-pool `data.available`, static-files `data.fs`, auth `data.current` / `data.issuers`, and
+  feature-flags `data.healthy` / `data.detail`. `degraded` still means out of rotation: `/ready`
+  503, `/health` 200. Healthy Kubernetes and Consul discovery probes now preserve their receiver and
+  allow readiness.
+- **Breaking Redis outage responses (M113b).** Cache and rate-limit connection faults now carry 503
+  status hints instead of reaching `errorHandler` as masked 500s; cache-backed sessions inherit the
+  cache response. Update response handling to accept 503 and inspect `cause` instead of checking raw
+  driver errors. WRONGTYPE/programming errors are unchanged.
+- **Breaking rate-limit wait bound (M113b).** Built `RedisRateLimitStore` clients now use a 15000 ms
+  command bound. Configure `commandTimeoutMs` higher for slow Redis, or `0` for the previous
+  unbounded wait; configure injected clients directly.
+
 - **Messaging broker bounds and recovery (M113a, `@setu-ts/messaging-plugin`).** Kafka and Pub/Sub
   publishes now reject after 15000 ms by default, including RPC and outbox traffic; set
   `publishTimeoutMs` higher or to `0` for the previous unbounded wait, and account for possible late
@@ -65,6 +81,17 @@ All notable changes to this project are documented here. The format follows
   unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
 
 ### Added
+
+- **Scheduler lock reachability (M113b).** `IDistributedLock` gains optional
+  `isHealthy?(): Promise<boolean | undefined>` and `IRedisLockClient` gains optional
+  `ping?(): Promise<unknown>`. The scheduler indicator adds `data.lock.reachable` (`true` / `false`
+  / `'unknown'`), cached for 5 s and bounded at 2 s while connected. Status remains lifecycle;
+  shared lock outages do not change readiness. Memory locks report reachable; Redis locks probe PING
+  and clients without it report unknown.
+
+- **Redis outage vocabulary (M113b).** `@setu-ts/common` exports `isConnectionFault` and
+  `CONNECTION_FAULT_CODES`; cache-plugin exports `CacheStoreUnavailableError`; auth-plugin exports
+  `RateLimitStoreUnavailableError`. `RedisRateLimitStore` gains `commandTimeoutMs`.
 
 - **Messaging reachability probes (M113a).** Kafka uses a dedicated short-timeout metadata client;
   Pub/Sub uses bounded `getTopics`. Both cache probes for 5 s and bound them at 2 s, including

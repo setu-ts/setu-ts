@@ -24,6 +24,7 @@ describe('cache-plugin barrel exports', () => {
     expect(Object.keys(cache).sort()).toEqual([
       'CachePlugin',
       'CacheService',
+      'CacheStoreUnavailableError',
       'MemoryStore',
       'NoopStore',
       'RedisStore',

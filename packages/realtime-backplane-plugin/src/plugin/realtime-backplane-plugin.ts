@@ -133,15 +133,15 @@ export function RealtimeBackplanePlugin(
       );
 
       ctx.health.register('realtime-backplane', async (): Promise<HealthCheckResult> => {
-        // M70c: a fan-out failure is `degraded` (local delivery still works, so
-        // /ready keeps serving), never `down`. A transport that cannot probe
-        // (isHealthy absent) reports unknown reachability with an up status.
+        // Shared fan-out faults stay in data: determineStatusCode withdraws
+        // every non-up replica, while local request delivery still works.
+        // A transport without isHealthy reports unknown reachability.
         let reachable: boolean | 'unknown' = 'unknown';
         if (typeof backplane.isHealthy === 'function') {
           reachable = await backplane.isHealthy();
         }
         return {
-          status: reachable === false ? 'degraded' : 'up',
+          status: 'up',
           data: {
             transport: options.transport ?? 'memory',
             origin: backplane.origin,

@@ -1105,6 +1105,9 @@ app.register(
 
 ## DatabasePlugin() (`@setu-ts/database-plugin`)
 
+The database driver's existing unavailable-errno classification uses the shared
+`CONNECTION_FAULT_CODES` from `@setu-ts/common`. Its status classification is unchanged.
+
 Provides database access with repository pattern and unit of work.
 
 ### Registration
@@ -2555,6 +2558,13 @@ app.router.get('/analytics', async (ctx) => {
 
 ## AuthPlugin() (`@setu-ts/auth-plugin`)
 
+`RedisRateLimitStore.increment/reset` wrap recognised connection faults in
+`RateLimitStoreUnavailableError`, preserving `cause`. With `errorHandler`, clients receive 503 and
+`Rate limiting is temporarily unavailable.` Other errors propagate unchanged. The constructor's
+`commandTimeoutMs` defaults to 15000, accepts 0–2147483647, and throws `RangeError` for invalid
+values including NaN. Zero omits ioredis's bound; an injected client keeps its own settings.
+Configure a larger bound when necessary.
+
 Provides JWT and API-key authentication, local credential verification, RBAC authorization with role
 hierarchy, and short-circuiting route guards. All cryptography (HS256/RS256 JWT, PBKDF2-SHA256
 password hashing) runs through Web Crypto via `IRuntimeServices`, so **no npm package is involved in
@@ -2703,15 +2713,15 @@ what changed is that the refusal is legible.
 > issuer, empty audience, unsupported algorithm, out-of-range tolerance or timing, a `keySet.ttlMs`
 > above `keySet.maxStaleMs`, `http` without `issuers` or `signIn`, non-`https` non-loopback URL —
 > throws `AuthPluginConfigurationError` from `AuthPlugin(...)`. `http?: IAuthHttp` replaces the
-> default `fetch` seam. An `auth` health indicator reports `up` or `degraded` (with per-issuer
-> `stale`/`expired`/`unfetched`), never `down`, and performs no I/O. `typ: at+jwt` (RFC 9068) is not
-> enforced (only a Keycloak `typ: "ID"` claim is refused), so the API needs an audience distinct
-> from any sign-in client id; multi-tenant Entra ID is not supported. `IJwtService` remains
-> self-issued only. `sub` is unique only within its issuer, so whenever an issuer is not the only
-> identity source — another issuer, a self-issued `jwt` (whose strategy also maps `sub` to the id),
-> an API key, a session or a custom strategy — `toPrincipal` should namespace the id
-> (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or keep their ids free of the
-> separator), since namespacing one side does not stop a local id of the same form colliding.
+> default `fetch` seam. The `auth` health indicator stays `up` with `data.current: boolean` and
+> `data.issuers` carrying per-issuer `stale`/`expired`/`unfetched` states. It performs no I/O.
+> `typ: at+jwt` (RFC 9068) is not enforced (only a Keycloak `typ: "ID"` claim is refused), so the
+> API needs an audience distinct from any sign-in client id; multi-tenant Entra ID is not supported.
+> `IJwtService` remains self-issued only. `sub` is unique only within its issuer, so whenever an
+> issuer is not the only identity source — another issuer, a self-issued `jwt` (whose strategy also
+> maps `sub` to the id), an API key, a session or a custom strategy — `toPrincipal` should namespace
+> the id (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or keep their ids free
+> of the separator), since namespacing one side does not stop a local id of the same form colliding.
 > `keySet.fetchTimeoutMs` may not exceed 2147483647, since a larger timer delay overflows.
 >
 > **Sign-in with an outside provider (M100c):** `signIn: SignInConfig` —
@@ -3330,6 +3340,11 @@ present. The fallback is retained for a custom `IHttpAdapter` that does set it.
 ---
 
 ## CachePlugin() (`@setu-ts/cache-plugin`)
+
+`RedisStore.get/set/delete/has/clear` wrap recognised connection faults in
+`CacheStoreUnavailableError`, preserving the original as `cause`. With the exceptions
+`errorHandler`, this returns 503 and the fixed detail `The cache is temporarily unavailable.` Other
+errors propagate unchanged. Inspect `cause` for driver diagnostics.
 
 Provides caching with multiple stores (Memory, Redis, Noop) and a transparent response-caching
 middleware. `CacheService.getOrSet()` offers coalesced programmatic read-through for callers that
@@ -4146,19 +4161,18 @@ knows its own transport.
 
 ### Health status
 
-Since M70c the indicator probes the transport's reachability (`isHealthy()`). A fan-out failure is
-`degraded` — local delivery still works, so `/ready` keeps serving — never `down`. A transport that
-cannot probe reports `up` with `reachable: 'unknown'`.
-
-| Status     | Meaning                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------- |
-| `up`       | The transport is reachable, or cannot be probed (`reachable` is `'unknown'`).           |
-| `degraded` | The transport is unreachable — a fan-out to a peer failed (local delivery still works). |
+The `realtime-backplane` indicator reports `up`, including fan-out outages. Local request delivery
+still works. `data.reachable: false` exposes an unreachable backend; a transport without a probe
+reports `'unknown'`. `/ready` therefore remains 200 for this shared dependency condition.
 
 `data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
 `'unknown'`.
 
 ## SessionPlugin() (`@setu-ts/session-plugin`)
+
+A cache-backed session inherits `CacheStoreUnavailableError` from Redis cache operations. With
+`errorHandler`, an outage answers 503 with value-free cache detail; the original driver failure
+stays in `cause`. Cookie-only sessions are unchanged.
 
 Cookie-backed sessions and session-backed form CSRF. Registers a `SessionService`
 (`ISessionService`) under `CAPABILITIES.SESSION` (`'session'`). Added in Milestone 48.
@@ -4589,6 +4603,10 @@ client bundle has to inline what it imports and cannot resolve a JSR specifier.
 ---
 
 ## WorkerPoolPlugin() (`@setu-ts/worker-pool-plugin`)
+
+The indicator stays `up` even without a worker host. `data.available: false` and `data.reason`
+expose the condition while `/ready` remains 200. Task submission still throws
+`WorkerPoolUnavailableError`; migrate alerts to `data.available`.
 
 Runs CPU-bound work (image processing, report generation, large data transforms) on **real worker
 threads**, off the event loop, behind the capability model. Registers an `IWorkerPool` under
@@ -6744,7 +6762,7 @@ value out of range, `NaN` or a fraction throws a `RangeError` naming the option,
   only; it is registered ahead of the broker's own close hook, so the drain precedes the disconnect
   on that path too.
 - **Health.** `down` with `ready: false` before the store is verified and once closing; `down` with
-  `reachable: false` when `stats()` does not answer (cached 5 s, bounded 2 s); `degraded` with
+  `reachable: false` when `stats()` does not answer (cached 5 s, bounded 2 s); `up` with
   `data.reasons` from a fixed vocabulary — cluster-wide, from the store: `oldest-pending-age` (past
   `health.degradedAfterMs`), `failed-rows`, `failed-scan-cap` (a store's failed count reaches
   `relay.maxFailedScan`); per instance, from this relay: `blocked-key-cap`, `store-write-failing`,
@@ -6874,7 +6892,7 @@ the store's.
   at once.
 - **Wiring.** With `inbox` set the plugin also provides `CAPABILITIES.INBOX` (`inbox.<name>`),
   declares `CAPABILITIES.SCHEDULER` as an optional dependency, registers an `inbox` health indicator
-  (`down` before verification and after close, `degraded` with `parked-rows`,
+  (`down` before verification and after close, `up` with `data.reasons: ['parked-rows']`,
   `up`/`reachable: 'unknown'` when the count does not answer within 2 s), verifies the store at
   `onInit` before any inbox subscription is resolved, schedules `inbox-purge[.<name>]`, and closes
   in an `onClose` hook registered after the broker's, so a delivery in flight during `stop()` is not
@@ -7351,8 +7369,10 @@ schedule until the registering plugin re-creates it. For durable background work
   lock); a timed-out `SET` may still apply on the server, so `RedisLock` releases that exact token
   before rethrowing. Either value outside `0`–`2147483647`, or a `commandTimeoutMs` above a non-zero
   `acquireTimeoutMs`, throws `RangeError` when `SchedulerPlugin(...)` is called
-- **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation
-- **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`
+- **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation;
+  optional `isHealthy?(): Promise<boolean | undefined>` reports reachable, unreachable, or unknown
+- **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`; optional
+  `ping?(): Promise<unknown>` supports lock reachability probes
 - **`IScheduler`** — Scheduler service interface (re-exported from `@setu-ts/common`)
 - **`ScheduledJob<T>`** — Job instance handed to the handler (re-exported)
 - **`SchedulerJobHandler<T>`** — Handler callback type (re-exported)
@@ -7395,8 +7415,8 @@ A Redis lock client the plugin builds routes the `'error'` events of the `ioredi
 to the application logger through `createConnectionErrorReporter` (common): the first error of an
 outage at `warn`, identical repeats at `debug`, the recovery at `info`. Without a listener `ioredis`
 prints every reconnect failure to `console.error`, bypassing the logger and redaction. An injected
-client gets no listener — it belongs to the caller. Health semantics are unchanged; a lock that
-cannot reach Redis still fails its `acquire`.
+client gets no listener — it belongs to the caller. A lock that cannot reach Redis still fails its
+`acquire`; the health indicator exposes that outage in `data.lock.reachable`.
 
 **Multi-instance deduplication** works across replicas sharing one lock backend. `cron` and `every`
 fires each claim a never-released _slot_ lock keyed on the fire's intended time
@@ -7569,8 +7589,24 @@ interface ScheduledJob<T = unknown> {
 }
 ```
 
-The plugin registers a `'scheduler'` health indicator and an `onClose` hook that clears all armed
-timers and disconnects the Redis lock on shutdown.
+### Health status
+
+The plugin registers a `'scheduler'` health indicator with
+`data: { connected, lock: { reachable: true | false | 'unknown' } }`. Status stays lifecycle:
+connected → `up`, disconnected → `down`. Lock reachability is diagnostic because a shared lock
+outage stops scheduled fires while request serving can continue; alert on `data.lock.reachable`.
+
+The indicator probes only while connected, caches answers for 5 s and bounds each probe at 2 s using
+runtime clocks and timers. A missing `IDistributedLock.isHealthy`, an `undefined` answer, or a
+timed-out/rejecting custom probe reports `'unknown'`. Disconnected checks report `down` with
+`connected: false` and `lock.reachable: 'unknown'` without probing, even if an answer was cached.
+
+`MemoryLock.isHealthy()` answers `true`. `RedisLock.isHealthy()` answers `false` before connect and
+after disconnect, `undefined` for a client without optional `ping`, and otherwise `true` when PING
+resolves or `false` when it rejects. A built client's PING is bounded by its configured
+`commandTimeout`; injected clients keep their own configuration.
+
+An `onClose` hook clears all armed timers and disconnects the Redis lock on shutdown.
 
 ---
 
@@ -8216,6 +8252,10 @@ through `CAPABILITIES.MAIL`.
 
 ## Feature Flags (`@setu-ts/feature-flags-plugin`)
 
+A failed provider keeps `feature-flags` `up` with `data.healthy: false` and `data.detail` when
+available. `/ready` stays 200 while the last good snapshot serves. Alert on `data.healthy` instead
+of the overall health status.
+
 Provides feature flag capability.
 
 ### Registration
@@ -8491,6 +8531,15 @@ await repo.create({ id: 'ord-1' });
   (300). Exported for manual re-ordering.
 
 ## Health (`@setu-ts/health-plugin`)
+
+### What `degraded` means
+
+`/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
+return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live` remains 200.
+
+Use `degraded` when this replica should stop taking traffic. A shared problem that does not stop
+request serving belongs in the indicator's `data`: draining every replica would remove healthy
+serving capacity. Alert on those data fields.
 
 Provides health check endpoints with pluggable indicators.
 
@@ -11121,6 +11170,10 @@ app.router.post('/users', {
 
 ## Service Discovery (`@setu-ts/service-discovery-plugin`)
 
+Provider reachability probes are invoked as methods, retaining their receiver. Healthy Kubernetes
+and Consul providers therefore report reachable and allow `/ready` to return 200. Stale-cache
+`degraded` semantics remain unchanged.
+
 Turns a logical service name into a reachable address, balances across the instances behind it, and
 takes them out of rotation when callers report failures. Registers an `IServiceDiscovery` under
 `CAPABILITIES.SERVICE_DISCOVERY` (`'service-discovery'`). Zero npm dependencies — the HTTP providers
@@ -11619,6 +11672,10 @@ app.register({
 ---
 
 ## API Reference: @setu-ts/common
+
+`isConnectionFault(error: unknown): boolean` walks up to five cause objects, stops at cycles, and
+recognises the eight `CONNECTION_FAULT_CODES` plus measured ioredis 5 outage rejections. It never
+mutates errors. Command errors such as WRONGTYPE remain unclassified.
 
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
@@ -14646,7 +14703,9 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
   `maxBufferBytes`
 - An explicit `Accept-Encoding` entry overrides the wildcard, so `br;q=0, *` refuses brotli
 - Workers degradation: registers capability but mounts no route when `fs` is absent
-- Health indicator: reports `up`/`down`/`degraded` based on root directory accessibility
+- Health indicator: reports `up`/`down` based on root directory accessibility; on a runtime without
+  fs it reports `up` with `data: { fs: false, detail: 'no file system on this runtime' }` and
+  registers no static route
 
 ---
 

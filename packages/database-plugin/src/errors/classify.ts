@@ -20,7 +20,7 @@
  *
  * @module
  */
-import { DuplicateKeyError } from '@setu-ts/common';
+import { CONNECTION_FAULT_CODES, DuplicateKeyError } from '@setu-ts/common';
 import { DatabaseUnavailableError, SerializationConflictError } from '../errors.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
@@ -101,16 +101,7 @@ const PG_CANNOT_CONNECT_NOW = '57P03';
  * names never fire for the commonest outage shape. SQLSTATE strings are
  * digits, so no collision is possible with the class-40/class-08 arms.
  */
-const UNAVAILABLE_ERRNOS: ReadonlySet<string> = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'ETIMEDOUT',
-  'EHOSTUNREACH',
-  'ENETUNREACH',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'EPIPE',
-]);
+const UNAVAILABLE_ERRNOS = CONNECTION_FAULT_CODES;
 
 /**
  * The message anchor for node-postgres pool exhaustion, which carries **no
