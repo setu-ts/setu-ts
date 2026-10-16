@@ -796,4 +796,8 @@ Client modules cannot import a Deno workspace library: the browser bundle has no
 Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
 before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
 with a labelled-insecure development value.
+
+Everything in \`build/client\` is served by the platform before the Worker runs, so those requests
+skip the application's middleware: no security headers and no authentication apply to them. Put only
+public files in \`public/\`.
 `;

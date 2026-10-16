@@ -410,6 +410,14 @@ describe('runNewCommand', () => {
         'SESSION_SECRET=dev-only-insecure-session-secret-change-me',
       );
       expect(h.fs.read('/work/shop/.gitignore')).toContain('.dev.vars');
+      // M113d §10 D2: assets bypass the application's middleware, and both
+      // places a developer reads say so.
+      expect(h.fs.read('/work/shop/wrangler.toml')).toContain(
+        "the application's middleware never sees that request: no security headers, no",
+      );
+      expect(h.fs.read('/work/shop/README.md')).toContain(
+        "skip the application's middleware: no security headers and no authentication",
+      );
     });
 
     it('uses Workers bindings instead of a requested dotenv file', async () => {
