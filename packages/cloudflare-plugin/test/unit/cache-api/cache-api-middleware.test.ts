@@ -862,3 +862,85 @@ describe('cacheApiMiddleware — the write path', () => {
     expect(cache.puts).toHaveLength(1);
   });
 });
+
+describe('cacheApiMiddleware — the write path with a hostless registry (M113d §3.6)', () => {
+  /** A real BindingRegistry built the way CloudflarePlugin builds it. */
+  function realRegistry(host: ((promise: Promise<unknown>) => void) | undefined) {
+    // Imported here so the marker helpers stay module-internal to the package.
+    return (async () => {
+      const { BindingRegistry } = await import('../../../src/bindings/binding-registry.ts');
+      const { markHostlessRegistry, resolveWaitUntil } = await import(
+        '../../../src/background/wait-until.ts'
+      );
+      const registry = new BindingRegistry(
+        {},
+        {},
+        resolveWaitUntil(host, () => undefined),
+      );
+      if (host === undefined) markHostlessRegistry(registry);
+      return registry as unknown as ICloudflareBindings;
+    })();
+  }
+
+  it('awaits the put itself when the registry has no waitUntil host', async () => {
+    const registry = await realRegistry(undefined);
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.CLOUDFLARE, registry);
+
+    // The put settles only after a tick: if store() handed it to the (no-op)
+    // sink and returned, `settled` would still be false when the middleware
+    // resolved — the V9-23 empty-body mechanism.
+    let settled = false;
+    const cache: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        settled = true;
+      },
+      delete: () => Promise.resolve(false),
+    };
+    const ctx = contextFor('https://example.test/x', { services });
+
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(settled).toBe(true);
+  });
+
+  it('hands the put to the host when the registry was built with one', async () => {
+    const sink: Promise<unknown>[] = [];
+    const registry = await realRegistry((promise) => {
+      sink.push(promise);
+    });
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.CLOUDFLARE, registry);
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/x', { services });
+
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(sink).toHaveLength(1);
+    await Promise.all(sink);
+    expect(cache.puts).toHaveLength(1);
+  });
+
+  it('hands the put to replacement bindings that are not in the hostless set', async () => {
+    // The existing `bindingsWithWaitUntil` fake is a replacement provider's
+    // object: never marked, trusted to carry a sink.
+    const sink: Promise<unknown>[] = [];
+    const ctx = contextFor('https://example.test/x', { services: registryWithBindings(sink) });
+    const cache = new FakeCacheApi();
+
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(sink).toHaveLength(1);
+  });
+});

@@ -14,6 +14,7 @@
 import type { ILogger, IRequestContext, IResponse, MiddlewareFunction } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
+import { isHostlessRegistry } from '../background/wait-until.ts';
 import type { ICacheApi } from './cache-api.ts';
 import { resolveCacheApi } from './cache-api.ts';
 import { assessCacheability } from './cacheability.ts';
@@ -395,7 +396,20 @@ async function store(
   const put = cache.put(key, response);
 
   if (ctx.services.has(CAPABILITIES.CLOUDFLARE)) {
-    ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE).waitUntil(put);
+    const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
+    // A hostless registry's sink delegates to nothing (M113d §3.6): handing
+    // the write to it abandons the write when the isolate is released, so it
+    // is awaited exactly as the no-plugin branch below does. A replacement
+    // provider's bindings are not in the hostless set and are trusted.
+    if (isHostlessRegistry(bindings)) {
+      try {
+        await put;
+      } catch (error: unknown) {
+        reportWriteFailure(ctx, key, error);
+      }
+      return;
+    }
+    bindings.waitUntil(put);
     return;
   }
 
