@@ -47,7 +47,7 @@ describe('application gate configuration', () => {
     // Same step, immediately after the gate: an assertion elsewhere or a
     // failure-tolerant shell command would let lockfile drift pass again.
     expect(nodeJob).toMatch(
-      /- name: Example applications\n {8}run: \|\n {10}pnpm run check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
+      /- name: Example applications\n {8}if: matrix\.shard == 'static'\n {8}run: \|\n {10}pnpm run check:apps\n {10}git diff --exit-code -- apps\n {8}env:/,
     );
   });
 
@@ -972,6 +972,47 @@ describe('M111b workflow lanes', () => {
     expect(lane).toMatch(/denoland\/setup-deno@v2\n\s+with:\n\s+deno-version: 2\.9\.6/);
     expect(source).toContain('name: Format / Lint / Check / Test\n');
     expect(source).not.toContain('(Deno)');
+  });
+
+  // The suite is sharded for wall time, not trimmed: these pins are what keep a
+  // shard from silently dropping work, and the required check from passing over
+  // a failed shard.
+  it('shards the node job without dropping or duplicating a lane', async () => {
+    const source = await readFile('.github/workflows/ci.yml', 'utf8');
+    const node = jobOf(source, 'node')!;
+    expect(node).toContain('fail-fast: false');
+    expect(node).toContain('shard: [static, cli, messaging, packages, tooling]');
+    const runs = [...node.matchAll(/if: matrix\.shard == '(\w+)'\n {8}run: (.+)/g)].map((match) => [
+      match[1],
+      match[2],
+    ]);
+    expect(runs.filter(([, run]) => run!.startsWith('pnpm test:coverage'))).toEqual([
+      ['cli', 'pnpm test:coverage --no-tooling cli'],
+      ['messaging', 'pnpm test:coverage --no-tooling messaging-plugin'],
+      ['packages', 'pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin'],
+    ]);
+    expect(runs.filter(([, run]) => run === 'pnpm run test:tooling:coverage')).toEqual([
+      ['tooling', 'pnpm run test:tooling:coverage'],
+    ]);
+    // Every static gate is conditioned on the static shard, so none runs five times.
+    for (const command of ['fmt:check', 'run lint', 'run check\n', 'check:docs', '--check\n']) {
+      expect(node).toMatch(
+        new RegExp(`if: matrix\\.shard == 'static'\\n {8}run: [^\\n]*${command}`),
+      );
+    }
+
+    // The aggregator carries the ruleset's required name and fails on any shard.
+    const gate = source.slice(source.indexOf('\n  node-gate:'), source.indexOf('\n  deno-lane:'));
+    expect(gate).toContain('name: Format / Lint / Check / Test\n');
+    expect(gate).toContain('if: always() && (');
+    expect(gate).toContain('needs: node');
+    expect(gate).toContain('RESULT: ${{ needs.node.result }}');
+    expect(gate).toContain('test "$RESULT" = success');
+    expect(source.match(/name: Format \/ Lint \/ Check \/ Test\n/g)).toHaveLength(1);
+
+    // Only pull-request runs are superseded; integration pushes never cancel.
+    expect(source).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
+    expect(source).toContain("format('ci-run-{0}', github.run_id)");
   });
 
   it('installs Deno in exactly the jobs where Deno is the subject', async () => {
