@@ -8,7 +8,7 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { createCachedProbe, deadlineRangeError, withDeadline } from '@setu-ts/common';
+import { createCachedProbe, withDeadline } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError, describeLogText } from './describe-error.ts';
@@ -17,6 +17,7 @@ import { normalizeTransportHeaders, type TransportHeaderValue } from './header-n
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
+import { resolvePublishTimeoutMs } from './publish-timeout.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
 // amqplib's frame codec requires a Node Buffer for message content (it throws
@@ -53,27 +54,6 @@ export function validateClient(client: unknown): client is IAmqpConnection {
     }
   }
   return true;
-}
-
-/** Default bound on one publish, including its confirm, in ms. */
-export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
-
-/**
- * Resolves and validates `publishTimeoutMs`. Shared by
- * `MessagingPlugin(...)` (which refuses a bad value at construction) and the
- * broker constructor, so both read one rule.
- *
- * @param value - The configured bound, or `undefined` for the default
- * @returns The bound in milliseconds (`0` = unbounded)
- * @throws {RangeError} When the value is outside `0`–`2147483647` or not finite
- */
-export function resolvePublishTimeoutMs(value: number | undefined): number {
-  const resolved = value ?? DEFAULT_PUBLISH_TIMEOUT_MS;
-  const refusal = deadlineRangeError('messaging-plugin: publishTimeoutMs', resolved);
-  if (refusal !== null) {
-    throw refusal;
-  }
-  return resolved;
 }
 
 /** Resolved immutable consumer configuration shared by plugin and broker construction. */

@@ -6267,6 +6267,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   three doc claims the source contradicted (a scaffolded project's test told to run the repository
   script, and two type-assertion comments still naming `deno test`), all fixed; three negative
   controls re-run against the real gate each failed on the rule they plant — complete (PR #460)
+- **Milestone 113a** (`packages/messaging-plugin` — brokers that report healthy while down, and
+  publishes with no bound; V9-35, V9-36, V9-37, V9-3): Kafka and Pub/Sub reachability is a real
+  round trip cached 5 s and bounded 2 s — Kafka `describeCluster()` on a dedicated client with a 1.5
+  s request timeout (kafkajs's default 30 s made a stopped broker look hung), Pub/Sub `getTopics`
+  with `gaxOpts` (without them both pause and stop hung). Stopped reads `down`; paused reads
+  `'unknown'` per the existing rule, whose readiness meaning M113b owns. Kafka and Pub/Sub gain
+  `publishTimeoutMs` (default 15 s, shared resolver with RabbitMQ); lazy NATS reconnects forever
+  through a validated `reconnect` option, refused beside an injected client. **V9-3 was redesigned
+  after the first pass**: Codex found kafkajs `admin.setOffsets` runs a temporary consumer costing
+  ~5 s per new group (every reply inbox is one). A new group now captures its watermarks at
+  `subscribe()`, advertises them in group-join metadata through a round-robin wrapper, and on its
+  first join seeks uncommitted partitions to the members' minimum — measured on real Kafka: 0/4
+  delivered with no handling, 4/4 in 12/12 trials, `subscribe()` ~5–60 ms, and 6/6 for two members
+  starting together where own-offset seeks lost 3/6 (the Spring Kafka `onPartitionsAssigned`
+  pattern). Implemented by Codex in two passes; review fixed a producer left connected when the
+  probe admin failed and a failed group-admin connect memoized for the broker's life. The
+  join-metadata seek reads offsets other group members write; the committed-tree security audit ran
+  two fresh-context rounds. Round 2 failed on R2-F4 (Low): the docs claimed a member that can join
+  can already commit, false under split group/topic ACLs. The docs now state that case, that the
+  lowering is unlogged, and the group-ACL remedy; re-accepted and NOT re-audited, at the
+  maintainer's direction — complete (PR #462).
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

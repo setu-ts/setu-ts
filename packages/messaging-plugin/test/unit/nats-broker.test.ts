@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { NatsBroker, validateClient } from '../../src/brokers/nats-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -10,6 +10,54 @@ import {
   NatsConsumerNameCollisionError,
   RequestTimeoutError,
 } from '../../src/errors.ts';
+
+describe('M113a NATS reconnect policy', () => {
+  it.each([undefined, {}, { maxAttempts: 3, waitMs: 17 }, { maxAttempts: 0, waitMs: 2147483647 }])(
+    'forwards lazy connect policy %s',
+    async (reconnect) => {
+      const connection = new FakeNatsConnection();
+      const connect = vi.fn(() => Promise.resolve(connection));
+      vi.doMock('nats', () => ({ connect, headers: () => ({}) }));
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        ...(reconnect ? { reconnect } : {}),
+      });
+      try {
+        await broker.connect();
+        expect(connect).toHaveBeenCalledWith({
+          servers: 'nats://localhost:4222',
+          maxReconnectAttempts: reconnect?.maxAttempts ?? -1,
+          reconnectTimeWait: reconnect?.waitMs ?? 2000,
+        });
+      } finally {
+        await broker.disconnect();
+        vi.doUnmock('nats');
+      }
+    },
+  );
+  it.each([-2, 1.5, NaN, Infinity])('refuses maxAttempts %s at construction', (maxAttempts) => {
+    expect(
+      () =>
+        new NatsBroker(createFakeRuntime(), new JsonSerializer(), { reconnect: { maxAttempts } }),
+    ).toThrow('reconnect.maxAttempts');
+  });
+  it.each([0, -1, 0.5, NaN, Infinity, 2147483648])(
+    'refuses waitMs %s at construction',
+    (waitMs) => {
+      expect(
+        () => new NatsBroker(createFakeRuntime(), new JsonSerializer(), { reconnect: { waitMs } }),
+      ).toThrow('reconnect.waitMs');
+    },
+  );
+  it('refuses a reconnect option with an injected client', () => {
+    expect(
+      () =>
+        new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+          client: new FakeNatsConnection(),
+          reconnect: {},
+        }),
+    ).toThrow(TypeError);
+  });
+});
 
 /**
  * NatsBroker unit tests.

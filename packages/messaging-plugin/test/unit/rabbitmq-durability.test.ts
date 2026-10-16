@@ -1,3 +1,7 @@
+import {
+  DEFAULT_PUBLISH_TIMEOUT_MS,
+  resolvePublishTimeoutMs,
+} from '../../src/brokers/publish-timeout.ts';
 /**
  * RabbitMQ message durability: persistent publishes and publisher confirms.
  *
@@ -12,11 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, IPlugin } from '@setu-ts/common';
-import {
-  DEFAULT_PUBLISH_TIMEOUT_MS,
-  RabbitMqBroker,
-  resolvePublishTimeoutMs,
-} from '../../src/brokers/rabbitmq-broker.ts';
+import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../../src/interfaces/index.ts';

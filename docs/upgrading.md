@@ -10,6 +10,34 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Messaging `publishTimeoutMs`, `reconnect` and Kafka group starts (M113a)
+
+- Kafka and Pub/Sub now bound publishes at 15000 ms, including RPC and outbox publishes. Set
+  `publishTimeoutMs` higher for slow brokers or to `0` for the previous unbounded wait. A timeout
+  does not prove rejection: the message may still arrive, so retries need de-duplication.
+- An injected Kafka factory without `admin()` reports unknown reachability. Supply an admin-capable
+  factory for a probe; its timeouts remain your responsibility. Lazy clients build a separate
+  short-timeout health client. Pub/Sub transports may return `undefined` from `isHealthy()`; code
+  consuming that member directly must handle unknown. Existing boolean implementations still fit.
+- Lazy NATS connections reconnect forever by default. To retain the previous budget use
+  `reconnect: { maxAttempts: 10, waitMs: 2000 }`; exhausted connections stay down. Configure an
+  injected connection yourself: combining `client` and `reconnect` throws `TypeError`.
+- Fresh Kafka groups start at the high watermark captured during `subscribe()`. Remove sleeps or
+  repeated publishes that worked around losing the first message; a single post-subscribe publish is
+  delivered once the consumer joins, without replaying earlier history. Existing committed groups
+  are unchanged. The first join seeks assigned uncommitted partitions to the minimum start offsets
+  advertised by current members, so concurrent first starts also deliver messages published after
+  any member’s subscription resolves, without replaying history before the first subscription. Group
+  members are trusted for this: joining needs only Read on the group, so a principal without topic
+  Read can still make a new group replay unlogged; restrict who can join the consumer group (Kafka
+  group ACLs) where a replayed history matters. Without admin the step is skipped. Injected
+  factories try importing kafkajs once at connect; if unavailable, members seek their own offsets
+  and concurrent first starts can miss messages. A member crashing before the join takes its start
+  offsets with it. Admin/metadata failures warn once per subscription with topic/group and remain
+  non-fatal.
+
 ## 0.9.0
 
 ### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`
