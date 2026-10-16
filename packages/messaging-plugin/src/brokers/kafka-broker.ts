@@ -792,7 +792,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     const realConsumer = realFactory.consumer({
       groupId,
       ...(startModule
-        ? { partitionAssigners: [startAwareRoundRobin(startModule, () => start)] }
+        ? { partitionAssigners: [startAwareRoundRobin(startModule, topic, () => start)] }
         : {}),
       retry: {
         retries: KAFKAJS_CONSUMER_RETRIES,
@@ -946,6 +946,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
           const { groups } = await admin.describeGroups([groupId]);
           minimum = minimumStartOffsets(
             start,
+            topic,
             groups.flatMap((group) => group.members),
             startModule,
             warn,

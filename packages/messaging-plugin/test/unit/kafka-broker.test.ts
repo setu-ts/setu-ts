@@ -79,7 +79,7 @@ describe('M113a Kafka bounds and start position', () => {
           memberMetadata: AssignerProtocol.MemberMetadata.encode({
             version: 0,
             topics: ['orders'],
-            userData: Buffer.from('{"0":"9007199254740992","1":"0","2":"0"}'),
+            userData: Buffer.from('{"orders":{"0":"9007199254740992","1":"0","2":"0"}}'),
           }),
         },
       ];
@@ -291,7 +291,7 @@ describe('M113a Kafka bounds and start position', () => {
       });
       expect(
         JSON.parse(AssignerProtocol.MemberMetadata.decode(protocol.metadata)!.userData.toString()),
-      ).toEqual(committed ? {} : { 0: '19', 1: '23' });
+      ).toEqual(committed ? {} : { 'test.topic': { 0: '19', 1: '23' } });
       await consumer.join({ 'test.topic': [0, 1] });
       const seeks = consumer.calls.filter((call) => call.method === 'seek');
       if (committed) {

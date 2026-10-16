@@ -29,11 +29,12 @@ cutting a release renames that heading to the version and is a rename, not a rec
   delivered once the consumer joins, without replaying earlier history. Existing committed groups
   are unchanged. The first join seeks assigned uncommitted partitions to the minimum start offsets
   advertised by current members, so concurrent first starts also deliver messages published after
-  any member’s subscription resolves, without replaying history before the first subscription.
-  Without admin the step is skipped. Injected factories try importing kafkajs once at connect; if
-  unavailable, members seek their own offsets and concurrent first starts can miss messages. A
-  member crashing before the join takes its start offsets with it. Admin/metadata failures warn once
-  per subscription with topic/group and remain non-fatal.
+  any member’s subscription resolves, without replaying history before the first subscription. Group
+  members are trusted for this: restrict who can join the consumer group (Kafka group ACLs) where a
+  replayed history matters. Without admin the step is skipped. Injected factories try importing
+  kafkajs once at connect; if unavailable, members seek their own offsets and concurrent first
+  starts can miss messages. A member crashing before the join takes its start offsets with it.
+  Admin/metadata failures warn once per subscription with topic/group and remain non-fatal.
 
 ## 0.9.0
 

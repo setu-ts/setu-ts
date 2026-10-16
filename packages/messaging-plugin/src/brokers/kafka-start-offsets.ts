@@ -21,9 +21,34 @@ export interface IKafkaStartModule {
   };
 }
 
-/** Delegates assignment unchanged, advertising only this member's start offsets. */
+/**
+ * Largest member metadata the first-join read decodes (security audit F3). The
+ * whole advertisement for one topic is a few dozen bytes per partition, so
+ * 64 KiB covers several thousand partitions while bounding the synchronous
+ * decode and `JSON.parse` a group member can impose on every other member.
+ */
+export const MAX_MEMBER_METADATA_BYTES: number = 64 * 1024;
+
+/** A Kafka offset is a signed 64-bit integer: at most 19 decimal digits. */
+const OFFSET = /^\d{1,19}$/;
+/** A partition id is a signed 32-bit integer: at most 10 decimal digits. */
+const PARTITION = /^\d{1,10}$/;
+
+/**
+ * Delegates assignment unchanged, advertising only this member's start offsets.
+ *
+ * The advertisement is keyed by `topic` (security audit F2): one consumer
+ * serves one topic, and a group misconfigured across topics must not apply one
+ * topic's offsets to another topic's partitions.
+ *
+ * @param module - The kafkajs assigner and metadata codec
+ * @param topic - The topic this consumer subscribes
+ * @param getStart - Reads this member's captured start offsets at join time
+ * @returns A partition assigner with round robin's name, version and assignment
+ */
 export function startAwareRoundRobin(
   module: IKafkaStartModule,
+  topic: string,
   getStart: () => KafkaStartOffsets | null,
 ): PartitionAssigner {
   return (config) => {
@@ -32,21 +57,41 @@ export function startAwareRoundRobin(
       name: base.name,
       version: base.version,
       assign: (group) => base.assign(group),
-      protocol: ({ topics }) => ({
-        name: base.name,
-        metadata: module.AssignerProtocol.MemberMetadata.encode({
-          version: base.version,
-          topics,
-          userData: JSON.stringify(getStart() ?? {}),
-        }),
-      }),
+      protocol: ({ topics }) => {
+        const start = getStart();
+        return {
+          name: base.name,
+          metadata: module.AssignerProtocol.MemberMetadata.encode({
+            version: base.version,
+            topics,
+            userData: JSON.stringify(start === null ? {} : { [topic]: start }),
+          }),
+        };
+      },
     };
   };
 }
 
-/** Decodes each member independently; malformed metadata cannot discard other members. */
+/**
+ * Lowers this member's start offsets to the minimum the group's members
+ * advertise for `topic`, decoding each member independently so malformed
+ * metadata cannot discard the others.
+ *
+ * Group members are TRUSTED here: a client able to join the group can move a
+ * new group's start earlier (never later), which replays history. That client
+ * can already commit the group's offsets, so this grants nothing new; the
+ * README states the trust.
+ *
+ * @param own - This member's snapshot for `topic`
+ * @param topic - The topic whose advertisements are read
+ * @param members - The group's current members, from `describeGroups`
+ * @param module - The kafkajs metadata codec
+ * @param warn - Receives each skipped member's reason
+ * @returns The per-partition minimum; partitions absent from `own` are ignored
+ */
 export function minimumStartOffsets(
   own: KafkaStartOffsets,
+  topic: string,
   members: ReadonlyArray<{ memberMetadata: Uint8Array }>,
   module: IKafkaStartModule,
   warn: (error: unknown) => void,
@@ -54,17 +99,27 @@ export function minimumStartOffsets(
   const minimum = { ...own };
   for (const member of members) {
     try {
+      if (member.memberMetadata.length > MAX_MEMBER_METADATA_BYTES) {
+        throw new Error(
+          `Kafka group member metadata exceeds ${MAX_MEMBER_METADATA_BYTES} bytes; skipped`,
+        );
+      }
       const data = module.AssignerProtocol.MemberMetadata.decode(member.memberMetadata)?.userData;
       if (!data || data.length === 0) continue;
       const parsed: unknown = JSON.parse(new TextDecoder().decode(data));
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('Invalid Kafka start offsets');
       }
-      const entries = Object.entries(parsed);
+      if (!Object.hasOwn(parsed, topic)) continue;
+      const forTopic: unknown = (parsed as Record<string, unknown>)[topic];
+      if (forTopic === null || typeof forTopic !== 'object' || Array.isArray(forTopic)) {
+        throw new Error('Invalid Kafka start offsets');
+      }
+      const entries = Object.entries(forTopic);
       if (
         entries.some(
           ([partition, offset]) =>
-            !/^\d+$/.test(partition) || typeof offset !== 'string' || !/^\d+$/.test(offset),
+            !PARTITION.test(partition) || typeof offset !== 'string' || !OFFSET.test(offset),
         )
       ) {
         throw new Error('Invalid Kafka start offset');

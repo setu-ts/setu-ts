@@ -476,6 +476,13 @@ when several members first start together; nothing published before the first me
 is replayed. `subscribe()` returns without waiting for the join. A group with any committed offset
 captures nothing; committed partitions and subsequent joins are left untouched.
 
+**Group members are trusted.** The minimum is taken over what every current member advertises, so
+any client able to join the group can move a new group's start earlier, which replays history to it;
+it can never move the start later. That client can already commit the group's offsets, so this
+grants nothing new, but restrict group membership (Kafka ACLs on the group) where replay matters.
+Advertisements are keyed by topic, member metadata above 64 KiB is skipped, and an offset longer
+than 19 digits is refused, each with one warning.
+
 This requires an admin-capable factory and a loadable `kafkajs` module. With an injected factory,
 the module is tried once at `connect()` for the round-robin wrapper and metadata codec. If absent,
 each member seeks to its own watermark, so concurrent first starts can miss messages. Without

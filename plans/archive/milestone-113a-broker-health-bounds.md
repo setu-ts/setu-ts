@@ -356,6 +356,62 @@ count proves the guarded suites ran.
 - Running the Pub/Sub emulator in CI — the emulator suites stay local
   (`docs/messaging-emulators.md`).
 
+## 10. Design security review (recorded after implementation, at the maintainer's direction)
+
+The committed-tree security audit of `582573a3` failed because this plan had no design review while
+the diff crosses a trust boundary (F1 below). This section is recorded after implementation — the
+M101a §11 / M101b §10 precedent — and is not presented as having guided the design.
+
+**Flows reviewed.** (a) Kafka consumer-group join metadata: each member's `userData`, written by
+whatever client joined the group, decoded by every other member through `describeGroups` and used to
+choose the offset a new group's member seeks to. (b) The Kafka and Pub/Sub reachability probes: a
+dedicated short-timeout admin round trip and a `getTopics` call whose errors are classified into
+`true` / `false` / `undefined`. (c) `publishTimeoutMs` and NATS `reconnect`, commonly fed from
+environment variables. (d) Error messages and warnings quoting topic, group and transport errors.
+(e) The optional `import('kafkajs')` for an injected client and the module-shape check.
+
+**Assets.** Delivery semantics of a new consumer group (no replay of history, no skipped messages);
+availability — a probe or publish against a hung broker settles, a failed `start()` exits, the event
+loop is not blocked; and the integrity of log records and error messages.
+
+**Attackers.** A Kafka client able to join the consumer group (an authorised peer service, a
+misconfigured deployment sharing a group id, or a holder of the group's credentials). A hostile or
+buggy broker or SDK answer. An operator value that is not a finite number. A reader of logs.
+
+**Approved budgets.** One `describeGroups` and one extra `fetchOffsets` per consumer, only on the
+first join of a group with no committed offsets. One admin connection per broker for probes, one
+probe round trip per 5 s at most (cached).
+
+**Obligations.**
+
+1. A foreign member can move a new group's start offset EARLIER only, never later, so it can cause
+   replay but never a skipped message; this is accepted because the same principal can already
+   commit the group's offsets, and the docs state that group members are trusted.
+2. One topic's advertised offsets never reach another topic's partitions: `userData` is keyed by
+   topic and only the consumer's own topic is read.
+3. Remote `userData` cannot impose unbounded synchronous work: member metadata above
+   `MAX_MEMBER_METADATA_BYTES` (64 KiB) is skipped before decode, offsets are refused above 19
+   digits and partition ids above 10 before `BigInt`, and keys are own-property reads (no prototype
+   pollution).
+4. Malformed metadata from one member is skipped with a warning and never discards the others.
+5. Probe and publish bounds settle every call (`withDeadline`), the probe is cached and bounded
+   inside the broker (direct callers such as the realtime backplane included), and every bound
+   refuses a non-finite or out-of-range value at construction without echoing it.
+6. Every quoted string goes through `JSON.stringify` / `describeError`, so CR, LF and the Unicode
+   line separators cannot forge a log record.
+7. Every failure path releases what it connected (the producer when the probe admin fails; a failed
+   group-admin connect is forgotten rather than memoized).
+
+**Findings.**
+
+| #   | Finding                                                                                                                                                | Disposition                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | Audit: no design security review                                                                                                                       | Fixed: this section                                                                                                                                                                                                                                                                                                                                                       |
+| F2  | Audit: a foreign member advertising `0` makes a new group replay history silently; docs claimed no replay unconditionally; `userData` carried no topic | Fixed: obligations 1–2 — topic-keyed `userData`; trust stated in README, PUBLIC_API, CHANGELOG and the upgrade guide. **Declined:** a warning when an advertised offset is below this member's own, because the legitimate concurrent-start path (§3.3) lowers the later member's offsets on every concurrent first start, so the warning would fire on correct behaviour |
+| F3  | Audit: remote `userData` parsed with no size bound (12.9 MB blob 231 ms; 10M-digit `BigInt` 1.2 s)                                                     | Fixed: obligation 3                                                                                                                                                                                                                                                                                                                                                       |
+| V1  | Verification: first publish to an auto-created topic after a broker restart exceeded a 2 s `publishTimeoutMs`                                          | Documented in the README; default unaffected                                                                                                                                                                                                                                                                                                                              |
+| O1  | Audit observation: with sends in flight during a pause, `app.stop()` takes ~26 s and the process does not exit — identical on `develop`                | Pre-existing; out of scope, flagged for a `fix/…` branch                                                                                                                                                                                                                                                                                                                  |
+
 ## 11. Implementation notes
 
 - The implementation request overrides §5/§7 closeout steps: leave ROADMAP.md and CLAUDE.md status

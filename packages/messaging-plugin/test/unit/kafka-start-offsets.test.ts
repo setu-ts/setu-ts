@@ -3,6 +3,7 @@ import { AssignerProtocol, PartitionAssigners } from 'kafkajs';
 import type { PartitionAssigner } from 'kafkajs';
 import {
   minimumStartOffsets,
+  MAX_MEMBER_METADATA_BYTES,
   isKafkaStartModule,
   optionalKafkaStartModule,
   startAwareRoundRobin,
@@ -24,7 +25,7 @@ describe('Kafka start-offset internal seams against real kafkajs', () => {
       cluster: { findTopicPartitionMetadata: () => [{ partitionId: 0 }, { partitionId: 1 }] },
     } as unknown as Parameters<PartitionAssigner>[0];
     let start: Record<string, string> | null = null;
-    const wrapper = startAwareRoundRobin(module, () => start)(config);
+    const wrapper = startAwareRoundRobin(module, 'orders', () => start)(config);
     const base = PartitionAssigners.roundRobin(config);
     expect([wrapper.name, wrapper.version]).toEqual([base.name, base.version]);
     for (const offsets of [null, { 0: '9007199254740995', 1: '23' }]) {
@@ -34,7 +35,9 @@ describe('Kafka start-offset internal seams against real kafkajs', () => {
       const decoded = AssignerProtocol.MemberMetadata.decode(protocol.metadata)!;
       expect(decoded.version).toBe(base.version);
       expect(decoded.topics).toEqual(['orders']);
-      expect(JSON.parse(decoded.userData.toString())).toEqual(start ?? {});
+      expect(JSON.parse(decoded.userData.toString())).toEqual(
+        start === null ? {} : { orders: start },
+      );
       const group = {
         members: [
           { memberId: 'a', memberMetadata: protocol.metadata },
@@ -51,17 +54,18 @@ describe('Kafka start-offset internal seams against real kafkajs', () => {
     const own = { 0: '9007199254740993', 1: '23' };
     const result = minimumStartOffsets(
       own,
+      'orders',
       [
-        member('{"0":"9007199254740992","1":"24","2":"0"}'),
-        member('{"0":"9007199254740994","1":"21"}'),
+        member('{"orders":{"0":"9007199254740992","1":"24","2":"0"}}'),
+        member('{"orders":{"0":"9007199254740994","1":"21"}}'),
         member(''),
         member('{}'),
         member('null'),
         member('[]'),
         member('bad'),
-        member('{"0":3}'),
-        member('{"0":"-1"}'),
-        member('{"x":"0"}'),
+        member('{"orders":{"0":3}}'),
+        member('{"orders":{"0":"-1"}}'),
+        member('{"orders":{"x":"0"}}'),
         { memberMetadata: Buffer.from([0]) },
       ],
       module,
@@ -77,10 +81,50 @@ describe('Kafka start-offset internal seams against real kafkajs', () => {
       },
     };
     expect(
-      minimumStartOffsets(own, [member('{}')], nullCodec, () => {
+      minimumStartOffsets(own, 'orders', [member('{}')], nullCodec, () => {
         throw new Error('unexpected warning');
       }),
     ).toEqual(own);
+  });
+
+  it('ignores other topics and refuses an over-long offset or oversized metadata (audit F2, F3)', () => {
+    const own = { 0: '50', 1: '50' };
+    const warnings: unknown[] = [];
+    const result = minimumStartOffsets(
+      own,
+      'orders',
+      [
+        // Another topic's offsets never reach this topic's partitions.
+        member('{"billing":{"0":"0","1":"0"}}'),
+        // A 20-digit offset exceeds a signed 64-bit integer and is refused before BigInt.
+        member('{"orders":{"0":"00000000000000000001"}}'),
+        // A partition id longer than a 32-bit integer is refused.
+        member('{"orders":{"12345678901":"0"}}'),
+        // Metadata above the cap is skipped before it is decoded or parsed.
+        member(`{"orders":{"1":"0"},"pad":"${'x'.repeat(MAX_MEMBER_METADATA_BYTES)}"}`),
+        member('{"orders":{"1":"7"}}'),
+      ],
+      module,
+      (error) => warnings.push(error),
+    );
+    expect(result).toEqual({ 0: '50', 1: '7' });
+    expect(warnings).toHaveLength(3);
+    expect(String(warnings[2])).toContain(`${MAX_MEMBER_METADATA_BYTES} bytes`);
+  });
+
+  it('accepts a 19-digit offset and a member whose metadata is exactly at the cap', () => {
+    const big = '9223372036854775806';
+    expect(
+      minimumStartOffsets(
+        { 0: '9223372036854775807' },
+        'orders',
+        [member(`{"orders":{"0":"${big}"}}`)],
+        module,
+        () => {
+          throw new Error('unexpected warning');
+        },
+      ),
+    ).toEqual({ 0: big });
   });
 
   it('loads the optional module once per attempt or returns the injected-client fallback', async () => {
