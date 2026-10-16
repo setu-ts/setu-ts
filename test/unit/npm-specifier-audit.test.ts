@@ -338,20 +338,34 @@ describe('scanImportEdges — import positions and modes', () => {
 
 // ── M113d §3.2 — the guarded-import rule ─────────────────────────────────────
 
-describe('findUnguardedImports — a same-function try block guards', () => {
-  it('accepts the §3.1 shape: the import inside the try of its own function', () => {
-    const source = [
-      'async function loadIoredis() {',
-      '  let mod;',
-      '  try {',
-      "    mod = await import('ioredis');",
-      '  } catch (error) {',
-      "    throw new Error('unavailable', { cause: error });",
-      '  }',
-      '  return mod;',
-      '}',
-    ].join('\n');
-    expect(findUnguardedImports(source)).toEqual([]);
+/** A function whose `try` block holds `body`, with a catch that wraps the error. */
+function inTry(body: string): string {
+  return [
+    'async function load(flag?: boolean) {',
+    '  try {',
+    `    ${body}`,
+    '  } catch (error) {',
+    "    throw new Error('unavailable', { cause: error });",
+    '  }',
+    '}',
+  ].join('\n');
+}
+
+// Every case below mirrors an esbuild 0.28.2 bundle of the same body with the
+// package absent: the accepted shapes bundled, the refused ones failed with
+// "Could not resolve" (measured 2026-10-17, M113d §3.2).
+describe('findUnguardedImports — an AWAITED import in a same-function try guards', () => {
+  it.each([
+    ['an assignment', "let mod; mod = await import('ioredis'); return mod;"],
+    ['a return', "return await import('@aws-sdk/client-dynamodb');"],
+    ['a cast over the awaited import', "return (await import('mongodb')) as unknown as { a: 1 };"],
+    ['an assertion inside the await', "return await (import('mongodb') as Promise<unknown>);"],
+    ['a call argument', "return String(await import('ioredis'));"],
+    ['an object property', "return { mod: await import('ioredis') };"],
+    ['an array element', "return [await import('ioredis')];"],
+    ['a conditional branch', "return flag ? await import('ioredis') : null;"],
+  ])('accepts the import awaited in %s', (_name, body) => {
+    expect(findUnguardedImports(inTry(body))).toEqual([]);
   });
 
   it('accepts an async arrow whose body is the try', () => {
@@ -360,34 +374,9 @@ describe('findUnguardedImports — a same-function try block guards', () => {
       '  try {',
       "    return await import('@aws-sdk/client-dynamodb');",
       '  } catch (error) {',
-      '    throw error;',
+      "    throw new Error('unavailable', { cause: error });",
       '  }',
       '};',
-    ].join('\n');
-    expect(findUnguardedImports(source)).toEqual([]);
-  });
-  it('accepts a .catch() chain on the import inside a same-function try', () => {
-    const source = [
-      'async function load() {',
-      '  try {',
-      "    return await import('ioredis').catch((error: unknown) => { throw error; });",
-      '  } catch (error) {',
-      "    throw new Error('unavailable', { cause: error });",
-      '  }',
-      '}',
-    ].join('\n');
-    expect(findUnguardedImports(source)).toEqual([]);
-  });
-
-  it('accepts a two-argument .then() chain on the import inside a same-function try', () => {
-    const source = [
-      'async function load() {',
-      '  try {',
-      "    return await import('ioredis').then((m) => m, (error: unknown) => { throw error; });",
-      '  } catch (error) {',
-      "    throw new Error('unavailable', { cause: error });",
-      '  }',
-      '}',
     ].join('\n');
     expect(findUnguardedImports(source)).toEqual([]);
   });
@@ -400,6 +389,25 @@ describe('findUnguardedImports — shapes the rule refuses', () => {
     expect(hits).toHaveLength(1);
     expect(hits[0].line).toBe(1);
     expect(hits[0].snippet).toContain("import('mongodb')");
+  });
+
+  it.each([
+    ['as a variable initializer', "const p = import('ioredis'); return await p;", 1],
+    ['as a bare return', "return import('ioredis');", 1],
+    [
+      'inside Promise.all([...])',
+      "return await Promise.all([import('@aws-sdk/client-s3'), import('@aws-sdk/s3-request-presigner')]);",
+      2,
+    ],
+    ['inside an awaited array literal', "return await [import('ioredis')];", 1],
+    ['as an object property', "const o = { m: import('ioredis') }; return await o.m;", 1],
+  ])('refuses an UNAWAITED import %s inside a same-function try', (_name, body, count) => {
+    expect(findUnguardedImports(inTry(body))).toHaveLength(count);
+  });
+
+  it('refuses an awaited .catch() chain (esbuild tolerates it; the rule keeps one shape)', () => {
+    const body = "return await import('ioredis').catch((e: unknown) => { throw e; });";
+    expect(findUnguardedImports(inTry(body))).toHaveLength(1);
   });
 
   it('refuses an import inside the try of an ENCLOSING function', () => {
@@ -444,54 +452,8 @@ describe('findUnguardedImports — shapes the rule refuses', () => {
     expect(findUnguardedImports(source)).toHaveLength(1);
   });
 
-  it('refuses the .catch() chain form', () => {
-    const source = "const load = () => import('ioredis').catch(() => null);";
-    expect(findUnguardedImports(source)).toHaveLength(1);
-  });
-
   it('refuses a top-level import outside any function', () => {
     const source = "const mod = await import('mongodb');";
-    expect(findUnguardedImports(source)).toHaveLength(1);
-  });
-  it('refuses an import nested in a Promise.all([...]) argument inside a same-function try', () => {
-    const source = [
-      'async function load() {',
-      '  try {',
-      '    return await Promise.all([',
-      "      import('@aws-sdk/client-s3'),",
-      "      import('@aws-sdk/s3-request-presigner'),",
-      '    ]);',
-      '  } catch (error) {',
-      "    throw new Error('unavailable', { cause: error });",
-      '  }',
-      '}',
-    ].join('\n');
-    expect(findUnguardedImports(source)).toHaveLength(2);
-  });
-
-  it('refuses an import in a bare [...] array literal inside a same-function try', () => {
-    const source = [
-      'async function load() {',
-      '  try {',
-      "    return await [import('ioredis')];",
-      '  } catch (error) {',
-      "    throw new Error('unavailable', { cause: error });",
-      '  }',
-      '}',
-    ].join('\n');
-    expect(findUnguardedImports(source)).toHaveLength(1);
-  });
-
-  it('refuses an import as an object property inside a same-function try', () => {
-    const source = [
-      'async function load() {',
-      '  try {',
-      "    return { mod: await import('ioredis') };",
-      '  } catch (error) {',
-      "    throw new Error('unavailable', { cause: error });",
-      '  }',
-      '}',
-    ].join('\n');
     expect(findUnguardedImports(source)).toHaveLength(1);
   });
 });

@@ -229,40 +229,54 @@ function isBarePackageSpecifier(specifier: string): boolean {
 }
 
 /**
- * True when the `import()` call at `node` is a DIRECT expression in the `try`
- * block of a `try`/`catch` in the SAME function — the shape esbuild leaves as
- * a runtime import (M113d §3.1, probed against esbuild 0.28.2). The walk stops
- * at the first function-like node, so a `try` of an ENCLOSING function does not
- * guard.
+ * True when the `import()` call at `node` is AWAITED inside the `try` block of a
+ * `try`/`catch` in the SAME function — the one shape the rule admits (M113d
+ * §3.1) and a shape esbuild leaves as a runtime import.
  *
- * “Direct” is the load-bearing word: esbuild tolerates the import as a
- * statement, a variable initializer, a `return`, or a `.catch()` / two-argument
- * `.then()` chain (where the import is the CALLEE, not an argument). It REFUSES
- * the import nested in a `Promise.all([…])` argument, a bare `[…]` array
- * literal, or an object property — there it resolves the sub-expression at build
- * time and errors on the unresolvable specifier. So the walk also refuses the
- * import when the path to the `tryBlock` passes through an array literal (as an
- * element), a call’s arguments (as an argument), or an object property.
+ * Both halves were measured against esbuild 0.28.2, which is what Wrangler
+ * bundles a Worker with:
+ *
+ * - **The `await` is load-bearing.** An awaited import is tolerated wherever the
+ *   `await` sits in the surrounding expression — a statement, an assignment, a
+ *   `return`, a call argument, an array element, an object property. An
+ *   UNAWAITED import is refused everywhere, including as a variable initializer
+ *   (`const p = import('x')`), a bare `return import('x')`, and an element of
+ *   `Promise.all([import('x')])`: esbuild resolves it at build time and fails on
+ *   the absent package. Parentheses and TypeScript assertions between the call
+ *   and the `await` are skipped, since `tsc` erases the assertions before a
+ *   bundler ever sees the code.
+ * - **The `try` must be in the same function.** The walk stops at the first
+ *   function-like node, so a `try` of an ENCLOSING function does not guard; nor
+ *   does a `catch` or `finally` block.
+ *
+ * esbuild also tolerates an awaited `.catch()` chain; the rule refuses it
+ * anyway, so a reader and this gate recognise one shape.
  */
 function isGuardedBySameFunctionTry(node: ts.Node): boolean {
-  let current: ts.Node = node;
+  let operand: ts.Node = node;
+  while (operand.parent !== undefined && isTransparentWrapper(operand.parent)) {
+    operand = operand.parent;
+  }
+  if (operand.parent === undefined || !ts.isAwaitExpression(operand.parent)) return false;
+  let current: ts.Node = operand.parent;
   while (current.parent !== undefined) {
     const parent: ts.Node = current.parent;
     if (isFunctionLikeNode(parent)) return false;
     if (ts.isTryStatement(parent) && parent.tryBlock === current) return true;
-    if (
-      ts.isArrayLiteralExpression(parent) &&
-      parent.elements.some((element) => element === current)
-    ) {
-      return false;
-    }
-    if (ts.isCallExpression(parent) && parent.arguments.some((argument) => argument === current)) {
-      return false;
-    }
-    if (ts.isPropertyAssignment(parent) && parent.initializer === current) return false;
     current = parent;
   }
   return false;
+}
+
+/** Syntax that changes neither what is awaited nor what a bundler sees. */
+function isTransparentWrapper(node: ts.Node): boolean {
+  return (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node)
+  );
 }
 
 /** The function-like syntax kinds a guard walk may not cross. */
