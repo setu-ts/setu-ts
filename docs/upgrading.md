@@ -42,7 +42,7 @@ rename it to `waitUntil` when you add the registration.
 Without `waitUntil`, `CloudflarePlugin` now logs one warning at startup on Workers, and
 `cacheApiMiddleware` awaits its cache write before answering instead of losing it.
 
-### Full-stack Workers projects: pass the server build as a module
+### Full-stack Workers projects: pass `serverBuild` as a module
 
 A `full-stack` Workers project scaffolded by 0.9.0 builds but cannot start: its `setu.config.ts`
 locates the server build with `new URL('./build/server/index.js', import.meta.url)`, which a bundled
