@@ -809,7 +809,7 @@ describe('cacheApiMiddleware — the write path', () => {
     expect(logger.messages()).toEqual([
       'cloudflare-cache-api: edge cache write failed, response served uncached',
     ]);
-    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'Response body too large' });
+    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'Error' });
   });
 
   it('logs the request path, never the key with its query string or tenant (M113d D1)', async () => {
@@ -832,11 +832,11 @@ describe('cacheApiMiddleware — the write path', () => {
     });
 
     const meta = logger.records.at(0)?.meta;
-    expect(meta).toEqual({ path: '/orders', error: 'quota' });
+    expect(meta).toEqual({ path: '/orders', error: 'Error' });
     expect(JSON.stringify(logger.records)).not.toContain('canary');
   });
 
-  it('reports a non-Error rejection as a string', async () => {
+  it('reports a non-Error rejection by its type', async () => {
     const failing: ICacheApi = {
       match: () => Promise.resolve(undefined),
       put: () => Promise.reject('a bare string'),
@@ -852,7 +852,7 @@ describe('cacheApiMiddleware — the write path', () => {
       return Promise.resolve();
     });
 
-    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'a bare string' });
+    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'string' });
   });
 
   it('stays silent, and still succeeds, when no logger is registered', async () => {
@@ -951,6 +951,55 @@ describe('cacheApiMiddleware — the write path with a hostless registry (M113d 
     await Promise.all(sink);
     expect(cache.puts).toHaveLength(1);
   });
+
+  it.each([
+    ['no bindings capability', 'none'],
+    ['a hostless registry', 'hostless'],
+    ['a registry with a waitUntil host', 'host'],
+  ] as const)(
+    'never logs a rejection message that quotes the key, with %s (M113d §10 F1)',
+    async (_label, shape) => {
+      // A custom cache whose rejection names the key it was given carries the
+      // query string and tenant back; only the error class may reach a log.
+      const failing: ICacheApi = {
+        match: () => Promise.resolve(undefined),
+        put: (key) => Promise.reject(new Error(`cannot store ${String(key)}`)),
+        delete: () => Promise.resolve(false),
+      };
+      const logger = new RecordingLogger();
+      const services = new MockServiceRegistry();
+      services.register(CAPABILITIES.LOGGER, logger);
+      const sink: Promise<unknown>[] = [];
+      if (shape !== 'none') {
+        const { BindingRegistry } = await import('../../../src/bindings/binding-registry.ts');
+        const { markHostlessRegistry, resolveWaitUntil } =
+          await import('../../../src/background/wait-until.ts');
+        const host =
+          shape === 'host' ? (p: Promise<unknown>): void => void sink.push(p) : undefined;
+        const registry = new BindingRegistry(
+          {},
+          {},
+          resolveWaitUntil(host, () => logger),
+        );
+        if (host === undefined) markHostlessRegistry(registry);
+        services.register(CAPABILITIES.CLOUDFLARE, registry as unknown as ICloudflareBindings);
+      }
+      const ctx = contextFor('https://example.test/orders?token=canary-secret', {
+        services,
+        tenant: 'tenant-canary',
+      });
+
+      await cacheApiMiddleware({ cache: failing })(ctx, () => {
+        ctx.response.json({ ok: true });
+        return Promise.resolve();
+      });
+      await Promise.all(sink);
+
+      expect(logger.records).toHaveLength(1);
+      expect(logger.records.at(0)?.meta).toEqual({ path: '/orders', error: 'Error' });
+      expect(JSON.stringify(logger.records)).not.toContain('canary');
+    },
+  );
 
   it('hands the put to replacement bindings that are not in the hostless set', async () => {
     // The existing `bindingsWithWaitUntil` fake is a replacement provider's

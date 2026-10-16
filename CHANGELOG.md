@@ -16,10 +16,11 @@ All notable changes to this project are documented here. The format follows
   missing optional dependency now rejects with that named error (the original rejection as `cause`)
   instead of the runtime's raw error. `cacheApiMiddleware` stores the body it serves with or without
   a `waitUntil` host, a failed write is logged with the request `path` instead of the cache `key`
-  (which carried the query string and the tenant id), and `CloudflarePlugin` warns once on Workers
-  when no host was passed. A newly scaffolded Workers project's entry passes the platform's
-  `waitUntil` to `createApp` as its second parameter (named `_waitUntil` until something reads it);
-  a full-stack Workers project passes its compiled server build from the entry (the new
+  (which carried the query string and the tenant id) and by error class rather than message, since a
+  custom cache's rejection may quote its key, and `CloudflarePlugin` warns once on Workers when no
+  host was passed. A newly scaffolded Workers project's entry passes the platform's `waitUntil` to
+  `createApp` as its second parameter (named `_waitUntil` until something reads it); a full-stack
+  Workers project passes its compiled server build from the entry (the new
   `ReactRouterPluginOptions.serverBuild` option), renders `.dev.vars`, and its `wrangler.toml`
   carries `[assets]` and `[build]` stanzas. `setu add cloudflare` prints the `waitUntil` form and
   tells you to rename the factory's `_waitUntil` parameter; `docs/upgrading.md` carries the edits

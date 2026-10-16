@@ -378,10 +378,12 @@ function buildStoredResponse(
  * produced by the time this runs, and a cache is an accelerator: letting
  * `put`'s rejection propagate would turn a perfectly good 200 into the kernel's
  * 500. `Cache.put` rejects for real and reachable reasons — an oversized
- * response, or a quota error — so this is a live path, not a defensive one. Both
- * branches below report rather than throw, which also keeps them behaviourally
- * identical: with the plugin registered `waitUntil` already attaches that
- * reporting (background/wait-until.ts), and without it this does.
+ * response, or a quota error — so this is a live path, not a defensive one.
+ *
+ * Every branch reports through {@linkcode reportWriteFailure} before the write
+ * is awaited or handed on, so a cache rejection never reaches the generic
+ * `waitUntil` reporter, which logs its message (M113d §10, F1). A host gets a
+ * promise that already settles quietly.
  *
  * `ctx.services.has` rather than a `try`/`catch` around `get`: the registry
  * throws on an unregistered token (common/src/registry.ts:96), and catching
@@ -393,7 +395,9 @@ async function store(
   key: string,
   response: Response,
 ): Promise<void> {
-  const put = cache.put(key, response);
+  const written = cache.put(key, response).catch((error: unknown) => {
+    reportWriteFailure(ctx, error);
+  });
 
   if (ctx.services.has(CAPABILITIES.CLOUDFLARE)) {
     const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
@@ -401,25 +405,15 @@ async function store(
     // the write to it abandons the write when the isolate is released, so it
     // is awaited exactly as the no-plugin branch below does. A replacement
     // provider's bindings are not in the hostless set and are trusted.
-    if (isHostlessRegistry(bindings)) {
-      try {
-        await put;
-      } catch (error: unknown) {
-        reportWriteFailure(ctx, error);
-      }
+    if (!isHostlessRegistry(bindings)) {
+      bindings.waitUntil(written);
       return;
     }
-    bindings.waitUntil(put);
-    return;
   }
 
-  // No plugin to extend the invocation past the response: awaiting is the only
+  // No sink to extend the invocation past the response: awaiting is the only
   // way the write is not simply abandoned when the isolate is released.
-  try {
-    await put;
-  } catch (error: unknown) {
-    reportWriteFailure(ctx, error);
-  }
+  await written;
 }
 
 /**
@@ -430,6 +424,10 @@ async function store(
  * locale, and a custom `key` function may build any string; a query string can
  * carry a credential and a tenant id identifies a customer, so neither belongs
  * in a log an operator reads to learn which route failed.
+ *
+ * The error is logged by CLASS, not message (M113d §10, F1): a custom
+ * {@linkcode ICacheApi} may quote the key it was given in its rejection, which
+ * would carry the same query string and tenant id back into the record.
  */
 function reportWriteFailure(ctx: IRequestContext, error: unknown): void {
   if (!ctx.services.has(CAPABILITIES.LOGGER)) return;
@@ -438,6 +436,6 @@ function reportWriteFailure(ctx: IRequestContext, error: unknown): void {
     .get<ILogger>(CAPABILITIES.LOGGER)
     .error('cloudflare-cache-api: edge cache write failed, response served uncached', {
       path: ctx.request.path,
-      error: error instanceof Error ? error.message : String(error),
+      error: error instanceof Error ? error.name : typeof error,
     });
 }
