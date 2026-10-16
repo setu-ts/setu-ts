@@ -232,11 +232,11 @@ act. M113c makes each of them recover, or bounds it.
 
 ### 3.5 V9-31 — Deno `close()` does not wait for in-flight requests
 
-- **Decision (amended after implementation stopped on it):** `DenoHttpAdapter.close()` waits for
-  `shutdown()` OR a 1000 ms grace, whichever comes first. A rejected `shutdown()` is caught. Without
-  in-flight requests `shutdown()` wins at once, as today; with a request that never settles,
-  `close()` returns after the grace, the `onClose` hooks run, and the worker pool's termination lets
-  the handler return.
+- **Decision (amended after implementation stopped on it):** `DenoHttpAdapter.close()` waits for the
+  first of `shutdown()` and a 1000 ms grace. A rejected `shutdown()` is caught. Without in-flight
+  requests `shutdown()` wins at once, as today; with a request that never settles, `close()` returns
+  after the grace, the `onClose` hooks run, and the worker pool's termination lets the handler
+  return.
 - **Why:** not awaiting at all broke the existing port-rebind test
   (`runtime/test/integration/deno-http-adapter.test.ts:56`) with `AddrInUse`. Measured on Deno 2.9.6
   over three runs with a request in flight: after `shutdown()` the port is still taken synchronously
