@@ -81,8 +81,15 @@ act. M113c makes each of them recover, or bounds it.
     `!supervisor.faulted`. `#faulted` is deleted.
   - **The `#processing` map is cleared on a successful reconnect.** RabbitMQ requeues every unacked
     message on a closed channel, so those entries name deliveries the broker has already taken back.
-    A later `ack`, `requeue` or `deadLetter` for a cleared entry finds nothing and returns. The job
-    is redelivered: at-least-once delivery, stated in the README.
+    The job is redelivered: at-least-once delivery, stated in the README.
+  - **Each delivery carries its own claim token** (amended after implementation stopped on it). The
+    map is keyed by job id, and RabbitMQ redelivers a job under the same id, so a late settlement
+    from the pre-outage delivery found the NEW entry and settled it. Codex measured this: the old
+    delivery's ack acknowledged the redelivered message (new-channel acks 0 → 1), and a late
+    `deadLetter` would dead-letter a job a second worker is still running. `reserve` now sets
+    `StoredJob.claimToken` to a fresh `runtime.uuid()` stored on the entry, and `ack`, `requeue` and
+    `deadLetter` act only when the entry's token matches. On a mismatch they reject with
+    `StaleClaimError`, exactly as the Redis adapter does (§3.2), so one rule covers both adapters.
   - **`disconnect()` calls `supervisor.stop()` first**, so no attempt runs after shutdown.
 - **Why:** this is the maintainer's decision (2026-10-17). One backoff and one attempt-loop
   implementation serves both plugins. The supervisor already handles the two traps a second copy
@@ -102,8 +109,11 @@ act. M113c makes each of them recover, or bounds it.
   - **`reserve`** runs one script. It first reclaims up to `limit` expired claims (processing score
     at or below the server's now), then reserves due jobs.
     - **Each reserved job** gets processing score `now + visibilityTimeoutMs` and a claim token. The
-      tokens are `limit` `runtime.uuid()` values passed as `ARGV` and stored in
-      `queue:<name>:claims` (id → token). Each returned `StoredJob` carries its `claimToken`.
+      token is minted inside the script from `INCR <prefix><name>:claimseq`, so it is unique across
+      replicas and needs no runtime (amended: `RedisQueue`'s published constructor takes options
+      only and has no `IRuntimeServices`, so `runtime.uuid()` was unreachable without a breaking
+      signature change). It is stored in `<prefix><name>:claims` (id → token), and each returned
+      `StoredJob` carries its `claimToken`.
     - **A reclaimed job** is removed from processing and its claim is deleted.
       `HINCRBY queue:<name>:stalls id 1` records the stall, and the job goes back to ready at score
       now.
@@ -119,8 +129,7 @@ act. M113c makes each of them recover, or bounds it.
     `runtime.now()`, so clock skew between replicas cannot reclaim a live job early. This follows
     `idempotency-plugin/src/stores/redis-scripts.ts:13`, and carries its stated floor: Redis 5 or
     later, where script-effects replication is the default and `TIME` before a write is safe. The
-    queue README states the floor. The non-`eval` fallback has no server clock and uses `nowMs`;
-    this is documented.
+    queue README states the floor.
   - **`ack`, `requeue` and `deadLetter` scripts check the claim.** They act only when
     `HGET claims id` equals the token passed in, and return `0` otherwise. A slow worker whose claim
     was reclaimed therefore cannot delete the new delivery. On success they also clear the `claims`
@@ -149,9 +158,12 @@ act. M113c makes each of them recover, or bounds it.
   - **Dead-letter on reserve.** When `attempts > maxAttempts` at dispatch, the service dead-letters
     the job without running it and reports `'queue job abandoned by a dead worker — dead-lettered'`.
     This is the first place a reclaim can exceed the budget.
-  - **Non-`eval` fallback.** The same steps run as separate commands, best-effort and not atomic.
-    The claim check reads, compares, then writes. This is documented and matches the existing
-    fallback's guarantees.
+  - **The lease requires `eval`** (amended). Without a script there is no server clock and no atomic
+    token, so a best-effort lease would hand a live job to a second worker on clock skew. A client
+    with no `eval` (only a minimal injected facade; a real ioredis client always has it) keeps the
+    pre-M113c behaviour: no claims, no reclaim. `connect()` reports this once through the
+    connection-error reporter, naming `visibilityTimeoutMs` as inactive, so the option is never
+    silently dropped. A test pins both the warning and the unchanged fallback.
   - **Upgrade path.** A member reserved before M113c has score equal to its reserved-at time, which
     is already in the past, and no claim entry. The first reserve after upgrade reclaims it: the
     stuck jobs V9-64 describes come back. A replica still on the old version that is running such a
@@ -161,10 +173,10 @@ act. M113c makes each of them recover, or bounds it.
   job to a second worker. The claim tokens make the remaining race, a GC pause past the lease,
   harmless at settlement.
 - **Test home:** `queue-plugin/test/unit/redis-lease.test.ts` (fake client with `eval` executing
-  each script's logic, plus the fallback path); `queue-plugin/test/unit/lease-renewal.test.ts`
-  (service timer, overlap guard, `false` renewal reported);
-  `queue-plugin/test/integration/redis-lease-real.test.ts` (real Redis 7, guarded on `REDIS_URL`,
-  cases below).
+  each script's logic, plus a client with no `eval`, which keeps the pre-M113c behaviour and warns
+  once); `queue-plugin/test/unit/lease-renewal.test.ts` (service timer, overlap guard, `false`
+  renewal reported); `queue-plugin/test/integration/redis-lease-real.test.ts` (real Redis 7, guarded
+  on `REDIS_URL`, cases below).
   - **A dead worker.** Reserve, never settle, advance past the lease, and a second reserve returns
     the job with `attempts` incremented.
   - **A long job.** A renewed job stays claimed past 3× the lease.
@@ -220,17 +232,24 @@ act. M113c makes each of them recover, or bounds it.
 
 ### 3.5 V9-31 — Deno `close()` does not wait for in-flight requests
 
-- **Decision:** `DenoHttpAdapter.close()` calls `handle.server.shutdown()`, attaches a no-op
-  rejection handler, sets `handle.server = null`, and resolves without awaiting the shutdown
-  promise. This is the Node and Bun behaviour. The kernel has already drained for up to 10 s, and
-  the port is released at once (measured, §1), so the `onClose` hooks then run and can reject the
-  remaining work. The worker pool terminates its workers, so the in-flight handler returns.
-- **Why:** parity across runtimes. The measurement shows no port-reuse cost.
+- **Decision (amended after implementation stopped on it):** `DenoHttpAdapter.close()` waits for
+  `shutdown()` OR a 1000 ms grace, whichever comes first. A rejected `shutdown()` is caught. Without
+  in-flight requests `shutdown()` wins at once, as today; with a request that never settles,
+  `close()` returns after the grace, the `onClose` hooks run, and the worker pool's termination lets
+  the handler return.
+- **Why:** not awaiting at all broke the existing port-rebind test
+  (`runtime/test/integration/deno-http-adapter.test.ts:56`) with `AddrInUse`. Measured on Deno 2.9.6
+  over three runs with a request in flight: after `shutdown()` the port is still taken synchronously
+  and after a microtask, and free after one macrotask. The grace is far longer than that, so the
+  port is free when `close()` returns. A stop is bounded at the kernel's 10 s drain plus 1 s, beside
+  Node and Bun's 10.5 s.
 - **Test home:**
   - **Unit:** added to the existing `runtime/test/unit/deno-http-adapter.test.ts`, which is already
     in `DENO_LANE_TESTS` (`scripts/test-lanes.ts`). `deno-http-adapter.ts` is a `DENO_ONLY_SOURCES`
     file, so its coverage is measured by the Deno lane. A fake host whose `shutdown()` never settles
-    still lets `close()` resolve, and a rejected `shutdown()` raises no unhandled rejection.
+    still lets `close()` resolve after the grace; a prompt `shutdown()` returns without waiting for
+    it; a rejected `shutdown()` raises no unhandled rejection; and the existing port-rebind
+    integration test passes unchanged.
   - **Deno lane e2e:** a new `runtime/test/e2e/deno-stop-bounded.test.ts`, added to
     `DENO_LANE_TESTS` and the generated lane config regenerated with
     `node scripts/node-manifests.ts`. A real `Deno.serve` with a request awaiting a 25 s promise:
@@ -242,9 +261,10 @@ act. M113c makes each of them recover, or bounds it.
 
 - **`QueueProcessorDefinition.processor`** changes from a `readonly` property to a method. Code that
   reads it is unaffected; code that relied on `readonly` to forbid reassignment loses that.
-- **Redis queue claim checks.** `ack`, `requeue` and `deadLetter` now ignore a settlement whose
-  claim token does not match. A caller of the internal adapter never sees this, and every public
-  path goes through `runJob`, which passes the token.
+- **Redis and RabbitMQ queue claim checks.** `ack`, `requeue` and `deadLetter` now reject with
+  `StaleClaimError` when the claim token does not match (§3.1, §3.2). The adapters are internal and
+  every public path goes through `runJob`, which passes the token and reports the rejection as a
+  failed settlement.
 
 The visible behaviour changes go to CHANGELOG as breaking and to `docs/upgrading.md`: a reclaimed
 job counts as an attempt, and pre-upgrade stuck jobs come back.
@@ -274,7 +294,7 @@ job counts as an attempt, and pre-upgrade stuck jobs come back.
 | `packages/messaging-plugin/src/brokers/reconnect.ts`                    | Deleted.                                                                                                                                                                                                        |
 | `packages/messaging-plugin/src/brokers/{rabbitmq,nats,kafka}-broker.ts` | Import from `@setu-ts/common`.                                                                                                                                                                                  |
 | `packages/queue-plugin/src/adapters/rabbitmq-queue.ts`                  | Drive-mode supervisor, reconnect, processing reset.                                                                                                                                                             |
-| `packages/queue-plugin/src/adapters/redis-queue.ts`                     | `#key`, `keyPrefix`, lease, claim tokens, stall counts, `claimRenewal`, fallback path.                                                                                                                          |
+| `packages/queue-plugin/src/adapters/redis-queue.ts`                     | `#key`, `keyPrefix`, lease, claim tokens, stall counts, `claimRenewal`, the no-`eval` warning.                                                                                                                  |
 | `packages/queue-plugin/src/adapters/redis-queue-scripts.ts`             | Reserve (reclaim + lease), claim-checked ack/requeue/dead-letter, extend.                                                                                                                                       |
 | `packages/queue-plugin/src/adapters/queue-adapter.ts`                   | Optional `claimRenewal?`.                                                                                                                                                                                       |
 | `packages/queue-plugin/src/plugin/queue-plugin.ts`                      | Forward and validate `keyPrefix`/`visibilityTimeoutMs`; call the processor as a method.                                                                                                                         |
@@ -288,21 +308,21 @@ job counts as an attempt, and pre-upgrade stuck jobs come back.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                           | src covered                                | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                  |
-| ------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `common/test/unit/reconnect-supervisor.test.ts` (moved)             | `reconnect-supervisor.ts`                  | The existing assertions unchanged, imported from the `common` barrel.                                                                                                                                                                                             |
-| `common/test/unit/barrel-exports.test.ts`                           | `index.ts`                                 | The four symbols are exported.                                                                                                                                                                                                                                    |
-| `messaging-plugin` existing broker tests                            | the three brokers                          | Pass unchanged; a barrel test asserts messaging-plugin does not re-export the supervisor.                                                                                                                                                                         |
-| `queue-plugin/test/unit/rabbitmq-reconnect.test.ts`                 | `rabbitmq-queue.ts`                        | Fault → supervisor attempt → new channel; `#processing` cleared; a cleared ack is a no-op; `disconnect` stops the supervisor; an injected connection gets a new channel only; `isHealthy` follows `faulted`.                                                      |
-| `queue-plugin/test/integration/rabbitmq-restart-real.test.ts`       | the same, against a real broker            | §3.1.                                                                                                                                                                                                                                                             |
-| `queue-plugin/test/unit/redis-lease.test.ts`                        | `redis-queue.ts`, `redis-queue-scripts.ts` | Lease score, reclaim, stall increment, orphan removal, claim-checked settlements rejecting `StaleClaimError`, extend, both `eval` and fallback paths, option validation.                                                                                          |
-| `queue-plugin/test/unit/redis-key-prefix.test.ts`                   | `redis-queue.ts`                           | Every key the fake client sees starts with the prefix; the default prefix keys are byte-identical to today's.                                                                                                                                                     |
-| `queue-plugin/test/integration/redis-lease-real.test.ts`            | the same, against a real Redis 7           | §3.2 and §3.3 real cases.                                                                                                                                                                                                                                         |
-| `queue-plugin/test/unit/lease-renewal.test.ts`                      | `queue-service.ts`, `job-processor.ts`     | Interval armed only with `claimRenewal` and a token; cleared on settle and on throw; no overlap; a `false` renewal is reported once; attempts over budget are dead-lettered without running; a `StaleClaimError` settlement is observed as `failed` and reported. |
-| `queue-plugin/test/unit/queue-plugin-redis-options.test.ts`         | `queue-plugin.ts`                          | `keyPrefix` and `visibilityTimeoutMs` are forwarded to `RedisQueue` and refused at `QueuePlugin(...)` construction for bad values; `prefix` set with `adapter: 'redis'` does not move the keys; a method-syntax processor that reads `this` receives the job.     |
-| `queue-plugin/test/unit/processor-definition.types.test.ts`         | `interfaces/index.ts`                      | §3.4 (compile-time).                                                                                                                                                                                                                                              |
-| `runtime/test/unit/deno-http-adapter.test.ts` (existing, Deno lane) | `deno-http-adapter.ts`                     | §3.5 unit.                                                                                                                                                                                                                                                        |
-| `runtime/test/e2e/deno-stop-bounded.test.ts` (Deno lane)            | `deno-http-adapter.ts`, real `Deno.serve`  | §3.5 e2e.                                                                                                                                                                                                                                                         |
+| Test file                                                           | src covered                                | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/test/unit/reconnect-supervisor.test.ts` (moved)             | `reconnect-supervisor.ts`                  | The existing assertions unchanged, imported from the `common` barrel.                                                                                                                                                                                                                                                   |
+| `common/test/unit/barrel-exports.test.ts`                           | `index.ts`                                 | The four symbols are exported.                                                                                                                                                                                                                                                                                          |
+| `messaging-plugin` existing broker tests                            | the three brokers                          | Pass unchanged; a barrel test asserts messaging-plugin does not re-export the supervisor.                                                                                                                                                                                                                               |
+| `queue-plugin/test/unit/rabbitmq-reconnect.test.ts`                 | `rabbitmq-queue.ts`                        | Fault → supervisor attempt → new channel; `#processing` cleared; a late ack, requeue or deadLetter from the pre-outage delivery rejects `StaleClaimError` and leaves the redelivered message unacked; `disconnect` stops the supervisor; an injected connection gets a new channel only; `isHealthy` follows `faulted`. |
+| `queue-plugin/test/integration/rabbitmq-restart-real.test.ts`       | the same, against a real broker            | §3.1.                                                                                                                                                                                                                                                                                                                   |
+| `queue-plugin/test/unit/redis-lease.test.ts`                        | `redis-queue.ts`, `redis-queue-scripts.ts` | Lease score, reclaim, stall increment, orphan removal, claim-checked settlements rejecting `StaleClaimError`, extend, the no-`eval` client keeping the old behaviour with one warning, option validation.                                                                                                               |
+| `queue-plugin/test/unit/redis-key-prefix.test.ts`                   | `redis-queue.ts`                           | Every key the fake client sees starts with the prefix; the default prefix keys are byte-identical to today's.                                                                                                                                                                                                           |
+| `queue-plugin/test/integration/redis-lease-real.test.ts`            | the same, against a real Redis 7           | §3.2 and §3.3 real cases.                                                                                                                                                                                                                                                                                               |
+| `queue-plugin/test/unit/lease-renewal.test.ts`                      | `queue-service.ts`, `job-processor.ts`     | Interval armed only with `claimRenewal` and a token; cleared on settle and on throw; no overlap; a `false` renewal is reported once; attempts over budget are dead-lettered without running; a `StaleClaimError` settlement is observed as `failed` and reported.                                                       |
+| `queue-plugin/test/unit/queue-plugin-redis-options.test.ts`         | `queue-plugin.ts`                          | `keyPrefix` and `visibilityTimeoutMs` are forwarded to `RedisQueue` and refused at `QueuePlugin(...)` construction for bad values; `prefix` set with `adapter: 'redis'` does not move the keys; a method-syntax processor that reads `this` receives the job.                                                           |
+| `queue-plugin/test/unit/processor-definition.types.test.ts`         | `interfaces/index.ts`                      | §3.4 (compile-time).                                                                                                                                                                                                                                                                                                    |
+| `runtime/test/unit/deno-http-adapter.test.ts` (existing, Deno lane) | `deno-http-adapter.ts`                     | §3.5 unit.                                                                                                                                                                                                                                                                                                              |
+| `runtime/test/e2e/deno-stop-bounded.test.ts` (Deno lane)            | `deno-http-adapter.ts`, real `Deno.serve`  | §3.5 e2e.                                                                                                                                                                                                                                                                                                               |
 
 **Negative controls**, each observed failing then reverted:
 
@@ -314,6 +334,8 @@ job counts as an attempt, and pre-upgrade stuck jobs come back.
 5. Hard-code `queue:` in one key: the prefix test names that key.
 6. Revert `processor` to a property: the type test fails `pnpm run check`.
 7. Restore `await handle.server.shutdown()`: the Deno e2e exceeds its bound.
+8. Drop the RabbitMQ token check: the late-settlement test acknowledges the redelivered message.
+9. Remove the grace and return without waiting: the port-rebind test fails with `AddrInUse`.
 
 ## 7. Verification gates
 
@@ -364,7 +386,8 @@ The real-backend suites need `RABBITMQ_URL` and `REDIS_URL`, against throwaway c
 **Flows changed:**
 
 - Redis keys now carry a configurable prefix and two new hashes, `claims` and `stalls`.
-- Claim tokens (`runtime.uuid()`) are stored in Redis and passed back on settlement.
+- Claim tokens are minted per delivery (a Redis `INCR` sequence; `runtime.uuid()` for RabbitMQ) and
+  passed back on settlement.
 - A RabbitMQ reconnect loop opens new connections after a fault.
 - Deno shutdown no longer waits for in-flight requests.
 
