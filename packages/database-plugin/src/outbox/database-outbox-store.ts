@@ -178,13 +178,21 @@ function fromRow(stored: Row): OutboxRecord {
   return record as unknown as OutboxRecord;
 }
 
-/** The status a fetched row carries, refused when it is outside the vocabulary. */
-function statusOf(row: Row, id: string): OutboxStatus {
+/**
+ * The status a fetched row carries, refused when it is outside the vocabulary.
+ *
+ * A status outside the vocabulary means the row was edited outside the
+ * framework: a data-integrity fault on the server's side, so it stays an
+ * unhinted error (a masked `500` under `errorHandler`), never a refusal blamed
+ * on the caller. Neither the stored value nor the row id is quoted — a row may
+ * have been edited by anyone with write access to the table, and on the
+ * `release` path the id is the operator's own input, which must not reach a
+ * log line verbatim.
+ */
+function statusOf(row: Row): OutboxStatus {
   const status = row.status;
   if (typeof status === 'string' && STATUSES.has(status)) return status as OutboxStatus;
-  // The stored value is not quoted: a row may have been edited by anyone with
-  // write access to the table.
-  throw new TypeError(`Outbox row '${id}' carries an unrecognized status`);
+  throw new TypeError('An outbox row carries an unrecognized status');
 }
 
 /**
@@ -378,7 +386,7 @@ export class DatabaseOutboxStore implements IOutboxStore {
       }
       const row = await this.#find(id);
       if (row === null) return { outcome: 'missing' };
-      const status = statusOf(row, id);
+      const status = statusOf(row);
       if (expected === 'pending' && status !== 'pending') return { outcome: 'not-pending', status };
       if (expected === 'failed' && status !== 'failed') return { outcome: 'not-failed', status };
       if (claimVersion !== undefined && row.claimVersion !== claimVersion) {

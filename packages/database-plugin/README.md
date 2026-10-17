@@ -503,8 +503,8 @@ invalid-scope error.
 ## The MongoDB backend
 
 `type: 'mongodb'` serves the `database` capability from a document store, over the native
-[`mongodb`](https://www.npmjs.com/package/mongodb) driver (`npm:mongodb@^6.21.0`). It implements all
-six `IDataSource` methods and translates all six `NormalizedQuery` members natively — `where` and
+[`mongodb`](https://www.npmjs.com/package/mongodb) driver (`mongodb`). It implements all six
+`IDataSource` methods and translates all six `NormalizedQuery` members natively — `where` and
 `filter` become a match document, `orderBy`/`offset`/`limit`/`select` become
 `sort`/`skip`/`limit`/`projection`. Nothing is filtered, sorted or paginated in JavaScript.
 
@@ -525,7 +525,7 @@ app.register(
 | `options` field | Type                                 | Default            | Read by                                                                                                             |
 | --------------- | ------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `url`           | `string`                             | —                  | The lazy client path. Required unless `client` is supplied; also supplies `database` when that option is absent.    |
-| `client`        | `IMongoClient`                       | —                  | `connect()`. An already-constructed client; when present the lazy `import('npm:mongodb@^6.21.0')` never runs.       |
+| `client`        | `IMongoClient`                       | —                  | `connect()`. An already-constructed client; when present the lazy `import('mongodb')` never runs.                   |
 | `objectIdCtor`  | `IMongoObjectIdCtor`                 | from the lazy load | The `_id` conversion. Supply it alongside an injected `client` whose collections use `ObjectId` keys.               |
 | `database`      | `string`                             | from `url`         | The collection resolver. When neither this nor `url` yields a name, `connect()` fails at startup naming the option. |
 | `collections`   | `Record<string, MongoEntityMapping>` | `{}`               | Per-entity `{ collection?, primaryKey?, idType? }`. An unmapped entity uses its own name and `'id'`.                |
@@ -561,7 +561,7 @@ real driver does not.
 ## The Azure Cosmos DB backend
 
 `type: 'cosmos'` serves the `database` capability from Azure Cosmos DB's **NoSQL (SQL) API**, over
-[`@azure/cosmos`](https://www.npmjs.com/package/@azure/cosmos) (`npm:@azure/cosmos@^4`). Every
+[`@azure/cosmos`](https://www.npmjs.com/package/@azure/cosmos) (`@azure/cosmos`). Every
 `NormalizedQuery` member is translated natively — `where`/`filter` become a bound SQL predicate,
 `orderBy` an `ORDER BY`, `offset`/`limit` an `OFFSET … LIMIT`, and `select` a projection list.
 Nothing is filtered, sorted or paginated in JavaScript.
@@ -570,8 +570,8 @@ Cosmos DB's **MongoDB API** is a different wire protocol and is served by the `'
 pointed at a Cosmos connection string, not by this one. That route is documented rather than tested,
 and the reason is a **version floor rather than a dead image**: the emulator's MongoDB endpoint
 (`AZURE_COSMOS_EMULATOR_ENABLE_MONGODB_ENDPOINT`) tops out at API version **4.0**, which reports
-wire version 7, while the `npm:mongodb@^6` driver this package pins requires wire version 8 (MongoDB
-4.2). Measured: the endpoint completes a handshake and then refuses with
+wire version 7, while the `mongodb` driver this package pins requires wire version 8 (MongoDB 4.2).
+Measured: the endpoint completes a handshake and then refuses with
 `reports maximum wire version 7, but this version of the Node.js Driver requires at least 8`. A live
 Azure Cosmos for MongoDB account offers server versions above that floor, so the route is
 **unverified against a live account** rather than known to fail.
@@ -592,14 +592,14 @@ app.register(
 );
 ```
 
-| `options` field | Type                                  | Default | Read by                                                                                                                               |
-| --------------- | ------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `endpoint`      | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                           |
-| `key`           | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                           |
-| `client`        | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('npm:@azure/cosmos@^4')` never runs — the route for an Entra ID (managed identity) client. |
-| `database`      | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to.      |
-| `containers`    | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                             |
-| `logQueries`    | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                                 |
+| `options` field | Type                                  | Default | Read by                                                                                                                          |
+| --------------- | ------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
+| `key`           | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
+| `client`        | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('@azure/cosmos')` never runs — the route for an Entra ID (managed identity) client.   |
+| `database`      | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to. |
+| `containers`    | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                        |
+| `logQueries`    | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                            |
 
 **Containers must already exist.** The adapter creates no database and no container: throughput,
 partition-key and indexing choices belong to the application's provisioning. A missing container is
@@ -705,7 +705,7 @@ emulator suites are local-only.
 
 `type: 'bigtable'` serves the `database` capability from Google Cloud Bigtable, over
 [`@google-cloud/bigtable`](https://www.npmjs.com/package/@google-cloud/bigtable)
-(`npm:@google-cloud/bigtable@^6`).
+(`@google-cloud/bigtable`).
 
 **Bigtable inverts the DynamoDB problem.** Its row key is a single lexicographically-sorted string,
 so `findById` fits it natively with no key object at all. What it lacks instead is everything
@@ -739,7 +739,7 @@ app.register(
 | `projectId`      | `string`                                | —       | The lazy client path. Required unless `client` is supplied.                                                                         |
 | `instance`       | `string`                                | —       | **Required on both arms.** A table is addressed as `project/instance/table`, and neither a client nor a project encodes it.         |
 | `apiEndpoint`    | `string`                                | —       | The lazy client path. The emulator address; an endpoint alone reaches `cbtemulator` with no credentials.                            |
-| `client`         | `IBigtableClient`                       | —       | `connect()`. When present the lazy `import('npm:@google-cloud/bigtable@^6')` never runs.                                            |
+| `client`         | `IBigtableClient`                       | —       | `connect()`. When present the lazy `import('@google-cloud/bigtable')` never runs.                                                   |
 | `tables`         | `Record<string, BigtableEntityMapping>` | `{}`    | Per-entity `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`. An unmapped entity uses its own name, `['id']` and `cf`. |
 | `maxPageFetches` | `number`                                | `10`    | `findPage`'s fill loop, bounding the re-fetch when a client-side filter empties a raw batch.                                        |
 | `logQueries`     | `boolean`                               | `false` | The database service, exactly as for every other arm.                                                                               |

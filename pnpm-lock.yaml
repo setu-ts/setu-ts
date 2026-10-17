@@ -1610,6 +1610,9 @@ importers:
       '@setu-ts/database-plugin':
         specifier: workspace:^
         version: link:../database-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../exceptions
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../health-plugin

@@ -3,7 +3,7 @@ import { normaliseFenceSpecifiers } from '../fixtures/snippets/fence-engine.ts';
 import { compileFence } from '../fixtures/snippets/fence-engine.ts';
 import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 
-it('normalises Deno module spellings without touching literals or comments', () => {
+it('leaves npm: specifiers unchanged while @hono/hono is still rewritten', () => {
   const source = `import { z } from 'npm:zod@^3.24.0';
 export { pgTable } from 'npm:drizzle-orm@^0.45.2/pg-core';
 import { html } from '@hono/hono/html';
@@ -13,12 +13,7 @@ const prose = 'npm:zod@^3.24.0';
 type T = import('npm:graphql@^16').GraphQLSchema;
 const dynamic = import('npm:@scope/name@^1/sub');`;
   expect(normaliseFenceSpecifiers(source)).toBe(
-    source
-      .replace("from 'npm:zod@^3.24.0'", "from 'zod'")
-      .replace("from 'npm:drizzle-orm@^0.45.2/pg-core'", "from 'drizzle-orm/pg-core'")
-      .replace("from '@hono/hono/html'", "from 'hono/html'")
-      .replace("import('npm:graphql@^16')", "import('graphql')")
-      .replace("import('npm:@scope/name@^1/sub')", "import('@scope/name/sub')"),
+    source.replace("from '@hono/hono/html'", "from 'hono/html'"),
   );
 });
 

@@ -511,7 +511,7 @@ export class AppService {
 ```typescript
 import { CAPABILITIES, type IConfig } from '@setu-ts/common';
 import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
-import { z } from 'npm:zod@^3.24.0';
+import { z } from 'zod';
 
 const database = defineConfigSection({
   prefix: 'DATABASE_',

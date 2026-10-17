@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { withHttpStatusHint } from '@setu-ts/common';
 
 /**
  * Thrown when an `onIntegrationEvent(..., { inbox })` subscription is
@@ -145,11 +146,30 @@ export class InboxStoreVerifyTimeoutError extends Error {
 const KNOWN_STATUSES = ['processed', 'discarded', 'attempting'] as const;
 
 /**
+ * How a `release` refusal is answered, by outcome. The caller caused the
+ * condition and it is permanent for that request, so the refusal answers with
+ * its own status instead of a masked 500; the details are fixed and quote
+ * nothing from a row.
+ */
+const HINT_BY_OUTCOME = {
+  'invalid-id': { status: 400, title: 'Bad Request', detail: 'The inbox row id is malformed.' },
+  missing: { status: 404, title: 'Not Found', detail: 'No inbox row has that id.' },
+  'not-parked': {
+    status: 409,
+    title: 'Conflict',
+    detail: 'The inbox row is not parked, so it cannot be released.',
+  },
+} as const;
+
+/**
  * Rejected by `IInbox.release` when the row id is malformed, or the marker is
  * missing or not parked. Names the outcome and, for `not-parked`, the
  * marker's status only when it is one of the three known values — a row
  * edited to carry anything else (line breaks included) is reported as not
  * parked with no `status`, so no stored text reaches the message.
+ *
+ * Branded with the HTTP status hint in the constructor: 400, 404 and 409 by
+ * outcome, with a fixed value-free detail.
  *
  * @since 0.9.0
  */
@@ -188,5 +208,6 @@ export class InboxRowStateError extends Error {
     if (status !== undefined) {
       Object.defineProperty(this, 'status', { value: status, enumerable: true });
     }
+    withHttpStatusHint(this, HINT_BY_OUTCOME[outcome]);
   }
 }

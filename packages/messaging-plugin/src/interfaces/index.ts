@@ -1053,7 +1053,11 @@ export interface OutboxRelayOptions {
    * One deadline over the whole sweep, measured on the monotonic clock.
    * Default `30000`. Must be greater than publishTimeoutMs + 2 * storeTimeoutMs.
    * Rows start while the remaining budget covers that reserve: the first
-   * `15000` ms with default options.
+   * `15000` ms with default options. EXCEPT that the status write settling an
+   * already-invoked publish runs to its own `storeTimeoutMs` even when a pause
+   * has exhausted the budget: a sweep that overran by a pause can outlive this
+   * deadline by at most one `storeTimeoutMs`, and the shutdown drain that waits
+   * for it is bounded by the same amount.
    */
   readonly sweepDeadlineMs?: number;
   /** Bound on one publish. Default `5000`. */

@@ -1256,7 +1256,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                               |
 | **Public API**       | `LoggerPlugin()`; `ILogger`                                                                                 |
 | **Extension Points** | Custom logger implementation (override `logger` token); custom log formatters                               |
-| **Rules**            | Pino is optional (injected or lazy-loaded via `npm:` specifier); ConsoleLogger works on all runtimes        |
+| **Rules**            | Pino is optional (injected or lazy-loaded via a bare specifier); ConsoleLogger works on all runtimes        |
 
 #### @setu-ts/config-plugin
 
@@ -1300,7 +1300,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                         |
 | **Public API**       | `DatabasePlugin()`; `IDatabaseService`; `IRepository`; `IUnitOfWork`; Drizzle-specific `createDrizzleDatabase()`, `getDrizzleDatabase()`, and `getDrizzleTransaction()` |
 | **Extension Points** | Custom ORM adapter; custom repository; custom transaction strategy                                                                    |
-| **Rules**            | Applications inject Prisma clients and opaque configured Drizzle identities with explicit Promise-aware transaction bridges; only Drizzle operators are lazy-loaded from `npm:`. Portable repository operations stay backend-neutral, while released raw `query()` and distinct typed outer/transaction Drizzle accessors are explicit backend-specific escape hatches. Memory remains the zero-dependency default. Cloud Bigtable is the wide-column arm: it has no secondary index, so its row key — one lexicographically-sorted string composed from logical fields by the per-entity mapping — is the only ordering, and every non-key predicate is evaluated by the same portable evaluator the memory reference uses. |
+| **Rules**            | Applications inject Prisma clients and opaque configured Drizzle identities with explicit Promise-aware transaction bridges; only Drizzle operators are lazy-loaded from bare specifiers. Portable repository operations stay backend-neutral, while released raw `query()` and distinct typed outer/transaction Drizzle accessors are explicit backend-specific escape hatches. Memory remains the zero-dependency default. Cloud Bigtable is the wide-column arm: it has no secondary index, so its row key — one lexicographically-sorted string composed from logical fields by the per-entity mapping — is the only ordering, and every non-key predicate is evaluated by the same portable evaluator the memory reference uses. |
 
 #### @setu-ts/cache-plugin
 
@@ -1311,7 +1311,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`                                                                                                            |
 | **Public API**       | `CachePlugin()`, `CacheService`, `MemoryStore`, `RedisStore`, `NoopStore`, `cacheMiddleware`, types in `src/interfaces/index` |
 | **Extension Points** | Custom cache store (override `cache` token); custom key generators; named multi-cache instances                               |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store default; `ICacheStore` has 5 methods    |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via a bare specifier); Memory store default; `ICacheStore` has 5 methods    |
 
 #### @setu-ts/events-plugin
 
@@ -1344,7 +1344,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                       |
 | **Public API**       | `MessagingPlugin()`; `EventsMessagingBridge()`; `InMemoryBroker`; `RedisStreamsBroker`; `RabbitMqBroker`; `NatsBroker`; `KafkaBroker`; `GcpPubSubBroker`; `ServiceBusBroker`; `JsonSerializer`; `IMessageBroker` (re-exported from `common`)        |
 | **Extension Points** | Custom broker adapter; custom serializers; custom SDK client injection; custom transport adapters                                                                                                                                                   |
-| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option; cloud brokers require provider credentials at runtime                |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via a bare specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option; cloud brokers require provider credentials at runtime                |
 
 #### @setu-ts/queue-plugin
 
@@ -1355,7 +1355,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                                                                                                                                      |
 | **Public API**       | `QueuePlugin()`; `MemoryQueue`; `RedisQueue`; `RabbitMqQueue`; `SqsQueue`; `SnsPublisher`; `IQueue` (re-exported from `common`)                                                                                                                                                                                                                                    |
 | **Extension Points** | Custom queue adapter via internal `QueueAdapter` seam; custom retry strategies; custom SQS transport injection                                                                                                                                                                                                                                                     |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory queue for testing; RabbitMQ adapter (polling via basicGet, TTL+DLX for delays); SQS adapter via AWS SDK `@aws-sdk/client-sqs` (injected or lazy-loaded); SNS publisher via AWS SDK `@aws-sdk/client-sns` (injected or lazy-loaded); DLQ forwards original body then deletes source |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via a bare specifier); Memory queue for testing; RabbitMQ adapter (polling via basicGet, TTL+DLX for delays); SQS adapter via AWS SDK `@aws-sdk/client-sqs` (injected or lazy-loaded); SNS publisher via AWS SDK `@aws-sdk/client-sns` (injected or lazy-loaded); DLQ forwards original body then deletes source |
 
 **Architecture Notes:** The `QueuePlugin` factory registers a `QueueService` implementing the
 `IQueue` contract under the `queue` capability token (or `queue.<name>` for named instances). The
@@ -1456,7 +1456,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                                                                                                                                                                     |
 | **Public API**       | `TelemetryPlugin()`; `telemetryMiddleware`; `TELEMETRY_SPAN_KEY`; `NoopTelemetryService`; `InstrumentationsConfig`/`InstrumentationConfig`/`InstrumentationKind`/`SpanProcessorKind`                                                                                                                                                                                                              |
 | **Extension Points** | Custom exporters; injectable `tracerProviderFactory`; injectable per-instrumentation instances (`InstrumentationConfig.instrumentation`)                                                                                                                                                                                                                                                          |
-| **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via `npm:` specifier); noop default when no exporter; middleware priority 30; `TracerProviderFactory` injection seam for tests; auto-instrumentation (M24b) is runtime-gated (Node-only kinds `http`/`fetch`/`ioredis`/`amqplib`/`kafkajs`) and degrades to a documented no-op elsewhere; `spanProcessor: 'simple'` (default) or `'batch'` |
+| **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via a bare specifier); noop default when no exporter; middleware priority 30; `TracerProviderFactory` injection seam for tests; auto-instrumentation (M24b) is runtime-gated (Node-only kinds `http`/`fetch`/`ioredis`/`amqplib`/`kafkajs`) and degrades to a documented no-op elsewhere; `spanProcessor: 'simple'` (default) or `'batch'` |
 
 #### @setu-ts/secrets-plugin
 
@@ -1467,7 +1467,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                         |
 | **Public API**       | `SecretsPlugin()`; `ISecretManager`                                                                   |
 | **Extension Points** | Custom secret provider                                                                                |
-| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); env provider for development |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via bare specifiers); env provider for development |
 
 #### @setu-ts/audit-plugin
 
@@ -1500,7 +1500,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                   |
 | **Public API**       | `StoragePlugin()`; `IStorage`                                                                                   |
 | **Extension Points** | Custom storage provider                                                                                         |
-| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); local and memory providers for testing |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via bare specifiers); local and memory providers for testing |
 
 #### @setu-ts/mail-plugin
 
@@ -1511,7 +1511,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`; optionally the `view` capability (component templates, M102)                  |
 | **Public API**       | `MailPlugin()`; `IMailer`                                                                         |
 | **Extension Points** | Custom mail provider; component templates through `CAPABILITIES.VIEW`                            |
-| **Rules**            | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
+| **Rules**            | Email SDKs are optional (injected or lazy-loaded via bare specifiers); log provider for testing |
 
 #### @setu-ts/notification-plugin
 
@@ -1522,7 +1522,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`                                                             |
 | **Public API**       | `NotificationPlugin()`; `INotifier`                                            |
 | **Extension Points** | Custom notification channels                                                   |
-| **Rules**            | Channel providers are optional (injected or lazy-loaded via `npm:` specifiers) |
+| **Rules**            | Channel providers are optional (injected or lazy-loaded via bare specifiers) |
 
 #### @setu-ts/feature-flags-plugin
 
@@ -1616,7 +1616,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `GraphqlPlugin()`; `IGraphqlService`                                                                                                    |
 | **Extension Points** | Custom schema; custom resolvers; custom scalar resolvers; custom document cache                                                         |
-| **Rules**            | `npm:graphql@^16` is inject-or-lazy; subscriptions require `CAPABILITIES.WEBSOCKET` or `CAPABILITIES.SSE` OPTIONALLY                   |
+| **Rules**            | `graphql` is inject-or-lazy; subscriptions require `CAPABILITIES.WEBSOCKET` or `CAPABILITIES.SSE` OPTIONALLY                   |
 
 #### @setu-ts/grpc-plugin
 
@@ -1627,7 +1627,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `GrpcPlugin()`; `IGrpcService`                                                                                                          |
 | **Extension Points** | Custom service definitions via embedded `FileDescriptorSet` constants                                                                   |
-| **Rules**            | Connect-ES + Protobuf-ES from `npm:`; detection is prefix-only; RPC dispatch runs in the kernel terminal handler after the middleware pipeline |
+| **Rules**            | Connect-ES + Protobuf-ES from bare specifiers; detection is prefix-only; RPC dispatch runs in the kernel terminal handler after the middleware pipeline |
 
 #### @setu-ts/react-router-plugin
 

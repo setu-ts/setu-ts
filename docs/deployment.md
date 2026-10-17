@@ -398,9 +398,9 @@ verify the production entry too. The remaining import map is cached, including d
 reachable from `main.ts`. The verified exclusion is the development connector.
 
 Deno can record a jsr package's npm edge list incompletely on a cold cache. An entrypoint-only
-frozen install can pass while lazy `npm:amqplib`/`npm:ioredis` imports later fail at startup.
-Retaining the full-map pair after removing the development pin prevents that failure. Runtime uses
-`--frozen` and the lockfile completed during the image build without modifying it.
+frozen install can pass while lazy `amqplib`/`ioredis` imports later fail at startup. Retaining the
+full-map pair after removing the development pin prevents that failure. Runtime uses `--frozen` and
+the lockfile completed during the image build without modifying it.
 
 Refusing to write is also what closes the original read-only-root failure, where the first lazy
 driver registration attempted to add an edge to `deno.lock`:

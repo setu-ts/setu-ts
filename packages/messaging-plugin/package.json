@@ -76,6 +76,7 @@
     "@opentelemetry/sdk-trace-base": "^2.9.0",
     "@setu-ts/cloudflare-plugin": "workspace:^",
     "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/metrics-plugin": "workspace:^",

@@ -39,7 +39,7 @@ The package's own tests drive our frame codec against our own state machine. Tha
 whether a conformant client agrees with us — and the protocol implementations here are hand-written
 from the specifications. So the suite uses the authorities instead:
 
-- **`npm:graphql-ws`** is the reference implementation of the protocol the plugin implements.
+- **`graphql-ws`** is the reference implementation of the protocol the plugin implements.
 - **`@apollo/client`'s persisted-query link** defines the APQ handshake `PUBLIC_API.md` claims to
   interoperate with.
 

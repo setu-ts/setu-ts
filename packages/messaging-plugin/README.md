@@ -5,8 +5,8 @@ Cross-service messaging. Registers an `IMessageBroker` under `CAPABILITIES.MESSA
 
 Eight brokers ship: `InMemoryBroker` (zero-dependency default), `RedisStreamsBroker`,
 `RabbitMqBroker`, `NatsBroker` (JetStream), `KafkaBroker`, `GcpPubSubBroker`
-(`npm:@google-cloud/pubsub`), `ServiceBusBroker` (`npm:@azure/service-bus`), and a custom-injected
-arm. Each cloud client is an **optional** dependency, lazily imported or injected.
+(`@google-cloud/pubsub`), `ServiceBusBroker` (`@azure/service-bus`), and a custom-injected arm. Each
+cloud client is an **optional** dependency, lazily imported or injected.
 
 ## Installation
 
@@ -188,16 +188,16 @@ handler. With no behaviours configured, no `PipelinedBroker` decorator is applie
 
 ## Brokers
 
-| `broker`          | Backing client             | Request-reply | Driven against a real backend in CI |
-| ----------------- | -------------------------- | ------------- | ----------------------------------- |
-| `'memory'`        | none                       | yes           | — (in-process; no backend)          |
-| `'redis-streams'` | `npm:ioredis`              | yes           | yes — Redis 7 (`redis-real` suites) |
-| `'rabbitmq'`      | `npm:amqplib`              | yes           | yes — RabbitMQ 4 (outage suite)     |
-| `'nats'`          | NATS JetStream client      | yes           | yes — `nats:2-alpine -js` (M90d)    |
-| `'kafka'`         | `npm:kafkajs`              | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
-| `'pubsub'`        | `npm:@google-cloud/pubsub` | yes²          | no — emulator suite is local-only   |
-| `'service-bus'`   | `npm:@azure/service-bus`   | yes²          | no — emulator suite is local-only   |
-| `'custom'`        | injected `IMessageBroker`  | yes³          | — (whatever the adapter provides)   |
+| `broker`          | Backing client            | Request-reply | Driven against a real backend in CI |
+| ----------------- | ------------------------- | ------------- | ----------------------------------- |
+| `'memory'`        | none                      | yes           | — (in-process; no backend)          |
+| `'redis-streams'` | `ioredis`                 | yes           | yes — Redis 7 (`redis-real` suites) |
+| `'rabbitmq'`      | `amqplib`                 | yes           | yes — RabbitMQ 4 (outage suite)     |
+| `'nats'`          | NATS JetStream client     | yes           | yes — `nats:2-alpine -js` (M90d)    |
+| `'kafka'`         | `kafkajs`                 | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
+| `'pubsub'`        | `@google-cloud/pubsub`    | yes²          | no — emulator suite is local-only   |
+| `'service-bus'`   | `@azure/service-bus`      | yes²          | no — emulator suite is local-only   |
+| `'custom'`        | injected `IMessageBroker` | yes³          | — (whatever the adapter provides)   |
 
 ¹ Kafka needs its reply topic to exist — see below. ² Cloud brokers need their reply topic to
 pre-exist (GCP) or require `Manage` right for admin (Azure). ³ Custom brokers carry whatever RPC
@@ -993,13 +993,13 @@ for a named instance) and an `outbox` health indicator. At `onInit` it resolves 
 default `relay.schedule: true` and no scheduler registered, `start()` rejects
 `OutboxRelayUnscheduledError`.
 
-| Member                                      | What it does                                                                                                                                                      |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `write(scope, definition, payload, input?)` | Builds the envelope (id, ordering key and deduplication id fixed NOW) and appends the row through `scope`. Resolves the envelope id; every refusal is a rejection |
-| `dispatch()`                                | Requests a sweep without waiting: coalesced (one running, one follow-up), never throws, a no-op once closing                                                      |
-| `sweep()`                                   | Runs or joins a sweep and resolves its `OutboxSweepResult`                                                                                                        |
-| `purge()`                                   | Deletes settled rows older than `retainSentMs`                                                                                                                    |
-| `release(id, action, { tenantId? })`        | Returns a `failed` row to `pending` (`'retry'`) or settles it unpublished (`'discard'`)                                                                           |
+| Member                                      | What it does                                                                                                                                                                                                                |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `write(scope, definition, payload, input?)` | Builds the envelope (id, ordering key and deduplication id fixed NOW) and appends the row through `scope`. Resolves the envelope id; every refusal is a rejection                                                           |
+| `dispatch()`                                | Requests a sweep without waiting: coalesced (one running, one follow-up), never throws, a no-op once closing                                                                                                                |
+| `sweep()`                                   | Runs or joins a sweep and resolves its `OutboxSweepResult`                                                                                                                                                                  |
+| `purge()`                                   | Deletes settled rows older than `retainSentMs`                                                                                                                                                                              |
+| `release(id, action, { tenantId? })`        | Returns a `failed` row to `pending` (`'retry'`) or settles it unpublished (`'discard'`); refuses a bad id (`'invalid-id'`, 400), an absent row (404) or a non-failed row (409) with the status-hinted `OutboxRowStateError` |
 
 `write` uses ONE implementation of the publish precedence with `publishIntegrationEvent`: the
 caller's `orderingKey` beats the definition's selector, and `deduplicationId` defaults to the
@@ -1142,7 +1142,7 @@ with no separators, so a collation that ignores punctuation cannot reorder it.
 The mappings for the other adapters:
 
 ```typescript
-import { bigint, integer, pgTable, text } from 'npm:drizzle-orm@^0.45.2/pg-core';
+import { bigint, integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { CosmosAdapter, DynamoAdapter, MongoAdapter } from '@setu-ts/database-plugin';
 
 // Drizzle: register this table as `drizzleTables: { Outbox: outbox }`.
@@ -1243,11 +1243,14 @@ calls it. `'retry'` returns the row to `pending` with zero attempts and `leaseUn
 release takes effect at the relay's next lap.
 
 **One deadline per sweep.** `relay.sweepDeadlineMs` (default 30 000), on the monotonic clock, bounds
-the whole sweep and purge. Each publish and store call has its own bound (default 5 000 each). A row
-starts only while `publishTimeoutMs + 2 × storeTimeoutMs` fits: the claim, publish and status write
-reserve 15 000 ms by default, leaving the first 15 000 ms for row starts. Construction requires
-`publishTimeoutMs + 2 × storeTimeoutMs < sweepDeadlineMs`; equality is refused naming all three
-options.
+the whole sweep and purge, EXCEPT that the status write settling an already-invoked publish runs to
+its own `storeTimeoutMs` even when a pause has exhausted the budget: a sweep that overran by a pause
+can outlive the deadline by at most one `storeTimeoutMs`, and the shutdown drain that waits for it
+is bounded by the same amount. Each publish and store call has its own bound (default 5 000 each). A
+row starts only while `publishTimeoutMs + 2 × storeTimeoutMs` fits: the claim, publish and status
+write reserve 15 000 ms by default, leaving the first 15 000 ms for row starts. Construction
+requires `publishTimeoutMs + 2 × storeTimeoutMs < sweepDeadlineMs`; equality is refused naming all
+three options.
 
 **Several relays may sweep one store.** Each row is claimed through an atomic compare-and-set on
 `claimVersion`, incrementing it once and recording `leaseUntil`. Another relay waits until
@@ -1262,8 +1265,11 @@ rule no longer bears on correctness. Claims use the same protocol on every suppo
 bridge refuses sources without native conditional writes.
 
 The overlap kinds are `fenced` (the pre-publish check refused an expired claim), `claim-lost` (a
-status write found another version) and `duplicate` (`markSent` found the row already sent). Any
-kind, including a dispatch sweep, adds the health reason `relay-overlap` inside the configured
+status write found another version) and `duplicate` (`markSent` found the row already sent, or
+`markFailure` did after the relay's publish timed out — the copy may have duplicated). A settlement
+answer is recorded even when it arrives after the call's own bound or the sweep deadline; a relay
+paused inside its publish may also report the `store-write-failing` health reason for that sweep.
+Any kind, including a dispatch sweep, adds the health reason `relay-overlap` inside the configured
 window. Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0`
 disables only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator
 diagnostic, and is absent from transition outcomes.
@@ -1274,8 +1280,8 @@ service.
 
 On shutdown the relay drains in an `onShutdown` hook, before any `onClose` hook closes the broker or
 the database: the jobs are removed, `dispatch()` becomes a no-op, and the in-flight sweep finishes
-within its deadline. A failure caused by the application stopping is never counted against
-`maxAttempts`.
+within its deadline plus, when a pause made it overrun, one `storeTimeoutMs`. A failure caused by
+the application stopping is never counted against `maxAttempts`.
 
 ### Tenancy
 
@@ -1701,8 +1707,9 @@ Any `IInboxStore` from `@setu-ts/common` can back the inbox. It must keep the br
 rejection; a second marker with the same id is refused; `find` returns `undefined` for a row of
 another `kind`; `recordFailure` writes outside any transaction; `park` answers `'exists'` when a
 marker is already present; `parked` never returns the envelope; `release` writes only from `parked`;
-`purge` never deletes a parked marker; `verify` rejects when the backend cannot serve the inbox; and
-every method rejects rather than throwing synchronously.
+`purge` deletes rows of every status, `parked` included, at most `limit` per status; `verify`
+rejects when the backend cannot serve the inbox; and every method rejects rather than throwing
+synchronously.
 
 ## Bridging in-process events
 

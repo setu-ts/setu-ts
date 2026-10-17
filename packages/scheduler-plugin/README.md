@@ -101,7 +101,7 @@ await app.start({ port: 3000 });
 
 Without `distributedLock`, a process-local `MemoryLock` is used — fine for a single instance, but
 **every replica will run every job**. Set `{ enabled: true, storage: 'redis' }` to use `RedisLock`
-(over `npm:ioredis`, lazily imported or injected) so only one replica executes each firing.
+(over `ioredis`, lazily imported or injected) so only one replica executes each firing.
 
 Every lock acquire is bounded, whichever lock is in use. An acquire still unsettled after
 `acquireTimeoutMs` is a skipped fire: it is logged, counted as `lockFailed` in the execution

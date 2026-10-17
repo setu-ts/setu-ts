@@ -3,7 +3,7 @@
 Caching with pluggable stores. Registers an `ICacheStore` under `CAPABILITIES.CACHE` (`'cache'`).
 
 Three stores ship: `MemoryStore` (LRU with per-entry TTL, zero-dependency default), `RedisStore`
-(over `npm:ioredis`, lazily imported or injected), and `NoopStore`.
+(over `ioredis`, lazily imported or injected), and `NoopStore`.
 
 ## Installation
 

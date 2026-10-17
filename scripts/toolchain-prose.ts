@@ -13,7 +13,7 @@ export interface ProseFile {
 export interface ToolchainProseFinding {
   readonly path: string;
   readonly line: number;
-  readonly rule: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'stale-allowlist';
+  readonly rule: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'stale-allowlist';
   readonly message: string;
 }
 
@@ -25,6 +25,8 @@ export interface ToolchainProseRules {
     readonly reason: string;
     /** URL allowances are separate: a legacy pin example does not authorize a stale link. */
     readonly allowJsrUrl?: true;
+    /** npm: reference allowances are separate: a legacy pin example does not authorize a stale npm: mention. */
+    readonly allowNpmRef?: true;
   }[];
   readonly generatedDenoTasks: readonly string[];
   readonly rootScripts: readonly string[];
@@ -367,6 +369,18 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
 
 const P1 = /deno\s+task\b|jsr:@setu-ts\/|@jsr\/setu-ts__|Deno-first/i;
 const P6 = /jsr\.io\/@setu-ts\b/i;
+/** P7: an `npm:` specifier in a quoted import position. Backtick-quoted text is P8's business. */
+const P7 = /(?:\bfrom\s+|\bimport\s+|\bimport\(\s*)["']npm:/g;
+/** P8: any `npm:<pkg>` reference; `pnpm:` and a "from npm:" registry mention do not match. */
+const P8 = /\bnpm:([A-Za-z@][A-Za-z0-9@._/^~-]*)/g;
+/** A Deno install command with the specifier as an argument: a legitimate Deno-target instruction. */
+/**
+ * A Deno install command and its arguments: the arguments run until the first
+ * shell delimiter or code-span backtick, the same boundary P3 uses.
+ */
+const DENO_INSTALL = /\bdeno\s+(?:add|install)\b[^\n`<>;|&]*/g;
+/** A line ending in a shell continuation (`\\` plus optional trailing whitespace). */
+const CONTINUED = /\\\s*$/;
 
 function history(path: string): boolean {
   return /^(?:CHANGELOG\.md$|ROADMAP\.md$|plans\/(?:archive\/|reviews\/|milestone-[^/]+\.md$))/.test(
@@ -414,13 +428,73 @@ export function scanToolchainProse(
           report('P2', `Repository task must use pnpm: ${match[0]}`);
         }
       }
-      let commandLine = line;
-      for (let next = index + 1; /\\\s*$/.test(commandLine) && next < lines.length; next++) {
-        commandLine = commandLine.replace(/\\\s*$/, '') + ' ' + lines[next]!;
+      // A backslash-continued command is joined ONCE, from the line that starts
+      // it, and each match is reported at the line holding its first character.
+      // Re-joining from every line of a chain made the scan cubic (O5).
+      if (index === 0 || !CONTINUED.test(lines[index - 1]!)) {
+        const pieces: string[] = [];
+        const starts: number[] = [];
+        let length = 0;
+        for (let next = index; ; next++) {
+          const continued = CONTINUED.test(lines[next]!) && next + 1 < lines.length;
+          // Strip the continuation from the piece itself, never from the growing
+          // join: a regex over the whole join per line is quadratic again.
+          const text = continued ? lines[next]!.replace(CONTINUED, '') + ' ' : lines[next]!;
+          starts.push(length);
+          pieces.push(text);
+          length += text.length;
+          if (!continued) break;
+        }
+        const commandLine = pieces.join('');
+        let piece = 0;
+        for (const match of commandLine.matchAll(/\b(?:deno|jsr)\s+add\b([^\n`<>;|&]*)/gi)) {
+          if (/(?:^|\s|["'])@setu-ts\//.test(match[1]!)) {
+            while (piece + 1 < starts.length && starts[piece + 1]! <= match.index!) piece++;
+            findings.push({
+              path,
+              line: index + piece + 1,
+              rule: 'P3',
+              message: 'Bare Setu-TS add argument resolves from JSR; use npm:@setu-ts/',
+            });
+          }
+        }
       }
-      for (const match of commandLine.matchAll(/\b(?:deno|jsr)\s+add\b([^\n`<>;|&]*)/gi)) {
-        if (/(?:^|\s|["'])@setu-ts\//.test(match[1]!)) {
-          report('P3', 'Bare Setu-TS add argument resolves from JSR; use npm:@setu-ts/');
+      if (path.endsWith('.md')) {
+        const p7NpmStarts = new Set<number>();
+        // Matches arrive in increasing order, so the backtick count before each
+        // quote is carried forward rather than recounted: one pass per line.
+        let ticksBefore = 0;
+        let counted = 0;
+        for (const match of line.matchAll(P7)) {
+          if (match.index === undefined) continue;
+          const quote = match.index + match[0].length - 5;
+          for (; counted < quote; counted++) if (line[counted] === '`') ticksBefore++;
+          if (ticksBefore % 2 === 1) continue;
+          p7NpmStarts.add(match.index + match[0].length - 4);
+          report('P7', 'Node cannot load an npm: specifier; import the bare package name');
+        }
+        // The spans holding Deno install arguments, found once per line: an
+        // `npm:` reference inside one is that command's argument, and one after
+        // the command's delimiter is ordinary prose that P8 still checks.
+        const installs = [...line.matchAll(DENO_INSTALL)].map((install) => [
+          install.index,
+          install.index + install[0].length,
+        ]);
+        let span = 0;
+        for (const match of line.matchAll(P8)) {
+          const pkg = match[1] ?? '';
+          if (pkg.startsWith('@setu-ts/') || pkg.startsWith('@jsr/')) continue;
+          if (match.index === undefined) continue;
+          if (p7NpmStarts.has(match.index)) continue;
+          while (span < installs.length && installs[span]![1]! <= match.index) span++;
+          const install = installs[span];
+          if (install !== undefined && install[0]! < match.index) continue;
+          if (allowance?.allowNpmRef) used.add(path);
+          else
+            report(
+              'P8',
+              'packages install and import by bare name since 0.9.0; drop the npm: prefix',
+            );
         }
       }
       if (!instructions(path)) continue;

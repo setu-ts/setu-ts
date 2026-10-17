@@ -54,7 +54,7 @@ reach clients on every replica.
 | ------------- | ----------------- | ------------------------------ | ----------------------------------------------------------------------------- |
 | `'memory'`    | No                | None                           | The default. A real single-process bus, not a no-op — useful in tests and dev |
 | `'messaging'` | Yes               | A plugin providing `messaging` | Reuses every broker the messaging plugin ships; adds no dependency            |
-| `'redis'`     | Yes               | `npm:ioredis@5.x` (lazy)       | Redis pub/sub. Opens **two** connections (see below)                          |
+| `'redis'`     | Yes               | `ioredis@5.x` (lazy)           | Redis pub/sub. Opens **two** connections (see below)                          |
 | `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane` you supply                                           |
 
 ### `'messaging'`

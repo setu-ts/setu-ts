@@ -285,8 +285,10 @@ export class OutboxService implements IOutbox {
   ): Promise<void> {
     const stores = this.#stores;
     if (stores === undefined) throw new OutboxNotReadyError();
+    // The operator named the row: a malformed id is the caller's, so it
+    // answers 400 with its own sentence instead of a masked 500.
     if (typeof id !== 'string' || id.length === 0) {
-      throw new TypeError('outbox: release needs the row id');
+      throw new OutboxRowStateError('invalid-id');
     }
     if (action !== 'retry' && action !== 'discard') {
       throw new TypeError("outbox: release action must be 'retry' or 'discard'");

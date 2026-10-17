@@ -124,7 +124,7 @@ Check each item and note where it holds or fails:
 - **No plugin imports another plugin** — cross-plugin needs go through
   `ctx.services.get<T>(CAPABILITIES.X)`.
 - **Docs match behavior** — every JSDoc/PUBLIC_API claim you can point at a code path for, actually
-  executes that path ("lazily imported via npm:x" must really `import()`).
+  executes that path ("lazily imported via `x`" must really `import('x')`).
 - **Fixtures honor the real contract** — cross-check fixture values against how the real producer
   sets them (e.g. monotonic `hrtime()` vs epoch `Date.now()`). For a fixture standing in for an
   external dependency, verify every method/shape the fixture implements EXISTS in the dependency's

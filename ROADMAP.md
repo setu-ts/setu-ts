@@ -14103,7 +14103,7 @@ re-run against a newly published version.
 | **M113g** | design | database calls and errors under faults and edge inputs                | V9-25, V9-33, V9-26, V9-34, V9-48                                                        | `database-plugin`                                                                                                                                                         |
 | **M113h** | fix    | generated output that is wrong                                        | V9-8, V9-17, V9-38, V9-39, V9-9, V9-11, V9-42, V9-67, V9-81                              | `cli`, `runtime`, `logger-plugin`, `kernel`                                                                                                                               |
 | **M113i** | fix    | CLI commands whose refusals and guidance mislead                      | V9-5, V9-12, V9-13, V9-30, V9-40, V9-60, V9-61, V9-62, V9-75                             | `cli`                                                                                                                                                                     |
-| **M113j** | fix    | outbox and inbox signals                                              | V9-20, V9-21, V9-22                                                                      | `messaging-plugin`                                                                                                                                                        |
+| **M113j** | fix    | outbox and inbox signals                                              | V9-20, V9-21, V9-22, V9-10                                                               | `messaging-plugin`, `database-plugin`, `cli` JSDoc, `scripts/`, `test/`, `docs/`, `PUBLIC_API.md`, `ARCHITECTURE.md`, the other package READMEs                           |
 | **M113k** | fix    | the idempotency key from client to server                             | V9-14, V9-15, V9-16                                                                      | `sdk`, `idempotency`, `http-security`, `database`                                                                                                                         |
 | **M113l** | docs   | documentation that does not match the code, or is missing             | V9-6, V9-7, V9-10, V9-24, V9-29, V9-51 … V9-59, V9-69, V9-72, V9-73, V9-74, V9-77, V9-78 | docs of `telemetry`, `localization`, `worker-pool`, `database`, `audit`, `health`, `openapi`, `multi-tenancy`, `config`, `kernel`, `auth`; `docs/`                        |
 | **M113m** | design | time the framework does not honour                                    | V9-63 **High**, V9-70                                                                    | `scheduler-plugin`, `auth-plugin`                                                                                                                                         |
@@ -14339,11 +14339,14 @@ schematic table), V9-75 (functional `g job` stays unwired though `QueuePlugin` i
 
 ### Milestone 113j: Outbox and Inbox Signals
 
-**Package(s):** `packages/messaging-plugin` — **fix** letter.
+**Package(s):** `packages/messaging-plugin`, `packages/database-plugin`, `scripts/`, `test/`,
+`docs/`, `PUBLIC_API.md`, `ARCHITECTURE.md`, the other package READMEs, the `cli` JSDoc — **fix**
+letter.
 
 V9-20 (a paused relay's late duplicate is booked as a store failure, never as an overlap), V9-21
-(`IInbox.release` on an unparked row answers a masked 500), V9-22 (README: the outbox mapping's
-`npm:` import and the inbox purge wording).
+(`IInbox.release` on an unparked row answers a masked 500), V9-22 (every stale `npm:` specifier in
+committed docs — the widened scope — plus the P7/P8 recurrence gate), taking V9-10's `npm:zod` half
+from M113l.
 
 ### Milestone 113k: The Idempotency Key From Client to Server
 
@@ -14359,16 +14362,16 @@ CORS example refuses `idempotency-key` and nothing says to expose `idempotent-re
 **Package(s):** docs only — one `docs/…` branch.
 
 V9-6 (telemetry's optional OTel peers), V9-7 (the 0.9.0 upgrade guide's Deno and Workers steps),
-V9-10 (getting-started's Config snippet), V9-24 (localization's error-response `Content-Language`),
-V9-29 (worker threads exceed `maxWorkers` at a hand-over on every runtime, measured only for Deno),
-and the nine M104 gaps V9-51 … V9-59 (database repository surface, audit storage and read path,
-`/ready` semantics, OpenAPI `exclude`/`operationId`, the localization formatter's limits,
-tenant-from-principal, construction-time configuration, the kernel's "one option" sentence, the
-`ITotpStore` atomicity contract), and from X39–X44: V9-69 (no backup/restore guidance anywhere),
-V9-72 (the S3 provider's two SDK packages, named nowhere, and a raw startup crash without the
-presigner), V9-73 (the tier-C idempotency example needs a scheduler), V9-74 (no inbound-webhook
-guidance), V9-77 (a secret in the scaffold's `.env` is invisible to the env provider), V9-78 (the
-deployment guide describes only the Deno image).
+V9-10 (getting-started's `envFilePath` and its Deno-only testing section), V9-24 (localization's
+error-response `Content-Language`), V9-29 (worker threads exceed `maxWorkers` at a hand-over on
+every runtime, measured only for Deno), and the nine M104 gaps V9-51 … V9-59 (database repository
+surface, audit storage and read path, `/ready` semantics, OpenAPI `exclude`/`operationId`, the
+localization formatter's limits, tenant-from-principal, construction-time configuration, the
+kernel's "one option" sentence, the `ITotpStore` atomicity contract), and from X39–X44: V9-69 (no
+backup/restore guidance anywhere), V9-72 (the S3 provider's two SDK packages, named nowhere, and a
+raw startup crash without the presigner), V9-73 (the tier-C idempotency example needs a scheduler),
+V9-74 (no inbound-webhook guidance), V9-77 (a secret in the scaffold's `.env` is invisible to the
+env provider), V9-78 (the deployment guide describes only the Deno image).
 
 ### Milestone 113m: Time the Framework Does Not Honour
 
@@ -14892,7 +14895,7 @@ patch by construction and gains nothing new here.
 | 113g      | ⬜     | database-plugin — database calls and errors under faults and edge inputs                                                                                                                                                                                                                  |
 | 113h      | ⬜     | cli — generated output that is wrong (fix branches)                                                                                                                                                                                                                                       |
 | 113i      | ⬜     | cli — commands whose refusals and guidance mislead (fix branches)                                                                                                                                                                                                                         |
-| 113j      | ⬜     | messaging-plugin — outbox and inbox signals (fix branches)                                                                                                                                                                                                                                |
+| 113j      | ✅     | messaging-plugin + database-plugin — outbox and inbox signals; PR #469                                                                                                                                                                                                                    |
 | 113k      | ⬜     | sdk + idempotency + http-security + database — the idempotency key from client to server (fix branches)                                                                                                                                                                                   |
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 113m      | ⬜     | scheduler-plugin + auth-plugin — time the framework does not honour                                                                                                                                                                                                                       |

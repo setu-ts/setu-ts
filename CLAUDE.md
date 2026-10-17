@@ -93,11 +93,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   additionally needs one guarded REAL-import test (logger-plugin pino / M9 discovery precedent),
   with the branching around the import unit-tested via an injection seam.
 - **Check external-package facts against reality, not memory.** The exact npm specifier of the
-  RUNTIME package (`npm:@prisma/client` — `npm:prisma` is the CLI and the plan had it wrong), and
-  whether the library's API actually fits the contract being implemented (Prisma has only
-  callback-style `$transaction` with a ~5s default timeout — no imperative begin/commit; bridging
-  that is a design decision, not an implementation detail). A plan naming a lazy import must state
-  exactly what it loads, when it can succeed, and the error when it cannot.
+  RUNTIME package (`@prisma/client` — `prisma` is the CLI and the plan had it wrong), and whether
+  the library's API actually fits the contract being implemented (Prisma has only callback-style
+  `$transaction` with a ~5s default timeout — no imperative begin/commit; bridging that is a design
+  decision, not an implementation detail). A plan naming a lazy import must state exactly what it
+  loads, when it can succeed, and the error when it cannot.
 - **Invented tokens and names must pass the committed grammar and the kernel's constraints.** Run
   every new capability token against `createCapabilityToken` in `packages/common/src/tokens.ts`
   (lowercase kebab-case, dot namespacing — colons are ILLEGAL), and for any plugin registrable more
@@ -6417,6 +6417,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   more (a throwing driver accessor making the scrub the fault, no Scarf opt-out at an npm workspace
   root). All six are fixed; the round-2 fixes were NOT re-audited, at the maintainer's direction —
   complete (PR #468)
+- **Milestone 113j** (`packages/messaging-plugin` + `packages/database-plugin` + `scripts/` + docs —
+  outbox and inbox signals; V9-20, V9-21, V9-22 and V9-10's `npm:zod` half). A relay paused past its
+  lease republished a row another relay had sent and reported nothing, because the late `markSent`
+  answer lost the race to its deadline and was booked as a store failure. Settlement writes for a
+  publish that actually ran now use their own `storeTimeoutMs` bound, ignoring an exhausted sweep
+  budget, and a late answer still records `duplicate`, `claim-lost` or `poisoned` through the one
+  `observeSettlement` both paths call. A publish the budget refused ends the sweep `'deadline'` with
+  no attempt counted. `InboxRowStateError` and `OutboxRowStateError` carry 400/404/409 status hints
+  with fixed details, and `OutboxRowStateError` gains `'invalid-id'` (breaking for an exhaustive
+  `switch`). Every stale `npm:` specifier in committed docs is corrected, the fence engine stops
+  rewriting them, and `check:docs` refuses one through rules P7 (quoted import) and P8 (any other
+  reference). The implementation was a trial of opencode on a local Qwen 27B: about 4 h 23 min over
+  two runs, stuck once on pause-test event ordering that needed an outside diagnosis, then stopped
+  before its gates and finished by Claude. Security audit round 1 failed on one Low (the P7/P8 scan
+  was quadratic, ~18 s for a 1 MiB line); round 2 passed on `4220698a`. The three observations it
+  raised — a budget-refused publish counted as a failure, a row id quoted in a store error, and a
+  cubic continued-line join in the same gate — were fixed afterwards and not re-audited, at the
+  maintainer's direction — complete (PR #469)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
@@ -6817,7 +6835,7 @@ because nothing defined what one was.
   external dependency, at least ONE test must exercise the REAL load/import path (guard/skip it when
   the dep is absent) so a stubbed-out fake is never the only path the suite ever runs.
 - **Docs must match behavior — a green gate does not verify a claim.** JSDoc, comments, and
-  PUBLIC_API.md must describe what the code actually does. "Lazily imported via `npm:pino`" on a
+  PUBLIC_API.md must describe what the code actually does. "Lazily imported via `pino`" on a
   function that never imports pino, or "@throws if X cannot be loaded from npm" when it throws
   because it never tries, are lies that pass every gate. When you touch a doc claim, confirm the
   code path it describes actually executes. **And when a comment or doc claims a SET — these inputs
