@@ -207,6 +207,37 @@ describe('form CSRF beside a bearer API (V9-27)', () => {
       await app.stop();
     }
   });
+
+  it.each([
+    ['a tampered cookie', 'setu_session=not-a-real-envelope'],
+    ['no cookie', undefined],
+  ])(
+    'never sends a session for a bearer-exempt request (L4): %s',
+    async (_label, cookie: string | undefined) => {
+      const { app, ran } = await start();
+      try {
+        const response = await app.fetch(
+          new Request('http://localhost/api/preferences', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${await token(app)}`,
+              ...(cookie === undefined ? {} : { cookie }),
+            },
+            body: '{}',
+          }),
+        );
+        await response.body?.cancel();
+        // Exempt and served — the handler wrote to its (new) session …
+        expect(response.status).toBe(200);
+        expect(ran).toEqual(['preferences']);
+        // … but nothing is committed, so no session can be planted in a browser.
+        expect(response.headers.getSetCookie()).toEqual([]);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
 });
 
 describe('verifyCsrfToken applies the same bearer rule', () => {

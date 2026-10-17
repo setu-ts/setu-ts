@@ -53,22 +53,47 @@ export function isBearerRequest(headers: Headers): boolean {
 }
 
 /**
- * Whether form-CSRF verification is skipped for this request: an explicit path
- * exclusion, or — while `exemptBearer` is on — a bearer request that a
- * `'header'`-credential strategy authenticated, as recorded under
- * `CREDENTIAL_SOURCE_STATE_KEY` by the authentication middleware, AND that
- * restored no session: the session `session-plugin` parked under
- * `SESSION_STATE_KEY` is new (`isNew === true`).
+ * The `ctx.state` key under which form CSRF marks a request the BEARER exemption
+ * admitted, so `sessionMiddleware` does not commit its session (M113e, L4).
  *
- * A bearer request is exempt ONLY when a header-credential strategy
- * authenticated it AND it restored no session: a request carrying a valid
- * session cookie must present a CSRF token even with a valid bearer token,
- * because the handler would otherwise act on that browser's session (M113e,
- * L3). An unauthenticated bearer header, a request the session cookie (a
- * `'cookie'` credential) authenticated, or a request whose session was restored
- * is still verified. A non-browser API client sends no session cookie, so its
- * new session keeps the exemption. This fails closed when the session or the
- * credential source is missing.
+ * Internal to `session-plugin` — both writer and reader live here — so it is
+ * not in `common` and not on the barrel.
+ */
+export const BEARER_EXEMPT_STATE_KEY = 'session-plugin:bearer-exempt';
+
+/**
+ * Whether the bearer rule exempts this request: `exemptBearer` is on, the
+ * request carries `Authorization: Bearer <token>`, a `'header'`-credential
+ * strategy authenticated it (recorded under `CREDENTIAL_SOURCE_STATE_KEY` by the
+ * authentication middleware), AND it restored no session — the session
+ * `session-plugin` parked under `SESSION_STATE_KEY` is new (`isNew === true`).
+ *
+ * A request carrying a valid session cookie must present a CSRF token even with
+ * a valid bearer token, because the handler would otherwise act on that
+ * browser's session (M113e, L3). An unauthenticated bearer header, a request the
+ * session cookie (a `'cookie'` credential) authenticated, or a request whose
+ * session was restored is still verified. A non-browser API client sends no
+ * session cookie, so its new session keeps the exemption. This fails closed
+ * when the session or the credential source is missing.
+ *
+ * @param ctx - The request context
+ * @param config - The resolved CSRF configuration
+ * @returns `true` when the bearer rule exempts the request
+ */
+export function isBearerExempt(ctx: IRequestContext, config: ResolvedCsrfConfig): boolean {
+  const session = ctx.state.get(SESSION_STATE_KEY) as ISession | undefined;
+  return (
+    config.exemptBearer &&
+    isBearerRequest(ctx.request.headers) &&
+    ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) === 'header' &&
+    session?.isNew === true
+  );
+}
+
+/**
+ * Whether form-CSRF verification is skipped for this request: the bearer rule
+ * ({@linkcode isBearerExempt}) or an explicit path exclusion. Pure — it records
+ * nothing; the entry points call {@linkcode applyCsrfExemption}.
  *
  * @param ctx - The request context
  * @param config - The resolved CSRF configuration
@@ -80,12 +105,34 @@ export function isCsrfExempt(
   config: ResolvedCsrfConfig,
   exclude: CsrfFormOptions['exclude'],
 ): boolean {
-  const session = ctx.state.get(SESSION_STATE_KEY) as ISession | undefined;
-  return (
-    (config.exemptBearer &&
-      isBearerRequest(ctx.request.headers) &&
-      ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) === 'header' &&
-      session?.isNew === true) ||
-    isCsrfExcluded(ctx, exclude)
-  );
+  return isBearerExempt(ctx, config) || isCsrfExcluded(ctx, exclude);
+}
+
+/**
+ * {@linkcode isCsrfExempt}, and when the BEARER rule is what exempts the request,
+ * marks it under {@linkcode BEARER_EXEMPT_STATE_KEY} so its session is not
+ * committed (M113e, L4).
+ *
+ * The bearer rule admits only a request that restored no session, but the
+ * handler could still WRITE one, and the commit would send it as `Set-Cookie`.
+ * On a credentialed CORS response that plants an attacker-written session in a
+ * browser whose cookie was dead. A header-authenticated request has no business
+ * writing a browser session, so it gets none. Both entry points — the
+ * middleware and {@linkcode verifyCsrfToken} — call this, so they agree.
+ *
+ * @param ctx - The request context
+ * @param config - The resolved CSRF configuration
+ * @param exclude - The configured path exclusions
+ * @returns `true` when verification must not run
+ */
+export function applyCsrfExemption(
+  ctx: IRequestContext,
+  config: ResolvedCsrfConfig,
+  exclude: CsrfFormOptions['exclude'],
+): boolean {
+  if (isBearerExempt(ctx, config)) {
+    ctx.state.set(BEARER_EXEMPT_STATE_KEY, true);
+    return true;
+  }
+  return isCsrfExcluded(ctx, exclude);
 }

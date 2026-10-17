@@ -16,7 +16,7 @@ import type { CsrfFormOptions, ResolvedCsrfConfig } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
 import { getSession } from '../services/get-session.ts';
 import { readCsrfToken } from './token.ts';
-import { isCsrfExempt } from './exclude.ts';
+import { applyCsrfExemption } from './exclude.ts';
 
 /**
  * Verifies the request's CSRF token against the session's, throwing on any
@@ -52,7 +52,7 @@ export async function verifyCsrfToken(
   options: CsrfFormOptions = {},
 ): Promise<void> {
   const config = resolveCsrfConfig(options);
-  if (isCsrfExempt(ctx, config, options.exclude)) return;
+  if (applyCsrfExemption(ctx, config, options.exclude)) return;
   await verifyWithConfig(ctx, config);
 }
 

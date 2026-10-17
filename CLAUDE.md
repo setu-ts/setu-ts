@@ -6382,7 +6382,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (now documented as trusting every origin CORS lets send `Authorization` with credentials), and a
   non-boolean `exemptBearer` failed open (now refused) — and observed that fixation without
   `regenerate()` was only reduced, so promotion now rotates the session id; round 2 passed on
-  `46acb5dd` — complete (PR #467)
+  `46acb5dd`. CodeRabbit then raised the bearer boundary as Major, and a framework survey found no
+  framework exempting on a bare header (Django REST Framework enforces CSRF only when session auth
+  succeeded), so the exemption became credential-based: strategies declare `credential`, the auth
+  middleware records it under `CREDENTIAL_SOURCE_STATE_KEY`, and form CSRF moves from priority 275
+  to 325. Rounds 3 and 4 narrowed it twice more: a bearer request is exempt only when it restored no
+  session (L3, an attacker's own valid token beside the victim's cookie), and such a request gets no
+  browser session committed (L4, session planting). The L4 fix was not re-audited, at the
+  maintainer's direction — complete (PR #467)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

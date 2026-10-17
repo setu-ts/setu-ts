@@ -364,3 +364,16 @@ failing. One new Low, fixed in code.
   `SESSION_STATE_KEY` and exempts only when it is new (`isNew === true`), failing closed when the
   session or the credential source is missing. A non-browser API client sends no session cookie, so
   its new session keeps the exemption.
+
+### Committed-tree audit, round 4 (same independent auditor, `0279bac3`) — failed
+
+L3 closed on both strategies (attacker token + victim cookie: write and logout 403, victim session
+unchanged); every requested edge case failed closed. New Low **L4**: when the victim's cookie no
+longer restores (tampered, expired, revoked, absent) the session is new, so a CORS-approved origin's
+own valid bearer request was exempt, and a session its handler wrote was committed and sent as
+`Set-Cookie` — session planting, login CSRF if the route writes identity. Fixed by the maintainer's
+choice of making bearer-exempt requests sessionless: `applyCsrfExemption` marks a request the bearer
+rule exempts (`BEARER_EXEMPT_STATE_KEY`, internal), and `sessionMiddleware` skips the commit for it.
+Implemented inline; reverting the skip fails both L4 tests (tampered cookie, no cookie).
+
+The L4 fix was NOT re-audited, at the maintainer's direction (2026-10-17).

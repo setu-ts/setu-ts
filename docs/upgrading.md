@@ -29,9 +29,12 @@ The exemption no longer trusts a bare header: a junk bearer header beside a sess
 verified, and an unauthenticated bearer header is verified too. A request carrying a valid session
 cookie must send the CSRF header even with a valid bearer token, because the handler would otherwise
 act on that browser's session — so a browser app calling the bearer API while holding a session
-cookie must send the CSRF header. The form-CSRF middleware moved from priority 275 to 325 (after
-authentication at 300, before authorization at 350) to make that check; custom middleware registered
-between 275 and 325 that relied on form CSRF having run must move above 325.
+cookie must send the CSRF header. A request the bearer rule exempts also gets no browser session:
+whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
+so it cannot plant a session in a browser whose cookie no longer restores. The form-CSRF middleware
+moved from priority 275 to 325 (after authentication at 300, before authorization at 350) to make
+that check; custom middleware registered between 275 and 325 that relied on form CSRF having run
+must move above 325.
 
 **Anonymous sessions on the store strategy stay in the cookie.** Nothing to change. During a rolling
 deploy an older replica treats the new anonymous cookie as no session, so a visitor with a form open

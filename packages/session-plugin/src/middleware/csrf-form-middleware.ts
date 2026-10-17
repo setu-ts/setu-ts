@@ -22,7 +22,7 @@ import type { CsrfFormOptions } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
 import { CSRF_CONFIG_STATE_KEY } from '../csrf/token.ts';
 import type { PublishedCsrfConfig } from '../csrf/token.ts';
-import { isCsrfExempt } from '../csrf/exclude.ts';
+import { applyCsrfExemption } from '../csrf/exclude.ts';
 import { verifyWithConfig } from '../csrf/verify.ts';
 
 /** Status returned when verification fails. */
@@ -77,7 +77,7 @@ export function csrfFormMiddleware(options: CsrfFormOptions = {}): MiddlewareFun
 
     if (
       config.ignoreMethods.has(ctx.request.method.toUpperCase()) ||
-      isCsrfExempt(ctx, config, options.exclude)
+      applyCsrfExemption(ctx, config, options.exclude)
     ) {
       await next();
       return;

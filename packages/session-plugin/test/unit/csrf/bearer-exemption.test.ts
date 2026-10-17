@@ -12,7 +12,12 @@ import { describe, expect, it } from 'vitest';
 import type { IRequestContext, ISession } from '@setu-ts/common';
 import { CREDENTIAL_SOURCE_STATE_KEY, SESSION_STATE_KEY } from '@setu-ts/common';
 
-import { isBearerRequest, isCsrfExempt } from '../../../src/csrf/exclude.ts';
+import {
+  applyCsrfExemption,
+  BEARER_EXEMPT_STATE_KEY,
+  isBearerRequest,
+  isCsrfExempt,
+} from '../../../src/csrf/exclude.ts';
 import { resolveCsrfConfig } from '../../../src/options.ts';
 
 function headers(authorization?: string): Headers {
@@ -152,5 +157,27 @@ describe('resolveCsrfConfig — exemptBearer validation (M113e audit L2)', () =>
     expect(resolveCsrfConfig({ exemptBearer: false }).exemptBearer).toBe(false);
     expect(resolveCsrfConfig({ exemptBearer: true }).exemptBearer).toBe(true);
     expect(resolveCsrfConfig({}).exemptBearer).toBe(true);
+  });
+});
+
+describe('applyCsrfExemption marks only a bearer exemption (M113e, L4)', () => {
+  const config = resolveCsrfConfig({});
+
+  it('marks a request the bearer rule exempts', () => {
+    const state = stateFor('header', true);
+    expect(applyCsrfExemption(ctx('/api', 'Bearer x', state), config, undefined)).toBe(true);
+    expect(state.get(BEARER_EXEMPT_STATE_KEY)).toBe(true);
+  });
+
+  it('does not mark a path exclusion', () => {
+    const state = stateFor(undefined);
+    expect(applyCsrfExemption(ctx('/rpc', undefined, state), config, ['/rpc'])).toBe(true);
+    expect(state.has(BEARER_EXEMPT_STATE_KEY)).toBe(false);
+  });
+
+  it('does not mark a request that is verified', () => {
+    const state = stateFor('header', false);
+    expect(applyCsrfExemption(ctx('/api', 'Bearer x', state), config, undefined)).toBe(false);
+    expect(state.has(BEARER_EXEMPT_STATE_KEY)).toBe(false);
   });
 });

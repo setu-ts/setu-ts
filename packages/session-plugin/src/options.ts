@@ -81,7 +81,10 @@ export interface CsrfFormOptions {
    * Skip verification for a bearer request ONLY when a bearer (header-credential)
    * strategy authenticated it AND the request restored no session — the session
    * `session-plugin` parked for the request is new (M113e, V9-27, L3). Default
-   * `true`.
+   * `true`. A request the bearer rule exempts also gets no browser session: whatever
+   * its handler writes to the session is not committed and no `Set-Cookie` is
+   * sent (L4), so it cannot plant a session in a browser whose cookie no longer
+   * restores.
    *
    * Form CSRF defends credentials the BROWSER attaches by itself — the session
    * cookie. A bearer token is never attached by the browser, and a page on

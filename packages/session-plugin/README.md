@@ -285,7 +285,9 @@ cookie, so its new session keeps the exemption; a junk bearer header beside a se
 still verified, and an unauthenticated bearer header is verified too (it fails closed when the
 session or the credential source is missing). `Basic` credentials are NOT exempt, because browsers
 re-send cached Basic credentials automatically. `exemptBearer: false` verifies every unsafe request,
-the behaviour before 0.10.0.
+the behaviour before 0.10.0. A request the bearer rule exempts also gets no browser session:
+whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
+so it cannot plant a session in a browser whose cookie no longer restores.
 
 ### What `SameSite` does not separate
 

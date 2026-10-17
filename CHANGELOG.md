@@ -27,15 +27,18 @@ All notable changes to this project are documented here. The format follows
   presence: a request carrying a valid session cookie must present a token even with a valid bearer
   token, because the handler would otherwise act on that browser's session (an origin CORS lets send
   credentials can send its own valid bearer token beside the victim's cookie, M113e, L3). A
-  non-browser API client sends no session cookie, so its new session keeps the exemption; a junk
-  bearer header beside a session cookie is still verified, and an unauthenticated bearer header is
-  verified too (it fails closed when the session or the credential source is missing). For that, the
-  form-CSRF middleware moved from priority 275 to 325 — after authentication (300), before
-  authorization (350) — so the credential source authentication recorded (the
-  `IAuthStrategy.credential` member, published under common's `CREDENTIAL_SOURCE_STATE_KEY`) and the
-  session it parks exist when the check runs. `Basic` credentials are not exempt. A non-boolean
-  `exemptBearer` is refused with a `TypeError`. `csrf.exemptBearer: false` restores the previous
-  refusal; `csrfFormMiddleware` and `verifyCsrfToken` honour the option alike.
+  non-browser API client sends no session cookie, so its new session keeps the exemption. A request
+  the bearer rule exempts also gets no browser session: whatever its handler writes to the session
+  is not committed and no `Set-Cookie` is sent (M113e, L4), so it cannot plant a session in a
+  browser whose cookie no longer restores. Otherwise, a junk bearer header beside a session cookie
+  is still verified, and an unauthenticated bearer header is verified too (it fails closed when the
+  session or the credential source is missing). For that, the form-CSRF middleware moved from
+  priority 275 to 325 — after authentication (300), before authorization (350) — so the credential
+  source authentication recorded (the `IAuthStrategy.credential` member, published under common's
+  `CREDENTIAL_SOURCE_STATE_KEY`) and the session it parks exist when the check runs. `Basic`
+  credentials are not exempt. A non-boolean `exemptBearer` is refused with a `TypeError`.
+  `csrf.exemptBearer: false` restores the previous refusal; `csrfFormMiddleware` and
+  `verifyCsrfToken` honour the option alike.
 - **Breaking session storage: anonymous sessions stay in the cookie on the store strategy (M113e,
   0.10.0, `@setu-ts/session-plugin`).** A session holding only the form-CSRF token and the tenant
   binding is sealed into the cookie and writes no store row, so 200 anonymous form views no longer
