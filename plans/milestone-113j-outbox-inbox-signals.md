@@ -555,6 +555,15 @@ classes applied, 11 negative controls each observed failing. Report:
   edited to unknown text (a masked 500; the id reaches the server log only); O4 — `errorHandler`
   logs a failing store's message unmasked, by design.
 
+### 10.7 Committed-tree audit, round 2 (fresh-context agent, `4220698a`) — passed
+
+Re-audit of `abc6e5a6..4220698a` by a second fresh agent. Every round-1 probe re-run with identical
+results; the P7/P8 rewrite was checked against the round-1 scanner over 12 named and 200,000 random
+lines with no difference; 6 negative controls each observed failing; `check:docs` exit 0. F1 is
+closed and there are no new findings. Observation O5, outside this change: the backslash-continued
+line join in the same gate (`scripts/toolchain-prose.ts`, P3, since M111f) is cubic — 4,000
+continued lines take ~108 s, identically on `develop` — left for a `fix/…` branch.
+
 ## 11. Plan review (one round, fresh-context agent, before implementation)
 
 Thirteen findings, all folded into this plan: the `markFailure` write for a publish the budget never
