@@ -25,7 +25,12 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { createCachedProbe, resolveProbeTiming, withDeadline } from '@setu-ts/common';
+import {
+  createCachedProbe,
+  OptionalDependencyUnavailableError,
+  resolveProbeTiming,
+  withDeadline,
+} from '@setu-ts/common';
 import { resolvePublishTimeoutMs } from './publish-timeout.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
@@ -263,8 +268,11 @@ export interface PubSubOptions {
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadPubSubModule(): Promise<PubSubSdkModule> {
-  const mod = await import('@google-cloud/pubsub');
-  return mod as unknown as PubSubSdkModule;
+  try {
+    return (await import('@google-cloud/pubsub')) as unknown as PubSubSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@google-cloud/pubsub', { cause: error });
+  }
 }
 
 /** Most `Topic` handles {@linkcode adaptPubSubModule} keeps while idle (M106 audit L3). */

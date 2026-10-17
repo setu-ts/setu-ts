@@ -567,7 +567,14 @@ describe('runAddCommand', () => {
     }
     const worker = harness({ '/app/deno.json': DENO_MANIFEST, '/app/wrangler.jsonc': '{}' });
     expect(await worker.run(['cloudflare']), worker.err.join('\n')).toBe(0);
-    expect(worker.out.join('\n')).toContain('Register CloudflarePlugin({ env })');
+    expect(worker.out.join('\n')).toContain(
+      'Register CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })',
+    );
+    // The printed line reads `waitUntil`, while a 0.10.0 factory names the
+    // unread parameter `_waitUntil` and an older one has none (M113d §3.8):
+    // both steps are printed, and the file itself is never classified.
+    expect(worker.out.join('\n')).toContain("rename the '_waitUntil' parameter to 'waitUntil'");
+    expect(worker.out.join('\n')).toContain('docs/upgrading.md');
   });
 
   it('prints only registrations that type-check against their plugin option types', async () => {

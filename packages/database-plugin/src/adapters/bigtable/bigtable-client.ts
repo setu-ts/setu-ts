@@ -9,6 +9,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type {
   BigtableFilter,
   BigtableMutation,
@@ -131,7 +132,12 @@ export function createLazyBigtableLoader(
   return {
     owned: true,
     load: async (): Promise<IBigtableClient> => {
-      const module = (await import('@google-cloud/bigtable')) as unknown as BigtableSdkModule;
+      let module: BigtableSdkModule;
+      try {
+        module = (await import('@google-cloud/bigtable')) as unknown as BigtableSdkModule;
+      } catch (error) {
+        throw new OptionalDependencyUnavailableError('@google-cloud/bigtable', { cause: error });
+      }
       return adaptBigtableSdkModule(module, configuration);
     },
   };

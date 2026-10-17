@@ -10,7 +10,7 @@
 import * as nodeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   formatForTarget,
@@ -299,6 +299,29 @@ describe('the real Prettier', () => {
       ]);
     } finally {
       await nodeFs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('loadPrettier — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when prettier is absent', async () => {
+    const { loadPrettier } = await import('../../../src/utils/prettier-format.ts');
+    vi.doMock('prettier', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadPrettier();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('prettier');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('prettier');
     }
   });
 });

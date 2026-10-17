@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IAzureSecretsClient, SecretProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -104,10 +105,20 @@ export function adaptAzureModule(
  * @throws {Error} If the packages cannot be resolved
  */
 export async function loadAzureModule(): Promise<AzureSdkModule> {
-  const [secretsMod, identityMod] = await Promise.all([
-    import('@azure/keyvault-secrets'),
-    import('@azure/identity'),
-  ]);
+  // Two guards, one per import, so the error names the package that actually
+  // failed rather than sniffing a rejection message (M113d §3.1).
+  let secretsMod: typeof import('@azure/keyvault-secrets');
+  try {
+    secretsMod = await import('@azure/keyvault-secrets');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/keyvault-secrets', { cause: error });
+  }
+  let identityMod: typeof import('@azure/identity');
+  try {
+    identityMod = await import('@azure/identity');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/identity', { cause: error });
+  }
   return {
     SecretClient: secretsMod.SecretClient,
     DefaultAzureCredential: identityMod.DefaultAzureCredential,

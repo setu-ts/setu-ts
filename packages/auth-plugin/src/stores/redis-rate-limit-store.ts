@@ -11,17 +11,25 @@ import {
   attachConnectionErrorReporter,
   deadlineRangeError,
   isConnectionFault,
+  OptionalDependencyUnavailableError,
 } from '@setu-ts/common';
 import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
 import { RateLimitStoreUnavailableError } from '../errors.ts';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
 
 /**
- * Lazily load ioredis at runtime. Pin to 5.x for stability.
+ * Lazily load ioredis at runtime. Pin to 5.x for stability. The import is
+ * guarded in the SAME function (AI_GUIDELINES §12.2), so a bundler that
+ * resolves dynamic imports at build time — esbuild inside Wrangler — leaves
+ * it as a runtime import when the driver is absent.
  */
 async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
-  const mod = await import('ioredis');
-  return mod.Redis;
+  try {
+    const mod = await import('ioredis');
+    return mod.Redis;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+  }
 }
 
 /**

@@ -129,10 +129,17 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       // injectable seam. Both come from one `react-router` module object.
       const mode = options.mode ?? DEFAULT_MODE;
       const getLoadRequestHandler = options.loadRequestHandler ?? loadRequestHandler;
+      // M113d §3.10: the build arrives by path (path arm) or as a module
+      // (module arm — a bundled Worker). The seam keeps its signature and is
+      // passed the path, or the `'<serverBuild>'` placeholder on the module
+      // arm; the default loader receives the module through its options.
+      const buildPath = 'serverBuildPath' in options ? options.serverBuildPath : '<serverBuild>';
+      const loaderOptions =
+        'serverBuild' in options ? { serverBuild: options.serverBuild } : undefined;
       // Validated at registration: a seam returning the pre-0.2.0 bare handler
       // would otherwise register cleanly and 500 on every request instead.
       const { handler, createLoadContext } = assertSsrRuntime(
-        await getLoadRequestHandler(options.serverBuildPath, mode),
+        await getLoadRequestHandler(buildPath, mode, loaderOptions),
       );
 
       // Build and register the SSR service.
@@ -230,7 +237,8 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
           status: 'up',
           data: {
             mode,
-            serverBuildPath: options.serverBuildPath,
+            serverBuildPath:
+              'serverBuildPath' in options ? options.serverBuildPath : '<serverBuild>',
           },
         }),
       );

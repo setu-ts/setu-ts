@@ -170,6 +170,9 @@ for (const target of ['example', 'scaffold'] as const) {
           () => page.getByRole('link', { name: 'Sign in', exact: true }).click(),
           '/login',
         );
+        // The URL can change before React commits the new route, so wait for
+        // the form rather than counting at once (a CI flake on PR #465).
+        await page.locator('form').first().waitFor();
         expect(await page.locator('form').count()).toBe(1);
       });
     });

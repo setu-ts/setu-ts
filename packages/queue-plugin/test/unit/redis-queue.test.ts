@@ -545,3 +545,27 @@ describe('RedisQueue', () => {
     });
   });
 });
+
+describe('RedisQueue — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
+    const { RedisQueue } = await import('../../src/adapters/redis-queue.ts');
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const queue = new RedisQueue();
+      let caught: unknown;
+      try {
+        await queue.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
+    }
+  });
+});

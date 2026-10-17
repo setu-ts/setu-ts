@@ -23,6 +23,9 @@ import { StaticPlugin } from '@setu-ts/static-plugin';
 /** Stands in for the Workers environment the printed line names. */
 declare const env: Record<string, unknown>;
 
+/** Stands in for the platform sink the printed line names (M113d §3.8). */
+declare const waitUntil: ((promise: Promise<unknown>) => void) | undefined;
+
 /** The printed registrations, constructed against the real option types. */
 export const PRINTED_REGISTRATIONS = [
   AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } }),
@@ -36,5 +39,9 @@ export const PRINTED_REGISTRATIONS = [
   ReactRouterPlugin({ serverBuildPath: '<server-build-module>' }),
   MultiTenancyPlugin({ resolver: 'header' }),
   ServiceDiscoveryPlugin({ provider: 'static', services: {} }),
-  CloudflarePlugin({ env }),
+  // The only runtime `setu add cloudflare` accepts is cloudflare-workers, so
+  // the printed form is the one whose factory takes `waitUntil` second
+  // (M113d §3.8). The spread is required under `exactOptionalPropertyTypes`:
+  // `setu commands` calls the factory with no `waitUntil`.
+  CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) }),
 ];

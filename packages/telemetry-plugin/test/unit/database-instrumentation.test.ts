@@ -4,7 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createIORedisInstrumentation,
   loadIORedisInstrumentation,
@@ -65,5 +65,29 @@ describe('database-instrumentation', () => {
   it('loadIORedisInstrumentation should reject when importFn rejects', async () => {
     const importFn = () => Promise.reject(new Error('inject-fail'));
     await expect(loadIORedisInstrumentation(undefined, importFn)).rejects.toThrow('inject-fail');
+  });
+});
+
+describe('loadIORedisInstrumentation — the guarded default import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    const { loadIORedisInstrumentation } =
+      await import('../../src/instrumentation/database-instrumentation.ts');
+    vi.doMock('@opentelemetry/instrumentation-ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadIORedisInstrumentation(undefined);
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@opentelemetry/instrumentation-ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@opentelemetry/instrumentation-ioredis');
+    }
   });
 });

@@ -2,7 +2,7 @@
  * Tests for graphql-loader.ts
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { adaptGraphqlModule, loadGraphqlModule } from '../../src/runtime/graphql-loader.ts';
 import { GraphqlRuntimeLoadError } from '../../src/errors/graphql-errors.ts';
 
@@ -137,5 +137,29 @@ describe('graphql-loader', () => {
 
       await expect(loadGraphqlModule(failingImporter)).rejects.toThrow(GraphqlRuntimeLoadError);
     });
+  });
+});
+
+describe('the guarded default import (M113d §3.1)', () => {
+  it('wraps the OptionalDependencyUnavailableError in GraphqlRuntimeLoadError', async () => {
+    const { loadGraphqlModule } = await import('../../src/runtime/graphql-loader.ts');
+    vi.doMock('graphql', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadGraphqlModule();
+      } catch (error) {
+        caught = error;
+      }
+      expect((caught as Error).name).toBe('GraphqlRuntimeLoadError');
+      expect((caught as Error & { cause: unknown }).cause).toBeInstanceOf(Error);
+      expect(((caught as Error & { cause: Error }).cause as Error).name).toBe(
+        'OptionalDependencyUnavailableError',
+      );
+    } finally {
+      vi.doUnmock('graphql');
+    }
   });
 });

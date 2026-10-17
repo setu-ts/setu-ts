@@ -6,21 +6,32 @@
  *
  * @module
  */
-import { attachConnectionErrorReporter, isConnectionFault } from '@setu-ts/common';
+import {
+  attachConnectionErrorReporter,
+  isConnectionFault,
+  OptionalDependencyUnavailableError,
+} from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import { CacheStoreUnavailableError } from '../errors.ts';
 import type { CacheStore } from './cache-store.ts';
 import type { IRedisClient } from '../interfaces/index.ts';
 
 /**
- * Lazily load ioredis at runtime. Pin to 5.x for stability.
+ * Lazily load ioredis at runtime. Pin to 5.x for stability. The import is
+ * guarded in the SAME function (AI_GUIDELINES §12.2), so a bundler that
+ * resolves dynamic imports at build time — esbuild inside Wrangler — leaves
+ * it as a runtime import when the driver is absent.
  *
  * @returns The ioredis constructor
- * @throws {Error} If the ioredis package cannot be resolved
+ * @throws {OptionalDependencyUnavailableError} If the ioredis package cannot be resolved
  */
 async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
-  const mod = await import('ioredis');
-  return mod.Redis;
+  try {
+    const mod = await import('ioredis');
+    return mod.Redis;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+  }
 }
 
 /**

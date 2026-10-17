@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
 import type { IS3Backend } from '../../src/interfaces/index.ts';
 import {
@@ -1468,5 +1468,34 @@ describe('adaptAwsS3Module getStream — SDK node-body wrapping', () => {
     );
     const stream = await facade.getStream('k');
     expect(stream).toBe(adapted);
+  });
+});
+
+describe('loadAwsS3Module — the guarded imports (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when a package is absent', async () => {
+    const { loadAwsS3Module } = await import('../../src/providers/s3-provider.ts');
+    vi.doMock('@aws-sdk/client-s3', () => {
+      throw new Error('Cannot find package');
+    });
+    vi.doMock('@aws-sdk/s3-request-presigner', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadAwsS3Module();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(['@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner']).toContain(
+        loadError.dependency,
+      );
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-s3');
+      vi.doUnmock('@aws-sdk/s3-request-presigner');
+    }
   });
 });

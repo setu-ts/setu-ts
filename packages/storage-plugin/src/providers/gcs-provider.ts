@@ -7,6 +7,7 @@
  * @module
  */
 import type { PutObjectOptions } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IGcsClient, StorageProvider } from '../interfaces/index.ts';
 import {
   createEagerEventStream,
@@ -231,7 +232,11 @@ export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): 
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadGcsModule(): Promise<GcsSdkModule> {
-  return (await import('@google-cloud/storage')) as unknown as GcsSdkModule;
+  try {
+    return (await import('@google-cloud/storage')) as unknown as GcsSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@google-cloud/storage', { cause: error });
+  }
 }
 
 /**

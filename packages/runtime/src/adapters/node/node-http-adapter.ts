@@ -23,7 +23,11 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
+import {
+  isPromiseLike,
+  OptionalDependencyUnavailableError,
+  upgradeIntentOf,
+} from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -126,8 +130,15 @@ export interface NodeServer {
  */
 const defaultNodeServeHost: NodeServeHost = {
   serve: async (options) => {
-    // Lazy import — only loads when listen() is actually called
-    const mod = await import('@hono/node-server');
+    // Lazy import — only loads when listen() is actually called. Guarded in
+    // the SAME function (AI_GUIDELINES §12.2) so a Worker bundling this file
+    // does not fail at build time when the server adapter is absent.
+    let mod: typeof import('@hono/node-server');
+    try {
+      mod = await import('@hono/node-server');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@hono/node-server', { cause: error });
+    }
     // node-server's own `Request`/`Response` are installed as globals, which
     // is its default and what every Hono-on-Node deployment already runs.
     //

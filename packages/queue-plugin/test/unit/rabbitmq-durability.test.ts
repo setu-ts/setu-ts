@@ -9,7 +9,7 @@
  * a retry and a dead-letter; the restart itself is proven against a real broker
  * in `durability-real.test.ts`.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IQueue } from '@setu-ts/common';
@@ -463,5 +463,30 @@ describe('QueuePlugin RabbitMQ durability options', () => {
     await app.start();
     expect(warnings.some((w) => w.includes('NOT confirmed'))).toBe(true);
     await app.stop();
+  });
+});
+
+describe('RabbitMqQueue — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when amqplib is absent', async () => {
+    const { RabbitMqQueue } = await import('../../src/adapters/rabbitmq-queue.ts');
+    const { FakeRuntimeServices } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('amqplib', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const queue = new RabbitMqQueue(new FakeRuntimeServices(), { url: 'amqp://localhost' });
+      let caught: unknown;
+      try {
+        await queue.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('amqplib');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('amqplib');
+    }
   });
 });

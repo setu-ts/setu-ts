@@ -14,6 +14,8 @@
  * @since 0.2.0
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+
 /** Result of loading an instrumentation. */
 export interface LoadedInstrumentation {
   instance: unknown;
@@ -54,8 +56,15 @@ export function createHttpInstrumentation(
  */
 export async function loadHttpInstrumentation(
   configArg: unknown | undefined,
-  importFn: () => Promise<Record<string, unknown>> = () =>
-    import('@opentelemetry/instrumentation-http'),
+  importFn: () => Promise<Record<string, unknown>> = async () => {
+    try {
+      return await import('@opentelemetry/instrumentation-http');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-http', {
+        cause: error,
+      });
+    }
+  },
 ): Promise<LoadedInstrumentation> {
   const mod = await importFn();
   const instance = createHttpInstrumentation(mod, configArg);
@@ -90,8 +99,15 @@ export function createFetchInstrumentation(
  */
 export async function loadFetchInstrumentation(
   configArg: unknown | undefined,
-  importFn: () => Promise<Record<string, unknown>> = () =>
-    import('@opentelemetry/instrumentation-undici'),
+  importFn: () => Promise<Record<string, unknown>> = async () => {
+    try {
+      return await import('@opentelemetry/instrumentation-undici');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-undici', {
+        cause: error,
+      });
+    }
+  },
 ): Promise<LoadedInstrumentation> {
   const mod = await importFn();
   const instance = createFetchInstrumentation(mod, configArg);

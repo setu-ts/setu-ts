@@ -349,6 +349,23 @@ export async function bootAndProbe(
   probe: string,
 ): Promise<Record<string, unknown>> {
   await nodeFs.writeFile(`${project}/run-probe.ts`, probe);
+  // M113d §3.8: the generated Workers entry imports `cloudflare:workers` on
+  // EVERY Workers project, and Deno cannot resolve that scheme. The probe maps
+  // it to a local no-op stub — what the probe exercises is the boot semantics,
+  // not the sink, and the import line itself is pinned by the template tests.
+  const manifestPath = `${project}/deno.json`;
+  const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
+    imports?: Record<string, string>;
+  };
+  await nodeFs.writeFile(
+    `${project}/cloudflare-workers-stub.mjs`,
+    'export function waitUntil() {}\n',
+  );
+  manifest.imports = {
+    ...(manifest.imports ?? {}),
+    'cloudflare:workers': './cloudflare-workers-stub.mjs',
+  };
+  await nodeFs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const command = () =>
     runProcess(denoBinary(), {
       args: [

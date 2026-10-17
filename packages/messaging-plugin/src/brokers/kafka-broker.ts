@@ -8,7 +8,12 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { createCachedProbe, resolveProbeTiming, withDeadline } from '@setu-ts/common';
+import {
+  createCachedProbe,
+  OptionalDependencyUnavailableError,
+  resolveProbeTiming,
+  withDeadline,
+} from '@setu-ts/common';
 import {
   minimumStartOffsets,
   isKafkaStartModule,
@@ -71,8 +76,11 @@ const REPLY_GROUP_PREFIX = 'rr-inbox-';
  * @throws {Error} If the kafkajs package cannot be resolved
  */
 async function loadKafkajs(): Promise<typeof import('kafkajs')> {
-  const mod = await import('kafkajs');
-  return mod;
+  try {
+    return await import('kafkajs');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('kafkajs', { cause: error });
+  }
 }
 
 /**

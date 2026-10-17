@@ -68,3 +68,37 @@ export function resolveWaitUntil(
     host?.(reported);
   };
 }
+
+/**
+ * The registries built with no `waitUntil` host (M113d §3.6).
+ *
+ * `store()` in `cache-api-middleware.ts` hands the edge-cache write to
+ * `bindings.waitUntil` only when the resolved bindings are NOT in this set;
+ * a hostless registry's sink delegates to nothing, so handing the write to it
+ * abandons the write when the isolate is released — the V9-23 mechanism.
+ * A bindings object from a replacement provider (`override: true`) is never
+ * in the set and is trusted to carry a sink: that is its contract, not ours.
+ *
+ * @internal - Module-private to the package that writes and reads it
+ */
+const hostlessRegistries = new WeakSet<object>();
+
+/**
+ * Records that `registry` was built with no `waitUntil` host.
+ *
+ * @param registry - The {@linkcode BindingRegistry} just registered
+ * @internal
+ */
+export function markHostlessRegistry(registry: object): void {
+  hostlessRegistries.add(registry);
+}
+
+/**
+ * True when `registry` was built with no `waitUntil` host.
+ *
+ * @param registry - The bindings resolved from the capability registry
+ * @internal
+ */
+export function isHostlessRegistry(registry: object): boolean {
+  return hostlessRegistries.has(registry);
+}

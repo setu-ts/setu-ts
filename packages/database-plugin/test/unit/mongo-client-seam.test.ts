@@ -10,7 +10,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createInjectedClientLoader,
   createLazyClientLoader,
@@ -53,5 +53,28 @@ describe('createLazyClientLoader — the real npm:mongodb import', () => {
     expect(client).toBeInstanceOf(Object);
     expect(typeof client.connect).toBe('function');
     expect(loader.objectIdCtor).toBeDefined();
+  });
+});
+
+describe('createLazyClientLoader — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the driver is absent', async () => {
+    const { createLazyClientLoader } = await import('../../src/adapters/mongo/mongo-client.ts');
+    vi.doMock('mongodb', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await createLazyClientLoader('mongodb://127.0.0.1:27017/testdb');
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('mongodb');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('mongodb');
+    }
   });
 });

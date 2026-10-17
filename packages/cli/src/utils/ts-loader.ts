@@ -36,6 +36,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 
 /**
  * Loads a module by absolute `file:` URL and returns its exports.
@@ -83,7 +84,13 @@ export function nearestTsconfig(
  * @returns The module's exports
  */
 export const importProjectModule: ProjectModuleLoader = async (url, root) => {
-  const { tsImport } = await import('tsx/esm/api');
+  let tsx: typeof import('tsx/esm/api');
+  try {
+    tsx = await import('tsx/esm/api');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('tsx', { cause: error });
+  }
+  const { tsImport } = tsx;
   const tsconfig = nearestTsconfig(url, root);
   const module: unknown = await tsImport(url, { parentURL: url, tsconfig });
   return module as Record<string, unknown>;

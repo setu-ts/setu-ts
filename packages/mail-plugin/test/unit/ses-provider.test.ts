@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   adaptSesModule,
@@ -163,6 +163,29 @@ describe('SesProvider', () => {
       expect(provider.isReady()).toBe(true);
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
+    }
+  });
+});
+
+describe('loadSesModule — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    const { loadSesModule } = await import('../../src/providers/ses-provider.ts');
+    vi.doMock('@aws-sdk/client-sesv2', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadSesModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@aws-sdk/client-sesv2');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-sesv2');
     }
   });
 });

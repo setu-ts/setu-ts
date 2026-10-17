@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type CosmosSdkModule,
   createInjectedClientLoader,
@@ -52,5 +52,28 @@ describe('the SDK module shape the lazy loader adapts', () => {
     expect(client).toBeDefined();
     expect(seen).toEqual({ endpoint: 'https://x/', key: 'k' });
     await Promise.resolve();
+  });
+});
+
+describe('createLazyClientLoader — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the SDK is absent', async () => {
+    const { createLazyClientLoader } = await import('../../src/adapters/cosmos/cosmos-client.ts');
+    vi.doMock('@azure/cosmos', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await createLazyClientLoader('https://acct.documents.azure.com:443', 'key');
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@azure/cosmos');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@azure/cosmos');
+    }
   });
 });

@@ -17,6 +17,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type {
   IMongoClient,
   IMongoCollection,
@@ -171,7 +172,12 @@ export function createInjectedClientLoader(
  * @since 0.2.0
  */
 export async function createLazyClientLoader(url: string): Promise<MongoClientLoader> {
-  const mod = (await import('mongodb')) as unknown as MongoSdkModule;
+  let mod: MongoSdkModule;
+  try {
+    mod = (await import('mongodb')) as unknown as MongoSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('mongodb', { cause: error });
+  }
   return {
     createClient: (): Promise<IMongoClient> => Promise.resolve(new mod.MongoClient(url)),
     objectIdCtor: mod.ObjectId,

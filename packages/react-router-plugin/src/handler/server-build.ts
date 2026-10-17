@@ -140,23 +140,35 @@ export function assembleHandler(
 export async function loadRequestHandler(
   serverBuildPath: string,
   mode: string,
-  options?: { rrImportHook?: () => Promise<Record<string, unknown>> },
+  options?: {
+    rrImportHook?: () => Promise<Record<string, unknown>>;
+    /**
+     * The app's compiled server build, supplied as a module (M113d §3.10).
+     * When present the path import is skipped entirely — the form a bundled
+     * Cloudflare Worker uses, where no path can be resolved at runtime.
+     */
+    serverBuild?: unknown;
+  },
 ): Promise<SsrRuntime> {
   let buildMod: unknown;
-  try {
-    // Vite ESM build: { default: ServerBuild, routes: {}, ... }
-    buildMod = await import(
-      /* @vite-ignore */
-      /* computed-specifier: the application's own compiled server build path */
-      serverBuildPath
-    );
-  } catch (err) {
-    throw new Error(
-      `Failed to load React Router server build from "${serverBuildPath}". ` +
-        `Ensure the path is correct and the file exports a ServerBuild as default. ` +
-        `Cause: ${err instanceof Error ? err.message : String(err)}`,
-      { cause: err },
-    );
+  if (options?.serverBuild !== undefined) {
+    buildMod = options.serverBuild;
+  } else {
+    try {
+      // Vite ESM build: { default: ServerBuild, routes: {}, ... }
+      buildMod = await import(
+        /* @vite-ignore */
+        /* computed-specifier: the application's own compiled server build path */
+        serverBuildPath
+      );
+    } catch (err) {
+      throw new Error(
+        `Failed to load React Router server build from "${serverBuildPath}". ` +
+          `Ensure the path is correct and the file exports a ServerBuild as default. ` +
+          `Cause: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
   }
 
   // Unwrap the default export (ESM `default` or CJS spread).

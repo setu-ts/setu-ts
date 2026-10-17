@@ -1,5 +1,7 @@
 /** @module Context-manager setup for active OTel spans. */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+
 /** Minimal shape accepted by OTel's global context registration API. @internal */
 export interface ContextManager {
   enable(): unknown;
@@ -44,8 +46,14 @@ const CONTEXT_MANAGER_SPECIFIER = '@opentelemetry/context-async-hooks';
  * @internal
  */
 export async function loadAsyncLocalStorageContextManager(): Promise<ContextManager> {
-  const module = await import('@opentelemetry/context-async-hooks');
-  return new module.AsyncLocalStorageContextManager();
+  try {
+    const module = await import('@opentelemetry/context-async-hooks');
+    return new module.AsyncLocalStorageContextManager();
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@opentelemetry/context-async-hooks', {
+      cause: error,
+    });
+  }
 }
 
 /**

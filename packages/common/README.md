@@ -268,6 +268,7 @@ package fits the plugin architecture.
 | `withValidationMetadata`              | function  |
 | `DuplicateKeyError`                   | class     |
 | `MalformedRequestBodyError`           | class     |
+| `OptionalDependencyUnavailableError`  | class     |
 | `ReconnectSupervisor`                 | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |

@@ -6,7 +6,7 @@
  * package is absent (cache-plugin redis-store precedent).
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RedisRateLimitStore, validateClient } from '../../src/stores/redis-rate-limit-store.ts';
 import type { IRateLimitRedisClient } from '../../src/stores/redis-rate-limit-store.ts';
 import { FakeIoredisClient } from '../fixtures/fake-ioredis-client.ts';
@@ -234,5 +234,30 @@ describe('RedisRateLimitStore', () => {
 
       await store.disconnect().catch(() => {});
     });
+  });
+});
+
+describe('RedisRateLimitStore — the guarded import (M113d §3.1)', () => {
+  it('increment rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
+    const { RedisRateLimitStore } = await import('../../src/stores/redis-rate-limit-store.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const store = new RedisRateLimitStore({ runtime: createFakeRuntime() });
+      let caught: unknown;
+      try {
+        await store.increment('anonymous', 60_000);
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
+    }
   });
 });
