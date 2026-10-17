@@ -300,13 +300,86 @@ pnpm run release:publish --dry-run && pnpm run release:verify 0.9.0
 
 ## 10. Design security review
 
-| #   | Threat                                                         | Mitigation in the design                                                                                   |
-| --- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| S1  | User data (bound values) reaches logs via driver errors        | §3.1 scrub of message and stack, applied at the single funnel                                              |
-| S2  | Public probes disclose runtime version, hostname, backend data | §3.2 status-only default                                                                                   |
-| S3  | Tampered or floating third-party script on `/docs`             | §3.7 self-hosted by default; CDN only pinned with SRI                                                      |
-| S4  | Self-hosted asset route serves arbitrary files                 | Exactly three fixed file names read at `register()`; no path from the request                              |
-| S5  | The stderr sink leaks what the logger would have redacted      | The sink receives only `serializeError` output (already scrubbed by §3.1) plus request id, method and path |
-| S6  | Error-level alerting blinded or flooded                        | §3.3/§3.4: one record per error, 4xx at `warn`, true statuses                                              |
+Recorded after implementation and verification, before the committed-tree audit (the M101a
+precedent): the plan shipped a threat table without the flows, assets, attackers and audit
+obligations a review needs. Reviewed against `7c10230f`.
 
-A committed-tree security audit runs before the PR, in a fresh context.
+### 10.1 Trust boundaries and reviewed flows
+
+| Flow | Path                                                                                                                                                                   | Boundary crossed                               |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| F1   | driver rejection → `DatabaseService` interception site → `classifiedOrOriginal` → `scrubDriverError` → `errorHandler` → logger / `runtime.reportError` / response body | database values → operator log channel, client |
+| F2   | `GET /health`, `/live`, `/ready` → `HealthService` report → `createHealthHandler` projection → response body                                                           | process internals → unauthenticated client     |
+| F3   | thrown value → `thrownErrorStatus` (served status; `statusFor` for the request logger) → `logError` level → log record                                                 | client-triggered error → alerting channel      |
+| F4   | no `CAPABILITIES.LOGGER` → `runtime.reportError(record)` → `JSON.stringify` → stderr (Node, Bun, Deno) or `console.error` (Workers)                                    | request data → platform log                    |
+| F5   | `GET <endpoint>` → Swagger HTML (`self` / `cdn` / `{ baseUrl }`) → browser loads three assets; `GET <endpoint>/<file>` → bytes read once at `register()`               | third-party script → API origin                |
+| F6   | `setu new` / `setu generate app` → `swagger-ui-dist` dependency, Workers `assets: 'cdn'`, Deno `--allow-read`                                                          | generator → developer's project, install hooks |
+
+### 10.2 Assets and attackers
+
+**Assets.** (a) Bound query values: emails, ids, tokens and any other user data a statement binds.
+(b) Process internals in probe bodies: runtime version, hostname, indicator data (backend hosts,
+pool sizes, queue depths). (c) The script integrity of the `/docs` origin: Swagger runs same-origin
+with the API, so a substituted script acts with the user's cookies. (d) The filesystem behind the
+asset routes. (e) The integrity of the error-level alert channel and of each log line.
+
+**Attackers.** **A1** an unauthenticated remote client: controls method, path, query, headers and
+body; can trigger 4xx at will and 5xx where the application allows; reads every probe and `/docs`.
+**A2** a log reader with less privilege than the database (an operations engineer, a log vendor, a
+shared platform log). **A3** the supply chain: a compromised CDN file, a floating version, an
+install-time script. **A4** a misconfiguring operator: options fed from the environment
+(`details: 'false'`, `baseUrl` from a variable).
+
+### 10.3 Threats, mitigations and residuals
+
+| #   | Threat                                                         | Mitigation                                                                                                                                                                                                           | Residual (accepted unless the audit shows otherwise)                                                                                                                                                                                             |
+| --- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S1  | A2 reads bound values from a Drizzle error (F1)                | §3.1 scrub of `message`, multiline `stack` header and own `params` over the cause chain, applied at every `DatabaseService` interception site before classification wraps it; `serializeError` copies no pg `detail` | Only the Drizzle `Failed query:` shape is recognized. Errors thrown from the typed builder (`getDrizzleDatabase`) or raw driver calls never reach `DatabaseService` and are not scrubbed. Other adapters' driver messages are not inspected here |
+| S2  | The scrub itself throws, turning the error path into the fault | Fixed in verification: a wrapper whose `cause` cannot be redefined (frozen) is copied instead (`scrub.test.ts`)                                                                                                      | A cycle longer than `MAX_CAUSE_DEPTH` (5) is cut at the bound; nodes past it are not scrubbed                                                                                                                                                    |
+| S3  | A1 reads process internals from a probe (F2)                   | §3.2 status-only default; `details` refuses a non-boolean (`'false'` does not enable details)                                                                                                                        | Indicator names and statuses stay public by design; `details: true` makes the endpoint as open as before (documented: protect it)                                                                                                                |
+| S4  | A3 substitutes a Swagger script (F5)                           | §3.7 self-hosting by default; `cdn` pinned to exactly 5.33.3 with SHA-384 SRI and `crossorigin="anonymous"` on all three tags; `{ baseUrl }` carries the same SRI                                                    | Self-hosted bytes are whatever the lockfile installed within `^5`, with no integrity check                                                                                                                                                       |
+| S5  | A1 reads arbitrary files through an asset route (F5)           | Exactly three fixed file names, read once at `register()`; no request value reaches a filesystem path                                                                                                                | None known                                                                                                                                                                                                                                       |
+| S6  | A4's `baseUrl` injects markup or a script origin (F5)          | Refused at construction unless an absolute `http(s):` URL or a path starting with a single `/`; every attribute value HTML-escaped; title and spec URL escaped                                                       | An `http:` base is accepted (the SRI still binds the bytes)                                                                                                                                                                                      |
+| S7  | A1 forges or breaks log lines through the sink (F4)            | One `JSON.stringify` per record, so a path holding newlines or quotes stays inside one line; serialization and write failures are swallowed                                                                          | A record that fails to serialize is dropped silently                                                                                                                                                                                             |
+| S8  | A1 floods or blinds error-level alerting (F3)                  | §3.3/§3.4: one record per error; 4xx at `warn`; the completion record carries the served status from the same rule `errorHandler` serves                                                                             | Any 5xx A1 can trigger still logs at `error`. A `respond` hook serving another status is not reflected (documented)                                                                                                                              |
+| S9  | The sink writes what the logger's redaction would have removed | The sink receives `serializeError` output (scrubbed per S1) plus request id, method and path; no headers, body or query                                                                                              | The unmasked error message reaches stderr, as it reaches the logger                                                                                                                                                                              |
+| S10 | A3 runs code at install time through `swagger-ui-dist` (F6)    | `@scarf/scarf` (a dependency of `swagger-ui-dist`) is denied a build in this repository (`allowBuilds`)                                                                                                              | Generated npm projects do not deny it; npm runs it unless the developer opts out                                                                                                                                                                 |
+| S11 | Generated Deno projects gain filesystem read (F6)              | `--allow-read` is already granted to every template with a dotenv file; the flags are de-duplicated                                                                                                                  | The grant is unscoped                                                                                                                                                                                                                            |
+
+### 10.4 Obligations for the committed-tree audit
+
+1. **Canaries for S1/S9.** Bind a `canary-bound-<random>` value in a create, an update and a
+   filtered read through a real `pg-proxy` Drizzle instance, and prove it absent from: the console
+   logger record, a Pino record, the `reportError` line, the response body (all three error
+   formats), and the request logger's completion record — in `message`, `stack` and every `cause`.
+   Repeat with the Drizzle error wrapped once, wrapped frozen, and in a cycle. Then throw a Drizzle
+   error from the typed builder (`getDrizzleDatabase`) in a handler and record where the canary
+   lands, with a severity.
+2. **Canaries for S3.** A custom indicator returning a canary in `data`, and one throwing an error
+   whose message holds a canary: absent from all three default bodies, present with `details: true`.
+   Refusal for `'false'`, `'true'`, `1`, `null`. Status codes unchanged for up, degraded and down.
+3. **Asset routes (S5).** `../package.json`, percent-encoded and double-encoded traversal, a NUL
+   suffix, other files the package ships (`index.html`, `swagger-initializer.js`,
+   `oauth2-redirect.html`) and a trailing slash all answer 404 and read nothing.
+4. **HTML (S4/S6).** In `cdn` and `{ baseUrl }` modes every external `<script>` and `<link>` carries
+   `integrity` and `crossorigin`, and no `@5` floating reference exists. Refusal of `javascript:`,
+   `data:`, `//host`, `\\host`, a leading space and a non-string `baseUrl`. A title and spec URL
+   containing `"><script>` and the template placeholders render inert.
+5. **Sink (S7).** A request path containing `\n{"level":"info"}` stays inside one stderr line; an
+   error whose getter throws or whose cause is circular does not escape the handler; a 4xx without a
+   logger writes nothing.
+6. **Alerting (S8).** 50 requests answering 400/404 produce zero `error` records; the completion
+   status equals the served status for an `HttpError`, a hinted error, a clamped `4004` and a thrown
+   non-`Error` value.
+7. **Generator (S10/S11).** A generated Workers project renders `assets: 'cdn'`; a generated npm
+   project declares `swagger-ui-dist`; observe and report whether Scarf's install script runs in a
+   generated npm install (no network beyond the registry is required for the observation).
+
+Every probe targets an in-process `createApplication` or a server this run starts on `127.0.0.1`.
+
+### 10.5 Findings already fixed (verification)
+
+- Scrub threw `TypeError` on a frozen wrapper (S2) — fixed with a copy, test added.
+- Workers sink appended a second newline — removed.
+- The kernel sink's `'Unhandled request error'` label was overwritten by `serializeError`'s
+  `message` — now carried as `msg`.
