@@ -22,15 +22,19 @@ All notable changes to this project are documented here. The format follows
   `Authorization: Bearer <token>` now skips form-CSRF verification, so a bearer-authenticated JSON
   API in the same application reaches its guard instead of answering `403`. A browser never attaches
   a bearer token itself and a cross-origin page cannot add one without an approved CORS preflight.
-  `Basic` credentials are not exempt. `csrf.exemptBearer: false` restores the previous refusal;
-  `csrfFormMiddleware` and `verifyCsrfToken` honour the option alike.
+  The exemption trusts every origin CORS lets send `Authorization` with credentials: such an origin
+  can add a junk bearer header to a cookie-authenticated request and skip the check. `Basic`
+  credentials are not exempt. A non-boolean `exemptBearer` is refused with a `TypeError`.
+  `csrf.exemptBearer: false` restores the previous refusal; `csrfFormMiddleware` and
+  `verifyCsrfToken` honour the option alike.
 - **Breaking session storage: anonymous sessions stay in the cookie on the store strategy (M113e,
   0.10.0, `@setu-ts/session-plugin`).** A session holding only the form-CSRF token and the tenant
   binding is sealed into the cookie and writes no store row, so 200 anonymous form views no longer
   add 200 rows (measured against Redis). The first write of any other key moves the session into the
-  store; a commit leaving only those keys on a stored session deletes its row. During a rolling
-  deploy, an older replica reading such a cookie starts a fresh session, so an anonymous form loses
-  its token once; signed-in sessions are unaffected.
+  store, rotating its id so a copied anonymous cookie can never read the signed-in row; a commit
+  leaving only those keys on a stored session deletes its row. During a rolling deploy, an older
+  replica reading such a cookie starts a fresh session, so an anonymous form loses its token once;
+  signed-in sessions are unaffected.
 - **Breaking password hashing default (M113e, 0.10.0, `@setu-ts/auth-plugin`).** `PasswordHasher`
   now hashes with PBKDF2-SHA256 at 600,000 iterations (OWASP 2023), up from 100,000; a hash costs
   about 80 ms on Node instead of 15 ms. Existing hashes keep verifying, because `verify` reads the

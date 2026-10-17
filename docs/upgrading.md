@@ -23,7 +23,9 @@ to keep the old behaviour — every principal role and permission then counts in
 **Form CSRF skips bearer requests.** With `SessionPlugin({ csrf: {} })`, a request carrying
 `Authorization: Bearer <token>` is no longer checked for a form token. If you added an `exclude`
 such as `/^\/api\//` only to let a bearer API through, you can remove it. To keep checking those
-requests, set `csrf: { exemptBearer: false }`.
+requests, set `csrf: { exemptBearer: false }` — and do so if any cross-origin partner has
+`credentials: true` with `Authorization` allowed, since such an origin could otherwise skip the form
+check on a cookie-authenticated request.
 
 **Anonymous sessions on the store strategy stay in the cookie.** Nothing to change. During a rolling
 deploy an older replica treats the new anonymous cookie as no session, so a visitor with a form open

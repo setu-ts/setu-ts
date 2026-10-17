@@ -85,7 +85,10 @@ export interface CsrfFormOptions {
    * cookie. A bearer token is never attached by the browser, and a page on
    * another origin cannot add an `Authorization` header without a CORS
    * preflight the server approves, so a bearer-authenticated API call cannot
-   * be forged by a cross-site form. `Basic` credentials are NOT exempt:
+   * be forged by a cross-site form. The boundary: the exemption trusts every
+   * origin CORS lets send `Authorization` with credentials — such an origin can
+   * add a junk bearer header to a cookie-authenticated request and skip the form
+   * check, since CSRF runs before authentication. `Basic` credentials are NOT exempt:
    * browsers re-send cached Basic credentials automatically. `false` verifies
    * every unsafe request, the behaviour before 0.10.0.
    */
@@ -252,8 +255,20 @@ export function resolveCsrfConfig(options: CsrfFormOptions = {}): ResolvedCsrfCo
     fieldName: options.fieldName ?? DEFAULT_CSRF_FIELD,
     headerName: options.headerName ?? DEFAULT_CSRF_HEADER,
     ignoreMethods: new Set(methods.map((m) => m.toUpperCase())),
-    exemptBearer: options.exemptBearer ?? true,
+    exemptBearer: resolveExemptBearer(options.exemptBearer),
   };
+}
+
+/**
+ * Resolves `csrf.exemptBearer`, refusing a non-boolean so a value such as
+ * `'false'` from an untyped config cannot silently leave the exemption on.
+ */
+function resolveExemptBearer(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== 'boolean') {
+    throw new TypeError("SessionPlugin option 'csrf.exemptBearer' must be a boolean.");
+  }
+  return value;
 }
 
 /** Rejects a non-positive or non-finite numeric option at configuration time. */

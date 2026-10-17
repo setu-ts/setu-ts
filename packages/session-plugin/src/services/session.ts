@@ -187,6 +187,11 @@ export class Session implements ISession {
     this.#regenerated = true;
   }
 
+  /** Rotates a cookie-held id for promotion without recording a store row to revoke. */
+  rotateId(id: string): void {
+    this.#id = id;
+  }
+
   destroy(): void {
     this.#data = {};
     this.#destroyed = true;

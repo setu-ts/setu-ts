@@ -65,3 +65,17 @@ describe('resolveCsrfConfig — exemptBearer', () => {
     expect(resolveCsrfConfig({ exemptBearer: false }).exemptBearer).toBe(false);
   });
 });
+
+describe('resolveCsrfConfig — exemptBearer validation (M113e audit L2)', () => {
+  it.each([['false'], ['no'], [null], [0], [1]])('refuses the non-boolean %j', (value) => {
+    expect(() => resolveCsrfConfig({ exemptBearer: value as unknown as boolean })).toThrow(
+      new TypeError("SessionPlugin option 'csrf.exemptBearer' must be a boolean."),
+    );
+  });
+
+  it('accepts both booleans and defaults to true', () => {
+    expect(resolveCsrfConfig({ exemptBearer: false }).exemptBearer).toBe(false);
+    expect(resolveCsrfConfig({ exemptBearer: true }).exemptBearer).toBe(true);
+    expect(resolveCsrfConfig({}).exemptBearer).toBe(true);
+  });
+});

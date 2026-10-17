@@ -72,10 +72,12 @@ SessionPlugin({ secret, store: myOwnStore }); // any ISessionStore
 reserved keys — the form-CSRF token and the tenant binding — is sealed into the cookie and writes no
 store row, so a public page rendering a form does not add a row per visitor. The first write of any
 other key (signing in) moves the session into the store, and clearing every other key (signing out)
-deletes the row again, so a copy of the signed-in cookie restores nothing. The reserved keys need no
-revocation, and the cookie is sealed under the same keys as every other one; under `mode: 'sign'`
-the browser can read its own CSRF token, which the form already shows it. Pending sign-in state from
-`auth-plugin` (state, nonce, PKCE verifier) is not a reserved key and still goes to the store.
+deletes the row again, so a copy of the signed-in cookie restores nothing. Promotion to the store
+rotates the session id, so a copied anonymous cookie can never read the signed-in row. The reserved
+keys need no revocation, and the cookie is sealed under the same keys as every other one; under
+`mode: 'sign'` the browser can read its own CSRF token, which the form already shows it. Pending
+sign-in state from `auth-plugin` (state, nonce, PKCE verifier) is not a reserved key and still goes
+to the store.
 
 > **`store: 'cache'` shares a blast radius.** Sessions live in the same cache as your application
 > data, so a `cache.clear()` from anywhere logs everybody out. Keys are namespaced (`session:` by
@@ -269,10 +271,15 @@ Connect/gRPC — never use it for an application form route.
 `Authorization: Bearer <token>` skips form CSRF, so a JWT- or API-token-authenticated JSON route in
 the same application reaches its guard rather than answering `403`. That is safe because a browser
 never attaches a bearer token by itself, and a page on another origin cannot add an `Authorization`
-header without a CORS preflight your server approves — an origin you approve for credentialed
-requests could read the form token anyway. `Basic` credentials are NOT exempt, because browsers
-re-send cached Basic credentials automatically. `exemptBearer: false` verifies every unsafe request,
-the behaviour before 0.10.0.
+header without a CORS preflight your server approves. The boundary: the exemption trusts every
+origin your CORS policy lets send `Authorization` with credentials. Such an origin can attach a junk
+bearer header to a request the session cookie authenticates and so skip the form check, even on a
+path where it cannot read the form token (CSRF runs before authentication, so an invalid token is
+not noticed). `corsMiddleware` echoes the requested headers when `allowedHeaders` is omitted, which
+admits `authorization`. If a cross-origin partner has `credentials: true` on any path, set
+`exemptBearer: false` or list `allowedHeaders` without `authorization`. `Basic` credentials are NOT
+exempt, because browsers re-send cached Basic credentials automatically. `exemptBearer: false`
+verifies every unsafe request, the behaviour before 0.10.0.
 
 ### What `SameSite` does not separate
 

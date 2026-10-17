@@ -128,18 +128,81 @@ describe('cookie-held sessions (store strategy)', () => {
     expect(store.reads()).toBe(0);
   });
 
-  it('moves the session into the store on its first non-reserved write', async () => {
+  it('rotates the id when promoting a held cookie on its first non-reserved write', async () => {
     const { service, ring, store } = await harness();
     const first = await round(service, undefined, (s) => s.set(CSRF_SESSION_KEY, 'tok'));
     const second = await round(service, first.cookie, (s) => s.set('user', 'ann'));
+    expect(second.session.id).not.toBe(first.session.id);
+    expect(second.session.previousId).toBeNull();
+    expect(second.session.wasRegenerated).toBe(false);
     expect(store.writes()).toBe(1);
+    expect([...store.entries.keys()]).toEqual([second.session.id]);
+    expect(store.calls).toEqual([`write:${second.session.id}`]);
     expect(store.entries.get(second.session.id)).toEqual({
       [CSRF_SESSION_KEY]: 'tok',
       user: 'ann',
     });
     const payload = await payloadOf(ring, second.cookie as string);
+    expect(payload.id).toBe(second.session.id);
     expect(payload.held).toBeUndefined();
     expect(payload.data).toEqual({});
+  });
+
+  it('keeps a copied held cookie anonymous and its promotion cannot overwrite the victim row', async () => {
+    const { service, store } = await harness();
+    const first = await round(service, undefined, (s) => s.set(CSRF_SESSION_KEY, 'tok'));
+    const copiedCookie = first.cookie;
+    const victim = await round(service, first.cookie, (s) => s.set('user', 'ann'));
+    const victimData = { [CSRF_SESSION_KEY]: 'tok', user: 'ann' };
+    expect(store.entries.get(victim.session.id)).toEqual(victimData);
+
+    const copied = await round(service, copiedCookie, (s) => {
+      expect(s.isNew).toBe(false);
+      expect(s.wasStoreHeld).toBe(false);
+      expect(s.get('user')).toBeUndefined();
+      s.set('cart', 'attacker');
+    });
+    expect(store.entries.get(victim.session.id)).toEqual(victimData);
+    expect(copied.session.id).not.toBe(victim.session.id);
+    expect(store.entries.get(copied.session.id)).toEqual({
+      [CSRF_SESSION_KEY]: 'tok',
+      cart: 'attacker',
+    });
+    expect(store.entries.has(first.session.id)).toBe(false);
+    expect(store.writes()).toBe(2);
+
+    const victimView = await service.fromHeaders(new Headers({ cookie: victim.cookie as string }));
+    expect(victimView?.data).toEqual(victimData);
+  });
+
+  it('keeps the server-minted id when a brand-new session writes non-reserved data', async () => {
+    const { service, ring, store } = await harness();
+    let initialId = '';
+    const first = await round(service, undefined, (s) => {
+      expect(s.isNew).toBe(true);
+      initialId = s.id;
+      s.set('user', 'ann');
+    });
+    expect(first.session.id).toBe(initialId);
+    expect(store.calls).toEqual([`write:${initialId}`]);
+    expect([...store.entries]).toEqual([[initialId, { user: 'ann' }]]);
+    expect((await payloadOf(ring, first.cookie as string)).id).toBe(initialId);
+  });
+
+  it('keeps the id when a store-held session writes again', async () => {
+    const { service, ring, store } = await harness();
+    const first = await round(service, undefined, (s) => s.set(CSRF_SESSION_KEY, 'tok'));
+    const promoted = await round(service, first.cookie, (s) => s.set('user', 'ann'));
+    const updated = await round(service, promoted.cookie, (s) => {
+      expect(s.wasStoreHeld).toBe(true);
+      s.set('user', 'beth');
+    });
+    expect(updated.session.id).toBe(promoted.session.id);
+    expect([...store.entries]).toEqual([
+      [promoted.session.id, { [CSRF_SESSION_KEY]: 'tok', user: 'beth' }],
+    ]);
+    expect(store.writes()).toBe(2);
+    expect((await payloadOf(ring, updated.cookie as string)).id).toBe(promoted.session.id);
   });
 
   it('deletes the row when a stored session moves back into the cookie', async () => {

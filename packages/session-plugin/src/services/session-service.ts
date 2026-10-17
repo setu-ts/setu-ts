@@ -234,6 +234,13 @@ export class SessionService implements ISessionService {
       session.extend(now + this.#config.maxAgeMs);
     }
 
+    const cookieHeld = this.#store !== undefined && isCookieHeld(session.toJSON());
+    if (this.#store !== undefined && !cookieHeld && !session.wasStoreHeld && !session.isNew) {
+      // A copied anonymous cookie must not know the promoted row's id. Avoid
+      // regenerate(): this id has no row to revoke or regeneration to record.
+      session.rotateId(this.#deps.uuid());
+    }
+
     const snapshot = session.snapshot();
     const ttlMs = Math.max(snapshot.exp - now, 0);
 
@@ -242,7 +249,6 @@ export class SessionService implements ISessionService {
     // unless the session holds only reserved keys, in which case the cookie
     // carries them and no row is written (M113e, V9-46), so anonymous traffic
     // rendering forms does not grow the store.
-    const cookieHeld = this.#store !== undefined && isCookieHeld(snapshot.data);
     const payload =
       this.#store === undefined
         ? snapshot

@@ -297,3 +297,23 @@ session restore (V9-46), principal claims → scoped authorization (V9-28), pass
 | S10 | Unbounded store growth from anonymous traffic (V9-46)                                    | Zero rows for reserved-only sessions; pending sign-in state remains a known residual (§9)                                                                                                                                                                                                |
 
 A committed-tree security audit runs before the PR, in a fresh context.
+
+### Committed-tree audit, round 1 (fresh-context agent, `36f497b1`) — failed
+
+Two Low findings, no Critical, High or Medium; all 10 negative controls observed failing.
+
+- **L1 — S2's justification was false under path-scoped CORS.** An origin allowed
+  `credentials: true` and `Authorization` on `/api/*` only cannot read the form token on `/form`,
+  yet can send a junk bearer header with the victim's cookie and skip the check (`200` as the
+  victim; `403` with `exemptBearer: false`). Fixed in the docs (session README, `CsrfFormOptions`
+  JSDoc, CHANGELOG, upgrade guide, `PUBLIC_API.md`): the exemption trusts every origin CORS lets
+  send `Authorization` with credentials. The default is unchanged (maintainer decision).
+- **L2 — `exemptBearer` was not validated.** `'false'`, `'no'` and `null` left the exemption on.
+  `resolveCsrfConfig` now refuses a non-boolean with a value-free `TypeError`; reverting fails 5
+  tests.
+- **O1 (observation, fixed) — fixation without `regenerate()` was reduced, not closed.** Promotion
+  of a cookie-held session to the store now rotates its id (`Session.rotateId`, internal), so a copy
+  of the anonymous cookie can never address the promoted row. Implemented by Codex; reverting fails
+  2 tests.
+- **O2 (pre-existing, not fixed here)** — `parseStoredHash` echoes the stored iteration string into
+  its error. **O3** — an oversized tenant id breaks only the requester's own commit.
