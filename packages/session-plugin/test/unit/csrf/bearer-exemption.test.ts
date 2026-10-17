@@ -1,11 +1,15 @@
 /**
- * The bearer rule (M113e plan §3.2, V9-27): which `Authorization` values skip
- * form CSRF, and that the option resolves to the documented default.
+ * The credential-based bearer rule (M113e, V9-27): a request carrying
+ * `Authorization: Bearer <token>` skips form CSRF only when a `'header'`-
+ * credential strategy authenticated it, as recorded under
+ * `CREDENTIAL_SOURCE_STATE_KEY` — and the option resolves to the documented
+ * default.
  *
  * @module
  */
 import { describe, expect, it } from 'vitest';
 import type { IRequestContext } from '@setu-ts/common';
+import { CREDENTIAL_SOURCE_STATE_KEY } from '@setu-ts/common';
 
 import { isBearerRequest, isCsrfExempt } from '../../../src/csrf/exclude.ts';
 import { resolveCsrfConfig } from '../../../src/options.ts';
@@ -14,8 +18,20 @@ function headers(authorization?: string): Headers {
   return new Headers(authorization === undefined ? {} : { authorization });
 }
 
-function ctx(path: string, authorization?: string): IRequestContext {
-  return { request: { path, headers: headers(authorization) } } as unknown as IRequestContext;
+function ctx(
+  path: string,
+  authorization?: string,
+  state: Map<string, unknown> = new Map(),
+): IRequestContext {
+  return {
+    request: { path, headers: headers(authorization) },
+    state,
+  } as unknown as IRequestContext;
+}
+
+/** The state a strategy of the given credential source leaves behind. */
+function authenticatedBy(source: 'header' | 'cookie'): Map<string, unknown> {
+  return new Map([[CREDENTIAL_SOURCE_STATE_KEY, source]]);
 }
 
 describe('isBearerRequest', () => {
@@ -39,14 +55,36 @@ describe('isBearerRequest', () => {
   });
 });
 
-describe('isCsrfExempt', () => {
-  it('exempts a bearer request by default', () => {
-    expect(isCsrfExempt(ctx('/api', 'Bearer t'), resolveCsrfConfig(), undefined)).toBe(true);
+describe('isCsrfExempt — the credential-based bearer rule', () => {
+  it('exempts a bearer request authenticated by a header-credential strategy', () => {
+    expect(
+      isCsrfExempt(
+        ctx('/api', 'Bearer t', authenticatedBy('header')),
+        resolveCsrfConfig(),
+        undefined,
+      ),
+    ).toBe(true);
   });
 
-  it('verifies a bearer request when exemptBearer is false', () => {
+  it('verifies a bearer request the session cookie authenticated', () => {
+    expect(
+      isCsrfExempt(
+        ctx('/api', 'Bearer t', authenticatedBy('cookie')),
+        resolveCsrfConfig(),
+        undefined,
+      ),
+    ).toBe(false);
+  });
+
+  it('verifies a bearer request nothing authenticated (fails closed)', () => {
+    expect(isCsrfExempt(ctx('/api', 'Bearer t'), resolveCsrfConfig(), undefined)).toBe(false);
+  });
+
+  it('verifies a header-authenticated bearer request when exemptBearer is false', () => {
     const config = resolveCsrfConfig({ exemptBearer: false });
-    expect(isCsrfExempt(ctx('/api', 'Bearer t'), config, undefined)).toBe(false);
+    expect(
+      isCsrfExempt(ctx('/api', 'Bearer t', authenticatedBy('header')), config, undefined),
+    ).toBe(false);
   });
 
   it('still honours a path exclusion when exemptBearer is false', () => {
@@ -55,7 +93,13 @@ describe('isCsrfExempt', () => {
   });
 
   it('does not exempt Basic credentials, which browsers re-send by themselves', () => {
-    expect(isCsrfExempt(ctx('/api', 'Basic x'), resolveCsrfConfig(), undefined)).toBe(false);
+    expect(
+      isCsrfExempt(
+        ctx('/api', 'Basic x', authenticatedBy('header')),
+        resolveCsrfConfig(),
+        undefined,
+      ),
+    ).toBe(false);
   });
 });
 

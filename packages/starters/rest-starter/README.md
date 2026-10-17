@@ -157,7 +157,7 @@ Gated plugins (`database`, `auth`, `session`, `di`, `graphql`, `serviceDiscovery
 ### The `session` arm
 
 Adds `SessionPlugin`: cookie-backed sessions under `CAPABILITIES.SESSION`, and — with `csrf` — the
-synchronizer-token form-CSRF middleware at priority 275, which is the check a
+synchronizer-token form-CSRF middleware at priority 325, which is the check a
 progressive-enhancement `<Form>` post can satisfy (the stateless Origin/Referer check in
 `httpSecurity` structurally cannot). Running both together is intended.
 

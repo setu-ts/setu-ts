@@ -43,6 +43,7 @@ export interface SessionStrategyOptions {
 export class SessionStrategy {
   /** Strategy name for identification. */
   readonly name = 'session';
+  readonly credential = 'cookie' as const;
   private readonly sessionService: ISessionService;
   private readonly toPrincipal: (view: SessionView) => IPrincipal | null;
 

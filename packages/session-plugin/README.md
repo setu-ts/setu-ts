@@ -209,7 +209,8 @@ This is the **synchronizer-token** strategy, and it is a _different mechanism_ f
 
 A progressive-enhancement `<Form>` post cannot set a custom header, which is why the stateless
 middleware's `customHeader` option cannot be driven by one. **Running both together is the intended
-arrangement** — the cheap stateless check at priority 270, the token check at 275.
+arrangement** — the cheap stateless check at priority 270, the token check at 325, after
+authentication (300).
 
 ```typescript
 SessionPlugin({ secret, csrf: {} });
@@ -268,18 +269,17 @@ non-string value never reaches the comparison)), `ignoreMethods` (default `GET`/
 Connect/gRPC — never use it for an application form route.
 
 **A bearer API beside forms needs no exclusion** (M113e). A request carrying
-`Authorization: Bearer <token>` skips form CSRF, so a JWT- or API-token-authenticated JSON route in
-the same application reaches its guard rather than answering `403`. That is safe because a browser
-never attaches a bearer token by itself, and a page on another origin cannot add an `Authorization`
-header without a CORS preflight your server approves. The boundary: the exemption trusts every
-origin your CORS policy lets send `Authorization` with credentials. Such an origin can attach a junk
-bearer header to a request the session cookie authenticates and so skip the form check, even on a
-path where it cannot read the form token (CSRF runs before authentication, so an invalid token is
-not noticed). `corsMiddleware` echoes the requested headers when `allowedHeaders` is omitted, which
-admits `authorization`. If a cross-origin partner has `credentials: true` on any path, set
-`exemptBearer: false` or list `allowedHeaders` without `authorization`. `Basic` credentials are NOT
-exempt, because browsers re-send cached Basic credentials automatically. `exemptBearer: false`
-verifies every unsafe request, the behaviour before 0.10.0.
+`Authorization: Bearer <token>` skips form CSRF when a bearer (header-credential) strategy
+authenticated it, so a JWT- or API-token-authenticated JSON route in the same application reaches
+its guard rather than answering `403`. That is safe because a browser never attaches a bearer token
+by itself, and a page on another origin cannot add an `Authorization` header without a CORS
+preflight your server approves. The exemption is decided by the credential that authenticated the
+request, not by the header's presence: the form check runs at 325, after authentication (300), and
+reads the credential source authentication recorded — a junk bearer header beside a session cookie
+is still verified, and an unauthenticated bearer header is verified too (it fails closed when
+authentication has not run). `Basic` credentials are NOT exempt, because browsers re-send cached
+Basic credentials automatically. `exemptBearer: false` verifies every unsafe request, the behaviour
+before 0.10.0.
 
 ### What `SameSite` does not separate
 
@@ -355,35 +355,35 @@ object.
 
 ## Middleware priorities
 
-| Priority | Middleware           | Why there                                              |
-| -------- | -------------------- | ------------------------------------------------------ |
-| 260      | `sessionMiddleware`  | After security headers (250), before auth (300)        |
-| 275      | `csrfFormMiddleware` | After the session loads and after stateless CSRF (270) |
+| Priority | Middleware           | Why there                                                                                                                                                          |
+| -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 260      | `sessionMiddleware`  | After security headers (250), before auth (300)                                                                                                                    |
+| 325      | `csrfFormMiddleware` | After the session loads (260) and after authentication (300), before authorization (350): the bearer exemption reads the credential source authentication recorded |
 
 Session sits below authentication so an auth strategy can read it. Anything that reads the session
 must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareMissingError`.
 
 ## Options
 
-| Option              | Default          | Notes                                                                        |
-| ------------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `secret`            | resolved         | `string` or rotation list; index 0 seals                                     |
-| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager and the environment                         |
-| `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                 |
-| `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                 |
-| `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                         |
-| `rolling`           | `false`          | Re-issue on every response                                                   |
-| `idleTimeoutMs`     | —                | No-request expiry; any request refreshes it, so it commits every response    |
-| `maxCookieBytes`    | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                  |
-| `cookie.name`       | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions |
-| `cookie.path`       | `/`              |                                                                              |
-| `cookie.domain`     | —                | Omitted means a host-only cookie                                             |
-| `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                     |
-| `cookie.secure`     | `true`           | Set `false` only for plain-HTTP local development                            |
-| `cookie.httpOnly`   | `true`           |                                                                              |
-| `csrf`              | —                | Presence enables form CSRF                                                   |
-| `csrf.exemptBearer` | `true`           | `Authorization: Bearer <token>` skips form CSRF; `Basic` never does          |
-| `tenantBinding`     | `true`           | Seal the tenant on commit and refuse a session presented under another       |
+| Option              | Default          | Notes                                                                                                                                                                |
+| ------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `secret`            | resolved         | `string` or rotation list; index 0 seals                                                                                                                             |
+| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager and the environment                                                                                                                 |
+| `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                                                                                                         |
+| `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                                                                                                         |
+| `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                                                                                                                 |
+| `rolling`           | `false`          | Re-issue on every response                                                                                                                                           |
+| `idleTimeoutMs`     | —                | No-request expiry; any request refreshes it, so it commits every response                                                                                            |
+| `maxCookieBytes`    | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                                                                                                          |
+| `cookie.name`       | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions                                                                                         |
+| `cookie.path`       | `/`              |                                                                                                                                                                      |
+| `cookie.domain`     | —                | Omitted means a host-only cookie                                                                                                                                     |
+| `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                                                                                                             |
+| `cookie.secure`     | `true`           | Set `false` only for plain-HTTP local development                                                                                                                    |
+| `cookie.httpOnly`   | `true`           |                                                                                                                                                                      |
+| `csrf`              | —                | Presence enables form CSRF                                                                                                                                           |
+| `csrf.exemptBearer` | `true`           | Only a bearer request a header-credential strategy authenticated skips form CSRF; a junk bearer header beside a session cookie is still verified; `Basic` never does |
+| `tenantBinding`     | `true`           | Seal the tenant on commit and refuse a session presented under another                                                                                               |
 
 ## Health
 

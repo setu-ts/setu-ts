@@ -20,12 +20,16 @@ because a token carried the role or permission, they now answer `403` until the 
 grant for that scope. Issue the grants, or set `scopedRbac: { …, principalAuthorityIsGlobal: true }`
 to keep the old behaviour — every principal role and permission then counts in every scope.
 
-**Form CSRF skips bearer requests.** With `SessionPlugin({ csrf: {} })`, a request carrying
-`Authorization: Bearer <token>` is no longer checked for a form token. If you added an `exclude`
-such as `/^\/api\//` only to let a bearer API through, you can remove it. To keep checking those
-requests, set `csrf: { exemptBearer: false }` — and do so if any cross-origin partner has
-`credentials: true` with `Authorization` allowed, since such an origin could otherwise skip the form
-check on a cookie-authenticated request.
+**Form CSRF skips only a bearer request that a bearer strategy authenticated.** With
+`SessionPlugin({ csrf: {} })`, a request carrying `Authorization: Bearer <token>` is no longer
+checked for a form token when a bearer (header-credential) strategy authenticated it. If you added
+an `exclude` such as `/^\/api\//` only to let a bearer API through, you can remove it. To keep
+checking those requests, set `csrf: { exemptBearer: false }`. The exemption no longer trusts a bare
+header: a junk bearer header beside a session cookie is still verified, so a cross-origin partner
+with `credentials: true` and `Authorization` allowed can no longer skip the form check on a
+cookie-authenticated request. The form-CSRF middleware moved from priority 275 to 325 (after
+authentication at 300, before authorization at 350) to make that check; custom middleware registered
+between 275 and 325 that relied on form CSRF having run must move above 325.
 
 **Anonymous sessions on the store strategy stay in the cookie.** Nothing to change. During a rolling
 deploy an older replica treats the new anonymous cookie as no session, so a visitor with a form open

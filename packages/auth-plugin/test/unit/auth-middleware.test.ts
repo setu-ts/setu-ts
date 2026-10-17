@@ -4,9 +4,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
-import { sealRequestIdentity } from '@setu-ts/common';
+import { AuthService, LocalStrategy } from '../../src/services/auth-service.ts';
+import { CREDENTIAL_SOURCE_STATE_KEY, sealRequestIdentity } from '@setu-ts/common';
 import type {
   HandlerResult,
+  IAuthStrategy,
   IAuthService,
   IPrincipal,
   IRequest,
@@ -14,6 +16,16 @@ import type {
   IResponse,
   IServiceRegistry,
 } from '@setu-ts/common';
+
+/** An `AuthService` whose chain matches with the given credential source. */
+function serviceWithSource(credential: 'header' | 'cookie'): AuthService {
+  const strategy: IAuthStrategy = {
+    name: 's1',
+    credential,
+    authenticate: () => Promise.resolve({ id: 'u' }),
+  };
+  return new AuthService([strategy], new LocalStrategy(() => Promise.resolve(null)));
+}
 
 function createContext(authService: IAuthService): {
   ctx: IRequestContext;
@@ -174,6 +186,60 @@ describe('authMiddleware', () => {
     });
 
     expect(request.user).toBeUndefined();
+    expect(nextCalled).toBe(true);
+  });
+
+  it('records the header source under CREDENTIAL_SOURCE_STATE_KEY when a header strategy authenticated', async () => {
+    const principal: IPrincipal = { id: 'header-user' };
+    const service = new AuthService(
+      [{ name: 'jwt', credential: 'header', authenticate: () => Promise.resolve(principal) }],
+      new LocalStrategy(() => Promise.resolve(null)),
+    );
+    const { ctx, request } = createContext(service);
+
+    await authMiddleware()(ctx, () => Promise.resolve());
+
+    expect(ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY)).toBe('header');
+    expect(request.user).toBe(principal);
+  });
+
+  it('records the cookie source under CREDENTIAL_SOURCE_STATE_KEY when a session strategy authenticated', async () => {
+    const { ctx } = createContext(serviceWithSource('cookie'));
+
+    await authMiddleware()(ctx, () => Promise.resolve());
+
+    expect(ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY)).toBe('cookie');
+  });
+
+  it('sets no source when nothing authenticated, so form CSRF stays closed', async () => {
+    const service = new AuthService(
+      [{ name: 'jwt', credential: 'header', authenticate: () => Promise.resolve(null) }],
+      new LocalStrategy(() => Promise.resolve(null)),
+    );
+    const { ctx, request } = createContext(service);
+
+    await authMiddleware()(ctx, () => Promise.resolve());
+
+    expect(ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY)).toBeUndefined();
+    expect(request.user).toBeUndefined();
+  });
+
+  it('keeps working through authenticate, recording no source, with a replaced service lacking the method', async () => {
+    const principal: IPrincipal = { id: 'replaced' };
+    const service: IAuthService = {
+      authenticate: () => Promise.resolve(principal),
+      verifyCredentials: () => Promise.resolve(null),
+    };
+    const { ctx, request } = createContext(service);
+
+    let nextCalled = false;
+    await authMiddleware()(ctx, () => {
+      nextCalled = true;
+      return Promise.resolve();
+    });
+
+    expect(request.user).toBe(principal);
+    expect(ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY)).toBeUndefined();
     expect(nextCalled).toBe(true);
   });
 });

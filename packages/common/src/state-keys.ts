@@ -26,6 +26,7 @@
  * | tenant binding on   | `session-plugin`       | `session-plugin:tenant-binding`       |
  * | uploads             | `storage-plugin`       | `storage-plugin:uploads`              |
  * | tenant cache prefix | `multi-tenancy-plugin` | `multi-tenancy-plugin:cache-prefix`   |
+ * | credential source   | `auth-plugin`          | `auth-plugin:credential-source`       |
  *
  * @module
  */
@@ -87,3 +88,20 @@ export const SESSION_STATE_KEY = 'session-plugin:session';
  * @since 0.9.0
  */
 export const SESSION_TENANT_BINDING_STATE_KEY = 'session-plugin:tenant-binding';
+
+/**
+ * The `ctx.state` key under which `auth-plugin`'s authentication middleware records the
+ * `credential` of the strategy that authenticated the request (`'header'` | `'cookie'`); unset when
+ * nothing authenticated it. `session-plugin`'s form CSRF reads it: only a request authenticated by a
+ * `'header'` strategy is exempt, so a junk bearer header beside a session cookie stays verified.
+ *
+ * Exported from `common` so the two packages agree on the value byte-for-byte instead of each
+ * hardcoding the literal — the `validatedStateKey` precedent.
+ *
+ * @example
+ * ```typescript
+ * const source = ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) as 'header' | 'cookie' | undefined;
+ * ```
+ * @since 0.10.0
+ */
+export const CREDENTIAL_SOURCE_STATE_KEY = 'auth-plugin:credential-source';

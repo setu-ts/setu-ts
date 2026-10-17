@@ -78,19 +78,23 @@ export interface CsrfFormOptions {
    */
   readonly exclude?: readonly (string | RegExp)[];
   /**
-   * Skip verification for a request carrying `Authorization: Bearer <token>`
-   * (M113e, V9-27). Default `true`.
+   * Skip verification for a bearer request ONLY when a bearer (header-credential)
+   * strategy authenticated it (M113e, V9-27). Default `true`.
    *
    * Form CSRF defends credentials the BROWSER attaches by itself — the session
    * cookie. A bearer token is never attached by the browser, and a page on
    * another origin cannot add an `Authorization` header without a CORS
-   * preflight the server approves, so a bearer-authenticated API call cannot
-   * be forged by a cross-site form. The boundary: the exemption trusts every
-   * origin CORS lets send `Authorization` with credentials — such an origin can
-   * add a junk bearer header to a cookie-authenticated request and skip the form
-   * check, since CSRF runs before authentication. `Basic` credentials are NOT exempt:
-   * browsers re-send cached Basic credentials automatically. `false` verifies
-   * every unsafe request, the behaviour before 0.10.0.
+   * preflight the server approves, so a cross-site form cannot forge a
+   * bearer-authenticated API call. The exemption is decided by the credential
+   * that actually authenticated the request, not by the header's presence: a
+   * junk bearer header beside a session cookie is still verified, and an
+   * unauthenticated bearer header is verified too — it fails closed when
+   * authentication has not run. `Basic` credentials are NOT exempt: browsers
+   * re-send cached Basic credentials automatically. `false` verifies every
+   * unsafe request, the behaviour before 0.10.0.
+   *
+   * Requires authentication to run before form CSRF, which the default
+   * priorities guarantee (300 then 325).
    */
   readonly exemptBearer?: boolean;
 }

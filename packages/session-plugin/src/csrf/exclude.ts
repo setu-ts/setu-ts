@@ -1,5 +1,6 @@
 /**
- * Shared form-CSRF exemption: path exclusion and the bearer rule.
+ * Shared form-CSRF exemption: path exclusion and the credential-based bearer
+ * rule.
  *
  * The middleware and {@linkcode verifyCsrfToken} use this one implementation
  * so an action verifying inline cannot disagree with the global policy.
@@ -7,6 +8,7 @@
  * @module
  */
 import type { IRequestContext } from '@setu-ts/common';
+import { CREDENTIAL_SOURCE_STATE_KEY } from '@setu-ts/common';
 
 import type { CsrfFormOptions, ResolvedCsrfConfig } from '../options.ts';
 
@@ -43,7 +45,14 @@ export function isBearerRequest(headers: Headers): boolean {
 
 /**
  * Whether form-CSRF verification is skipped for this request: an explicit path
- * exclusion, or a bearer request while `exemptBearer` is on.
+ * exclusion, or — while `exemptBearer` is on — a bearer request that a
+ * `'header'`-credential strategy authenticated, as recorded under
+ * `CREDENTIAL_SOURCE_STATE_KEY` by the authentication middleware.
+ *
+ * A bearer request is exempt ONLY when a header-credential strategy
+ * authenticated it: an unauthenticated bearer header, or a request the session
+ * cookie (a `'cookie'` credential) authenticated, is still verified. This fails
+ * closed when authentication has not run — no source recorded means verified.
  *
  * @param ctx - The request context
  * @param config - The resolved CSRF configuration
@@ -56,6 +65,9 @@ export function isCsrfExempt(
   exclude: CsrfFormOptions['exclude'],
 ): boolean {
   return (
-    (config.exemptBearer && isBearerRequest(ctx.request.headers)) || isCsrfExcluded(ctx, exclude)
+    (config.exemptBearer &&
+      isBearerRequest(ctx.request.headers) &&
+      ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) === 'header') ||
+    isCsrfExcluded(ctx, exclude)
   );
 }

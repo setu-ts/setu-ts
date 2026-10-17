@@ -159,8 +159,8 @@ The default middleware priority order:
 | 250      | Security headers                    | `HttpSecurityPlugin`                                |
 | 260      | Session load and commit             | `SessionPlugin`                                     |
 | 270      | Origin-based CSRF check             | `HttpSecurityPlugin`                                |
-| 275      | Form CSRF (synchronizer)            | `SessionPlugin`                                     |
 | 300      | Authentication                      | `AuthPlugin`                                        |
+| 325      | Form CSRF (synchronizer)            | `SessionPlugin`                                     |
 | 500      | Middleware added with no `priority` | The application                                     |
 
 Lower numbers run first on the way in and last on the way out. Route-level middleware (a route's

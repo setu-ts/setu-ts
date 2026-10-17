@@ -325,3 +325,24 @@ controls observed failing (NC1–NC10 plus NC11/NC11b for the rotation and NC12 
 check). Observation: two concurrent promotions from one held cookie leave one orphan row, reachable
 only by the discarded cookie, until its TTL — benign. Support limits: Node only, no real browser
 (CORS asserted from response headers), not tested on a deployed Worker.
+
+### Design change after review (bearer exemption)
+
+A CodeRabbit Major finding — an origin CORS lets send `Authorization` with credentials can add a
+junk bearer header to a request the session cookie authenticates and skip the form check — plus a
+framework survey (Django REST Framework enforces CSRF only when session authentication succeeded;
+Laravel, Rails, Spring, and ASP.NET Core exempt by route; no framework exempts on header presence)
+led the maintainer to choose credential-based exemption: a bearer request skips form CSRF only when
+a `'header'`-credential strategy authenticated it.
+
+Three changes: (1) `IAuthStrategy.credential` (`'header'` | `'cookie'`, absent treated as `'cookie'`
+— fail closed) declares where each strategy reads its credential — the built-in jwt, api-key and
+issuer strategies are `'header'`, the session and auth-session strategies are `'cookie'`; (2)
+`CREDENTIAL_SOURCE_STATE_KEY` (`auth-plugin:credential-source` in `common`) — the authentication
+middleware records the credential of the strategy that authenticated the request, unset when nothing
+did, and form CSRF reads it: `exemptBearer` and a bearer header are not enough, the source must be
+`'header'`; (3) the form-CSRF middleware moved from priority 275 to 325 (after authentication at
+300, before authorization at 350) so the source exists when the check runs. `L1` is now closed in
+code rather than documented: the stated boundary — the exemption trusting every origin CORS lets
+send `Authorization` with credentials — no longer exists, and the documentation that carried it was
+replaced by the new rule.
