@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import type {
@@ -1615,4 +1615,32 @@ it('nacks malformed reply deliveries without a logger and ignores a callback ret
   await pending;
   await deliver!(message);
   expect(abandoned).toBe(1);
+});
+
+describe('ServiceBusBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { ServiceBusBroker } = await import('../../src/brokers/service-bus-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('@azure/service-bus', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
+        connectionString: 'Endpoint=sb://example/;SharedAccessKeyName=k;SharedAccessKey=v',
+      });
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@azure/service-bus');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@azure/service-bus');
+    }
+  });
 });

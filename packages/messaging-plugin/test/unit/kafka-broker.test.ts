@@ -1934,3 +1934,29 @@ describe('KafkaBroker owns crash restarts (M101b security audit N2, O5)', () => 
     expect(order).toEqual(['joined', 'disconnect']);
   });
 });
+
+describe('KafkaBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { KafkaBroker } = await import('../../src/brokers/kafka-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('kafkajs', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer());
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('kafkajs');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('kafkajs');
+    }
+  });
+});

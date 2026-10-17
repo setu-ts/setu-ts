@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IGcpSecretsClient, SecretProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -159,7 +160,11 @@ function buildGcpClientOptions(endpoint?: string): Record<string, unknown> | und
  * @throws {Error} If `@google-cloud/secret-manager` cannot be resolved
  */
 export async function loadGcpModule(): Promise<GcpSdkModule> {
-  return (await import('@google-cloud/secret-manager')) as unknown as GcpSdkModule;
+  try {
+    return (await import('@google-cloud/secret-manager')) as unknown as GcpSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@google-cloud/secret-manager', { cause: error });
+  }
 }
 
 /**

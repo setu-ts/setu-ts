@@ -14,6 +14,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type {
   CosmosAccessCondition,
   CosmosBatchDeleteOperation,
@@ -244,7 +245,12 @@ export async function createLazyClientLoader(
   endpoint: string,
   key: string,
 ): Promise<CosmosClientLoader> {
-  const mod = (await import('@azure/cosmos')) as unknown as CosmosSdkModule;
+  let mod: CosmosSdkModule;
+  try {
+    mod = (await import('@azure/cosmos')) as unknown as CosmosSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/cosmos', { cause: error });
+  }
   return {
     createClient: (): Promise<ICosmosClient> =>
       Promise.resolve(new mod.CosmosClient({ endpoint, key })),

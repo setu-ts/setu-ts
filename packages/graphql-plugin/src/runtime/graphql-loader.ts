@@ -4,6 +4,7 @@
  * @module
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { GraphqlModuleLike, GraphqlRuntime } from '../interfaces/graphql-runtime.ts';
 import { GraphqlRuntimeLoadError } from '../errors/graphql-errors.ts';
 
@@ -32,7 +33,12 @@ export function adaptGraphqlModule(module: GraphqlModuleLike): GraphqlRuntime {
  * Default importer function that performs the actual import.
  */
 const defaultImporter = async (): Promise<GraphqlModuleLike> => {
-  const mod = await import('graphql');
+  let mod: typeof import('graphql');
+  try {
+    mod = await import('graphql');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('graphql', { cause: error });
+  }
   return {
     parse: mod.parse as unknown as GraphqlModuleLike['parse'],
     validate: mod.validate as unknown as GraphqlModuleLike['validate'],

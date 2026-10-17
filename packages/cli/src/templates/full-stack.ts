@@ -61,13 +61,6 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
  */
 function fullStackArgs(context: AppFactoryRenderContext): string {
   const { runtime, serviceEndpoints, grpcBasePath } = context;
-  const assets =
-    runtime === 'cloudflare-workers'
-      ? // Assets are served by the platform binding, not the framework.
-        ''
-      : // In development (`dev.ts`) Vite serves the client modules and there is no
-        // client build to read, so the development SSR runtime replaces assetsDir.
-        `\n      ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),`;
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
@@ -79,7 +72,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const discovery =
     serviceEndpoints === undefined
       ? ''
-      : `\n    serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
+      : `\n      serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
   const config =
     runtime === 'cloudflare-workers'
       ? ''
@@ -104,31 +97,63 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   // error named the adapter rather than the option. Probed against the real
   // type: with the annotation the same literal raises TS2561 naming the key and
   // its nearest match; without it, nothing at all.
-  return `(config): FullStackStarterOptions => ({
-    reactRouter: {
-      // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
-      // and a relative specifier there would resolve against the PLUGIN's
-      // module rather than this project.
-      serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,${assets}
-      populateLoadContext: (ctx, context) => {
-        // The bridge between the kernel request context and a React Router
-        // loader: getSession() needs the kernel context, which a loader never
-        // sees. The keys come from contextKeyFor(), so the copy of
-        // context-keys.server.ts inlined into the server build resolves to the
-        // same key objects this module holds.
-        context.set(sessionContext, getSession(ctx));
-        context.set(csrfContext, getCsrfToken(ctx));
-        context.set(loggerContext, ctx.services.get<ILogger>(CAPABILITIES.LOGGER));
-        context.set(secretsContext, ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS));
+  // M113d §3.10: the arm is chosen at RUNTIME by the generated code, but the
+  // assetsDir decision is made HERE — the generated config has no \`runtime\`
+  // in scope, and assets are served by the platform binding on Workers.
+  // The dev spread stays clean because \`ssr\` is a union: the module object
+  // carries no dev fields and the dev object carries no \`serverBuild\`, so
+  // neither spread can leak an optional property into the other arm under
+  // exactOptionalPropertyTypes.
+  const moduleArm = "ssr !== undefined && 'serverBuild' in ssr";
+  const reactRouterArm =
+    runtime === 'cloudflare-workers'
+      ? `...(${moduleArm} ? { serverBuild: ssr.serverBuild } : {
+          // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
+          // and a relative specifier there would resolve against the PLUGIN's
+          // module rather than this project.
+          serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+        }),`
+      : `...(${moduleArm} ? { serverBuild: ssr.serverBuild } : {
+          // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
+          // and a relative specifier there would resolve against the PLUGIN's
+          // module rather than this project.
+          serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+          ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),
+        }),`;
+
+  // The call wraps onto its own line and the body sits two spaces deeper than
+  // the single-line form: this argument is long enough that Prettier wraps the
+  // call, and a generated project must pass its OWN \`prettier --check\` (M63).
+  return `
+    (config): FullStackStarterOptions => ({
+      reactRouter: {
+        // M113d §3.10: the arm is chosen at runtime. On Workers the entry passes
+        // the compiled server build as a MODULE — a bundled Worker cannot resolve
+        // \`new URL(…, import.meta.url)\` against the application. On the socket
+        // targets — and for \`setu commands\`, which loads this config without
+        // the entry — the path arm is unchanged.
+        ${reactRouterArm}
+        populateLoadContext: (ctx, context) => {
+          // The bridge between the kernel request context and a React Router
+          // loader: getSession() needs the kernel context, which a loader never
+          // sees. The keys come from contextKeyFor(), so the copy of
+          // context-keys.server.ts inlined into the server build resolves to the
+          // same key objects this module holds.
+          context.set(sessionContext, getSession(ctx));
+          context.set(csrfContext, getCsrfToken(ctx));
+          context.set(loggerContext, ctx.services.get<ILogger>(CAPABILITIES.LOGGER));
+          context.set(secretsContext, ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS));
+        },
       },
-    },
-    session: {
-      secret: config.getOrThrow<string>('SESSION_SECRET'),
-      csrf: ${csrf},
-    },${discovery}
-    // Preserve Origin on native form posts; send no cross-origin referrer.
-    httpSecurity: { headers: { referrerPolicy: 'same-origin' } },
-  }), { env${config} }`;
+      session: {
+        secret: config.getOrThrow<string>('SESSION_SECRET'),
+        csrf: ${csrf},
+      },${discovery}
+      // Preserve Origin on native form posts; send no cross-origin referrer.
+      httpSecurity: { headers: { referrerPolicy: 'same-origin' } },
+    }),
+    { env${config} },
+  `;
 }
 
 /**
@@ -182,9 +207,9 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin'],
     parameter: {
       name: 'ssr',
-      type: "Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
-      doc: 'The development SSR runtime `dev.ts` supplies; omitted in production.',
-      readOn: ['deno', 'node', 'bun'],
+      type: "{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
+      doc: 'The development SSR runtime `dev.ts` supplies; on Workers the entry passes the compiled server build module.',
+      readOn: ['deno', 'node', 'bun', 'cloudflare-workers'],
     },
   },
   routes: [
@@ -258,6 +283,31 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // fails on its first request. `--allow-sys` is for `HealthPlugin`, which the
     // full-stack starter composes — its `self` indicator reads the hostname.
     denoPermissions: ['--allow-read', '--allow-sys'],
+  },
+  runtimeSwaps: {
+    // M113d §3.10: the full-stack Workers project builds before it bundles.
+    // The static import of the server build in src/index.ts cannot resolve
+    // until `react-router build` has run, and the client bundle must be served
+    // as platform assets — no socket target needs either stanza.
+    'cloudflare-workers': {
+      removePackages: [],
+      addPlugins: [],
+      wranglerToml: `
+# The client build is served as platform assets before the Worker runs, so a
+# file in it answers instead of an application route with the same path, and
+# the application's middleware never sees that request: no security headers, no
+# authentication. Keep only public files here. It holds the hashed bundles under
+# /assets/ and any files from public/; every other path reaches the application.
+[assets]
+directory = "./build/client"
+
+# \`wrangler dev\` and \`wrangler deploy\` build the client and server BEFORE
+# bundling the Worker — the static import in src/index.ts cannot resolve until
+# the server build exists. The frontend build runs on every \`wrangler dev\`
+# start; for this template that is well under a second.
+[build]
+command = "npm run build"`,
+    },
   },
   // Every runtime is supported: a missing filesystem makes the asset handler
   // answer 404 rather than throw, and this template omits the asset route

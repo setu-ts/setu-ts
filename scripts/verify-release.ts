@@ -190,6 +190,16 @@ async function main(): Promise<void> {
         `Node resolves neither; write the bare package name.`,
     );
   }
+  // M113d §3.2: Wrangler's esbuild pass resolves a bare import() at build
+  // time, so a Worker importing the package fails to build unless the load is
+  // guarded by a same-function try (AI_GUIDELINES §12.2).
+  for (const hit of audit.unguarded) {
+    problems.push(
+      `${hit.file}:${hit.line}: bare import() not guarded by a same-function try — ` +
+        `a Worker bundling this package fails at build time. Wrap the import in ` +
+        `try { … } catch { throw new OptionalDependencyUnavailableError(…) }. ${hit.snippet}`,
+    );
+  }
 
   // ── 7: the changelog must carry this version's release notes ───────────────
 

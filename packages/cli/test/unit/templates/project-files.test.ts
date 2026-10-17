@@ -266,7 +266,7 @@ describe('a template with a frontend build, on a Deno target', () => {
   it('hands the development SSR runtime to the plugin in place of assetsDir', () => {
     const config = contentsOf([...projectFiles('shop', 'deno', host)], 'setu.config.ts');
     expect(config).toContain(
-      "  ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+      "  ssr?: { serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
     );
     expect(config).toContain(
       "...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),",
@@ -307,11 +307,13 @@ describe('a template with a frontend build, on a Deno target', () => {
     const files = [...projectFiles('shop', 'cloudflare-workers', workersHost)];
     expect(files.some((file) => file.path === 'dev.ts')).toBe(false);
     const workers = contentsOf(files, 'setu.config.ts');
-    // One signature on every target; Workers reads none of it.
+    // One signature on every target; on Workers the entry supplies the compiled
+    // server build, so the parameter is READ (M113d §3.10) and the arm is
+    // chosen at runtime.
     expect(workers).toContain(
-      "  _ssr?: Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
+      "  ssr?: { serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>,",
     );
-    expect(workers).not.toContain('ssr === undefined');
+    expect(workers).toContain("'serverBuild' in ssr");
     const scripts = (
       JSON.parse(contentsOf(files, 'package.json')) as {
         scripts: Record<string, string>;
@@ -369,14 +371,17 @@ describe('the Cloudflare Workers target', () => {
     expect(config).toContain('...(waitUntil ? { waitUntil } : {})');
   });
 
-  it('emits no waitUntil parameter for a host that consumes none', () => {
-    // Otherwise a REST project on Workers gains an unused parameter, which its
-    // own type-check rejects.
+  it('declares the waitUntil parameter underscore-prefixed for a host that consumes none (M113d §3.8)', () => {
+    // The entry always passes the platform sink positionally, so the parameter
+    // is declared on every Workers project — but underscore-prefixed where
+    // nothing reads it, so the generated project passes its own lint.
     const config = contentsOf(filesOf(rest), 'setu.config.ts');
     const entry = contentsOf(filesOf(rest), 'src/index.ts');
 
-    expect(config).not.toContain('waitUntil');
-    expect(entry).not.toContain('cloudflare:workers');
+    expect(config).toContain('_waitUntil?: (promise: Promise<unknown>) => void');
+    expect(config).not.toContain('...(_waitUntil');
+    expect(entry).toContain("import { waitUntil } from 'cloudflare:workers';");
+    expect(entry).toContain('createApp(env, waitUntil)');
   });
 
   it('starts with deno serve, which actually binds (X9-7)', () => {

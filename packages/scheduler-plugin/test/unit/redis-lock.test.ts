@@ -1,7 +1,7 @@
 /**
  * Tests for RedisLock with fake ioredis client.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createRedisLockClient,
   DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
@@ -420,5 +420,29 @@ describe('RedisLock command bound (M101a V8-24)', () => {
     await lock.connect();
     await expect(lock.acquire('job', 30_000)).rejects.toThrow('Command timed out');
     await lock.disconnect();
+  });
+});
+
+describe('RedisLock — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
+    const { RedisLock } = await import('../../src/lock/redis-lock.ts');
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const lock = new RedisLock({ url: 'redis://localhost:6379' });
+      let caught: unknown;
+      try {
+        await lock.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
+    }
   });
 });

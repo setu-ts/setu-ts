@@ -118,7 +118,20 @@ async function loadEntry(): Promise<{ worker: WorkerModule['default']; log: Boot
   const dir = await tempDir({ prefix: 'workers-entry-' });
   tempDirs.push(dir);
   await nodeFs.mkdir(`${dir}/src`);
-  await nodeFs.writeFile(`${dir}/src/index.ts`, workersEntry());
+  // M113d §3.8: the generated entry imports `cloudflare:workers`, which Node
+  // (and so this harness's loader) cannot resolve. The boot semantics under
+  // test are independent of where the sink comes from, so the specifier is
+  // rewritten to a local stub; the import line itself is pinned verbatim by
+  // new-command.test.ts and project-files.test.ts.
+  const rendered = workersEntry().replace(
+    "from 'cloudflare:workers'",
+    "from './cloudflare-workers-stub.mjs'",
+  );
+  await nodeFs.writeFile(`${dir}/src/index.ts`, rendered);
+  await nodeFs.writeFile(
+    `${dir}/src/cloudflare-workers-stub.mjs`,
+    'export function waitUntil() {}\n',
+  );
   await nodeFs.writeFile(
     `${dir}/setu.config.ts`,
     `export const log = {

@@ -789,4 +789,15 @@ who is not signed in to \`/login\`, and puts the signed-in user on the context f
 Import workspace libraries from \`.server.ts\` modules and \`setu.config.ts\`. The SSR build leaves
 their declared package names external so the server runtime resolves them through the workspace.
 Client modules cannot import a Deno workspace library: the browser bundle has no Deno workspace.
+
+## Deploying to Cloudflare Workers
+
+\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret is a
+Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
+before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
+with a labelled-insecure development value.
+
+Everything in \`build/client\` is served by the platform before the Worker runs, so those requests
+skip the application's middleware: no security headers and no authentication apply to them. Put only
+public files in \`public/\`.
 `;

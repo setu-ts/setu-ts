@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Workers builds and the edge cache (M113d).** A Cloudflare Worker importing a Setu-TS package now
+  builds and deploys whether or not that package's optional peers are installed. Every bare dynamic
+  `import()` in `packages/*/src` is now awaited inside the `try` block of a same-function
+  `try`/`catch` (the loaders of 14 published packages and `cli` converted; the rest already were),
+  and the `catch` throws the new `OptionalDependencyUnavailableError` from `@setu-ts/common` — a
+  missing optional dependency now rejects with that named error, or with a package-specific wrapper
+  that keeps it as `cause` (the original rejection remains the shared error's `cause`), instead of
+  the runtime's raw error. `cacheApiMiddleware` stores the body it serves with or without a
+  `waitUntil` host, a failed write is logged with the request `path` instead of the cache `key`
+  (which carried the query string and the tenant id) and by error class rather than message, since a
+  custom cache's rejection may quote its key (a `put` that throws rather than rejects is handled the
+  same way, and the response is still served), and `CloudflarePlugin` warns once on Workers when no
+  host was passed. A newly scaffolded Workers project's entry passes the platform's `waitUntil` to
+  `createApp` as its second parameter (named `_waitUntil` until something reads it); a full-stack
+  Workers project passes its compiled server build from the entry (the new
+  `ReactRouterPluginOptions.serverBuild` option), renders `.dev.vars`, and its `wrangler.toml`
+  carries `[assets]` and `[build]` stanzas. `setu add cloudflare` prints the `waitUntil` form and
+  tells you to rename the factory's `_waitUntil` parameter; `docs/upgrading.md` carries the edits
+  for projects scaffolded by 0.9.0 or earlier. `ReactRouterPluginOptions` changes from an
+  `interface` to a union `type` (`serverBuildPath` | `serverBuild`, exactly one required) — breaking
+  for implementors who `extends` it; a caller passing `serverBuildPath` is unaffected. A custom
+  `loadRequestHandler` receives the module as `options.serverBuild`, its new optional third
+  parameter. Ships in minor `0.10.0`.
 - **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
   previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
   changes overall status for these conditions. Migrate alerts to inbox `data.parked` /

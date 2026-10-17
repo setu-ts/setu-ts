@@ -19,6 +19,7 @@
  */
 
 import { resolve, sep } from 'node:path';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 
 import { joinPath } from './file-writer.ts';
 import type { GeneratedFile } from './file-writer.ts';
@@ -38,7 +39,12 @@ export type PrettierLoader = () => Promise<PrettierApi>;
 
 /** The default loader: Prettier, a regular dependency of this package. */
 export const loadPrettier: PrettierLoader = async () => {
-  const prettier = await import('prettier');
+  let prettier: typeof import('prettier');
+  try {
+    prettier = await import('prettier');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('prettier', { cause: error });
+  }
   return {
     resolveConfigFile: (path) => prettier.resolveConfigFile(path),
     resolveConfig: (path, options) => prettier.resolveConfig(path, options),

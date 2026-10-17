@@ -25,6 +25,7 @@ import {
   type SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ServiceBusRetryOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
@@ -411,8 +412,11 @@ async function closeReceiver(entry: OpenReceiver): Promise<void> {
  * @throws {Error} If the package cannot be resolved
  */
 export async function loadServiceBusModule(): Promise<ServiceBusSdkModule> {
-  const mod = await import('@azure/service-bus');
-  return mod as unknown as ServiceBusSdkModule;
+  try {
+    return (await import('@azure/service-bus')) as unknown as ServiceBusSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/service-bus', { cause: error });
+  }
 }
 
 /**

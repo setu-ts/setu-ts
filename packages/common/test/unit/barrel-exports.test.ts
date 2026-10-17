@@ -444,6 +444,24 @@ describe('@setu-ts/common barrel — duplicate key', () => {
 });
 
 // ---------------------------------------------------------------------------
+// M113d — the portable optional-dependency error
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — optional dependency unavailable', () => {
+  it('exports OptionalDependencyUnavailableError, naming the dependency and the cause', () => {
+    const cause = new Error('No such module "ioredis"');
+    const error = new common.OptionalDependencyUnavailableError('ioredis', { cause });
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('OptionalDependencyUnavailableError');
+    expect(error.dependency).toBe('ioredis');
+    expect(error.cause).toBe(cause);
+    expect(error.message).toContain("'ioredis'");
+    // A startup/configuration fault, not a request failure: no status hint.
+    expect(common.httpStatusHintOf(error)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M92 — the view rendering contract
 // ---------------------------------------------------------------------------
 

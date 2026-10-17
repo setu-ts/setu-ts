@@ -25,7 +25,20 @@
  */
 
 import { run as runProcess } from './lib/run.ts';
-import { readFile, rm, mkdir, realpath, readdir, copyFile } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:net';
 import { workspaceMembers } from './lib/workspace.ts';
 import {
@@ -33,6 +46,9 @@ import {
   decideOutcome,
   type LegResult,
   workspaceProtocolSpecifiers,
+  workersBundleDriver,
+  workersBundleEntry,
+  workersBundleMembers,
 } from './node-build-gate.ts';
 
 async function main(): Promise<void> {
@@ -144,6 +160,33 @@ async function main(): Promise<void> {
   // stays scoped by command name rather than by a resolved `.bin` path.
   const tsc = await realpath('node_modules/typescript/bin/tsc');
   await step('tsc the decorated controller', 'node', [tsc, '-p', 'tsconfig.json'], BOOT_DIR);
+
+  // M113d §3.4 — the Workers bundle leg: a Worker author's exact situation
+  // (published tarballs, a plain `npm install`, the optional peers absent),
+  // bundled the way Wrangler's esbuild pass resolves. It runs OUTSIDE the
+  // repository, through a `node_modules` link to the install above: inside it,
+  // resolution would walk up into the repository's own `node_modules`, where a
+  // hoisted optional peer satisfies an import no Worker author's install can.
+  const bundleNames: string[] = [];
+  for (const dir of workersBundleMembers(members)) {
+    const manifest = JSON.parse(await readFile(`${dir}/package.json`, 'utf8')) as { name: string };
+    bundleNames.push(manifest.name);
+  }
+  const bundleDir = await mkdtemp(join(tmpdir(), 'setu-workers-bundle-'));
+  try {
+    await symlink(await realpath(`${BOOT_DIR}/node_modules`), join(bundleDir, 'node_modules'));
+    await writeFile(join(bundleDir, 'worker-entry.mjs'), workersBundleEntry(bundleNames));
+    const esbuildUrl = pathToFileURL(await realpath('node_modules/esbuild/lib/main.js')).href;
+    await writeFile(join(bundleDir, 'workers-bundle.mjs'), workersBundleDriver(esbuildUrl));
+    await step(
+      `esbuild workerd bundle of ${bundleNames.length} members (Wrangler resolution)`,
+      'node',
+      ['workers-bundle.mjs'],
+      bundleDir,
+    );
+  } finally {
+    await rm(bundleDir, { recursive: true, force: true });
+  }
 
   const legs: LegResult[] = [];
   const runLeg = async (name: string, cmd: string, args: readonly string[], probe: string[]) => {

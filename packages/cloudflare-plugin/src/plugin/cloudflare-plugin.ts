@@ -18,7 +18,7 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@setu-ts/common';
 
-import { resolveWaitUntil } from '../background/wait-until.ts';
+import { markHostlessRegistry, resolveWaitUntil } from '../background/wait-until.ts';
 import { instanceToken } from '../instance-token.ts';
 import { WorkersBroker } from '../messaging/workers-broker.ts';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
@@ -147,6 +147,23 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
         resolveWaitUntil(options.waitUntil, () => ctx.logger),
       );
       ctx.services.register<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE, registry);
+
+      // M113d §3.6/§3.7. With no host the registry's sink delegates to
+      // nothing, so `store()` must await the edge-cache write itself; and on
+      // Workers an application's own background work still needs a sink, so
+      // one warning names the remedy. Off Workers nothing is logged: running
+      // the promise to completion is correct there (wait-until.ts).
+      if (options.waitUntil === undefined) {
+        markHostlessRegistry(registry);
+        if (ctx.runtime.platform() === 'cloudflare-workers') {
+          ctx.logger?.warn(
+            'cloudflare: CloudflarePlugin received no waitUntil host; work passed to ' +
+              'bindings.waitUntil() may be cut off when the response is sent. Import ' +
+              "{ waitUntil } from 'cloudflare:workers' in the Worker entry and pass it " +
+              'through the application factory.',
+          );
+        }
+      }
 
       if (cacheArm !== undefined) {
         const store = new KvCacheStore(registry.kv(cacheArm.options.binding), ctx.runtime, {

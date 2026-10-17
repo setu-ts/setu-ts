@@ -5,7 +5,7 @@
  * @since 0.2.0
  */
 
-import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError, TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 import type { SpanContext } from '@setu-ts/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { normalizeTraceFlags } from './trace-flags.ts';
@@ -429,13 +429,32 @@ export async function loadOtelTracerProvider(
     throw new Error(`TelemetryPlugin: exporter must be 'otlp' or 'console' when using real mode`);
   }
 
-  // Lazy-load sdk-trace-base
-  const sdkMod = await import('@opentelemetry/sdk-trace-base');
+  // Lazy-load sdk-trace-base. Each import is guarded in the SAME function
+  // (AI_GUIDELINES §12.2) so a Worker bundling this file does not fail at
+  // build time when a package is absent.
+  let sdkMod: typeof import('@opentelemetry/sdk-trace-base');
+  try {
+    sdkMod = await import('@opentelemetry/sdk-trace-base');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@opentelemetry/sdk-trace-base', {
+      cause: error,
+    });
+  }
   // Lazy-load resources
-  const resourcesMod = await import('@opentelemetry/resources');
+  let resourcesMod: typeof import('@opentelemetry/resources');
+  try {
+    resourcesMod = await import('@opentelemetry/resources');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@opentelemetry/resources', { cause: error });
+  }
   // Lazy-load the OTel API (transitive dep of sdk-trace-base) for span parenting.
   // F2 fix: typed import — properly cast to OtelApi interface.
-  const apiMod = await import('@opentelemetry/api');
+  let apiMod: typeof import('@opentelemetry/api');
+  try {
+    apiMod = await import('@opentelemetry/api');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@opentelemetry/api', { cause: error });
+  }
   setOtelApi(apiMod as OtelApi);
 
   // Span activation is opt-out. When it is attempted the outcome is reported,

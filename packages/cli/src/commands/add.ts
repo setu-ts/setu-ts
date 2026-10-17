@@ -250,7 +250,13 @@ function registrationLine(bare: string): string | undefined {
   if (bare === 'service-discovery-plugin') {
     return "ServiceDiscoveryPlugin({ provider: 'static', services: {} })";
   }
-  if (bare === 'cloudflare-plugin') return 'CloudflarePlugin({ env })';
+  if (bare === 'cloudflare-plugin') {
+    // M113d §3.8: `setu add cloudflare` is accepted only on cloudflare-workers,
+    // whose generated factory takes the platform sink as its second parameter.
+    // The spread is required under `exactOptionalPropertyTypes`: `setu commands`
+    // calls the factory with no `waitUntil`.
+    return 'CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })';
+  }
   return undefined;
 }
 
@@ -777,6 +783,16 @@ export async function runAddCommand(
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
   printWiringNote(configSource, bare, deps.log);
+  if (bare === 'cloudflare-plugin') {
+    // M113d §3.8: the generated factory names its second parameter `_waitUntil`
+    // while nothing reads it (a read-free parameter must be underscored to pass
+    // the project's own lint), and a project scaffolded before 0.10.0 has no
+    // such parameter at all. The printed registration reads `waitUntil`, so
+    // both cases are named here rather than detected in the developer's file.
+    deps.log("  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.");
+    deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
+    deps.log('  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").');
+  }
   printPermissionNote(specifier, deps.log);
   return EXIT_OK;
 }

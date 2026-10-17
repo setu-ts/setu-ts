@@ -267,6 +267,7 @@ package fits the plugin architecture.
 | `withValidationMetadata`              | function  |
 | `DuplicateKeyError`                   | class     |
 | `MalformedRequestBodyError`           | class     |
+| `OptionalDependencyUnavailableError`  | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |

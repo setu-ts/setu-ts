@@ -14097,7 +14097,7 @@ re-run against a newly published version.
 | **M113a** | design | brokers that report healthy while down, and publishes with no bound   | V9-35 **High**, V9-36 **High**, V9-37, V9-3                                              | `messaging-plugin`                                                                                                                                                        |
 | **M113b** | design | readiness that does not describe the dependency                       | V9-2 **High**, V9-19, V9-32, V9-44                                                       | `service-discovery`, `health`, `scheduler`, `cache`, `session`, `auth`, `messaging`, `realtime-backplane`, `worker-pool`, `static`, `feature-flags`, `common`, `database` |
 | **M113c** | design | connections and jobs that never recover, and a shutdown with no bound | V9-18 **High**, V9-31, V9-64 **High**, V9-71, V9-76                                      | `queue-plugin`, `runtime`                                                                                                                                                 |
-| **M113d** | design | Workers builds and the edge cache                                     | V9-1 **High, REGRESSION**, V9-23 **High**, V9-4                                          | `database`, `scheduler`, `cloudflare`, `cli`                                                                                                                              |
+| **M113d** | design | Workers builds and the edge cache                                     | V9-1 **High, REGRESSION**, V9-23 **High**, V9-4                                          | `common`, `react-router`, `cloudflare`, `cli`, and the 14 packages whose loaders were converted                                                                           |
 | **M113e** | design | identity and session semantics a client cannot predict                | V9-28, V9-27, V9-46, V9-50                                                               | `auth-plugin`, `session-plugin`                                                                                                                                           |
 | **M113f** | design | what reaches logs and public endpoints                                | V9-45, V9-47, V9-43, V9-41, V9-49, V9-80, V9-82                                          | `exceptions`, `logger`, `database`, `health`, `openapi`, `kernel`                                                                                                         |
 | **M113g** | design | database calls and errors under faults and edge inputs                | V9-25, V9-33, V9-26, V9-34, V9-48                                                        | `database-plugin`                                                                                                                                                         |
@@ -14197,17 +14197,31 @@ V9-68 is owned by M113o.
 
 ### Milestone 113d: Workers Builds and the Edge Cache
 
-**Package(s):** `packages/database-plugin`, `packages/scheduler-plugin`,
-`packages/cloudflare-plugin`, `packages/cli`
+**Package(s):** `packages/common`, `packages/react-router-plugin`, `packages/cloudflare-plugin`,
+`packages/cli`, and the 14 published packages whose loaders carried an unguarded import (auth,
+cache, database, graphql, grpc, idempotency, mail, messaging, queue, runtime, scheduler, secrets,
+storage, telemetry)
 
 - **V9-1 (High, REGRESSION)** — a Cloudflare Worker importing `database-plugin` or
-  `scheduler-plugin` no longer builds on `0.9.0`. Investigate first: if the cause is one import, the
-  fix is a `fix/…` branch and this letter shrinks to V9-23 and V9-4.
+  `scheduler-plugin` no longer builds on `0.9.0`. **Investigated first: it is not one import.**
+  M111a turned every lazy driver import into `import('<bare peer>')`; Wrangler bundles with esbuild,
+  which resolves a string-literal `import()` at build time, so a Worker importing ANY of the 14
+  published packages carrying an unguarded bare import fails with `Could not resolve "…"` although
+  it never loads one. The fix is a repository-wide rule (the literal is awaited inside the `try` of
+  a same-function `try`/`catch`; the `catch` throws the new shared
+  `OptionalDependencyUnavailableError`), its source gate, and a Workers bundle leg in
+  `check:node-build`. The full-stack Workers probe found three more defects, fixed in the same
+  letter: the server build was located with `new URL(…, import.meta.url)` (unresolvable in a bundled
+  Worker — the plugin gains a `serverBuild` module arm), the Workers target emitted no local
+  variables file (`.dev.vars`), and the client bundle answered 404 (`[assets]`/`[build]` stanzas).
 - **V9-23 (High)** — `cacheApiMiddleware` stores an empty body unless `CloudflarePlugin` receives
   `waitUntil`, and the scaffold gives no working way to pass it (the README's
   `import { waitUntil } from 'cloudflare:workers'` breaks `setu commands`; the generated entry takes
-  no execution context).
-- **V9-4** — an unmatched cron trigger throws a 500 on workerd where the README says it is silent.
+  no execution context). Fixed on both halves: the cache write is awaited when the registry has no
+  sink, and every generated Workers entry passes `waitUntil` to `createApp` as its second parameter
+  (named `_waitUntil` in the factory until something reads it).
+- **V9-4** — an unmatched cron trigger throws a 500 on workerd. The behaviour is right (M70l); the
+  README said it is silent and is corrected.
 
 ---
 
@@ -14844,7 +14858,7 @@ patch by construction and gains nothing new here.
 | 113a      | ✅     | messaging-plugin — brokers that report healthy while down, and publishes with no bound                                                                                                                                                                                                    |
 | 113b      | ✅     | service-discovery + health + scheduler + cache + session + auth + messaging + realtime-backplane + worker-pool + static + feature-flags + common + database — readiness that does not describe the dependency                                                                             |
 | 113c      | ⬜     | queue-plugin + runtime — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                                            |
-| 113d      | ⬜     | database + scheduler + cloudflare + cli — Workers builds (the V9-1 regression) and the edge cache                                                                                                                                                                                         |
+| 113d      | ✅     | common + react-router + cloudflare + cli + 14 loader packages — Workers builds (the V9-1 regression) and the edge cache; PR #465                                                                                                                                                          |
 | 113e      | ⬜     | auth-plugin + session-plugin — identity and session semantics a client cannot predict                                                                                                                                                                                                     |
 | 113f      | ⬜     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints                                                                                                                                                                                                |
 | 113g      | ⬜     | database-plugin — database calls and errors under faults and edge inputs                                                                                                                                                                                                                  |

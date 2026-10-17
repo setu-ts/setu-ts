@@ -9,6 +9,7 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
@@ -65,8 +66,11 @@ function isConsumerExistsError(err: unknown): boolean {
  * @throws {Error} If the nats package cannot be resolved
  */
 async function loadNats(): Promise<typeof import('nats')> {
-  const mod = await import('nats');
-  return mod;
+  try {
+    return await import('nats');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('nats', { cause: error });
+  }
 }
 
 /**

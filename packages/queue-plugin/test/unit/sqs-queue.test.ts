@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 import type { ISqsTransport } from '../../src/adapters/sqs-queue.ts';
@@ -1998,4 +1998,27 @@ it('skips malformed envelopes and stale settlements safely without a logger', as
   expect(deletions).toBe(0);
   await queue.disconnect();
   await queue.disconnect();
+});
+
+describe('loadSqsModule — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the SDK is absent', async () => {
+    const { loadSqsModule } = await import('../../src/adapters/sqs-queue.ts');
+    vi.doMock('@aws-sdk/client-sqs', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadSqsModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@aws-sdk/client-sqs');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-sqs');
+    }
+  });
 });

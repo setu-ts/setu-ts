@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { canSign } from '../../src/providers/azure-provider.ts';
 import type { IAzureBlobClient } from '../../src/interfaces/index.ts';
 import {
@@ -995,5 +995,28 @@ describe('AzureBlobProvider getStream cancellation safety', () => {
     await tick();
     await tick();
     await tick();
+  });
+});
+
+describe('loadAzureModule — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    const { loadAzureModule } = await import('../../src/providers/azure-provider.ts');
+    vi.doMock('@azure/storage-blob', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadAzureModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@azure/storage-blob');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@azure/storage-blob');
+    }
   });
 });

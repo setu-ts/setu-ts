@@ -19,6 +19,102 @@
 const SHIPPED_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'] as const;
 
 /**
+ * The workspace members excluded from the Workers bundle leg (M113d §3.4):
+ * `setu` and `npm create @setu-ts` are executables, not libraries a Worker
+ * imports, and neither ships a barrel a bundler could resolve.
+ */
+const WORKERS_BUNDLE_EXCLUDED: ReadonlySet<string> = new Set(['packages/cli', 'packages/create']);
+
+/**
+ * The published members the Workers bundle leg imports: every workspace
+ * member except the two executables.
+ *
+ * @param members - The workspace member directories, in authored order
+ * @returns The directories whose barrel the entry module imports
+ */
+export function workersBundleMembers(members: readonly string[]): readonly string[] {
+  return members.filter((dir) => !WORKERS_BUNDLE_EXCLUDED.has(dir));
+}
+
+/**
+ * The Workers bundle entry module: one side-effect import per member barrel.
+ *
+ * Resolution, not execution, is the point — Wrangler's esbuild pass fails a
+ * Worker build on the first unresolvable specifier, so a bare `import()` a
+ * guarded loader let through, or a regular dependency that does not resolve
+ * for `workerd`, fails here.
+ *
+ * @param names - The npm package names whose barrel the entry imports
+ * @returns The entry module source
+ */
+export function workersBundleEntry(names: readonly string[]): string {
+  return `${names.map((name) => `import '${name}';`).join('\n')}\n`;
+}
+
+/** The esbuild option set the Workers bundle leg builds with. */
+export interface WorkersBundleOptions {
+  /** ESM, as a Worker entry is. */
+  readonly format: 'esm';
+  /** `neutral` — no Node or browser built-ins assumed. */
+  readonly platform: 'neutral';
+  /** Wrangler's resolution conditions, in its order. */
+  readonly conditions: readonly string[];
+  /** Wrangler's main-field priority. */
+  readonly mainFields: readonly string[];
+  /** Node built-ins and Cloudflare's platform modules stay runtime imports. */
+  readonly external: readonly string[];
+  /**
+   * Resolve through the bundle directory's `node_modules` link rather than its
+   * target. The installed tarballs live inside the repository, and following
+   * the link would let resolution walk up into the repository's own
+   * `node_modules`, where a hoisted optional peer (`graphql` is one) would
+   * satisfy an import a Worker author's install cannot.
+   */
+  readonly preserveSymlinks: true;
+}
+
+/**
+ * The esbuild options matching Wrangler's bundling resolution (M113d §3.4):
+ * the same conditions and main fields Wrangler passes, with `node:*` and
+ * `cloudflare:*` left external as workerd supplies them at runtime.
+ *
+ * @returns The option object spread into the fixture's `build()` call
+ */
+export function workersBundleOptions(): WorkersBundleOptions {
+  return {
+    format: 'esm',
+    platform: 'neutral',
+    conditions: ['workerd', 'worker', 'browser'],
+    mainFields: ['browser', 'module', 'main'],
+    external: ['node:*', 'cloudflare:*'],
+    preserveSymlinks: true,
+  };
+}
+
+/**
+ * The script that bundles {@linkcode workersBundleEntry} with
+ * {@linkcode workersBundleOptions}. It imports esbuild by URL because it runs in
+ * a directory outside the repository, where a bare `esbuild` does not resolve.
+ *
+ * @param esbuildUrl - A `file:` URL of the repository's esbuild entry module
+ * @returns The driver module source
+ */
+export function workersBundleDriver(esbuildUrl: string): string {
+  const options = workersBundleOptions();
+  return [
+    `import { build } from ${JSON.stringify(esbuildUrl)};`,
+    'await build({',
+    "  entryPoints: ['worker-entry.mjs'],",
+    "  outfile: 'worker-bundled.mjs',",
+    '  bundle: true,',
+    "  logLevel: 'error',",
+    ...Object.entries(options).map(([key, value]) => `  ${key}: ${JSON.stringify(value)},`),
+    '});',
+    '',
+  ].join('\n');
+}
+
+/**
  * Every `name@specifier` in a packed manifest's shipped dependency fields that
  * still uses the `workspace:` protocol.
  *

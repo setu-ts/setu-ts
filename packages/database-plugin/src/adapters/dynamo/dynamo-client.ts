@@ -8,6 +8,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type {
   DynamoDeleteItemCommandInput,
   DynamoDeleteItemCommandOutput,
@@ -193,7 +194,12 @@ export function createLazyDynamoLoader(
   assertTransportSecurity(configuration);
   return {
     load: async (): Promise<IDynamoClient> => {
-      const module = (await import('@aws-sdk/client-dynamodb')) as unknown as DynamoSdkModule;
+      let module: DynamoSdkModule;
+      try {
+        module = (await import('@aws-sdk/client-dynamodb')) as unknown as DynamoSdkModule;
+      } catch (error) {
+        throw new OptionalDependencyUnavailableError('@aws-sdk/client-dynamodb', { cause: error });
+      }
       return adaptDynamoSdkModule(module, configuration);
     },
   };

@@ -1362,3 +1362,29 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
     await broker.disconnect();
   });
 });
+
+describe('NatsBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { NatsBroker } = await import('../../src/brokers/nats-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('nats', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer());
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('nats');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('nats');
+    }
+  });
+});

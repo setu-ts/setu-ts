@@ -9,6 +9,10 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
+  workersBundleDriver,
+  workersBundleEntry,
+  workersBundleMembers,
+  workersBundleOptions,
   classifyLeg,
   decideOutcome,
   type LegResult,
@@ -127,5 +131,62 @@ describe('the CI job runs the gate strictly (M111a §3.10)', () => {
     // The manifest drift check runs under Node (M111e3); Deno is not set up in this job.
     expect(job).toMatch(/^ +run: node scripts\/node-manifests\.ts --check$/m);
     expect(job).not.toContain('setup-deno');
+  });
+});
+
+// ── M113d §3.4 — the Workers bundle leg ──────────────────────────────────────
+
+describe('workersBundleMembers (M113d §3.4)', () => {
+  it('keeps every library member and excludes the two executables', () => {
+    const members = [
+      'packages/common',
+      'packages/cli',
+      'packages/create',
+      'packages/cloudflare-plugin',
+      'packages/starters/full-stack-starter',
+    ];
+    expect(workersBundleMembers(members)).toEqual([
+      'packages/common',
+      'packages/cloudflare-plugin',
+      'packages/starters/full-stack-starter',
+    ]);
+  });
+});
+
+describe('workersBundleEntry (M113d §3.4)', () => {
+  it('imports every named member barrel, one side-effect import per line', () => {
+    const entry = workersBundleEntry(['@setu-ts/common', '@setu-ts/kernel']);
+    expect(entry).toBe("import '@setu-ts/common';\nimport '@setu-ts/kernel';\n");
+  });
+
+  it('produces an empty entry for an empty member list', () => {
+    expect(workersBundleEntry([])).toBe('\n');
+  });
+});
+
+describe('workersBundleOptions (M113d §3.4)', () => {
+  it('carries Wrangler resolution: workerd conditions, neutral platform, two externals', () => {
+    expect(workersBundleOptions()).toEqual({
+      format: 'esm',
+      platform: 'neutral',
+      conditions: ['workerd', 'worker', 'browser'],
+      mainFields: ['browser', 'module', 'main'],
+      external: ['node:*', 'cloudflare:*'],
+      preserveSymlinks: true,
+    });
+  });
+});
+
+describe('workersBundleDriver (M113d §3.4)', () => {
+  it('imports esbuild by the given URL and passes every option through', () => {
+    const driver = workersBundleDriver('file:///repo/node_modules/esbuild/lib/main.js');
+    expect(driver).toContain(
+      'import { build } from "file:///repo/node_modules/esbuild/lib/main.js";',
+    );
+    expect(driver).toContain("entryPoints: ['worker-entry.mjs'],");
+    expect(driver).toContain('  bundle: true,');
+    for (const [key, value] of Object.entries(workersBundleOptions())) {
+      expect(driver).toContain(`  ${key}: ${JSON.stringify(value)},`);
+    }
   });
 });

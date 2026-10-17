@@ -1,4 +1,5 @@
 import { attachConnectionErrorReporter, createCachedProbe } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type {
   ISubscription,
@@ -51,8 +52,12 @@ return removed`;
  * @throws {Error} If the ioredis package cannot be resolved
  */
 async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
-  const mod = await import('ioredis');
-  return mod.Redis;
+  try {
+    const mod = await import('ioredis');
+    return mod.Redis;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+  }
 }
 
 /** Constructs an ioredis client without opening its socket before connect(). */

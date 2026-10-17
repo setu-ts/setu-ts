@@ -393,12 +393,31 @@ describe('runNewCommand', () => {
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).toContain('const booted = acquire(env);');
-      expect(entry).toContain('createApp(env)');
+      // M113d §3.8: the sink is imported and passed on every project; §3.10:
+      // the starter factory also receives the compiled server build module.
+      expect(entry).toContain('createApp(env, waitUntil, undefined, { serverBuild })');
+      expect(entry).toContain("import { waitUntil } from 'cloudflare:workers';");
+      expect(entry).toContain("import * as serverBuild from '../build/server/index.js';");
       expect(config).toContain('env?: Readonly<Record<string, unknown>>');
       expect(config).toContain('{ env }');
       expect(config).not.toContain('envFilePath');
       expect(h.fs.has('/work/shop/.env')).toBe(false);
       expect(h.fs.has('/work/shop/.env.example')).toBe(false);
+      // The local variables render `.dev.vars` on Workers (M113d §3.10).
+      expect(h.fs.has('/work/shop/.dev.vars')).toBe(true);
+      expect(h.fs.has('/work/shop/.dev.vars.example')).toBe(true);
+      expect(h.fs.read('/work/shop/.dev.vars')).toContain(
+        'SESSION_SECRET=dev-only-insecure-session-secret-change-me',
+      );
+      expect(h.fs.read('/work/shop/.gitignore')).toContain('.dev.vars');
+      // M113d §10 D2: assets bypass the application's middleware, and both
+      // places a developer reads say so.
+      expect(h.fs.read('/work/shop/wrangler.toml')).toContain(
+        "the application's middleware never sees that request: no security headers, no",
+      );
+      expect(h.fs.read('/work/shop/README.md')).toContain(
+        "skip the application's middleware: no security headers and no authentication",
+      );
     });
 
     it('uses Workers bindings instead of a requested dotenv file', async () => {
@@ -441,7 +460,9 @@ describe('runNewCommand', () => {
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).toContain('const booted = acquire(env);');
-      expect(entry).toContain('createApp(env)');
+      expect(entry).toContain('createApp(env, waitUntil)');
+      // M113d §3.8: the platform sink is imported and passed on every project.
+      expect(entry).toContain("import { waitUntil } from 'cloudflare:workers';");
       // The devtool parameter is the second one on every target (M98c), so
       // the env parameter keeps its default and the signature wraps.
       expect(config).toContain(
