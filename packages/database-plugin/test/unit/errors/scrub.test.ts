@@ -111,4 +111,29 @@ describe('scrubDriverError', () => {
     expect(JSON.stringify(clean.cause)).not.toContain('private-email');
     expect((outer.cause as Error).message).toContain('private-email');
   });
+
+  it('rebuilds a SQLSTATE class 22 cause from its code, dropping the quoted input', () => {
+    const pg = Object.assign(new Error('invalid input syntax for type uuid: "canary-22p02"'), {
+      code: '22P02',
+      severity: 'ERROR',
+      where: "unnamed portal parameter $1 = 'canary-22p02'",
+      stack: 'error: invalid input syntax for type uuid: "canary-22p02"\n    at parse (pg.js:1:1)',
+    });
+    const clean = scrubDriverError(queryError(pg)) as Error;
+    const cause = clean.cause as Error & { code?: string; severity?: string };
+    expect(cause.message).toBe('Data exception (SQLSTATE 22P02)');
+    expect(cause.stack).toBe('Data exception (SQLSTATE 22P02)\n    at parse (pg.js:1:1)');
+    expect(cause.code).toBe('22P02');
+    expect(cause.severity).toBe('ERROR');
+    expect(JSON.stringify({ ...cause, m: cause.message, s: cause.stack })).not.toContain(
+      'canary-22p02',
+    );
+  });
+
+  it('leaves non-class-22 codes and code-less errors untouched', () => {
+    for (const code of ['23505', '40001', 'ER_DUP_ENTRY', '2200', '22p02']) {
+      const node = Object.assign(new Error(`keep ${code}`), { code });
+      expect(scrubDriverError(node)).toBe(node);
+    }
+  });
 });

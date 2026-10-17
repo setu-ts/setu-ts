@@ -50,14 +50,24 @@ export function resolveSwaggerAssets(
   if (assets === 'self' || assets === 'cdn') return assets;
   if (typeof assets === 'object' && assets !== null && typeof assets.baseUrl === 'string') {
     const base = assets.baseUrl;
-    if (base.startsWith('/') && !base.startsWith('//'))
-      return { baseUrl: base.replace(/\/+$/, '') };
-    try {
-      const url = new URL(base);
-      if (url.protocol === 'https:' || url.protocol === 'http:')
-        return { baseUrl: base.replace(/\/+$/, '') };
-    } catch {
-      // Report the fixed configuration error below without echoing input.
+    const trimmed = base.replace(/\/+$/, '');
+    // Printable ASCII without a backslash only: a browser resolves `/\host`
+    // to another host, and `new URL()` silently trims whitespace that the
+    // emitted attribute would still carry.
+    if (/^[\x21-\x5b\x5d-\x7e]+$/.test(base)) {
+      if (/^\/(?!\/)/.test(base)) return { baseUrl: trimmed };
+      try {
+        const url = new URL(base);
+        // Only a base that is already its own serialization: what the
+        // validator saw is exactly what the browser will request.
+        if (
+          (url.protocol === 'https:' || url.protocol === 'http:') &&
+          url.href.replace(/\/+$/, '') === trimmed
+        )
+          return { baseUrl: trimmed };
+      } catch {
+        // Report the fixed configuration error below without echoing input.
+      }
     }
   }
   throw new TypeError(

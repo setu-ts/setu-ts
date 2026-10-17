@@ -25,7 +25,10 @@ Otherwise startup fails with `OptionalDependencyUnavailableError`. To use the pi
 instead, set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
 `openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
 `assets: { baseUrl: '/assets' }`; a custom base must serve the exact 5.33.3 files for SRI to pass.
-Fresh CLI projects declare the dependency and select CDN mode for Workers automatically.
+Fresh CLI projects declare the dependency and select CDN mode for Workers automatically. If you add
+`swagger-ui-dist` to an existing npm project, it pulls in `@scarf/scarf`, whose `postinstall` sends
+install analytics; set `"scarfSettings": { "enabled": false }` in your root `package.json` to opt
+out, as generated projects do.
 
 Handled 4xx now logs once at `warn`; handled 5xx logs once at `error`. Completion logs report the
 responder's status rule; a custom `respond` hook choosing another status is not reflected there.

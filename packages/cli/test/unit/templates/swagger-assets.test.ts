@@ -19,7 +19,15 @@ describe('Swagger scaffold wiring', () => {
           if (runtime === 'deno') {
             expect(manifest.imports['swagger-ui-dist']).toBe('npm:swagger-ui-dist@^5');
             expect(manifest.tasks.start).toContain('--allow-read');
-          } else expect(manifest.dependencies['swagger-ui-dist']).toBe('^5');
+          } else if (runtime === 'cloudflare-workers') {
+            // F4 (M113f audit): a Worker never self-hosts, so it never installs
+            // the package — or the analytics hook it pulls in.
+            expect(manifest.dependencies['swagger-ui-dist']).toBeUndefined();
+            expect(manifest.scarfSettings).toBeUndefined();
+          } else {
+            expect(manifest.dependencies['swagger-ui-dist']).toBe('^5');
+            expect(manifest.scarfSettings).toEqual({ enabled: false });
+          }
           const config = rendered.find((f) => f.path === 'setu.config.ts')!.contents;
           if (runtime === 'cloudflare-workers') {
             expect(config).toContain("swagger: { assets: 'cdn' }");

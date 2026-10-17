@@ -167,10 +167,12 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
   // Workers receive configuration exclusively through their request bindings.
   // Leaving an env-file path in the manifest would make ConfigPlugin require a
-  // filesystem that the Workers runtime deliberately does not provide.
+  // filesystem that the Workers runtime deliberately does not provide. Nor can
+  // a Worker self-host Swagger UI (no filesystem; its swap selects the CDN), so
+  // the asset package is dropped rather than installed and never loaded.
   const manifest =
-    runtime === 'cloudflare-workers' && host.manifest?.envFilePath !== undefined
-      ? withoutEnvFilePath(host.manifest)
+    runtime === 'cloudflare-workers' && host.manifest !== undefined
+      ? withoutWorkersFilesystemNeeds(host.manifest)
       : host.manifest;
 
   return {
@@ -240,14 +242,34 @@ function envExampleContents(envFilePath: string, variables: readonly EnvVariable
 }
 
 /**
- * Removes the filesystem-only dotenv setting for a Workers project.
+ * Removes the filesystem-only parts of a manifest for a Workers project: the
+ * dotenv path, and the self-hosted Swagger asset package.
  *
- * @param manifest - The template manifest that may declare a dotenv path
- * @returns The manifest without its dotenv path
+ * @param manifest - The template manifest
+ * @returns The manifest without them
  */
-function withoutEnvFilePath(manifest: TemplateManifest): TemplateManifest {
-  const { envFilePath: _envFilePath, ...without } = manifest;
-  return without;
+function withoutWorkersFilesystemNeeds(manifest: TemplateManifest): TemplateManifest {
+  const { envFilePath: _envFilePath, npmDependencies, ...without } = manifest;
+  if (npmDependencies === undefined) return without;
+  const { [SWAGGER_ASSET_PACKAGE]: _assets, ...kept } = npmDependencies;
+  return Object.keys(kept).length === 0 ? without : { ...without, npmDependencies: kept };
+}
+
+/** The package `OpenApiPlugin` self-hosts Swagger UI from. */
+const SWAGGER_ASSET_PACKAGE = 'swagger-ui-dist';
+
+/**
+ * Opts a generated npm project out of Scarf, the install-time analytics hook
+ * `swagger-ui-dist` depends on: under npm its `postinstall` reports platform,
+ * Node version and dependency data unless the ROOT package.json disables it.
+ *
+ * @param dependencies - The dependencies the manifest declares
+ * @returns The `scarfSettings` member to spread, or nothing
+ */
+function scarfOptOut(dependencies: Readonly<Record<string, string>>): Record<string, unknown> {
+  return Object.hasOwn(dependencies, SWAGGER_ASSET_PACKAGE)
+    ? { scarfSettings: { enabled: false } }
+    : {};
 }
 
 /**
@@ -1613,6 +1635,7 @@ function standaloneNpmFiles(
           // Guarding each one added three branches no combination can reach.
           scripts,
           dependencies,
+          ...scarfOptOut(dependencies),
           devDependencies,
         },
         null,
@@ -1894,6 +1917,7 @@ describe('application composition', () => {
             ...host.extraScripts,
           },
           dependencies: npmDependencies(host, runtime),
+          ...scarfOptOut(npmDependencies(host, runtime)),
           // Runtime-level first, so a template that pins its own copy of the
           // same package wins — the template knows what its build needs.
           //

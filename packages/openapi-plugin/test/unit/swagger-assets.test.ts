@@ -45,6 +45,17 @@ describe('Swagger asset options', () => {
         'ftp://other.test/ui',
         'https://',
         '',
+        // F1 (M113f audit): a browser resolves these to another host or
+        // would emit whitespace the URL parser trimmed away.
+        '/\\other.test/ui',
+        '/\\t/other.test',
+        '/\t/other.test',
+        ' https://assets.example.com/ui',
+        '\thttps://assets.example.com/ui',
+        'https://assets.example.com/ui\n',
+        'https://assets.example.com/u i',
+        'https://ASSETS.example.com/ui',
+        'https://assets.example.com/./ui',
       ].map((baseUrl) => ({ assets: { baseUrl } })),
     ])
       expect(() => OpenApiPlugin({ swagger } as unknown as OpenApiPluginOptions)).toThrow(

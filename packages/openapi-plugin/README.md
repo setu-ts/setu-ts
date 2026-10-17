@@ -93,9 +93,14 @@ and `{}` select `'self'`; `false` disables the UI. Missing `swagger-ui-dist` fai
 `OptionalDependencyUnavailableError`: install it or set `swagger: { assets: 'cdn' }`. Runtimes
 without `runtime.fs`, including Workers, must choose `'cdn'` or `{ baseUrl }`.
 
+`swagger-ui-dist` depends on `@scarf/scarf`, whose npm `postinstall` sends install analytics
+(platform, Node version, dependency data) unless the root `package.json` sets
+`"scarfSettings": { "enabled": false }`. Projects `setu new` generates set it.
+
 CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 integrity and
-`crossorigin="anonymous"` on all three tags. A custom base must be an absolute HTTP(S) URL or a path
-starting `/` and must serve the unmodified **5.33.3** files, since it uses the same hashes. Invalid
+`crossorigin="anonymous"` on all three tags. A custom base must be printable ASCII with no
+backslash, and either an absolute HTTP(S) URL already in its serialized form or a path starting with
+a single `/`; it must serve the unmodified **5.33.3** files, since it uses the same hashes. Invalid
 modes and base URLs throw `TypeError` at construction. `SwaggerUiOptions.assets` selects the same
 mode for `swaggerUiHtml`; its `endpoint` supplies the local prefix (default `/docs`).
 
