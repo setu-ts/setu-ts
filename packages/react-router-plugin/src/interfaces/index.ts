@@ -108,13 +108,19 @@ export interface ReactRouterCommonOptions {
    * to pick up rebuilds without restarting the process.
    *
    * The first argument is the app's `serverBuildPath`, or the placeholder
-   * `'<serverBuild>'` when the build was supplied as a module.
+   * `'<serverBuild>'` when the build was supplied as a module. On the module
+   * arm the third argument carries that module as `serverBuild`; on the path
+   * arm it is `undefined`.
    *
    * @since 0.2.0 Returns an {@linkcode SsrRuntime} rather than a bare handler,
    * so the context-provider constructor is sourced from the same `react-router`
    * module as the handler.
    */
-  readonly loadRequestHandler?: (serverBuildPath: string, mode: string) => Promise<SsrRuntime>;
+  readonly loadRequestHandler?: (
+    serverBuildPath: string,
+    mode: string,
+    options?: { readonly serverBuild?: unknown },
+  ) => Promise<SsrRuntime>;
 
   /**
    * Filesystem root of the built client bundle. Omit to disable static-asset

@@ -485,4 +485,25 @@ describe('the module arm (M113d §3.10)', () => {
     expect(ssrService).toBeDefined();
     expect(typeof (ssrService as SsrService).render).toBe('function');
   });
+
+  it('register() hands a custom loader the supplied module as its third argument', async () => {
+    // A module-aware custom loader reads the build through the typed seam,
+    // with no cast: the placeholder path alone could not reach it.
+    const serverBuild = { default: { routes: {} } };
+    const received: unknown[] = [];
+    const plugin = ReactRouterPlugin({
+      serverBuild,
+      loadRequestHandler: (path, mode, options) => {
+        received.push(path, mode, options?.serverBuild);
+        return Promise.resolve({
+          handler: () => Promise.resolve(new Response('ok')),
+          createLoadContext: () => ({}),
+        } as Any);
+      },
+    });
+
+    await plugin.register(moduleArmCtx());
+
+    expect(received).toEqual(['<serverBuild>', 'production', serverBuild]);
+  });
 });
