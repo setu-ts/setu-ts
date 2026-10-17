@@ -68,6 +68,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@types/ws': '^8.18.2',
   '@types/pg': '^8.23.1',
   '@types/amqplib': '^0.10.8',
+  '@types/swagger-ui-dist': '^3.30.6',
   '@prisma/client': '^7.10.0',
   amqplib: '0.10.x',
   'drizzle-orm': '0.45.2',
@@ -78,6 +79,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   nats: '2.x',
   nodemailer: '^10',
   pino: '10.x',
+  'swagger-ui-dist': '^5',
   'react-router': '^8',
   ws: '^8.18.0',
   zod: '^4.4.0',
@@ -97,6 +99,13 @@ export interface Override {
 
 /** The committed overrides (M111a plan §3.1), each with its reason. */
 export const OVERRIDES: readonly Override[] = [
+  {
+    package: 'packages/openapi-plugin',
+    dependency: '@types/swagger-ui-dist',
+    kind: 'dev-dependency-types',
+    reason:
+      'The guarded CommonJS absolute-path helper has no bundled declarations; source-based README and guide compilers must resolve its function signature (M113f).',
+  },
   {
     package: 'packages/database-plugin',
     dependency: '@types/pg',

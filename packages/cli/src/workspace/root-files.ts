@@ -101,6 +101,10 @@ export function workspaceRootFiles(
               // matches them as written.
               workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
               scripts: { dev: profile.runAll },
+              // Scarf (pulled in by a member's `swagger-ui-dist`) reads its
+              // opt-out from the package.json at npm's INIT_CWD — this root —
+              // and ignores a member's own setting (M113f audit R2-F6).
+              scarfSettings: { enabled: false },
             },
             null,
             2,

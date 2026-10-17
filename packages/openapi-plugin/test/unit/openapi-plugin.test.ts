@@ -102,7 +102,9 @@ describe('OpenApiPlugin', () => {
         exit: (() => {
           throw new Error('exit called');
         }) as () => never,
-        fs: {} as IPluginContext['runtime']['fs'],
+        fs: {
+          readFile: () => Promise.resolve(new Uint8Array([1, 2, 3])),
+        } as unknown as IPluginContext['runtime']['fs'],
       },
       app: {
         router,

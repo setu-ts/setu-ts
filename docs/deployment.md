@@ -181,6 +181,12 @@ through `rest-starter`.
 
 ### What the probes measure
 
+Probe HTTP bodies default to status-only checks:
+`{ status, timestamp, checks: { name: { status } } }`. They omit runtime version, hostname,
+indicator data, and latency. Dashboards needing full data set `HealthPlugin({ details: true })` (a
+starter uses `health: { details: true }`) and should protect those detailed endpoints. Programmatic
+reports retain full data; probe HTTP status rules stay the same.
+
 The three endpoints aggregate the registered indicators differently:
 
 | Endpoint  | `200` when                  | `503` when                                                   |

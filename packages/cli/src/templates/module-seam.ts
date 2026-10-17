@@ -34,7 +34,8 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
   // `HealthPlugin`'s `self` indicator reads `runtime.hostname()` on every probe.
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
-  denoPermissions: ['--allow-sys'],
+  denoPermissions: ['--allow-sys', '--allow-read'],
+  npmDependencies: { 'swagger-ui-dist': '^5' },
 };
 
 /** Manifest additions unique to the class-based module composition. */

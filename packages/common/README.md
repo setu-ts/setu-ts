@@ -1,5 +1,11 @@
 # @setu-ts/common
 
+`IRuntimeServices.reportError?` is the optional last-resort JSON error sink used by the kernel and
+`errorHandler` when no logger is registered. Implementations contain serialization and write
+failures. `IErrorResponder.statusFor?` purely predicts the owner's served status for a thrown value;
+request logging consumes it without reporting a clamp twice. A custom response hook can serve a
+different status, which the predictor does not reflect.
+
 Shared types, interfaces, and capability tokens for the Setu-TS framework.
 
 This package is the framework's contract layer: every other package depends on it, and it depends on

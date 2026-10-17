@@ -1074,7 +1074,7 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
             }),
           },
         }),
-        HealthPlugin(),
+        HealthPlugin({ details: true }),
       ],
     });
     await app.start();

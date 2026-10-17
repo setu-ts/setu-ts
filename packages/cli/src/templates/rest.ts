@@ -82,6 +82,14 @@ export const REST_RECIPE: TemplateRecipe = {
   plugins: REST_PLUGINS,
   middleware: REST_MIDDLEWARE,
   manifest: FUNCTIONAL_MODULE_MANIFEST,
+  runtimeSwaps: {
+    'cloudflare-workers': {
+      removePackages: ['openapi-plugin'],
+      addPlugins: [
+        { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
+      ],
+    },
+  },
   showcase: {
     // The functional showcase reaches its plain service by a direct import,
     // exactly as the functional generators do.

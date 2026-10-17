@@ -79,7 +79,7 @@ describe(
       const app = createApplication({
         plugins: [
           RuntimePlugin(),
-          HealthPlugin(),
+          HealthPlugin({ details: true }),
           MessagingPlugin({
             broker: 'service-bus',
             connectionString: connectionString ?? '',

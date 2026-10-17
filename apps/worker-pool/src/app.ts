@@ -7,6 +7,10 @@ import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
 /** Builds an unstarted application sharing one worker slot between modules. */
 export function createWorkerPoolApp(): IKernelApplication {
   return createApplication({
-    plugins: [RuntimePlugin(), HealthPlugin(), WorkerPoolPlugin({ maxWorkers: 1 })],
+    plugins: [
+      RuntimePlugin(),
+      HealthPlugin({ details: true }),
+      WorkerPoolPlugin({ maxWorkers: 1 }),
+    ],
   });
 }

@@ -73,7 +73,7 @@ describe('REAL Redis scheduler lock outage (M101a V8-24)', { skip: redisUrl === 
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
-        HealthPlugin(),
+        HealthPlugin({ details: true }),
         SchedulerPlugin({
           distributedLock: { enabled: true, storage: 'redis', url, commandTimeoutMs: BOUND_MS },
         }),

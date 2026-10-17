@@ -3,6 +3,16 @@
 Database access with the repository pattern and Unit of Work. Registers an `IDatabaseService` under
 `CAPABILITIES.DATABASE` (`'database'`).
 
+Driver errors that pass through `IDatabaseService` (repositories, transactions, `query()`) are
+scrubbed before they are classified or logged. Drizzle's `Failed query:` wrapper keeps its SQL with
+placeholders and loses its bound values, from the message, the whole multiline stack header and
+`params`. A SQLSTATE class 22 cause (data exception: invalid text, out of range, bad date, bad enum)
+is rebuilt from its code, because PostgreSQL's message quotes the rejected input. Classification is
+unchanged. Two limits: an error from a query built through `getDrizzleDatabase(...)`, or a raw
+driver call, never passes through the service and is logged as the driver wrote it; and the scrub
+walks at most five causes, so a value nested deeper survives. It is not a general log-redaction
+policy.
+
 Four adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, `DrizzleAdapter`,
 and `MongoAdapter` (the native `mongodb` driver). The application owns the optional ORM and driver
 clients and injects them into the plugin.

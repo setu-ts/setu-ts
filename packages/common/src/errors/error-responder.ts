@@ -169,6 +169,14 @@ export interface ErrorResponseInit {
  */
 export interface IErrorResponder {
   /**
+   * Purely predicts the status the owner serves for a thrown value. A custom
+   * response hook may serve a different status. Must perform no reporting.
+   * @param error - The thrown value
+   * @returns The serveable response status
+   * @since 0.10.0
+   */
+  statusFor?(error: unknown): number;
+  /**
    * Writes an error response in the configured format.
    *
    * @param target - The context (state, response, request) to write into

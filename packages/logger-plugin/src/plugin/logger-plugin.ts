@@ -12,6 +12,7 @@ import type {
   IRuntimeServices,
   ITelemetryService,
   LogLevel,
+  PathPattern,
 } from '@setu-ts/common';
 import {
   CAPABILITIES,
@@ -61,8 +62,8 @@ export interface LoggerPluginOptions {
   readonly requestLogging?: boolean;
   /** Requests slower than this (ms) trigger a `warn` entry. Defaults to `5000`. */
   readonly slowRequestThreshold?: number;
-  /** Exact paths excluded from request logging. */
-  readonly excludePaths?: readonly string[];
+  /** Exact strings or regular expressions excluded from request logging. */
+  readonly excludePaths?: readonly PathPattern[];
   /**
    * Inject a pre-loaded Pino factory for the pino transport, bypassing
    * the `import('pino')` path. Useful for tests.
@@ -301,7 +302,7 @@ export function composeLoggerRedaction(
 function buildRequestLoggerOptions(options?: LoggerPluginOptions): RequestLoggerOptions {
   const base: {
     slowRequestThreshold?: number;
-    excludePaths?: readonly string[];
+    excludePaths?: readonly PathPattern[];
   } = {};
   if (options?.slowRequestThreshold !== undefined) {
     base.slowRequestThreshold = options.slowRequestThreshold;

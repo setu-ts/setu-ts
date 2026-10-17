@@ -50,7 +50,7 @@ describe('Service Bus outage through /health and /ready (M101a V8-1)', () => {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
-        HealthPlugin(),
+        HealthPlugin({ details: true }),
         MessagingPlugin({ broker: 'service-bus', client: hungProbeTransport() }),
       ],
     });

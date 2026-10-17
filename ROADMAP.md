@@ -14278,6 +14278,21 @@ reported 100,000-iteration limit is not verified here.
 - **V9-49** — `/docs` loads Swagger UI from `unpkg.com/swagger-ui-dist@5`, a floating major with no
   integrity hash.
 
+Shipped (PR #468). The package list grew to `common`, `runtime`, `kernel` and `cli` as well. Drizzle
+query errors keep their SQL and lose their bound values, and SQLSTATE class 22 causes, whose
+PostgreSQL message quotes the input, are rebuilt from their code; errors from the typed builder and
+raw driver calls are not scrubbed (documented). Health endpoints answer status only unless
+`details: true`. A handled error is logged once, at `warn` below 500, and the request logger reports
+the served status through `IErrorResponder.statusFor?`. With no logger, handled 5xx and kernel
+unhandled errors reach `IRuntimeServices.reportError?`. `excludePaths` takes patterns. Swagger UI is
+self-hosted from `swagger-ui-dist` by default, with a CDN mode pinned to 5.33.3 under SHA-384 SRI;
+generated projects declare the package and opt out of Scarf's install-time analytics, and Workers
+projects select the CDN. Implemented by Codex. The committed-tree security audit ran two
+fresh-context rounds: round 1 found four Lows (a `baseUrl` a browser sends to another host, class 22
+messages leaking values, overstated scrub docs, undisclosed Scarf analytics), round 2 two more (a
+throwing driver accessor making the scrub the fault, no Scarf opt-out at an npm workspace root). All
+six are fixed; the round-2 fixes were NOT re-audited, at the maintainer's direction.
+
 ---
 
 ### Milestone 113g: Database Calls and Errors Under Faults and Edge Inputs
@@ -14876,7 +14891,7 @@ patch by construction and gains nothing new here.
 | 113c      | ✅     | queue-plugin + runtime + common + messaging-plugin — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                |
 | 113d      | ✅     | common + react-router + cloudflare + cli + 14 loader packages — Workers builds (the V9-1 regression) and the edge cache; PR #465                                                                                                                                                          |
 | 113e      | ✅     | auth-plugin + session-plugin — identity and session semantics a client cannot predict; PR #467                                                                                                                                                                                            |
-| 113f      | ⬜     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints                                                                                                                                                                                                |
+| 113f      | ✅     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints; PR #468                                                                                                                                                                                       |
 | 113g      | ⬜     | database-plugin — database calls and errors under faults and edge inputs                                                                                                                                                                                                                  |
 | 113h      | ⬜     | cli — generated output that is wrong (fix branches)                                                                                                                                                                                                                                       |
 | 113i      | ⬜     | cli — commands whose refusals and guidance mislead (fix branches)                                                                                                                                                                                                                         |

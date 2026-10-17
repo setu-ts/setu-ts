@@ -31,6 +31,19 @@ logger.info('server ready', { port: 3000 });
 
 ## Options
 
+The plugin's `excludePaths` accepts the same `readonly PathPattern[]` as request middleware: strings
+match exactly and regular expressions match the request path.
+
+`errorHandler` owns the caught-error diagnostic: one `warn` below 500, one `error` for 5xx. Request
+logging records completion with the error responder's predicted status and rethrows; without a
+responder it records 500. A custom `ErrorHandlerOptions.respond` hook can choose a different served
+status; request completion still reports the rule's status. Request logging stays inside telemetry
+so trace identifiers remain available.
+
+Without a registered logger, unhandled kernel errors and handled 5xx use the runtime's `reportError`
+sink (one JSON line to stderr; Workers uses its platform log channel). Handled 4xx stays silent
+without a logger. Registering a logger selects it exclusively, including a no-op logger.
+
 | Option                 | Type                                   | Default               | Description                                                                                             |
 | ---------------------- | -------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | `level`                | `LogLevel`                             | `'info'`              | Minimum level to emit.                                                                                  |
