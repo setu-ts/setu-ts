@@ -502,6 +502,10 @@ async function examine(
   if (key !== undefined) lap.block(key);
   // A failure while the application stops writes nothing: it is not the row's.
   if (ctx.isClosing()) return 'closing';
+  // The budget refused the publish before it ran (a pause emptied it): that is
+  // the sweep's deadline, not the row's failure — no attempt, no failure
+  // count, no write. The claim expires and the next lap retries the row.
+  if (!publishInvoked) return 'deadline';
   budget.failures += 1;
   ctx.observer.publishFailed(topic);
   const attempts = attemptsOf(record) + 1;
@@ -515,36 +519,25 @@ async function examine(
       availableAt: now + backoff,
       status,
     });
+  // The publish ran: the failure is that row's work, so the write runs under
+  // its own bound even when a pause exhausted the sweep budget.
+  const settle = boundedSettle(ctx, 'markFailure', markFailure);
   let transition: OutboxTransition;
-  if (publishInvoked) {
-    // The publish ran: the failure is that row's work, so the write runs
-    // under its own bound even when a pause exhausted the sweep budget.
-    const settle = boundedSettle(ctx, 'markFailure', markFailure);
-    try {
-      transition = await settle.bounded;
-    } catch (error) {
-      if (error instanceof RelayCallTimeoutError) {
-        settle.store.then(
-          (late) =>
-            observeSettlement(ctx, 'markFailure', late, {
-              late: true,
-              topic,
-              madeFailed: status === 'failed',
-            }),
-          () => {},
-        );
-      }
-      return 'store-failure';
+  try {
+    transition = await settle.bounded;
+  } catch (error) {
+    if (error instanceof RelayCallTimeoutError) {
+      settle.store.then(
+        (late) =>
+          observeSettlement(ctx, 'markFailure', late, {
+            late: true,
+            topic,
+            madeFailed: status === 'failed',
+          }),
+        () => {},
+      );
     }
-  } else {
-    // The budget refused the publish: keep today's path, which itself
-    // refuses — no write, no attempt counted, the claim expires and the
-    // next lap retries the row.
-    try {
-      transition = await bounded(ctx, options.storeTimeoutMs, 'markFailure', markFailure);
-    } catch {
-      return 'store-failure';
-    }
+    return 'store-failure';
   }
   observeSettlement(ctx, 'markFailure', transition, {
     late: false,

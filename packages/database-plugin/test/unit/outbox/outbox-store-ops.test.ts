@@ -543,4 +543,16 @@ describe('DatabaseOutboxStore — a status outside the vocabulary', () => {
     await seed(service, [{ ...record(1), status: 7 }]);
     await expect(store.release('row-1', 'retry', 1)).rejects.toThrow('unrecognized status');
   });
+
+  it('quotes neither the row id nor the stored status in the refusal', async () => {
+    const service = await memoryService();
+    const store = new DatabaseOutboxStore(service, ENTITY);
+    await seed(service, [{ ...record(1), status: 'canary-status\r\nforged' }]);
+    const error = await store.release('row-1', 'retry', 1).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(TypeError);
+    expect(String((error as Error).message)).not.toMatch(/row-1|canary|forged/);
+  });
 });

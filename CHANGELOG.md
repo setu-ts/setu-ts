@@ -234,8 +234,11 @@ All notable changes to this project are documented here. The format follows
   `sent` records the `duplicate` overlap, a `claim-lost` answer is booked as an overlap, a late
   `markFailure` that made the row `failed` records `poisoned` without touching the sweep budget, and
   a late rejection is swallowed. A sweep that overran by a pause can outlive `sweepDeadlineMs` by at
-  most one `storeTimeoutMs`, and the shutdown drain is bounded by the same amount. A `markFailure`
-  for a publish the budget refused to invoke is still never written.
+  most one `storeTimeoutMs`, and the shutdown drain is bounded by the same amount. A publish the
+  budget refused to invoke is no longer counted as a publish failure: the sweep ends `deadline`,
+  writes nothing and reports no `store-write-failing`. The database outbox store's
+  unrecognized-status error no longer quotes the row id (`@setu-ts/database-plugin`), and the
+  `check:docs` continued-line rule (P3) joins each command once instead of from every line.
 - **Stale `npm:` specifiers in committed docs (M113j, V9-22's widened scope and V9-10's `npm:zod`
   half).** Every `npm:` import and every prose, table or comment claim that a package loads as
   `npm:<pkg>` — about 80 lines across ~20 files, plus one `cli` JSDoc — now names the bare package

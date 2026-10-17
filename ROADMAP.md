@@ -14103,7 +14103,7 @@ re-run against a newly published version.
 | **M113g** | design | database calls and errors under faults and edge inputs                | V9-25, V9-33, V9-26, V9-34, V9-48                                                        | `database-plugin`                                                                                                                                                         |
 | **M113h** | fix    | generated output that is wrong                                        | V9-8, V9-17, V9-38, V9-39, V9-9, V9-11, V9-42, V9-67, V9-81                              | `cli`, `runtime`, `logger-plugin`, `kernel`                                                                                                                               |
 | **M113i** | fix    | CLI commands whose refusals and guidance mislead                      | V9-5, V9-12, V9-13, V9-30, V9-40, V9-60, V9-61, V9-62, V9-75                             | `cli`                                                                                                                                                                     |
-| **M113j** | fix    | outbox and inbox signals                                              | V9-20, V9-21, V9-22, V9-10                                                               | `messaging-plugin`, `cli` JSDoc, `scripts/`, `test/`, `docs/`, `PUBLIC_API.md`, `ARCHITECTURE.md`, the other package READMEs                                              |
+| **M113j** | fix    | outbox and inbox signals                                              | V9-20, V9-21, V9-22, V9-10                                                               | `messaging-plugin`, `database-plugin`, `cli` JSDoc, `scripts/`, `test/`, `docs/`, `PUBLIC_API.md`, `ARCHITECTURE.md`, the other package READMEs                           |
 | **M113k** | fix    | the idempotency key from client to server                             | V9-14, V9-15, V9-16                                                                      | `sdk`, `idempotency`, `http-security`, `database`                                                                                                                         |
 | **M113l** | docs   | documentation that does not match the code, or is missing             | V9-6, V9-7, V9-10, V9-24, V9-29, V9-51 … V9-59, V9-69, V9-72, V9-73, V9-74, V9-77, V9-78 | docs of `telemetry`, `localization`, `worker-pool`, `database`, `audit`, `health`, `openapi`, `multi-tenancy`, `config`, `kernel`, `auth`; `docs/`                        |
 | **M113m** | design | time the framework does not honour                                    | V9-63 **High**, V9-70                                                                    | `scheduler-plugin`, `auth-plugin`                                                                                                                                         |
@@ -14324,8 +14324,9 @@ schematic table), V9-75 (functional `g job` stays unwired though `QueuePlugin` i
 
 ### Milestone 113j: Outbox and Inbox Signals
 
-**Package(s):** `packages/messaging-plugin`, `scripts/`, `test/`, `docs/`, `PUBLIC_API.md`,
-`ARCHITECTURE.md`, the other package READMEs, the `cli` JSDoc — **fix** letter.
+**Package(s):** `packages/messaging-plugin`, `packages/database-plugin`, `scripts/`, `test/`,
+`docs/`, `PUBLIC_API.md`, `ARCHITECTURE.md`, the other package READMEs, the `cli` JSDoc — **fix**
+letter.
 
 V9-20 (a paused relay's late duplicate is booked as a store failure, never as an overlap), V9-21
 (`IInbox.release` on an unparked row answers a masked 500), V9-22 (every stale `npm:` specifier in

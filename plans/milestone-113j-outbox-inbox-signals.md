@@ -98,11 +98,14 @@ about whether the purge deletes parked markers (V9-22).
   - `markSent` (reached only after a publish fulfilled, so always invoked) runs through a new
     internal `boundedSettle(ctx, what, run)` that bounds it by `storeTimeoutMs` **alone**, not
     `min(storeTimeoutMs, remaining)`, and always invokes `run`.
-  - `markFailure` runs through `boundedSettle` only when `publishInvoked` is true. When the budget
-    refused the publish, it keeps today's `bounded` path, which itself refuses: no write, no attempt
-    counted, the claim expires and the next lap retries the row. Otherwise a pause between claim and
-    publish would count an attempt (and could reach `failed` at `maxAttempts`) for a publish that
-    never ran — reachable with a large `claimLeaseMs` (up to 3 600 000).
+  - `markFailure` runs through `boundedSettle`, and only when `publishInvoked` is true. When the
+    budget refused the publish, the row ends the sweep with `'deadline'` before any failure is
+    counted: no write, no attempt, no `publishFailed`, and no `store-failure` health reason — the
+    claim expires and the next lap retries the row. Otherwise a pause between claim and publish
+    would count an attempt (and could reach `failed` at `maxAttempts`) for a publish that never ran
+    — reachable with a large `claimLeaseMs` (up to 3 600 000). (Audit observation O1: the first
+    implementation kept the old refusing `markFailure` path, which still counted a publish failure
+    and ended the sweep `'store-failure'`.)
   - Every other call (`claim`, `markInvalid`, `failedKeys`, `scanPending`, the purge) keeps
     `boundedCall` unchanged.
 - **Why:** after a pause the sweep budget is exhausted on resume, so `boundedCall` rejects without
@@ -563,6 +566,28 @@ lines with no difference; 6 negative controls each observed failing; `check:docs
 closed and there are no new findings. Observation O5, outside this change: the backslash-continued
 line join in the same gate (`scripts/toolchain-prose.ts`, P3, since M111f) is cubic — 4,000
 continued lines take ~108 s, identically on `develop` — left for a `fix/…` branch.
+
+### 10.8 Fixes for the audit observations (after round 2, not re-audited)
+
+At the maintainer's direction the three observations were fixed on this branch, and no further audit
+round was run on them.
+
+- **O1 — a budget-refused publish counted as a failure.** `relay.ts` now returns `'deadline'` before
+  `budget.failures`, `publishFailed` or any write when `publishInvoked` is false (§3.1), so a pause
+  no longer reports a publish failure or the `store-write-failing` reason. The case in
+  `relay-late-settlement.test.ts` asserts all four; removing the early return fails it.
+- **O2 — the database store's unrecognized-status error quoted the row id.** On `release` the id is
+  the operator's input, so it reached the server log verbatim. The error stays an unhinted
+  `TypeError` — a status edited outside the framework is a server-side integrity fault, a masked
+  `500`, not the caller's — but quotes neither the id nor the stored value. A new test plants a CRLF
+  canary in the status; restoring the id in the message fails it.
+- **O5 — the P3 continued-line join was cubic.** `scripts/toolchain-prose.ts` joins a
+  backslash-continued command once, from its first line, strips each piece's continuation instead of
+  re-running the regex over the growing join, and reports each match at the line holding its first
+  character. That also ends a duplicate: a command starting mid-chain was reported at the chain's
+  first line AND its own. Measured against the previous scanner: a 1,500-line chain 10,608 ms → 1
+  ms, and 1,501 P3 findings → 1. Two tests cover the timing (8,000 lines under 2 s) and the single
+  report.
 
 ## 11. Plan review (one round, fresh-context agent, before implementation)
 

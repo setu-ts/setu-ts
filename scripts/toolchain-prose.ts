@@ -375,6 +375,8 @@ const P7 = /(?:\bfrom\s+|\bimport\s+|\bimport\(\s*)["']npm:/g;
 const P8 = /\bnpm:([A-Za-z@][A-Za-z0-9@._/^~-]*)/g;
 /** A Deno install command with the specifier as an argument: a legitimate Deno-target instruction. */
 const DENO_INSTALL = /\bdeno\s+(?:add|install)\b/;
+/** A line ending in a shell continuation (`\\` plus optional trailing whitespace). */
+const CONTINUED = /\\\s*$/;
 
 function history(path: string): boolean {
   return /^(?:CHANGELOG\.md$|ROADMAP\.md$|plans\/(?:archive\/|reviews\/|milestone-[^/]+\.md$))/.test(
@@ -422,13 +424,35 @@ export function scanToolchainProse(
           report('P2', `Repository task must use pnpm: ${match[0]}`);
         }
       }
-      let commandLine = line;
-      for (let next = index + 1; /\\\s*$/.test(commandLine) && next < lines.length; next++) {
-        commandLine = commandLine.replace(/\\\s*$/, '') + ' ' + lines[next]!;
-      }
-      for (const match of commandLine.matchAll(/\b(?:deno|jsr)\s+add\b([^\n`<>;|&]*)/gi)) {
-        if (/(?:^|\s|["'])@setu-ts\//.test(match[1]!)) {
-          report('P3', 'Bare Setu-TS add argument resolves from JSR; use npm:@setu-ts/');
+      // A backslash-continued command is joined ONCE, from the line that starts
+      // it, and each match is reported at the line holding its first character.
+      // Re-joining from every line of a chain made the scan cubic (O5).
+      if (index === 0 || !CONTINUED.test(lines[index - 1]!)) {
+        const pieces: string[] = [];
+        const starts: number[] = [];
+        let length = 0;
+        for (let next = index; ; next++) {
+          const continued = CONTINUED.test(lines[next]!) && next + 1 < lines.length;
+          // Strip the continuation from the piece itself, never from the growing
+          // join: a regex over the whole join per line is quadratic again.
+          const text = continued ? lines[next]!.replace(CONTINUED, '') + ' ' : lines[next]!;
+          starts.push(length);
+          pieces.push(text);
+          length += text.length;
+          if (!continued) break;
+        }
+        const commandLine = pieces.join('');
+        let piece = 0;
+        for (const match of commandLine.matchAll(/\b(?:deno|jsr)\s+add\b([^\n`<>;|&]*)/gi)) {
+          if (/(?:^|\s|["'])@setu-ts\//.test(match[1]!)) {
+            while (piece + 1 < starts.length && starts[piece + 1]! <= match.index!) piece++;
+            findings.push({
+              path,
+              line: index + piece + 1,
+              rule: 'P3',
+              message: 'Bare Setu-TS add argument resolves from JSR; use npm:@setu-ts/',
+            });
+          }
         }
       }
       if (path.endsWith('.md')) {

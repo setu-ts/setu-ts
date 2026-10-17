@@ -202,7 +202,8 @@ describe('late settlement of an invoked publish', () => {
   });
 
   it('a budget exhausted before the publish: the broker and markFailure are never called, attempts unchanged', async () => {
-    const h = await outboxHarness({ options: { relay: RELAY } });
+    const observer = countingObserver();
+    const h = await outboxHarness({ options: { relay: RELAY }, observer });
     const id = await h.write({ n: 1 });
     // The claim itself consumes the whole sweep budget; the publish is then
     // refused by the budget and never invoked.
@@ -210,7 +211,11 @@ describe('late settlement of an invoked publish', () => {
       h.clock.step(1000);
     };
     const result = await h.sweep();
-    expect(result.endedBy).toBe('store-failure');
+    // A pause is the sweep's deadline, not a store or publish failure.
+    expect(result.endedBy).toBe('deadline');
+    expect(result.failures).toBe(0);
+    expect(observer.counts['publishFailed']).toBeUndefined();
+    expect(h.service.instanceSignals().storeWriteFailing).toBe(false);
     expect(h.broker.calls).toEqual([]);
     expect(h.store.count('markFailure')).toBe(0);
     expect(await row(h.db, id)).toMatchObject({ status: 'pending', attempts: 0 });

@@ -72,6 +72,23 @@ describe('toolchain prose refusals', () => {
       'P1',
     ]);
   });
+  it('P3 reports a command starting mid-chain once, at its own line', () => {
+    const text = [
+      'echo one \\',
+      `  ${['deno', 'add'].join(' ')} @setu-ts/kernel \\`,
+      '  done',
+    ].join('\n');
+    expect(scan(text).map((finding) => [finding.rule, finding.line])).toEqual([['P3', 2]]);
+  });
+  it('P3 joins a long continued chain in linear time', () => {
+    // Re-joining from every line of the chain took ~108 s for 4,000 lines.
+    const chain = Array.from({ length: 8_000 }, () => 'echo some words here \\').join('\n');
+    const text = `${chain}\n${['deno', 'add'].join(' ')} @setu-ts/kernel`;
+    const started = performance.now();
+    const findings = scan(text);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(findings.map((finding) => [finding.rule, finding.line])).toEqual([['P3', 8_001]]);
+  });
   it.each([
     'AGENTS.md',
     'AI_GUIDELINES.md',
