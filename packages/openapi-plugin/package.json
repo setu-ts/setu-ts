@@ -38,6 +38,14 @@
   "dependencies": {
     "@setu-ts/common": "workspace:^"
   },
+  "peerDependencies": {
+    "swagger-ui-dist": "^5"
+  },
+  "peerDependenciesMeta": {
+    "swagger-ui-dist": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@setu-ts/auth-plugin": "workspace:^",
     "@setu-ts/decorator-plugin": "workspace:^",
@@ -47,6 +55,8 @@
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
     "@types/node": "^24",
+    "@types/swagger-ui-dist": "^3.30.6",
+    "swagger-ui-dist": "^5",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
     "zod-v3": "npm:zod@^3.24.0",

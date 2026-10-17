@@ -10,7 +10,7 @@ it('Kubernetes discovery keeps /ready 200 when its real provider probe succeeds'
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
       ServiceDiscoveryPlugin({
         provider: 'kubernetes',
         namespace: 'default',
@@ -44,7 +44,7 @@ describe.each(['consul', 'kubernetes'] as const)('%s discovery readiness probe b
     const app = createApplication({
       plugins: [
         RuntimePlugin({ platform: 'node', adapters: { node: () => runtime } }),
-        HealthPlugin(),
+        HealthPlugin({ details: true }),
         ServiceDiscoveryPlugin(
           kind === 'consul'
             ? { provider: 'consul', address: 'https://consul.test', http }

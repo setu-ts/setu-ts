@@ -39,10 +39,12 @@ describe('runtime swaps', () => {
     const deno = packagesOn(MICROSERVICE_TEMPLATE, 'deno');
     const workers = packagesOn(MICROSERVICE_TEMPLATE, 'cloudflare-workers');
 
-    const survivors = deno.filter((pkg) => pkg !== 'messaging-plugin' && pkg !== 'queue-plugin');
+    const survivors = deno.filter(
+      (pkg) => pkg !== 'messaging-plugin' && pkg !== 'queue-plugin' && pkg !== 'openapi-plugin',
+    );
     // The swap appends, so the survivors keep their relative order and only the
     // replacement is new.
-    expect(workers).toEqual([...survivors, 'cloudflare-plugin']);
+    expect(workers).toEqual([...survivors, 'openapi-plugin', 'cloudflare-plugin']);
   });
 
   it('leaves the other three runtimes byte-identical', () => {
@@ -59,7 +61,7 @@ describe('runtime swaps', () => {
   it('leaves a template declaring no swap unchanged on every runtime', () => {
     const baseline = packagesOn(REST_TEMPLATE, 'deno');
 
-    for (const runtime of ['node', 'bun', 'cloudflare-workers'] as const) {
+    for (const runtime of ['node', 'bun'] as const) {
       expect(packagesOn(REST_TEMPLATE, runtime)).toEqual(baseline);
     }
   });

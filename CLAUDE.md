@@ -6390,6 +6390,33 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   session (L3, an attacker's own valid token beside the victim's cookie), and such a request gets no
   browser session committed (L4, session planting). The L4 fix was not re-audited, at the
   maintainer's direction — complete (PR #467)
+- **Milestone 113f** (`packages/exceptions` + `packages/logger-plugin` +
+  `packages/database-plugin` + `packages/health-plugin` + `packages/openapi-plugin` +
+  `packages/common` + `packages/runtime` + `packages/kernel` + `packages/cli` — what reaches logs
+  and public endpoints; V9-45, V9-47, V9-43, V9-80, V9-82, V9-41, V9-49): a Drizzle query error
+  keeps its SQL and loses its bound values in message, multiline stack header and `params`, and a
+  SQLSTATE class 22 cause (whose PostgreSQL message quotes the input) is rebuilt from its code;
+  errors from the typed builder and raw driver calls are not scrubbed (documented). Health endpoints
+  answer `{ status, timestamp, checks }` with status only unless `HealthPlugin({ details: true })`
+  (breaking). `errorHandler` logs a handled error once, at `warn` below 500 and `error` otherwise;
+  the request logger stops logging `request failed` and reports the served status through the new
+  optional `IErrorResponder.statusFor?`, one rule shared with the serving path. With no logger,
+  handled 5xx and kernel unhandled errors write one JSON line through the new optional
+  `IRuntimeServices.reportError?` (stderr; `console.error` on Workers). `excludePaths` accepts
+  `PathPattern[]`. Swagger UI is self-hosted from the optional peer `swagger-ui-dist` by default
+  (breaking), with `assets: 'cdn'` pinned to 5.33.3 under SHA-384 SRI (hashes recomputed from the
+  real tarball) and a validated `{ baseUrl }`; generated projects declare the package and opt out of
+  Scarf's install-time analytics, and Workers projects select the CDN. Implemented by Codex, which
+  stopped once on a plan error the real driver exposed (Drizzle's stack header is multiline).
+  Verification's behavioural driver (46 checks, real Drizzle, real swagger-ui- dist, real stderr;
+  three negative controls discriminating) found the scrub throwing on a frozen wrapper, a double
+  newline in the Workers sink and a dead label in the kernel's sink record, all fixed. The design
+  security review is plan §10, recorded after implementation. The committed-tree audit ran two
+  fresh-context rounds: round 1 found four Lows (a `baseUrl` a browser resolves to another host,
+  class 22 messages leaking values, overstated scrub docs, undisclosed Scarf analytics), round 2 two
+  more (a throwing driver accessor making the scrub the fault, no Scarf opt-out at an npm workspace
+  root). All six are fixed; the round-2 fixes were NOT re-audited, at the maintainer's direction —
+  complete (PR #468)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

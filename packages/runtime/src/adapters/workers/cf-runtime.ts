@@ -59,6 +59,14 @@ export function createCloudflareRuntimeServices(
   // shutdown handler will run, and it never would.
   return mergeRuntimeServices({
     platform: () => 'cloudflare-workers',
+    reportError: (record) => {
+      try {
+        // eslint-disable-next-line no-console -- runtime sink (M113f)
+        console.error(JSON.stringify(record));
+      } catch {
+        // Last-resort reporting must never replace the request failure.
+      }
+    },
     version: () => '',
     hostname: () => '',
     env: vars,

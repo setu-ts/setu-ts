@@ -188,6 +188,13 @@ export function createBunRuntimeServices(
 
   return mergeRuntimeServices({
     platform: () => 'bun',
+    reportError: (record) => {
+      try {
+        process.stderr.write(`${JSON.stringify(record)}\n`);
+      } catch {
+        // Last-resort reporting must never replace the request failure.
+      }
+    },
     version: () => host.version,
     hostname: () => host.hostname,
     env: host.env as Readonly<Record<string, string | undefined>>,

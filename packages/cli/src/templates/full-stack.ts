@@ -150,7 +150,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
         csrf: ${csrf},
       },${discovery}
       // Preserve Origin on native form posts; send no cross-origin referrer.
-      httpSecurity: { headers: { referrerPolicy: 'same-origin' } },
+      httpSecurity: { headers: { referrerPolicy: 'same-origin' } },${context.swaggerAssets === 'cdn' ? "\n      openapi: { swagger: { assets: 'cdn' } }," : ''}
     }),
     { env${config} },
   `;
@@ -262,7 +262,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
       outputDir: 'build',
       devEntry: FULL_STACK_DEV_ENTRY,
     },
-    npmDependencies: FULL_STACK_NPM_DEPENDENCIES,
+    npmDependencies: { ...FULL_STACK_NPM_DEPENDENCIES, 'swagger-ui-dist': '^5' },
     // The test packages are merged in because `setu generate module` is ungated
     // since M65: this template can emit a `*.service.test.ts` too, and a host
     // that emits a test file must declare what that file imports.
@@ -290,6 +290,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // until `react-router build` has run, and the client bundle must be served
     // as platform assets — no socket target needs either stanza.
     'cloudflare-workers': {
+      appFactoryContext: { swaggerAssets: 'cdn' },
       removePackages: [],
       addPlugins: [],
       wranglerToml: `

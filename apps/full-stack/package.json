@@ -22,7 +22,8 @@
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/react-router-plugin": "workspace:^",
     "@setu-ts/session-plugin": "workspace:^",
-    "@setu-ts/full-stack-starter": "workspace:^"
+    "@setu-ts/full-stack-starter": "workspace:^",
+    "swagger-ui-dist": "^5"
   },
   "devDependencies": {
     "@react-router/dev": "^8.0.0",

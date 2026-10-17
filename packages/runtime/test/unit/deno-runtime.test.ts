@@ -84,6 +84,29 @@ function createFakeDenoHost(overrides: Partial<DenoHost> = {}): DenoHost {
 }
 
 describe('createDenoRuntimeServices', () => {
+  it('writes one JSON line to stderr and contains serialization/write failures', () => {
+    const lines: string[] = [];
+    const host = createFakeDenoHost({
+      stderr: {
+        writeSync(data) {
+          lines.push(new TextDecoder().decode(data));
+          return data.length;
+        },
+      },
+    });
+    const runtime = createDenoRuntimeServices(host);
+    runtime.reportError?.({ message: 'fault' });
+    expect(lines).toEqual(['{"message":"fault"}\n']);
+    expect(() => runtime.reportError?.({ value: 1n })).not.toThrow();
+    host.stderr = {
+      writeSync() {
+        throw new Error('closed');
+      },
+    };
+    expect(() => runtime.reportError?.({ message: 'fault' })).not.toThrow();
+    delete host.stderr;
+    expect(() => runtime.reportError?.({ message: 'legacy injected host' })).not.toThrow();
+  });
   it('returns platform "deno"', () => {
     const services = createDenoRuntimeServices(createFakeDenoHost());
     expect(services.platform()).toBe('deno');

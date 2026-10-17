@@ -189,6 +189,13 @@
       },
       {
         "kind": "method",
+        "name": "reportError",
+        "readonly": false,
+        "optional": true,
+        "signature": "reportError?(record:Readonly<Record<string,unknown>>):void"
+      },
+      {
+        "kind": "method",
         "name": "setInterval",
         "readonly": false,
         "optional": false,

@@ -208,3 +208,47 @@ describe('a duplicate key answers 409 Conflict', () => {
     }
   });
 });
+
+describe('a commit rejection is scrubbed before it is rethrown', () => {
+  /** A Drizzle query error carrying a bound value, as the transaction bridge rejects it. */
+  function drizzleCommitFailure(): Error {
+    return Object.assign(
+      new Error('Failed query: update "accounts" set "email" = $1\nparams: private-email', {
+        cause: Object.assign(new Error('could not serialize access'), { code: '40001' }),
+      }),
+      {
+        query: 'update "accounts" set "email" = $1',
+        params: ['private-email'],
+        stack:
+          'Error: Failed query: update "accounts" set "email" = $1\nparams: private-email\n' +
+          '    at commit (driver.js:1:2)',
+      },
+    );
+  }
+
+  it('drops bound values from an unclassified commit rejection', async () => {
+    const plugin = DatabasePlugin({
+      type: 'custom',
+      adapter: stubAdapter(refusingCreate(new Error('not reached')), drizzleCommitFailure()),
+    });
+    const app = createApplication({ plugins: [RuntimePlugin(), plugin] });
+    await app.start();
+    try {
+      const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const error = await db
+        .transaction(async () => {})
+        .then(
+          () => undefined,
+          (rejected: unknown) => rejected,
+        );
+      expect(error).toBeInstanceOf(Error);
+      const scrubbed = error as Error & { query?: unknown; params?: unknown };
+      expect(scrubbed.message).toBe('Failed query: update "accounts" set "email" = $1');
+      expect(scrubbed.query).toBe('update "accounts" set "email" = $1');
+      expect(scrubbed.params).toBeUndefined();
+      expect(JSON.stringify([scrubbed.message, scrubbed.stack])).not.toContain('private-email');
+    } finally {
+      await app.stop();
+    }
+  });
+});

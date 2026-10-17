@@ -40,7 +40,7 @@ function contributingPlugin(name: string, status: HealthStatus): IPlugin {
 
 async function boot(...contributors: IPlugin[]) {
   const app = createApplication({
-    plugins: [RuntimePlugin(), HealthPlugin(), ...contributors],
+    plugins: [RuntimePlugin(), HealthPlugin({ details: true }), ...contributors],
   });
   await app.start();
   return app;

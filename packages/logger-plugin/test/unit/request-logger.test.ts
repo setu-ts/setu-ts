@@ -254,7 +254,10 @@ describe('createRequestLoggerMiddleware', () => {
     ).rejects.toThrow('boom');
 
     const messages = logger.entries.map((e) => e.message);
-    expect(messages).toContain('request failed');
+    expect(messages).not.toContain('request failed');
+    expect(logger.entries.find((e) => e.message === 'request completed')?.metadata.status).toBe(
+      500,
+    );
   });
 
   it('skips logging for excluded paths', async () => {
@@ -357,9 +360,9 @@ describe('createRequestLoggerMiddleware', () => {
       }),
     ).rejects.toBe('boom');
 
-    const failed = logger.entries.find((e) => e.message === 'request failed');
-    expect(failed).toBeDefined();
-    expect(failed!.metadata.error).toBe('boom');
-    expect(failed!.metadata.stack).toBeUndefined();
+    expect(logger.entries.some((e) => e.message === 'request failed')).toBe(false);
+    expect(logger.entries.find((e) => e.message === 'request completed')?.metadata.status).toBe(
+      500,
+    );
   });
 });
