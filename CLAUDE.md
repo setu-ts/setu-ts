@@ -6390,6 +6390,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   session (L3, an attacker's own valid token beside the victim's cookie), and such a request gets no
   browser session committed (L4, session planting). The L4 fix was not re-audited, at the
   maintainer's direction — complete (PR #467)
+- **Milestone 113j** (`packages/messaging-plugin` + `packages/database-plugin` + `scripts/` + docs —
+  outbox and inbox signals; V9-20, V9-21, V9-22 and V9-10's `npm:zod` half). A relay paused past its
+  lease republished a row another relay had sent and reported nothing, because the late `markSent`
+  answer lost the race to its deadline and was booked as a store failure. Settlement writes for a
+  publish that actually ran now use their own `storeTimeoutMs` bound, ignoring an exhausted sweep
+  budget, and a late answer still records `duplicate`, `claim-lost` or `poisoned` through the one
+  `observeSettlement` both paths call. A publish the budget refused ends the sweep `'deadline'` with
+  no attempt counted. `InboxRowStateError` and `OutboxRowStateError` carry 400/404/409 status hints
+  with fixed details, and `OutboxRowStateError` gains `'invalid-id'` (breaking for an exhaustive
+  `switch`). Every stale `npm:` specifier in committed docs is corrected, the fence engine stops
+  rewriting them, and `check:docs` refuses one through rules P7 (quoted import) and P8 (any other
+  reference). The implementation was a trial of opencode on a local Qwen 27B: about 4 h 23 min over
+  two runs, stuck once on pause-test event ordering that needed an outside diagnosis, then stopped
+  before its gates and finished by Claude. Security audit round 1 failed on one Low (the P7/P8 scan
+  was quadratic, ~18 s for a 1 MiB line); round 2 passed on `4220698a`. The three observations it
+  raised — a budget-refused publish counted as a failure, a row id quoted in a store error, and a
+  cubic continued-line join in the same gate — were fixed afterwards and not re-audited, at the
+  maintainer's direction — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
