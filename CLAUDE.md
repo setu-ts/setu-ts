@@ -6407,7 +6407,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   was quadratic, ~18 s for a 1 MiB line); round 2 passed on `4220698a`. The three observations it
   raised — a budget-refused publish counted as a failure, a row id quoted in a store error, and a
   cubic continued-line join in the same gate — were fixed afterwards and not re-audited, at the
-  maintainer's direction — complete (PR pending)
+  maintainer's direction — complete (PR #469)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
