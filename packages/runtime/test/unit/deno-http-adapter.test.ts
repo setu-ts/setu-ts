@@ -113,6 +113,37 @@ describe('deno-http-adapter | listen', () => {
 // ---------------------------------------------------------------------------
 
 describe('deno-http-adapter | close', () => {
+  it('waits for the 1000 ms grace while shutdown is pending and observes a later rejection', async () => {
+    const shutdown = Promise.withResolvers<void>();
+    const handle = new DenoHttpServerHandle({
+      serve: () => ({ shutdown: () => shutdown.promise }),
+    });
+    handle.server = { shutdown: () => shutdown.promise };
+    const adapter = new DenoHttpAdapter();
+    const started = performance.now();
+    await adapter.close(handle);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(900);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(handle.server).toBe(null);
+    shutdown.reject(new Error('shutdown failed'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+
+  it('returns promptly when shutdown rejects or resolves before the grace', async () => {
+    for (const rejects of [false, true]) {
+      const adapter = new DenoHttpAdapter({
+        serve: () => ({
+          shutdown: () =>
+            rejects ? Promise.reject(new Error('shutdown failed')) : Promise.resolve(),
+        }),
+      });
+      const handle = await adapter.listen(3000);
+      const started = performance.now();
+      await adapter.close(handle);
+      expect(performance.now() - started).toBeLessThan(500);
+    }
+  });
+
   it('calls server.shutdown on valid handle', async () => {
     let shutdownCalled = false;
     const { host } = createFakeHost();

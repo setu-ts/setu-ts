@@ -14096,7 +14096,7 @@ re-run against a newly published version.
 | --------- | ------ | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **M113a** | design | brokers that report healthy while down, and publishes with no bound   | V9-35 **High**, V9-36 **High**, V9-37, V9-3                                              | `messaging-plugin`                                                                                                                                                        |
 | **M113b** | design | readiness that does not describe the dependency                       | V9-2 **High**, V9-19, V9-32, V9-44                                                       | `service-discovery`, `health`, `scheduler`, `cache`, `session`, `auth`, `messaging`, `realtime-backplane`, `worker-pool`, `static`, `feature-flags`, `common`, `database` |
-| **M113c** | design | connections and jobs that never recover, and a shutdown with no bound | V9-18 **High**, V9-31, V9-64 **High**, V9-71, V9-76                                      | `queue-plugin`, `runtime`                                                                                                                                                 |
+| **M113c** | design | connections and jobs that never recover, and a shutdown with no bound | V9-18 **High**, V9-31, V9-64 **High**, V9-71, V9-76                                      | `queue-plugin`, `runtime`, `common`, `messaging-plugin`                                                                                                                   |
 | **M113d** | design | Workers builds and the edge cache                                     | V9-1 **High, REGRESSION**, V9-23 **High**, V9-4                                          | `database`, `scheduler`, `cloudflare`, `cli`                                                                                                                              |
 | **M113e** | design | identity and session semantics a client cannot predict                | V9-28, V9-27, V9-46, V9-50                                                               | `auth-plugin`, `session-plugin`                                                                                                                                           |
 | **M113f** | design | what reaches logs and public endpoints                                | V9-45, V9-47, V9-43, V9-41, V9-49, V9-80, V9-82                                          | `exceptions`, `logger`, `database`, `health`, `openapi`, `kernel`                                                                                                         |
@@ -14176,7 +14176,8 @@ V9-68 is owned by M113o.
 
 ### Milestone 113c: Connections and Jobs That Never Recover, and a Shutdown With No Bound
 
-**Package(s):** `packages/queue-plugin`, `packages/runtime`
+**Package(s):** `packages/queue-plugin`, `packages/runtime`, `packages/common`,
+`packages/messaging-plugin`
 
 - **V9-18 (High)** — `RabbitMqQueue` never recovers from a broker restart: jobs stop until the
   process restarts (X67, real RabbitMQ 4).
@@ -14192,6 +14193,10 @@ V9-68 is owned by M113o.
   kernel's 10 s drain, `DenoHttpAdapter.close()` awaits `server.shutdown()`, which waits for every
   in-flight request, so `onClose` hooks (the worker pool's termination among them) run only when the
   handler returns. Node and Bun stop in 10.5 s.
+
+Shipped (PR pending). The fix for Redis clients without a reporter, folded in at the maintainer's
+direction, also touches `auth-plugin`, `cache-plugin`, `idempotency-plugin`,
+`realtime-backplane-plugin` and `scheduler-plugin`; each change is the same one-line call-site edit.
 
 ---
 
@@ -14843,7 +14848,7 @@ patch by construction and gains nothing new here.
 | 113       | ⬜     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113o                                                                                                                                                                                                        |
 | 113a      | ✅     | messaging-plugin — brokers that report healthy while down, and publishes with no bound                                                                                                                                                                                                    |
 | 113b      | ✅     | service-discovery + health + scheduler + cache + session + auth + messaging + realtime-backplane + worker-pool + static + feature-flags + common + database — readiness that does not describe the dependency                                                                             |
-| 113c      | ⬜     | queue-plugin + runtime — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                                            |
+| 113c      | ✅     | queue-plugin + runtime + common + messaging-plugin — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                |
 | 113d      | ⬜     | database + scheduler + cloudflare + cli — Workers builds (the V9-1 regression) and the edge cache                                                                                                                                                                                         |
 | 113e      | ⬜     | auth-plugin + session-plugin — identity and session semantics a client cannot predict                                                                                                                                                                                                     |
 | 113f      | ⬜     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints                                                                                                                                                                                                |

@@ -79,9 +79,7 @@ async function resolveClient(
   const client = createRateLimitRedisClient(RedisCtor, url, commandTimeoutMs);
   // Attached synchronously after construction: this client connects eagerly,
   // but a connect failure is emitted asynchronously, so none is missed.
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(client, reporter);
-  }
+  attachConnectionErrorReporter(client, reporter);
   return client as unknown as IRateLimitRedisClient;
 }
 

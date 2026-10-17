@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking recovery and shutdown behaviour (M113c, 0.10.0).** RabbitMQ queue faults now reconnect
+  automatically through the shared common supervisor; unacked jobs may be redelivered with their
+  original attempt count. Make processors idempotent. Deno HTTP close now waits for the first of
+  shutdown completion and a 1000 ms grace, catching rejected shutdown, so lifecycle hooks run after
+  the bounded drain even with requests in flight; move resource cleanup into shutdown/close hooks.
+  After the grace, `close()` returns without waiting for those requests; they finish only if the
+  process outlives them.
+- **Breaking Redis delivery claims (M113c, 0.10.0).** `visibilityTimeoutMs` defaults to 30000, must
+  be at least 1000, and is renewed every third of the lease. Redis 5+ server-time scripts reclaim
+  expired claims; crashes count as attempts and an over-budget job is passed to `onFailed`, then
+  dead-lettered without running. Drain old replicas before upgrading: their stuck processing entries
+  now return. Redis and RabbitMQ reject stale settlements with internal `StaleClaimError`, reported
+  as failed settlement while leaving the current delivery intact. Make processors idempotent. A
+  Redis client without `eval` retains the prior behavior (no claims or reclaim), with one warning
+  that `visibilityTimeoutMs` is inactive.
+- **Breaking processor definition mutability (M113c, 0.10.0).**
+  `QueueProcessorDefinition<T = unknown>.processor` is now a method, admitting typed payloads in
+  declarative lists and preserving `this`. Code relying on its former `readonly` restriction must
+  enforce immutability itself.
+- **Redis namespaces (M113c).** `RedisQueueOptions.keyPrefix` and `QueuePluginOptions.keyPrefix`
+  configure every Redis key; the default remains `queue:`. Use distinct prefixes for applications
+  sharing Redis; drain or migrate existing keys before changing a deployed prefix. RabbitMQ's
+  `prefix` does not configure Redis.
+- **Shared reconnect exports (M113c).** Common now exports `ReconnectSupervisor`,
+  `ReconnectSupervisorOptions`, `ReconnectMode` and `fullJitterDelay`; messaging's three supervisor
+  callers import them from common. The implementation moves without behavioural changes.
+
 - **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
   previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
   changes overall status for these conditions. Migrate alerts to inbox `data.parked` /
@@ -106,6 +133,15 @@ All notable changes to this project are documented here. The format follows
   Stopped Kafka/Pub/Sub report down; a hung probe reports unknown, which still leaves health up.
 
 ### Fixed
+
+- **A Redis client built without a reporter wrote its errors to the console (M113c).** Since 0.8.0
+  the cache store, queue adapter, Redis Streams broker, realtime backplane, rate-limit store,
+  scheduler lock and idempotency store attached their `'error'` listener only when given a
+  `connectionErrorReporter`. Each plugin passes one, but `RedisRateLimitStore`, which no plugin
+  builds, and any store or adapter constructed directly got none, so ioredis printed
+  `[ioredis] Unhandled error event` on every failed attempt. `attachConnectionErrorReporter`'s
+  `reporter` is now optional: omitted, the listener drops events, as a reporter with no logger
+  already does, and the health probe still reports the outage.
 
 - **Kafka shutdown with sends in flight.** With publishes abandoned at `publishTimeoutMs` during a
   broker pause, `app.stop()` waited on kafkajs's pending-request drain (about 26 s) and the process

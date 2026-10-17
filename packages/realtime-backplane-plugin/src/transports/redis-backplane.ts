@@ -191,9 +191,7 @@ export class RedisBackplane implements IRealtimeBackplane {
         this.#commandTimeoutMs === 0 ? {} : { commandTimeout: this.#commandTimeoutMs };
       const reporter = this.#options.connectionErrorReporter;
       publisher = module.create(url, clientOptions);
-      if (reporter !== undefined) {
-        attachConnectionErrorReporter(publisher, reporter);
-      }
+      attachConnectionErrorReporter(publisher, reporter);
       try {
         subscriber = module.create(url, clientOptions);
       } catch (error) {
@@ -204,9 +202,7 @@ export class RedisBackplane implements IRealtimeBackplane {
       }
       // One reporter for both: the pair fails together, so an outage's
       // identical errors from the two connections de-duplicate into one warn.
-      if (reporter !== undefined) {
-        attachConnectionErrorReporter(subscriber, reporter);
-      }
+      attachConnectionErrorReporter(subscriber, reporter);
     }
 
     const listener = (channel: string, message: string): void => {

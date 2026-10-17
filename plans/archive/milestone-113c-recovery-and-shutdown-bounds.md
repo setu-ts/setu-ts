@@ -19,6 +19,14 @@ act. M113c makes each of them recover, or bounds it.
   - **V9-76.** A typed processor `(job: IJob<T>) => …` type-checks inside a
     `QueueProcessorDefinition`.
   - **V9-31.** On Deno, `app.stop()` is bounded the way it is on Node and Bun.
+  - **Folded in at the maintainer's direction (2026-10-17):** a Redis client a package builds with
+    no `connectionErrorReporter` now carries an `'error'` listener that drops events, instead of
+    none. Found during verification as the `[ioredis] Unhandled error event` a queue test printed;
+    it predates M113c (PR #378 attached the listener only when a reporter was given). The fix is in
+    `common`'s `attachConnectionErrorReporter`, whose `reporter` becomes optional, and removes the
+    `if (reporter !== undefined)` guard from eight call sites in seven packages: `queue-plugin`,
+    `cache-plugin`, `messaging-plugin`, `realtime-backplane-plugin`, `auth-plugin`,
+    `scheduler-plugin` and `idempotency-plugin`.
 - **Packages:** `queue-plugin`, `runtime`, `common` and `messaging-plugin`. The ROADMAP row named
   only `queue-plugin` and `runtime`. `common` and `messaging-plugin` join because the maintainer
   chose, on 2026-10-17, to move the reconnect supervisor into `common` rather than write a second
@@ -130,6 +138,14 @@ act. M113c makes each of them recover, or bounds it.
     `idempotency-plugin/src/stores/redis-scripts.ts:13`, and carries its stated floor: Redis 5 or
     later, where script-effects replication is the default and `TIME` before a write is safe. The
     queue README states the floor.
+  - **Deviation recorded at implementation (2026-10-17):** the reserve script selects DUE ready jobs
+    by the server clock too, not only the lease. Before M113c, `reserve` compared the ready set
+    against the reserving replica's `runtime.now()`; one clock per script is simpler and keeps
+    reclaim and due selection consistent. Ready-set scores are still written by the enqueuing
+    replica (`availableAtMs`), so a delayed or backed-off job's readiness shifts by that replica's
+    skew against Redis. Before, it shifted by the skew between the two replicas, so the bound is no
+    worse. The script also returns `[payload, stalls, token]` triples, not the pairs described
+    above, because the claim token is minted inside it.
   - **`ack`, `requeue` and `deadLetter` scripts check the claim.** They act only when
     `HGET claims id` equals the token passed in, and return `0` otherwise. A slow worker whose claim
     was reclaimed therefore cannot delete the new delivery. On success they also clear the `claims`
@@ -383,6 +399,11 @@ The real-backend suites need `RABBITMQ_URL` and `REDIS_URL`, against throwaway c
 
 ## 10. Design security review
 
+**Status.** The flow, assets, attackers, obligations 1–6 and findings S1–S2 were written before
+implementation (`c4ec403c`). Implementation added surfaces that review did not cover, so on
+2026-10-17, before the committed-tree audit, it was extended with the rows marked _(added)_. That
+part is recorded after implementation, the M101a precedent: it describes the design as built.
+
 **Flows changed:**
 
 - Redis keys now carry a configurable prefix and two new hashes, `claims` and `stalls`.
@@ -390,6 +411,16 @@ The real-backend suites need `RABBITMQ_URL` and `REDIS_URL`, against throwaway c
   passed back on settlement.
 - A RabbitMQ reconnect loop opens new connections after a fault.
 - Deno shutdown no longer waits for in-flight requests.
+- _(added)_ The reserve script reclaims expired claims, counts each reclaim as an attempt, removes
+  orphaned ids, and selects due jobs by the Redis server clock.
+- _(added)_ A delivery over its attempt budget is passed to `onFailed`, then dead-lettered without
+  running the processor.
+- _(added)_ While a processor runs, the service renews its claim every `visibilityTimeoutMs / 3` and
+  reports one failed renewal per delivery to the logger.
+- _(added)_ A settlement whose token no longer matches rejects with the internal `StaleClaimError`,
+  on Redis and on RabbitMQ; the dispatcher reports it as a failed settlement.
+- _(added)_ `ReconnectSupervisor` moved from `messaging-plugin` into `common`; the RabbitMQ, NATS
+  and Kafka brokers and `RabbitMqQueue` now import it from there.
 
 **Assets:**
 
@@ -397,6 +428,8 @@ The real-backend suites need `RABBITMQ_URL` and `REDIS_URL`, against throwaway c
 - Isolation between applications sharing one Redis.
 - The at-least-once guarantee.
 - The shutdown bound.
+- _(added)_ The process: a queue adapter must not hot-loop, leak connections or timers, or let a
+  callback's throw become an unhandled rejection.
 
 **Attackers:**
 
@@ -405,6 +438,9 @@ The real-backend suites need `RABBITMQ_URL` and `REDIS_URL`, against throwaway c
 - **An operator misconfiguration:** `keyPrefix` or `visibilityTimeoutMs` read from a malformed
   environment variable.
 - **A flapping broker** that drives the reconnect loop.
+- _(added)_ **A poison job** whose processor kills its worker on every delivery.
+- _(added)_ **Application callbacks** (`onFailed`, the processor) that throw, reject or never
+  settle.
 
 **Obligations for the committed-tree audit:**
 
@@ -422,10 +458,33 @@ The real-backend suites need `RABBITMQ_URL` and `REDIS_URL`, against throwaway c
    settles, and no unhandled rejection appears.
 6. **No payload re-encoding** in any new script; byte-compare a stored payload before and after a
    reclaim.
+7. _(added)_ **Scripts take no caller data as code.** Every Lua script receives keys through `KEYS`
+   and values through `ARGV`; no script text is assembled from a prefix, job name, id or payload.
+8. _(added)_ **Stale settlements change nothing.** On Redis and on RabbitMQ, a settlement carrying a
+   superseded token leaves the new delivery's state untouched (it is neither acked, requeued nor
+   dead-lettered), and the rejection names no token, id or payload.
+9. _(added)_ **Poison jobs terminate.** A job that kills its worker on every delivery reaches the
+   dead set within `maxAttempts` deliveries and never runs again; prove it with real `SIGKILL`s.
+10. _(added)_ **Callbacks cannot break dispatch.** An `onFailed` that throws or rejects still lets
+    the job be dead-lettered and the slot be released; an unconvertible thrown value does not strand
+    the job; no unhandled rejection appears.
+11. _(added)_ **Renewal is bounded.** At most one renewal is in flight per delivery, the interval is
+    cleared on every settlement path and on `disconnect()`, a failed renewal is logged once with the
+    job id and name only, and the smallest accepted `visibilityTimeoutMs` cannot produce an interval
+    under 333 ms.
+12. _(added)_ **The shared supervisor changes no messaging behaviour.** The three brokers' reconnect
+    tests pass unchanged against the `common` copy, and no second copy remains in
+    `messaging-plugin`.
 
 **Findings:**
 
-| #   | Finding                                                                                                         | Disposition                                                                                                                    |
-| --- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| S1  | V9-71 is itself a cross-application data exposure: with a shared job name, one application runs another's jobs. | Fixed by §3.3, for a deployment that sets `keyPrefix`; the default is unchanged by maintainer decision and the README says so. |
-| S2  | A Redis writer can extend or settle another worker's job by reading its token from the `claims` hash.           | Accepted: such a writer can already delete the job; Redis ACLs are the boundary.                                               |
+| #   | Finding                                                                                                                                                                                                          | Disposition                                                                                                                                                                                                                                                               |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | V9-71 is itself a cross-application data exposure: with a shared job name, one application runs another's jobs.                                                                                                  | Fixed by §3.3, for a deployment that sets `keyPrefix`; the default is unchanged by maintainer decision and the README says so.                                                                                                                                            |
+| S2  | A Redis writer can extend or settle another worker's job by reading its token from the `claims` hash.                                                                                                            | Accepted: such a writer can already delete the job; Redis ACLs are the boundary.                                                                                                                                                                                          |
+| S3  | _(added)_ Keys are `prefix + name + ':' + suffix` and job names are not validated, so two prefixes collide when one is a string prefix of the other: `app:` with job `b:x` and `app:b:` with job `x` share keys. | **Documented, maintainer decision 2026-10-17:** the README and `RedisQueueOptions.keyPrefix` JSDoc state that no prefix on one Redis may be a string prefix of another. The code cannot check it across applications; refusing `:` in job names was declined as breaking. |
+| S4  | _(added)_ `visibilityTimeoutMs` accepted any positive number, so a value below 3 gave a zero-delay renewal interval: a tight loop of Redis round trips for every running job.                                    | **Fixed, maintainer decision 2026-10-17:** values below 1 000 ms are refused at construction (`MIN_VISIBILITY_TIMEOUT_MS`, internal), keeping the renewal interval at 333 ms or more.                                                                                     |
+| S5  | _(added)_ A Redis writer can raise a job's `stalls` count and force it to be dead-lettered.                                                                                                                      | Accepted under S2: the same writer can delete the job.                                                                                                                                                                                                                    |
+| S6  | _(added)_ After the 1 000 ms Deno grace, `close()` returns while requests are still in flight. `shutdown()` is not cancelled, so they finish only if the process outlives them.                                  | Accepted: the bound is the point of V9-31; the CHANGELOG entry states it.                                                                                                                                                                                                 |
+| S7  | _(added)_ The supervisor's shared state now spans packages, so a defect there reaches four transports at once.                                                                                                   | Covered by obligation 12.                                                                                                                                                                                                                                                 |
+| S8  | _(added)_ A built Redis client given no reporter wrote every connection error, with its stack, to `console.error`, bypassing the application's logger and its redaction.                                         | **Fixed (folded in, see §0):** the listener is always attached and drops events without a reporter. Cost: an application that builds `RedisRateLimitStore` or a store directly, without a reporter, loses the console lines; its health probe still reports the outage.   |

@@ -214,3 +214,8 @@ describe('barrel exports', () => {
     expect(headers.get('traceparent')).toBe('00-a');
   });
 });
+
+it('keeps shared reconnect helpers in common only', () => {
+  expect('ReconnectSupervisor' in messaging).toBe(false);
+  expect('fullJitterDelay' in messaging).toBe(false);
+});

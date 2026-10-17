@@ -165,6 +165,12 @@ export function createConnectionErrorReporter(
   };
 }
 
+/** Drops every event; attached when the client's owner supplied no reporter. */
+const DROPPING_REPORTER: ConnectionErrorReporter = Object.freeze({
+  report(): void {},
+  recovered(): void {},
+});
+
 /** The event-emitter surface {@linkcode attachConnectionErrorReporter} uses. */
 interface ErrorEventSource {
   on(event: string, listener: (value: unknown) => void): unknown;
@@ -179,15 +185,21 @@ interface ErrorEventSource {
  * listener exists). The client is checked structurally at runtime, so the
  * package's injection facade need not declare `on`.
  *
+ * With no `reporter`, the listeners are still attached and drop every event —
+ * the same outcome as a reporter whose logger returns `undefined`. A built
+ * client therefore never writes to the console, whether or not its owner
+ * supplied a log sink; the owning package's health probe still reports the
+ * outage.
+ *
  * @param client - The built client; an object exposing an `on` method
- * @param reporter - The reporter to route events to
+ * @param reporter - The reporter to route events to; omitted, events are dropped
  * @returns `true` when the listeners were attached, `false` when the client
  * exposes no `on` method
  * @since 0.8.0
  */
 export function attachConnectionErrorReporter(
   client: unknown,
-  reporter: ConnectionErrorReporter,
+  reporter: ConnectionErrorReporter = DROPPING_REPORTER,
 ): boolean {
   if (
     (typeof client !== 'object' && typeof client !== 'function') ||

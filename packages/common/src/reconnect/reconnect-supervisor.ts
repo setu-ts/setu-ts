@@ -3,7 +3,7 @@
  *
  * @module
  *
- * Internal to `messaging-plugin` — NOT barrel-exported. Brokers that own their
+ * Shared by messaging and queue adapters. Brokers that own their
  * connection lifecycle use this to turn a broker blip into a self-repair
  * rather than a permanent outage, and to keep `isHealthy` truthful during the
  * outage window.
@@ -30,21 +30,21 @@
  * supervisor attached — the listener-accumulation class M47 fixed in
  * `resilience-plugin` and M50's review found twice in watch backoffs.
  *
- * @since 0.1.0
+ * @since 0.10.0
  */
-import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
+import type { IRuntimeServices, TimerHandle } from '../runtime.ts';
 
 /**
  * Supervisor mode.
  *
- * @since 0.1.0
+ * @since 0.10.0
  */
 export type ReconnectMode = 'drive' | 'observe';
 
 /**
  * Options for {@linkcode ReconnectSupervisor}.
  *
- * @since 0.1.0
+ * @since 0.10.0
  */
 export interface ReconnectSupervisorOptions {
   /** Runtime services providing the monotonic timer surface. */
@@ -94,7 +94,7 @@ export interface ReconnectSupervisorOptions {
  * @param initialMs - First backoff window
  * @param maxMs - Backoff ceiling
  * @returns The delay to wait before the next attempt, in milliseconds
- * @since 0.1.0
+ * @since 0.10.0
  */
 export function fullJitterDelay(attempt: number, initialMs: number, maxMs: number): number {
   const ceiling = Math.min(maxMs, initialMs * 2 ** attempt);
@@ -105,7 +105,7 @@ export function fullJitterDelay(attempt: number, initialMs: number, maxMs: numbe
  * Owns backoff, the reconnect attempt loop (drive mode), and fault/recovery
  * tracking (both modes) for a broker's connection.
  *
- * @since 0.1.0
+ * @since 0.10.0
  */
 export class ReconnectSupervisor {
   #faulted = false;

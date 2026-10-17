@@ -39,6 +39,8 @@ import { MemoryQueue } from '../adapters/memory-queue.ts';
 import {
   RedisQueue,
   resolveCommandTimeoutMs,
+  resolveKeyPrefix,
+  resolveVisibilityTimeoutMs,
   validateClient as isRedisQueueClient,
 } from '../adapters/redis-queue.ts';
 import {
@@ -87,7 +89,11 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   // type cannot reach — refuses before any application exists, with a fixed,
   // value-free message.
   // M101a V8-5: refused here, not at `start()`, like every other bound.
-  if (adapterType === 'redis') resolveCommandTimeoutMs(options?.commandTimeoutMs);
+  if (adapterType === 'redis') {
+    resolveCommandTimeoutMs(options?.commandTimeoutMs);
+    resolveKeyPrefix(options?.keyPrefix);
+    resolveVisibilityTimeoutMs(options?.visibilityTimeoutMs);
+  }
   if (adapterType === 'rabbitmq') {
     resolvePublishTimeoutMs(options?.publishTimeoutMs);
     if (
@@ -183,6 +189,10 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
         case 'redis': {
           const client = options?.client;
           adapter = new RedisQueue({
+            ...(options?.visibilityTimeoutMs === undefined
+              ? {}
+              : { visibilityTimeoutMs: options.visibilityTimeoutMs }),
+            ...(options?.keyPrefix === undefined ? {} : { keyPrefix: options.keyPrefix }),
             url: options?.url ?? 'redis://localhost:6379',
             ...(client !== undefined && isRedisQueueClient(client) ? { client } : {}),
             ...(options?.deadLetterTtlMs === undefined
@@ -327,7 +337,11 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // contradicting this option's own documented last-wins contract.
       if (processorFactories.length === 0) {
         for (const definition of processorInstances) {
-          registrar.process(definition.name, definition.processor, definition.options);
+          registrar.process(
+            definition.name,
+            (job) => definition.processor(job),
+            definition.options,
+          );
         }
       }
 
@@ -400,7 +414,11 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
                         `QueuePlugin({ processors })[${index}]`,
                       )
                     : entry;
-                registrar.process(definition.name, definition.processor, definition.options);
+                registrar.process(
+                  definition.name,
+                  (job) => definition.processor(job),
+                  definition.options,
+                );
               });
             }
 

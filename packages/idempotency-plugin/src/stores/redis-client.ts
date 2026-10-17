@@ -61,9 +61,7 @@ export function createRedisIdempotencyClient(
     commandTimeoutMs === 0
       ? new RedisCtor(url, { lazyConnect: true })
       : new RedisCtor(url, { lazyConnect: true, commandTimeout: commandTimeoutMs });
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(client, reporter);
-  }
+  attachConnectionErrorReporter(client, reporter);
   return client;
 }
 

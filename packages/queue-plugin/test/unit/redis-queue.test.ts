@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RedisQueue, validateClient } from '../../src/adapters/redis-queue.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
 
@@ -499,8 +499,19 @@ describe('RedisQueue', () => {
 
   describe('guarded real-import', () => {
     it('connect() rejects with bad URL (enters loadIoredis)', async () => {
-      const queue = new RedisQueue({ url: 'redis://localhost:9999' });
-      await expect(queue.connect()).rejects.toThrow();
+      // Built with no reporter: the real ioredis client must still carry an
+      // 'error' listener, or it prints "[ioredis] Unhandled error event".
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const queue = new RedisQueue({ url: 'redis://localhost:9999' });
+        await expect(queue.connect()).rejects.toThrow();
+        await queue.disconnect().catch(() => {});
+        expect(
+          consoleError.mock.calls.filter((call) => String(call[0]).startsWith('[ioredis]')),
+        ).toEqual([]);
+      } finally {
+        consoleError.mockRestore();
+      }
     });
   });
 

@@ -696,3 +696,9 @@ export { checkWritePrecondition } from './services/write-precondition.ts';
 
 /** Shared connection-outage classifier and network errno vocabulary. */
 export { isConnectionFault, isConnectionFaultCode } from './errors/connection-fault.ts';
+
+export { ReconnectSupervisor, fullJitterDelay } from './reconnect/reconnect-supervisor.ts';
+export type {
+  ReconnectMode,
+  ReconnectSupervisorOptions,
+} from './reconnect/reconnect-supervisor.ts';

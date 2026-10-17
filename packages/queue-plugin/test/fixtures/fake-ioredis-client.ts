@@ -12,6 +12,7 @@ import {
   ACK_SCRIPT,
   DEAD_LETTER_SCRIPT,
   ENQUEUE_SCRIPT,
+  EXTEND_SCRIPT,
   REQUEUE_SCRIPT,
   RESERVE_SCRIPT,
 } from '../../src/adapters/redis-queue-scripts.ts';
@@ -315,6 +316,8 @@ export class FakeRedisClient implements IRedisQueueClient {
 export class FakeEvalRedisClient extends FakeRedisClient {
   /** Every `eval` call, as `[script, numKeys, ...keysAndArgs]`. */
   readonly evals: Array<readonly unknown[]> = [];
+  serverNowMs = 100;
+  #sequences = new Map<string, number>();
 
   async eval(
     script: string,
@@ -330,29 +333,73 @@ export class FakeEvalRedisClient extends FakeRedisClient {
         await this.zadd(keys[1], Number(args[2]), args[0]);
         return 1;
       case RESERVE_SCRIPT: {
-        const ids = await this.zrangebyscore(keys[0], '-inf', args[0], 'LIMIT', 0, Number(args[1]));
-        const out: string[] = [];
+        const expired = await this.zrangebyscore(
+          keys[1],
+          '-inf',
+          this.serverNowMs,
+          'LIMIT',
+          0,
+          Number(args[0]),
+        );
+        for (const id of expired) {
+          await this.zrem(keys[1], id);
+          await this.hdel(keys[3], id);
+          if ((await this.hget(keys[2], id)) !== null) {
+            const stalls = Number((await this.hget(keys[4], id)) ?? '0') + 1;
+            await this.hset(keys[4], id, String(stalls));
+            await this.zadd(keys[0], this.serverNowMs, id);
+          } else {
+            await this.zrem(keys[0], id);
+            await this.hdel(keys[4], id);
+          }
+        }
+        const ids = await this.zrangebyscore(
+          keys[0],
+          '-inf',
+          this.serverNowMs,
+          'LIMIT',
+          0,
+          Number(args[0]),
+        );
+        const out: [string, number, string][] = [];
         for (const id of ids) {
           await this.zrem(keys[0], id);
-          await this.zadd(keys[1], Number(args[0]), id);
           const raw = await this.hget(keys[2], id);
           if (raw !== null) {
-            out.push(raw);
+            const sequence = (this.#sequences.get(keys[5]) ?? 0) + 1;
+            this.#sequences.set(keys[5], sequence);
+            const token = String(sequence);
+            await this.zadd(keys[1], this.serverNowMs + Number(args[1]), id);
+            await this.hset(keys[3], id, token);
+            out.push([raw, Number((await this.hget(keys[4], id)) ?? '0'), token]);
+          } else {
+            await this.zrem(keys[1], id);
+            await this.hdel(keys[3], id);
+            await this.hdel(keys[4], id);
           }
         }
         return out;
       }
       case ACK_SCRIPT:
+        if ((await this.hget(keys[2], args[0])) !== args[1]) return 0;
         await this.zrem(keys[0], args[0]);
         await this.hdel(keys[1], args[0]);
+        await this.hdel(keys[2], args[0]);
+        await this.hdel(keys[3], args[0]);
         return 1;
       case REQUEUE_SCRIPT:
+        if ((await this.hget(keys[3], args[0])) !== args[3]) return 0;
         await this.hset(keys[0], args[0], args[1]);
         await this.zrem(keys[1], args[0]);
         await this.zadd(keys[2], Number(args[2]), args[0]);
+        await this.hdel(keys[3], args[0]);
+        await this.hdel(keys[4], args[0]);
         return 1;
       case DEAD_LETTER_SCRIPT: {
+        if ((await this.hget(keys[4], args[0])) !== args[3]) return 0;
         await this.zrem(keys[0], args[0]);
+        await this.hdel(keys[4], args[0]);
+        await this.hdel(keys[5], args[0]);
         if (args[2] === '1') {
           const raw = await this.hget(keys[2], args[0]);
           if (raw !== null) {
@@ -363,6 +410,10 @@ export class FakeEvalRedisClient extends FakeRedisClient {
         await this.zadd(keys[1], Number(args[1]), args[0]);
         return 1;
       }
+      case EXTEND_SCRIPT:
+        if ((await this.hget(keys[1], args[0])) !== args[1]) return 0;
+        await this.zadd(keys[0], this.serverNowMs + Number(args[2]), args[0]);
+        return 1;
       default:
         throw new Error('ERR unknown script');
     }

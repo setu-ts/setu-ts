@@ -6306,6 +6306,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   M113o. Implemented by Codex, which stopped on a plan contradiction (§3.3 typed the lock probe
   `Promise<boolean>` while requiring "unknown"); opencode's read-only sweep found three stale doc
   and comment sites — complete (PR #463)
+- **Milestone 113c** (`queue-plugin` + `runtime` + `common` + `messaging-plugin`, plus one call-site
+  line in five Redis-backed plugins — connections and jobs that never recover, and a shutdown with
+  no bound; V9-18, V9-64, V9-71, V9-76, V9-31): `RabbitMqQueue` reconnects after a broker fault
+  through `ReconnectSupervisor`, now exported from `common` (moved from `messaging-plugin`,
+  unchanged), with full-jitter backoff on the runtime's timers. Every RabbitMQ delivery carries a
+  `runtime.uuid()` claim token, so a settlement from before a reconnect rejects with the internal
+  `StaleClaimError` instead of acking the redelivered message. The Redis queue gains a renewed
+  delivery lease (`visibilityTimeoutMs`, default 30 s, renewed every third, refused below 1000 ms)
+  measured on the server's `TIME`, so a job whose worker died is reclaimed. Its claim tokens come
+  from `INCR`. A reclaim counts as an attempt, and an over-budget job goes to `onFailed`, then dead,
+  without running. A client without `eval` keeps the old behaviour and logs one warning. `keyPrefix`
+  (default `queue:`) namespaces every Redis key. No prefix may be a string prefix of another on one
+  Redis, which is documented rather than enforced (maintainer decision).
+  `QueueProcessorDefinition.processor` is a method, so typed processors compile in declarative
+  lists. On Deno, `close()` waits for the first of `server.shutdown()` and a 1000 ms grace, so
+  `onClose` hooks run with requests still in flight. Shutdown is not cancelled. Folded in at the
+  maintainer's direction: since #378, a Redis client built without a reporter had no `'error'`
+  listener and printed `[ioredis] Unhandled error event` on every failed attempt.
+  `attachConnectionErrorReporter`'s reporter is now optional and defaults to dropping listeners,
+  applied at all eight call sites. Verified against real Redis 7 and RabbitMQ 4 (7 driver checks).
+  The design security review is plan §10. Its post-implementation findings S4 (a lease too short to
+  renew) and S8 (the console fix) are fixed. S3 is documented, and S5 and S6 are accepted — complete
+  (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

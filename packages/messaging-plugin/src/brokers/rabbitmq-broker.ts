@@ -18,7 +18,7 @@ import { buildTransportHeaders, validatePublishOptions } from './publish-options
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { resolvePublishTimeoutMs } from './publish-timeout.ts';
-import { ReconnectSupervisor } from './reconnect.ts';
+import { ReconnectSupervisor } from '@setu-ts/common';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
 // amqplib's frame codec requires a Node Buffer for message content (it throws
 // `TypeError('content is not a buffer')` for a string or a Uint8Array). This is

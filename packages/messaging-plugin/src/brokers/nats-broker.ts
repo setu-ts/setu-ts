@@ -14,7 +14,7 @@ import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
-import { ReconnectSupervisor } from './reconnect.ts';
+import { ReconnectSupervisor } from '@setu-ts/common';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
 import {
   JetStreamStreamError,

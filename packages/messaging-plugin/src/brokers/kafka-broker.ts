@@ -24,7 +24,7 @@ import { normalizeTransportHeaders } from './header-normalize.ts';
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
-import { ReconnectSupervisor } from './reconnect.ts';
+import { ReconnectSupervisor } from '@setu-ts/common';
 import type { IKafkaEventEmitter, IKafkaFactory, KafkaOptions } from '../interfaces/index.ts';
 import { KafkaTopicUnavailableError } from '../errors.ts';
 import { describeError } from './describe-error.ts';

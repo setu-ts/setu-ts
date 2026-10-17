@@ -63,13 +63,14 @@ describe('RedisQueue atomic transitions (eval present)', () => {
     expect(reserved.map((j) => j.id)).toEqual(['j1']);
     expect(reserved[0].data).toEqual({ n: 1 });
 
-    await queue.requeue('email', 'j1', 200, 1);
+    await queue.requeue('email', 'j1', 200, 1, reserved[0].claimToken);
     expect(await locate(client, 'j1')).toEqual({ ready: true, processing: false, payload: true });
+    client.serverNowMs = 200;
     const again = await queue.reserve<{ n: number }>('email', 10, 200);
     expect(again[0].attempts).toBe(1);
     expect(again[0].availableAtMs).toBe(200);
 
-    await queue.ack('email', 'j1');
+    await queue.ack('email', 'j1', again[0].claimToken);
     expect(await locate(client, 'j1')).toEqual({ ready: false, processing: false, payload: false });
 
     expect(client.evals.map((e) => e[0])).toEqual([
@@ -82,21 +83,24 @@ describe('RedisQueue atomic transitions (eval present)', () => {
     // KEYS then ARGV, with numKeys naming how many keys lead.
     expect(client.evals[1]).toEqual([
       RESERVE_SCRIPT,
-      3,
+      6,
       'queue:email:ready',
       'queue:email:processing',
       'queue:email:jobs',
-      100,
+      'queue:email:claims',
+      'queue:email:stalls',
+      'queue:email:claimseq',
       10,
+      30000,
     ]);
     await queue.disconnect();
   });
 
-  it('requeue of a job whose payload is gone sends no script', async () => {
+  it('requeue of a job whose payload is gone rejects without a script', async () => {
     const client = new FakeEvalRedisClient();
     const queue = new RedisQueue({ client });
     await queue.connect();
-    await queue.requeue('email', 'missing', 200, 1);
+    await expect(queue.requeue('email', 'missing', 200, 1)).rejects.toThrow('claim is stale');
     expect(client.evals).toEqual([]);
     await queue.disconnect();
   });
@@ -106,12 +110,12 @@ describe('RedisQueue atomic transitions (eval present)', () => {
     const queue = new RedisQueue({ client });
     await queue.connect();
     await queue.enqueue(job('j1'));
-    await queue.reserve('email', 10, 100);
-    await queue.deadLetter('email', 'j1', 300);
+    const [reserved] = await queue.reserve('email', 10, 100);
+    await queue.deadLetter('email', 'j1', 300, reserved.claimToken);
 
     const last = client.evals.at(-1)!;
     expect(last[0]).toBe(DEAD_LETTER_SCRIPT);
-    expect(last.slice(-1)).toEqual(['0']);
+    expect(last.slice(-2, -1)).toEqual(['0']);
     expect(await client.zrangebyscore('queue:email:dead', '-inf', '+inf')).toEqual(['j1']);
     expect(await client.hget('queue:email:jobs', 'j1')).not.toBeNull();
     await queue.disconnect();
@@ -122,10 +126,10 @@ describe('RedisQueue atomic transitions (eval present)', () => {
     const queue = new RedisQueue({ client, deadLetterTtlMs: 60_000 });
     await queue.connect();
     await queue.enqueue(job('j1'));
-    await queue.reserve('email', 10, 100);
-    await queue.deadLetter('email', 'j1', 300);
+    const [reserved] = await queue.reserve('email', 10, 100);
+    await queue.deadLetter('email', 'j1', 300, reserved.claimToken);
 
-    expect(client.evals.at(-1)!.slice(-1)).toEqual(['1']);
+    expect(client.evals.at(-1)!.slice(-2, -1)).toEqual(['1']);
     expect(await client.hget('queue:email:jobs', 'j1')).toBeNull();
     expect(await client.hget('queue:email:dead:jobs', 'j1')).not.toBeNull();
     expect(client.calls.some((c) => c.method === 'expire')).toBe(true);
