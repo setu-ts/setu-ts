@@ -6416,7 +6416,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   class 22 messages leaking values, overstated scrub docs, undisclosed Scarf analytics), round 2 two
   more (a throwing driver accessor making the scrub the fault, no Scarf opt-out at an npm workspace
   root). All six are fixed; the round-2 fixes were NOT re-audited, at the maintainer's direction —
-  complete (PR pending)
+  complete (PR #468)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

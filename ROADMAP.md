@@ -14278,7 +14278,7 @@ reported 100,000-iteration limit is not verified here.
 - **V9-49** — `/docs` loads Swagger UI from `unpkg.com/swagger-ui-dist@5`, a floating major with no
   integrity hash.
 
-Shipped (PR pending). The package list grew to `common`, `runtime`, `kernel` and `cli` as well.
+Shipped (PR #468). The package list grew to `common`, `runtime`, `kernel` and `cli` as well.
 Drizzle query errors keep their SQL and lose their bound values, and SQLSTATE class 22 causes, whose
 PostgreSQL message quotes the input, are rebuilt from their code; errors from the typed builder and
 raw driver calls are not scrubbed (documented). Health endpoints answer status only unless
@@ -14888,7 +14888,7 @@ patch by construction and gains nothing new here.
 | 113c      | ✅     | queue-plugin + runtime + common + messaging-plugin — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                |
 | 113d      | ✅     | common + react-router + cloudflare + cli + 14 loader packages — Workers builds (the V9-1 regression) and the edge cache; PR #465                                                                                                                                                          |
 | 113e      | ✅     | auth-plugin + session-plugin — identity and session semantics a client cannot predict; PR #467                                                                                                                                                                                            |
-| 113f      | ✅     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints; PR pending                                                                                                                                                                                    |
+| 113f      | ✅     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints; PR #468                                                                                                                                                                                       |
 | 113g      | ⬜     | database-plugin — database calls and errors under faults and edge inputs                                                                                                                                                                                                                  |
 | 113h      | ⬜     | cli — generated output that is wrong (fix branches)                                                                                                                                                                                                                                       |
 | 113i      | ⬜     | cli — commands whose refusals and guidance mislead (fix branches)                                                                                                                                                                                                                         |
