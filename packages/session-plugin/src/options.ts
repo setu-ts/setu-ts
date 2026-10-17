@@ -77,6 +77,19 @@ export interface CsrfFormOptions {
    * it to bypass CSRF for application form routes.
    */
   readonly exclude?: readonly (string | RegExp)[];
+  /**
+   * Skip verification for a request carrying `Authorization: Bearer <token>`
+   * (M113e, V9-27). Default `true`.
+   *
+   * Form CSRF defends credentials the BROWSER attaches by itself — the session
+   * cookie. A bearer token is never attached by the browser, and a page on
+   * another origin cannot add an `Authorization` header without a CORS
+   * preflight the server approves, so a bearer-authenticated API call cannot
+   * be forged by a cross-site form. `Basic` credentials are NOT exempt:
+   * browsers re-send cached Basic credentials automatically. `false` verifies
+   * every unsafe request, the behaviour before 0.10.0.
+   */
+  readonly exemptBearer?: boolean;
 }
 
 /**
@@ -223,6 +236,7 @@ export interface ResolvedCsrfConfig {
   readonly fieldName: string;
   readonly headerName: string;
   readonly ignoreMethods: ReadonlySet<string>;
+  readonly exemptBearer: boolean;
 }
 
 /**
@@ -238,6 +252,7 @@ export function resolveCsrfConfig(options: CsrfFormOptions = {}): ResolvedCsrfCo
     fieldName: options.fieldName ?? DEFAULT_CSRF_FIELD,
     headerName: options.headerName ?? DEFAULT_CSRF_HEADER,
     ignoreMethods: new Set(methods.map((m) => m.toUpperCase())),
+    exemptBearer: options.exemptBearer ?? true,
   };
 }
 

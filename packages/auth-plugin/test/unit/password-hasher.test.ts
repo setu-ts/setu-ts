@@ -146,7 +146,7 @@ describe('PasswordHasher', () => {
     const parts = stored.split('$');
     expect(parts.length).toBe(4);
     expect(parts[0]).toBe('pbkdf2');
-    expect(parts[1]).toBe('100000');
+    expect(parts[1]).toBe('600000');
 
     // Verify works
     expect(await hasher.verify(stored, password)).toBe(true);
@@ -183,5 +183,85 @@ describe('PasswordHasher', () => {
     const shortHash = btoa('ab').replace(/=/g, '');
     const salt = btoa('salt1234salt1234').replace(/=/g, '');
     expect(await hasher.verify(`pbkdf2$100000$${salt}$${shortHash}`, 'password')).toBe(false);
+  });
+
+  describe('work factor (M113e, V9-50)', () => {
+    it('hashes at 600,000 iterations by default', async () => {
+      const stored = await new PasswordHasher(createFakeRuntime()).hash('pw');
+      expect(stored.split('$')[1]).toBe('600000');
+    });
+
+    it('hashes at a configured count', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime(), { iterations: 100_000 });
+      const stored = await hasher.hash('pw');
+      expect(stored.split('$')[1]).toBe('100000');
+      expect(await hasher.verify(stored, 'pw')).toBe(true);
+    });
+
+    it.each([
+      ['below the floor', 99_999],
+      ['above the cap', 10_000_001],
+      ['NaN', Number.NaN],
+      ['a fraction', 100_000.5],
+      ['infinity', Number.POSITIVE_INFINITY],
+    ])('refuses %s at construction, naming the bounds and not the value', (_label, iterations) => {
+      let error: unknown;
+      try {
+        new PasswordHasher(createFakeRuntime(), { iterations });
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(TypeError);
+      const message = (error as TypeError).message;
+      expect(message).toContain('from 100000 to 10000000');
+      expect(message).not.toContain(String(iterations));
+    });
+
+    it('verifies a hash made at the previous default under the new one', async () => {
+      const old = await new PasswordHasher(createFakeRuntime(), { iterations: 100_000 }).hash('pw');
+      expect(await new PasswordHasher(createFakeRuntime()).verify(old, 'pw')).toBe(true);
+    });
+
+    it('reports a hash below the configured count as needing a rehash', async () => {
+      const old = await new PasswordHasher(createFakeRuntime(), { iterations: 100_000 }).hash('pw');
+      expect(new PasswordHasher(createFakeRuntime()).needsRehash(old)).toBe(true);
+    });
+
+    it('does not ask to rehash a hash at the configured count', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime(), { iterations: 200_000 });
+      expect(hasher.needsRehash(await hasher.hash('pw'))).toBe(false);
+    });
+
+    it('never downgrades a hash above the configured count', async () => {
+      const strong = await new PasswordHasher(createFakeRuntime(), {
+        iterations: 300_000,
+      }).hash('pw');
+      const lowered = new PasswordHasher(createFakeRuntime(), { iterations: 100_000 });
+      expect(lowered.needsRehash(strong)).toBe(false);
+    });
+
+    it.each([
+      ['plaintext', 'plaintext-password'],
+      ['trailing junk', 'pbkdf2$100000junk$salt$hash'],
+      ['zero iterations', 'pbkdf2$0$c2FsdA$aGFzaA'],
+      ['over the cap', 'pbkdf2$10000001$c2FsdA$aGFzaA'],
+      ['bad base64', 'pbkdf2$1000$!!!$@@@'],
+    ])('refuses %s exactly as verify does', async (_label, stored) => {
+      const hasher = new PasswordHasher(createFakeRuntime());
+      expect(() => hasher.needsRehash(stored)).toThrow(MalformedPasswordHashError);
+      await expect(hasher.verify(stored, 'pw')).rejects.toThrow(MalformedPasswordHashError);
+    });
+
+    it('drives the sign-in upgrade loop: verify, rehash, verify at the new count', async () => {
+      const runtime = createFakeRuntime();
+      let stored = await new PasswordHasher(runtime, { iterations: 100_000 }).hash('pw');
+      const hasher = new PasswordHasher(runtime);
+      if ((await hasher.verify(stored, 'pw')) && hasher.needsRehash(stored)) {
+        stored = await hasher.hash('pw');
+      }
+      expect(stored.split('$')[1]).toBe('600000');
+      expect(hasher.needsRehash(stored)).toBe(false);
+      expect(await hasher.verify(stored, 'pw')).toBe(true);
+    });
   });
 });

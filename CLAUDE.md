@@ -6362,6 +6362,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the path, not the cache key); the committed-tree audit failed on one Low (F1, a custom cache's
   rejection message reaching the log), fixed by logging the error class only and NOT re-audited, at
   the maintainer's direction — complete (PR #465)
+- **Milestone 113e** (`packages/auth-plugin` + `packages/session-plugin` — identity and session
+  semantics a client cannot predict; V9-28, V9-27, V9-46, V9-50; every option the recommended one,
+  maintainer decision 2026-10-17). Scoped checks are decided by grants alone: a principal's own
+  `roles` and `permissions` (including `'*'`) count in no scope unless
+  `scopedRbac.principalAuthorityIsGlobal: true`, the pre-0.10.0 answer. The opt-in covers
+  permissions too, because `#holdsDirectly` let a token `'*'` pass every scoped permission check,
+  and the unscoped guards are unchanged. Form CSRF skips `Authorization: Bearer <token>` by default
+  (`csrf.exemptBearer: false` restores the refusal), through one `isCsrfExempt` both
+  `csrfFormMiddleware` and `verifyCsrfToken` call. `Basic` is never exempt, because browsers re-send
+  it. On the store strategy a session holding only the CSRF token and the tenant binding is sealed
+  into the cookie under a `held: 'cookie'` marker and writes no row, so 200 anonymous form views
+  write 0 rows instead of 200 (measured on a real Redis, 200 with the rule disabled). Promotion to
+  the store happens on the first other key, and demotion deletes the row so an id-only replay
+  restores nothing. `PasswordHasher` defaults to 600,000 iterations (79 ms vs 15 ms on Node), with
+  `PasswordHasherOptions.iterations` (100,000–10,000,000) and `needsRehash`. A deployed Worker's
+  reported 100,000 limit is documented and unverified; local workerd accepts 600,000. Seven negative
+  controls observed failing — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

@@ -68,6 +68,15 @@ SessionPlugin({ secret, store: 'cache' }); // over CAPABILITIES.CACHE
 SessionPlugin({ secret, store: myOwnStore }); // any ISessionStore
 ```
 
+**Anonymous sessions stay in the cookie** (M113e). On the store strategy, a session holding only the
+reserved keys — the form-CSRF token and the tenant binding — is sealed into the cookie and writes no
+store row, so a public page rendering a form does not add a row per visitor. The first write of any
+other key (signing in) moves the session into the store, and clearing every other key (signing out)
+deletes the row again, so a copy of the signed-in cookie restores nothing. The reserved keys need no
+revocation, and the cookie is sealed under the same keys as every other one; under `mode: 'sign'`
+the browser can read its own CSRF token, which the form already shows it. Pending sign-in state from
+`auth-plugin` (state, nonce, PKCE verifier) is not a reserved key and still goes to the store.
+
 > **`store: 'cache'` shares a blast radius.** Sessions live in the same cache as your application
 > data, so a `cache.clear()` from anywhere logs everybody out. Keys are namespaced (`session:` by
 > default) so they are identifiable, but a dedicated cache instance is the production
@@ -252,9 +261,18 @@ the header is read FIRST, so a client that sends it triggers no body parse at al
 `multipart/form-data`, whose FIELD carries the token too since M94b, while a token arriving as a
 multipart FILE part is refused (a client chooses freely whether a part carries a `filename`, so a
 non-string value never reaches the comparison)), `ignoreMethods` (default `GET`/`HEAD`/`OPTIONS`),
-and `exclude` (exact paths or regular expressions that skip form CSRF). `exclude` is only for a
-separately-mounted non-browser protocol surface such as Connect/gRPC — never use it for an
-application form route.
+`exclude` (exact paths or regular expressions that skip form CSRF), and `exemptBearer` (default
+`true`). `exclude` is only for a separately-mounted non-browser protocol surface such as
+Connect/gRPC — never use it for an application form route.
+
+**A bearer API beside forms needs no exclusion** (M113e). A request carrying
+`Authorization: Bearer <token>` skips form CSRF, so a JWT- or API-token-authenticated JSON route in
+the same application reaches its guard rather than answering `403`. That is safe because a browser
+never attaches a bearer token by itself, and a page on another origin cannot add an `Authorization`
+header without a CORS preflight your server approves — an origin you approve for credentialed
+requests could read the form token anyway. `Basic` credentials are NOT exempt, because browsers
+re-send cached Basic credentials automatically. `exemptBearer: false` verifies every unsafe request,
+the behaviour before 0.10.0.
 
 ### What `SameSite` does not separate
 
@@ -340,24 +358,25 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 
 ## Options
 
-| Option            | Default          | Notes                                                                        |
-| ----------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `secret`          | resolved         | `string` or rotation list; index 0 seals                                     |
-| `secretName`      | `SESSION_SECRET` | Looked up in the secrets manager and the environment                         |
-| `mode`            | `'encrypt'`      | `'sign'` exposes its payload                                                 |
-| `store`           | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                 |
-| `maxAge`          | `7200`           | Seconds; also the cookie's `Max-Age`                                         |
-| `rolling`         | `false`          | Re-issue on every response                                                   |
-| `idleTimeoutMs`   | —                | No-request expiry; any request refreshes it, so it commits every response    |
-| `maxCookieBytes`  | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                  |
-| `cookie.name`     | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions |
-| `cookie.path`     | `/`              |                                                                              |
-| `cookie.domain`   | —                | Omitted means a host-only cookie                                             |
-| `cookie.sameSite` | `'lax'`          | `'none'` forces `Secure`                                                     |
-| `cookie.secure`   | `true`           | Set `false` only for plain-HTTP local development                            |
-| `cookie.httpOnly` | `true`           |                                                                              |
-| `csrf`            | —                | Presence enables form CSRF                                                   |
-| `tenantBinding`   | `true`           | Seal the tenant on commit and refuse a session presented under another       |
+| Option              | Default          | Notes                                                                        |
+| ------------------- | ---------------- | ---------------------------------------------------------------------------- |
+| `secret`            | resolved         | `string` or rotation list; index 0 seals                                     |
+| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager and the environment                         |
+| `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                 |
+| `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                 |
+| `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                         |
+| `rolling`           | `false`          | Re-issue on every response                                                   |
+| `idleTimeoutMs`     | —                | No-request expiry; any request refreshes it, so it commits every response    |
+| `maxCookieBytes`    | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                  |
+| `cookie.name`       | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions |
+| `cookie.path`       | `/`              |                                                                              |
+| `cookie.domain`     | —                | Omitted means a host-only cookie                                             |
+| `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                     |
+| `cookie.secure`     | `true`           | Set `false` only for plain-HTTP local development                            |
+| `cookie.httpOnly`   | `true`           |                                                                              |
+| `csrf`              | —                | Presence enables form CSRF                                                   |
+| `csrf.exemptBearer` | `true`           | `Authorization: Bearer <token>` skips form CSRF; `Basic` never does          |
+| `tenantBinding`     | `true`           | Seal the tenant on commit and refuse a session presented under another       |
 
 ## Health
 

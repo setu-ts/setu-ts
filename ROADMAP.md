@@ -14246,6 +14246,14 @@ storage, telemetry)
 - **V9-50** — `PasswordHasher` uses PBKDF2-SHA256 at 100,000 iterations, below current OWASP
   guidance (600,000); the plan decides the new default and how stored hashes upgrade on sign-in.
 
+Shipped (PR pending). The maintainer took every recommended option (2026-10-17). Scoped checks are
+decided by grants alone, and `scopedRbac.principalAuthorityIsGlobal: true` restores the old answer.
+The opt-in covers the principal's `permissions` too, since `'*'` reached scoped permission checks
+through the same mechanism. Form CSRF exempts `Authorization: Bearer` by default, not `Basic`. On
+the store strategy, a session holding only the CSRF token and the tenant binding stays in the
+cookie. And `PasswordHasher` defaults to 600,000 iterations with `needsRehash`. A deployed Worker's
+reported 100,000-iteration limit is not verified here.
+
 ---
 
 ### Milestone 113f: What Reaches Logs and Public Endpoints
@@ -14864,7 +14872,7 @@ patch by construction and gains nothing new here.
 | 113b      | ✅     | service-discovery + health + scheduler + cache + session + auth + messaging + realtime-backplane + worker-pool + static + feature-flags + common + database — readiness that does not describe the dependency                                                                             |
 | 113c      | ✅     | queue-plugin + runtime + common + messaging-plugin — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                |
 | 113d      | ✅     | common + react-router + cloudflare + cli + 14 loader packages — Workers builds (the V9-1 regression) and the edge cache; PR #465                                                                                                                                                          |
-| 113e      | ⬜     | auth-plugin + session-plugin — identity and session semantics a client cannot predict                                                                                                                                                                                                     |
+| 113e      | ✅     | auth-plugin + session-plugin — identity and session semantics a client cannot predict; PR pending                                                                                                                                                                                         |
 | 113f      | ⬜     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints                                                                                                                                                                                                |
 | 113g      | ⬜     | database-plugin — database calls and errors under faults and edge inputs                                                                                                                                                                                                                  |
 | 113h      | ⬜     | cli — generated output that is wrong (fix branches)                                                                                                                                                                                                                                       |

@@ -271,12 +271,16 @@ that bundle catalogue permissions; `timing` is `'request'` (default — a revoca
 next request), `{ kind: 'cache', ttlMs, maxEntries }` (within `ttlMs`) or `'sign-in'` (stored in the
 auth session — until sign-out); a `custom` source sees only the principal's id and `iss`, so its
 answer is safe to share, while a `claims` source is mapped from the credential on every check and
-never cached, since two tokens for one principal can carry different claims. A direct
-`policies.can(...)` call made while serving a request passes the request as the target's `context`,
-or the tenant comparison is skipped. Every bound (`sourceTimeoutMs`, `maxGrantsPerPrincipal`,
-`maxScopeDepth`, `maxScopeNodes`, `maxCustomRoles`, `maxPermissionsPerRole`) refuses an out-of-range
-value at construction, and exceeding one denies. The decorator form is
-`@ScopedRoles`/`@ScopedPermissions` in `@setu-ts/decorator-plugin`. Full guide:
+never cached, since two tokens for one principal can carry different claims. **Only grants decide a
+scoped check:** the `roles` and `permissions` a principal carries itself (a JWT `roles` claim, a
+`'*'` permission) count in no scope unless `principalAuthorityIsGlobal: true`, which makes each one
+global — the behaviour before 0.10.0. The unscoped `requireRole`/`requirePermission` guards read the
+principal either way. A direct `policies.can(...)` call made while serving a request passes the
+request as the target's `context`, or the tenant comparison is skipped. Every bound
+(`sourceTimeoutMs`, `maxGrantsPerPrincipal`, `maxScopeDepth`, `maxScopeNodes`, `maxCustomRoles`,
+`maxPermissionsPerRole`) refuses an out-of-range value at construction, and exceeding one denies.
+The decorator form is `@ScopedRoles`/`@ScopedPermissions` in `@setu-ts/decorator-plugin`. Full
+guide:
 [Scoped Roles](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md#scoped-roles).
 
 ## Guards
@@ -346,8 +350,11 @@ evaluate.
 
 `PasswordHasher` is an exported utility for provisioning passwords and verifying them inside a
 `local.verify` callback. It draws a random 16-byte salt and derives a 32-byte key with PBKDF2-SHA256
-(100 000 iterations) via `runtime.subtle` / `runtime.randomBytes`, comparing with a fixed-time
-check.
+via `runtime.subtle` / `runtime.randomBytes`, comparing with a fixed-time check. New hashes use
+**600,000 iterations** (OWASP's 2023 guidance) unless `iterations` says otherwise — an integer from
+100,000 to 10,000,000, refused at construction otherwise. `verify` reads the count stored in each
+hash, so a hash made at another count keeps verifying, and `needsRehash(stored)` reports a hash made
+with fewer iterations than configured, so it can be replaced the next time its password is known.
 
 ```typescript
 import { PasswordHasher } from '@setu-ts/auth-plugin';
@@ -355,7 +362,18 @@ import { PasswordHasher } from '@setu-ts/auth-plugin';
 const hasher = new PasswordHasher(runtime); // IRuntimeServices resolved from the 'runtime' token
 const stored = await hasher.hash('correct horse battery staple');
 const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
+
+// On a successful sign-in, upgrade a hash made at a lower count:
+if (ok && hasher.needsRehash(stored)) {
+  const upgraded = await hasher.hash('correct horse battery staple');
+  // …persist `upgraded` in place of `stored`
+}
 ```
+
+A hash costs about 80 ms on Node at 600,000 iterations (15 ms at 100,000), so keep a sign-in route
+behind `rateLimitMiddleware`. A deployed Cloudflare Worker is reported to refuse PBKDF2 counts above
+100,000 (local workerd accepts 600,000; this is not verified against a deployed Worker), so a
+Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })`.
 
 ## Options
 
@@ -1359,6 +1377,7 @@ MIT
 | `PasskeyOptions`                    | interface |
 | `PasskeyRegistrationContext`        | interface |
 | `PasskeySaveOptions`                | interface |
+| `PasswordHasherOptions`             | interface |
 | `ProviderTokens`                    | interface |
 | `RateLimitOptions`                  | interface |
 | `RateLimitResult`                   | interface |

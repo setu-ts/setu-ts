@@ -12,6 +12,35 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### `principalAuthorityIsGlobal`, `exemptBearer`, anonymous sessions and `needsRehash` (M113e)
+
+**Scoped RBAC no longer reads the principal's own roles.** If your scoped checks
+(`requireScopedRole`, `requireScopedPermission`, `@ScopedRoles`, `@ScopedPermissions`) passed
+because a token carried the role or permission, they now answer `403` until the principal holds a
+grant for that scope. Issue the grants, or set `scopedRbac: { …, principalAuthorityIsGlobal: true }`
+to keep the old behaviour — every principal role and permission then counts in every scope.
+
+**Form CSRF skips bearer requests.** With `SessionPlugin({ csrf: {} })`, a request carrying
+`Authorization: Bearer <token>` is no longer checked for a form token. If you added an `exclude`
+such as `/^\/api\//` only to let a bearer API through, you can remove it. To keep checking those
+requests, set `csrf: { exemptBearer: false }`.
+
+**Anonymous sessions on the store strategy stay in the cookie.** Nothing to change. During a rolling
+deploy an older replica treats the new anonymous cookie as no session, so a visitor with a form open
+may get one `403` and must reload it; signed-in sessions are unaffected.
+
+**`PasswordHasher` hashes at 600,000 iterations.** Existing hashes keep verifying. To upgrade them,
+re-hash on a successful sign-in:
+
+```typescript
+if ((await hasher.verify(user.passwordHash, password)) && hasher.needsRehash(user.passwordHash)) {
+  await saveHash(user.id, await hasher.hash(password));
+}
+```
+
+On Cloudflare Workers, which are reported to refuse PBKDF2 counts above 100,000, construct the
+hasher with `new PasswordHasher(runtime, { iterations: 100_000 })`.
+
 ### Queue reconnect, `QueueProcessorDefinition` and Deno shutdown (M113c)
 
 RabbitMQ queues now recover automatically. Unacked jobs can be delivered again with their original
