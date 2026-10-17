@@ -3084,9 +3084,9 @@ pre-namespacing keys.
 The application constructs `RedisRateLimitStore`, so no plugin supplies its connection-error
 reporter. Pass `connectionErrorReporter` — built with `createConnectionErrorReporter` from
 `@setu-ts/common` over your logger — and the `'error'` events of the client the store builds are
-logged (first error at `warn`, repeats at `debug`, recovery at `info`) instead of printed by
-`ioredis` to `console.error` on every reconnect attempt. Absent, `ioredis` keeps its console
-fallback. An injected `client` never gets a listener.
+logged (first error at `warn`, repeats at `debug`, recovery at `info`). Absent, the built client's
+connection errors are dropped, so nothing reaches the console or a log; an injected `client` never
+gets a listener.
 
 The default key is `defaultRateLimitKey`, which resolves in this order: the authenticated principal
 (`user:<id>`), the client IP published by `ipSecurityMiddleware` (`ip:<address>`), `IRequest.ip`

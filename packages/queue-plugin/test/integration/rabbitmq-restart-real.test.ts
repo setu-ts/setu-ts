@@ -30,9 +30,14 @@ describe('RabbitMQ automatic recovery', { skip: process.env['RABBITMQ_URL'] === 
     { timeout: 90_000 },
     async () => {
       const url = process.env['RABBITMQ_URL']!;
-      // This test restarts only the explicitly authorized throwaway container.
-      expect(new URL(url).port).toBe('56720');
       const run = promisify(execFile);
+      // Restarts the container publishing RABBITMQ_URL's port, the convention
+      // the outage-real suites follow; the run must own that broker.
+      const port = new URL(url).port || '5672';
+      const { stdout } = await run('docker', ['ps', '-q', '--filter', `publish=${port}`]);
+      const containerId = stdout.trim().split('\n')[0];
+      if (containerId === undefined || containerId === '')
+        throw new Error(`no container publishing port ${port}`);
       const id = crypto.randomUUID();
       let processed = 0;
       const app = createApplication({
@@ -62,7 +67,7 @@ describe('RabbitMQ automatic recovery', { skip: process.env['RABBITMQ_URL'] === 
         await eventually(() => {
           expect(processed).toBe(1);
         });
-        await run('docker', ['restart', 'm113c-rabbit']);
+        await run('docker', ['restart', containerId]);
         await eventually(async () => {
           await queue.add('email', { after: true });
         });

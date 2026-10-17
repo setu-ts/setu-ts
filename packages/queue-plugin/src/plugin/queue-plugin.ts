@@ -202,7 +202,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
               ? {}
               : { commandTimeoutMs: options.commandTimeoutMs }),
             // The built client's reconnect failures go to the logger (read at
-            // call time) rather than ioredis's own console fallback.
+            // call time) rather than being dropped.
             connectionErrorReporter: createConnectionErrorReporter({
               source: `${pluginName}: redis adapter`,
               logger: () => ctx.logger,

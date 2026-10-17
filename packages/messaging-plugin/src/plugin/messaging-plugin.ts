@@ -358,7 +358,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         }
         if (logger !== undefined) redisOptions.logger = logger;
         // The built client's reconnect failures go to the logger (read at call
-        // time) rather than ioredis's own console fallback.
+        // time) rather than being dropped.
         redisOptions.connectionErrorReporter = createConnectionErrorReporter({
           source: `${pluginName}: redis-streams broker`,
           logger: () => ctx.logger,

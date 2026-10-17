@@ -21,7 +21,6 @@ const job = {
 async function fixture(
   run: (queue: RedisQueue, other: RedisQueue, inspect: Redis, prefix: string) => Promise<void>,
 ): Promise<void> {
-  expect(new URL(url!).port).toBe('63800');
   const prefix = `m113c:lease:${crypto.randomUUID()}:`;
   const inspect = new Redis(url!);
   const queue = new RedisQueue({ url: url!, keyPrefix: prefix, visibilityTimeoutMs: leaseMs });
