@@ -6330,7 +6330,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   a deployed Worker. The design security review approved D1/D2 fixes (the write-failure log names
   the path, not the cache key); the committed-tree audit failed on one Low (F1, a custom cache's
   rejection message reaching the log), fixed by logging the error class only and NOT re-audited, at
-  the maintainer's direction — complete (PR pending)
+  the maintainer's direction — complete (PR #465)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
