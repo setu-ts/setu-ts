@@ -6382,7 +6382,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (now documented as trusting every origin CORS lets send `Authorization` with credentials), and a
   non-boolean `exemptBearer` failed open (now refused) — and observed that fixation without
   `regenerate()` was only reduced, so promotion now rotates the session id; round 2 passed on
-  `46acb5dd` — complete (PR pending)
+  `46acb5dd` — complete (PR #467)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
