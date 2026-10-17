@@ -170,6 +170,8 @@ export interface EnvVariable {
 
 /** Inputs a template factory needs while its call is rendered. */
 export interface AppFactoryRenderContext {
+  /** Asset mode supplied by a runtime swap to a starter composition. */
+  readonly swaggerAssets?: 'cdn';
   /** The runtime target selected for the generated project. */
   readonly runtime: TargetRuntime;
   /** Identifier naming the workspace member's generated endpoint map, when any. */
@@ -228,7 +230,10 @@ export interface TemplateManifest {
    * scaffold is gated on passing its own `fmt --check`.
    */
   readonly readmeSection?: string;
-  /** npm packages the running application needs, merged into `dependencies`. */
+  /**
+   * npm packages the running application needs, merged into `dependencies`
+   * on npm targets and into the Deno target's import map.
+   */
   readonly npmDependencies?: Readonly<Record<string, string>>;
   /** npm packages the build or tests need, merged into `devDependencies`. */
   readonly npmDevDependencies?: Readonly<Record<string, string>>;
@@ -548,6 +553,8 @@ export interface WorkerExportRoute {
  * @since 0.2.0
  */
 export interface RuntimeSwap {
+  /** Starter inputs this runtime overrides before rendering its factory. */
+  readonly appFactoryContext?: Omit<AppFactoryRenderContext, 'runtime'>;
   /**
    * Bare package names dropped from the plugin list on this runtime.
    *

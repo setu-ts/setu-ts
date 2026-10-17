@@ -34,7 +34,7 @@ async function buildApp(available: () => boolean) {
   const app: IKernelApplication = createApplication({
     plugins: [
       RuntimePlugin(),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
       AuthPlugin({
         http,
         jwt: { secret: 'self-issued-secret-at-least-32-characters' },

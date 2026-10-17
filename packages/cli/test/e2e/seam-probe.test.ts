@@ -205,8 +205,8 @@ await bus.publish({
 // reports it — the observer above proves the bus itself delivered.
 out['eventDelivered'] = seen.length === 1;
 out['eventSubscriptions'] =
-  (JSON.parse(health.body) as { checks?: Record<string, { data?: { handlers?: number } }> })
-    .checks?.events?.data?.handlers ?? 0;
+  (await services.get<import('@setu-ts/common').IHealthService>(CAPABILITIES.HEALTH).check())
+    .checks.events?.data?.handlers ?? 0;
 `;
 
 /**

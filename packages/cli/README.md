@@ -1,5 +1,10 @@
 # @setu-ts/cli
 
+Projects using Swagger declare `swagger-ui-dist` through their template's npm dependencies,
+including the Deno import map. Node, Bun and Deno self-host the three `/docs` assets (Deno start
+tasks grant read access); Workers templates select pinned CDN assets. Full-stack projects pass that
+choice through the starter's `openapi` option.
+
 The `setu` command-line tool: project scaffolding and plugin-aware code generation for the Setu-TS
 framework.
 

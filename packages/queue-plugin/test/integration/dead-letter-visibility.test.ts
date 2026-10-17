@@ -44,7 +44,7 @@ describe('dead-letter visibility through a real application (X8-4)', () => {
       plugins: [
         RuntimePlugin(),
         MetricsPlugin(),
-        HealthPlugin(),
+        HealthPlugin({ details: true }),
         QueuePlugin({ adapter: 'memory', pollIntervalMs: POLL_MS, defaultMaxAttempts: 2 }),
       ],
     });

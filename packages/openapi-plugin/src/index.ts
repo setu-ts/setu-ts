@@ -37,4 +37,4 @@ export type {
 
 // UI
 export { swaggerUiHtml } from './ui/swagger-ui.ts';
-export type { SwaggerUiOptions } from './ui/swagger-ui.ts';
+export type { SwaggerUiOptions, SwaggerOptions } from './ui/swagger-ui.ts';

@@ -1191,6 +1191,16 @@ describe('--workspace', () => {
     expect(manifest.workspaces).toEqual(['apps/*', 'libs/*']);
   });
 
+  it('opts the npm workspace root out of Scarf analytics (M113f audit R2-F6)', async () => {
+    const h = harness();
+    await h.run(['acme', '--workspace']);
+    const manifest = JSON.parse(h.fs.read('/work/acme/package.json')) as {
+      scarfSettings?: unknown;
+    };
+    // Scarf reads the root at INIT_CWD and ignores a member's own setting.
+    expect(manifest.scarfSettings).toEqual({ enabled: false });
+  });
+
   it('records the default base port', async () => {
     const h = harness();
     await h.run(['acme', '--workspace']);

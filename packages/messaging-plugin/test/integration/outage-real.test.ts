@@ -119,7 +119,7 @@ async function startM113App(options: MessagingPluginOptions) {
   const { HealthPlugin } = await import('@setu-ts/health-plugin');
   const { MessagingPlugin } = await import('../../src/index.ts');
   const app = createApplication({
-    plugins: [RuntimePlugin(), MessagingPlugin(options), HealthPlugin()],
+    plugins: [RuntimePlugin(), MessagingPlugin(options), HealthPlugin({ details: true })],
   });
   await app.start();
   const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
@@ -497,7 +497,7 @@ async function startHealthApp(rabbitUrl: string) {
     plugins: [
       RuntimePlugin(),
       MessagingPlugin({ broker: 'rabbitmq', url: toIpv4(rabbitUrl) }),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
     ],
   });
   await app.start();

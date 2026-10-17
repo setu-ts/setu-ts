@@ -235,7 +235,7 @@ describe('errorHandler middleware', () => {
       await mw(ctx, nextThrows(notFound('gone')));
 
       expect(logger.calls).toHaveLength(1);
-      expect(logger.calls[0].level).toBe('error');
+      expect(logger.calls[0].level).toBe('warn');
       expect(logger.calls[0].message).toBe('gone');
       expect(logger.calls[0].meta?.statusCode).toBe(404);
     });

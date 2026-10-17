@@ -8,6 +8,34 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING V9-47 — public health bodies (M113f, `@setu-ts/health-plugin`).** `/health`, `/live`
+  and `/ready` omit indicator data and latency by default. Migration: set `details: true` for
+  dashboards needing the old body. Programmatic reports stay full; gRPC and diagnostics are
+  unaffected.
+- **BREAKING V9-49 — Swagger self-hosting (M113f, `@setu-ts/openapi-plugin`, `@setu-ts/cli`).**
+  Swagger now serves three fixed local assets and excludes those routes from its spec. The new
+  `SwaggerOptions` type selects self-hosted, CDN, or custom-base delivery. Migration: install the
+  optional `swagger-ui-dist` peer (`^5`) and allow filesystem reads on Deno, or select
+  `swagger: { assets: 'cdn' }` (a starter uses `openapi: { swagger: { assets: 'cdn' } }`). Missing
+  packages fail startup with `OptionalDependencyUnavailableError`. CDN and custom-base modes use
+  pinned 5.33.3 files with SHA-384 SRI; a custom base must be printable ASCII with no backslash, an
+  HTTP(S) URL in serialized form or a path starting with a single `/`. Generated Node, Bun and Deno
+  projects declare the package, and a generated standalone or npm workspace-root `package.json` sets
+  `"scarfSettings": { "enabled": false }`: `swagger-ui-dist` depends on `@scarf/scarf`, whose npm
+  `postinstall` otherwise reports platform, Node version and dependency data. If you install the
+  package yourself, add the same setting to your root `package.json` (in a workspace, the root;
+  Scarf ignores a member's). Workers selects CDN and no longer declares the package.
+- **M113f logging (`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/exceptions`,
+  `@setu-ts/logger-plugin`, `@setu-ts/database-plugin`).** Scrub Drizzle bound values from messages
+  and multiline stack headers while retaining SQL and classification, and rebuild a SQLSTATE class
+  22 cause (whose PostgreSQL message quotes the rejected input) from its code. The scrub covers
+  errors that pass through `IDatabaseService`; a query built through `getDrizzleDatabase(...)` or a
+  raw driver call is logged as the driver wrote it, and causes nested more than five deep are not
+  walked. Log caught errors once, at `warn` below 500 and `error` otherwise; request completion uses
+  the responder's pure optional `statusFor` rule. Runtime adapters provide optional `reportError` as
+  a last-resort JSON sink for unhandled errors and handled 5xx without a logger. Logger
+  `excludePaths` now accepts patterns.
+
 - **Breaking scoped RBAC: principal authority no longer counts in every scope (M113e, 0.10.0,
   `@setu-ts/auth-plugin`).** A scoped check (`requireScopedRole`, `requireScopedPermission`,
   `@ScopedRoles`, `@ScopedPermissions`) is now decided by grants alone: the `roles` and

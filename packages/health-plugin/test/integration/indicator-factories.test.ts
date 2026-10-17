@@ -44,6 +44,7 @@ describe('HealthPlugin indicator factories (through the real kernel)', () => {
       plugins: [
         RuntimePlugin(),
         HealthPlugin({
+          details: true,
           indicators: [
             // Resolved in the FACTORY BODY, not inside `check`. That is what makes
             // this test discriminate: `HealthPlugin` registers at priority 100 and

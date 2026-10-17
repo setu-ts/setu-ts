@@ -42,7 +42,7 @@ import {
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
-import { startOverlay } from '../fixtures/node-project.ts';
+import { npmInstall, startOverlay, withNodeServer } from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -54,6 +54,12 @@ const fs: IFileSystem = runtime.fs!;
 // was the one the boot gate skipped. It now emits `install`/`build` and `start`
 // depends on `build`, so it belongs here.
 const BOOTABLE = ['rest', 'microservice', 'class-based', 'full-stack'] as const;
+const DOCS_PATHS = [
+  '/docs',
+  '/docs/swagger-ui.css',
+  '/docs/swagger-ui-bundle.js',
+  '/docs/swagger-ui-standalone-preset.js',
+] as const;
 
 /**
  * Every host a scaffold can produce, including the no-template one.
@@ -316,6 +322,23 @@ async function advertisedPaths(project: string): Promise<string[]> {
 }
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
+  it('boots a Node REST scaffold with self-hosted Swagger assets', async () => {
+    expect(await run(['new', '--runtime', 'node', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const booted = await withNodeServer(project, async (origin) => {
+        const statuses: number[] = [];
+        for (const path of DOCS_PATHS) statuses.push((await fetch(`${origin}${path}`)).status);
+        return statuses;
+      });
+      expect(booted.result, booted.output).toEqual([200, 200, 200, 200]);
+    } finally {
+      await overlay.close();
+    }
+  });
   // Membership is asserted, not just iterated. Removing a template from
   // `BOOTABLE` makes its build-and-boot assertions VANISH rather than fail, so
   // the whole gate stays green while covering strictly less — a one-word edit
@@ -376,6 +399,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(7);
       const paths = [
         ...new Set([
+          ...DOCS_PATHS,
           '/health',
           '/ready',
           '/metrics',
@@ -384,6 +408,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
         ]),
       ];
       const result = await bootWithGeneratedPermissions(project, paths);
+      for (const path of DOCS_PATHS) expect(result.statuses[path], result.output).toBe(200);
       for (const path of advertised) {
         // `fetch` follows redirects, so a page behind sign-in lands on the
         // sign-in form and answers 200 as well.

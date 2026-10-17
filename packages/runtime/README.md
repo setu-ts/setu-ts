@@ -1,5 +1,10 @@
 # @setu-ts/runtime
 
+Each adapter supplies `IRuntimeServices.reportError`: one JSON line to stderr on Node, Bun and Deno,
+or the platform log channel on Workers. Serialization and write failures never escape. The kernel
+and `errorHandler` use it only without a registered logger, for unhandled errors and handled 5xx
+respectively; handled 4xx stays silent without a logger.
+
 RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Deno, Bun, and
 Cloudflare Workers.
 

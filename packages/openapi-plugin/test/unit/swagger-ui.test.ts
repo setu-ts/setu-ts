@@ -14,9 +14,9 @@ describe('swaggerUiHtml', () => {
   });
 
   it('should include Swagger UI CDN script tags', () => {
-    const html = swaggerUiHtml('/openapi.json');
+    const html = swaggerUiHtml({ specUrl: '/openapi.json', assets: 'cdn' });
 
-    expect(html).toContain('unpkg.com/swagger-ui-dist');
+    expect(html).toContain('unpkg.com/swagger-ui-dist@5.33.3');
     expect(html).toContain('swagger-ui-bundle.js');
     expect(html).toContain('swagger-ui-standalone-preset.js');
   });

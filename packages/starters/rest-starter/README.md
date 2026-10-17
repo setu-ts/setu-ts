@@ -98,6 +98,12 @@ const app = createApplication({
 
 ## Options
 
+Swagger UI is self-hosted by default. Install `swagger-ui-dist` (`^5`) in the consuming application;
+Deno also needs filesystem read permission. All starter families forward `openapi`:
+`createRestApp({ openapi: { swagger: { assets: 'cdn' } } })` selects pinned CDN assets, which is
+required on Workers unless you provide `assets: { baseUrl: '/assets' }` for the pinned files.
+Omitting the package while self-hosting fails startup with `OptionalDependencyUnavailableError`.
+
 `RestStarterOptions` is one optional field per plugin. Every field is optional and `createRestApp()`
 with no arguments is valid.
 

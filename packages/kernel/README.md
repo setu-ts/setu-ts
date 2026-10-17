@@ -1,5 +1,9 @@
 # @setu-ts/kernel
 
+Unhandled HTTP errors use the registered logger, or `runtime.reportError` when no logger is
+registered. The last-resort runtime sink receives the serialized error, request id, method, and
+path; the client still receives an opaque 500 response. An injected runtime may omit the sink.
+
 Plugin kernel for the Setu-TS framework: plugin registry, service registry, middleware pipeline,
 router, and application lifecycle.
 

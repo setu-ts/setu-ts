@@ -40,6 +40,7 @@ import {
   UnsupportedRawQueryError,
 } from '../errors.ts';
 import { classifyDriverError } from '../errors/classify.ts';
+import { scrubDriverError } from '../errors/scrub.ts';
 
 /**
  * Reachability-probe bound (M95b §3.5), in ms. A probe that has not
@@ -73,10 +74,10 @@ function accessPathOf(dataSource: DataSource): string | undefined {
 
 /**
  * Maps a driver rejection onto the package-owned classified error
- * (X38-1/X35-2, M90f), or returns the ORIGINAL when no signal matches.
+ * (X38-1/X35-2, M90f), or returns the scrubbed diagnostic when no signal matches.
  *
  * The classifier returns a KIND; the caller-facing object is built HERE,
- * carrying the driver error as `cause` so the operator's diagnostic — the
+ * carrying the scrubbed driver error as `cause` so the operator's diagnostic — the
  * SQLSTATE, the statement — stays reachable for the log while the served
  * `detail` stays the class's fixed sentence.
  */
@@ -86,6 +87,7 @@ function classifiedOrOriginal(
   entity?: string,
 ): unknown {
   const kind = classifyDriverError(error, adapterType);
+  error = scrubDriverError(error);
   if (kind === 'duplicate') return duplicateKeyError(error, entity);
   if (kind === 'conflict') {
     return new SerializationConflictError(
@@ -149,7 +151,7 @@ function duplicateKeyError(cause: unknown, entity: string | undefined): Duplicat
  * Classifies a rejection raised by `commit()`, where only a duplicate key is
  * mapped.
  *
- * A commit rejection is otherwise rethrown unchanged because its outcome can
+ * A commit rejection is otherwise rethrown, scrubbed but unclassified, because its outcome can
  * be unknown: a lost acknowledgement may follow a write the server applied,
  * so the retry-safe `409`/`503` contracts are not advertised there. A
  * duplicate key is different. It is the server's own refusal of the write,
@@ -158,9 +160,11 @@ function duplicateKeyError(cause: unknown, entity: string | undefined): Duplicat
  * when they refuse.
  */
 function duplicateAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
-  return classifyDriverError(error, adapterType) === 'duplicate'
-    ? duplicateKeyError(error, undefined)
-    : error;
+  // Classify the raw driver error, then scrub it: a commit rejection can
+  // carry a Drizzle statement's bound values just as a repository call can.
+  const isDuplicate = classifyDriverError(error, adapterType) === 'duplicate';
+  const scrubbed = scrubDriverError(error);
+  return isDuplicate ? duplicateKeyError(scrubbed, undefined) : scrubbed;
 }
 
 // ---------------------------------------------------------------------------

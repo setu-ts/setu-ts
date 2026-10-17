@@ -12,6 +12,30 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Health `details` and `SwaggerOptions` (M113f, breaking)
+
+**V9-47:** `/health`, `/live`, and `/ready` now return status-only checks by default:
+`{ status, timestamp, checks: { name: { status } } }`. Dashboards that read `checks[*].data` or
+`latencyMs` must set `HealthPlugin({ details: true })` (or a starter's `health: { details: true }`).
+Programmatic health reports stay full and the gRPC bridge is unchanged; diagnostics never carried
+indicator `data` and are unaffected.
+
+**V9-49:** Swagger UI now self-hosts its assets. Install `swagger-ui-dist` (`^5`) in applications
+that use `OpenApiPlugin` or a starter with Swagger enabled. Deno tasks also need `--allow-read`.
+Otherwise startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets
+instead, set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
+`openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
+`assets: { baseUrl: '/assets' }`; a custom base must serve the exact 5.33.3 files for SRI to pass.
+Fresh CLI projects declare the dependency and select CDN mode for Workers automatically. If you add
+`swagger-ui-dist` to an existing npm project, it pulls in `@scarf/scarf`, whose `postinstall` sends
+install analytics; set `"scarfSettings": { "enabled": false }` in your root `package.json` to opt
+out, as generated projects do. In a workspace the setting belongs in the root `package.json`, the
+one npm is run from; a member's own setting is ignored.
+
+Handled 4xx now logs once at `warn`; handled 5xx logs once at `error`. Completion logs report the
+responder's status rule; a custom `respond` hook choosing another status is not reflected there.
+Without a logger, handled 5xx and kernel unhandled errors reach the runtime's default error sink.
+
 ### `principalAuthorityIsGlobal`, `exemptBearer`, anonymous sessions and `needsRehash` (M113e)
 
 **Scoped RBAC no longer reads the principal's own roles.** If your scoped checks

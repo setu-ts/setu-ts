@@ -33,3 +33,5 @@ apps/compiled-binary/hono-example
 coverage-node
 coverage-deno-lane
 **/dist
+# Incremental build state: without dist it would tell tsc -b the image is already built.
+**/*.tsbuildinfo
