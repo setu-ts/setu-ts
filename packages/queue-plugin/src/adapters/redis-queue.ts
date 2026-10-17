@@ -96,11 +96,15 @@ export const MIN_VISIBILITY_TIMEOUT_MS = 1_000;
  */
 export function resolveVisibilityTimeoutMs(value: number | undefined): number {
   const resolved = value === undefined ? 30_000 : value;
-  const error = deadlineRangeError('queue-plugin: options.visibilityTimeoutMs', resolved);
-  if (error !== null) throw error;
-  if (resolved < MIN_VISIBILITY_TIMEOUT_MS)
+  // deadlineRangeError's message says 0 disables a bound, which is false here,
+  // so it decides validity and this function words the refusal (audit L3).
+  if (
+    deadlineRangeError('queue-plugin: options.visibilityTimeoutMs', resolved) !== null ||
+    resolved < MIN_VISIBILITY_TIMEOUT_MS
+  )
     throw new RangeError(
-      `queue-plugin: options.visibilityTimeoutMs must be at least ${MIN_VISIBILITY_TIMEOUT_MS} milliseconds`,
+      `queue-plugin: options.visibilityTimeoutMs must be a finite number between ` +
+        `${MIN_VISIBILITY_TIMEOUT_MS} and 2147483647 milliseconds`,
     );
   return resolved;
 }
@@ -391,7 +395,7 @@ export class RedisQueue implements QueueAdapter {
         this.#key(name, 'stalls'),
         this.#key(name, 'claimseq'),
       ],
-      [limit, this.#visibilityTimeoutMs],
+      [limit, this.#visibilityTimeoutMs, nowMs],
     );
     if (atomic !== null) {
       const rows = (await atomic(RESERVE_SCRIPT)) as readonly (readonly [string, number, string])[];

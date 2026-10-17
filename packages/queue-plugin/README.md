@@ -365,16 +365,20 @@ Redis 5 or later is required: the lease scripts use `TIME` before writes under s
 replication. `RedisQueueOptions.visibilityTimeoutMs` and the flat
 `QueuePluginOptions.visibilityTimeoutMs` default to `30000`. A duration from `1000` to `2147483647`
 is required, so renewal never runs more often than every 333 ms; invalid values throw `RangeError`
-at construction. Each reservation uses server time for due jobs and its lease deadline, and a token
-minted by `INCR <keyPrefix><name>:claimseq`. The service renews the claim every
-`Math.floor(visibilityTimeoutMs / 3)` ms while the processor runs, without overlapping renewal
-calls. A failed or false renewal is reported once per delivery; the processor continues.
+at construction. Each reservation sets its lease deadline by Redis server time and mints a token
+with `INCR <keyPrefix><name>:claimseq`. Which jobs are due is decided by the reserving replica's own
+clock, the same clock that wrote `availableAtMs`, so clock skew between an application host and
+Redis shifts neither delays nor retries. Reclaimed jobs become due at once. The service renews the
+claim every `Math.floor(visibilityTimeoutMs / 3)` ms while the processor runs, without overlapping
+renewal calls. A failed or false renewal is reported once per delivery; the processor continues.
 
 On reserve, up to the requested limit of expired claims return to ready. Each reclaim counts as an
 attempt: a delivery has `max(stored attempts, 1) + stalls`. Once that exceeds `maxAttempts`,
 dispatch calls `onFailed` (if configured) and then dead-letters it without running the processor, so
-an abandoned job sends the same signal as a final failed attempt. Orphan ids without payloads are
-removed. A timed-out reserve that Redis eventually applies is recovered by this same lease.
+an abandoned job sends the same signal as a final failed attempt. The claim is renewed while
+`onFailed` runs, as it is during a processor, so a slow callback is not reclaimed; one that never
+settles holds its concurrency slot, like a processor that never settles. Orphan ids without payloads
+are removed. A timed-out reserve that Redis eventually applies is recovered by this same lease.
 Settlement clears claims and stalls; a stale ack, retry or dead-letter rejects with internal
 `StaleClaimError` and the service reports a failed settlement, leaving the current delivery intact.
 Payload bytes are unchanged by reclaim.
@@ -395,7 +399,12 @@ inactive. The client the adapter builds always has `eval`.
 RabbitMQ-backed queue polling per-name durable queues through the default exchange. Delayed jobs and
 retries wait in a per-name delay queue whose message TTL dead-letters them into the ready queue.
 Jobs are published persistent through a confirm channel (see [RabbitMQ Adapter](#rabbitmq-adapter)).
-Requires the `amqplib` package at runtime (or an injected `IAmqpQueueConnection`).
+Requires the `amqplib` package at runtime (or an injected `IAmqpQueueConnection`). Each connection
+attempt the adapter makes is bounded at 10 seconds, TCP and AMQP handshake together, so a broker
+that accepts connections but never answers is retried rather than waited on. A message in a ready
+queue whose body is not a stored job (not JSON, not an object, or no string `id`) is moved with its
+bytes unchanged into the dead queue, acknowledged, and reported once as a warning that does not
+quote the body; the rest of the batch is reserved normally.
 
 ### SqsQueue
 

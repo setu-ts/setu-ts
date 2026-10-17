@@ -481,6 +481,37 @@ export class QueueService implements IQueue {
     const processor = async () => {
       let renewalTimer: TimerHandle | undefined;
       try {
+        // Renewal starts before either path: an over-budget job's onFailed runs
+        // under the claim too, or a callback slower than the lease is reclaimed
+        // and handed to onFailed again on every period (M113c audit M1).
+        const renewal = this.#adapter.claimRenewal;
+        const token = storedJob.claimToken;
+        if (this.#connected && renewal !== undefined && token !== undefined) {
+          let pending = false;
+          let reported = false;
+          const reportFailure = (error: unknown): void => {
+            if (reported) return;
+            reported = true;
+            this.#report('queue job claim renewal failed', error, {
+              job: storedJob.id,
+              name: storedJob.name,
+            });
+          };
+          renewalTimer = this.#runtime.setInterval(() => {
+            if (pending) return;
+            pending = true;
+            // The promise wrapper also catches a synchronously throwing facade.
+            void Promise.resolve()
+              .then(() => renewal.extend(storedJob.name, storedJob.id, token))
+              .then((extended) => {
+                if (!extended) reportFailure(new Error('queue job claim is stale'));
+              }, reportFailure)
+              .finally(() => {
+                pending = false;
+              });
+          }, renewal.intervalMs);
+          this.#renewalHandles.add(renewalTimer);
+        }
         if (storedJob.attempts > storedJob.maxAttempts) {
           const abandoned = new Error('attempt budget exhausted');
           this.#report('queue job abandoned by a dead worker — dead-lettered', abandoned, {
@@ -509,34 +540,6 @@ export class QueueService implements IQueue {
           observed?.settled('terminal-error', 'dead-lettered');
           this.#collector?.jobSettled(storedJob.name, 'dead_lettered');
           return;
-        }
-        const renewal = this.#adapter.claimRenewal;
-        const token = storedJob.claimToken;
-        if (this.#connected && renewal !== undefined && token !== undefined) {
-          let pending = false;
-          let reported = false;
-          const reportFailure = (error: unknown): void => {
-            if (reported) return;
-            reported = true;
-            this.#report('queue job claim renewal failed', error, {
-              job: storedJob.id,
-              name: storedJob.name,
-            });
-          };
-          renewalTimer = this.#runtime.setInterval(() => {
-            if (pending) return;
-            pending = true;
-            // The promise wrapper also catches a synchronously throwing facade.
-            void Promise.resolve()
-              .then(() => renewal.extend(storedJob.name, storedJob.id, token))
-              .then((extended) => {
-                if (!extended) reportFailure(new Error('queue job claim is stale'));
-              }, reportFailure)
-              .finally(() => {
-                pending = false;
-              });
-          }, renewal.intervalMs);
-          this.#renewalHandles.add(renewalTimer);
         }
         await runJob<T>(
           this.#runtime,

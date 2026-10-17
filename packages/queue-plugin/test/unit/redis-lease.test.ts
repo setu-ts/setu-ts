@@ -121,8 +121,12 @@ describe('Redis delivery lease', () => {
 
   it('validates the positive lease length at construction without echoing values', () => {
     for (const value of [0, 1, 999, 999.9, -1, NaN, Infinity, 2_147_483_648, 'bad', null]) {
+      // One wording for every refused value; 0 is refused, so the message must
+      // not inherit deadlineRangeError's "0 disables the bound" (audit L3).
       expect(() => new RedisQueue({ visibilityTimeoutMs: value as number })).toThrow(
-        'options.visibilityTimeoutMs',
+        new RangeError(
+          'queue-plugin: options.visibilityTimeoutMs must be a finite number between 1000 and 2147483647 milliseconds',
+        ),
       );
     }
     for (const value of [1000, 2_147_483_647])

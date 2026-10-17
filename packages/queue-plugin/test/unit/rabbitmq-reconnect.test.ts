@@ -77,6 +77,10 @@ describe('RabbitMQ queue reconnect', () => {
     await runtime.advanceMs(1000);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(factory.connect).toHaveBeenCalledTimes(2);
+    // Each attempt carries amqplib's socket timeout, so a broker that accepts
+    // TCP and never answers fails the attempt instead of hanging it (audit L1).
+    for (const call of factory.connect.mock.calls as unknown[][])
+      expect(call[1]).toEqual({ timeout: 10_000 });
     await queue.disconnect();
     const late = new Connection();
     opening.resolve(late);
@@ -150,6 +154,37 @@ describe('RabbitMQ queue reconnect', () => {
     await runtime.advanceMs(1000);
     expect(await queue.isHealthy!()).toBe(true);
     await queue.disconnect();
+  });
+
+  it('moves bodies that are not stored jobs to the dead queue and keeps the batch (audit L4)', async () => {
+    const runtime = new FakeRuntimeServices(0);
+    const connection = new Connection();
+    const warnings: string[] = [];
+    const queue = new RabbitMqQueue(runtime, {
+      client: connection,
+      reportWarning: (message) => warnings.push(message),
+    });
+    await queue.connect();
+    try {
+      const channel = connection.channels[0];
+      const bad = ['"string"', 'not json', '[1]', '{"id":7}'];
+      channel.publish('', 'he.queue.email.ready', Buffer.from(bad[0]));
+      await queue.enqueue(job);
+      for (const body of bad.slice(1))
+        channel.publish('', 'he.queue.email.ready', Buffer.from(body));
+      const reserved = await queue.reserve('email', 10, 0);
+      expect(reserved.map((entry) => entry.id)).toEqual(['old']);
+      expect(
+        channel.getReadyBuffer('he.queue.email.dead').map((entry) => entry.content.toString()),
+      ).toEqual(bad);
+      expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(bad.length);
+      const moved = warnings.filter((warning) => warning.includes('moved to the dead queue'));
+      expect(moved).toHaveLength(bad.length);
+      for (const warning of warnings) for (const body of bad) expect(warning).not.toContain(body);
+      await queue.ack('email', 'old', reserved[0].claimToken);
+    } finally {
+      await queue.disconnect();
+    }
   });
 
   it('closes a channel that finishes opening after disconnect', async () => {

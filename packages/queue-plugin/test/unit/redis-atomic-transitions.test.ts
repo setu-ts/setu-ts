@@ -92,6 +92,7 @@ describe('RedisQueue atomic transitions (eval present)', () => {
       'queue:email:claimseq',
       10,
       30000,
+      100,
     ]);
     await queue.disconnect();
   });

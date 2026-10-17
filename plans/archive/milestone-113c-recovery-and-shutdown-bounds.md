@@ -144,8 +144,12 @@ act. M113c makes each of them recover, or bounds it.
     reclaim and due selection consistent. Ready-set scores are still written by the enqueuing
     replica (`availableAtMs`), so a delayed or backed-off job's readiness shifts by that replica's
     skew against Redis. Before, it shifted by the skew between the two replicas, so the bound is no
-    worse. The script also returns `[payload, stalls, token]` triples, not the pairs described
-    above, because the claim token is minted inside it.
+    worse. **Reversed after the committed-tree audit (finding L2):** "no worse" held only across
+    replicas; a single replica had zero skew before and gained its full skew against Redis, so a
+    delayed job ran early. Due selection and reclaim rescoring use the caller's `nowMs` again
+    (passed as `ARGV[3]`); only leases use `TIME`. The script also returns
+    `[payload, stalls, token]` triples, not the pairs described above, because the claim token is
+    minted inside it.
   - **`ack`, `requeue` and `deadLetter` scripts check the claim.** They act only when
     `HGET claims id` equals the token passed in, and return `0` otherwise. A slow worker whose claim
     was reclaimed therefore cannot delete the new delivery. On success they also clear the `claims`
@@ -488,3 +492,20 @@ part is recorded after implementation, the M101a precedent: it describes the des
 | S6  | _(added)_ After the 1 000 ms Deno grace, `close()` returns while requests are still in flight. `shutdown()` is not cancelled, so they finish only if the process outlives them.                                  | Accepted: the bound is the point of V9-31; the CHANGELOG entry states it.                                                                                                                                                                                                 |
 | S7  | _(added)_ The supervisor's shared state now spans packages, so a defect there reaches four transports at once.                                                                                                   | Covered by obligation 12.                                                                                                                                                                                                                                                 |
 | S8  | _(added)_ A built Redis client given no reporter wrote every connection error, with its stack, to `console.error`, bypassing the application's logger and its redaction.                                         | **Fixed (folded in, see §0):** the listener is always attached and drops events without a reporter. Cost: an application that builds `RedisRateLimitStore` or a store directly, without a reporter, loses the console lines; its health probe still reports the outage.   |
+
+### Committed-tree audit, round 1 (2026-10-17, on `0424e49d`): failed
+
+A fresh-context audit probed all twelve obligations against real Redis 7 and RabbitMQ 4 and failed
+on one Medium and four Low findings, all fixed on this branch with a test that fails when the fix is
+reverted:
+
+- **M1 (Medium):** the over-budget path awaited `onFailed` before lease renewal started, so a
+  callback slower than the lease was reclaimed and handed to `onFailed` again every period and the
+  job never reached the dead set (obligation 9). Renewal now starts before both paths.
+- **L1:** `amqplib.connect` had no socket timeout, so a broker accepting TCP and never answering
+  hung one reconnect attempt forever. Each attempt now passes `{ timeout: 10_000 }`.
+- **L2:** due selection by server `TIME` shifted delays by a single replica's skew; reversed, see
+  the deviation note in §3.
+- **L3:** the `visibilityTimeoutMs` refusal said "0 disables the bound" while refusing 0.
+- **L4:** a ready-queue body that was JSON but not an object threw out of `reserve`, stranding the
+  batch. Such bodies (and non-JSON ones, which already did this) move to the dead queue unchanged.

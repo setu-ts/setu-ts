@@ -29,8 +29,14 @@ return 1
  * script-effects replication. Payload bytes are returned unchanged, beside the
  * stall count and new token; Lua never re-encodes job data.
  *
+ * Two clocks, each where it is consistent: leases are written and expired on
+ * the server's TIME, while ready-set scores are written by the enqueuing
+ * replica's clock, so due selection compares them against the reserving
+ * replica's `nowMs` (as before M113c) and a reclaimed job is rescored to it.
+ * Server time there would shift every delay by the app's skew (audit L2).
+ *
  * KEYS: ready, processing, jobs, claims, stalls, claimseq.
- * ARGV: limit, visibilityTimeoutMs. Both ready and lease scores use server time.
+ * ARGV: limit, visibilityTimeoutMs, nowMs (the caller's clock).
  */
 export const RESERVE_SCRIPT = `
 local clock = redis.call('TIME')
@@ -41,13 +47,13 @@ for _, id in ipairs(expired) do
   redis.call('HDEL', KEYS[4], id)
   if redis.call('HEXISTS', KEYS[3], id) == 1 then
     redis.call('HINCRBY', KEYS[5], id, 1)
-    redis.call('ZADD', KEYS[1], now, id)
+    redis.call('ZADD', KEYS[1], ARGV[3], id)
   else
     redis.call('ZREM', KEYS[1], id)
     redis.call('HDEL', KEYS[5], id)
   end
 end
-local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, ARGV[1])
+local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[3], 'LIMIT', 0, ARGV[1])
 local out = {}
 for _, id in ipairs(ids) do
   redis.call('ZREM', KEYS[1], id)

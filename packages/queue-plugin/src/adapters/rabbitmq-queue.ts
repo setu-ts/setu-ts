@@ -18,6 +18,7 @@ import type { QueueAdapter } from './queue-adapter.ts';
 import type {
   IAmqpQueueChannel,
   IAmqpQueueConnection,
+  IAmqpQueueMessage,
   RabbitMqQueueOptions,
   StoredJob,
   StoredRecurring,
@@ -78,9 +79,31 @@ async function resolveClient(
     return injectedClient;
   }
   const amqplib = await loadAmqplib();
-  const connection = await amqplib.connect(url);
+  // amqplib's socket timeout stays armed until the AMQP open handshake ends, so
+  // a broker that accepts TCP and never answers fails the attempt and the
+  // supervisor retries, rather than one attempt hanging forever (audit L1).
+  const connection = await amqplib.connect(url, { timeout: CONNECT_TIMEOUT_MS });
   return connection as unknown as IAmqpQueueConnection;
 }
+
+/**
+ * Parses a message body as a stored job.
+ * @param payload - The body as UTF-8 text
+ * @returns The job, or `null` when the body is not JSON or not a job object with a string `id`
+ */
+function parseStoredJob<T>(payload: string): StoredJob<T> | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  return typeof (value as { id?: unknown }).id === 'string' ? (value as StoredJob<T>) : null;
+}
+
+/** Bound on opening one connection, TCP and AMQP handshake together, in ms. */
+const CONNECT_TIMEOUT_MS = 10_000;
 
 /** Default bound on one job publish, including its confirm, in ms. */
 export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
@@ -636,9 +659,14 @@ export class RabbitMqQueue implements QueueAdapter {
         break;
       }
 
-      // Decode Buffer to string, then parse JSON
-      const payload = msg.content.toString('utf8');
-      const job = JSON.parse(payload) as StoredJob<T>;
+      const job = parseStoredJob<T>(msg.content.toString('utf8'));
+      if (job === null) {
+        // A body that is not a stored job cannot be claimed, run or settled.
+        // Throwing here would strand the messages already fetched this call, so
+        // it is moved, bytes unchanged, into the dead queue (audit L4).
+        await this.#quarantine(name, msg);
+        continue;
+      }
       const token = this.#runtime.uuid();
       job.claimToken = token;
 
@@ -648,6 +676,24 @@ export class RabbitMqQueue implements QueueAdapter {
     }
 
     return result as readonly StoredJob<T>[];
+  }
+
+  /**
+   * Moves an unreadable message into the dead queue with its bytes unchanged,
+   * then acks it, and warns without echoing the body.
+   * @param name - Job name whose ready queue delivered it
+   * @param msg - The message as fetched
+   */
+  async #quarantine(name: string, msg: IAmqpQueueMessage): Promise<void> {
+    const channel = this.#channel!;
+    const deadQ = this.#deadQueue(name);
+    await this.#bounded(deadQ, async () => {
+      await this.#publish(channel, deadQ, msg.content);
+    });
+    channel.ack(msg);
+    this.#reportWarning?.(
+      'queue-plugin: a RabbitMQ message that is not a stored job was moved to the dead queue',
+    );
   }
 
   // eslint-disable-next-line require-await

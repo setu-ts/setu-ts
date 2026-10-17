@@ -22,7 +22,14 @@ All notable changes to this project are documented here. The format follows
   now return. Redis and RabbitMQ reject stale settlements with internal `StaleClaimError`, reported
   as failed settlement while leaving the current delivery intact. Make processors idempotent. A
   Redis client without `eval` retains the prior behavior (no claims or reclaim), with one warning
-  that `visibilityTimeoutMs` is inactive.
+  that `visibilityTimeoutMs` is inactive. The claim is renewed while an over-budget job's `onFailed`
+  runs. Due jobs are still selected by the reserving replica's clock, so skew between an application
+  host and Redis does not shift delays.
+- **RabbitMQ queue connection bound and unreadable messages (M113c).** Each connection attempt
+  `RabbitMqQueue` makes is bounded at 10 seconds, so a broker that accepts TCP and never answers is
+  retried. A ready-queue message whose body is not a stored job is moved, bytes unchanged, into the
+  dead queue with one warning, rather than throwing out of `reserve` and stranding the messages
+  already fetched in that batch.
 - **Breaking processor definition mutability (M113c, 0.10.0).**
   `QueueProcessorDefinition<T = unknown>.processor` is now a method, admitting typed payloads in
   declarative lists and preserving `this`. Code relying on its former `readonly` restriction must

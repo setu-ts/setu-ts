@@ -208,6 +208,28 @@ describe('QueueService lease renewal', () => {
       await s.service.disconnect();
     }
   });
+  it('renews the claim while an over-budget job waits on onFailed (audit M1)', async () => {
+    // Unrenewed, a callback slower than the lease is reclaimed and handed to
+    // onFailed again on every period, never reaching the dead set.
+    const gate = Promise.withResolvers<void>();
+    const onFailed = vi.fn(() => gate.promise);
+    const s = await setup({ token: 'delivery', attempts: 4, onFailed });
+    try {
+      await s.runtime.advanceMs(500);
+      expect(onFailed).toHaveBeenCalledTimes(1);
+      expect(s.extend).toHaveBeenCalledWith('email', 'j', 'delivery');
+      expect(s.dead).not.toHaveBeenCalled();
+      gate.resolve();
+      await s.runtime.advanceMs(100);
+      expect(s.dead).toHaveBeenCalledTimes(1);
+      const renewals = s.extend.mock.calls.length;
+      await s.runtime.advanceMs(500);
+      expect(s.extend).toHaveBeenCalledTimes(renewals);
+    } finally {
+      gate.resolve();
+      await s.service.disconnect();
+    }
+  });
   it('still dead-letters an abandoned job when onFailed throws', async () => {
     const s = await setup({
       token: 'delivery',

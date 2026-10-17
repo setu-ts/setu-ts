@@ -90,6 +90,21 @@ describe('Redis delivery lease against real Redis', { skip: url === undefined },
     });
   });
 
+  it("selects due jobs by the reserving replica's clock, not Redis TIME (audit L2)", async () => {
+    // availableAtMs is written by the enqueuing replica's clock, so a replica
+    // whose clock is behind Redis must not run a delayed job early.
+    await fixture(async (queue, _other, inspect) => {
+      const [seconds] = await inspect.time();
+      const serverNow = Number(seconds) * 1000;
+      const skewedNow = serverNow - 120_000;
+      await queue.enqueue({ ...job, availableAtMs: skewedNow + 60_000 });
+      expect(await queue.reserve('email', 1, skewedNow)).toEqual([]);
+      const [due] = await queue.reserve('email', 1, skewedNow + 60_000);
+      expect(due.id).toBe('j');
+      await queue.ack('email', 'j', due.claimToken);
+    });
+  });
+
   it('a long renewed job stays claimed past three leases', async () => {
     await fixture(async (queue, other) => {
       const work = Promise.withResolvers<void>();
