@@ -433,19 +433,28 @@ export function scanToolchainProse(
       }
       if (path.endsWith('.md')) {
         const p7NpmStarts = new Set<number>();
+        // Matches arrive in increasing order, so the backtick count before each
+        // quote is carried forward rather than recounted: one pass per line.
+        let ticksBefore = 0;
+        let counted = 0;
         for (const match of line.matchAll(P7)) {
           if (match.index === undefined) continue;
           const quote = match.index + match[0].length - 5;
-          if ((line.slice(0, quote).match(/`/g)?.length ?? 0) % 2 === 1) continue;
+          for (; counted < quote; counted++) if (line[counted] === '`') ticksBefore++;
+          if (ticksBefore % 2 === 1) continue;
           p7NpmStarts.add(match.index + match[0].length - 4);
           report('P7', 'Node cannot load an npm: specifier; import the bare package name');
         }
+        // Where the first Deno install command ends, found once per line: an
+        // `npm:` reference after it is that command's argument.
+        const install = DENO_INSTALL.exec(line);
+        const installEnd = install === null ? Infinity : install.index + install[0].length;
         for (const match of line.matchAll(P8)) {
           const pkg = match[1] ?? '';
           if (pkg.startsWith('@setu-ts/') || pkg.startsWith('@jsr/')) continue;
           if (match.index === undefined) continue;
           if (p7NpmStarts.has(match.index)) continue;
-          if (DENO_INSTALL.test(line.slice(0, match.index))) continue;
+          if (installEnd <= match.index) continue;
           if (allowance?.allowNpmRef) used.add(path);
           else
             report(

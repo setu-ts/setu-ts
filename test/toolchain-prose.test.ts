@@ -156,6 +156,18 @@ describe('toolchain prose refusals', () => {
     expect(scan('npm:ioredis', entry.path, { ...rules, allowlist: [entry] })).toEqual([]);
     expect(scan('npm:ioredis', 'docs/live.md').map((f) => f.rule)).toEqual(['P8']);
   });
+  it.each([
+    ['quoted imports', "from 'npm:a' "],
+    ['bare references', 'npm:a '],
+    ['imports after an open backtick', "`import 'npm:a';"],
+  ])('P7 and P8 scan a 1 MiB line of %s in linear time', (_label, unit) => {
+    // Recounting the prefix per match made one such line take ~18 s.
+    const line = unit.repeat(Math.ceil(1_048_576 / unit.length));
+    const started = performance.now();
+    const findings = scan(line, 'docs/live.md');
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(findings.length).toBeGreaterThan(0);
+  });
   it('P7 and P8 skip non-markdown files', () => {
     expect(scan("import { z } from 'npm:zod'\n`npm:ioredis`", 'src/app.ts')).toEqual([]);
   });
