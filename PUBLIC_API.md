@@ -8410,7 +8410,7 @@ app.router.get('/beta', {
 | `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                     |
 | `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                   |
 | `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`         |
-| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy `npm:` import                   |
+| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy SDK import                      |
 | `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                            |
 | `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                  |
 | `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget; defaults to `5`. A timeout degrades, never throws        |
@@ -8985,9 +8985,10 @@ request-span middleware at priority 30 (inside metrics at 20, outside auth at 30
 inbound HTTP request in a server span with W3C `traceparent`/`tracestate` propagation.
 
 The OpenTelemetry SDK is a **heavy optional dependency**: the plugin lazy-loads
-`@opentelemetry/sdk-trace-base` and an exporter via dynamic `npm:` imports, failing with a clear
-error when the package is absent. A `NoopTelemetryService` is the default when no exporter is
-configured, so the plugin always registers a usable service with zero npm deps in that mode.
+`@opentelemetry/sdk-trace-base` and an exporter via dynamic imports of the bare package names,
+failing with a clear error when the package is absent. A `NoopTelemetryService` is the default when
+no exporter is configured, so the plugin always registers a usable service with zero npm deps in
+that mode.
 
 An injectable `tracerProviderFactory` option lets tests (and consumers with a pre-built provider)
 bypass the lazy import entirely.
@@ -9054,8 +9055,8 @@ instance; when `otelProvider` is absent, the registry returns a no-op handle imm
 
 Each instrumentation uses the **inject-or-lazy seam**: when `InstrumentationConfig.instrumentation`
 is set, the instance is used directly (inject path); otherwise the registry lazy-loads the OTel
-package via a literal `npm:` dynamic import (lazy path). Any loader failure is caught and recorded
-as a failure outcome — the plugin **never throws** from instrumentation setup.
+package via a literal dynamic import of its bare package name (lazy path). Any loader failure is
+caught and recorded as a failure outcome — the plugin **never throws** from instrumentation setup.
 
 Every outcome is reported through the plugin's logger (`ctx.logger`, read at call time): an enabled
 instrumentation logs one line at `debug`, a failure one line at `warn` carrying `kind` and `reason`.

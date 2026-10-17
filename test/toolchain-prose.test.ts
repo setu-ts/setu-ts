@@ -185,6 +185,17 @@ describe('toolchain prose refusals', () => {
     expect(performance.now() - started).toBeLessThan(2_000);
     expect(findings.length).toBeGreaterThan(0);
   });
+  it.each([
+    ['a shell delimiter', 'deno add npm:hono; then use `npm:ioredis`'],
+    ['a closing code span', '`deno add npm:hono` and the `npm:ioredis` client'],
+    ['a pipe', 'deno install npm:hono | grep npm:ioredis'],
+  ])('P8 exempts only the install arguments, not a reference after %s', (_label, text) => {
+    expect(scan(text, 'docs/live.md').map((f) => [f.rule, f.line])).toEqual([['P8', 1]]);
+  });
+  it('P8 exempts every argument of each install command on a line', () => {
+    expect(scan('deno add npm:a npm:b; deno install npm:c', 'docs/live.md')).toEqual([]);
+    expect(scan('npm:x deno add npm:a npm:y', 'docs/live.md').map((f) => f.rule)).toEqual(['P8']);
+  });
   it('P7 and P8 skip non-markdown files', () => {
     expect(scan("import { z } from 'npm:zod'\n`npm:ioredis`", 'src/app.ts')).toEqual([]);
   });

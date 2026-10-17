@@ -374,7 +374,11 @@ const P7 = /(?:\bfrom\s+|\bimport\s+|\bimport\(\s*)["']npm:/g;
 /** P8: any `npm:<pkg>` reference; `pnpm:` and a "from npm:" registry mention do not match. */
 const P8 = /\bnpm:([A-Za-z@][A-Za-z0-9@._/^~-]*)/g;
 /** A Deno install command with the specifier as an argument: a legitimate Deno-target instruction. */
-const DENO_INSTALL = /\bdeno\s+(?:add|install)\b/;
+/**
+ * A Deno install command and its arguments: the arguments run until the first
+ * shell delimiter or code-span backtick, the same boundary P3 uses.
+ */
+const DENO_INSTALL = /\bdeno\s+(?:add|install)\b[^\n`<>;|&]*/g;
 /** A line ending in a shell continuation (`\\` plus optional trailing whitespace). */
 const CONTINUED = /\\\s*$/;
 
@@ -469,16 +473,22 @@ export function scanToolchainProse(
           p7NpmStarts.add(match.index + match[0].length - 4);
           report('P7', 'Node cannot load an npm: specifier; import the bare package name');
         }
-        // Where the first Deno install command ends, found once per line: an
-        // `npm:` reference after it is that command's argument.
-        const install = DENO_INSTALL.exec(line);
-        const installEnd = install === null ? Infinity : install.index + install[0].length;
+        // The spans holding Deno install arguments, found once per line: an
+        // `npm:` reference inside one is that command's argument, and one after
+        // the command's delimiter is ordinary prose that P8 still checks.
+        const installs = [...line.matchAll(DENO_INSTALL)].map((install) => [
+          install.index,
+          install.index + install[0].length,
+        ]);
+        let span = 0;
         for (const match of line.matchAll(P8)) {
           const pkg = match[1] ?? '';
           if (pkg.startsWith('@setu-ts/') || pkg.startsWith('@jsr/')) continue;
           if (match.index === undefined) continue;
           if (p7NpmStarts.has(match.index)) continue;
-          if (installEnd <= match.index) continue;
+          while (span < installs.length && installs[span]![1]! <= match.index) span++;
+          const install = installs[span];
+          if (install !== undefined && install[0]! < match.index) continue;
           if (allowance?.allowNpmRef) used.add(path);
           else
             report(
