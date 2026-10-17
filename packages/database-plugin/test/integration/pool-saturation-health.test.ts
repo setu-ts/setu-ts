@@ -69,7 +69,7 @@ async function boot(poolStats?: () => DatabasePoolCapacity) {
           ...(poolStats !== undefined && { poolStats }),
         },
       }),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
     ],
   });
   await app.start();

@@ -17,7 +17,7 @@ it('unreachable fan-out remains visible in /ready at 200', async () => {
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
       RealtimeBackplanePlugin({ transport: 'custom', instance }),
     ],
   });

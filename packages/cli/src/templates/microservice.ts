@@ -111,8 +111,9 @@ export class ReplyInboxObject {
  * the same swap applies to it.
  */
 const WORKERS_SWAP = {
-  removePackages: ['messaging-plugin', 'queue-plugin'],
+  removePackages: ['messaging-plugin', 'queue-plugin', 'openapi-plugin'],
   addPlugins: [
+    { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
     {
       pkg: 'cloudflare-plugin',
       symbol: 'CloudflarePlugin',

@@ -80,9 +80,28 @@ await app.start({ port: 3000 });
 
 ## Options
 
+Swagger defaults to self-hosting. Install `swagger-ui-dist` (supported range `^5`) in the
+application and grant filesystem read access on Deno. Registration awaits the tiny
+`swagger-ui-dist/absolute-path.js` helper and reads only the three fixed distribution files once.
+The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
+`/docs/swagger-ui-standalone-preset.js` serve the package bytes with CSS/JavaScript content types
+and `Cache-Control: public, max-age=3600`; changing `endpoint` moves all four UI routes. Delivery
+routes are excluded from the generated spec.
+
+`SwaggerOptions` is `{ readonly assets?: 'self' | 'cdn' | { readonly baseUrl: string } }`. `true`
+and `{}` select `'self'`; `false` disables the UI. Missing `swagger-ui-dist` fails startup with
+`OptionalDependencyUnavailableError`: install it or set `swagger: { assets: 'cdn' }`. Runtimes
+without `runtime.fs`, including Workers, must choose `'cdn'` or `{ baseUrl }`.
+
+CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 integrity and
+`crossorigin="anonymous"` on all three tags. A custom base must be an absolute HTTP(S) URL or a path
+starting `/` and must serve the unmodified **5.33.3** files, since it uses the same hashes. Invalid
+modes and base URLs throw `TypeError` at construction. `SwaggerUiOptions.assets` selects the same
+mode for `swaggerUiHtml`; its `endpoint` supplies the local prefix (default `/docs`).
+
 | Option                 | Type                             | Default                               | Description                                                  |
 | ---------------------- | -------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
-| `swagger`              | `boolean`                        | `true`                                | Serve the Swagger UI HTML page.                              |
+| `swagger`              | `boolean \| SwaggerOptions`      | `true`                                | Serve Swagger UI, self-hosted by default.                    |
 | `endpoint`             | `string`                         | `'/docs'`                             | Path for the Swagger UI page.                                |
 | `specEndpoint`         | `string`                         | `'/openapi.json'`                     | Path for the JSON spec.                                      |
 | `security`             | `readonly SecurityRequirement[]` | —                                     | Document-level requirement inherited by every operation.     |
@@ -241,6 +260,7 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `OpenApiSchemaObject`     | interface |
 | `OpenApiServiceOptions`   | interface |
 | `SwaggerUiOptions`        | interface |
+| `SwaggerOptions`          | type      |
 | `SchemaIo`                | type      |
 | `SchemaNodeHook`          | type      |
 

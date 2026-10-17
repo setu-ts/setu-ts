@@ -513,6 +513,20 @@ whose sole export is `defineWorkerTask` (see the WorkerPoolPlugin section).
 
 ## LoggerPlugin() (`@setu-ts/logger-plugin`)
 
+`LoggerPluginOptions.excludePaths?: readonly PathPattern[]` passes strings and regular expressions
+unchanged to request middleware. Strings match exactly; regular expressions test the request path.
+
+| Option                             | Type                     | Consumer                               |
+| ---------------------------------- | ------------------------ | -------------------------------------- |
+| `LoggerPluginOptions.excludePaths` | `readonly PathPattern[]` | Request-logger middleware path matcher |
+
+The request logger emits completion with the status predicted by `IErrorResponder.statusFor?` on a
+throw, or 500 without that method; normal returns use the response snapshot. It rethrows without a
+duplicate failure record. `errorHandler` logs once at `warn` below 500 and `error` otherwise. A
+custom `ErrorHandlerOptions.respond` hook choosing another status is not reflected in request
+completion logs. Request logging remains inside telemetry. With no logger, handled 5xx and kernel
+unhandled errors use the runtime's default sink; a registered logger is the exclusive destination.
+
 Provides structured logging via a capability token. The plugin depends on `RuntimePlugin` and
 registers its `ILogger` under `CAPABILITIES.LOGGER` at `PLUGIN_PRIORITY.HIGH` (100) so logging is
 available before most other plugins register.
@@ -8630,6 +8644,12 @@ await repo.create({ id: 'ord-1' });
 
 ## Health (`@setu-ts/health-plugin`)
 
+`HealthPluginOptions.details?: boolean` defaults to `false`. HTTP `/health`, `/live`, and `/ready`
+return only `{ status, timestamp, checks: { name: { status } } }`, omitting each indicator's `data`
+and `latencyMs`. `HealthPlugin({ details: true })` restores the full HTTP report; non-booleans throw
+`TypeError` at construction. The programmatic health service, gRPC bridge, and diagnostics retain
+full reports. HTTP status rules are unchanged.
+
 ### What `degraded` means
 
 `/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
@@ -8768,10 +8788,10 @@ GET /health
   "status": "up",
   "timestamp": "2024-01-01T00:00:00.000Z",
   "checks": {
-    "self": { "status": "up", "latencyMs": 1, "data": { "platform": "node", "version": "18.0.0", "hostname": "my-host" } },
-    "database": { "status": "up", "latencyMs": 5 },
-    "cache": { "status": "up", "latencyMs": 2 },
-    "external-api": { "status": "down", "latencyMs": 3000, "data": { "error": "timeout" } }
+    "self": { "status": "up" },
+    "database": { "status": "up" },
+    "cache": { "status": "up" },
+    "external-api": { "status": "up" }
   }
 }
 ```
@@ -9195,6 +9215,29 @@ section for the field names and the absent-telemetry behaviour.
 ---
 
 ## OpenAPI (`@setu-ts/openapi-plugin`)
+
+`OpenApiPluginOptions.swagger?: boolean | SwaggerOptions` defaults to self-hosted Swagger UI.
+Install optional peer `swagger-ui-dist` (`^5`) and provide `runtime.fs` (Deno needs `--allow-read`).
+`true` and `{}` select self-hosting; `false` disables UI. Registration loads the guarded CommonJS
+`swagger-ui-dist/absolute-path.js` helper through its default export, then reads three fixed files
+once. `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
+`/docs/swagger-ui-standalone-preset.js` serve CSS/JavaScript bytes with
+`Cache-Control: public, max-age=3600`; `endpoint` moves their prefix. These routes, the UI and the
+spec endpoint never appear as API operations. A missing package throws
+`OptionalDependencyUnavailableError`, naming installation or `swagger: { assets: 'cdn' }`. No
+filesystem refuses self-hosting and names CDN and custom-base remedies.
+
+| Export             | Kind      | Contract                                                                                                              |
+| ------------------ | --------- | --------------------------------------------------------------------------------------------------------------------- |
+| `SwaggerOptions`   | type      | `{ readonly assets?: 'self' \| 'cdn' \| { readonly baseUrl: string } }`                                               |
+| `SwaggerUiOptions` | interface | `specUrl`, optional `title`, `assets` with the same modes, and local `endpoint` (default `/docs`) for `swaggerUiHtml` |
+
+CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 SRI and
+`crossorigin="anonymous"` on all three asset tags. `{ baseUrl }` uses the same hashes and requires
+the unmodified 5.33.3 files. The base must be an absolute HTTP(S) URL or a path starting `/`.
+Invalid modes or bases throw `TypeError` at construction. Workers selects an external mode; starters
+forward it through `openapi: { swagger: { assets: 'cdn' } }`. CLI projects declare the package in
+npm dependencies, or the Deno import map; Workers templates select CDN automatically.
 
 Provides automatic OpenAPI documentation.
 
@@ -11776,6 +11819,11 @@ app.register({
 ---
 
 ## API Reference: @setu-ts/common
+
+| Runtime/error contract member                                                    | Consumer                                                              | Behavior                                                                                                                       |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `IRuntimeServices.reportError?(record: Readonly<Record<string, unknown>>): void` | Kernel unhandled errors and `errorHandler` 5xx, only without a logger | Last-resort JSON line to stderr (Workers platform log channel); serialization and write failures never throw                   |
+| `IErrorResponder.statusFor?(error: unknown): number`                             | Request logger                                                        | Pure prediction of the owner's served status rule; no clamp reporting; custom response-hook status overrides are not reflected |
 
 `isConnectionFault(error: unknown): boolean` walks up to five cause objects, stops at cycles, and
 recognises the eight node/net connection-fault codes plus measured ioredis 5 outage rejections. It

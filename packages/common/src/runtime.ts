@@ -302,6 +302,13 @@ export interface IDnsResolver {
  */
 export interface IRuntimeServices {
   /**
+   * Last-resort error sink: writes one JSON line to standard error (the log
+   * channel on Workers). Serialization and write failures never escape.
+   * @param record - The already sanitized diagnostic
+   * @since 0.10.0
+   */
+  reportError?(record: Readonly<Record<string, unknown>>): void;
+  /**
    * Identifies the current runtime.
    *
    * @returns The runtime platform identifier

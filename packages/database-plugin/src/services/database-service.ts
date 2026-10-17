@@ -40,6 +40,7 @@ import {
   UnsupportedRawQueryError,
 } from '../errors.ts';
 import { classifyDriverError } from '../errors/classify.ts';
+import { scrubDriverError } from '../errors/scrub.ts';
 
 /**
  * Reachability-probe bound (M95b §3.5), in ms. A probe that has not
@@ -73,10 +74,10 @@ function accessPathOf(dataSource: DataSource): string | undefined {
 
 /**
  * Maps a driver rejection onto the package-owned classified error
- * (X38-1/X35-2, M90f), or returns the ORIGINAL when no signal matches.
+ * (X38-1/X35-2, M90f), or returns the scrubbed diagnostic when no signal matches.
  *
  * The classifier returns a KIND; the caller-facing object is built HERE,
- * carrying the driver error as `cause` so the operator's diagnostic — the
+ * carrying the scrubbed driver error as `cause` so the operator's diagnostic — the
  * SQLSTATE, the statement — stays reachable for the log while the served
  * `detail` stays the class's fixed sentence.
  */
@@ -86,6 +87,7 @@ function classifiedOrOriginal(
   entity?: string,
 ): unknown {
   const kind = classifyDriverError(error, adapterType);
+  error = scrubDriverError(error);
   if (kind === 'duplicate') return duplicateKeyError(error, entity);
   if (kind === 'conflict') {
     return new SerializationConflictError(

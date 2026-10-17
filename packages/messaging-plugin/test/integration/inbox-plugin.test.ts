@@ -205,7 +205,7 @@ describe('inbox through a real kernel app', () => {
     const calls: string[] = [];
     const app = buildApp({
       inbox: { maxAttempts: 2 },
-      before: [HealthPlugin()],
+      before: [HealthPlugin({ details: true })],
       subscriptions: [
         onIntegrationEvent(
           hired,

@@ -155,6 +155,12 @@ export type HealthIndicatorEntry = IHealthIndicator | RegistryFactory<IHealthInd
  */
 export interface HealthPluginOptions {
   /**
+   * Include indicator data and latency in HTTP responses. Defaults to false;
+   * programmatic reports and diagnostics always retain their full shape.
+   * @since 0.10.0
+   */
+  readonly details?: boolean;
+  /**
    * Endpoint path configuration.
    *
    * Defaults to `{ health: '/health', live: '/live', ready: '/ready' }`.

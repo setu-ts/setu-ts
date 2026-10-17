@@ -70,6 +70,7 @@ function createDisabledHealthSource(): IHealthDiagnosticsSource {
  *
  * @param options - Plugin configuration options
  * @returns A plugin that registers an `IHealthService` under `'health'`
+ * @throws {TypeError} If details is not a boolean
  *
  * @example
  * ```typescript
@@ -98,6 +99,10 @@ function createDisabledHealthSource(): IHealthDiagnosticsSource {
  * @since 0.2.0
  */
 export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
+  if (options?.details !== undefined && typeof options.details !== 'boolean') {
+    throw new TypeError('HealthPlugin details must be a boolean.');
+  }
+  const details = options?.details ?? false;
   const endpoints = options?.endpoints ?? {
     health: '/health',
     live: '/live',
@@ -161,7 +166,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       }
 
       // Register the health endpoints
-      registerHealthEndpoints(ctx, service, endpoints);
+      registerHealthEndpoints(ctx, service, endpoints, details);
 
       // Wire the health-observation source (M98d). An absent `diagnostics`
       // option registers an inert disabled source and performs no capture; a
@@ -242,20 +247,21 @@ function registerHealthEndpoints(
   ctx: IPluginContext,
   service: HealthService,
   endpoints: { health?: string; live?: string; ready?: string },
+  details: boolean,
 ): void {
   // Register /health endpoint
   if (endpoints.health !== undefined) {
-    ctx.router.get(endpoints.health, createHealthHandler(service, 'check'));
+    ctx.router.get(endpoints.health, createHealthHandler(service, 'check', details));
   }
 
   // Register /live endpoint
   if (endpoints.live !== undefined) {
-    ctx.router.get(endpoints.live, createHealthHandler(service, 'checkLive'));
+    ctx.router.get(endpoints.live, createHealthHandler(service, 'checkLive', details));
   }
 
   // Register /ready endpoint
   if (endpoints.ready !== undefined) {
-    ctx.router.get(endpoints.ready, createHealthHandler(service, 'checkReady'));
+    ctx.router.get(endpoints.ready, createHealthHandler(service, 'checkReady', details));
   }
 }
 
@@ -269,11 +275,21 @@ function registerHealthEndpoints(
 function createHealthHandler(
   service: HealthService,
   method: 'check' | 'checkLive' | 'checkReady',
+  details: boolean,
 ): RouteHandler {
   return async (ctx: IRequestContext): Promise<HandlerResult> => {
     const report = await service[method]();
     const statusCode = determineStatusCode(report, method);
-    return ctx.response.status(statusCode).json(report);
+    const body = details
+      ? report
+      : {
+          status: report.status,
+          timestamp: report.timestamp,
+          checks: Object.fromEntries(
+            Object.entries(report.checks).map(([name, check]) => [name, { status: check.status }]),
+          ),
+        };
+    return ctx.response.status(statusCode).json(body);
   };
 }
 

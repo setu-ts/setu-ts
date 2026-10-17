@@ -9,7 +9,7 @@ it('no filesystem remains visible in /ready at 200', async () => {
   const app = createApplication({
     plugins: [
       RuntimePlugin({ platform: 'cloudflare-workers' }),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
       StaticPlugin({ root: '/public' }),
     ],
   });

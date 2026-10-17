@@ -1,10 +1,69 @@
 /**
  * Swagger UI HTML generator.
  *
- * Serves an HTML page that loads Swagger UI from CDN and points it at the spec endpoint.
+ * Serves self-hosted assets by default, or pinned external assets with SRI.
  *
  * @module
  */
+
+/**
+ * Swagger UI asset delivery. Self-hosting requires swagger-ui-dist and runtime.fs;
+ * CDN and baseUrl modes serve the pinned 5.33.3 files with integrity checks.
+ * @since 0.10.0
+ */
+export type SwaggerOptions = {
+  /** Defaults to 'self'. A custom base must serve the pinned, unmodified files. */
+  readonly assets?: 'self' | 'cdn' | { readonly baseUrl: string };
+};
+
+/** Fixed asset inventory; no request path is ever used as a filesystem path. */
+export const SWAGGER_ASSETS = [
+  {
+    file: 'swagger-ui.css',
+    contentType: 'text/css; charset=utf-8',
+    integrity: 'sha384-Ov4/wv3j2bmct8cDc5X4ngJZohVPzEmc6uDPH8WeljUxO5vtoykvMEfbu9Vh6RaW',
+  },
+  {
+    file: 'swagger-ui-bundle.js',
+    contentType: 'application/javascript; charset=utf-8',
+    integrity: 'sha384-h00llMzD1afyNow1pDmnZKlHsUZgp9KE9HXLFXF2CvbwsBY0+WBO4f75SfGwvM4K',
+  },
+  {
+    file: 'swagger-ui-standalone-preset.js',
+    contentType: 'application/javascript; charset=utf-8',
+    integrity: 'sha384-My2aDM4r2Mbm3ybHcubKm9O9U8FEjvF/O5nGvE9YK5dzqOTbWEKa79RPJ1krdMaF',
+  },
+] as const;
+
+/** Resolves and validates delivery options at plugin construction. @internal */
+export function resolveSwaggerAssets(
+  swagger: boolean | SwaggerOptions,
+): NonNullable<SwaggerOptions['assets']> {
+  if (
+    typeof swagger !== 'boolean' &&
+    (typeof swagger !== 'object' || swagger === null || Array.isArray(swagger))
+  ) {
+    throw new TypeError('OpenApiPlugin swagger must be a boolean or options object.');
+  }
+  const assets =
+    typeof swagger === 'boolean' || swagger.assets === undefined ? 'self' : swagger.assets;
+  if (assets === 'self' || assets === 'cdn') return assets;
+  if (typeof assets === 'object' && assets !== null && typeof assets.baseUrl === 'string') {
+    const base = assets.baseUrl;
+    if (base.startsWith('/') && !base.startsWith('//'))
+      return { baseUrl: base.replace(/\/+$/, '') };
+    try {
+      const url = new URL(base);
+      if (url.protocol === 'https:' || url.protocol === 'http:')
+        return { baseUrl: base.replace(/\/+$/, '') };
+    } catch {
+      // Report the fixed configuration error below without echoing input.
+    }
+  }
+  throw new TypeError(
+    'OpenApiPlugin swagger.assets must be self, cdn, or { baseUrl } with an absolute HTTP(S) URL or / path.',
+  );
+}
 
 /**
  * Options for Swagger UI HTML generation.
@@ -12,6 +71,10 @@
  * @since 0.1.0
  */
 export interface SwaggerUiOptions {
+  /** Asset delivery mode, defaulting to self-hosting. @since 0.10.0 */
+  readonly assets?: SwaggerOptions['assets'];
+  /** Self-hosted route prefix. Defaults to '/docs'. @since 0.10.0 */
+  readonly endpoint?: string;
   /** The URL of the OpenAPI spec JSON. */
   readonly specUrl: string;
   /** The title of the page. */
@@ -31,7 +94,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
   <title>API Documentation</title>
   <link
     rel="stylesheet"
-    href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"
+    __CSS_ASSET__
   />
   <style>
     body {
@@ -46,8 +109,8 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script __BUNDLE_ASSET__></script>
+  <script __PRESET_ASSET__></script>
   <script>
     window.onload = function () {
       window.ui = SwaggerUIBundle({
@@ -104,9 +167,27 @@ function htmlEscape(str: string): string {
  *
  * @param options - Options for the UI
  * @returns The complete HTML document
+ * @throws {TypeError} If the asset mode or custom base URL is invalid
  * @since 0.1.0
  */
 export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
+  const assets = resolveSwaggerAssets(
+    typeof options === 'string'
+      ? true
+      : { ...(options.assets === undefined ? {} : { assets: options.assets }) },
+  );
+  const endpoint = typeof options === 'string' ? '/docs' : (options.endpoint ?? '/docs');
+  const baseUrl =
+    assets === 'self'
+      ? endpoint.replace(/\/+$/, '')
+      : assets === 'cdn'
+        ? 'https://unpkg.com/swagger-ui-dist@5.33.3'
+        : assets.baseUrl;
+  const attributes = SWAGGER_ASSETS.map(
+    (asset, i) =>
+      `${i === 0 ? 'href' : 'src'}="${htmlEscape(`${baseUrl}/${asset.file}`)}"` +
+      (assets === 'self' ? '' : ` integrity="${asset.integrity}" crossorigin="anonymous"`),
+  );
   const specUrl = typeof options === 'string' ? options : options.specUrl;
   const title =
     typeof options === 'string' ? 'API Documentation' : (options.title ?? 'API Documentation');
@@ -117,8 +198,9 @@ export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
 
   // Use function replacement for title to avoid JS $-pattern interpretation in replacement strings
   // (e.g., $&, $1, $2 would otherwise be treated as backreferences)
-  return HTML_TEMPLATE.replace(
-    /<title>.*?<\/title>/,
-    () => `<title>${escapedTitle}</title>`,
-  ).replace(/__SPEC_URL__/g, () => escapedSpecUrl);
+  return HTML_TEMPLATE.replace(/<title>.*?<\/title>/, () => `<title>${escapedTitle}</title>`)
+    .replace(/__SPEC_URL__/g, () => escapedSpecUrl)
+    .replace('__CSS_ASSET__', () => attributes[0]!)
+    .replace('__BUNDLE_ASSET__', () => attributes[1]!)
+    .replace('__PRESET_ASSET__', () => attributes[2]!);
 }

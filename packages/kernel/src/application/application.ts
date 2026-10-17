@@ -2132,6 +2132,18 @@ class Application implements IKernelApplication {
   #reportUnhandledError(error: Error, ctx: IRequestContext): void {
     try {
       if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
+          ...Object.assign(
+            {
+              level: 'error',
+              message: 'Unhandled request error',
+            },
+            serializeError(error),
+          ),
+          requestId: ctx.id,
+          method: ctx.request.method,
+          path: ctx.request.path,
+        });
         return;
       }
       const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
@@ -2142,8 +2154,7 @@ class Application implements IKernelApplication {
         path: ctx.request.path,
       });
     } catch {
-      // The logger itself failed or none is resolvable — no safe channel
-      // remains without violating the no-console rule; degrade silently.
+      // Reporting must never replace the original request failure.
     }
   }
 

@@ -1,5 +1,11 @@
 # @setu-ts/database-plugin
 
+Drizzle query diagnostics retain SQL with placeholders while dropping bound values before
+classification wrappers and error logs. The scrubber replaces query errors' messages and entire
+multiline stack headers, retaining only stack frames, the query and the scrubbed cause chain. Driver
+classifier fields remain available, so retry/conflict/unavailability statuses are unchanged. This
+handles Drizzle's own query wrappers; it is not a general free-text log redaction policy.
+
 Database access with the repository pattern and Unit of Work. Registers an `IDatabaseService` under
 `CAPABILITIES.DATABASE` (`'database'`).
 

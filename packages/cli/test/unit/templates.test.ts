@@ -223,8 +223,11 @@ describe('microservice template', () => {
   // tier keeps them from a different provider rather than losing the target.
   it('no longer refuses Cloudflare Workers, and swaps instead', () => {
     const swap = MICROSERVICE_TEMPLATE.runtimeSwaps?.['cloudflare-workers'];
-    expect(swap?.removePackages).toEqual(['messaging-plugin', 'queue-plugin']);
-    expect(swap?.addPlugins.map((wiring) => wiring.pkg)).toEqual(['cloudflare-plugin']);
+    expect(swap?.removePackages).toEqual(['messaging-plugin', 'queue-plugin', 'openapi-plugin']);
+    expect(swap?.addPlugins.map((wiring) => wiring.pkg)).toEqual([
+      'openapi-plugin',
+      'cloudflare-plugin',
+    ]);
   });
 
   it('swaps on Workers only, leaving the socket-capable runtimes alone', () => {

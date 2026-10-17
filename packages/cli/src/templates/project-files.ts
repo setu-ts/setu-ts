@@ -194,6 +194,7 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
     appFactoryContext: {
       ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
       ...host.appFactoryContext,
+      ...swap?.appFactoryContext,
     },
     manifest,
   };
@@ -1059,12 +1060,15 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
  * Builds the Deno `imports` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `npm:@setu-ts/…` specifier
+ * @returns Framework and template dependency specifiers mapped to npm imports
  */
 function frameworkImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const imports: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     imports[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'deno');
+  }
+  for (const [name, range] of Object.entries(host.manifest?.npmDependencies ?? {})) {
+    imports[name] = `npm:${name}@${range}`;
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.

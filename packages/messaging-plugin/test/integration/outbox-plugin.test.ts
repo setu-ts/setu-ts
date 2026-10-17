@@ -429,7 +429,7 @@ describe('MessagingPlugin outbox wiring', () => {
       buildApp({
         outbox: { store: createDatabaseOutboxStore(), relay: { schedule: false } },
         scheduler: false,
-        extra: [HealthPlugin()],
+        extra: [HealthPlugin({ details: true })],
       });
     const readOutbox = async (app: IKernelApplication) => {
       const body = (await (await app.fetch(new Request('http://localhost/health'))).json()) as {

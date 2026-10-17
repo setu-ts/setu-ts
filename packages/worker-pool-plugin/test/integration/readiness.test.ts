@@ -9,7 +9,7 @@ it('no worker host remains visible in /ready at 200', async () => {
   const app = createApplication({
     plugins: [
       RuntimePlugin({ platform: 'cloudflare-workers' }),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
       WorkerPoolPlugin(),
     ],
   });

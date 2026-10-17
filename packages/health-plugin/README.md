@@ -33,16 +33,24 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option        | Type                       | Default                                                 | Description                                  |
-| ------------- | -------------------------- | ------------------------------------------------------- | -------------------------------------------- |
-| `endpoints`   | `EndpointsOptions`         | `{ health: '/health', live: '/live', ready: '/ready' }` | Probe paths.                                 |
-| `indicators`  | `IHealthIndicator[]`       | `[]`                                                    | Indicators registered at startup.            |
-| `diagnostics` | `HealthDiagnosticsOptions` | _(absent — disabled)_                                   | Opt-in minimized health observations (M98d). |
+| Option        | Type                       | Default                                                 | Description                                                                               |
+| ------------- | -------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `endpoints`   | `EndpointsOptions`         | `{ health: '/health', live: '/live', ready: '/ready' }` | Probe paths.                                                                              |
+| `indicators`  | `IHealthIndicator[]`       | `[]`                                                    | Indicators registered at startup.                                                         |
+| `diagnostics` | `HealthDiagnosticsOptions` | _(absent — disabled)_                                   | Opt-in minimized health observations (M98d).                                              |
+| `details`     | `boolean`                  | `false`                                                 | Include indicator data and latency in HTTP responses. Non-booleans throw at construction. |
 
 Indicators passed via `indicators` are registered **before** the `onInit` drain, so they are present
 even when the lifecycle is bypassed.
 
 ## Statuses
+
+HTTP responses from `/health`, `/live`, and `/ready` default to
+`{ status, timestamp, checks: { name: { status } } }`. They omit indicator `data` and `latencyMs`,
+including runtime version and hostname. Set `HealthPlugin({ details: true })` to restore full
+reports for a dashboard; protect those endpoints when their data is sensitive.
+`HealthService.check()`, `checkLive()` and `checkReady()`, the gRPC bridge, and diagnostics retain
+full reports.
 
 An indicator reports `'up'`, `'degraded'`, or `'down'`; the overall report takes the worst status
 among them. A result that is not one of those — not an object, or a `status` outside the three — is

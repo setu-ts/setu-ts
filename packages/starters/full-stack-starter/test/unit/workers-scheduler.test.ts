@@ -42,7 +42,9 @@ describe('full-stack-starter / scheduler on Cloudflare Workers', () => {
 
   it('boots on Workers and answers /health', async () => {
     const app = createApplication({
-      plugins: onWorkers(composeFullStackPlugins({}, 'cloudflare-workers')),
+      plugins: onWorkers(
+        composeFullStackPlugins({ openapi: { swagger: { assets: 'cdn' } } }, 'cloudflare-workers'),
+      ),
     });
     await app.start();
     try {

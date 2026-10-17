@@ -233,6 +233,13 @@ export function createNodeRuntimeServices(
 
   return mergeRuntimeServices({
     platform: () => 'node',
+    reportError: (record) => {
+      try {
+        process.stderr.write(`${JSON.stringify(record)}\n`);
+      } catch {
+        // Last-resort reporting must never replace the request failure.
+      }
+    },
     version: () => host.nodeVersion,
     hostname: () => host.hostname,
     env: host.env as Readonly<Record<string, string | undefined>>,

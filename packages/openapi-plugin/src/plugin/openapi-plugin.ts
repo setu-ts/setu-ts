@@ -1,10 +1,11 @@
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, OptionalDependencyUnavailableError, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 import type { OpenApiGeneratorOptions } from '../generators/openapi-generator.ts';
 import type { IOpenApiService } from '../interfaces/openapi-service.ts';
 import { OpenApiService } from '../services/openapi-service.ts';
-import { swaggerUiHtml } from '../ui/swagger-ui.ts';
+import { resolveSwaggerAssets, SWAGGER_ASSETS, swaggerUiHtml } from '../ui/swagger-ui.ts';
+import type { SwaggerOptions } from '../ui/swagger-ui.ts';
 import { VERSION } from '../version.ts';
 
 /**
@@ -14,11 +15,12 @@ import { VERSION } from '../version.ts';
  */
 export interface OpenApiPluginOptions extends OpenApiGeneratorOptions {
   /**
-   * Whether to serve the Swagger UI HTML page.
+   * Whether to serve Swagger UI; options select self-hosted (default), pinned
+   * CDN, or custom-base assets. Self-hosting requires swagger-ui-dist and fs.
    *
    * @defaultValue true
    */
-  readonly swagger?: boolean;
+  readonly swagger?: boolean | SwaggerOptions;
 
   /**
    * Path for the Swagger UI HTML page.
@@ -54,6 +56,8 @@ export interface OpenApiPluginOptions extends OpenApiGeneratorOptions {
  *
  * @param options - Plugin options
  * @returns An `IPlugin` instance
+ * @throws {TypeError} If Swagger asset options are invalid
+ * @throws {OptionalDependencyUnavailableError} At registration if self-hosting cannot load swagger-ui-dist
  *
  * @example
  * ```typescript
@@ -89,12 +93,18 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     endpoint = '/docs',
     specEndpoint = '/openapi.json',
   } = options;
+  const assets = resolveSwaggerAssets(swagger);
+  const assetBase = endpoint.replace(/\/+$/, '');
 
   // The documentation endpoints are not part of the API being documented, so
   // they are always excluded — a spec that lists `/openapi.json` and `/docs`
   // as operations describes its own delivery mechanism, and those entries flow
   // into every generated client. Caller exclusions are added on top.
-  const excludedPaths = [specEndpoint, ...(swagger ? [endpoint] : []), ...(exclude ?? [])];
+  const excludedPaths = [
+    specEndpoint,
+    ...(swagger ? [endpoint, ...SWAGGER_ASSETS.map(({ file }) => `${assetBase}/${file}`)] : []),
+    ...(exclude ?? []),
+  ];
 
   return {
     name: 'openapi-plugin',
@@ -102,7 +112,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     provides: [CAPABILITIES.OPENAPI],
     priority: PLUGIN_PRIORITY.OPENAPI,
 
-    register(ctx: IPluginContext): void {
+    async register(ctx: IPluginContext): Promise<void> {
       // A security requirement may only name a scheme the document declares.
       // Emitting one that does not produces a document that is invalid per the
       // OpenAPI specification: Swagger UI shows a lock on every operation with
@@ -169,9 +179,38 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
 
       // Register the Swagger UI endpoint
       if (swagger) {
+        if (assets === 'self') {
+          const fs = ctx.runtime.fs;
+          if (fs === undefined) {
+            throw new Error(
+              "OpenApiPlugin self-hosted Swagger requires runtime.fs. Choose swagger: { assets: 'cdn' } or swagger: { assets: { baseUrl: '/assets' } }.",
+            );
+          }
+          let directory: string;
+          try {
+            const mod = await import('swagger-ui-dist/absolute-path.js');
+            directory = mod.default();
+          } catch (cause) {
+            const error = new OptionalDependencyUnavailableError('swagger-ui-dist', { cause });
+            error.message += " Install swagger-ui-dist, or choose swagger: { assets: 'cdn' }.";
+            throw error;
+          }
+          for (const asset of SWAGGER_ASSETS) {
+            const bytes = await fs.readFile(`${directory}/${asset.file}`);
+            ctx.router.get(`${assetBase}/${asset.file}`, (ctx) =>
+              ctx.response
+                .status(200)
+                .header('Content-Type', asset.contentType)
+                .header('Cache-Control', 'public, max-age=3600')
+                .send(bytes),
+            );
+          }
+        }
         const uiHtml = swaggerUiHtml({
           specUrl: specEndpoint,
           title: `${title ?? 'API'} - Documentation`,
+          assets,
+          endpoint,
         });
 
         ctx.router.get(endpoint, (ctx) => {
