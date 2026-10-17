@@ -433,5 +433,5 @@ observed failing. Two new Lows, both fixed inline at the maintainer's direction.
 - **Observation addressed:** a `baseUrl` carrying credentials is written into the page as given; the
   openapi README and `PUBLIC_API.md` now say it must not carry any.
 
-The R2-F5 and R2-F6 fixes (`fix commit after 4f45b8f5` onward) were NOT re-audited, at the
-maintainer's direction (2026-10-18).
+The R2-F5 and R2-F6 fixes (`c2acd661`) were NOT re-audited, at the maintainer's direction
+(2026-10-18).
