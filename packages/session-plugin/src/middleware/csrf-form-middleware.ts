@@ -34,9 +34,10 @@ const FORBIDDEN = 403;
  * Registered by the plugin at priority 325 when the `csrf` option is present:
  * after the session loads at 260, after the cheap stateless Origin/Referer check
  * at 270, and after authentication at 300 — the bearer exemption reads the
- * credential source authentication recorded, so a forged post is rejected before
- * the handler and a bearer request is exempt only when a header-credential
- * strategy authenticated it.
+ * credential source recorded and the session parked at 260, so a forged post is
+ * rejected before the handler and a bearer request is exempt only when a
+ * header-credential strategy authenticated it and it restored no session (the
+ * session is new).
  *
  * On failure it answers `403` and does **not** call `next()`, so neither
  * downstream middleware nor the handler runs.

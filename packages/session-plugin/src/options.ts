@@ -79,19 +79,26 @@ export interface CsrfFormOptions {
   readonly exclude?: readonly (string | RegExp)[];
   /**
    * Skip verification for a bearer request ONLY when a bearer (header-credential)
-   * strategy authenticated it (M113e, V9-27). Default `true`.
+   * strategy authenticated it AND the request restored no session — the session
+   * `session-plugin` parked for the request is new (M113e, V9-27, L3). Default
+   * `true`.
    *
    * Form CSRF defends credentials the BROWSER attaches by itself — the session
    * cookie. A bearer token is never attached by the browser, and a page on
    * another origin cannot add an `Authorization` header without a CORS
    * preflight the server approves, so a cross-site form cannot forge a
    * bearer-authenticated API call. The exemption is decided by the credential
-   * that actually authenticated the request, not by the header's presence: a
-   * junk bearer header beside a session cookie is still verified, and an
-   * unauthenticated bearer header is verified too — it fails closed when
-   * authentication has not run. `Basic` credentials are NOT exempt: browsers
-   * re-send cached Basic credentials automatically. `false` verifies every
-   * unsafe request, the behaviour before 0.10.0.
+   * that actually authenticated the request AND the session it restored, not by
+   * the header's presence: a request carrying a valid session cookie must
+   * present a CSRF token even with a valid bearer token, because the handler
+   * would otherwise act on that browser's session — an origin CORS lets send
+   * credentials can send its own valid bearer token beside the victim's cookie,
+   * authenticating as the attacker while the session middleware restored the
+   * victim's session (M113e, L3). A non-browser API client sends no session
+   * cookie, so its new session keeps the exemption. It fails closed when the
+   * session or the credential source is missing. `Basic` credentials are NOT
+   * exempt: browsers re-send cached Basic credentials automatically. `false`
+   * verifies every unsafe request, the behaviour before 0.10.0.
    *
    * Requires authentication to run before form CSRF, which the default
    * priorities guarantee (300 then 325).

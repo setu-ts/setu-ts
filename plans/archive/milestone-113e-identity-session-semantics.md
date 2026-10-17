@@ -346,3 +346,21 @@ did, and form CSRF reads it: `exemptBearer` and a bearer header are not enough, 
 code rather than documented: the stated boundary — the exemption trusting every origin CORS lets
 send `Authorization` with credentials — no longer exists, and the documentation that carried it was
 replaced by the new rule.
+
+### Committed-tree audit, round 3 (same independent auditor, `d36f019d`) — failed
+
+L1 (the CodeRabbit Major) is now closed in code by the credential-source rule: the round-1 junk
+bearer header beside the session cookie (R1) is refused `403`. 17 negative controls observed
+failing. One new Low, fixed in code.
+
+- **L3 — a CORS-approved credentialed origin with its own valid bearer token beside the victim's
+  cookie was exempt yet acted on the victim's session.** An origin allowed `credentials: true` and
+  `Authorization` can send its own VALID bearer token — authenticating as the attacker, source
+  `'header'` — beside the victim's session cookie, which the session middleware (260) has already
+  restored (`isNew` false). The credential-source rule exempted the request (a `'header'` strategy
+  authenticated it), so a mutating handler wrote into the victim's session, or
+  `POST <basePath>/logout` signed them out. Fixed by also requiring the request to have restored no
+  session: the exemption now additionally reads the session `session-plugin` parks under
+  `SESSION_STATE_KEY` and exempts only when it is new (`isNew === true`), failing closed when the
+  session or the credential source is missing. A non-browser API client sends no session cookie, so
+  its new session keeps the exemption.

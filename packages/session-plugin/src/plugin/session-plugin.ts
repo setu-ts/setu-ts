@@ -32,7 +32,7 @@ const MIDDLEWARE_PRIORITY = {
   /**
    * After the session loads (260), after authentication (300) and before
    * authorization (350): the bearer exemption reads the credential source
-   * authentication recorded, so it must run after it.
+   * recorded and the session loaded, so it must run after both.
    */
   CSRF_FORM: 325,
 } as const;

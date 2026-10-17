@@ -1,11 +1,13 @@
 /**
- * V9-27 through a REAL kernel application (M113e plan §3.2): an application
- * serving both browser forms and a bearer-authenticated JSON API, with form
- * CSRF on. A JWT request reaches its handler with no form token; a forged
- * form post, a Basic request, a junk bearer header beside the session
- * cookie of a signed-in user — and, with `exemptBearer: false`, a bearer
- * request — are each refused `403` before the handler runs, through BOTH
- * entry points (the middleware and `verifyCsrfToken`).
+ * V9-27 and L3 through a REAL kernel application (M113e plan §3.2): an
+ * application serving both browser forms and a bearer-authenticated JSON API,
+ * with form CSRF on. A JWT request with no session cookie reaches its handler
+ * with no form token; a forged form post, a Basic request, a junk bearer
+ * header beside the session cookie of a signed-in user, a VALID bearer token
+ * beside the session cookie of a signed-in user (L3: it would write to the
+ * victim's session) — and, with `exemptBearer: false`, a bearer request — are
+ * each refused `403` before the handler runs, through BOTH entry points (the
+ * middleware and `verifyCsrfToken`).
  *
  * @module
  */
@@ -50,6 +52,19 @@ async function start(csrf: CsrfFormOptions = {}) {
     getSession(ctx).set('sub', 'session-user');
     return ctx.response.json({ ok: true });
   });
+  // The L3 damage: a mutating endpoint that writes to the caller's session. If
+  // the exemption wrongly covers a restored session, a cross-site request
+  // writes here even though it carries no form token.
+  app.router.post('/api/preferences', (ctx) => {
+    ran.push('preferences');
+    getSession(ctx).set('prefs', { theme: 'dark' });
+    return ctx.response.json({ ok: true });
+  });
+  // Read the session data back, to prove the victim's session was not written.
+  app.router.get('/me', (ctx) => {
+    const session = getSession(ctx);
+    return ctx.response.json({ sub: session.get('sub'), prefs: session.get('prefs') });
+  });
   app.router.post('/api/orders', {
     middleware: [requireAuth()],
     handler: (ctx) => {
@@ -92,6 +107,16 @@ async function signInCookie(app: IKernelApplication): Promise<string> {
     .join('; ');
   expect(cookie.length).toBeGreaterThan(0);
   return cookie;
+}
+
+/** Reads the session back through its cookie, to inspect what it holds. */
+async function readBack(
+  app: IKernelApplication,
+  cookie: string,
+): Promise<{ sub: string | null; prefs: unknown }> {
+  const me = await app.fetch(new Request('http://localhost/me', { headers: { cookie } }));
+  expect(me.status).toBe(200);
+  return (await me.json()) as { sub: string | null; prefs: unknown };
 }
 
 describe('form CSRF beside a bearer API (V9-27)', () => {
@@ -154,6 +179,30 @@ describe('form CSRF beside a bearer API (V9-27)', () => {
       });
       expect(status).toBe(403);
       expect(ran).toEqual([]);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // The L3 attack: an origin CORS lets send credentials holds ITS OWN valid
+  // bearer token and sends it beside the victim's session cookie. The request
+  // authenticates as the attacker (header source) while the session middleware
+  // restores the victim's session, so a handler here would write into the
+  // victim's session. The exemption now requires the request to have restored
+  // no session, so this is verified and refused.
+  it('refuses the attacker JWT beside the victim cookie (L3): no write to the victim session', async () => {
+    const { app, ran } = await start();
+    try {
+      const cookie = await signInCookie(app);
+      const status = await post(app, '/api/preferences', {
+        cookie,
+        authorization: `Bearer ${await token(app)}`,
+      });
+      expect(status).toBe(403);
+      expect(ran).toEqual([]);
+      const session = await readBack(app, cookie);
+      expect(session.sub).toBe('session-user');
+      expect(session.prefs).toBeUndefined();
     } finally {
       await app.stop();
     }

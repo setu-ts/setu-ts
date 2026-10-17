@@ -17,19 +17,25 @@ All notable changes to this project are documented here. The format follows
   every tenant with no grant rows. Migration: issue grants, or set
   `scopedRbac.principalAuthorityIsGlobal: true` to restore the old answer (still subject to
   `grantableIn`). The unscoped `requireRole` and `requirePermission` guards are unchanged.
-- **Breaking form CSRF: a bearer request is exempt only when a bearer strategy authenticated it
-  (M113e, 0.10.0, `@setu-ts/session-plugin`).** With `SessionPlugin({ csrf: {} })`, a request
-  carrying `Authorization: Bearer <token>` skips form-CSRF verification only when a bearer
-  (header-credential) strategy authenticated it, so a JWT- or API-token-authenticated JSON API in
-  the same application reaches its guard instead of answering `403`. The exemption is decided by the
-  credential that authenticated the request, not by the header's presence: a junk bearer header
-  beside a session cookie is still verified, and an unauthenticated bearer header is verified too
-  (it fails closed when authentication has not run). For that, the form-CSRF middleware moved from
-  priority 275 to 325 — after authentication (300), before authorization (350) — so the credential
-  source authentication recorded (the `IAuthStrategy.credential` member, published under common's
-  `CREDENTIAL_SOURCE_STATE_KEY`) exists when the check runs. `Basic` credentials are not exempt. A
-  non-boolean `exemptBearer` is refused with a `TypeError`. `csrf.exemptBearer: false` restores the
-  previous refusal; `csrfFormMiddleware` and `verifyCsrfToken` honour the option alike.
+- **Breaking form CSRF: a bearer request is exempt only when a bearer strategy authenticated it and
+  it restored no session (M113e, 0.10.0, `@setu-ts/session-plugin`).** With
+  `SessionPlugin({ csrf: {} })`, a request carrying `Authorization: Bearer <token>` skips form-CSRF
+  verification only when a bearer (header-credential) strategy authenticated it AND it restored no
+  session — the session `session-plugin` parks is new — so a JWT- or API-token-authenticated JSON
+  API in the same application reaches its guard instead of answering `403`. The exemption is decided
+  by the credential that authenticated the request and the session it restored, not by the header's
+  presence: a request carrying a valid session cookie must present a token even with a valid bearer
+  token, because the handler would otherwise act on that browser's session (an origin CORS lets send
+  credentials can send its own valid bearer token beside the victim's cookie, M113e, L3). A
+  non-browser API client sends no session cookie, so its new session keeps the exemption; a junk
+  bearer header beside a session cookie is still verified, and an unauthenticated bearer header is
+  verified too (it fails closed when the session or the credential source is missing). For that, the
+  form-CSRF middleware moved from priority 275 to 325 — after authentication (300), before
+  authorization (350) — so the credential source authentication recorded (the
+  `IAuthStrategy.credential` member, published under common's `CREDENTIAL_SOURCE_STATE_KEY`) and the
+  session it parks exist when the check runs. `Basic` credentials are not exempt. A non-boolean
+  `exemptBearer` is refused with a `TypeError`. `csrf.exemptBearer: false` restores the previous
+  refusal; `csrfFormMiddleware` and `verifyCsrfToken` honour the option alike.
 - **Breaking session storage: anonymous sessions stay in the cookie on the store strategy (M113e,
   0.10.0, `@setu-ts/session-plugin`).** A session holding only the form-CSRF token and the tenant
   binding is sealed into the cookie and writes no store row, so 200 anonymous form views no longer
