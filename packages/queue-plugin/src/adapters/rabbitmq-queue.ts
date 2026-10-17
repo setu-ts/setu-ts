@@ -120,7 +120,8 @@ async function resolveClient(
 /**
  * Parses a message body as a stored job.
  * @param payload - The body as UTF-8 text
- * @returns The job, or `null` when the body is not JSON or not a job object with a string `id`
+ * @returns The job, or `null` when the body is not JSON, not an object, or lacks a string `id` or
+ *   `name`, `data`, or a finite `attempts`, `maxAttempts` or `availableAtMs`
  */
 function parseStoredJob<T>(payload: string): StoredJob<T> | null {
   let value: unknown;
@@ -130,7 +131,16 @@ function parseStoredJob<T>(payload: string): StoredJob<T> | null {
     return null;
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  return typeof (value as { id?: unknown }).id === 'string' ? (value as StoredJob<T>) : null;
+  const job = value as Record<string, unknown>;
+  const finite = (key: string): boolean => Number.isFinite(job[key]);
+  return typeof job['id'] === 'string' &&
+    typeof job['name'] === 'string' &&
+    'data' in job &&
+    finite('attempts') &&
+    finite('maxAttempts') &&
+    finite('availableAtMs')
+    ? (value as StoredJob<T>)
+    : null;
 }
 
 /** Bound on one whole connection attempt, TCP and AMQP handshake together, in ms. */

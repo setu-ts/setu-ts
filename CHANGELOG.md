@@ -22,9 +22,10 @@ All notable changes to this project are documented here. The format follows
   now return. Redis and RabbitMQ reject stale settlements with internal `StaleClaimError`, reported
   as failed settlement while leaving the current delivery intact. Make processors idempotent. A
   Redis client without `eval` retains the prior behavior (no claims or reclaim), with one warning
-  that `visibilityTimeoutMs` is inactive. The claim is renewed while an over-budget job's `onFailed`
-  runs. Due jobs are still selected by the reserving replica's clock, so skew between an application
-  host and Redis does not shift delays.
+  that `visibilityTimeoutMs` is inactive, sent through the connection-error reporter when one is
+  configured (`QueuePlugin` always configures one). The claim is renewed while an over-budget job's
+  `onFailed` runs. Due jobs are still selected by the reserving replica's clock, so skew between an
+  application host and Redis does not shift delays.
 - **RabbitMQ queue connection bound and unreadable messages (M113c).** Each connection attempt
   `RabbitMqQueue` makes is bounded at 10 seconds in total, so a broker that never answers, or
   answers too slowly, is retried; a connection that opens late is closed. A ready-queue message

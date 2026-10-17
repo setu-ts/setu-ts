@@ -167,7 +167,14 @@ describe('RabbitMQ queue reconnect', () => {
     await queue.connect();
     try {
       const channel = connection.channels[0];
-      const bad = ['"string"', 'not json', '[1]', '{"id":7}'];
+      const bad = [
+        '"string"',
+        'not json',
+        '[1]',
+        '{"id":7}',
+        '{"id":"x"}',
+        '{"id":"x","name":"email","data":1,"attempts":"1","maxAttempts":3,"availableAtMs":0}',
+      ];
       channel.publish('', 'he.queue.email.ready', Buffer.from(bad[0]));
       await queue.enqueue(job);
       for (const body of bad.slice(1))

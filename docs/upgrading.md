@@ -20,11 +20,11 @@ caller-owned.
 
 Redis queues now use a renewed 30000 ms delivery lease (`visibilityTimeoutMs`, from `1000` to
 `2147483647`, on both RedisQueue and QueuePlugin). Redis 5+ and `eval` are required for the lease; a
-minimal injected client without `eval` keeps the old behavior with one connection-error report
-naming the inactive option. The service renews every third of the lease while a processor runs, with
-no overlap, and reports renewal failure once. Raise the duration for expected event-loop pauses;
-delivery remains at least once, so make processors idempotent. A live stuck processor keeps renewing
-and is not reclaimed.
+minimal injected client without `eval` keeps the old behavior, with one connection-error report
+naming the inactive option when a reporter is configured (`QueuePlugin` always configures one). The
+service renews every third of the lease while a processor runs, with no overlap, and reports renewal
+failure once. Raise the duration for expected event-loop pauses; delivery remains at least once, so
+make processors idempotent. A live stuck processor keeps renewing and is not reclaimed.
 
 **Drain old replicas before upgrading.** Their processing scores are immediately expired under the
 new model; stuck jobs return on reserve. Each abandoned lease counts as an attempt, and dispatch

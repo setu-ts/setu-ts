@@ -7086,22 +7086,22 @@ redelivery, possibly with the original attempt count. Disconnect stops scheduled
 disposes listeners.
 
 **Delivery claims (0.10.0).** RabbitMQ uses a fresh runtime UUID for each delivery. Redis 5+ uses
-atomic Lua scripts, server `TIME` for due jobs and lease deadlines, and
-`INCR <keyPrefix><name>:claimseq` tokens shared across replicas. Redis's `visibilityTimeoutMs` (also
-a flat `QueuePluginOptions` field) defaults to `30000`, must be from `1000` to `2147483647`, and is
-validated at adapter and Redis plugin construction. The service renews every
-`Math.floor(visibilityTimeoutMs / 3)` ms with no overlapping calls and reports a failed or false
-renewal once per delivery, while the processor continues. Each reserve reclaims up to its limit of
-expired claims and removes payload-less orphans. Attempts become `max(stored attempts, 1) + stalls`;
-dispatch dead-letters an over-budget job without running it. Successful settlement clears the claim
-and stalls. Redis and RabbitMQ reject stale ack, requeue and dead-letter calls with internal
-`StaleClaimError` (not barrel-exported); the service reports failed settlement and the new delivery
-remains intact. These tokens fence deliveries, not Redis writers; ACLs remain the boundary. Delivery
-is at least once, including on pauses longer than the Redis lease. A live stuck processor keeps
-renewing. Drain older replicas before upgrading: their processing entries are immediately
-reclaimable. An injected Redis facade without `eval` retains the prior multi-command behavior, no
-claims or reclaim, and `connect()` reports once through the connection-error reporter that
-`visibilityTimeoutMs` is inactive.
+atomic Lua scripts, server `TIME` for lease deadlines, the reserving replica's `nowMs` (the clock
+that wrote `availableAtMs`) to decide which jobs are due, and `INCR <keyPrefix><name>:claimseq`
+tokens shared across replicas. Redis's `visibilityTimeoutMs` (also a flat `QueuePluginOptions`
+field) defaults to `30000`, must be from `1000` to `2147483647`, and is validated at adapter and
+Redis plugin construction. The service renews every `Math.floor(visibilityTimeoutMs / 3)` ms with no
+overlapping calls and reports a failed or false renewal once per delivery, while the processor
+continues. Each reserve reclaims up to its limit of expired claims and removes payload-less orphans.
+Attempts become `max(stored attempts, 1) + stalls`; dispatch dead-letters an over-budget job without
+running it. Successful settlement clears the claim and stalls. Redis and RabbitMQ reject stale ack,
+requeue and dead-letter calls with internal `StaleClaimError` (not barrel-exported); the service
+reports failed settlement and the new delivery remains intact. These tokens fence deliveries, not
+Redis writers; ACLs remain the boundary. Delivery is at least once, including on pauses longer than
+the Redis lease. A live stuck processor keeps renewing. Drain older replicas before upgrading: their
+processing entries are immediately reclaimable. An injected Redis facade without `eval` retains the
+prior multi-command behavior, no claims or reclaim, and `connect()` reports once through the
+connection-error reporter, when one is configured, that `visibilityTimeoutMs` is inactive.
 
 ### Declarative processors and behaviours
 
