@@ -21,6 +21,7 @@ export interface ApiKeyStrategyOptions {
  */
 export class ApiKeyStrategy implements IAuthStrategy {
   readonly name = 'api-key';
+  readonly credential = 'header' as const;
   private readonly header: string;
   private readonly validate: (key: string) => Promise<IPrincipal | null>;
 

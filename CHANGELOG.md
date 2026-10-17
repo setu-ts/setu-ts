@@ -8,6 +8,50 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking scoped RBAC: principal authority no longer counts in every scope (M113e, 0.10.0,
+  `@setu-ts/auth-plugin`).** A scoped check (`requireScopedRole`, `requireScopedPermission`,
+  `@ScopedRoles`, `@ScopedPermissions`) is now decided by grants alone: the `roles` and
+  `permissions` a principal carries itself — a JWT `roles` claim, a `'*'` permission — count in no
+  scope. Before, each principal role was a global grant and each principal permission satisfied
+  every scoped permission check, so a token role `admin` passed `requireScopedRole('admin')` in
+  every tenant with no grant rows. Migration: issue grants, or set
+  `scopedRbac.principalAuthorityIsGlobal: true` to restore the old answer (still subject to
+  `grantableIn`). The unscoped `requireRole` and `requirePermission` guards are unchanged.
+- **Breaking form CSRF: a bearer request is exempt only when a bearer strategy authenticated it and
+  it restored no session (M113e, 0.10.0, `@setu-ts/session-plugin`).** With
+  `SessionPlugin({ csrf: {} })`, a request carrying `Authorization: Bearer <token>` skips form-CSRF
+  verification only when a bearer (header-credential) strategy authenticated it AND it restored no
+  session — the session `session-plugin` parks is new — so a JWT- or API-token-authenticated JSON
+  API in the same application reaches its guard instead of answering `403`. The exemption is decided
+  by the credential that authenticated the request and the session it restored, not by the header's
+  presence: a request carrying a valid session cookie must present a token even with a valid bearer
+  token, because the handler would otherwise act on that browser's session (an origin CORS lets send
+  credentials can send its own valid bearer token beside the victim's cookie, M113e, L3). A
+  non-browser API client sends no session cookie, so its new session keeps the exemption. A request
+  the bearer rule exempts also gets no browser session: whatever its handler writes to the session
+  is not committed and no `Set-Cookie` is sent (M113e, L4), so it cannot plant a session in a
+  browser whose cookie no longer restores. Otherwise, a junk bearer header beside a session cookie
+  is still verified, and an unauthenticated bearer header is verified too (it fails closed when the
+  session or the credential source is missing). For that, the form-CSRF middleware moved from
+  priority 275 to 325 — after authentication (300), before authorization (350) — so the credential
+  source authentication recorded (the `IAuthStrategy.credential` member, published under common's
+  `CREDENTIAL_SOURCE_STATE_KEY`) and the session it parks exist when the check runs. `Basic`
+  credentials are not exempt. A non-boolean `exemptBearer` is refused with a `TypeError`.
+  `csrf.exemptBearer: false` restores the previous refusal; `csrfFormMiddleware` and
+  `verifyCsrfToken` honour the option alike.
+- **Breaking session storage: anonymous sessions stay in the cookie on the store strategy (M113e,
+  0.10.0, `@setu-ts/session-plugin`).** A session holding only the form-CSRF token and the tenant
+  binding is sealed into the cookie and writes no store row, so 200 anonymous form views no longer
+  add 200 rows (measured against Redis). The first write of any other key moves the session into the
+  store, rotating its id so a copied anonymous cookie can never read the signed-in row; a commit
+  leaving only those keys on a stored session deletes its row. During a rolling deploy, an older
+  replica reading such a cookie starts a fresh session, so an anonymous form loses its token once;
+  signed-in sessions are unaffected.
+- **Breaking password hashing default (M113e, 0.10.0, `@setu-ts/auth-plugin`).** `PasswordHasher`
+  now hashes with PBKDF2-SHA256 at 600,000 iterations (OWASP 2023), up from 100,000; a hash costs
+  about 80 ms on Node instead of 15 ms. Existing hashes keep verifying, because `verify` reads the
+  count stored in each hash. A deployed Cloudflare Worker is reported to refuse counts above 100,000
+  (unverified against a deployed Worker): pass `{ iterations: 100_000 }` there.
 - **Breaking recovery and shutdown behaviour (M113c, 0.10.0).** RabbitMQ queue faults now reconnect
   automatically through the shared common supervisor; unacked jobs may be redelivered with their
   original attempt count. Make processors idempotent. Deno HTTP close now waits for the first of
@@ -149,6 +193,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`PasswordHasherOptions` and `PasswordHasher.needsRehash` (M113e, `@setu-ts/auth-plugin`).**
+  `new PasswordHasher(runtime, { iterations })` sets the count for new hashes (100,000–10,000,000,
+  refused at construction otherwise, `NaN` included); `needsRehash(stored)` reports a hash made with
+  fewer iterations so the application can replace it on the next successful sign-in, and never asks
+  to downgrade one.
+- **`scopedRbac.principalAuthorityIsGlobal` and `csrf.exemptBearer` (M113e).** The opt-outs for the
+  two breaking defaults above.
 - **Scheduler lock reachability (M113b).** `IDistributedLock` gains optional
   `isHealthy?(): Promise<boolean | undefined>` and `IRedisLockClient` gains optional
   `ping?(): Promise<unknown>`. The scheduler indicator adds `data.lock.reachable` (`true` / `false`

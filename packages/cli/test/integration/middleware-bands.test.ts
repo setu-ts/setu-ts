@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
 import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
@@ -68,7 +69,7 @@ const COMPOSITIONS: Readonly<Record<string, () => readonly IPlugin[]>> = {
   'tenant resolution': () => [MultiTenancyPlugin({ resolver: 'header' })],
   'request logging': () => [LoggerPlugin({ requestLogging: true })],
   // Every optional concern switched on, so the band's ends are both observed.
-  'HTTP security, session and form CSRF': () => [
+  'HTTP security, session, authentication and form CSRF': () => [
     HttpSecurityPlugin({
       cors: { origin: ['https://example.test'] },
       csrf: {},
@@ -76,6 +77,7 @@ const COMPOSITIONS: Readonly<Record<string, () => readonly IPlugin[]>> = {
       ipSecurity: {},
     }),
     SessionPlugin({ secret: 'a-test-secret-that-is-at-least-32-bytes-long', csrf: {} }),
+    AuthPlugin({ jwt: { secret: 'a-test-jwt-secret-that-is-at-least-32-bytes' } }),
   ],
 };
 

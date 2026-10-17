@@ -6362,6 +6362,34 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the path, not the cache key); the committed-tree audit failed on one Low (F1, a custom cache's
   rejection message reaching the log), fixed by logging the error class only and NOT re-audited, at
   the maintainer's direction — complete (PR #465)
+- **Milestone 113e** (`packages/auth-plugin` + `packages/session-plugin` — identity and session
+  semantics a client cannot predict; V9-28, V9-27, V9-46, V9-50; every option the recommended one,
+  maintainer decision 2026-10-17). Scoped checks are decided by grants alone: a principal's own
+  `roles` and `permissions` (including `'*'`) count in no scope unless
+  `scopedRbac.principalAuthorityIsGlobal: true`, the pre-0.10.0 answer. The opt-in covers
+  permissions too, because `#holdsDirectly` let a token `'*'` pass every scoped permission check,
+  and the unscoped guards are unchanged. Form CSRF skips `Authorization: Bearer <token>` by default
+  (`csrf.exemptBearer: false` restores the refusal), through one `isCsrfExempt` both
+  `csrfFormMiddleware` and `verifyCsrfToken` call. `Basic` is never exempt, because browsers re-send
+  it. On the store strategy a session holding only the CSRF token and the tenant binding is sealed
+  into the cookie under a `held: 'cookie'` marker and writes no row, so 200 anonymous form views
+  write 0 rows instead of 200 (measured on a real Redis, 200 with the rule disabled). Promotion to
+  the store happens on the first other key, and demotion deletes the row so an id-only replay
+  restores nothing. `PasswordHasher` defaults to 600,000 iterations (79 ms vs 15 ms on Node), with
+  `PasswordHasherOptions.iterations` (100,000–10,000,000) and `needsRehash`. A deployed Worker's
+  reported 100,000 limit is documented and unverified; local workerd accepts 600,000. The security
+  audit failed round 1 on two Lows — the docs' bearer justification was false under path-scoped CORS
+  (now documented as trusting every origin CORS lets send `Authorization` with credentials), and a
+  non-boolean `exemptBearer` failed open (now refused) — and observed that fixation without
+  `regenerate()` was only reduced, so promotion now rotates the session id; round 2 passed on
+  `46acb5dd`. CodeRabbit then raised the bearer boundary as Major, and a framework survey found no
+  framework exempting on a bare header (Django REST Framework enforces CSRF only when session auth
+  succeeded), so the exemption became credential-based: strategies declare `credential`, the auth
+  middleware records it under `CREDENTIAL_SOURCE_STATE_KEY`, and form CSRF moves from priority 275
+  to 325. Rounds 3 and 4 narrowed it twice more: a bearer request is exempt only when it restored no
+  session (L3, an attacker's own valid token beside the victim's cookie), and such a request gets no
+  browser session committed (L4, session planting). The L4 fix was not re-audited, at the
+  maintainer's direction — complete (PR #467)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

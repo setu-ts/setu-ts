@@ -83,25 +83,49 @@ describe('scoped-rbac policy — evaluation', () => {
     expect(await check(harness, 'perm:invoices:approve', null, principal('u1'))).toBe(false);
   });
 
-  it("treats the principal's own roles as global grants and its permissions as held", async () => {
-    const harness = withGrants([]);
-    expect(
-      await check(harness, 'perm:invoices:read', T1, principal('x', { roles: ['viewer'] })),
-    ).toBe(true);
-    expect(
-      await check(
-        harness,
-        'perm:invoices:approve',
-        T1,
-        principal('x', { permissions: ['invoices:approve'] }),
-      ),
-    ).toBe(true);
-    expect(
-      await check(harness, 'perm:invoices:approve', T1, principal('x', { permissions: ['*'] })),
-    ).toBe(true);
-    expect(
-      await check(harness, 'perm:invoices:approve', T1, principal('x', { permissions: ['other'] })),
-    ).toBe(false);
+  describe("the principal's own authority (M113e, V9-28)", () => {
+    const viewer = principal('x', { roles: ['viewer'] });
+    const approverPerm = principal('x', { permissions: ['invoices:approve'] });
+    const wildcard = principal('x', { permissions: ['*'] });
+    const other = principal('x', { permissions: ['other'] });
+
+    it('ignores principal roles and permissions in a scope that granted nothing (default)', async () => {
+      const harness = withGrants([]);
+      expect(harness.config.principalAuthorityIsGlobal).toBe(false);
+      expect(await check(harness, 'perm:invoices:read', T1, viewer)).toBe(false);
+      expect(await check(harness, 'role:viewer', T1, viewer)).toBe(false);
+      expect(await check(harness, 'perm:invoices:approve', T1, approverPerm)).toBe(false);
+      expect(await check(harness, 'perm:invoices:approve', T1, wildcard)).toBe(false);
+    });
+
+    it('ignores them for a global check too, so only grants decide (default)', async () => {
+      const harness = withGrants([]);
+      expect(await check(harness, 'perm:invoices:read', null, viewer)).toBe(false);
+      expect(await check(harness, 'perm:invoices:approve', null, wildcard)).toBe(false);
+    });
+
+    it('still allows on a real grant while ignoring principal authority (default)', async () => {
+      const harness = withGrants([{ subject: 'x', role: 'viewer', scope: T1 }]);
+      expect(await check(harness, 'perm:invoices:read', T1, viewer)).toBe(true);
+      expect(await check(harness, 'perm:invoices:read', T2, viewer)).toBe(false);
+    });
+
+    it('counts them in every scope with principalAuthorityIsGlobal: true', async () => {
+      const harness = withGrants([], { principalAuthorityIsGlobal: true });
+      expect(await check(harness, 'perm:invoices:read', T1, viewer)).toBe(true);
+      expect(await check(harness, 'role:viewer', T2, viewer)).toBe(true);
+      expect(await check(harness, 'perm:invoices:approve', T1, approverPerm)).toBe(true);
+      expect(await check(harness, 'perm:invoices:approve', T1, wildcard)).toBe(true);
+      expect(await check(harness, 'perm:invoices:approve', T1, other)).toBe(false);
+    });
+
+    it('still applies grantableIn to a principal role made global', async () => {
+      const harness = withGrants([], {
+        principalAuthorityIsGlobal: true,
+        grantableIn: { viewer: { scopeTypes: ['tenant'], global: false } },
+      });
+      expect(await check(harness, 'perm:invoices:read', T1, viewer)).toBe(false);
+    });
   });
 
   it('never resolves a prototype member as a role', async () => {

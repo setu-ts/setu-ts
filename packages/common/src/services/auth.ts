@@ -111,6 +111,15 @@ export interface IAuthStrategy {
   /** Strategy name for identification. */
   readonly name: string;
   /**
+   * Where this strategy reads its credential. `'header'` — a credential the client sends explicitly (a bearer or
+   * API-key header); `'cookie'` — one the browser attaches by itself (a session cookie). Read by form CSRF: only a
+   * request authenticated by a `'header'` strategy may skip the synchronizer-token check. Absent is treated as
+   * `'cookie'` (fail closed).
+   *
+   * @since 0.10.0
+   */
+  readonly credential?: 'header' | 'cookie';
+  /**
    * Attempt to authenticate the request.
    *
    * @param request - The incoming request

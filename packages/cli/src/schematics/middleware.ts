@@ -48,7 +48,7 @@ export const FRAMEWORK_MIDDLEWARE_BANDS: readonly FrameworkMiddlewareBand[] = [
   { from: 30, to: 30, owner: 'telemetry' },
   { from: 40, to: 40, owner: 'tenant resolution' },
   { from: 100, to: 100, owner: 'request logging' },
-  { from: 120, to: 275, owner: 'HTTP security, session and form CSRF' },
+  { from: 120, to: 325, owner: 'HTTP security, session, authentication and form CSRF' },
 ];
 
 /**

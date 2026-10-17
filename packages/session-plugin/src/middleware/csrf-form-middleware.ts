@@ -22,7 +22,7 @@ import type { CsrfFormOptions } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
 import { CSRF_CONFIG_STATE_KEY } from '../csrf/token.ts';
 import type { PublishedCsrfConfig } from '../csrf/token.ts';
-import { isCsrfExcluded } from '../csrf/exclude.ts';
+import { applyCsrfExemption } from '../csrf/exclude.ts';
 import { verifyWithConfig } from '../csrf/verify.ts';
 
 /** Status returned when verification fails. */
@@ -31,10 +31,13 @@ const FORBIDDEN = 403;
 /**
  * Builds the form-CSRF middleware.
  *
- * Registered by the plugin at priority 275 when the `csrf` option is present:
+ * Registered by the plugin at priority 325 when the `csrf` option is present:
  * after the session loads at 260, after the cheap stateless Origin/Referer check
- * at 270, and before authentication at 300 so a forged post is rejected before
- * any credential work happens.
+ * at 270, and after authentication at 300 — the bearer exemption reads the
+ * credential source recorded and the session parked at 260, so a forged post is
+ * rejected before the handler and a bearer request is exempt only when a
+ * header-credential strategy authenticated it and it restored no session (the
+ * session is new).
  *
  * On failure it answers `403` and does **not** call `next()`, so neither
  * downstream middleware nor the handler runs.
@@ -46,7 +49,7 @@ const FORBIDDEN = 403;
  * // Registered automatically:
  * SessionPlugin({ secret, csrf: {} });
  * // Or standalone, e.g. on a test app built with `autoStart: false`:
- * app.middleware.add(csrfFormMiddleware({ headerName: 'x-csrf-token' }), { priority: 275 });
+ * app.middleware.add(csrfFormMiddleware({ headerName: 'x-csrf-token' }), { priority: 325 });
  * ```
  * @since 0.2.0
  */
@@ -74,7 +77,7 @@ export function csrfFormMiddleware(options: CsrfFormOptions = {}): MiddlewareFun
 
     if (
       config.ignoreMethods.has(ctx.request.method.toUpperCase()) ||
-      isCsrfExcluded(ctx, options.exclude)
+      applyCsrfExemption(ctx, config, options.exclude)
     ) {
       await next();
       return;

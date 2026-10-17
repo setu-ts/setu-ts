@@ -136,7 +136,7 @@ export interface RestStarterOptions {
    * which is what `auth` covers.
    *
    * Setting `csrf` additionally registers the synchronizer-token middleware at
-   * priority 275, which is the check a progressive-enhancement `<Form>` post
+   * priority 325, which is the check a progressive-enhancement `<Form>` post
    * can satisfy — unlike the stateless Origin/Referer check that
    * `httpSecurity` performs, which a form structurally cannot. Running both is
    * intended.

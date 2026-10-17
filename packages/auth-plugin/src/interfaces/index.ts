@@ -857,6 +857,20 @@ export interface ScopedRbacOptions {
   readonly grantableIn?: Readonly<Record<string, ScopedRoleLimit>>;
   /** Per-scope custom roles, bundling catalogue permissions only. */
   readonly customRoles?: IScopedRoleSource | RegistryFactory<IScopedRoleSource>;
+  /**
+   * Whether the authority a principal carries itself — its `roles` and its
+   * `permissions` (including `'*'`) — counts in EVERY scope (M113e, V9-28).
+   * Default `false`: a scoped check is decided by grants alone, so a token
+   * role `admin` does not pass `requireScopedRole('admin')` in a tenant that
+   * granted it nothing. `true` restores the behaviour before 0.10.0: each
+   * principal role is a global grant (still limited by `grantableIn`) and
+   * each principal permission satisfies every scoped permission check. The
+   * unscoped guards (`requireRole`, `requirePermission`) read the principal
+   * either way.
+   *
+   * @since 0.10.0
+   */
+  readonly principalAuthorityIsGlobal?: boolean;
   /** When grants are resolved (default `'request'`). */
   readonly timing?: ScopedRbacTiming;
   /** The deadline on every source and resolver call, 1–60 000 ms (default 2 000). */

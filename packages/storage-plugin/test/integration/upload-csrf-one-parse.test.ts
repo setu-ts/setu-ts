@@ -1,7 +1,7 @@
 /**
  * M94b e2e: one multipart POST, two first-party consumers.
  *
- * `csrfFormMiddleware` runs globally at priority 275, AHEAD of the route's
+ * `csrfFormMiddleware` runs globally at priority 325, AHEAD of the route's
  * upload middleware. With the shared accessor, both read the SAME `FormBody`:
  * a token in a multipart FIELD now verifies (before this milestone the
  * request could only `403`), and the file is still delivered. The one-parse
@@ -47,8 +47,8 @@ function formStashPlugin(): IPlugin {
         }
         await next();
       };
-      // CSRF_FORM is 275; 300 runs after it and before the route middleware.
-      ctx.middleware.add(stash, { name: 'form-stash', priority: 300 });
+      // CSRF_FORM is 325; 330 runs after it and before the route middleware.
+      ctx.middleware.add(stash, { name: 'form-stash', priority: 330 });
     },
   };
 }

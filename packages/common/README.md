@@ -273,6 +273,7 @@ package fits the plugin architecture.
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
+| `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |

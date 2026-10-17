@@ -56,6 +56,7 @@ export type {
 
 // Exported utilities
 export { MalformedPasswordHashError, PasswordHasher } from './services/password-hasher.ts';
+export type { PasswordHasherOptions } from './services/password-hasher.ts';
 
 // Middleware
 export { authMiddleware } from './middleware/auth-middleware.ts';

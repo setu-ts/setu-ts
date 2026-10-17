@@ -75,6 +75,8 @@ export interface CompiledScopedRbac {
   readonly tenantScopeType: string;
   /** Per-role limits, keyed by catalogue role. */
   readonly limits: ReadonlyMap<string, CompiledLimit>;
+  /** Whether the principal's own roles and permissions count in every scope. */
+  readonly principalAuthorityIsGlobal: boolean;
   /** The custom-role source, when configured. */
   readonly customRoles: IScopedRoleSource | RegistryFactory<IScopedRoleSource> | undefined;
   /** When grants are resolved. */
@@ -332,6 +334,14 @@ export function compileScopedRbac(
     refuse('customRoles must be an IScopedRoleSource or a factory returning one');
   }
 
+  // Checked before defaulting: `?? false` would turn an explicit `null` into
+  // the default instead of refusing it.
+  const declaredAuthority: unknown = options.principalAuthorityIsGlobal;
+  if (declaredAuthority !== undefined && typeof declaredAuthority !== 'boolean') {
+    refuse('principalAuthorityIsGlobal must be a boolean');
+  }
+  const principalAuthorityIsGlobal = declaredAuthority === true;
+
   const timing = compileTiming(options.timing);
   if (timing.kind === 'sign-in' && !signInConfigured) {
     refuse("timing 'sign-in' requires the signIn option — grants are resolved at sign-in");
@@ -345,6 +355,7 @@ export function compileScopedRbac(
     tenantScopeType,
     limits: compileLimits(options.grantableIn, roles),
     customRoles,
+    principalAuthorityIsGlobal,
     timing,
     sourceTimeoutMs: bound('sourceTimeoutMs', options.sourceTimeoutMs, 1, 60_000, 2_000),
     maxGrants: bound('maxGrantsPerPrincipal', options.maxGrantsPerPrincipal, 1, 10_000, 256),

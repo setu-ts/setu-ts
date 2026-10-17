@@ -13,9 +13,15 @@ import type {
   ISession,
   ISessionService,
   ISessionStore,
+  SessionData,
   SessionView,
 } from '@setu-ts/common';
-import { parseCookie, serializeCookie, SESSION_STATE_KEY } from '@setu-ts/common';
+import {
+  parseCookie,
+  serializeCookie,
+  SESSION_STATE_KEY,
+  SESSION_TENANT_BINDING_KEY,
+} from '@setu-ts/common';
 
 import type { KeyRing } from '../codec/crypto.ts';
 import { open, seal } from '../codec/crypto.ts';
@@ -23,6 +29,26 @@ import { SessionMiddlewareMissingError, SessionTooLargeError } from '../errors.t
 import type { ResolvedSessionConfig } from '../options.ts';
 import type { Session } from './session.ts';
 import { createSession, parseSnapshot, restoreSession } from './session.ts';
+import { CSRF_SESSION_KEY } from '../csrf/token.ts';
+
+/**
+ * The reserved keys a session may hold and still be sealed into the cookie on
+ * the store strategy (M113e, V9-46): the form-CSRF token and the tenant
+ * binding. Both exist to serve requests before anyone signs in, and a store
+ * row behind them buys nothing — there is nothing to revoke in a session
+ * holding only those. The first write of any other key moves the session into
+ * the store. Pending sign-in secrets (`auth-plugin`'s state, nonce and PKCE
+ * verifier) are deliberately NOT here: they stay server-side.
+ */
+const COOKIE_HELD_KEYS: ReadonlySet<string> = new Set([
+  CSRF_SESSION_KEY,
+  SESSION_TENANT_BINDING_KEY,
+]);
+
+/** Whether every key of `data` is one {@linkcode COOKIE_HELD_KEYS} allows. */
+function isCookieHeld(data: SessionData): boolean {
+  return Object.keys(data).every((key) => COOKIE_HELD_KEYS.has(key));
+}
 
 /**
  * Key under which the middleware parks the live session in
@@ -208,15 +234,27 @@ export class SessionService implements ISessionService {
       session.extend(now + this.#config.maxAgeMs);
     }
 
+    const cookieHeld = this.#store !== undefined && isCookieHeld(session.toJSON());
+    if (this.#store !== undefined && !cookieHeld && !session.wasStoreHeld && !session.isNew) {
+      // A copied anonymous cookie must not know the promoted row's id. Avoid
+      // regenerate(): this id has no row to revoke or regeneration to record.
+      session.rotateId(this.#deps.uuid());
+    }
+
     const snapshot = session.snapshot();
     const ttlMs = Math.max(snapshot.exp - now, 0);
 
     // On the store strategy the payload goes server-side and the cookie carries
-    // only the id, which is why the same envelope stays well under any limit.
+    // only the id, which is why the same envelope stays well under any limit —
+    // unless the session holds only reserved keys, in which case the cookie
+    // carries them and no row is written (M113e, V9-46), so anonymous traffic
+    // rendering forms does not grow the store.
     const payload =
       this.#store === undefined
         ? snapshot
-        : { id: snapshot.id, data: {}, exp: snapshot.exp, seen: snapshot.seen };
+        : cookieHeld
+          ? { ...snapshot, held: 'cookie' as const }
+          : { id: snapshot.id, data: {}, exp: snapshot.exp, seen: snapshot.seen };
 
     const sealed = await seal(
       this.#deps.subtle,
@@ -234,7 +272,14 @@ export class SessionService implements ISessionService {
     }
 
     if (this.#store !== undefined) {
-      await this.#store.write(snapshot.id, snapshot.data, ttlMs);
+      if (cookieHeld) {
+        // Moving a stored session into the cookie (a logout clearing every
+        // other key) deletes its row: otherwise a copy of the old id-only
+        // cookie would keep restoring the signed-in data until its TTL.
+        await this.#destroyStored(session.wasStoreHeld ? snapshot.id : null);
+      } else {
+        await this.#store.write(snapshot.id, snapshot.data, ttlMs);
+      }
     }
 
     ctx.response.appendHeader('set-cookie', header);
@@ -286,18 +331,33 @@ export class SessionService implements ISessionService {
       return null;
     }
 
-    let data = snapshot.data;
-    if (this.#store !== undefined) {
-      const stored = await this.#store.read(snapshot.id);
-      if (stored === null) {
-        // Revoked or expired server-side. The cookie is authentic but the
-        // session behind it is gone, so this must not restore.
-        return null;
-      }
-      data = stored;
+    if (this.#store === undefined) {
+      return restoreSession(snapshot, now, this.#deps.uuid, this.#config.idleTimeoutMs);
     }
 
-    return restoreSession({ ...snapshot, data }, now, this.#deps.uuid, this.#config.idleTimeoutMs);
+    if (snapshot.held === 'cookie') {
+      // A cookie-held session (M113e, V9-46) has no row to read. It must hold
+      // reserved keys only — `commit` never seals anything else this way, so
+      // anything else is refused rather than trusted.
+      if (!isCookieHeld(snapshot.data)) {
+        return null;
+      }
+      return restoreSession(snapshot, now, this.#deps.uuid, this.#config.idleTimeoutMs);
+    }
+
+    const stored = await this.#store.read(snapshot.id);
+    if (stored === null) {
+      // Revoked or expired server-side. The cookie is authentic but the
+      // session behind it is gone, so this must not restore.
+      return null;
+    }
+    return restoreSession(
+      { ...snapshot, data: stored },
+      now,
+      this.#deps.uuid,
+      this.#config.idleTimeoutMs,
+      true,
+    );
   }
 
   /**

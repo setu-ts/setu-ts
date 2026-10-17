@@ -25,10 +25,24 @@ export class AuthService implements IAuthService {
    * First non-null principal wins, null if none match.
    */
   async authenticate(request: IRequest): Promise<IPrincipal | null> {
+    return (await this.authenticateWithSource(request))?.principal ?? null;
+  }
+
+  /**
+   * The one strategy loop, returning the first match WITH the credential source of the
+   * strategy that produced it (`strategy.credential`, absent treated as `'cookie'` —
+   * fail closed). Internal to the plugin: `authMiddleware` records the source under
+   * `CREDENTIAL_SOURCE_STATE_KEY` so form CSRF can exempt only header-credential
+   * authentication; a replaced `IAuthService` without this method simply records no
+   * source and every request stays verified.
+   */
+  async authenticateWithSource(
+    request: IRequest,
+  ): Promise<{ principal: IPrincipal; credential: 'header' | 'cookie' } | null> {
     for (const strategy of this.strategies) {
       const principal = await strategy.authenticate(request);
       if (principal !== null) {
-        return principal;
+        return { principal, credential: strategy.credential ?? 'cookie' };
       }
     }
     return null;

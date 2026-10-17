@@ -65,6 +65,7 @@ function withAmr(principal: IPrincipal, record: AuthSessionRecord): IPrincipal {
 export class AuthSessionStrategy implements IAuthStrategy {
   /** Strategy name for identification. */
   readonly name = 'auth-session';
+  readonly credential = 'cookie' as const;
   readonly #sessionService: ISessionService;
   // `| undefined` explicitly: the project compiles with exactOptionalPropertyTypes,
   // so assigning an optional option to an optional field needs the wider type.

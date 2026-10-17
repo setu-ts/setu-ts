@@ -42,6 +42,7 @@ export interface IssuerStrategyOptions {
  */
 export class IssuerStrategy implements IAuthStrategy {
   readonly name = 'issuers';
+  readonly credential = 'header' as const;
   readonly #byIssuer: ReadonlyMap<string, IssuerBinding>;
   readonly #verifiers: ReadonlyMap<string, JwtVerifier>;
   readonly #report: TokenRefusalReporter;

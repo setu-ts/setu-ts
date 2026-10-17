@@ -1905,17 +1905,17 @@ last outbound).
 | 250      | SecurityHeadersMiddleware | Add security headers     |
 | 260      | SessionMiddleware         | Load/commit the session  |
 | 270      | CsrfMiddleware            | Origin/Referer check     |
-| 275      | CsrfFormMiddleware        | Synchronizer-token check |
 | 300      | AuthMiddleware            | Authenticate request     |
+| 325      | CsrfFormMiddleware        | Synchronizer-token check |
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
 
 These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40),
-locale resolution (45), HTTP security (120–270), session (260/275), and authentication (300) are
-self-registered by their own plugins. The application (or a starter) adds the error handler and any
-application middleware. `AuthPluginOptions.middleware` can move authentication, exclude selected
-paths, or disable its global registration when the application attaches `authMiddleware()` per
-route.
+locale resolution (45), HTTP security (120–270), session (260), authentication (300), and form CSRF
+(325) are self-registered by their own plugins. The application (or a starter) adds the error
+handler and any application middleware. `AuthPluginOptions.middleware` can move authentication,
+exclude selected paths, or disable its global registration when the application attaches
+`authMiddleware()` per route.
 
 The session sits below authentication so an auth strategy can read it — `SessionStrategy`
 (configured by `AuthPluginOptions.session`) is that reader. It opens the cookie through
@@ -1924,8 +1924,10 @@ The session sits below authentication so an auth strategy can read it — `Sessi
 first. The session's commit phase (which runs after `next()` returns) therefore wraps everything
 inner. The two CSRF middlewares are different mechanisms rather than one feature configured twice:
 the stateless Origin/Referer check at 270 is cheap and runs first, so a request failing it never
-reaches token comparison at 275. Anything reading the session must be registered above 260, or the
-session accessor throws.
+reaches token comparison at 325. The form check sits after authentication (300) because its bearer
+exemption reads the credential source the authentication middleware records — only a request
+authenticated by a header-credential strategy is exempt. Anything reading the session must be
+registered above 260, or the session accessor throws.
 
 ### Registration
 

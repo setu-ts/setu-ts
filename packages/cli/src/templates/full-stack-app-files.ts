@@ -689,7 +689,7 @@ export function loader({ context }: { context: AppLoadContext }) {
  * Handles the sign-in post.
  *
  * The CSRF token is NOT checked here: the session plugin's form-CSRF
- * middleware runs at priority 275, before this route is ever reached, and
+ * middleware runs at priority 325, before this route is ever reached, and
  * answers 403 on a missing or mismatched token. So this action only runs for a
  * request that already passed the check.
  *

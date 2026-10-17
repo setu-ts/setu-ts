@@ -105,6 +105,7 @@ export {
 } from './request-identity.ts';
 export {
   CLIENT_IP_STATE_KEY,
+  CREDENTIAL_SOURCE_STATE_KEY,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_STATE_KEY,
 } from './state-keys.ts';

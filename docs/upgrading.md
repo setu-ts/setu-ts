@@ -12,6 +12,46 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### `principalAuthorityIsGlobal`, `exemptBearer`, anonymous sessions and `needsRehash` (M113e)
+
+**Scoped RBAC no longer reads the principal's own roles.** If your scoped checks
+(`requireScopedRole`, `requireScopedPermission`, `@ScopedRoles`, `@ScopedPermissions`) passed
+because a token carried the role or permission, they now answer `403` until the principal holds a
+grant for that scope. Issue the grants, or set `scopedRbac: { …, principalAuthorityIsGlobal: true }`
+to keep the old behaviour — every principal role and permission then counts in every scope.
+
+**Form CSRF skips only a bearer request that a bearer strategy authenticated and that restored no
+session.** With `SessionPlugin({ csrf: {} })`, a request carrying `Authorization: Bearer <token>` is
+no longer checked for a form token when a bearer (header-credential) strategy authenticated it and
+it restored no session. If you added an `exclude` such as `/^\/api\//` only to let a bearer API
+through, you can remove it. To keep checking those requests, set `csrf: { exemptBearer: false }`.
+The exemption no longer trusts a bare header: a junk bearer header beside a session cookie is still
+verified, and an unauthenticated bearer header is verified too. A request carrying a valid session
+cookie must send the CSRF header even with a valid bearer token, because the handler would otherwise
+act on that browser's session — so a browser app calling the bearer API while holding a session
+cookie must send the CSRF header. A request the bearer rule exempts also gets no browser session:
+whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
+so it cannot plant a session in a browser whose cookie no longer restores. The form-CSRF middleware
+moved from priority 275 to 325 (after authentication at 300, before authorization at 350) to make
+that check; custom middleware registered between 275 and 325 that relied on form CSRF having run
+must move above 325.
+
+**Anonymous sessions on the store strategy stay in the cookie.** Nothing to change. During a rolling
+deploy an older replica treats the new anonymous cookie as no session, so a visitor with a form open
+may get one `403` and must reload it; signed-in sessions are unaffected.
+
+**`PasswordHasher` hashes at 600,000 iterations.** Existing hashes keep verifying. To upgrade them,
+re-hash on a successful sign-in:
+
+```typescript
+if ((await hasher.verify(user.passwordHash, password)) && hasher.needsRehash(user.passwordHash)) {
+  await saveHash(user.id, await hasher.hash(password));
+}
+```
+
+On Cloudflare Workers, which are reported to refuse PBKDF2 counts above 100,000, construct the
+hasher with `new PasswordHasher(runtime, { iterations: 100_000 })`.
+
 ### Queue reconnect, `QueueProcessorDefinition` and Deno shutdown (M113c)
 
 RabbitMQ queues now recover automatically. Unacked jobs can be delivered again with their original

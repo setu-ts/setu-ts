@@ -11,6 +11,7 @@ import {
   tenantBindingMismatch,
 } from '@setu-ts/common';
 
+import { BEARER_EXEMPT_STATE_KEY } from '../csrf/exclude.ts';
 import type { SessionService } from '../services/session-service.ts';
 import { readTenantBinding, sealTenantBinding } from '../services/session-tenant-binding.ts';
 
@@ -84,6 +85,14 @@ export function sessionMiddleware(
     }
 
     await next();
+
+    // A request the bearer exemption admitted restored no session; committing
+    // whatever its handler wrote would send that session as `Set-Cookie` and, on
+    // a credentialed CORS response, plant it in a browser whose cookie was dead
+    // (M113e, L4). A header-authenticated request gets no browser session.
+    if (ctx.state.get(BEARER_EXEMPT_STATE_KEY) === true) {
+      return;
+    }
 
     // Bind on commit: seal the resolved tenant so the next request can compare.
     // Only seal a session that carries NO binding — a bound session is never

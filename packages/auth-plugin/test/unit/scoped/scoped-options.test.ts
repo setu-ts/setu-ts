@@ -42,6 +42,12 @@ describe('compileScopedRbac — defaults', () => {
     expect(config.maxPermissionsPerRole).toBe(256);
     expect(config.inheritsFrom).toBeUndefined();
     expect(config.customRoles).toBeUndefined();
+    expect(config.principalAuthorityIsGlobal).toBe(false);
+  });
+
+  it('compiles principalAuthorityIsGlobal when set (M113e, V9-28)', () => {
+    expect(compile({ principalAuthorityIsGlobal: true }).principalAuthorityIsGlobal).toBe(true);
+    expect(compile({ principalAuthorityIsGlobal: false }).principalAuthorityIsGlobal).toBe(false);
   });
 
   it('builds the catalogue closure, and never makes the wildcard checkable', () => {
@@ -199,6 +205,17 @@ describe('compileScopedRbac — refusals', () => {
     refused({ sources: [SOURCE], inheritsFrom: 'x' }, 'inheritsFrom must be a function');
     refused({ sources: [SOURCE], tenantScopeType: 'Tenant' }, 'tenantScopeType');
     refused({ sources: [SOURCE], customRoles: {} }, 'customRoles must be');
+  });
+
+  it.each([
+    ['a string', 'yes'],
+    ['a number', 1],
+    ['null', null],
+  ])('refuses principalAuthorityIsGlobal given as %s', (_label, value) => {
+    refused(
+      { sources: [SOURCE], principalAuthorityIsGlobal: value },
+      'scopedRbac.principalAuthorityIsGlobal must be a boolean',
+    );
   });
 
   it('refuses malformed timing, and sign-in timing without signIn', () => {

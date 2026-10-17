@@ -19,6 +19,64 @@ function createRequest(): IRequest {
 }
 
 describe('AuthService', () => {
+  describe('authenticateWithSource', () => {
+    it('returns the first match with the header credential of a header strategy', async () => {
+      const principal: IPrincipal = { id: 'p1' };
+      const strategies: IAuthStrategy[] = [
+        { name: 's1', authenticate: () => Promise.resolve(null) },
+        { name: 's2', credential: 'header', authenticate: () => Promise.resolve(principal) },
+      ];
+      const service = new AuthService(strategies, new LocalStrategy(() => Promise.resolve(null)));
+
+      const result = await service.authenticateWithSource(createRequest());
+      expect(result).toEqual({ principal, credential: 'header' });
+    });
+
+    it('returns the cookie credential of a cookie strategy', async () => {
+      const principal: IPrincipal = { id: 'p2' };
+      const strategies: IAuthStrategy[] = [
+        { name: 's1', credential: 'cookie', authenticate: () => Promise.resolve(principal) },
+      ];
+      const service = new AuthService(strategies, new LocalStrategy(() => Promise.resolve(null)));
+
+      const result = await service.authenticateWithSource(createRequest());
+      expect(result).toEqual({ principal, credential: 'cookie' });
+    });
+
+    it('treats a strategy without a credential as cookie (fail closed)', async () => {
+      const principal: IPrincipal = { id: 'p3' };
+      const strategies: IAuthStrategy[] = [
+        { name: 's1', authenticate: () => Promise.resolve(principal) },
+      ];
+      const service = new AuthService(strategies, new LocalStrategy(() => Promise.resolve(null)));
+
+      const result = await service.authenticateWithSource(createRequest());
+      expect(result).toEqual({ principal, credential: 'cookie' });
+    });
+
+    it('returns null when nothing matches', async () => {
+      const service = new AuthService([], new LocalStrategy(() => Promise.resolve(null)));
+
+      const result = await service.authenticateWithSource(createRequest());
+      expect(result).toBeNull();
+    });
+
+    it('runs the same one loop as authenticate, which returns the same principal', async () => {
+      const principal: IPrincipal = { id: 'p4' };
+      const strategies: IAuthStrategy[] = [
+        { name: 's1', authenticate: () => Promise.resolve(null) },
+        { name: 's2', credential: 'header', authenticate: () => Promise.resolve(principal) },
+        { name: 's3', authenticate: () => Promise.reject(new Error('must not be reached')) },
+      ];
+      const service = new AuthService(strategies, new LocalStrategy(() => Promise.resolve(null)));
+
+      const viaSource = await service.authenticateWithSource(createRequest());
+      expect(viaSource?.credential).toBe('header');
+      const viaAuthenticate = await service.authenticate(createRequest());
+      expect(viaAuthenticate).toBe(viaSource?.principal);
+    });
+  });
+
   describe('authenticate', () => {
     it('returns the first non-null principal from the strategy chain', async () => {
       const principal1: IPrincipal = { id: 'p1' };

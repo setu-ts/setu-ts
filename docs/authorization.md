@@ -344,15 +344,16 @@ await app.start();
 
 ### What a scoped check decides
 
-| Situation                                                                      | Outcome                                                              |
-| ------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| A grant of a role carrying the permission, in the scope or a scope it inherits | Allowed                                                              |
-| A global grant (`scope: null`)                                                 | Counts in every scope, unless `grantableIn` restricts the role       |
-| A route scope naming a different tenant than the resolved request tenant       | Denied — a parameter cannot reach outside the caller's tenant        |
-| A parent tenant's grant, checked in a child that names it in `inheritsFrom`    | Allowed — child requests inherit parent grants, never the reverse    |
-| Any grant source rejects, throws, or exceeds `sourceTimeoutMs`                 | Denied, and logged with the source name and error class only         |
-| More grants, a deeper walk, or more scopes than the configured bounds          | Denied                                                               |
-| A guard naming a permission or role outside the catalogue                      | `app.start()` fails, naming the route — a typo is never a silent 403 |
+| Situation                                                                      | Outcome                                                                            |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| A grant of a role carrying the permission, in the scope or a scope it inherits | Allowed                                                                            |
+| A global grant (`scope: null`)                                                 | Counts in every scope, unless `grantableIn` restricts the role                     |
+| A role or permission the principal carries itself (a JWT `roles` claim, `'*'`) | Counts in no scope — set `principalAuthorityIsGlobal: true` to count it everywhere |
+| A route scope naming a different tenant than the resolved request tenant       | Denied — a parameter cannot reach outside the caller's tenant                      |
+| A parent tenant's grant, checked in a child that names it in `inheritsFrom`    | Allowed — child requests inherit parent grants, never the reverse                  |
+| Any grant source rejects, throws, or exceeds `sourceTimeoutMs`                 | Denied, and logged with the source name and error class only                       |
+| More grants, a deeper walk, or more scopes than the configured bounds          | Denied                                                                             |
+| A guard naming a permission or role outside the catalogue                      | `app.start()` fails, naming the route — a typo is never a silent 403               |
 
 Grant sources are **unioned**, and one failing source denies the whole check: a check that silently
 skipped a source would allow on a partial answer. The wildcard `*` is never checkable by name.
