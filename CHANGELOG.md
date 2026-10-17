@@ -20,8 +20,8 @@ All notable changes to this project are documented here. The format follows
   packages fail startup with `OptionalDependencyUnavailableError`. CDN and custom-base modes use
   pinned 5.33.3 files with SHA-384 SRI; a custom base must be printable ASCII with no backslash, `?`
   or `#`, an HTTP(S) URL in serialized form without credentials, or a path starting with a single
-  `/`. On Workers the starters select the CDN when `openapi.swagger` is not set. Generated Node, Bun
-  and Deno projects declare the package, and a generated standalone or npm workspace-root
+  `/`. On Workers the starters select the CDN when no Swagger asset mode is chosen. Generated Node,
+  Bun and Deno projects declare the package, and a generated standalone or npm workspace-root
   `package.json` sets `"scarfSettings": { "enabled": false }`: `swagger-ui-dist` depends on
   `@scarf/scarf`, whose npm `postinstall` otherwise reports platform, Node version and dependency
   data. If you install the package yourself, add the same setting to your root `package.json` (in a

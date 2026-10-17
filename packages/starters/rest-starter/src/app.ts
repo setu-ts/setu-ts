@@ -40,8 +40,9 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
 /**
  * Chooses the OpenAPI options for a platform. Swagger UI self-hosts by default,
  * which reads `swagger-ui-dist` through `runtime.fs`; Workers has no `fs`, so a
- * caller who did not choose a Swagger mode gets the pinned CDN assets there.
- * An explicit `swagger` value, including `false` or `true`, is kept.
+ * caller who did not choose an asset mode gets the pinned CDN assets there.
+ * `swagger: false` and an explicit `assets` value are kept; `true` and `{}`
+ * name no asset mode, so they get the CDN too.
  *
  * @internal
  * @param openapi - The caller's OpenAPI options, if any.
@@ -52,8 +53,17 @@ export function openApiOptionsFor(
   openapi: OpenApiPluginOptions | undefined,
   platform: RuntimePlatform,
 ): OpenApiPluginOptions | undefined {
-  if (platform !== 'cloudflare-workers' || openapi?.swagger !== undefined) return openapi;
-  return { ...openapi, swagger: { assets: 'cdn' } };
+  const swagger = openapi?.swagger;
+  if (
+    platform !== 'cloudflare-workers' ||
+    swagger === false ||
+    (typeof swagger === 'object' && swagger.assets !== undefined)
+  )
+    return openapi;
+  return {
+    ...openapi,
+    swagger: { ...(typeof swagger === 'object' ? swagger : {}), assets: 'cdn' },
+  };
 }
 
 /**

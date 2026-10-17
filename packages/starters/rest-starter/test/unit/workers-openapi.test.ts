@@ -29,9 +29,21 @@ describe('rest-starter / OpenAPI assets per platform', () => {
     });
   });
 
-  it('keeps an explicit Swagger choice on Workers', () => {
-    for (const swagger of [false, true, { assets: { baseUrl: '/swagger' } }] as const) {
+  it('keeps a disabled UI and an explicit asset mode on Workers', () => {
+    for (const swagger of [
+      false,
+      { assets: 'self' },
+      { assets: { baseUrl: '/swagger' } },
+    ] as const) {
       expect(openApiOptionsFor({ swagger }, 'cloudflare-workers')).toEqual({ swagger });
+    }
+  });
+
+  it('selects the CDN on Workers for a Swagger value naming no asset mode', () => {
+    for (const swagger of [true, {}] as const) {
+      expect(openApiOptionsFor({ swagger }, 'cloudflare-workers')).toEqual({
+        swagger: { assets: 'cdn' },
+      });
     }
   });
 
@@ -58,7 +70,9 @@ describe('rest-starter / OpenAPI assets per platform', () => {
 
   it('cannot boot the self-hosted default on Workers (the defect)', async () => {
     const app = createApplication({
-      plugins: onWorkers(composeRestPlugins({ openapi: { swagger: true } }, 'cloudflare-workers')),
+      plugins: onWorkers(
+        composeRestPlugins({ openapi: { swagger: { assets: 'self' } } }, 'cloudflare-workers'),
+      ),
     });
     await expect(app.start()).rejects.toThrow();
     await app.stop().catch(() => undefined);

@@ -25,9 +25,9 @@ that use `OpenApiPlugin` or a starter with Swagger enabled. Deno tasks also need
 Otherwise startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets
 instead, set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
 `openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
-`assets: { baseUrl: '/assets' }`; the starters select the CDN there when `openapi.swagger` is unset;
-a custom base must serve the exact 5.33.3 files for SRI to pass. Fresh CLI projects declare the
-dependency and select CDN mode for Workers automatically. If you add `swagger-ui-dist` to an
+`assets: { baseUrl: '/assets' }`; the starters select the CDN there when no Swagger asset mode is
+chosen; a custom base must serve the exact 5.33.3 files for SRI to pass. Fresh CLI projects declare
+the dependency and select CDN mode for Workers automatically. If you add `swagger-ui-dist` to an
 existing npm project, it pulls in `@scarf/scarf`, whose `postinstall` sends install analytics; set
 `"scarfSettings": { "enabled": false }` in your root `package.json` to opt out, as generated
 projects do. In a workspace the setting belongs in the root `package.json`, the one npm is run from;

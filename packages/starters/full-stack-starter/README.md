@@ -127,7 +127,7 @@ const app = createApplication({
 OpenApiPlugin self-hosts Swagger UI by default, so install `swagger-ui-dist` (`^5`) in the consuming
 application, or pass `openapi: { swagger: { assets: 'cdn' } }`. Without either, startup fails with
 `OptionalDependencyUnavailableError`. On Cloudflare Workers, which has no filesystem to self-host
-from, the starter selects the CDN itself when `openapi.swagger` is not set.
+from, the starter selects the CDN itself when no Swagger asset mode is chosen.
 
 The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
 `apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware

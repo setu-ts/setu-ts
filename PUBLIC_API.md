@@ -9242,7 +9242,7 @@ the unmodified 5.33.3 files. The base must be printable ASCII with no backslash,
 either an absolute HTTP(S) URL already in its serialized form or a path starting with a single `/`;
 it is written into the page as given, so a URL carrying credentials is refused. Invalid modes or
 bases throw `TypeError` at construction. Workers needs an external mode. The REST, microservice and
-full-stack starters select `'cdn'` on Workers when `openapi.swagger` is not set, and keep any
+full-stack starters select `'cdn'` on Workers when no Swagger asset mode is chosen, and keep any
 explicit choice. CLI projects declare the package in npm dependencies, or the Deno import map, and
 set `"scarfSettings": { "enabled": false }` in a generated standalone or npm workspace-root
 `package.json` (Scarf ignores a member's setting), opting out of the install-time analytics hook
