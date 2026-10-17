@@ -675,7 +675,8 @@ The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child l
 
 - Incoming request (method, path)
 - Outgoing response (status, duration in ms), including a request that threw: the status is the one
-  served, read from `errorHandler`'s responder (`500` without one)
+  `errorHandler`'s responder predicts through `statusFor` (`500` without it), so a custom `respond`
+  hook that chooses another status is not reflected
 - Slow request warning when duration exceeds `slowRequestThreshold`
 
 It does not log the error itself; `errorHandler` logs it once (V9-80).
@@ -9240,12 +9241,13 @@ CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 SRI and
 the unmodified 5.33.3 files. The base must be printable ASCII with no backslash, `?` or `#`, and
 either an absolute HTTP(S) URL already in its serialized form or a path starting with a single `/`;
 it is written into the page as given, so a URL carrying credentials is refused. Invalid modes or
-bases throw `TypeError` at construction. Workers selects an external mode; starters forward it
-through `openapi: { swagger: { assets: 'cdn' } }`. CLI projects declare the package in npm
-dependencies, or the Deno import map, and set `"scarfSettings": { "enabled": false }` in a generated
-standalone or npm workspace-root `package.json` (Scarf ignores a member's setting), opting out of
-the install-time analytics hook `swagger-ui-dist` depends on (`@scarf/scarf`). Workers templates
-select CDN automatically and do not declare the package.
+bases throw `TypeError` at construction. Workers needs an external mode. The REST, microservice and
+full-stack starters select `'cdn'` on Workers when `openapi.swagger` is not set, and keep any
+explicit choice. CLI projects declare the package in npm dependencies, or the Deno import map, and
+set `"scarfSettings": { "enabled": false }` in a generated standalone or npm workspace-root
+`package.json` (Scarf ignores a member's setting), opting out of the install-time analytics hook
+`swagger-ui-dist` depends on (`@scarf/scarf`). Workers templates select CDN automatically and do not
+declare the package.
 
 Provides automatic OpenAPI documentation.
 

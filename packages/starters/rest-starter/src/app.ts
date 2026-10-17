@@ -3,8 +3,8 @@
  */
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
-import type { IPlugin } from '@setu-ts/common';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import type { IPlugin, RuntimePlatform } from '@setu-ts/common';
+import { detectRuntime, RuntimePlugin } from '@setu-ts/runtime';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
@@ -12,6 +12,7 @@ import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
 import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
+import type { OpenApiPluginOptions } from '@setu-ts/openapi-plugin';
 import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 import { AuthPlugin } from '@setu-ts/auth-plugin';
@@ -33,6 +34,42 @@ import type { RestStarterOptions } from './options.ts';
  * @returns Array of {@linkcode IPlugin} instances in registration order.
  */
 export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
+  return composeRestPlugins(options, detectRuntime());
+}
+
+/**
+ * Chooses the OpenAPI options for a platform. Swagger UI self-hosts by default,
+ * which reads `swagger-ui-dist` through `runtime.fs`; Workers has no `fs`, so a
+ * caller who did not choose a Swagger mode gets the pinned CDN assets there.
+ * An explicit `swagger` value, including `false` or `true`, is kept.
+ *
+ * @internal
+ * @param openapi - The caller's OpenAPI options, if any.
+ * @param platform - The platform the application runs on.
+ * @returns The options to construct {@linkcode OpenApiPlugin} with.
+ */
+export function openApiOptionsFor(
+  openapi: OpenApiPluginOptions | undefined,
+  platform: RuntimePlatform,
+): OpenApiPluginOptions | undefined {
+  if (platform !== 'cloudflare-workers' || openapi?.swagger !== undefined) return openapi;
+  return { ...openapi, swagger: { assets: 'cdn' } };
+}
+
+/**
+ * Builds the REST plugin set for an already-detected platform. Internal:
+ * taking the platform as a parameter is what lets a test reach the Workers
+ * branch, since `detectRuntime()` never answers Workers under the suite.
+ *
+ * @internal
+ * @param options - Optional per-plugin configuration arms.
+ * @param platform - The platform the application runs on.
+ * @returns Array of {@linkcode IPlugin} instances in registration order.
+ */
+export function composeRestPlugins(
+  options: RestStarterOptions,
+  platform: RuntimePlatform,
+): IPlugin[] {
   const plugins: IPlugin[] = [
     // Runtime must be first — the kernel requires it at start()
     RuntimePlugin(),
@@ -48,7 +85,7 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     HttpSecurityPlugin(options.httpSecurity),
     HealthPlugin(options.health),
     MetricsPlugin(options.metrics),
-    OpenApiPlugin(options.openapi),
+    OpenApiPlugin(openApiOptionsFor(options.openapi, platform)),
     DecoratorPlugin(options.decorators),
 
     // Gated arms — only added when explicitly provided.
