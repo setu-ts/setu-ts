@@ -37,7 +37,7 @@ it, are recorded in §3.
 
 | Reference                          | Source (file:line)                                                                                 | Verified surface / fact                                                                                                                                                                                                                                                |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DrizzleQueryError`                | `node_modules/.pnpm/drizzle-orm@0.45.2_…/node_modules/drizzle-orm/errors.js:10-18`                 | `super(\`Failed query: ${query}\nparams: ${params}\`)`; own `query`, `params`, `cause`. The `stack`'s first line repeats the message, so the values appear in BOTH `message`and`stack`                                                                                 |
+| `DrizzleQueryError`                | `node_modules/.pnpm/drizzle-orm@0.45.2_…/node_modules/drizzle-orm/errors.js:10-18`                 | `super(\`Failed query: ${query}\nparams: ${params}\`)`; own `query`, `params`, `cause`. The `stack`'s header repeats the whole multiline message (`params:`on its second line), so the values appear in BOTH`message`and`stack`                                        |
 | `classifiedOrOriginal`             | `packages/database-plugin/src/services/database-service.ts:83-103`, called at :265/295/318/497…583 | The one funnel every adapter error passes through; wraps conflict/unavailable/duplicate with the driver error as `cause`, else returns the ORIGINAL                                                                                                                    |
 | `serializeError`                   | `packages/common/src/errors/serialize-error.ts:160-240`                                            | Copies `name`, `message`, `stack`, `cause` (recursively) and `CLASSIFIER_KEYS` (`code`, `errno`, `syscall`, `severity`, `constraint`, `codeName`, `statusCode`) — NOT `detail`, so a pg error's `Key (email)=(…)` detail is not logged; its message carries no values  |
 | `errorHandler` status rule         | `packages/exceptions/src/middleware/error-handler.ts:178-250`                                      | `HttpError` → its `statusCode`; otherwise `httpStatusHintOf` → hint status; otherwise `500`; then `resolveResponseStatus` clamps (`common/src/errors/error-responder.ts:308`)                                                                                          |
@@ -72,10 +72,12 @@ it, are recorded in §3.
   a Drizzle query error when it is an `Error` with an own string `query` and own array `params` and
   a message starting `Failed query: `. Such a node is replaced by a new `Error` (same `name`) whose
   `message` is `Failed query: <query>`, whose `stack` is that message followed by the original
-  stack's frame lines (the first line, which repeats the old message, is dropped), whose `cause` is
-  the scrubbed next node, and which carries `query` but NOT `params`. Every other node is returned
-  unchanged. Classification still reads the original chain (codes live on the pg error, which is
-  kept).
+  stack's frame lines only — every line from the first one matching `/^\s*at\s/` onward; the whole
+  original header before it is dropped, because Drizzle's header is multiline
+  (`Failed query: …\nparams: …`, measured on 0.45.2), so dropping only the first line keeps the
+  values. A stack with no frame line becomes the new message alone — whose `cause` is the scrubbed
+  next node, and which carries `query` but NOT `params`. Every other node is returned unchanged.
+  Classification still reads the original chain (codes live on the pg error, which is kept).
 - **Why:** the SQL with placeholders is the operator's diagnostic; the values are user data. EF Core
   omits values by default; Laravel added masking after the same leak.
 - **Test home:** `database-plugin/test/unit/errors/scrub.test.ts`;
