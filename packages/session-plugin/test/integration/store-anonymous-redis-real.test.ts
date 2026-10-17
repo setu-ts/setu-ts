@@ -25,8 +25,13 @@ async function docker(...args: string[]): Promise<string> {
 
 async function keysUnder(url: string, prefix: string): Promise<number> {
   const port = new URL(url).port || '6379';
-  const container = await docker('ps', '-q', '--filter', `publish=${port}`);
-  const out = await docker('exec', container, 'redis-cli', '--scan', '--pattern', `${prefix}*`);
+  const ids = (await docker('ps', '-q', '--filter', `publish=${port}`))
+    .split('\n')
+    .filter((id) => id !== '');
+  if (ids.length !== 1) {
+    throw new Error(`Expected one container publishing port ${port}, found ${ids.length}`);
+  }
+  const out = await docker('exec', ids[0], 'redis-cli', '--scan', '--pattern', `${prefix}*`);
   return out === '' ? 0 : out.split('\n').length;
 }
 
