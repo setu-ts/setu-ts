@@ -14278,8 +14278,8 @@ reported 100,000-iteration limit is not verified here.
 - **V9-49** — `/docs` loads Swagger UI from `unpkg.com/swagger-ui-dist@5`, a floating major with no
   integrity hash.
 
-Shipped (PR #468). The package list grew to `common`, `runtime`, `kernel` and `cli` as well.
-Drizzle query errors keep their SQL and lose their bound values, and SQLSTATE class 22 causes, whose
+Shipped (PR #468). The package list grew to `common`, `runtime`, `kernel` and `cli` as well. Drizzle
+query errors keep their SQL and lose their bound values, and SQLSTATE class 22 causes, whose
 PostgreSQL message quotes the input, are rebuilt from their code; errors from the typed builder and
 raw driver calls are not scrubbed (documented). Health endpoints answer status only unless
 `details: true`. A handled error is logged once, at `warn` below 500, and the request logger reports
