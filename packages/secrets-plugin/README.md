@@ -5,13 +5,13 @@ a pluggable provider with a read-through cache.
 
 Providers:
 
-| Provider                   | `provider` id | Backend                                      | Dependency                                             |
-| -------------------------- | ------------- | -------------------------------------------- | ------------------------------------------------------ |
-| `EnvProvider` (default)    | `env`         | Environment variables via `IRuntimeServices` | none (every runtime, incl. Cloudflare Workers)         |
-| `AwsKmsProvider`           | `aws-kms`     | AWS Secrets Manager (KMS-backed encryption)  | lazy `npm:@aws-sdk/client-secrets-manager` (or inject) |
-| `GcpSecretManagerProvider` | `gcp`         | GCP Secret Manager                           | lazy `npm:@google-cloud/secret-manager` (or inject)    |
-| `AzureKeyVaultProvider`    | `azure`       | Azure Key Vault                              | lazy `npm:@azure/keyvault-secrets` (or inject)         |
-| `HashiCorpVaultProvider`   | `vault`       | HashiCorp Vault KV v2 over `fetch`           | none (zero-dependency, Workers-compatible)             |
+| Provider                   | `provider` id | Backend                                      | Dependency                                         |
+| -------------------------- | ------------- | -------------------------------------------- | -------------------------------------------------- |
+| `EnvProvider` (default)    | `env`         | Environment variables via `IRuntimeServices` | none (every runtime, incl. Cloudflare Workers)     |
+| `AwsKmsProvider`           | `aws-kms`     | AWS Secrets Manager (KMS-backed encryption)  | lazy `@aws-sdk/client-secrets-manager` (or inject) |
+| `GcpSecretManagerProvider` | `gcp`         | GCP Secret Manager                           | lazy `@google-cloud/secret-manager` (or inject)    |
+| `AzureKeyVaultProvider`    | `azure`       | Azure Key Vault                              | lazy `@azure/keyvault-secrets` (or inject)         |
+| `HashiCorpVaultProvider`   | `vault`       | HashiCorp Vault KV v2 over `fetch`           | none (zero-dependency, Workers-compatible)         |
 
 No cloud SDK is a hard dependency: a provider either receives an injected client facade through
 options, or lazily imports the SDK at `connect()` time (AI_GUIDELINES §12.2). Secrets are never

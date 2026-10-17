@@ -146,5 +146,46 @@ export function describeOutboxRelayProofs(
         await backend.dispose();
       }
     });
+
+    it('a paused relay records a duplicate when the store answers late on the real backend', async () => {
+      const backend = await build();
+      try {
+        await backend.store.verify();
+        const observer = countingObserver();
+        const a = await outboxHarness({ shared: backend, observer });
+        const b = await outboxHarness({
+          shared: { db: backend.db, store: new FaultStore(backend.store.inner) },
+          clock: outboxClock(10000),
+        });
+        const id = await a.write({ n: 1 }, { tenantId: 't1' });
+        // Hold the hook before the delegate: fire the settle's own deadline
+        // (the default storeTimeoutMs), move both wall clocks past the lease
+        // plus the clock skew, let B claim, publish and mark the row sent on
+        // the real backend, and only then let A's real markSent run — it
+        // answers not-pending/sent, after its bound.
+        a.store.faults.markSent = async () => {
+          await a.clock.advance(5000);
+          a.clock.setWall(WALL_START + 35_000);
+          b.clock.setWall(WALL_START + 35_000);
+          await b.sweep();
+        };
+        const result = await a.sweep();
+        expect(result.endedBy).toBe('store-failure');
+        // The real store call settles on real I/O; wait for the late answer.
+        for (
+          let round = 0;
+          round < 200 && observer.counts['overlap-duplicate'] === undefined;
+          round++
+        ) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+        }
+        expect(a.store.count('markSent')).toBe(1);
+        expect(b.broker.sequence()).toEqual([1]);
+        expect(await row(backend.db, id)).toMatchObject({ status: 'sent', claimVersion: 2 });
+        expect(observer.counts['overlap-duplicate']).toBe(1);
+      } finally {
+        await backend.dispose();
+      }
+    });
   });
 }

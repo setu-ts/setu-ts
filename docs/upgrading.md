@@ -52,6 +52,21 @@ if ((await hasher.verify(user.passwordHash, password)) && hasher.needsRehash(use
 On Cloudflare Workers, which are reported to refuse PBKDF2 counts above 100,000, construct the
 hasher with `new PasswordHasher(runtime, { iterations: 100_000 })`.
 
+### Outbox and inbox `release` refusals answer `400`/`404`/`409`; `OutboxRowStateError` gains `invalid-id` (M113j)
+
+**`release` refusals no longer answer a masked `500`.** An unhandled `release` refusal under
+`errorHandler` now answers its own status: `400` for a bad row id (`invalid-id`), `404` for an
+absent row (`missing`), and `409` for a row in the wrong state (`not-failed` for the outbox,
+`not-parked` for the inbox). `InboxRowStateError` and `OutboxRowStateError` are branded with
+`withHttpStatusHint`, so the answer carries the mapped status with the class's own title and detail;
+the row id and the stored status stay out of the body. No reader action is needed — match the new
+status instead of the old `500`; the rejection is the same one.
+
+**`OutboxRowStateError.outcome` gains `'invalid-id'`.** An outbox `release` with an empty or
+non-string row id no longer rejects with a bare `TypeError`; it rejects with
+`OutboxRowStateError('invalid-id')` (the `400` above), like the other refusals. If you switch on
+`outcome` exhaustively without a `default`, add a case for `'invalid-id'`.
+
 ### Queue reconnect, `QueueProcessorDefinition` and Deno shutdown (M113c)
 
 RabbitMQ queues now recover automatically. Unacked jobs can be delivered again with their original

@@ -25,7 +25,7 @@ the cost of all of that.
 | Deno               | `Deno.upgradeWebSocket`                           | the `fetch` path   | none             |
 | Cloudflare Workers | `new WebSocketPair()` + a 101 response            | the `fetch` path   | none             |
 | Bun                | `server.upgrade` + serve-time `websocket`         | `listen()` only    | none             |
-| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `npm:ws@^8`      |
+| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `ws`             |
 
 On Node, install `ws` (`npm install ws` / `deno add npm:ws`). It is an **optional** dependency
 loaded lazily on the first accepted upgrade, so a plain HTTP application never pulls it in; if it is

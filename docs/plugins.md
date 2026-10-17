@@ -369,10 +369,10 @@ emitDecoratorMetadata).
 - Memory (built-in)
 - Prisma (an injected Prisma v7 client)
 - Drizzle (an injected Drizzle database, wrapped with `createDrizzleDatabase`)
-- MongoDB (via npm:mongodb)
-- DynamoDB (via npm:@aws-sdk/client-dynamodb)
-- Azure Cosmos DB (via npm:@azure/cosmos)
-- Cloud Bigtable (via npm:@google-cloud/bigtable)
+- MongoDB (via mongodb)
+- DynamoDB (via @aws-sdk/client-dynamodb)
+- Azure Cosmos DB (via @azure/cosmos)
+- Cloud Bigtable (via @google-cloud/bigtable)
 - Custom (`type: 'custom'`), for example `D1Adapter` from `cloudflare-plugin`
 
 **Links:**
@@ -397,7 +397,7 @@ emitDecoratorMetadata).
 **Stores:**
 
 - Memory (built-in)
-- Redis (via npm:ioredis)
+- Redis (via ioredis)
 - Cloudflare KV
 
 **Links:**
@@ -452,12 +452,12 @@ emitDecoratorMetadata).
 **Brokers:**
 
 - In-memory (built-in)
-- Redis Streams (via npm:ioredis)
-- RabbitMQ (via npm:amqplib)
-- NATS (via npm:nats)
-- Kafka (via npm:kafkajs)
-- GCP Pub/Sub (via npm:@google-cloud/pubsub)
-- Azure Service Bus (via npm:@azure/service-bus)
+- Redis Streams (via ioredis)
+- RabbitMQ (via amqplib)
+- NATS (via nats)
+- Kafka (via kafkajs)
+- GCP Pub/Sub (via @google-cloud/pubsub)
+- Azure Service Bus (via @azure/service-bus)
 
 > Workers is not supported by **this package**: every broker except the in-memory default needs raw
 > sockets or an npm SDK that does not run on the edge. The capability itself IS available there —
@@ -495,9 +495,9 @@ emitDecoratorMetadata).
 **Adapters:**
 
 - Memory (built-in)
-- Redis (via npm:ioredis)
-- RabbitMQ (via npm:amqplib)
-- SQS (via npm:@aws-sdk/client-sqs)
+- Redis (via ioredis)
+- RabbitMQ (via amqplib)
+- SQS (via @aws-sdk/client-sqs)
 
 > Workers Queues belong to [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin), not this
 > package — the queue-plugin adapters all need raw sockets or an npm SDK unavailable on the edge.

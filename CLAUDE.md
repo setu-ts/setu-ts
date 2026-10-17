@@ -93,11 +93,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   additionally needs one guarded REAL-import test (logger-plugin pino / M9 discovery precedent),
   with the branching around the import unit-tested via an injection seam.
 - **Check external-package facts against reality, not memory.** The exact npm specifier of the
-  RUNTIME package (`npm:@prisma/client` — `npm:prisma` is the CLI and the plan had it wrong), and
-  whether the library's API actually fits the contract being implemented (Prisma has only
-  callback-style `$transaction` with a ~5s default timeout — no imperative begin/commit; bridging
-  that is a design decision, not an implementation detail). A plan naming a lazy import must state
-  exactly what it loads, when it can succeed, and the error when it cannot.
+  RUNTIME package (`@prisma/client` — `prisma` is the CLI and the plan had it wrong), and whether
+  the library's API actually fits the contract being implemented (Prisma has only callback-style
+  `$transaction` with a ~5s default timeout — no imperative begin/commit; bridging that is a design
+  decision, not an implementation detail). A plan naming a lazy import must state exactly what it
+  loads, when it can succeed, and the error when it cannot.
 - **Invented tokens and names must pass the committed grammar and the kernel's constraints.** Run
   every new capability token against `createCapabilityToken` in `packages/common/src/tokens.ts`
   (lowercase kebab-case, dot namespacing — colons are ILLEGAL), and for any plugin registrable more
@@ -6790,7 +6790,7 @@ because nothing defined what one was.
   external dependency, at least ONE test must exercise the REAL load/import path (guard/skip it when
   the dep is absent) so a stubbed-out fake is never the only path the suite ever runs.
 - **Docs must match behavior — a green gate does not verify a claim.** JSDoc, comments, and
-  PUBLIC_API.md must describe what the code actually does. "Lazily imported via `npm:pino`" on a
+  PUBLIC_API.md must describe what the code actually does. "Lazily imported via `pino`" on a
   function that never imports pino, or "@throws if X cannot be loaded from npm" when it throws
   because it never tries, are lies that pass every gate. When you touch a doc claim, confirm the
   code path it describes actually executes. **And when a comment or doc claims a SET — these inputs

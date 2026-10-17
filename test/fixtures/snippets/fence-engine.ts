@@ -1187,8 +1187,6 @@ export function normaliseFenceSpecifiers(source: string): string {
         (ts.isLiteralTypeNode(node.parent) && ts.isImportTypeNode(node.parent.parent)))
     ) {
       let value = node.text;
-      const match = /^npm:(@[^/]+\/[^@/]+|[^@/]+)(?:@[^/]+)?(\/.*)?$/.exec(value);
-      if (match) value = match[1]! + (match[2] ?? '');
       value = value.replace(/^@hono\/hono(?=\/|$)/, 'hono');
       if (value !== node.text)
         edits.push({ start: node.getStart(sf) + 1, end: node.getEnd() - 1, text: value });

@@ -17,7 +17,7 @@ import type { GeneratedFile } from '../utils/file-writer.ts';
  * React Router major the emitted project is written against.
  *
  * Pinned to 8 because that is what the SSR plugin loads: it does
- * `await import('npm:react-router@8')` to get `createRequestHandler`, and hands
+ * `await import('react-router')` to get `createRequestHandler`, and hands
  * it the server build this project's toolchain produced. A project built
  * against 7 would compile, install, and then hand a v7 build to a v8 runtime.
  */

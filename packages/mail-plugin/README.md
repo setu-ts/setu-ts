@@ -2,9 +2,9 @@
 
 Transactional email. Registers an `IMailer` under `CAPABILITIES.MAIL` (`'mail'`).
 
-Four providers ship: `LogProvider` (zero-dependency default), `SmtpProvider` (over
-`npm:nodemailer`), `SesProvider` (AWS SESv2), and `SendGridProvider` (SendGrid v3 HTTP API over
-`fetch`, so it is Workers-portable).
+Four providers ship: `LogProvider` (zero-dependency default), `SmtpProvider` (over `nodemailer`),
+`SesProvider` (AWS SESv2), and `SendGridProvider` (SendGrid v3 HTTP API over `fetch`, so it is
+Workers-portable).
 
 ## Installation
 

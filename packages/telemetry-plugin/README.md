@@ -3,7 +3,7 @@
 OpenTelemetry distributed tracing. Registers an `ITelemetryService` under `CAPABILITIES.TELEMETRY`
 (`'telemetry'`) and a request-span middleware at priority 30.
 
-The OTel SDK is an **optional** dependency, lazily imported via `npm:` specifiers. Without an
+The OTel SDK is an **optional** dependency, lazily imported via bare specifiers. Without an
 `exporter` the plugin runs in noop mode, so tracing can stay off in development at zero cost.
 
 ## Installation

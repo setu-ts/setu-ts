@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking: outbox and inbox `release` refusals carry HTTP status hints (M113j, 0.10.0,
+  `@setu-ts/messaging-plugin`).** An unhandled `release` refusal under `errorHandler` answers its
+  own status instead of a masked `500`: `400` for a bad row id (`invalid-id` — the outbox's former
+  missing-id `TypeError` is now `OutboxRowStateError('invalid-id')`), `404` for an absent row
+  (`missing`), and `409` for a row in the wrong state (`not-failed` outbox, `not-parked` inbox).
+  `InboxRowStateError` and `OutboxRowStateError` are branded with `withHttpStatusHint`, so the
+  answer carries the mapped status with the class's own title and detail; the row id and the stored
+  status stay out of the body. `OutboxRowStateError.outcome` gains `'invalid-id'`, so an exhaustive
+  `switch` on it with no `default` needs a new case.
 - **Breaking scoped RBAC: principal authority no longer counts in every scope (M113e, 0.10.0,
   `@setu-ts/auth-plugin`).** A scoped check (`requireScopedRole`, `requireScopedPermission`,
   `@ScopedRoles`, `@ScopedPermissions`) is now decided by grants alone: the `roles` and
@@ -218,6 +227,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A paused relay's late publish settlement (M113j, 0.10.0, `@setu-ts/messaging-plugin`).** A
+  `markSent` or `markFailure` for a publish the relay already invoked now runs to its own
+  `storeTimeoutMs` bound even when a pause has exhausted the sweep budget, and its answer is
+  observed when it arrives after the bound: a `markSent` or `markFailure` that finds the row already
+  `sent` records the `duplicate` overlap, a `claim-lost` answer is booked as an overlap, a late
+  `markFailure` that made the row `failed` records `poisoned` without touching the sweep budget, and
+  a late rejection is swallowed. A sweep that overran by a pause can outlive `sweepDeadlineMs` by at
+  most one `storeTimeoutMs`, and the shutdown drain is bounded by the same amount. A `markFailure`
+  for a publish the budget refused to invoke is still never written.
+- **Stale `npm:` specifiers in committed docs (M113j, V9-22's widened scope and V9-10's `npm:zod`
+  half).** Every `npm:` import and every prose, table or comment claim that a package loads as
+  `npm:<pkg>` — about 80 lines across ~20 files, plus one `cli` JSDoc — now names the bare package
+  the loaders have used since M111a. The fence engine no longer rewrites `npm:` specifiers (the
+  `@hono/hono` → `hono` alias rewrite stays), and `check:docs` refuses a stale one by name: P7 names
+  a quoted `npm:` specifier in an import position, P8 any other `npm:<pkg>` reference (Deno
+  `add`/`install` arguments and `@setu-ts`/`@jsr` specifiers are exempt).
 - **A Redis client built without a reporter wrote its errors to the console (M113c).** Since 0.8.0
   the cache store, queue adapter, Redis Streams broker, realtime backplane, rate-limit store,
   scheduler lock and idempotency store attached their `'error'` listener only when given a

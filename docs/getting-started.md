@@ -190,7 +190,7 @@ app.register(LoggerPlugin());
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig } from '@setu-ts/common';
 import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
-import { z } from 'npm:zod@^3.24.0';
+import { z } from 'zod';
 
 // A typed slice of configuration: DATABASE_URL, validated as a URL.
 const database = defineConfigSection({

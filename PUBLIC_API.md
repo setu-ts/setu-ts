@@ -537,11 +537,11 @@ app.register(
 
 ### Transports
 
-| Transport   | Description                                                                                    |
-| ----------- | ---------------------------------------------------------------------------------------------- |
-| `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                        |
-| `'pino'`    | Pino-backed, loaded via `await import('npm:pino')` or injected factory. `register()` is async. |
-| `'noop'`    | Discards all output. For tests or disabling logging.                                           |
+| Transport   | Description                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                    |
+| `'pino'`    | Pino-backed, loaded via `await import('pino')` or injected factory. `register()` is async. |
+| `'noop'`    | Discards all output. For tests or disabling logging.                                       |
 
 ### Usage in Routes
 
@@ -638,7 +638,7 @@ import { ConsoleLogger, NoopLogger, PinoLogger } from '@setu-ts/logger-plugin';
 
 const consoleLogger = new ConsoleLogger(runtime, { level: 'debug', pretty: true });
 const noopLogger = new NoopLogger();
-// PinoLogger uses async construction (import('npm:pino') is async):
+// PinoLogger uses async construction (import('pino') is async):
 const pinoLogger = await PinoLogger.create({ level: 'info', redact: ['password'] });
 ```
 
@@ -804,7 +804,7 @@ without `config-plugin` depending on Zod.
 ```typescript
 import { CAPABILITIES, type IConfig } from '@setu-ts/common';
 import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
-import { z } from 'npm:zod@^3.24.0';
+import { z } from 'zod';
 
 const database = defineConfigSection({
   prefix: 'DATABASE_',
@@ -1888,8 +1888,8 @@ adapter cannot know whether the column stores an ISO string or an epoch integer.
 
 ### MongoDB backend (`'mongodb'` arm)
 
-`MongoAdapter` is a document-store backend over the native `mongodb` driver (`npm:mongodb@^6.21.0`),
-registered through the same discriminated union as every other backend:
+`MongoAdapter` is a document-store backend over the native `mongodb` driver (`mongodb`), registered
+through the same discriminated union as every other backend:
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
@@ -1910,16 +1910,15 @@ app.register(
 requires `url` (the connection string), the other requires `client` (an already-constructed
 `IMongoClient`). Supplying neither is a compile error rather than a `connect()` throw — the
 guarantee every other built-in arm gives. `MongoAdapterOptionsBase` is the half both arms share
-(`objectIdCtor`, `database`, `collections`). When `client` is present the lazy
-`import('npm:mongodb@^6.21.0')` never runs; the injected client is structural, so a driver of a
-different major that honours the same shapes is accepted. An injected client that uses ObjectId
-values supplies its `objectIdCtor` companion, so the adapter can convert 24-hex repository ids
-without importing the driver. `database` names the database; when absent the one encoded in `url` is
-used, and if neither yields a name `connect()` fails at startup naming the option. `collections` is
-a per-entity override (`{ collection?, primaryKey?, idType? }`); an unmapped entity uses its own
-name as the collection and `'id'` as the primary key — the D1-shaped two-layer mapping, where the
-public surface is a per-entity override with a zero-config default and the internal target is
-unexported.
+(`objectIdCtor`, `database`, `collections`). When `client` is present the lazy `import('mongodb')`
+never runs; the injected client is structural, so a driver of a different major that honours the
+same shapes is accepted. An injected client that uses ObjectId values supplies its `objectIdCtor`
+companion, so the adapter can convert 24-hex repository ids without importing the driver. `database`
+names the database; when absent the one encoded in `url` is used, and if neither yields a name
+`connect()` fails at startup naming the option. `collections` is a per-entity override
+(`{ collection?, primaryKey?, idType? }`); an unmapped entity uses its own name as the collection
+and `'id'` as the primary key — the D1-shaped two-layer mapping, where the public surface is a
+per-entity override with a zero-config default and the internal target is unexported.
 
 Identity maps `_id` to the configured primary key on read and back on write. Because a
 `findOne({_id: "<24-hex>"})` misses when `_id` is an `ObjectId`, the driver id is converted with a
@@ -1965,7 +1964,7 @@ shapes `IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`
 ### DynamoDB backend (`'dynamodb'` arm)
 
 `DynamoAdapter` is a key-value backend over the native AWS SDK v3 client
-(`npm:@aws-sdk/client-dynamodb@^3`), registered through the same discriminated union as every other
+(`@aws-sdk/client-dynamodb`), registered through the same discriminated union as every other
 backend:
 
 ```typescript
@@ -1989,8 +1988,8 @@ requires `region` (with an optional `endpoint` — the emulator address — and 
 other requires `client`, an already-constructed client behind the structural `IDynamoClient` facade.
 Supplying neither is a compile error rather than a `connect()` throw — the guarantee every other
 built-in arm gives. `DynamoAdapterOptionsBase` is the half both arms share (`entities`,
-`maxPageFetches`). When `client` is present the lazy `import('npm:@aws-sdk/client-dynamodb@^3')`
-never runs. The adapter owns marshalling and deliberately does **not** use `lib-dynamodb`'s
+`maxPageFetches`). When `client` is present the lazy `import('@aws-sdk/client-dynamodb')` never
+runs. The adapter owns marshalling and deliberately does **not** use `lib-dynamodb`'s
 `DocumentClient`: automatic marshalling would hide two facts the adapter must decide — DynamoDB has
 no date type, so the encoding of a `Date` comparison is the mapping's decision, and a DynamoDB `N`
 is an arbitrary-precision decimal that `Number()` degrades.
@@ -2062,7 +2061,7 @@ not exported.
 
 ### Cosmos DB backend (`'cosmos'` arm)
 
-`CosmosAdapter` serves Azure Cosmos DB's **NoSQL (SQL) API** over `npm:@azure/cosmos@^4`, registered
+`CosmosAdapter` serves Azure Cosmos DB's **NoSQL (SQL) API** over `@azure/cosmos`, registered
 through the same discriminated union as every other backend:
 
 ```typescript
@@ -2084,7 +2083,7 @@ app.register(
 Cosmos DB's **MongoDB API** is a different wire protocol; it is served by the `'mongodb'` arm
 pointed at a Cosmos connection string. That route is documented and **not verified against a live
 account**: the emulator's MongoDB endpoint tops out at API version 4.0 (wire version 7) while the
-`npm:mongodb@^6` driver this package pins requires wire version 8, so it cannot be exercised there.
+`mongodb` driver this package pins requires wire version 8, so it cannot be exercised there.
 
 `CosmosAdapterOptions` is a **union of two arms**: one requires `endpoint` + `key`, the other
 requires `client` (an already-constructed structural `ICosmosClient`, which is how an Entra ID or
@@ -2165,8 +2164,8 @@ real SDK implements their structural shapes.
 
 ### Cloud Bigtable backend (`'bigtable'` arm)
 
-`BigtableAdapter` serves Google Cloud Bigtable over `npm:@google-cloud/bigtable@^6`, registered
-through the same discriminated union as every other backend:
+`BigtableAdapter` serves Google Cloud Bigtable over `@google-cloud/bigtable`, registered through the
+same discriminated union as every other backend:
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
@@ -2883,13 +2882,13 @@ what changed is that the refusal is legible.
 | `PasskeySaveResult`                 | `src/stores/passkey-store.ts`                 | M100e: `IPasskeyStore.save`'s outcome — `'saved'`, `'duplicate'` or `'limit'`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `SamlProvider`                      | `src/interfaces/index.ts`                     | M100f `saml` sign-in arm: this application as a SAML 2.0 service provider. `entityId` (AuthnRequest issuer, required audience, metadata), `idp` (`entityId` the assertion Issuer must equal, `ssoUrl` for the HTTP-Redirect AuthnRequest, `certs` — one or more PEM signing certificates for rotation overlap), `acsUrl` (path must end `<basePath>/<name>/acs`; every `SubjectConfirmationData` `Recipient` must equal it), `toPrincipal(profile)` (null or throw refuses with `403 principal-refused`), optional `failureRedirect`, `store` (default `MemorySamlRequestStore`, single replica only) and `module` (injected library). Routes: `GET …/login`, `POST …/acs`, `GET …/metadata` (`application/samlmetadata+xml`). Assertions must be signed; IdP-initiated responses, encrypted assertions and single logout are refused or not offered. ACS refusals answer `401` (or `failureRedirect?error=`) with `assertion-invalid` or `state-invalid` only. Pending requests are bound to the browser by `__Host-setu-saml` (`SameSite=None; Secure; HttpOnly; Path=/; Max-Age=600`) |
 | `SamlProfile`                       | `src/interfaces/index.ts`                     | M100f: the frozen verified identity `SamlProvider.toPrincipal` receives — `issuer`, `nameID`, optional `nameIDFormat` / `sessionIndex`, and `attributes` (string, or array for a multi-valued attribute)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `SamlModule`                        | `src/interfaces/index.ts`                     | M100f: structural shape of an injected SAML library (`{ SAML }`); replaces the lazy `npm:@node-saml/node-saml@^5` import                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `SamlModule`                        | `src/interfaces/index.ts`                     | M100f: structural shape of an injected SAML library (`{ SAML }`); replaces the lazy `@node-saml/node-saml` import                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `ISamlRequestStore`                 | `src/stores/saml-request-store.ts`            | M100f store port: `saveRequest(request, now)`, `peekRequest(id, now)` (non-consuming read node-saml's `getAsync` uses), `consumeRequest(id, now)` (MUST atomically delete and return — of two concurrent calls exactly one gets the record), `claimAssertionId(id, retainUntil, now)` (MUST be atomic; `false` for a reused id). The same store is handed to node-saml as its `cacheProvider`, so replicas sharing one agree about pending requests                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `SamlPendingRequest`                | `src/stores/saml-request-store.ts`            | M100f pending login: `requestId`, `provider`, `returnTo`, `binding` (the cookie value), `issuedAt`, `expiresAt` (ms, 10 minutes after login)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `MemorySamlRequestStore`            | `src/stores/saml-request-store.ts`            | M100f single-process `ISamlRequestStore`; sweeps expired requests on write and assertion claims when their map has doubled. `new MemorySamlRequestStore({ maxPendingRequests })` caps pending requests (default `DEFAULT_MAX_PENDING_SAML_REQUESTS` = 10,000; oldest evicted first; a non-positive-integer cap throws `RangeError`). A second replica holds its own map                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `MemorySamlRequestStoreOptions`     | `src/stores/saml-request-store.ts`            | M100f options for `MemorySamlRequestStore`: `maxPendingRequests?` (positive integer; default `DEFAULT_MAX_PENDING_SAML_REQUESTS`) bounds what an unauthenticated login flood can hold                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `DEFAULT_MAX_PENDING_SAML_REQUESTS` | `src/stores/saml-request-store.ts`            | M100f default pending-request cap of `MemorySamlRequestStore`: `10_000`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `SamlRuntimeLoadError`              | `src/errors.ts`                               | M100f: `register()` rejects with it when a `saml` provider is configured and `npm:@node-saml/node-saml@^5` cannot be loaded (or the injected module has no `SAML` class); names the specifier and the Workers `nodejs_compat` flag; the underlying failure is `cause`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SamlRuntimeLoadError`              | `src/errors.ts`                               | M100f: `register()` rejects with it when a `saml` provider is configured and `@node-saml/node-saml` cannot be loaded (or the injected module has no `SAML` class); names the specifier and the Workers `nodejs_compat` flag; the underlying failure is `cause`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `RefreshTokenService`               | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `RefreshTokenOptions`               | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `TokenPair`                         | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -2905,7 +2904,7 @@ what changed is that the refusal is legible.
 | `RateLimitStore`                    | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `RateLimitResult`                   | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `MemoryRateLimitStore`              | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`), namespacing keys under `keyPrefix`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `ioredis`), namespacing keys under `keyPrefix`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`        | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `IAuthService`                      | re-export                                     | From `@setu-ts/common`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `IJwtService`                       | re-export                                     | From `@setu-ts/common`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -3069,12 +3068,11 @@ with 429** (downstream stages, including the handler, do not run) and a JSON bod
 `RateLimit-Reset` — `RateLimit-Reset` and `Retry-After` are both **delta-seconds** until the window
 resets (IETF draft semantics), never epoch timestamps. The default store is an in-memory
 fixed-window counter (single-process); pass `store: new RedisRateLimitStore({ url, runtime })` for
-multi-instance deployments (ioredis is inject-or-lazy: pass `client` to inject, otherwise
-`npm:ioredis@5.x` is lazily imported on first use). This limiter's `Retry-After` is the honest case
-for the header — a fixed window genuinely knows when it resets — which is why the framework's other
-backpressure statuses (the resilience shedding errors, X32-7; the database classifications, M90f)
-deliberately carry none: no component there holds an honest horizon, and the asymmetry is recorded
-beside each.
+multi-instance deployments (ioredis is inject-or-lazy: pass `client` to inject, otherwise `ioredis`
+is lazily imported on first use). This limiter's `Retry-After` is the honest case for the header — a
+fixed window genuinely knows when it resets — which is why the framework's other backpressure
+statuses (the resilience shedding errors, X32-7; the database classifications, M90f) deliberately
+carry none: no component there holds an honest horizon, and the asymmetry is recorded beside each.
 
 The 429 body is written through `respondWithError`, so it uses the application's configured error
 format — including Problem Details under `errorHandler({ format: 'rfc9457' })` — just like a guard
@@ -4039,9 +4037,9 @@ ws.route(
 - **The heartbeat is an application-level frame, not an RFC 6455 ping.** The web `WebSocket` API on
   Deno and Cloudflare Workers exposes no `ping()`, so a protocol ping would silently no-op on half
   the supported runtimes.
-- **Node requires `npm:ws`.** It is an optional dependency, loaded lazily on the first accepted
-  upgrade (AI_GUIDELINES §12.2) — a plain HTTP application never loads it. `loadWsModule` throws
-  with the install command when it is absent. The other three runtimes need no dependency.
+- **Node requires `ws`.** It is an optional dependency, loaded lazily on the first accepted upgrade
+  (AI_GUIDELINES §12.2) — a plain HTTP application never loads it. `loadWsModule` throws with the
+  install command when it is absent. The other three runtimes need no dependency.
 - **Upgrades on Node arrive on the raw `upgrade` event, not the `fetch` path**, so they are only
   available after `listen()`. On Bun, upgrades likewise only work through `listen()`, since
   `server.upgrade` requires the serve-time `websocket` handlers. Deno and Workers upgrade on the
@@ -4117,7 +4115,7 @@ Discriminated on `transport`.
 | `topic`                   | all but `memory`   | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                                                                                                                                                                                       |
 | `origin`                  | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                                                                                                                                                                                                |
 | `bus`                     | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                                                                                                                                                                                                 |
-| `url`                     | `'redis'`          | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path                                                                                                                                                                                                                                                                                                                                                       |
+| `url`                     | `'redis'`          | —                        | Connection URL, read only on the lazy `ioredis` path                                                                                                                                                                                                                                                                                                                                                               |
 | `client` / `subscriber`   | `'redis'`          | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                                                                            |
 | `module`                  | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                                                                    |
 | `commandTimeoutMs`        | `'redis'`          | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair                                                |
@@ -4137,7 +4135,7 @@ knows its own transport.
 | ------------- | ----------------- | ------------------------------ | -------------------------------------------------------------- |
 | `'memory'`    | No                | None                           | The default, and a real single-process bus rather than a no-op |
 | `'messaging'` | Yes               | A plugin providing `messaging` | Reuses any registered messaging broker; adds no dependency     |
-| `'redis'`     | Yes               | `npm:ioredis@5.x` (lazy)       | Redis pub/sub, over two connections                            |
+| `'redis'`     | Yes               | `ioredis` (lazy)               | Redis pub/sub, over two connections                            |
 | `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane`                                       |
 
 ### Exports
@@ -4151,7 +4149,7 @@ knows its own transport.
 | `RedisBackplane`                                                                                                                   | class             | Redis pub/sub transport                                                                |
 | `isRealtimeFrame`                                                                                                                  | function          | Guard narrowing arriving broker traffic to a `RealtimeFrame`                           |
 | `adaptRedisModule`                                                                                                                 | function          | Narrows an `ioredis` module to `IRedisModule`                                          |
-| `loadRedisModule`                                                                                                                  | function          | Real lazy `import('npm:ioredis@5.x')`                                                  |
+| `loadRedisModule`                                                                                                                  | function          | Real lazy `import('ioredis')`                                                          |
 | `RedisModuleError`                                                                                                                 | class             | Thrown when `ioredis` cannot be loaded or recognized                                   |
 | `DEFAULT_TOPIC`                                                                                                                    | const             | `'setu-ts.realtime'`                                                                   |
 | `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`                                                                                                 | const             | `15000`, the default `commandTimeoutMs`                                                |
@@ -4501,12 +4499,12 @@ app.router.get('/api/health', (ctx) => {
   handler from a pre-loaded `ServerBuild` and the `createRequestHandler` factory. Pure function;
   unit-testable without I/O.
 - `loadRequestHandler(serverBuildPath, mode, options?): Promise<SsrRuntime>` — lazily imports the
-  app-provided server build and `npm:react-router@8`, unwraps the `ServerBuild` (default export),
-  and returns `{ handler, createLoadContext }`. Both come from the SAME module object so the
-  provider instance is always an instance of the class the handler's `instanceof` check tests. The
-  optional `options` parameter accepts `{ rrImportHook?: () => Promise<Record<string, unknown>> }` —
-  a test-seam that replaces the `npm:react-router@8` import. Throws when the resolved module exposes
-  no `RouterContextProvider` export (i.e. react-router earlier than 8).
+  app-provided server build and `react-router`, unwraps the `ServerBuild` (default export), and
+  returns `{ handler, createLoadContext }`. Both come from the SAME module object so the provider
+  instance is always an instance of the class the handler's `instanceof` check tests. The optional
+  `options` parameter accepts `{ rrImportHook?: () => Promise<Record<string, unknown>> }` — a
+  test-seam that replaces the `react-router` import. Throws when the resolved module exposes no
+  `RouterContextProvider` export (i.e. react-router earlier than 8).
 - `createLoadContextFactory(rr): () => RouterLoadContext` — pure seam building the per-request
   context factory from a loaded `react-router` module namespace. **@throws** when the module has no
   `RouterContextProvider` export.
@@ -4627,7 +4625,7 @@ client bundle has to inline what it imports and cannot resolve a JSR specifier.
   through context keys:
 
   ```typescript
-  // Before — produced a 500 on every SSR request against react-router@8.
+  // Before — produced a 500 on every SSR request against react-router.
   ReactRouterPlugin({
     serverBuildPath,
     getLoadContext: (ctx) => ({ db: myDb, user: ctx.request.user }),
@@ -6778,22 +6776,22 @@ absorbs. Two windows remain: a relay can pause AFTER the fence check and resume 
 a publish the broker accepts after it was abandoned can arrive late. Those repeats can arrive out of
 order. A relay paused past its claim BEFORE the fence check publishes nothing.
 
-| Export                          | Kind      | Notes                                                                                                                                                                   |
-| ------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IOutbox`                       | interface | `write(scope, definition, payload, input?)` → envelope id; `dispatch()` (never throws); `sweep()`; `purge()`; `release(id, action, options?)`                           |
-| `OutboxOptions`                 | type      | `OutboxCommonOptions` plus exactly one of `store` (one store) and `stores` (per tenant id); supplying both is a compile error                                           |
-| `OutboxCommonOptions`           | interface | `maxEnvelopeBytes`, `background`, `relay`, `health`, `retainSentMs`, `purgeBatch`, `purgeIntervalMs`                                                                    |
-| `OutboxRelayOptions`            | interface | `schedule`, `intervalMs`, `pageSize`, `scanLimit`, `publishLimit`, `maxFailedScan`, `maxAttempts`, backoff bounds, the sweep deadline, `claimLeaseMs`, `maxClockSkewMs` |
-| `OutboxHealthOptions`           | interface | `degradedAfterMs` (default 60 000), `overlapWindowMs` (default 600 000)                                                                                                 |
-| `OutboxStoreEntry`              | type      | an `IOutboxStore` or a `RegistryFactory<IOutboxStore>`, resolved in `onInit`                                                                                            |
-| `OutboxWriteInput`              | interface | `metadata?`, `options?` (`PublishOptions`, the `publishIntegrationEvent` precedence), `tenantId?`                                                                       |
-| `OutboxSweepResult`             | interface | `origin`, `scanned`, `published`, `failures`, `poisoned`, `endedBy`                                                                                                     |
-| `OutboxEnvelopeTooLargeError`   | class     | `write` — the serialized envelope exceeds `maxEnvelopeBytes` (`bytes`, `limit`); the caller's transaction rolls back                                                    |
-| `OutboxRelayUnscheduledError`   | class     | `start()` — the relay is scheduled (the default) but no `CAPABILITIES.SCHEDULER` is registered                                                                          |
-| `OutboxUnknownTenantError`      | class     | `write` / `release` with per-tenant `stores` naming no tenant, or one with no store; the tenant id is never quoted                                                      |
-| `OutboxRowStateError`           | class     | `release` — `outcome: 'missing'` or `'not-failed'` (with the row's `status`)                                                                                            |
-| `OutboxNotReadyError`           | class     | any call before `onInit` resolved and verified the store                                                                                                                |
-| `OutboxStoreVerifyTimeoutError` | class     | `start()` — a store's `verify()` did not settle within `relay.storeTimeoutMs` (`timeoutMs`); no tenant or store is named                                                |
+| Export                          | Kind      | Notes                                                                                                                                                                                                                                             |
+| ------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IOutbox`                       | interface | `write(scope, definition, payload, input?)` → envelope id; `dispatch()` (never throws); `sweep()`; `purge()`; `release(id, action, options?)`                                                                                                     |
+| `OutboxOptions`                 | type      | `OutboxCommonOptions` plus exactly one of `store` (one store) and `stores` (per tenant id); supplying both is a compile error                                                                                                                     |
+| `OutboxCommonOptions`           | interface | `maxEnvelopeBytes`, `background`, `relay`, `health`, `retainSentMs`, `purgeBatch`, `purgeIntervalMs`                                                                                                                                              |
+| `OutboxRelayOptions`            | interface | `schedule`, `intervalMs`, `pageSize`, `scanLimit`, `publishLimit`, `maxFailedScan`, `maxAttempts`, backoff bounds, the sweep deadline, `claimLeaseMs`, `maxClockSkewMs`                                                                           |
+| `OutboxHealthOptions`           | interface | `degradedAfterMs` (default 60 000), `overlapWindowMs` (default 600 000)                                                                                                                                                                           |
+| `OutboxStoreEntry`              | type      | an `IOutboxStore` or a `RegistryFactory<IOutboxStore>`, resolved in `onInit`                                                                                                                                                                      |
+| `OutboxWriteInput`              | interface | `metadata?`, `options?` (`PublishOptions`, the `publishIntegrationEvent` precedence), `tenantId?`                                                                                                                                                 |
+| `OutboxSweepResult`             | interface | `origin`, `scanned`, `published`, `failures`, `poisoned`, `endedBy`                                                                                                                                                                               |
+| `OutboxEnvelopeTooLargeError`   | class     | `write` — the serialized envelope exceeds `maxEnvelopeBytes` (`bytes`, `limit`); the caller's transaction rolls back                                                                                                                              |
+| `OutboxRelayUnscheduledError`   | class     | `start()` — the relay is scheduled (the default) but no `CAPABILITIES.SCHEDULER` is registered                                                                                                                                                    |
+| `OutboxUnknownTenantError`      | class     | `write` / `release` with per-tenant `stores` naming no tenant, or one with no store; the tenant id is never quoted                                                                                                                                |
+| `OutboxRowStateError`           | class     | `release` — `outcome: 'invalid-id'` (400), `'missing'` (404) or `'not-failed'` (409, with the row's `status`); each is status-hinted (`withHttpStatusHint`), so an `errorHandler` answers the mapped status with the class's own title and detail |
+| `OutboxNotReadyError`           | class     | any call before `onInit` resolved and verified the store                                                                                                                                                                                          |
+| `OutboxStoreVerifyTimeoutError` | class     | `start()` — a store's `verify()` did not settle within `relay.storeTimeoutMs` (`timeoutMs`); no tenant or store is named                                                                                                                          |
 
 **Wiring.** With `outbox` set the plugin also provides `CAPABILITIES.OUTBOX` (`outbox.<name>` for a
 named instance), declares `CAPABILITIES.SCHEDULER` and `CAPABILITIES.METRICS` as optional
@@ -6810,7 +6808,10 @@ value out of range, `NaN` or a fraction throws a `RangeError` naming the option,
   `purgeIntervalMs` (default 60 000). With `relay: { schedule: false }` nothing is scheduled; call
   `sweep()` and `purge()` yourself (on Cloudflare Workers, from a Cron Trigger).
 - **One deadline.** `relay.sweepDeadlineMs` defaults to 30 000 on the monotonic clock and bounds the
-  sweep and purge across all stores. The strict relation is
+  sweep and purge across all stores, EXCEPT that the status write settling an already-invoked
+  publish runs to its own `storeTimeoutMs` even when a pause has exhausted the budget: a sweep that
+  overran by a pause can outlive the deadline by at most one `storeTimeoutMs`, and the shutdown
+  drain that waits for it is bounded by the same amount. The strict relation is
   `publishTimeoutMs + 2 * storeTimeoutMs < sweepDeadlineMs`; the default 15 000 ms reserve leaves
   the first 15 000 ms for row starts. A purge call running past the deadline rejects; deletions
   already completed stay completed.
@@ -6911,23 +6912,23 @@ marker is purged is processed again. Nothing is promised about effects outside t
 about two processes using one consumer name with different handlers, or about a database other than
 the store's.
 
-| Export                             | Kind      | Notes                                                                                                                                 |
-| ---------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `IInbox`                           | interface | `parked(limit?)` (never the envelope); `release(rowId, 'retry' \| 'discard')`; `purge()`                                              |
-| `InboxOptions`                     | interface | `store`, `maxAttempts?`, `retainMs?` (7 days), `storeTimeoutMs?` (5000), `maxParkedEnvelopeBytes?` (262 144), `purge?`                |
-| `InboxPurgeOptions`                | interface | `schedule?` (`true`), `intervalMs?` (60 000), `batch?` (100)                                                                          |
-| `InboxStoreEntry`                  | type      | an `IInboxStore` or a `RegistryFactory<IInboxStore>`, resolved in `onInit`                                                            |
-| `ParkedInboxEntry`                 | interface | `rowId`, `consumer`, `topic`, `envelopeId?`, `attempts`, `updatedAt`, `lastError?`                                                    |
-| `InboxReleaseResult`               | interface | `topic`, and for `retry` the stored `envelope` (absent when too large or unreadable)                                                  |
-| `IntegrationEventInboxHandler`     | type      | `(payload, envelope, metadata, scope: S)`                                                                                             |
-| `IntegrationEventInboxOptions`     | interface | `consumer` (a valid publish id, required), `instance?` (resolves `inbox.<instance>`)                                                  |
-| `IntegrationEventSubscribeOptions` | type      | `SubscribeOptions & { inbox: IntegrationEventInboxOptions }`                                                                          |
-| `InboxNotConfiguredError`          | class     | resolution — `reason: 'unregistered'` (no `MessagingPlugin({ inbox })`) or `'foreign-provider'` (a replacement provider of the token) |
-| `InboxConsumerConflictError`       | class     | resolution — a second subscription with the same `consumer` on the same topic in one inbox                                            |
-| `InboxNotReadyError`               | class     | `state: 'not-started'` (resolution or a call before the store is verified) or `'closed'`                                              |
-| `InboxPurgeUnscheduledError`       | class     | `start()` — `purge.schedule` (the default) without a `CAPABILITIES.SCHEDULER`                                                         |
-| `InboxStoreVerifyTimeoutError`     | class     | `start()` — `verify()` did not settle within `storeTimeoutMs`                                                                         |
-| `InboxRowStateError`               | class     | `release` — `outcome: 'invalid-id'`, `'missing'` or `'not-parked'` (with the marker's `status`)                                       |
+| Export                             | Kind      | Notes                                                                                                                                                                                                                                                |
+| ---------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IInbox`                           | interface | `parked(limit?)` (never the envelope); `release(rowId, 'retry' \| 'discard')`; `purge()`                                                                                                                                                             |
+| `InboxOptions`                     | interface | `store`, `maxAttempts?`, `retainMs?` (7 days), `storeTimeoutMs?` (5000), `maxParkedEnvelopeBytes?` (262 144), `purge?`                                                                                                                               |
+| `InboxPurgeOptions`                | interface | `schedule?` (`true`), `intervalMs?` (60 000), `batch?` (100)                                                                                                                                                                                         |
+| `InboxStoreEntry`                  | type      | an `IInboxStore` or a `RegistryFactory<IInboxStore>`, resolved in `onInit`                                                                                                                                                                           |
+| `ParkedInboxEntry`                 | interface | `rowId`, `consumer`, `topic`, `envelopeId?`, `attempts`, `updatedAt`, `lastError?`                                                                                                                                                                   |
+| `InboxReleaseResult`               | interface | `topic`, and for `retry` the stored `envelope` (absent when too large or unreadable)                                                                                                                                                                 |
+| `IntegrationEventInboxHandler`     | type      | `(payload, envelope, metadata, scope: S)`                                                                                                                                                                                                            |
+| `IntegrationEventInboxOptions`     | interface | `consumer` (a valid publish id, required), `instance?` (resolves `inbox.<instance>`)                                                                                                                                                                 |
+| `IntegrationEventSubscribeOptions` | type      | `SubscribeOptions & { inbox: IntegrationEventInboxOptions }`                                                                                                                                                                                         |
+| `InboxNotConfiguredError`          | class     | resolution — `reason: 'unregistered'` (no `MessagingPlugin({ inbox })`) or `'foreign-provider'` (a replacement provider of the token)                                                                                                                |
+| `InboxConsumerConflictError`       | class     | resolution — a second subscription with the same `consumer` on the same topic in one inbox                                                                                                                                                           |
+| `InboxNotReadyError`               | class     | `state: 'not-started'` (resolution or a call before the store is verified) or `'closed'`                                                                                                                                                             |
+| `InboxPurgeUnscheduledError`       | class     | `start()` — `purge.schedule` (the default) without a `CAPABILITIES.SCHEDULER`                                                                                                                                                                        |
+| `InboxStoreVerifyTimeoutError`     | class     | `start()` — `verify()` did not settle within `storeTimeoutMs`                                                                                                                                                                                        |
+| `InboxRowStateError`               | class     | `release` — `outcome: 'invalid-id'` (400), `'missing'` (404) or `'not-parked'` (409, with the marker's `status`); each is status-hinted (`withHttpStatusHint`), so an `errorHandler` answers the mapped status with the class's own title and detail |
 
 - **Delivery.** Validate the envelope; read the marker (present → acknowledge); parse; then ONE
   transaction that creates the marker first and runs the handler. After ANY rejection the marker is
@@ -7504,10 +7505,10 @@ app.register(
 from the factory. Cron expressions are always evaluated in UTC.
 
 When `distributedLock` is absent or `enabled: false`, a process-local memory lock is used. With
-`enabled: true` and `storage: 'redis'`, an ioredis client is lazily imported (`npm:ioredis@5.x`)
-unless you inject one via `client`, or supply your own `IDistributedLock` via `lock` (which takes
-priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
-if the lock expires mid-run, another instance may start the same job.
+`enabled: true` and `storage: 'redis'`, an ioredis client is lazily imported (`ioredis`) unless you
+inject one via `client`, or supply your own `IDistributedLock` via `lock` (which takes priority over
+`storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime — if the lock
+expires mid-run, another instance may start the same job.
 
 A Redis lock client the plugin builds routes the `'error'` events of the `ioredis` client it builds
 to the application logger through `createConnectionErrorReporter` (common): the first error of an
@@ -7963,14 +7964,14 @@ itself.
 
 The plugin ships five named providers plus a first-class B2 preset that reuses S3 under the hood.
 
-| Provider               | Type       | Key options                                                         | Auth / SDK                                   | Notes                                                                          |
-| ---------------------- | ---------- | ------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
-| `MemoryProvider`       | `'memory'` | _(none)_                                                            | N/A (zero-dep)                               | Default. In-process map. Every runtime incl. Cloudflare.                       |
-| `LocalStorageProvider` | `'local'`  | `rootDir?: string`                                                  | N/A (`runtime.fs` seam)                      | Node/Deno/Bun only. Throws on connect when `fs` absent.                        |
-| `S3Provider`           | `'s3'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`, `endpoint?`   | Lazy `npm:@aws-sdk/client-s3@^3` + presigner | R2 and MinIO via `endpoint`. Real presigned GET URLs.                          |
-| `GcsProvider`          | `'gcs'`    | `bucket`, `projectId?`                                              | Lazy `npm:@google-cloud/storage@^7`          | Real signed URLs via `file.getSignedUrl`.                                      |
-| `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?` | Lazy `npm:@azure/storage-blob@^12`           | SAS requires `accountKey`. No `@azure/identity` needed.                        |
-| B2 preset              | `'b2'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`                | Same as S3 (reuses `S3Provider`)             | Endpoint defaults to `https://s3.<region>.backblazeb2.com`. No separate class. |
+| Provider               | Type       | Key options                                                         | Auth / SDK                            | Notes                                                                          |
+| ---------------------- | ---------- | ------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------ |
+| `MemoryProvider`       | `'memory'` | _(none)_                                                            | N/A (zero-dep)                        | Default. In-process map. Every runtime incl. Cloudflare.                       |
+| `LocalStorageProvider` | `'local'`  | `rootDir?: string`                                                  | N/A (`runtime.fs` seam)               | Node/Deno/Bun only. Throws on connect when `fs` absent.                        |
+| `S3Provider`           | `'s3'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`, `endpoint?`   | Lazy `@aws-sdk/client-s3` + presigner | R2 and MinIO via `endpoint`. Real presigned GET URLs.                          |
+| `GcsProvider`          | `'gcs'`    | `bucket`, `projectId?`                                              | Lazy `@google-cloud/storage`          | Real signed URLs via `file.getSignedUrl`.                                      |
+| `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?` | Lazy `@azure/storage-blob`            | SAS requires `accountKey`. No `@azure/identity` needed.                        |
+| B2 preset              | `'b2'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`                | Same as S3 (reuses `S3Provider`)      | Endpoint defaults to `https://s3.<region>.backblazeb2.com`. No separate class. |
 
 All cloud providers support an injectable `client` option that bypasses the lazy import, but the
 three types are NOT alike and the difference decides what you can pass:
@@ -8429,7 +8430,7 @@ app.router.get('/beta', {
 | `LaunchDarklyProvider`         | class            | LaunchDarkly-backed provider bridging its async SDK to the sync contract      |
 | `toLaunchDarklyContext`        | function         | Maps a `FlagContext` to the SDK's single-kind `user` context                  |
 | `adaptLaunchDarklyModule`      | function         | Narrows an SDK module to `ILaunchDarklyModule`                                |
-| `loadLaunchDarklyModule`       | function         | Real lazy `import('npm:@launchdarkly/node-server-sdk@^9')`                    |
+| `loadLaunchDarklyModule`       | function         | Real lazy `import('@launchdarkly/node-server-sdk')`                           |
 | `LaunchDarklyModuleError`      | class            | Thrown when the SDK cannot be loaded or does not expose `init()`              |
 | `ILaunchDarklyClient`          | interface        | Injection facade for the SDK client                                           |
 | `ILaunchDarklyModule`          | interface        | Injection facade for the SDK module                                           |
@@ -10414,7 +10415,7 @@ Notes:
   Vite and React Router; Node and Bun targets get those dev dependencies merged into the
   `package.json` they already have. The Deno `start` task additionally carries `--allow-read`, which
   the SSR plugin needs to import its own server build and read client assets.
-- **React Router is pinned to v8**, matching the `npm:react-router@8` the SSR plugin imports.
+- **React Router is pinned to v8**, matching the `react-router` the SSR plugin imports.
 
 A class-based project (the `class-based` alias, or `rest`/`microservice` with `--style class-based`)
 additionally emits `src/services/greeting.service.ts` and `src/controllers/greeting.controller.ts`,
@@ -12598,7 +12599,7 @@ Per-runtime upgrade seams:
 | `buildUpgradeResponseInit`             | function | Builds the Workers 101 `ResponseInit` carrying the client socket                  |
 | `NodeUpgradeCoordinator`               | class    | Owns the `ws` server for one Node adapter and performs the raw handshake          |
 | `adaptWsModule`                        | function | Narrows an imported `ws` module to `WsModuleLike`                                 |
-| `loadWsModule`                         | function | Lazily imports `npm:ws@^8.18.0`; throws with the install command if absent        |
+| `loadWsModule`                         | function | Lazily imports `ws`; throws with the install command if absent                    |
 | `bindWsSocketToSink`                   | function | Binds a `ws` socket's events to a `WebSocketEventSink`                            |
 | `createWsTransport`                    | function | Wraps a `ws` socket as an `IWebSocketTransport`                                   |
 | `toWsReadyState`                       | function | Maps a `ws` numeric ready state to `WebSocketReadyState`                          |
@@ -14521,7 +14522,7 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 Code-first differs only in passing a pre-built schema instead of `typeDefs` + `resolvers`:
 
 ```typescript
-import { buildSchema } from 'npm:graphql@^16';
+import { buildSchema } from 'graphql';
 const schema = buildSchema(`type Query { hello: String }`);
 
 GraphqlPlugin({ schema });
@@ -14580,7 +14581,7 @@ GraphqlPlugin({ schema });
 | `createDepthLimitRule`        | function  | Creates a validation rule for query depth limiting                                                                                             |
 | `GraphqlSchemaError`          | class     | Thrown when schema construction or resolver attachment fails                                                                                   |
 | `GraphqlRuntimeLoadError`     | class     | Thrown when graphql runtime cannot be loaded                                                                                                   |
-| `loadGraphqlModule`           | function  | Loads `npm:graphql@^16` through a real dynamic import                                                                                          |
+| `loadGraphqlModule`           | function  | Loads `graphql` through a real dynamic import                                                                                                  |
 | `GraphqlPluginOptions`        | type      | The factory parameter shape (union of the two arms)                                                                                            |
 | `GraphqlSchemaFirstOptions`   | type      | The schema-first arm of that union                                                                                                             |
 | `GraphqlCodeFirstOptions`     | type      | The code-first arm of that union                                                                                                               |

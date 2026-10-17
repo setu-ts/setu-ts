@@ -45,7 +45,7 @@ describe('toolchain prose refusals', () => {
   });
   it.each(['deno', 'jsr', 'npx jsr'])('P3 rejects bare arguments after %s add', (command) => {
     const text = [command, 'add', 'npm:graphql', '@setu-ts/auth-plugin'].join(' ');
-    expect(scan(text).map((f) => f.rule)).toEqual(['P3']);
+    expect(scan(text, 'src/app.ts').map((f) => f.rule)).toEqual(['P3']);
     expect(scan(`${command} add npm:@setu-ts/auth-plugin`)).toEqual([]);
     expect(scan(`${command} add jsr:@setu-ts/auth-plugin`).map((f) => f.rule)).toEqual(['P1']);
   });
@@ -128,6 +128,49 @@ describe('toolchain prose refusals', () => {
     ).toEqual([]);
   });
   it.each([
+    "from 'npm:zod'",
+    'from "npm:zod"',
+    "import 'npm:zod'",
+    "import type { z } from 'npm:zod'",
+    'import type { z } from "npm:zod"',
+    "import('npm:zod')",
+  ])('P7 reports %s at the right line and not a backticked mention', (text) => {
+    const findings = scan(`${text}\n\`from 'npm:zod'\``, 'docs/live.md');
+    expect(findings.filter((f) => f.rule === 'P7').map((f) => [f.rule, f.line])).toEqual([
+      ['P7', 1],
+    ]);
+  });
+  it('P8 refuses a backticked npm: reference in a table and in prose', () => {
+    expect(scan('| `npm:ioredis` | redis |', 'docs/live.md').map((f) => f.rule)).toEqual(['P8']);
+    expect(scan('the `npm:ioredis` client', 'docs/live.md').map((f) => f.rule)).toEqual(['P8']);
+  });
+  it('P8 exempts @setu-ts, @jsr, deno install arguments, and allowlisted paths', () => {
+    expect(scan('deno add npm:hono', 'docs/live.md')).toEqual([]);
+    expect(scan('npm:@setu-ts/kernel\nnpm:@jsr/hono', 'docs/live.md')).toEqual([]);
+    const entry = {
+      path: 'docs/allowed.md',
+      category: 'legacy-pin' as const,
+      reason: 'Explains the audit',
+      allowNpmRef: true as const,
+    };
+    expect(scan('npm:ioredis', entry.path, { ...rules, allowlist: [entry] })).toEqual([]);
+    expect(scan('npm:ioredis', 'docs/live.md').map((f) => f.rule)).toEqual(['P8']);
+  });
+  it('P7 and P8 skip non-markdown files', () => {
+    expect(scan("import { z } from 'npm:zod'\n`npm:ioredis`", 'src/app.ts')).toEqual([]);
+  });
+  it('ratchets an unused P8 allowance', () => {
+    const entry = {
+      path: 'unused.md',
+      category: 'fixture' as const,
+      reason: 'Needless P8 entry',
+      allowNpmRef: true as const,
+    };
+    expect(scan('no npm input', entry.path, { ...rules, allowlist: [entry] })[0]?.rule).toBe(
+      'stale-allowlist',
+    );
+  });
+  it.each([
     'CHANGELOG.md',
     'ROADMAP.md',
     'plans/archive/old.md',
@@ -142,16 +185,19 @@ describe('toolchain prose refusals', () => {
           'pnpm run missing',
           'deno lint',
           'https://jsr.io/@setu-ts/kernel',
+          "from 'npm:zod'",
+          '`npm:ioredis`',
         ].join('\n'),
         path,
       ),
     ).toEqual([]);
   });
   it('exempts only the Current status section and preserves line numbers', () => {
-    const text = `# Instructions\n${task('check')}\n## Current status\n${task('fmt:check')}\npnpm run missing\n## Verification\n${task('check')}`;
+    const text = `# Instructions\n${task('check')}\n## Current status\n${task('fmt:check')}\npnpm run missing\nfrom 'npm:zod'\n## Verification\n${task('check')}\n\`npm:ioredis\``;
     expect(scan(text, 'CLAUDE.md').map((f) => [f.rule, f.line])).toEqual([
       ['P1', 2],
-      ['P1', 7],
+      ['P1', 8],
+      ['P8', 9],
     ]);
     expect(scan(`## Current status\n${task('fmt:check')}`, 'CLAUDE.md')).toEqual([]);
   });

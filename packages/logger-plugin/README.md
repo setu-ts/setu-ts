@@ -3,8 +3,8 @@
 Structured logging. Registers an `ILogger` under `CAPABILITIES.LOGGER` (`'logger'`) and, optionally,
 request/response logging middleware.
 
-Three implementations ship: `ConsoleLogger` (zero-dependency default), `PinoLogger` (over
-`npm:pino`, lazily imported or injected), and `NoopLogger`.
+Three implementations ship: `ConsoleLogger` (zero-dependency default), `PinoLogger` (over `pino`,
+lazily imported or injected), and `NoopLogger`.
 
 ## Installation
 

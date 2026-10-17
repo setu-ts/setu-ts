@@ -13,7 +13,7 @@ export interface ProseFile {
 export interface ToolchainProseFinding {
   readonly path: string;
   readonly line: number;
-  readonly rule: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'stale-allowlist';
+  readonly rule: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'stale-allowlist';
   readonly message: string;
 }
 
@@ -25,6 +25,8 @@ export interface ToolchainProseRules {
     readonly reason: string;
     /** URL allowances are separate: a legacy pin example does not authorize a stale link. */
     readonly allowJsrUrl?: true;
+    /** npm: reference allowances are separate: a legacy pin example does not authorize a stale npm: mention. */
+    readonly allowNpmRef?: true;
   }[];
   readonly generatedDenoTasks: readonly string[];
   readonly rootScripts: readonly string[];
@@ -367,6 +369,12 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
 
 const P1 = /deno\s+task\b|jsr:@setu-ts\/|@jsr\/setu-ts__|Deno-first/i;
 const P6 = /jsr\.io\/@setu-ts\b/i;
+/** P7: an `npm:` specifier in a quoted import position. Backtick-quoted text is P8's business. */
+const P7 = /(?:\bfrom\s+|\bimport\s+|\bimport\(\s*)["']npm:/g;
+/** P8: any `npm:<pkg>` reference; `pnpm:` and a "from npm:" registry mention do not match. */
+const P8 = /\bnpm:([A-Za-z@][A-Za-z0-9@._/^~-]*)/g;
+/** A Deno install command with the specifier as an argument: a legitimate Deno-target instruction. */
+const DENO_INSTALL = /\bdeno\s+(?:add|install)\b/;
 
 function history(path: string): boolean {
   return /^(?:CHANGELOG\.md$|ROADMAP\.md$|plans\/(?:archive\/|reviews\/|milestone-[^/]+\.md$))/.test(
@@ -421,6 +429,29 @@ export function scanToolchainProse(
       for (const match of commandLine.matchAll(/\b(?:deno|jsr)\s+add\b([^\n`<>;|&]*)/gi)) {
         if (/(?:^|\s|["'])@setu-ts\//.test(match[1]!)) {
           report('P3', 'Bare Setu-TS add argument resolves from JSR; use npm:@setu-ts/');
+        }
+      }
+      if (path.endsWith('.md')) {
+        const p7NpmStarts = new Set<number>();
+        for (const match of line.matchAll(P7)) {
+          if (match.index === undefined) continue;
+          const quote = match.index + match[0].length - 5;
+          if ((line.slice(0, quote).match(/`/g)?.length ?? 0) % 2 === 1) continue;
+          p7NpmStarts.add(match.index + match[0].length - 4);
+          report('P7', 'Node cannot load an npm: specifier; import the bare package name');
+        }
+        for (const match of line.matchAll(P8)) {
+          const pkg = match[1] ?? '';
+          if (pkg.startsWith('@setu-ts/') || pkg.startsWith('@jsr/')) continue;
+          if (match.index === undefined) continue;
+          if (p7NpmStarts.has(match.index)) continue;
+          if (DENO_INSTALL.test(line.slice(0, match.index))) continue;
+          if (allowance?.allowNpmRef) used.add(path);
+          else
+            report(
+              'P8',
+              'packages install and import by bare name since 0.9.0; drop the npm: prefix',
+            );
         }
       }
       if (!instructions(path)) continue;

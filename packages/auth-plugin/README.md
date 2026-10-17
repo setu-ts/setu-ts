@@ -776,7 +776,7 @@ SessionPlugin({
 HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
 ```
 
-**The library.** `@node-saml/node-saml@^5` is imported lazily when a `saml` provider is configured,
+**The library.** `@node-saml/node-saml` is imported lazily when a `saml` provider is configured,
 awaited in `register()`, so a missing package fails at startup with `SamlRuntimeLoadError` rather
 than at the first login. Pass `module` to inject it instead. On Cloudflare Workers it needs the
 `nodejs_compat` compatibility flag; without it the library cannot bundle, and the error says so.
@@ -1182,7 +1182,7 @@ registered under no capability token. Over-limit requests are short-circuited wi
 (`Retry-After` always set; `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` set unless
 `standardHeaders: false` — `Reset` and `Retry-After` are both delta-seconds). The default store is
 in-memory (single-process); use `RedisRateLimitStore` for multi-instance deployments (pass an
-ioredis-compatible `client`, or `npm:ioredis@5.x` is lazily imported on first use).
+ioredis-compatible `client`, or `ioredis` is lazily imported on first use).
 
 The 429 body uses `@setu-ts/common`'s error-responder seam, so it follows the application's
 configured error format. The operational paths `/live`, `/ready`, `/health`, `/metrics`,
