@@ -383,7 +383,8 @@ function buildStoredResponse(
  * Every branch reports through {@linkcode reportWriteFailure} before the write
  * is awaited or handed on, so a cache rejection never reaches the generic
  * `waitUntil` reporter, which logs its message (M113d §10, F1). A host gets a
- * promise that already settles quietly.
+ * promise that already settles quietly. A `put` that throws synchronously is
+ * reported the same way and nothing is handed on.
  *
  * `ctx.services.has` rather than a `try`/`catch` around `get`: the registry
  * throws on an unregistered token (common/src/registry.ts:96), and catching
@@ -395,9 +396,17 @@ async function store(
   key: string,
   response: Response,
 ): Promise<void> {
-  const written = cache.put(key, response).catch((error: unknown) => {
+  let written: Promise<void>;
+  try {
+    written = cache.put(key, response).catch((error: unknown) => {
+      reportWriteFailure(ctx, error);
+    });
+  } catch (error) {
+    // A custom cache may throw from `put` instead of rejecting; that is the
+    // same failed write, reported once and never surfaced to the request.
     reportWriteFailure(ctx, error);
-  });
+    return;
+  }
 
   if (ctx.services.has(CAPABILITIES.CLOUDFLARE)) {
     const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);

@@ -1001,6 +1001,40 @@ describe('cacheApiMiddleware — the write path with a hostless registry (M113d 
     },
   );
 
+  it.each([
+    ['no bindings capability', false],
+    ['replacement bindings with a waitUntil sink', true],
+  ] as const)(
+    'serves the response and reports once when put throws synchronously, with %s',
+    async (_label, withBindings) => {
+      // A custom cache may throw from `put` rather than reject; the write is
+      // still best-effort, so the 200 stands and nothing is handed to a host.
+      const failing: ICacheApi = {
+        match: () => Promise.resolve(undefined),
+        put: () => {
+          throw new TypeError('put threw');
+        },
+        delete: () => Promise.resolve(false),
+      };
+      const sink: Promise<unknown>[] = [];
+      const services = withBindings ? registryWithBindings(sink) : new MockServiceRegistry();
+      const logger = new RecordingLogger();
+      services.register(CAPABILITIES.LOGGER, logger);
+      const ctx = contextFor('https://example.test/orders', { services });
+
+      await cacheApiMiddleware({ cache: failing })(ctx, () => {
+        ctx.response.json({ ok: true });
+        return Promise.resolve();
+      });
+
+      expect(ctx.response.snapshot().status).toBe(200);
+      expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('MISS');
+      expect(sink).toHaveLength(0);
+      expect(logger.records).toHaveLength(1);
+      expect(logger.records.at(0)?.meta).toEqual({ path: '/orders', error: 'TypeError' });
+    },
+  );
+
   it('hands the put to replacement bindings that are not in the hostless set', async () => {
     // The existing `bindingsWithWaitUntil` fake is a replacement provider's
     // object: never marked, trusted to carry a sink.
