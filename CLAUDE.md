@@ -6377,8 +6377,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the store happens on the first other key, and demotion deletes the row so an id-only replay
   restores nothing. `PasswordHasher` defaults to 600,000 iterations (79 ms vs 15 ms on Node), with
   `PasswordHasherOptions.iterations` (100,000–10,000,000) and `needsRehash`. A deployed Worker's
-  reported 100,000 limit is documented and unverified; local workerd accepts 600,000. Seven negative
-  controls observed failing — complete (PR pending)
+  reported 100,000 limit is documented and unverified; local workerd accepts 600,000. The security
+  audit failed round 1 on two Lows — the docs' bearer justification was false under path-scoped CORS
+  (now documented as trusting every origin CORS lets send `Authorization` with credentials), and a
+  non-boolean `exemptBearer` failed open (now refused) — and observed that fixation without
+  `regenerate()` was only reduced, so promotion now rotates the session id; round 2 passed on
+  `46acb5dd` — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

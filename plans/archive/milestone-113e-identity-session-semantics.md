@@ -317,3 +317,11 @@ Two Low findings, no Critical, High or Medium; all 10 negative controls observed
   2 tests.
 - **O2 (pre-existing, not fixed here)** — `parseStoredHash` echoes the stored iteration string into
   its error. **O3** — an oversized tenant id breaks only the requester's own commit.
+
+### Committed-tree audit, round 2 (same independent auditor, `46acb5dd`) — passed
+
+No open findings. L1 (wording judged accurate and sufficient), L2 and O1 verified fixed. 13 negative
+controls observed failing (NC1–NC10 plus NC11/NC11b for the rotation and NC12 for the boolean
+check). Observation: two concurrent promotions from one held cookie leave one orphan row, reachable
+only by the discarded cookie, until its TTL — benign. Support limits: Node only, no real browser
+(CORS asserted from response headers), not tested on a deployed Worker.
