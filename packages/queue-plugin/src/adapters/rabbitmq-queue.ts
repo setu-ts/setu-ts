@@ -67,7 +67,8 @@ export function validateClient(client: unknown): client is IAmqpQueueConnection 
  */
 async function resolveClient(
   url: string,
-  injectedClient?: IAmqpQueueConnection,
+  injectedClient: IAmqpQueueConnection | undefined,
+  runtime: IRuntimeServices,
 ): Promise<IAmqpQueueConnection> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -79,11 +80,37 @@ async function resolveClient(
     return injectedClient;
   }
   const amqplib = await loadAmqplib();
-  // amqplib's socket timeout stays armed until the AMQP open handshake ends, so
-  // a broker that accepts TCP and never answers fails the attempt and the
-  // supervisor retries, rather than one attempt hanging forever (audit L1).
-  const connection = await amqplib.connect(url, { timeout: CONNECT_TIMEOUT_MS });
-  return connection as unknown as IAmqpQueueConnection;
+  // amqplib's socket `timeout` is an IDLE timeout, armed until the AMQP open
+  // handshake ends: it fails a silent peer (audit L1) but not one trickling
+  // bytes (audit N2). The deadline bounds the whole attempt; a connection that
+  // opens after it is closed at once, since the supervisor has moved on.
+  const attempt = amqplib.connect(url, {
+    timeout: CONNECT_TIMEOUT_MS,
+  }) as unknown as Promise<IAmqpQueueConnection>;
+  let expired = false;
+  try {
+    return await withDeadline(() => attempt, {
+      timeoutMs: CONNECT_TIMEOUT_MS,
+      onTimeout: () => {
+        expired = true;
+        return new Error(
+          `RabbitMQ did not complete the connection within ${CONNECT_TIMEOUT_MS} ms`,
+        );
+      },
+      timing: {
+        setTimer: (fn, ms) => runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => runtime.clearTimeout(handle),
+      },
+    });
+  } catch (error) {
+    if (expired) {
+      attempt.then(
+        (late) => late.close().catch(() => undefined),
+        () => undefined,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -102,7 +129,7 @@ function parseStoredJob<T>(payload: string): StoredJob<T> | null {
   return typeof (value as { id?: unknown }).id === 'string' ? (value as StoredJob<T>) : null;
 }
 
-/** Bound on opening one connection, TCP and AMQP handshake together, in ms. */
+/** Bound on one whole connection attempt, TCP and AMQP handshake together, in ms. */
 const CONNECT_TIMEOUT_MS = 10_000;
 
 /** Default bound on one job publish, including its confirm, in ms. */
@@ -389,7 +416,7 @@ export class RabbitMqQueue implements QueueAdapter {
     if (this.#ready) {
       return;
     }
-    this.#connection = await resolveClient(this.#url, this.#injectedClient);
+    this.#connection = await resolveClient(this.#url, this.#injectedClient, this.#runtime);
     this.#closing = false;
     this.#supervisor = this.#createSupervisor();
     this.#supervisor.start();
@@ -553,7 +580,7 @@ export class RabbitMqQueue implements QueueAdapter {
           // A fault can already have closed it.
         }
       }
-      const connection = await resolveClient(this.#url, undefined);
+      const connection = await resolveClient(this.#url, undefined, this.#runtime);
       if (this.#closing) {
         await connection.close();
         return;
@@ -664,7 +691,19 @@ export class RabbitMqQueue implements QueueAdapter {
         // A body that is not a stored job cannot be claimed, run or settled.
         // Throwing here would strand the messages already fetched this call, so
         // it is moved, bytes unchanged, into the dead queue (audit L4).
-        await this.#quarantine(name, msg);
+        try {
+          await this.#quarantine(name, msg);
+        } catch {
+          // The dead queue refused the move (a reject-publish length policy, or
+          // a blocked broker past publishTimeoutMs). Stop fetching and return
+          // what was claimed; the message stays unacknowledged until the
+          // channel closes, then is redelivered and moved again (audit N1).
+          this.#reportWarning?.(
+            'queue-plugin: a RabbitMQ message that is not a stored job could not be moved to ' +
+              'the dead queue; it stays unacknowledged until the channel closes',
+          );
+          break;
+        }
         continue;
       }
       const token = this.#runtime.uuid();

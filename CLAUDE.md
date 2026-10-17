@@ -6327,8 +6327,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `attachConnectionErrorReporter`'s reporter is now optional and defaults to dropping listeners,
   applied at all eight call sites. Verified against real Redis 7 and RabbitMQ 4 (7 driver checks).
   The design security review is plan §10. Its post-implementation findings S4 (a lease too short to
-  renew) and S8 (the console fix) are fixed. S3 is documented, and S5 and S6 are accepted — complete
-  (PR pending)
+  renew) and S8 (the console fix) are fixed. S3 is documented, and S5 and S6 are accepted. The
+  committed-tree audit ran two fresh-context rounds. Round 1 failed on a Medium: an over-budget
+  job's `onFailed` ran unrenewed, so a callback slower than the lease was reclaimed and re-notified
+  forever and the job never reached the dead set. It also failed on four Lows: no RabbitMQ connect
+  bound, due jobs selected by Redis `TIME` so app clock skew moved delays (the plan's recorded "no
+  worse" deviation was wrong for a single replica), a refusal message saying 0 disables the bound,
+  and a non-object RabbitMQ body stranding the batch. Round 2 confirmed all five fixed and found two
+  Lows in those fixes: a refused dead-queue move stranded the batch again, and the connect bound was
+  amqplib's idle timeout, which a trickling peer outlasts. Both were fixed afterwards and NOT
+  re-audited, at the maintainer's direction — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

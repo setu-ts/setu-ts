@@ -509,3 +509,20 @@ reverted:
 - **L3:** the `visibilityTimeoutMs` refusal said "0 disables the bound" while refusing 0.
 - **L4:** a ready-queue body that was JSON but not an object threw out of `reserve`, stranding the
   batch. Such bodies (and non-JSON ones, which already did this) move to the dead queue unchanged.
+
+### Committed-tree audit, round 2 (2026-10-17, on `17cfb4dd`): failed; fixes not re-audited
+
+A second fresh-context audit confirmed M1 and L1–L4 fixed, each with a probe that failed when the
+fix was reverted, and re-ran every round-1 probe green. It failed on two new Low findings, both
+consequences of the round-1 fixes, fixed afterwards with a test that fails when reverted:
+
+- **N1 (Low):** if the dead queue refused L4's move (a `reject-publish` length policy, or a blocked
+  broker), `#quarantine` threw and the messages already fetched in that call stayed unacknowledged.
+  `reserve` now warns, stops fetching and returns what it claimed; the message is redelivered when
+  the channel closes.
+- **N2 (Low):** L1's 10 s bound was amqplib's idle socket timeout, so a peer trickling bytes kept an
+  attempt pending past 40 s. The whole attempt now runs under `withDeadline` on the runtime's
+  timers, and a connection that opens after expiry is closed.
+
+**Not re-audited, at the maintainer's direction (2026-10-17):** both findings were Low and the fixes
+narrow, so round 3 was waived.

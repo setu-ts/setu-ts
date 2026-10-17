@@ -400,11 +400,15 @@ RabbitMQ-backed queue polling per-name durable queues through the default exchan
 retries wait in a per-name delay queue whose message TTL dead-letters them into the ready queue.
 Jobs are published persistent through a confirm channel (see [RabbitMQ Adapter](#rabbitmq-adapter)).
 Requires the `amqplib` package at runtime (or an injected `IAmqpQueueConnection`). Each connection
-attempt the adapter makes is bounded at 10 seconds, TCP and AMQP handshake together, so a broker
-that accepts connections but never answers is retried rather than waited on. A message in a ready
-queue whose body is not a stored job (not JSON, not an object, or no string `id`) is moved with its
-bytes unchanged into the dead queue, acknowledged, and reported once as a warning that does not
-quote the body; the rest of the batch is reserved normally.
+attempt the adapter makes is bounded at 10 seconds in total, TCP and AMQP handshake together, so a
+broker that never answers, or answers too slowly, is retried rather than waited on; a connection
+that opens after its attempt expired is closed at once. A message in a ready queue whose body is not
+a stored job (not JSON, not an object, or no string `id`) is moved with its bytes unchanged into the
+dead queue, acknowledged, and reported once as a warning that does not quote the body; the rest of
+the batch is reserved normally. If the dead queue refuses the move (a `reject-publish` length
+policy, or a blocked broker past `publishTimeoutMs`), the warning says so, the jobs already claimed
+in that call are returned, fetching stops, and the message stays unacknowledged until the channel
+closes, when RabbitMQ redelivers it and the move is tried again.
 
 ### SqsQueue
 

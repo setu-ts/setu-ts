@@ -26,10 +26,12 @@ All notable changes to this project are documented here. The format follows
   runs. Due jobs are still selected by the reserving replica's clock, so skew between an application
   host and Redis does not shift delays.
 - **RabbitMQ queue connection bound and unreadable messages (M113c).** Each connection attempt
-  `RabbitMqQueue` makes is bounded at 10 seconds, so a broker that accepts TCP and never answers is
-  retried. A ready-queue message whose body is not a stored job is moved, bytes unchanged, into the
-  dead queue with one warning, rather than throwing out of `reserve` and stranding the messages
-  already fetched in that batch.
+  `RabbitMqQueue` makes is bounded at 10 seconds in total, so a broker that never answers, or
+  answers too slowly, is retried; a connection that opens late is closed. A ready-queue message
+  whose body is not a stored job is moved, bytes unchanged, into the dead queue with one warning,
+  rather than throwing out of `reserve` and stranding the messages already fetched in that batch. If
+  the dead queue refuses the move, the jobs already claimed are returned and the message waits,
+  unacknowledged, until the channel closes.
 - **Breaking processor definition mutability (M113c, 0.10.0).**
   `QueueProcessorDefinition<T = unknown>.processor` is now a method, admitting typed payloads in
   declarative lists and preserving `this`. Code relying on its former `readonly` restriction must

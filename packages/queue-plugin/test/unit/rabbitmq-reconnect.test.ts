@@ -187,6 +187,65 @@ describe('RabbitMQ queue reconnect', () => {
     }
   });
 
+  it('stops fetching and returns what it claimed when the dead queue refuses a move (audit N1)', async () => {
+    const runtime = new FakeRuntimeServices(0);
+    const connection = new Connection();
+    const warnings: string[] = [];
+    const queue = new RabbitMqQueue(runtime, {
+      client: connection,
+      reportWarning: (message) => warnings.push(message),
+    });
+    await queue.connect();
+    try {
+      const channel = connection.channels[0];
+      await queue.enqueue(job);
+      channel.publish('', 'he.queue.email.ready', Buffer.from('"string"'));
+      await queue.enqueue({ ...job, id: 'later' });
+      const publish = channel.publish.bind(channel);
+      vi.spyOn(channel, 'publish').mockImplementation((exchange, key, content, options, cb) => {
+        if (key.endsWith('.dead')) throw new Error('dead queue refused');
+        return publish(exchange, key, content, options, cb);
+      });
+      const reserved = await queue.reserve('email', 10, 0);
+      expect(reserved.map((entry) => entry.id)).toEqual(['old']);
+      expect(warnings.filter((w) => w.includes('could not be moved'))).toHaveLength(1);
+      expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(0);
+      await queue.ack('email', 'old', reserved[0].claimToken);
+      expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(1);
+    } finally {
+      await queue.disconnect();
+    }
+  });
+
+  it('bounds a whole lazy connection attempt and closes a connection that opens late (audit N2)', async () => {
+    const runtime = new FakeRuntimeServices(0);
+    const opening = Promise.withResolvers<IAmqpQueueConnection>();
+    factory.connect.mockReset();
+    factory.connect.mockImplementationOnce(() => opening.promise);
+    const queue = new RabbitMqQueue(runtime);
+    const connecting = queue.connect().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    // The deadline arms only once amqplib has loaded and connect() was called.
+    while (factory.connect.mock.calls.length === 0)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await runtime.advanceMs(9_999);
+    let settled = false;
+    void connecting.then(() => (settled = true));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    await runtime.advanceMs(1);
+    expect(await connecting).toEqual(
+      new Error('RabbitMQ did not complete the connection within 10000 ms'),
+    );
+    const late = new Connection();
+    opening.resolve(late);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(late.closes).toBe(1);
+    expect(late.channels).toHaveLength(0);
+  });
+
   it('closes a channel that finishes opening after disconnect', async () => {
     const runtime = new FakeRuntimeServices(0);
     const connection = new Connection();
