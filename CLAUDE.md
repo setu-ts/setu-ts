@@ -6336,7 +6336,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and a non-object RabbitMQ body stranding the batch. Round 2 confirmed all five fixed and found two
   Lows in those fixes: a refused dead-queue move stranded the batch again, and the connect bound was
   amqplib's idle timeout, which a trickling peer outlasts. Both were fixed afterwards and NOT
-  re-audited, at the maintainer's direction — complete (PR pending)
+  re-audited, at the maintainer's direction — complete (PR #466)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

@@ -14194,7 +14194,7 @@ V9-68 is owned by M113o.
   in-flight request, so `onClose` hooks (the worker pool's termination among them) run only when the
   handler returns. Node and Bun stop in 10.5 s.
 
-Shipped (PR pending). The fix for Redis clients without a reporter, folded in at the maintainer's
+Shipped (PR #466). The fix for Redis clients without a reporter, folded in at the maintainer's
 direction, also touches `auth-plugin`, `cache-plugin`, `idempotency-plugin`,
 `realtime-backplane-plugin` and `scheduler-plugin`; each change is the same one-line call-site edit.
 
