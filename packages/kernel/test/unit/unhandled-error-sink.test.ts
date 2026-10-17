@@ -45,6 +45,7 @@ describe('kernel last-resort request sink', () => {
         if (!withLogger)
           expect(records[0]).toMatchObject({
             level: 'error',
+            msg: 'Unhandled request error',
             name: 'Error',
             message: 'escaped fault',
             method: 'GET',

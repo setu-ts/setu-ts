@@ -2132,14 +2132,12 @@ class Application implements IKernelApplication {
   #reportUnhandledError(error: Error, ctx: IRequestContext): void {
     try {
       if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        // `msg` carries the label and `message` the error's own text, the same
+        // two keys the console logger writes for the branch below.
         this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
-          ...Object.assign(
-            {
-              level: 'error',
-              message: 'Unhandled request error',
-            },
-            serializeError(error),
-          ),
+          level: 'error',
+          msg: 'Unhandled request error',
+          ...serializeError(error),
           requestId: ctx.id,
           method: ctx.request.method,
           path: ctx.request.path,

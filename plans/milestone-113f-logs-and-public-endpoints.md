@@ -144,9 +144,10 @@ it, are recorded in §3.
   scoped `eslint-disable-next-line no-console -- runtime sink (M113f)` — Workers has no stderr
   stream and `console` is its log channel. Consumers, each only when `CAPABILITIES.LOGGER` is NOT
   registered: the kernel's `#reportUnhandledError` (record
-  `{ level: 'error', message: 'Unhandled request error', ...serializeError(error), requestId, method, path }`),
-  and `errorHandler`'s `logError` for a served status ≥ 500 only (4xx stays silent without a
-  logger).
+  `{ level: 'error', msg: 'Unhandled request error', ...serializeError(error), requestId, method, path }`
+  (the label is `msg`, as the console logger writes it, because `serializeError` supplies
+  `message`)), and `errorHandler`'s `logError` for a served status ≥ 500 only (4xx stays silent
+  without a logger).
 - **Why:** every compared framework has a default sink; the no-console rule confines it to
   `runtime`.
 - **Test home:** `runtime/test/unit/report-error.test.ts` (each adapter writes one JSON line; a
