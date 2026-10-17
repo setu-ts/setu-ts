@@ -1020,7 +1020,7 @@ describe('RedisBackplane connection-error reporting', () => {
     await backplane.close();
   });
 
-  it('attaches nothing to built connections when no reporter is configured', async () => {
+  it('attaches dropping listeners to built connections when no reporter is configured', async () => {
     const { module, clients } = builtPair();
     const backplane = new RedisBackplane(
       { transport: 'redis', url: 'redis://localhost:6379', module },
@@ -1030,8 +1030,10 @@ describe('RedisBackplane connection-error reporting', () => {
 
     await backplane.connect();
 
+    // A listener must exist, or ioredis writes every error to the console.
     for (const client of clients) {
-      expect(client.eventListeners.has('error')).toBe(false);
+      expect(client.eventListeners.get('error')?.length).toBe(1);
+      expect(() => client.emitEvent('error', new Error('refused'))).not.toThrow();
     }
     await backplane.close();
   });

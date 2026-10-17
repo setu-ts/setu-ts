@@ -17,6 +17,7 @@ export const DENO_LANE_TESTS = [
   'packages/cli/test/unit/process-boundary.test.ts',
   'packages/runtime/test/unit/create-runtime-services.test.ts',
   'packages/runtime/test/e2e/worker-host-real.test.ts',
+  'packages/runtime/test/e2e/deno-stop-bounded.test.ts',
   'packages/runtime/test/integration/deno-http-adapter.test.ts',
   'packages/runtime/test/unit/deno-dns-resolver.test.ts',
   'packages/runtime/test/unit/deno-http-adapter-rpc.test.ts',
@@ -56,6 +57,7 @@ export const NODE_EXCLUDED_TESTS = [
   'packages/websocket-plugin/test/integration/websocket-integration.test.ts',
 
   'packages/runtime/test/e2e/worker-host-real.test.ts',
+  'packages/runtime/test/e2e/deno-stop-bounded.test.ts',
   'packages/runtime/test/integration/deno-http-adapter.test.ts',
   'packages/runtime/test/unit/deno-dns-resolver.test.ts',
   'packages/runtime/test/unit/deno-http-adapter-rpc.test.ts',

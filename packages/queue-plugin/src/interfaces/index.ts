@@ -8,7 +8,7 @@ import type { Buffer } from 'node:buffer';
 import type {
   ConnectionErrorReporter,
   IIngressBehavior,
-  JobProcessor,
+  IJob,
   ProcessOptions,
   RegistryFactory,
 } from '@setu-ts/common';
@@ -171,11 +171,11 @@ export interface StoredJob<T = unknown> {
   availableAtMs: number;
   /**
    * Opaque token identifying THIS delivery, set by `reserve` on adapters whose
-   * transport hands out a per-delivery claim (SQS populates it from the receipt
-   * handle). `runJob` passes it back on `ack`/`requeue`/`deadLetter` so the
+   * transport hands out a per-delivery claim (Redis mints a server sequence,
+   * RabbitMQ uses runtime.uuid(), SQS uses the receipt handle). `runJob` passes it back on `ack`/`requeue`/`deadLetter` so the
    * adapter can reject a settle belonging to a superseded delivery.
    *
-   * Adapters with no transport-level claim (memory, redis, rabbitmq) leave it
+   * Adapters with no transport-level claim (memory, or Redis without eval) leave it
    * unset and ignore the argument; `runJob` then falls back to {@link id}.
    */
   claimToken?: string;
@@ -219,6 +219,17 @@ export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq' | 'sqs';
  * Options for configuring the queue plugin.
  */
 export interface QueuePluginOptions {
+  /** Redis key namespace, default `queue:`. Non-empty, at most 128 characters,
+   * without control characters. Does not read the RabbitMQ `prefix` option.
+   * @since 0.10.0
+   */
+  keyPrefix?: string;
+  /** Redis lease length in ms, default 30000; from 1000 to 2147483647.
+   * Requires eval; otherwise inactive with one connection-error report.
+   * Renewed every third of this duration. Redis 5+ required.
+   * @since 0.10.0
+   */
+  visibilityTimeoutMs?: number;
   /** The adapter type to use (default 'memory'). */
   adapter?: QueueAdapterType;
   /** Instance name for multi-instance support. */
@@ -308,8 +319,8 @@ export interface QueuePluginOptions {
    * the job an idempotent handler. Each queue transition runs as one Lua script
    * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
    * `reserve` applied after its timeout leaves the job and its payload in the
-   * processing set. Nothing reclaims a processing-set member, so that job is
-   * not dispatched again until it is moved back to the ready set by hand.
+   * processing set. With eval, an expired lease is reclaimed on reserve.
+   * A client without eval keeps the previous behaviour: no claims or reclaim.
    *
    * @since 0.9.0
    */
@@ -460,11 +471,11 @@ export interface QueueDiagnosticsOptions {
  *
  * @since 0.3.0
  */
-export interface QueueProcessorDefinition {
+export interface QueueProcessorDefinition<T = unknown> {
   /** The job name this processor handles (the `process()` name argument). */
   readonly name: string;
   /** Invoked per delivered job, exactly as the imperative `process()` accepts. */
-  readonly processor: JobProcessor;
+  processor(job: IJob<T>): void | Promise<void>;
   /** Per-name configuration, exactly as the imperative `process()` accepts. */
   readonly options?: ProcessOptions;
 }
@@ -483,6 +494,19 @@ export type QueueProcessorEntry =
  * Options for configuring RedisQueue.
  */
 export interface RedisQueueOptions {
+  /** Redis key namespace, default `queue:`. Non-empty, at most 128 characters,
+   * without control characters. Set per application for shared Redis isolation;
+   * no prefix on one Redis may be a string prefix of another (`app:` and `app:b:`
+   * collide through a job named `b:x`).
+   * @since 0.10.0
+   */
+  keyPrefix?: string;
+  /** Redis lease length in ms, default 30000; from 1000 to 2147483647.
+   * Requires eval; otherwise inactive with one connection-error report.
+   * Renewed every third of this duration. Redis 5+ required.
+   * @since 0.10.0
+   */
+  visibilityTimeoutMs?: number;
   /** Redis connection URL (default 'redis://localhost:6379'). */
   url?: string;
   /** Injected Redis client (bypasses lazy import). */
@@ -518,8 +542,8 @@ export interface RedisQueueOptions {
    * the job an idempotent handler. Each queue transition runs as one Lua script
    * (see `IRedisQueueClient.eval`), so a timeout leaves it whole or absent; a
    * `reserve` applied after its timeout leaves the job and its payload in the
-   * processing set. Nothing reclaims a processing-set member, so that job is
-   * not dispatched again until it is moved back to the ready set by hand.
+   * processing set. With eval, an expired lease is reclaimed on reserve.
+   * A client without eval keeps the previous behaviour: no claims or reclaim.
    *
    * @since 0.9.0
    */

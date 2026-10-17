@@ -96,7 +96,7 @@ export function RealtimeBackplanePlugin(
 
       // The redis arm's built connections report reconnect failures to the
       // logger (read at call time) unless the caller routed them elsewhere,
-      // rather than through ioredis's own console fallback.
+      // rather than being dropped.
       const resolved: RealtimeBackplanePluginOptions =
         options.transport === 'redis' && options.connectionErrorReporter === undefined
           ? {

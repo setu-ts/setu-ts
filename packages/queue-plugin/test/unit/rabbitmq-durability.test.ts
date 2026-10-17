@@ -101,10 +101,10 @@ describe('RabbitMqQueue durability', () => {
     await queue.enqueue(job(runtime, 'ready'));
     await queue.enqueue(job(runtime, 'delayed', 5_000));
     const [first] = await queue.reserve('emails', 1, runtime.now());
-    await queue.requeue('emails', first!.id, runtime.now() + 1_000, 1);
+    await queue.requeue('emails', first!.id, runtime.now() + 1_000, 1, first!.claimToken);
     await queue.enqueue(job(runtime, 'doomed'));
     const [doomed] = await queue.reserve('emails', 1, runtime.now());
-    await queue.deadLetter('emails', doomed!.id, runtime.now());
+    await queue.deadLetter('emails', doomed!.id, runtime.now(), doomed!.claimToken);
 
     const sent = publishes(channel);
     expect(sent.map((p) => p.queue)).toEqual([
@@ -181,13 +181,13 @@ describe('RabbitMqQueue durability', () => {
       return accepted;
     };
     const before = acks(channel);
-    await expect(queue.requeue('emails', reserved!.id, runtime.now() + 10, 1)).rejects.toThrow(
-      'refused',
-    );
+    await expect(
+      queue.requeue('emails', reserved!.id, runtime.now() + 10, 1, reserved!.claimToken),
+    ).rejects.toThrow('refused');
     expect(acks(channel)).toBe(before);
-    await expect(queue.deadLetter('emails', reserved!.id, runtime.now())).rejects.toThrow(
-      'refused',
-    );
+    await expect(
+      queue.deadLetter('emails', reserved!.id, runtime.now(), reserved!.claimToken),
+    ).rejects.toThrow('refused');
     expect(acks(channel)).toBe(before);
     await queue.disconnect();
   });
@@ -200,7 +200,13 @@ describe('RabbitMqQueue durability', () => {
     await enqueueing;
     const [reserved] = await queue.reserve('emails', 1, runtime.now());
 
-    const retrying = queue.requeue('emails', reserved!.id, runtime.now() + 10, 1);
+    const retrying = queue.requeue(
+      'emails',
+      reserved!.id,
+      runtime.now() + 10,
+      1,
+      reserved!.claimToken,
+    );
     await settle();
     expect(acks(channel)).toBe(0);
     channel.releaseConfirms();
@@ -216,7 +222,7 @@ describe('RabbitMqQueue durability', () => {
     channel.releaseConfirms();
     await enqueueing;
     const [reserved] = await queue.reserve('emails', 1, runtime.now());
-    const dying = queue.deadLetter('emails', reserved!.id, runtime.now());
+    const dying = queue.deadLetter('emails', reserved!.id, runtime.now(), reserved!.claimToken);
     await settle();
     await queue.disconnect();
     channel.releaseConfirms();
@@ -257,7 +263,13 @@ describe('RabbitMqQueue durability', () => {
     channel.releaseConfirms();
     await enqueueing;
     const [reserved] = await queue.reserve('emails', 1, runtime.now());
-    const retrying = queue.requeue('emails', reserved!.id, runtime.now() + 10, 1);
+    const retrying = queue.requeue(
+      'emails',
+      reserved!.id,
+      runtime.now() + 10,
+      1,
+      reserved!.claimToken,
+    );
     await settle();
     channel.emitClose();
     await expect(retrying).rejects.toThrow('channel closed before the confirm arrived');

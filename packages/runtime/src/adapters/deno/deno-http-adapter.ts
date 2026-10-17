@@ -303,7 +303,20 @@ export class DenoHttpAdapter implements IHttpAdapter {
     }
 
     if (handle.server !== null) {
-      await handle.server.shutdown();
+      // Yield until the listener is released, but never let an in-flight
+      // request block the lifecycle hooks that can terminate its work.
+      const shutdown = handle.server.shutdown().catch(() => {});
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          shutdown,
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 1000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
       handle.server = null;
     }
     return Promise.resolve();

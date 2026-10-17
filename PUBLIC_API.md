@@ -7,6 +7,8 @@
 
 ## Table of Contents
 
+- [Shared reconnect supervisor (`@setu-ts/common`)](#shared-reconnect-supervisor-setu-tscommon)
+
 1. [Installation](#installation)
 2. [Full Stack Application](#full-stack-application)
 3. [Minimal Application](#minimal-application)
@@ -309,6 +311,24 @@ an injected multipart upload parse as an empty form.
 
 ---
 
+## Shared reconnect supervisor (`@setu-ts/common`)
+
+Since 0.10.0, common exports `ReconnectSupervisor`, `ReconnectSupervisorOptions`, `ReconnectMode`
+and `fullJitterDelay(attempt, initialMs, maxMs)`. Messaging's RabbitMQ, NATS and Kafka brokers and
+the RabbitMQ queue adapter share this implementation. Messaging does not re-export these symbols.
+
+`ReconnectMode` is `'drive' | 'observe'`. The options require `runtime`, `mode` and
+`attachFaultListener(onFault)`, which returns a disposer. Drive mode additionally requires
+`reconnect` and `replay` callbacks; `reassert` is optional. Observe mode can supply
+`attachRecoveryListener(onRecovered)`. `initialMs` defaults to 500 and `maxMs` to 30000.
+`fullJitterDelay` returns an integer uniformly distributed from zero through the exponential
+window's capped ceiling. Attempts are unbounded.
+
+Call `start()` to attach listeners, `fault()` to mark an outage and start drive-mode retries,
+`recovered()` to clear a fault, and `stop()` to cancel scheduled attempts and dispose listeners.
+`faulted` reports the current fault window. A stopped supervisor is terminal; construct a new
+instance to start another lifecycle.
+
 ## RuntimePlugin() (`@setu-ts/runtime`)
 
 Provides runtime-agnostic services (UUID, timers, crypto, env, HTTP server).
@@ -324,6 +344,12 @@ app.register(
   }),
 );
 ```
+
+### Deno shutdown
+
+Since 0.10.0, Deno adapter `close()` waits for the first of `shutdown()` and a 1000 ms grace,
+catching a rejected shutdown. After the kernel's bounded drain, shutdown and close hooks can run
+while a request is still in flight. Register resource cleanup in lifecycle hooks.
 
 ### Bounding the request body
 
@@ -3058,9 +3084,9 @@ pre-namespacing keys.
 The application constructs `RedisRateLimitStore`, so no plugin supplies its connection-error
 reporter. Pass `connectionErrorReporter` — built with `createConnectionErrorReporter` from
 `@setu-ts/common` over your logger — and the `'error'` events of the client the store builds are
-logged (first error at `warn`, repeats at `debug`, recovery at `info`) instead of printed by
-`ioredis` to `console.error` on every reconnect attempt. Absent, `ioredis` keeps its console
-fallback. An injected `client` never gets a listener.
+logged (first error at `warn`, repeats at `debug`, recovery at `info`). Absent, the built client's
+connection errors are dropped, so nothing reaches the console or a log; an injected `client` never
+gets a listener.
 
 The default key is `defaultRateLimitKey`, which resolves in this order: the authenticated principal
 (`user:<id>`), the client IP published by `ipSecurityMiddleware` (`ip:<address>`), `IRequest.ip`
@@ -6914,7 +6940,8 @@ Provides background job queue with Memory and Redis adapters.
   `sqs?`)
 - **`MemoryQueue`** — In-memory queue adapter for development/testing
 - **`RedisQueue`** — Redis-backed queue adapter for production
-- **`RedisQueueOptions`** — Redis adapter configuration
+- **`RedisQueueOptions`** — Redis adapter configuration, including `keyPrefix?` (default `queue:`)
+  and `visibilityTimeoutMs?` (default `30000`)
 - **`RabbitMqQueue`** — RabbitMQ queue adapter via amqplib (polling via basicGet, TTL+DLX for
   delays)
 - **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`,
@@ -7043,7 +7070,45 @@ accepted, so a broker failure in between can run a job twice but never loses it.
 job was dropped. An injected connection without `createConfirmChannel()` keeps a plain channel and
 the adapter reports one warning through the logger.
 
+### Redis namespaces
+
+`RedisQueueOptions.keyPrefix` and the flat `QueuePluginOptions.keyPrefix` default to `queue:`,
+preserving existing keys. Every Redis key, including recurring and dead-letter keys, uses this
+prefix. Use a distinct prefix per application on a shared Redis. It must be a non-empty string of at
+most 128 characters with no control characters; invalid values throw `RangeError` at adapter or
+Redis plugin construction. The RabbitMQ-only `prefix` option does not configure Redis.
+
+**RabbitMQ recovery (0.10.0).** Connection or channel faults drive automatic reconnect with
+full-jitter backoff through the common supervisor. Readiness reports down during the fault window.
+An injected connection receives only a new channel. Successful recovery clears local delivery
+bookkeeping and lazily re-declares queues. Unacked jobs return to the broker for at-least-once
+redelivery, possibly with the original attempt count. Disconnect stops scheduled retries and
+disposes listeners.
+
+**Delivery claims (0.10.0).** RabbitMQ uses a fresh runtime UUID for each delivery. Redis 5+ uses
+atomic Lua scripts, server `TIME` for lease deadlines, the reserving replica's `nowMs` (the clock
+that wrote `availableAtMs`) to decide which jobs are due, and `INCR <keyPrefix><name>:claimseq`
+tokens shared across replicas. Redis's `visibilityTimeoutMs` (also a flat `QueuePluginOptions`
+field) defaults to `30000`, must be from `1000` to `2147483647`, and is validated at adapter and
+Redis plugin construction. The service renews every `Math.floor(visibilityTimeoutMs / 3)` ms with no
+overlapping calls and reports a failed or false renewal once per delivery, while the processor
+continues. Each reserve reclaims up to its limit of expired claims and removes payload-less orphans.
+Attempts become `max(stored attempts, 1) + stalls`; dispatch dead-letters an over-budget job without
+running it. Successful settlement clears the claim and stalls. Redis and RabbitMQ reject stale ack,
+requeue and dead-letter calls with internal `StaleClaimError` (not barrel-exported); the service
+reports failed settlement and the new delivery remains intact. These tokens fence deliveries, not
+Redis writers; ACLs remain the boundary. Delivery is at least once, including on pauses longer than
+the Redis lease. A live stuck processor keeps renewing. Drain older replicas before upgrading: their
+processing entries are immediately reclaimable. An injected Redis facade without `eval` retains the
+prior multi-command behavior, no claims or reclaim, and `connect()` reports once through the
+connection-error reporter, when one is configured, that `visibilityTimeoutMs` is inactive.
+
 ### Declarative processors and behaviours
+
+`QueueProcessorDefinition<T = unknown>` declares `processor(job: IJob<T>): void | Promise<void>` as
+a method. Typed definitions and typed inline processors fit the `processors` list. The method is
+called with its definition as `this`; its member is no longer `readonly`. `QueueProcessorEntry` is
+unchanged.
 
 | Option       | Type                                                                 | Behavior                                                                                                                                                                                                                                                                                                                                                |
 | ------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -11758,7 +11823,7 @@ reaches `redactors[<string>]`):
 | `DeadlineOptions`                                      | type     | **Since M101a.** `{ timeoutMs, onTimeout, timing? }` for `withDeadline`; `timing` is the `setTimer`/`clearTimer` surface, typically `resolveProbeTiming(ctx.runtime)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `resolveProbeTiming(runtime)`                          | function | Resolves a probe's clock-and-timer surface — `{ hrtime, setTimer, clearTimer }` bound to the injected `IRuntimeServices` (e.g. `ctx.runtime`), ready to spread into `createCachedProbe`'s options. NO ambient `performance.now()`/`Date.now()` fallback: all time access outside `packages/runtime` goes through `IRuntimeServices` (AI_GUIDELINES §4), so a caller with no runtime to inject has no clock the probe may lawfully read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `createConnectionErrorReporter(options)`               | function | Builds a de-duplicating sink for one connection's error events from `{ source, logger }`, where `logger` is a thunk read at CALL time. The first error of a run, or one whose message differs from the previous, logs at `warn`; a repeat of the previous message logs at `debug` with a `repeats` count; `recovered()` after at least one error logs once at `info` and resets, so the next outage warns again. Only the error's message is logged, never its stack. Neither method throws — a failing logger or an unstringifiable value is swallowed, since the caller is an event-emitter listener. An accessor returning `undefined` drops the event (no log sink is registered; the owning package's `isHealthy` probe still reports the outage)                                                                                                                                                                                                                                        |
-| `attachConnectionErrorReporter(client, reporter)`      | function | Attaches a reporter to a client's `'error'` (→ `report`) and `'ready'` (→ `recovered`) events, returning `false` when the value exposes no `on` method. For clients a package BUILT: an injected client belongs to the caller, and adding an `'error'` listener to it would silence the caller's own handling, since `ioredis` falls back to `console.error` only when no listener exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `attachConnectionErrorReporter(client, reporter?)`     | function | Attaches a reporter to a client's `'error'` (→ `report`) and `'ready'` (→ `recovered`) events, returning `false` when the value exposes no `on` method. With no `reporter` the listeners still attach and drop every event, so a built client never writes to the console. For clients a package BUILT: an injected client belongs to the caller, and adding an `'error'` listener to it would silence the caller's own handling, since `ioredis` falls back to `console.error` only when no listener exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `parseCookie(header)`                                  | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `Cookie()` source both need it and no plugin may import another                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `serializeCookie(n, v, a?)`                            | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `isWorkerReadySignal(m)`                               | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |

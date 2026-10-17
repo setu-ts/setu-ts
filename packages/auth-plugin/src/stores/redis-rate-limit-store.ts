@@ -87,9 +87,7 @@ async function resolveClient(
   const client = createRateLimitRedisClient(RedisCtor, url, commandTimeoutMs);
   // Attached synchronously after construction: this client connects eagerly,
   // but a connect failure is emitted asynchronously, so none is missed.
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(client, reporter);
-  }
+  attachConnectionErrorReporter(client, reporter);
   return client as unknown as IRateLimitRedisClient;
 }
 
@@ -154,8 +152,8 @@ export class RedisRateLimitStore implements RateLimitStore {
      * failure to the console. Never attached to an injected `client`, which
      * belongs to the caller. This store is constructed by the application,
      * so no plugin supplies one: build it with `createConnectionErrorReporter`
-     * from `@setu-ts/common` over your logger. Absent, `ioredis` keeps its
-     * own console fallback.
+     * from `@setu-ts/common` over your logger. Absent, the built client's
+     * connection errors are dropped: nothing reaches the console or a log.
      *
      * @since 0.8.0
      */

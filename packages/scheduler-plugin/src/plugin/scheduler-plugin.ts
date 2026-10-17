@@ -160,7 +160,7 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
 
       // Resolve distributed lock
       // A built Redis lock client's reconnect failures go to the logger (read
-      // at call time) rather than ioredis's own console fallback.
+      // at call time) rather than being dropped.
       const lock = await resolveLock(
         options,
         ctx.runtime,

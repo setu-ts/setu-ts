@@ -153,12 +153,10 @@ async function resolveClient(
   );
   // Attached synchronously after construction: this client connects eagerly,
   // but a connect failure is emitted asynchronously, so none is missed.
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(
-      client as Parameters<typeof attachConnectionErrorReporter>[0],
-      reporter,
-    );
-  }
+  attachConnectionErrorReporter(
+    client as Parameters<typeof attachConnectionErrorReporter>[0],
+    reporter,
+  );
   return client as unknown as IRedisLockClient;
 }
 

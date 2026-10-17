@@ -222,9 +222,9 @@ describe('RabbitMqQueue', () => {
         availableAtMs: runtime.now(),
       };
       await queue.enqueue(job);
-      await queue.reserve('test', 1, runtime.now());
+      const reserved = await queue.reserve('test', 1, runtime.now());
 
-      await queue.ack('test', '5');
+      await queue.ack('test', '5', reserved[0].claimToken);
       // Acked job should no longer appear on reserve
       const afterAck = await queue.reserve('test', 10, runtime.now());
       expect(afterAck.length).toBe(0);
@@ -244,7 +244,7 @@ describe('RabbitMqQueue', () => {
       expect(reserved.length).toBe(1);
 
       const newAvailableAtMs = runtime.now() + 10000;
-      await queue.requeue('test', '6', newAvailableAtMs, 1);
+      await queue.requeue('test', '6', newAvailableAtMs, 1, reserved[0].claimToken);
 
       // Find the publish call to the delay queue
       const publishCalls = channel.calls.filter(
@@ -291,7 +291,7 @@ describe('RabbitMqQueue', () => {
       const reserved = await queue.reserve('test', 1, runtime.now());
       expect(reserved.length).toBe(1);
 
-      await queue.deadLetter('test', '7', runtime.now());
+      await queue.deadLetter('test', '7', runtime.now(), reserved[0].claimToken);
 
       const deadBuffer = channel.getReadyBuffer('test.queue.test.dead');
       expect(deadBuffer.length).toBe(1);
@@ -489,24 +489,28 @@ describe('RabbitMqQueue', () => {
   });
 
   describe('error paths and edge cases', () => {
-    it('requeue returns early when job not in processing', async () => {
+    it('requeue rejects when job not in processing', async () => {
       const runtime = new FakeRuntimeServices();
       const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
 
       // Try to requeue a job that was never reserved
-      await expect(queue.requeue('test', 'nonexistent', runtime.now(), 1)).resolves.toBeUndefined();
+      await expect(queue.requeue('test', 'nonexistent', runtime.now(), 1)).rejects.toThrow(
+        'claim is stale',
+      );
     });
 
-    it('deadLetter returns early when job not in processing', async () => {
+    it('deadLetter rejects when job not in processing', async () => {
       const runtime = new FakeRuntimeServices();
       const fakeClient = createFakeAmqpConnection();
       const queue = new RabbitMqQueue(runtime, { client: fakeClient });
       await queue.connect();
 
       // Try to deadLetter a job that was never reserved
-      await expect(queue.deadLetter('test', 'nonexistent', runtime.now())).resolves.toBeUndefined();
+      await expect(queue.deadLetter('test', 'nonexistent', runtime.now())).rejects.toThrow(
+        'claim is stale',
+      );
     });
 
     it('advanceRecurring returns early when recurring job not found', async () => {

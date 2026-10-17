@@ -6306,6 +6306,37 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   M113o. Implemented by Codex, which stopped on a plan contradiction (§3.3 typed the lock probe
   `Promise<boolean>` while requiring "unknown"); opencode's read-only sweep found three stale doc
   and comment sites — complete (PR #463)
+- **Milestone 113c** (`queue-plugin` + `runtime` + `common` + `messaging-plugin`, plus one call-site
+  line in five Redis-backed plugins — connections and jobs that never recover, and a shutdown with
+  no bound; V9-18, V9-64, V9-71, V9-76, V9-31): `RabbitMqQueue` reconnects after a broker fault
+  through `ReconnectSupervisor`, now exported from `common` (moved from `messaging-plugin`,
+  unchanged), with full-jitter backoff on the runtime's timers. Every RabbitMQ delivery carries a
+  `runtime.uuid()` claim token, so a settlement from before a reconnect rejects with the internal
+  `StaleClaimError` instead of acking the redelivered message. The Redis queue gains a renewed
+  delivery lease (`visibilityTimeoutMs`, default 30 s, renewed every third, refused below 1000 ms)
+  measured on the server's `TIME`, so a job whose worker died is reclaimed. Its claim tokens come
+  from `INCR`. A reclaim counts as an attempt, and an over-budget job goes to `onFailed`, then dead,
+  without running. A client without `eval` keeps the old behaviour and logs one warning. `keyPrefix`
+  (default `queue:`) namespaces every Redis key. No prefix may be a string prefix of another on one
+  Redis, which is documented rather than enforced (maintainer decision).
+  `QueueProcessorDefinition.processor` is a method, so typed processors compile in declarative
+  lists. On Deno, `close()` waits for the first of `server.shutdown()` and a 1000 ms grace, so
+  `onClose` hooks run with requests still in flight. Shutdown is not cancelled. Folded in at the
+  maintainer's direction: since #378, a Redis client built without a reporter had no `'error'`
+  listener and printed `[ioredis] Unhandled error event` on every failed attempt.
+  `attachConnectionErrorReporter`'s reporter is now optional and defaults to dropping listeners,
+  applied at all eight call sites. Verified against real Redis 7 and RabbitMQ 4 (7 driver checks).
+  The design security review is plan §10. Its post-implementation findings S4 (a lease too short to
+  renew) and S8 (the console fix) are fixed. S3 is documented, and S5 and S6 are accepted. The
+  committed-tree audit ran two fresh-context rounds. Round 1 failed on a Medium: an over-budget
+  job's `onFailed` ran unrenewed, so a callback slower than the lease was reclaimed and re-notified
+  forever and the job never reached the dead set. It also failed on four Lows: no RabbitMQ connect
+  bound, due jobs selected by Redis `TIME` so app clock skew moved delays (the plan's recorded "no
+  worse" deviation was wrong for a single replica), a refusal message saying 0 disables the bound,
+  and a non-object RabbitMQ body stranding the batch. Round 2 confirmed all five fixed and found two
+  Lows in those fixes: a refused dead-queue move stranded the batch again, and the connect bound was
+  amqplib's idle timeout, which a trickling peer outlasts. Both were fixed afterwards and NOT
+  re-audited, at the maintainer's direction — complete (PR #466)
 - **Milestone 113d** (`common` + `react-router-plugin` + `cloudflare-plugin` + `cli` + the loaders
   of 14 published packages — Workers builds and the edge cache; V9-1, V9-23, V9-4): a Worker
   importing any Setu-TS package builds whether or not its optional peers are installed. Every bare

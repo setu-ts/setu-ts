@@ -205,6 +205,7 @@ package fits the plugin architecture.
 | `extractContextFromHeaders`           | function  |
 | `formEncodingOf`                      | function  |
 | `fromNullable`                        | function  |
+| `fullJitterDelay`                     | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
 | `isConnectionFault`                   | function  |
@@ -268,6 +269,7 @@ package fits the plugin architecture.
 | `DuplicateKeyError`                   | class     |
 | `MalformedRequestBodyError`           | class     |
 | `OptionalDependencyUnavailableError`  | class     |
+| `ReconnectSupervisor`                 | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
@@ -530,6 +532,7 @@ package fits the plugin architecture.
 | `RealtimeFrame`                       | interface |
 | `RealtimeGaugeReading`                | interface |
 | `RealtimeObservationCollectorInit`    | interface |
+| `ReconnectSupervisorOptions`          | interface |
 | `RecurringOptions`                    | interface |
 | `RedactionContext`                    | interface |
 | `RedactionPolicy`                     | interface |
@@ -691,6 +694,7 @@ package fits the plugin architecture.
 | `RealtimeGaugeState`                  | type      |
 | `RealtimeObservationOperation`        | type      |
 | `RealtimeSourceKind`                  | type      |
+| `ReconnectMode`                       | type      |
 | `Redactor`                            | type      |
 | `RegistryFactory`                     | type      |
 | `RequestHandler`                      | type      |

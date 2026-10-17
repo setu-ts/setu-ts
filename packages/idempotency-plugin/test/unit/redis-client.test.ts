@@ -79,10 +79,14 @@ describe('createRedisIdempotencyClient (M109a §3.5)', () => {
     expect(reported).toEqual([boom]);
   });
 
-  it('attaches nothing when no reporter is supplied', () => {
+  it('attaches dropping listeners when no reporter is supplied', () => {
+    // Without an 'error' listener ioredis writes every reconnect failure to the
+    // console as "[ioredis] Unhandled error event"; the dropping reporter absorbs them.
     RecordingRedis.listeners = [];
     createRedisIdempotencyClient(RecordingRedis as unknown as RedisCtor, 'redis://x', 0);
-    expect(RecordingRedis.listeners).toEqual([]);
+    expect(RecordingRedis.listeners.map((entry) => entry.event)).toEqual(['error', 'ready']);
+    const errorListener = RecordingRedis.listeners.find((entry) => entry.event === 'error');
+    expect(() => errorListener?.handler(new Error('connect ECONNREFUSED'))).not.toThrow();
   });
 });
 

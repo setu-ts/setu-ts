@@ -17,7 +17,7 @@ const flush = (): Promise<void> =>
 
 /**
  * A controllable clock so the drive-mode backoff is deterministic and can be
- * flushed without real waiting (mirrors reconnect.test.ts).
+ * flushed without real waiting (mirrors reconnect-supervisor.test.ts in @setu-ts/common).
  */
 function makeClock() {
   let now = 0;

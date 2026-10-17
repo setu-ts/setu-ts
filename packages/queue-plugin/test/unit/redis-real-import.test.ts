@@ -50,7 +50,7 @@ describe('REAL RedisQueue round trip (guarded)', () => {
         expect(reserved[0].data).toEqual({ hello: 'world' });
 
         // Ack it
-        await queue.ack(queueName, jobId);
+        await queue.ack(queueName, jobId, reserved[0].claimToken);
 
         // Reserve again — should be empty now
         const reservedAgain = await queue.reserve(queueName, 1, now);

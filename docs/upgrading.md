@@ -12,6 +12,39 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Queue reconnect, `QueueProcessorDefinition` and Deno shutdown (M113c)
+
+RabbitMQ queues now recover automatically. Unacked jobs can be delivered again with their original
+attempt count after a reconnect; make processors idempotent. Injected connections remain
+caller-owned.
+
+Redis queues now use a renewed 30000 ms delivery lease (`visibilityTimeoutMs`, from `1000` to
+`2147483647`, on both RedisQueue and QueuePlugin). Redis 5+ and `eval` are required for the lease; a
+minimal injected client without `eval` keeps the old behavior, with one connection-error report
+naming the inactive option when a reporter is configured (`QueuePlugin` always configures one). The
+service renews every third of the lease while a processor runs, with no overlap, and reports renewal
+failure once. Raise the duration for expected event-loop pauses; delivery remains at least once, so
+make processors idempotent. A live stuck processor keeps renewing and is not reclaimed.
+
+**Drain old replicas before upgrading.** Their processing scores are immediately expired under the
+new model; stuck jobs return on reserve. Each abandoned lease counts as an attempt, and dispatch
+dead-letters a job above `maxAttempts` without running it. Redis and RabbitMQ now reject a stale
+ack, retry or dead-letter with internal `StaleClaimError`; the service records failed settlement and
+leaves the current delivery intact. Claim tokens are delivery fences, not authorization; Redis ACLs
+remain the boundary.
+
+`QueueProcessorDefinition<T>` accepts typed payload processors and calls them as methods on the
+definition. Its `processor` member loses `readonly`; enforce immutability in application code if
+needed.
+
+Deno stop initiates HTTP shutdown after the kernel's bounded drain and waits for shutdown or a 1000
+ms grace, catching a rejection. Lifecycle cleanup then runs even with requests still in flight. Put
+resource teardown in shutdown/close hooks. The default drain plus grace bounds stop at about 11 s.
+
+Redis `keyPrefix` defaults to `queue:`. Give applications on shared Redis distinct prefixes. Drain
+or migrate existing jobs before changing a deployed prefix; the RabbitMQ `prefix` option does not
+configure Redis.
+
 ### Workers projects: thread `waitUntil` through the factory
 
 A Workers project scaffolded by 0.10.0 passes the platform's `waitUntil` from `src/index.ts` into

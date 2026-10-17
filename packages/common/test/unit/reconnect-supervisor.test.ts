@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
-import { fullJitterDelay, ReconnectSupervisor } from '../../../src/brokers/reconnect.ts';
+import { fullJitterDelay, ReconnectSupervisor } from '../../src/index.ts';
 
 /**
  * Drains the microtask queue: a real 0ms macrotask runs only after every

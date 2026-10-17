@@ -177,6 +177,7 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 | `defaultMaxAttempts` | `number`                                                             | `3`                        | Default retry attempts                                                                                                                                                                                                                                                                                                                |
 | `pollIntervalMs`     | `number`                                                             | `1000`                     | Worker poll interval                                                                                                                                                                                                                                                                                                                  |
 | `deadLetterTtlMs`    | `number`                                                             | — (retained forever)       | Retention for a dead-lettered payload (Redis only)                                                                                                                                                                                                                                                                                    |
+| `keyPrefix`          | `string`                                                             | `'queue:'`                 | Redis namespace for every key, including recurring keys; non-empty, at most 128 characters, no control characters                                                                                                                                                                                                                     |
 | `commandTimeoutMs`   | `number`                                                             | `15000`                    | Bound on one Redis command (Redis only; `0` disables). A paused server makes `add()` reject and a poll record the failure instead of waiting forever. The server may still apply a timed-out command, so a rejected `add()` can still have enqueued the job — retrying it can run the job twice. Not applied to an injected `client`. |
 | `persistentMessages` | `boolean`                                                            | `true`                     | Publish every job persistent so it survives a RabbitMQ restart (adapter `rabbitmq` only); `false` restores the pre-0.9.0 transient publishes                                                                                                                                                                                          |
 | `publishTimeoutMs`   | `number`                                                             | `15000`                    | Bound on one job publish, including its broker confirm (adapter `rabbitmq` only); `0` disables it                                                                                                                                                                                                                                     |
@@ -186,6 +187,10 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 
 Two options this table used to list do not exist and never did: `region` (SQS configuration lives
 under `sqs`) and `queues` (RabbitMQ derives its queue names from `prefix`).
+
+`QueueProcessorDefinition<T = unknown>` uses method syntax:
+`processor(job: IJob<T>): void | Promise<void>`. Typed payload processors fit the declarative list,
+and methods retain their definition as `this`. The processor member is writable.
 
 Declarative processors coexist with imperative `queue.process()` calls. Behaviours run in declared
 order; a short circuit acknowledges the job, while a throw follows the existing retry, final
@@ -307,14 +312,41 @@ atomic, so a process that dies mid-sequence can still leave a payload behind.
 Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
 the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
 key holds the payload of **every** job for the name, Redis keeps a key's TTL across later writes,
-and a job whose payload has vanished is moved to the processing set by `reserve` and never returned
-— so expiring it would silently discard work that was only waiting to run.
+and a job whose payload has vanished cannot be returned by `reserve` — so expiring it would silently
+discard work that was only waiting to run.
 
 ## Adapters
 
 ### MemoryQueue
 
 In-memory queue for testing and local development. Jobs are lost on restart.
+
+### Redis key namespaces
+
+Set `keyPrefix` on `QueuePlugin({ adapter: 'redis', keyPrefix: 'orders:' })` or
+`new RedisQueue({ keyPrefix: 'orders:' })` to isolate applications sharing one Redis. The default
+remains `queue:` so existing jobs are found after upgrading. Every key, including recurring and
+dead-letter keys, uses the prefix. It must be non-empty, at most 128 characters and contain no
+control characters; invalid values are refused at construction. The RabbitMQ `prefix` option is
+separate and does not move Redis keys. Changing a deployed prefix requires draining or migrating its
+existing jobs.
+
+Keys are the prefix followed by the job name, and job names may contain `:`. Isolation therefore
+holds only when no prefix on one Redis is a string prefix of another: `app:` with a job named `b:x`
+and `app:b:` with a job named `x` both use `app:b:x:*`. Choose sibling prefixes such as `orders:`
+and `billing:`, never nested ones. The adapter cannot check this, because one application never sees
+another's prefix.
+
+### RabbitMQ recovery
+
+Connection and channel faults start automatic reconnect with full-jitter backoff. Readiness is down
+during the fault window. An injected connection receives a fresh channel only; the caller owns
+reconnecting that connection. Queues are re-declared lazily after recovery. RabbitMQ returns unacked
+jobs for at-least-once redelivery: a job can run twice across an outage, and its redelivery can
+carry the original attempt count. Make processors idempotent. Disconnect stops scheduled reconnects
+and removes listeners. Each delivery has a fresh claim token; a pre-outage delivery cannot settle
+the redelivered message. A late ack, retry or dead-letter rejects with the internal
+`StaleClaimError`, reported by the service as a failed settlement.
 
 ### RedisQueue
 
@@ -324,17 +356,60 @@ processing.
 Since M101a each transition (`enqueue`, `reserve`, `ack`, `requeue`, dead-lettering) runs as one Lua
 script through the client's `eval`, so a command that times out locally cannot leave a job half
 moved. An injected client without `eval` keeps the separate commands. The scripts touch several
-`queue:<name>:*` keys with no hash tag, so a Redis Cluster client is not supported: it would refuse
-them with `CROSSSLOT`. A `reserve` the server applies after its local timeout leaves the job in
-`queue:<name>:processing`, and nothing reclaims that set, so such a job has to be moved back by
-hand.
+`<keyPrefix><name>:*` keys with no hash tag, so a Redis Cluster client is not supported: it would
+refuse them with `CROSSSLOT`.
+
+### Claims and dead workers
+
+Redis 5 or later is required: the lease scripts use `TIME` before writes under script-effects
+replication. `RedisQueueOptions.visibilityTimeoutMs` and the flat
+`QueuePluginOptions.visibilityTimeoutMs` default to `30000`. A duration from `1000` to `2147483647`
+is required, so renewal never runs more often than every 333 ms; invalid values throw `RangeError`
+at construction. Each reservation sets its lease deadline by Redis server time and mints a token
+with `INCR <keyPrefix><name>:claimseq`. Which jobs are due is decided by the reserving replica's own
+clock, the same clock that wrote `availableAtMs`, so clock skew between an application host and
+Redis shifts neither delays nor retries. Reclaimed jobs become due at once. The service renews the
+claim every `Math.floor(visibilityTimeoutMs / 3)` ms while the processor runs, without overlapping
+renewal calls. A failed or false renewal is reported once per delivery; the processor continues.
+
+On reserve, up to the requested limit of expired claims return to ready. Each reclaim counts as an
+attempt: a delivery has `max(stored attempts, 1) + stalls`. Once that exceeds `maxAttempts`,
+dispatch calls `onFailed` (if configured) and then dead-letters it without running the processor, so
+an abandoned job sends the same signal as a final failed attempt. The claim is renewed while
+`onFailed` runs, as it is during a processor, so a slow callback is not reclaimed; one that never
+settles holds its concurrency slot, like a processor that never settles. Orphan ids without payloads
+are removed. A timed-out reserve that Redis eventually applies is recovered by this same lease.
+Settlement clears claims and stalls; a stale ack, retry or dead-letter rejects with internal
+`StaleClaimError` and the service reports a failed settlement, leaving the current delivery intact.
+Payload bytes are unchanged by reclaim.
+
+Delivery is at least once: a process death, GC pause or event-loop stall longer than the lease can
+run a job twice. Make processors idempotent and raise the lease for expected pauses. An alive but
+stuck processor keeps renewing and is not reclaimed. Drain old replicas before upgrading, since
+pre-upgrade processing entries are immediately reclaimable. Claim tokens fence deliveries; they are
+not authorization. A Redis writer can read them and already has access to delete jobs; Redis ACLs
+are the security boundary.
+
+An injected client without `eval` keeps the old multi-command behavior, with no claims or reclaim.
+`connect()` reports once through the connection-error reporter that `visibilityTimeoutMs` is
+inactive. The client the adapter builds always has `eval`.
 
 ### RabbitMqQueue
 
 RabbitMQ-backed queue polling per-name durable queues through the default exchange. Delayed jobs and
 retries wait in a per-name delay queue whose message TTL dead-letters them into the ready queue.
 Jobs are published persistent through a confirm channel (see [RabbitMQ Adapter](#rabbitmq-adapter)).
-Requires the `amqplib` package at runtime (or an injected `IAmqpQueueConnection`).
+Requires the `amqplib` package at runtime (or an injected `IAmqpQueueConnection`). Each connection
+attempt the adapter makes is bounded at 10 seconds in total, TCP and AMQP handshake together, so a
+broker that never answers, or answers too slowly, is retried rather than waited on; a connection
+that opens after its attempt expired is closed at once. A message in a ready queue whose body is not
+a stored job (not JSON, not an object, or missing a string `id` or `name`, `data`, or a finite
+`attempts`, `maxAttempts` or `availableAtMs`) is moved with its bytes unchanged into the dead queue,
+acknowledged, and reported once as a warning that does not quote the body; the rest of the batch is
+reserved normally. If the dead queue refuses the move (a `reject-publish` length policy, or a
+blocked broker past `publishTimeoutMs`), the warning says so, the jobs already claimed in that call
+are returned, fetching stops, and the message stays unacknowledged until the channel closes, when
+RabbitMQ redelivers it and the move is tried again.
 
 ### SqsQueue
 

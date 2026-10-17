@@ -13,16 +13,18 @@
  */
 
 import { Buffer } from 'node:buffer';
+import { StaleClaimError } from '../errors.ts';
 import type { QueueAdapter } from './queue-adapter.ts';
 import type {
   IAmqpQueueChannel,
   IAmqpQueueConnection,
+  IAmqpQueueMessage,
   RabbitMqQueueOptions,
   StoredJob,
   StoredRecurring,
 } from '../interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { deadlineRangeError, withDeadline } from '@setu-ts/common';
+import { deadlineRangeError, ReconnectSupervisor, withDeadline } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 
 /**
@@ -69,7 +71,8 @@ export function validateClient(client: unknown): client is IAmqpQueueConnection 
  */
 async function resolveClient(
   url: string,
-  injectedClient?: IAmqpQueueConnection,
+  injectedClient: IAmqpQueueConnection | undefined,
+  runtime: IRuntimeServices,
 ): Promise<IAmqpQueueConnection> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -81,9 +84,67 @@ async function resolveClient(
     return injectedClient;
   }
   const amqplib = await loadAmqplib();
-  const connection = await amqplib.connect(url);
-  return connection as unknown as IAmqpQueueConnection;
+  // amqplib's socket `timeout` is an IDLE timeout, armed until the AMQP open
+  // handshake ends: it fails a silent peer (audit L1) but not one trickling
+  // bytes (audit N2). The deadline bounds the whole attempt; a connection that
+  // opens after it is closed at once, since the supervisor has moved on.
+  const attempt = amqplib.connect(url, {
+    timeout: CONNECT_TIMEOUT_MS,
+  }) as unknown as Promise<IAmqpQueueConnection>;
+  let expired = false;
+  try {
+    return await withDeadline(() => attempt, {
+      timeoutMs: CONNECT_TIMEOUT_MS,
+      onTimeout: () => {
+        expired = true;
+        return new Error(
+          `RabbitMQ did not complete the connection within ${CONNECT_TIMEOUT_MS} ms`,
+        );
+      },
+      timing: {
+        setTimer: (fn, ms) => runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => runtime.clearTimeout(handle),
+      },
+    });
+  } catch (error) {
+    if (expired) {
+      attempt.then(
+        (late) => late.close().catch(() => undefined),
+        () => undefined,
+      );
+    }
+    throw error;
+  }
 }
+
+/**
+ * Parses a message body as a stored job.
+ * @param payload - The body as UTF-8 text
+ * @returns The job, or `null` when the body is not JSON, not an object, or lacks a string `id` or
+ *   `name`, `data`, or a finite `attempts`, `maxAttempts` or `availableAtMs`
+ */
+function parseStoredJob<T>(payload: string): StoredJob<T> | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const job = value as Record<string, unknown>;
+  const finite = (key: string): boolean => Number.isFinite(job[key]);
+  return typeof job['id'] === 'string' &&
+    typeof job['name'] === 'string' &&
+    'data' in job &&
+    finite('attempts') &&
+    finite('maxAttempts') &&
+    finite('availableAtMs')
+    ? (value as StoredJob<T>)
+    : null;
+}
+
+/** Bound on one whole connection attempt, TCP and AMQP handshake together, in ms. */
+const CONNECT_TIMEOUT_MS = 10_000;
 
 /** Default bound on one job publish, including its confirm, in ms. */
 export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
@@ -241,12 +302,10 @@ export class RabbitMqQueue implements QueueAdapter {
   /** Whether the no-confirm-channel warning has been reported (once). */
   #warnedUnconfirmed = false;
   #ready = false;
-  /**
-   * M70c: set when the connection fires `'error'`/`'close'` — the same fault
-   * mechanism as the RabbitMQ broker. `isHealthy` reads it, so a faulted
-   * connection is `down` even though it is still "ready".
-   */
-  #faulted = false;
+  #supervisor: ReconnectSupervisor;
+  #closing = false;
+  #disposeConnectionFault: () => void = () => {};
+  #disposeChannelFault: () => void = () => {};
   /**
    * M70c: present only when the connection exposes `on?`; its absence is
    * *unknown* reachability, not `false`.
@@ -255,7 +314,10 @@ export class RabbitMqQueue implements QueueAdapter {
    */
   isHealthy?: () => Promise<boolean>;
   // Per-name: processing jobs (reserved but not acked/dead-lettered)
-  #processing: Map<string, Map<string, { message: unknown; job: StoredJob<unknown> }>>;
+  #processing: Map<
+    string,
+    Map<string, { message: unknown; job: StoredJob<unknown>; token: string }>
+  >;
   // Recurring jobs (in-memory, non-durable)
   #recurringJobs: Map<string, StoredRecurring>;
   // Track asserted queues to avoid redundant asserts
@@ -285,6 +347,7 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#processing = new Map();
     this.#recurringJobs = new Map();
     this.#asserted = new Set();
+    this.#supervisor = this.#createSupervisor();
   }
 
   /**
@@ -367,12 +430,10 @@ export class RabbitMqQueue implements QueueAdapter {
     if (this.#ready) {
       return;
     }
-    this.#connection = await resolveClient(this.#url, this.#injectedClient);
-    // A freshly-resolved connection is not faulted. Set this BEFORE installing
-    // the fault listener so a reset that lands during `createChannel()` (right
-    // after a backend restart, when the port is open before the AMQP handshake
-    // is ready) is recorded, not cleared.
-    this.#faulted = false;
+    this.#connection = await resolveClient(this.#url, this.#injectedClient, this.#runtime);
+    this.#closing = false;
+    this.#supervisor = this.#createSupervisor();
+    this.#supervisor.start();
     // Install the connection fault listener BEFORE `createChannel()`: the
     // broker can reset the socket while the channel is being created, and an
     // unlistened connection `'error'` is an unhandled event that crashes the
@@ -388,7 +449,7 @@ export class RabbitMqQueue implements QueueAdapter {
     // an `on` surface is *unknown* reachability, not `false` (the indicator
     // reads absence, not a false positive).
     if (this.#connection !== null && typeof this.#connection.on === 'function') {
-      this.isHealthy = (): Promise<boolean> => Promise.resolve(!this.#faulted);
+      this.isHealthy = (): Promise<boolean> => Promise.resolve(!this.#supervisor.faulted);
     } else {
       delete this.isHealthy;
     }
@@ -468,51 +529,102 @@ export class RabbitMqQueue implements QueueAdapter {
     });
   }
 
-  /**
-   * M70c: installs the `'error'`/`'close'` fault listener on the connection
-   * when it exposes `on?`. Installed before `createChannel()` (see
-   * {@linkcode connect}) so a reset during channel creation is handled rather
-   * than crashing the host process as an unhandled `'error'` event.
-   */
-  #installConnectionFaultListener(): void {
-    const connection = this.#connection;
-    if (connection !== null && typeof connection.on === 'function') {
-      const listener = (): void => {
-        this.#faulted = true;
-      };
-      connection.on('error', listener);
-      connection.on('close', listener);
-    }
+  #createSupervisor(): ReconnectSupervisor {
+    return new ReconnectSupervisor({
+      runtime: this.#runtime,
+      mode: 'drive',
+      reconnect: () => this.#reconnect(),
+      reassert: () => {
+        this.#asserted.clear();
+        return Promise.resolve();
+      },
+      replay: () => Promise.resolve(),
+      attachFaultListener: () => {
+        if (this.#closing) return () => {};
+        this.#installConnectionFaultListener();
+        this.#installChannelFaultListener();
+        const connection = this.#disposeConnectionFault;
+        const channel = this.#disposeChannelFault;
+        return () => {
+          connection();
+          channel();
+        };
+      },
+    });
   }
 
-  /**
-   * M70c: installs an `'error'` listener on the channel when it exposes one.
-   * amqplib emits `error` on **every** channel when the underlying connection
-   * resets (ECONNRESET during a real backend outage). An unlistened channel
-   * `error` is an unhandled `'error'` event that crashes the host process — a
-   * defect a fake-based test can never construct (a fake channel never emits).
-   * The listener marks the adapter faulted (redundant with the connection
-   * listener, but truthful for a channel that faults before the connection
-   * event lands).
-   */
+  /** Attach before channel creation so a socket error always has a listener. */
+  #installConnectionFaultListener(): void {
+    this.#disposeConnectionFault();
+    this.#disposeConnectionFault = this.#listenForFault(this.#connection, ['error', 'close']);
+  }
+
   #installChannelFaultListener(): void {
-    const channel = this.#channel as unknown as {
+    this.#disposeChannelFault();
+    this.#disposeChannelFault = this.#listenForFault(this.#channel, ['error', 'close']);
+  }
+
+  #listenForFault(target: unknown, events: readonly string[]): () => void {
+    const observable = target as {
       on?: (event: string, listener: () => void) => void;
+      off?: (event: string, listener: () => void) => void;
     } | null;
-    if (channel !== null && typeof channel.on === 'function') {
-      channel.on('error', (): void => {
-        this.#faulted = true;
-      });
+    if (observable === null || typeof observable.on !== 'function') return () => {};
+    const listener = () => this.#supervisor.fault();
+    for (const event of events) observable.on(event, listener);
+    return () => {
+      for (const event of events) observable.off?.(event, listener);
+    };
+  }
+
+  /** Re-open only the channel for caller-owned connections. */
+  async #reconnect(): Promise<void> {
+    if (this.#channel !== null) {
+      try {
+        await this.#channel.close();
+      } catch {
+        // A fault can already have closed it.
+      }
     }
+    if (this.#injectedClient === undefined) {
+      if (this.#connection !== null) {
+        try {
+          await this.#connection.close();
+        } catch {
+          // A fault can already have closed it.
+        }
+      }
+      const connection = await resolveClient(this.#url, undefined, this.#runtime);
+      if (this.#closing) {
+        await connection.close();
+        return;
+      }
+      this.#connection = connection;
+      this.#installConnectionFaultListener();
+    }
+    const connection = this.#connection!;
+    const channel = await this.#openChannel(connection);
+    if (this.#closing) {
+      this.#disposeConnectionFault();
+      this.#disposeChannelFault();
+      await channel.close();
+      if (this.#injectedClient === undefined) await connection.close();
+      return;
+    }
+    this.#channel = channel;
+    this.#installChannelFaultListener();
+    this.#processing.clear();
   }
 
   async disconnect(): Promise<void> {
+    this.#supervisor.stop();
+    this.#closing = true;
+    this.#disposeConnectionFault();
+    this.#disposeChannelFault();
     // Clear processing state
     this.#processing.clear();
     // Clear asserted queues so they are re-asserted on next connect
     this.#asserted.clear();
-    // Clear the fault flag (M70c)
-    this.#faulted = false;
     delete this.isHealthy;
     // Close channel. Best-effort: after a backend outage amqplib has already
     // torn the channel down, so `close()` throws `IllegalOperationError:
@@ -588,28 +700,65 @@ export class RabbitMqQueue implements QueueAdapter {
         break;
       }
 
-      // Decode Buffer to string, then parse JSON
-      const payload = msg.content.toString('utf8');
-      const job = JSON.parse(payload) as StoredJob<T>;
+      const job = parseStoredJob<T>(msg.content.toString('utf8'));
+      if (job === null) {
+        // A body that is not a stored job cannot be claimed, run or settled.
+        // Throwing here would strand the messages already fetched this call, so
+        // it is moved, bytes unchanged, into the dead queue (audit L4).
+        try {
+          await this.#quarantine(name, msg);
+        } catch {
+          // The dead queue refused the move (a reject-publish length policy, or
+          // a blocked broker past publishTimeoutMs). Stop fetching and return
+          // what was claimed; the message stays unacknowledged until the
+          // channel closes, then is redelivered and moved again (audit N1).
+          this.#reportWarning?.(
+            'queue-plugin: a RabbitMQ message that is not a stored job could not be moved to ' +
+              'the dead queue; it stays unacknowledged until the channel closes',
+          );
+          break;
+        }
+        continue;
+      }
+      const token = this.#runtime.uuid();
+      job.claimToken = token;
 
       // Claim the job
-      processing.set(job.id, { message: msg, job: job as StoredJob<unknown> });
+      processing.set(job.id, { message: msg, job: job as StoredJob<unknown>, token });
       result.push(job);
     }
 
     return result as readonly StoredJob<T>[];
   }
 
+  /**
+   * Moves an unreadable message into the dead queue with its bytes unchanged,
+   * then acks it, and warns without echoing the body.
+   * @param name - Job name whose ready queue delivered it
+   * @param msg - The message as fetched
+   */
+  async #quarantine(name: string, msg: IAmqpQueueMessage): Promise<void> {
+    const channel = this.#channel!;
+    const deadQ = this.#deadQueue(name);
+    await this.#bounded(deadQ, async () => {
+      await this.#publish(channel, deadQ, msg.content);
+    });
+    channel.ack(msg);
+    this.#reportWarning?.(
+      'queue-plugin: a RabbitMQ message that is not a stored job was moved to the dead queue',
+    );
+  }
+
   // eslint-disable-next-line require-await
-  async ack(name: string, id: string, _claimToken?: string): Promise<void> {
+  async ack(name: string, id: string, claimToken?: string): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
     }
 
     const processing = this.#getOrCreateProcessing(name);
     const entry = processing.get(id);
-    if (!entry) {
-      return;
+    if (!entry || entry.token !== claimToken) {
+      throw new StaleClaimError();
     }
 
     // Ack the message
@@ -622,7 +771,7 @@ export class RabbitMqQueue implements QueueAdapter {
     id: string,
     availableAtMs: number,
     attempts: number,
-    _claimToken?: string,
+    claimToken?: string,
   ): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
@@ -635,8 +784,8 @@ export class RabbitMqQueue implements QueueAdapter {
     const channel = this.#channel;
     const processing = this.#getOrCreateProcessing(name);
     const entry = processing.get(id);
-    if (!entry) {
-      return;
+    if (!entry || entry.token !== claimToken) {
+      throw new StaleClaimError();
     }
 
     // Update job
@@ -662,7 +811,7 @@ export class RabbitMqQueue implements QueueAdapter {
     processing.delete(id);
   }
 
-  async deadLetter(name: string, id: string, nowMs: number, _claimToken?: string): Promise<void> {
+  async deadLetter(name: string, id: string, nowMs: number, claimToken?: string): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
     }
@@ -671,8 +820,8 @@ export class RabbitMqQueue implements QueueAdapter {
     const channel = this.#channel;
     const processing = this.#getOrCreateProcessing(name);
     const entry = processing.get(id);
-    if (!entry) {
-      return;
+    if (!entry || entry.token !== claimToken) {
+      throw new StaleClaimError();
     }
 
     // Publish to dead queue — accepted before the ack, as in `requeue`.
@@ -730,7 +879,9 @@ export class RabbitMqQueue implements QueueAdapter {
   /**
    * Get or create the processing map for a job name.
    */
-  #getOrCreateProcessing(name: string): Map<string, { message: unknown; job: StoredJob<unknown> }> {
+  #getOrCreateProcessing(
+    name: string,
+  ): Map<string, { message: unknown; job: StoredJob<unknown>; token: string }> {
     if (!this.#processing.has(name)) {
       this.#processing.set(name, new Map());
     }

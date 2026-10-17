@@ -154,9 +154,7 @@ async function resolveClient(
   }
   const RedisCtor = await loadIoredis();
   const client = createLazyRedisClient(RedisCtor, url, commandTimeoutMs);
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(client, reporter);
-  }
+  attachConnectionErrorReporter(client, reporter);
   return client;
 }
 

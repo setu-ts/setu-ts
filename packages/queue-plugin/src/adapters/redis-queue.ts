@@ -7,14 +7,16 @@
  * @module
  */
 
-import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { attachConnectionErrorReporter, deadlineRangeError } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import { StaleClaimError } from '../errors.ts';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import {
   ACK_SCRIPT,
   DEAD_LETTER_SCRIPT,
   ENQUEUE_SCRIPT,
+  EXTEND_SCRIPT,
   REQUEUE_SCRIPT,
   RESERVE_SCRIPT,
 } from './redis-queue-scripts.ts';
@@ -85,6 +87,56 @@ export function resolveCommandTimeoutMs(value: number | undefined): number {
     );
   }
   return resolved;
+}
+
+/** The shortest accepted Redis lease; keeps the renewal interval at 333 ms or more (§10 S4). */
+export const MIN_VISIBILITY_TIMEOUT_MS = 1_000;
+
+/**
+ * Resolve the Redis lease length; no runtime is needed by this adapter.
+ * @param value - Configured duration, default 30 seconds
+ * @returns Validated duration in milliseconds
+ * @throws {RangeError} Below {@linkcode MIN_VISIBILITY_TIMEOUT_MS} or outside the runtime timer range
+ * @internal
+ */
+export function resolveVisibilityTimeoutMs(value: number | undefined): number {
+  const resolved = value === undefined ? 30_000 : value;
+  // deadlineRangeError's message says 0 disables a bound, which is false here,
+  // so it decides validity and this function words the refusal (audit L3).
+  if (
+    deadlineRangeError('queue-plugin: options.visibilityTimeoutMs', resolved) !== null ||
+    resolved < MIN_VISIBILITY_TIMEOUT_MS
+  )
+    throw new RangeError(
+      `queue-plugin: options.visibilityTimeoutMs must be a finite number between ` +
+        `${MIN_VISIBILITY_TIMEOUT_MS} and 2147483647 milliseconds`,
+    );
+  return resolved;
+}
+
+/**
+ * Resolve the Redis namespace without echoing caller data in refusals.
+ * @param value - Configured prefix; absent uses the existing `queue:` namespace
+ * @returns The validated prefix
+ * @throws {RangeError} For an empty, oversized or control-containing prefix
+ * @internal
+ */
+export function resolveKeyPrefix(value: string | undefined): string {
+  const prefix = value === undefined ? 'queue:' : value;
+  if (
+    typeof prefix !== 'string' ||
+    prefix.length === 0 ||
+    prefix.length > 128 ||
+    Array.from(prefix).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || (code >= 127 && code <= 159);
+    })
+  ) {
+    throw new RangeError(
+      'queue-plugin: options.keyPrefix must be a non-empty string of at most 128 characters without control characters',
+    );
+  }
+  return prefix;
 }
 
 /** The constructor options a lazily built client receives. */
@@ -164,9 +216,7 @@ async function resolveClient(
   }
   const RedisCtor = await loadIoredis();
   const client = createLazyRedisClient(RedisCtor, url, commandTimeoutMs);
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(client, reporter);
-  }
+  attachConnectionErrorReporter(client, reporter);
   return client;
 }
 
@@ -179,7 +229,9 @@ async function resolveClient(
  *
  * Key structure per job name:
  * - `queue:<name>:ready` - ZSET (score = availableAtMs, member = jobId)
- * - `queue:<name>:processing` - ZSET (score = reservedAtMs, member = jobId)
+ * - `queue:<name>:processing` - ZSET (score = lease deadline on the Redis clock)
+ * - `queue:<name>:claims` / `stalls` - HASH (delivery tokens / abandoned attempts)
+ * - `queue:<name>:claimseq` - persistent INCR sequence shared across replicas
  * - `queue:<name>:dead` - ZSET (score = deadLetterAtMs, member = jobId)
  * - `queue:<name>:jobs` - HASH (field = jobId, value = JSON job)
  * - `queue:<name>:dead:jobs` - HASH (dead payloads; only when a TTL is configured)
@@ -198,6 +250,11 @@ export class RedisQueue implements QueueAdapter {
   #deadLetterTtlMs: number | undefined;
   #reporter: ConnectionErrorReporter | undefined;
   #commandTimeoutMs: number;
+  #keyPrefix: string;
+  #visibilityTimeoutMs: number;
+  #warnedInactiveLease = false;
+  /** Renewed lease, present only while connected to an eval-capable client. */
+  claimRenewal?: NonNullable<QueueAdapter['claimRenewal']>;
   #ready = false;
   /**
    * M70c: present only when the client exposes `ping()`; its absence is
@@ -210,15 +267,21 @@ export class RedisQueue implements QueueAdapter {
 
   /**
    * @param options - Connection, client and retention options
-   * @throws {RangeError} If `commandTimeoutMs` is not a number from `0` to
-   *   `2147483647`
+   * @throws {RangeError} For an invalid key prefix, a non-positive lease, or
+   *   a duration outside the finite timer range (`0` disables only commandTimeoutMs)
    */
   constructor(options?: RedisQueueOptions) {
+    this.#keyPrefix = resolveKeyPrefix(options?.keyPrefix);
+    this.#visibilityTimeoutMs = resolveVisibilityTimeoutMs(options?.visibilityTimeoutMs);
     this.#commandTimeoutMs = resolveCommandTimeoutMs(options?.commandTimeoutMs);
     this.#url = options?.url ?? 'redis://localhost:6379';
     this.#injectedClient = options?.client;
     this.#deadLetterTtlMs = options?.deadLetterTtlMs;
     this.#reporter = options?.connectionErrorReporter;
+  }
+
+  #key(...parts: readonly string[]): string {
+    return this.#keyPrefix + parts.join(':');
   }
 
   async connect(): Promise<void> {
@@ -237,6 +300,25 @@ export class RedisQueue implements QueueAdapter {
     this.#ready = true;
     this.#installProbe();
     this.#installDepths();
+    if (typeof this.#client.eval === 'function') {
+      this.claimRenewal = {
+        intervalMs: Math.floor(this.#visibilityTimeoutMs / 3),
+        extend: async (name, id, token) => {
+          const atomic = this.#atomic(
+            [this.#key(name, 'processing'), this.#key(name, 'claims')],
+            [id, token, this.#visibilityTimeoutMs],
+          );
+          return atomic !== null && (await atomic(EXTEND_SCRIPT)) === 1;
+        },
+      };
+    } else if (!this.#warnedInactiveLease) {
+      this.#warnedInactiveLease = true;
+      this.#reporter?.report(
+        new Error(
+          'RedisQueue: visibilityTimeoutMs is inactive because the client has no eval; claims and reclaim are disabled',
+        ),
+      );
+    }
   }
 
   /**
@@ -271,6 +353,7 @@ export class RedisQueue implements QueueAdapter {
     this.#ready = false;
     delete this.isHealthy;
     delete this.depths;
+    delete this.claimRenewal;
   }
 
   isReady(): boolean {
@@ -282,8 +365,8 @@ export class RedisQueue implements QueueAdapter {
       throw new Error('RedisQueue is not connected');
     }
 
-    const readyKey = `queue:${job.name}:ready`;
-    const jobsKey = `queue:${job.name}:jobs`;
+    const readyKey = this.#key(job.name, 'ready');
+    const jobsKey = this.#key(job.name, 'jobs');
     const payload = JSON.stringify(job);
 
     const atomic = this.#atomic([jobsKey, readyKey], [job.id, payload, job.availableAtMs]);
@@ -304,14 +387,27 @@ export class RedisQueue implements QueueAdapter {
       throw new Error('RedisQueue is not connected');
     }
 
-    const readyKey = `queue:${name}:ready`;
-    const processingKey = `queue:${name}:processing`;
-    const jobsKey = `queue:${name}:jobs`;
+    const readyKey = this.#key(name, 'ready');
+    const processingKey = this.#key(name, 'processing');
+    const jobsKey = this.#key(name, 'jobs');
 
-    const atomic = this.#atomic([readyKey, processingKey, jobsKey], [nowMs, limit]);
+    const atomic = this.#atomic(
+      [
+        readyKey,
+        processingKey,
+        jobsKey,
+        this.#key(name, 'claims'),
+        this.#key(name, 'stalls'),
+        this.#key(name, 'claimseq'),
+      ],
+      [limit, this.#visibilityTimeoutMs, nowMs],
+    );
     if (atomic !== null) {
-      const raws = (await atomic(RESERVE_SCRIPT)) as readonly string[];
-      return raws.map((raw) => JSON.parse(raw) as StoredJob<T>);
+      const rows = (await atomic(RESERVE_SCRIPT)) as readonly (readonly [string, number, string])[];
+      return rows.map(([raw, stalls, claimToken]) => {
+        const job = JSON.parse(raw) as StoredJob<T>;
+        return { ...job, attempts: Math.max(job.attempts, 1) + stalls, claimToken };
+      });
     }
 
     // Get due jobs (score <= nowMs)
@@ -342,17 +438,20 @@ export class RedisQueue implements QueueAdapter {
     return jobs as readonly StoredJob<T>[];
   }
 
-  async ack(name: string, id: string, _claimToken?: string): Promise<void> {
+  async ack(name: string, id: string, claimToken?: string): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');
     }
 
-    const processingKey = `queue:${name}:processing`;
-    const jobsKey = `queue:${name}:jobs`;
+    const processingKey = this.#key(name, 'processing');
+    const jobsKey = this.#key(name, 'jobs');
 
-    const atomic = this.#atomic([processingKey, jobsKey], [id]);
+    const atomic = this.#atomic(
+      [processingKey, jobsKey, this.#key(name, 'claims'), this.#key(name, 'stalls')],
+      [id, claimToken ?? ''],
+    );
     if (atomic !== null) {
-      await atomic(ACK_SCRIPT);
+      if ((await atomic(ACK_SCRIPT)) === 0) throw new StaleClaimError();
       return;
     }
 
@@ -368,19 +467,20 @@ export class RedisQueue implements QueueAdapter {
     id: string,
     availableAtMs: number,
     attempts: number,
-    _claimToken?: string,
+    claimToken?: string,
   ): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');
     }
 
-    const processingKey = `queue:${name}:processing`;
-    const readyKey = `queue:${name}:ready`;
-    const jobsKey = `queue:${name}:jobs`;
+    const processingKey = this.#key(name, 'processing');
+    const readyKey = this.#key(name, 'ready');
+    const jobsKey = this.#key(name, 'jobs');
 
     // Fetch current job
     const raw = await this.#client.hget(jobsKey, id);
     if (!raw) {
+      if (typeof this.#client.eval === 'function') throw new StaleClaimError();
       return;
     }
 
@@ -392,9 +492,12 @@ export class RedisQueue implements QueueAdapter {
 
     // The read above changes nothing, so a timeout there is harmless; the three
     // writes are the transition and run as one script.
-    const atomic = this.#atomic([jobsKey, processingKey, readyKey], [id, payload, availableAtMs]);
+    const atomic = this.#atomic(
+      [jobsKey, processingKey, readyKey, this.#key(name, 'claims'), this.#key(name, 'stalls')],
+      [id, payload, availableAtMs, claimToken ?? ''],
+    );
     if (atomic !== null) {
-      await atomic(REQUEUE_SCRIPT);
+      if ((await atomic(REQUEUE_SCRIPT)) === 0) throw new StaleClaimError();
       return;
     }
 
@@ -408,22 +511,29 @@ export class RedisQueue implements QueueAdapter {
     await this.#client.zadd(readyKey, availableAtMs, id);
   }
 
-  async deadLetter(name: string, id: string, nowMs: number, _claimToken?: string): Promise<void> {
+  async deadLetter(name: string, id: string, nowMs: number, claimToken?: string): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');
     }
 
-    const processingKey = `queue:${name}:processing`;
-    const deadKey = `queue:${name}:dead`;
+    const processingKey = this.#key(name, 'processing');
+    const deadKey = this.#key(name, 'dead');
 
     const atomic = this.#atomic(
-      [processingKey, deadKey, `queue:${name}:jobs`, `queue:${name}:dead:jobs`],
-      [id, nowMs, this.#retention() === null ? '0' : '1'],
+      [
+        processingKey,
+        deadKey,
+        this.#key(name, 'jobs'),
+        this.#key(name, 'dead', 'jobs'),
+        this.#key(name, 'claims'),
+        this.#key(name, 'stalls'),
+      ],
+      [id, nowMs, this.#retention() === null ? '0' : '1', claimToken ?? ''],
     );
     if (atomic !== null) {
       // The move and the dead-set insert land together, so a concurrent sweep
       // can never see a member whose payload has not been moved yet.
-      await atomic(DEAD_LETTER_SCRIPT);
+      if ((await atomic(DEAD_LETTER_SCRIPT)) === 0) throw new StaleClaimError();
       await this.#sweepDeadLetters(name, nowMs);
       return;
     }
@@ -480,8 +590,8 @@ export class RedisQueue implements QueueAdapter {
    * job for this name, not only dead ones, so expiring it destroys work that is
    * merely queued: Redis keeps a key's TTL across later `HSET`s (measured), so
    * jobs enqueued after the first dead-letter inherit the countdown, and
-   * `reserve` drops a job whose payload is missing into the processing set and
-   * never returns it. That is silent, permanent loss of queued work — caused by
+   * `reserve` cannot return a job whose payload is missing. That is silent,
+   * permanent loss of queued work — caused by
    * an option whose purpose is bounding DEAD payloads.
    *
    * Issued BEFORE the caller's `ZADD` into the dead set. None of these commands
@@ -507,8 +617,8 @@ export class RedisQueue implements QueueAdapter {
       return;
     }
     const { client } = retention;
-    const jobsKey = `queue:${name}:jobs`;
-    const deadJobsKey = `queue:${name}:dead:jobs`;
+    const jobsKey = this.#key(name, 'jobs');
+    const deadJobsKey = this.#key(name, 'dead', 'jobs');
 
     // Move the payload out of the LIVE hash: that key holds every queued job's
     // payload for this name, so it can carry no expiry of its own.
@@ -555,8 +665,8 @@ export class RedisQueue implements QueueAdapter {
       return;
     }
     const { client, ttlMs } = retention;
-    const deadKey = `queue:${name}:dead`;
-    const deadJobsKey = `queue:${name}:dead:jobs`;
+    const deadKey = this.#key(name, 'dead');
+    const deadJobsKey = this.#key(name, 'dead', 'jobs');
 
     // Sweep whatever has now outlived the retention.
     const expired = await client.zrangebyscore(deadKey, 0, nowMs - ttlMs);
@@ -622,9 +732,9 @@ export class RedisQueue implements QueueAdapter {
       // Bound to the client for the same reason M70c bound `ping`: ioredis
       // reads `this.options` and an unbound call throws.
       const [ready, processing, dead] = await Promise.all([
-        zcard.call(client, `queue:${name}:ready`),
-        zcard.call(client, `queue:${name}:processing`),
-        zcard.call(client, `queue:${name}:dead`),
+        zcard.call(client, this.#key(name, 'ready')),
+        zcard.call(client, this.#key(name, 'processing')),
+        zcard.call(client, this.#key(name, 'dead')),
       ]);
       return { ready, processing, dead };
     };
@@ -635,8 +745,8 @@ export class RedisQueue implements QueueAdapter {
       throw new Error('RedisQueue is not connected');
     }
 
-    const dueKey = 'queue:recurring:due';
-    const jobsKey = 'queue:recurring:jobs';
+    const dueKey = this.#key('recurring', 'due');
+    const jobsKey = this.#key('recurring', 'jobs');
 
     // Store recurring job
     await this.#client.hset(jobsKey, rec.id, JSON.stringify(rec));
@@ -650,8 +760,8 @@ export class RedisQueue implements QueueAdapter {
       throw new Error('RedisQueue is not connected');
     }
 
-    const dueKey = 'queue:recurring:due';
-    const jobsKey = 'queue:recurring:jobs';
+    const dueKey = this.#key('recurring', 'due');
+    const jobsKey = this.#key('recurring', 'jobs');
 
     // Get due recurring jobs
     const dueIds = await this.#client.zrangebyscore(dueKey, '-inf', nowMs);
@@ -672,8 +782,8 @@ export class RedisQueue implements QueueAdapter {
       throw new Error('RedisQueue is not connected');
     }
 
-    const dueKey = 'queue:recurring:due';
-    const jobsKey = 'queue:recurring:jobs';
+    const dueKey = this.#key('recurring', 'due');
+    const jobsKey = this.#key('recurring', 'jobs');
 
     // Fetch current recurring job
     const raw = await this.#client.hget(jobsKey, id);

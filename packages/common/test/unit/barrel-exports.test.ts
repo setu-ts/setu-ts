@@ -9,6 +9,20 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
+import type { ReconnectMode, ReconnectSupervisorOptions } from '../../src/index.ts';
+
+describe('shared reconnect exports', () => {
+  it('exports the supervisor and backoff helper with their option types', () => {
+    const mode: ReconnectMode = 'observe';
+    const options: ReconnectSupervisorOptions = {
+      mode,
+      runtime: {} as common.IRuntimeServices,
+      attachFaultListener: () => () => {},
+    };
+    expect(new common.ReconnectSupervisor(options).faulted).toBe(false);
+    expect(typeof common.fullJitterDelay).toBe('function');
+  });
+});
 import type { WritePrecondition, WritePreconditionCheck } from '../../src/index.ts';
 
 describe('portable write precondition exports', () => {
