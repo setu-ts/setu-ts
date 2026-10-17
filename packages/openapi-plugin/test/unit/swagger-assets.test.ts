@@ -56,6 +56,15 @@ describe('Swagger asset options', () => {
         'https://assets.example.com/u i',
         'https://ASSETS.example.com/ui',
         'https://assets.example.com/./ui',
+        // Review (PR #468): a query or fragment swallows the appended file
+        // names, and credentials would be published in the page.
+        '/ui?theme=dark',
+        '/ui#top',
+        'https://assets.example.com/ui?v=1',
+        'https://assets.example.com/ui#top',
+        'https://user:secret@assets.example.com/ui',
+        'https://user@assets.example.com/ui',
+        'https://:secret@assets.example.com/ui',
       ].map((baseUrl) => ({ assets: { baseUrl } })),
     ])
       expect(() => OpenApiPlugin({ swagger } as unknown as OpenApiPluginOptions)).toThrow(

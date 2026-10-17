@@ -51,17 +51,21 @@ export function resolveSwaggerAssets(
   if (typeof assets === 'object' && assets !== null && typeof assets.baseUrl === 'string') {
     const base = assets.baseUrl;
     const trimmed = base.replace(/\/+$/, '');
-    // Printable ASCII without a backslash only: a browser resolves `/\host`
-    // to another host, and `new URL()` silently trims whitespace that the
-    // emitted attribute would still carry.
-    if (/^[\x21-\x5b\x5d-\x7e]+$/.test(base)) {
+    // Printable ASCII without a backslash, `?` or `#`: a browser resolves
+    // `/\host` to another host, `new URL()` silently trims whitespace that the
+    // emitted attribute would still carry, and the file names are appended to
+    // the base, so a query or fragment would swallow them.
+    if (/^[\x21-\x22\x24-\x3e\x40-\x5b\x5d-\x7e]+$/.test(base)) {
       if (/^\/(?!\/)/.test(base)) return { baseUrl: trimmed };
       try {
         const url = new URL(base);
         // Only a base that is already its own serialization: what the
         // validator saw is exactly what the browser will request.
+        // Credentials are refused: the base is written into a public page.
         if (
           (url.protocol === 'https:' || url.protocol === 'http:') &&
+          url.username === '' &&
+          url.password === '' &&
           url.href.replace(/\/+$/, '') === trimmed
         )
           return { baseUrl: trimmed };
@@ -71,7 +75,7 @@ export function resolveSwaggerAssets(
     }
   }
   throw new TypeError(
-    'OpenApiPlugin swagger.assets must be self, cdn, or { baseUrl } with an absolute HTTP(S) URL or / path.',
+    'OpenApiPlugin swagger.assets must be self, cdn, or { baseUrl } with an absolute HTTP(S) URL or / path, without credentials, query or fragment.',
   );
 }
 

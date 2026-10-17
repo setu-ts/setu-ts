@@ -53,3 +53,25 @@ describe.skipIf(directory === undefined)('real Swagger UI self-hosting', () => {
     }
   });
 });
+
+describe('external Swagger UI assets', () => {
+  it('keeps an application route at an asset path in the spec', async () => {
+    for (const assets of ['cdn', { baseUrl: '/static/swagger' }] as const) {
+      const app = createApplication({
+        plugins: [RuntimePlugin(), OpenApiPlugin({ swagger: { assets } })],
+      });
+      app.router.get('/docs/swagger-ui.css', (ctx) => ctx.response.text('app stylesheet'));
+      await app.start();
+      try {
+        const spec = app.services.get<IOpenApiService>(CAPABILITIES.OPENAPI).getSpec();
+        expect(Object.keys(spec.paths as Record<string, unknown>)).toEqual([
+          '/docs/swagger-ui.css',
+        ]);
+        const response = await app.fetch(new Request('http://localhost/docs/swagger-ui.css'));
+        expect(await response.text()).toBe('app stylesheet');
+      } finally {
+        await app.stop();
+      }
+    }
+  });
+});

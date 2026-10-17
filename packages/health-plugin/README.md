@@ -48,9 +48,11 @@ even when the lifecycle is bypassed.
 HTTP responses from `/health`, `/live`, and `/ready` default to
 `{ status, timestamp, checks: { name: { status } } }`. They omit indicator `data` and `latencyMs`,
 including runtime version and hostname. Set `HealthPlugin({ details: true })` to restore full
-reports for a dashboard; protect those endpoints when their data is sensitive.
-`HealthService.check()`, `checkLive()` and `checkReady()`, the gRPC bridge, and diagnostics retain
-full reports.
+reports for a dashboard; protect those endpoints when their data is sensitive. The option affects
+only those HTTP bodies: `HealthService.check()`, `checkLive()` and `checkReady()` still return full
+reports, and the gRPC bridge is unchanged. Diagnostics are unaffected too, and record only their
+minimized observations, never indicator `data` (see
+[Health observations](#health-observations-m98d)).
 
 An indicator reports `'up'`, `'degraded'`, or `'down'`; the overall report takes the worst status
 among them. A result that is not one of those — not an object, or a `status` outside the three — is

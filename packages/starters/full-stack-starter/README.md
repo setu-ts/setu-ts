@@ -124,6 +124,10 @@ const app = createApplication({
 |                  | MultiTenancyPlugin | Tenant isolation               |
 |                  | ReactRouterPlugin  | React SSR & file-based routing |
 
+OpenApiPlugin self-hosts Swagger UI by default, so install `swagger-ui-dist` (`^5`) in the consuming
+application, or pass `openapi: { swagger: { assets: 'cdn' } }`. Without either, startup fails with
+`OptionalDependencyUnavailableError`.
+
 The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
 `apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware
 globally at priority 300 unless `auth.middleware` disables or moves it.

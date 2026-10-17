@@ -17,7 +17,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 **V9-47:** `/health`, `/live`, and `/ready` now return status-only checks by default:
 `{ status, timestamp, checks: { name: { status } } }`. Dashboards that read `checks[*].data` or
 `latencyMs` must set `HealthPlugin({ details: true })` (or a starter's `health: { details: true }`).
-Programmatic health reports, the gRPC bridge, and diagnostics keep the full report.
+Programmatic health reports stay full and the gRPC bridge is unchanged; diagnostics never carried
+indicator `data` and are unaffected.
 
 **V9-49:** Swagger UI now self-hosts its assets. Install `swagger-ui-dist` (`^5`) in applications
 that use `OpenApiPlugin` or a starter with Swagger enabled. Deno tasks also need `--allow-read`.

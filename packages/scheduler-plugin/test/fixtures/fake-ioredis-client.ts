@@ -47,6 +47,15 @@ export class FakeRedisClient implements IRedisLockClient {
     }, 100);
   }
 
+  /** Expires `key` on access, as real Redis does, so a read never races the sweep. */
+  #expireIfDue(key: string): void {
+    const expiry = this.#ttlStore.get(key);
+    if (expiry !== undefined && Date.now() >= expiry) {
+      this.#store.delete(key);
+      this.#ttlStore.delete(key);
+    }
+  }
+
   #stopTTLChecker(): void {
     if (this.#checkTTLInterval !== null) {
       clearInterval(this.#checkTTLInterval);
@@ -65,6 +74,7 @@ export class FakeRedisClient implements IRedisLockClient {
     this.#calls.push({ method: 'set', args: [key, value, option, pxFlag, ttl] });
 
     // NX: only set if key does not exist
+    this.#expireIfDue(key);
     if (option === 'NX' && this.#store.has(key)) {
       return null;
     }
@@ -82,12 +92,14 @@ export class FakeRedisClient implements IRedisLockClient {
   // eslint-disable-next-line require-await
   async get(key: string): Promise<string | null> {
     this.#calls.push({ method: 'get', args: [key] });
+    this.#expireIfDue(key);
     return this.#store.get(key) ?? null;
   }
 
   // eslint-disable-next-line require-await
   async del(key: string): Promise<number> {
     this.#calls.push({ method: 'del', args: [key] });
+    this.#expireIfDue(key);
     if (this.#store.has(key)) {
       this.#store.delete(key);
       return 1;
@@ -114,6 +126,7 @@ export class FakeRedisClient implements IRedisLockClient {
     const key = keysAndArgs[0];
     const token = keysAndArgs[1];
 
+    this.#expireIfDue(key);
     const current = this.#store.get(key) ?? null;
     if (current === token) {
       this.#store.delete(key);

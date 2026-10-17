@@ -102,7 +102,12 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
   // into every generated client. Caller exclusions are added on top.
   const excludedPaths = [
     specEndpoint,
-    ...(swagger ? [endpoint, ...SWAGGER_ASSETS.map(({ file }) => `${assetBase}/${file}`)] : []),
+    ...(swagger ? [endpoint] : []),
+    // Asset routes exist only when self-hosting; in the external modes an
+    // application route at the same path is the application's own.
+    ...(swagger && assets === 'self'
+      ? SWAGGER_ASSETS.map(({ file }) => `${assetBase}/${file}`)
+      : []),
     ...(exclude ?? []),
   ];
 

@@ -86,7 +86,8 @@ application and grant filesystem read access on Deno. Registration awaits the ti
 The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
 `/docs/swagger-ui-standalone-preset.js` serve the package bytes with CSS/JavaScript content types
 and `Cache-Control: public, max-age=3600`; changing `endpoint` moves all four UI routes. Delivery
-routes are excluded from the generated spec.
+routes are excluded from the generated spec; in the external modes no asset route exists, so only
+the page endpoint is.
 
 `SwaggerOptions` is `{ readonly assets?: 'self' | 'cdn' | { readonly baseUrl: string } }`. `true`
 and `{}` select `'self'`; `false` disables the UI. Missing `swagger-ui-dist` fails startup with
@@ -101,12 +102,12 @@ workspace root.
 
 CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 integrity and
 `crossorigin="anonymous"` on all three tags. A custom base must be printable ASCII with no
-backslash, and either an absolute HTTP(S) URL already in its serialized form or a path starting with
-a single `/`. The base is written into the page as given, so it must not carry credentials
-(`https://user:password@host`). It must serve the unmodified **5.33.3** files, since it uses the
-same hashes. Invalid modes and base URLs throw `TypeError` at construction.
-`SwaggerUiOptions.assets` selects the same mode for `swaggerUiHtml`; its `endpoint` supplies the
-local prefix (default `/docs`).
+backslash, `?` or `#` (the file names are appended to it), and either an absolute HTTP(S) URL
+already in its serialized form or a path starting with a single `/`. The base is written into the
+page as given, so a URL carrying credentials (`https://user:password@host`) is refused. It must
+serve the unmodified **5.33.3** files, since it uses the same hashes. Invalid modes and base URLs
+throw `TypeError` at construction. `SwaggerUiOptions.assets` selects the same mode for
+`swaggerUiHtml`; its `endpoint` supplies the local prefix (default `/docs`).
 
 | Option                 | Type                             | Default                               | Description                                                  |
 | ---------------------- | -------------------------------- | ------------------------------------- | ------------------------------------------------------------ |

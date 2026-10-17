@@ -10,7 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - **BREAKING V9-47 — public health bodies (M113f, `@setu-ts/health-plugin`).** `/health`, `/live`
   and `/ready` omit indicator data and latency by default. Migration: set `details: true` for
-  dashboards needing the old body. Programmatic reports, gRPC and diagnostics retain full reports.
+  dashboards needing the old body. Programmatic reports stay full; gRPC and diagnostics are
+  unaffected.
 - **BREAKING V9-49 — Swagger self-hosting (M113f, `@setu-ts/openapi-plugin`, `@setu-ts/cli`).**
   Swagger now serves three fixed local assets and excludes those routes from its spec. The new
   `SwaggerOptions` type selects self-hosted, CDN, or custom-base delivery. Migration: install the

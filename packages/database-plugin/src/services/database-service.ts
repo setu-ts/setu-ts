@@ -151,7 +151,7 @@ function duplicateKeyError(cause: unknown, entity: string | undefined): Duplicat
  * Classifies a rejection raised by `commit()`, where only a duplicate key is
  * mapped.
  *
- * A commit rejection is otherwise rethrown unchanged because its outcome can
+ * A commit rejection is otherwise rethrown, scrubbed but unclassified, because its outcome can
  * be unknown: a lost acknowledgement may follow a write the server applied,
  * so the retry-safe `409`/`503` contracts are not advertised there. A
  * duplicate key is different. It is the server's own refusal of the write,
@@ -160,9 +160,11 @@ function duplicateKeyError(cause: unknown, entity: string | undefined): Duplicat
  * when they refuse.
  */
 function duplicateAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
-  return classifyDriverError(error, adapterType) === 'duplicate'
-    ? duplicateKeyError(error, undefined)
-    : error;
+  // Classify the raw driver error, then scrub it: a commit rejection can
+  // carry a Drizzle statement's bound values just as a repository call can.
+  const isDuplicate = classifyDriverError(error, adapterType) === 'duplicate';
+  const scrubbed = scrubDriverError(error);
+  return isDuplicate ? duplicateKeyError(scrubbed, undefined) : scrubbed;
 }
 
 // ---------------------------------------------------------------------------

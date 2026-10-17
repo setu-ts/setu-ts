@@ -674,9 +674,11 @@ The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child l
 `requestId`, and logs:
 
 - Incoming request (method, path)
-- Outgoing response (status, duration in ms)
+- Outgoing response (status, duration in ms), including a request that threw: the status is the one
+  served, read from `errorHandler`'s responder (`500` without one)
 - Slow request warning when duration exceeds `slowRequestThreshold`
-- Unhandled errors with stack traces
+
+It does not log the error itself; `errorHandler` logs it once (V9-80).
 
 ---
 
@@ -8647,8 +8649,9 @@ await repo.create({ id: 'ord-1' });
 `HealthPluginOptions.details?: boolean` defaults to `false`. HTTP `/health`, `/live`, and `/ready`
 return only `{ status, timestamp, checks: { name: { status } } }`, omitting each indicator's `data`
 and `latencyMs`. `HealthPlugin({ details: true })` restores the full HTTP report; non-booleans throw
-`TypeError` at construction. The programmatic health service, gRPC bridge, and diagnostics retain
-full reports. HTTP status rules are unchanged.
+`TypeError` at construction. Only the HTTP bodies change: the programmatic health service returns
+full reports, the gRPC bridge is unchanged, and diagnostics keep recording minimized observations
+that never include indicator `data`. HTTP status rules are unchanged.
 
 ### What `degraded` means
 
@@ -9234,15 +9237,15 @@ filesystem refuses self-hosting and names CDN and custom-base remedies.
 
 CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 SRI and
 `crossorigin="anonymous"` on all three asset tags. `{ baseUrl }` uses the same hashes and requires
-the unmodified 5.33.3 files. The base must be printable ASCII with no backslash, and either an
-absolute HTTP(S) URL already in its serialized form or a path starting with a single `/`; it is
-written into the page as given, so it must not carry credentials. Invalid modes or bases throw
-`TypeError` at construction. Workers selects an external mode; starters forward it through
-`openapi: { swagger: { assets: 'cdn' } }`. CLI projects declare the package in npm dependencies, or
-the Deno import map, and set `"scarfSettings": { "enabled": false }` in a generated standalone or
-npm workspace-root `package.json` (Scarf ignores a member's setting), opting out of the install-time
-analytics hook `swagger-ui-dist` depends on (`@scarf/scarf`). Workers templates select CDN
-automatically and do not declare the package.
+the unmodified 5.33.3 files. The base must be printable ASCII with no backslash, `?` or `#`, and
+either an absolute HTTP(S) URL already in its serialized form or a path starting with a single `/`;
+it is written into the page as given, so a URL carrying credentials is refused. Invalid modes or
+bases throw `TypeError` at construction. Workers selects an external mode; starters forward it
+through `openapi: { swagger: { assets: 'cdn' } }`. CLI projects declare the package in npm
+dependencies, or the Deno import map, and set `"scarfSettings": { "enabled": false }` in a generated
+standalone or npm workspace-root `package.json` (Scarf ignores a member's setting), opting out of
+the install-time analytics hook `swagger-ui-dist` depends on (`@scarf/scarf`). Workers templates
+select CDN automatically and do not declare the package.
 
 Provides automatic OpenAPI documentation.
 
