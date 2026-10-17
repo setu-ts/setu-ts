@@ -9235,12 +9235,14 @@ filesystem refuses self-hosting and names CDN and custom-base remedies.
 CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 SRI and
 `crossorigin="anonymous"` on all three asset tags. `{ baseUrl }` uses the same hashes and requires
 the unmodified 5.33.3 files. The base must be printable ASCII with no backslash, and either an
-absolute HTTP(S) URL already in its serialized form or a path starting with a single `/`. Invalid
-modes or bases throw `TypeError` at construction. Workers selects an external mode; starters forward
-it through `openapi: { swagger: { assets: 'cdn' } }`. CLI projects declare the package in npm
-dependencies, or the Deno import map, and set `"scarfSettings": { "enabled": false }` in a generated
-`package.json`, opting out of the install-time analytics hook `swagger-ui-dist` depends on
-(`@scarf/scarf`). Workers templates select CDN automatically and do not declare the package.
+absolute HTTP(S) URL already in its serialized form or a path starting with a single `/`; it is
+written into the page as given, so it must not carry credentials. Invalid modes or bases throw
+`TypeError` at construction. Workers selects an external mode; starters forward it through
+`openapi: { swagger: { assets: 'cdn' } }`. CLI projects declare the package in npm dependencies, or
+the Deno import map, and set `"scarfSettings": { "enabled": false }` in a generated standalone or
+npm workspace-root `package.json` (Scarf ignores a member's setting), opting out of the install-time
+analytics hook `swagger-ui-dist` depends on (`@scarf/scarf`). Workers templates select CDN
+automatically and do not declare the package.
 
 Provides automatic OpenAPI documentation.
 

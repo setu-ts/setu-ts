@@ -136,4 +136,46 @@ describe('scrubDriverError', () => {
       expect(scrubDriverError(node)).toBe(node);
     }
   });
+
+  it('returns normally when a driver error accessor throws (R2-F5)', () => {
+    const throwing = (target: Error, key: string): Error =>
+      Object.defineProperty(target, key, {
+        get() {
+          throw new Error(`accessor ${key}`);
+        },
+      });
+    for (const key of ['code', 'stack', 'severity', 'message', 'name']) {
+      const node = Object.assign(new Error('invalid input syntax for type uuid: "canary-r2"'), {
+        code: '22P02',
+        severity: 'ERROR',
+      });
+      throwing(node, key);
+      expect(() => scrubDriverError(queryError(node))).not.toThrow();
+    }
+    // A data exception whose stack throws still loses the quoted value.
+    const stackless = throwing(
+      Object.assign(new Error('invalid input syntax for type uuid: "canary-r2"'), {
+        code: '22P02',
+      }),
+      'stack',
+    );
+    const cause = (scrubDriverError(queryError(stackless)) as Error).cause as Error;
+    expect(cause.message).toBe('Data exception (SQLSTATE 22P02)');
+    expect(cause.stack).toBe('Data exception (SQLSTATE 22P02)');
+    // A Drizzle wrapper whose stack throws is scrubbed with no frames.
+    const wrapper = throwing(queryError(), 'stack');
+    expect((scrubDriverError(wrapper) as Error).stack).toBe('Failed query: select $1');
+    // A frozen wrapper with a throwing own getter is copied without throwing.
+    const frozen = Object.freeze(
+      Object.defineProperty(new Error('wrapper', { cause: queryError() }), 'detail', {
+        enumerable: true,
+        get() {
+          throw new Error('accessor detail');
+        },
+      }),
+    );
+    const copy = scrubDriverError(frozen) as Error & { detail?: unknown };
+    expect(copy).not.toBe(frozen);
+    expect(copy.detail).toBeUndefined();
+  });
 });

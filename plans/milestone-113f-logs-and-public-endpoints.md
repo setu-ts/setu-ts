@@ -413,3 +413,25 @@ Four Low findings, no Critical, High or Medium. All fixed inline at the maintain
   the page without executing anything; a thrown Proxy with a throwing `getPrototypeOf` logs
   completion `200` (pre-existing); an indicator named `__proto__` is dropped (pre-existing on
   `develop`).
+
+### 10.7 Committed-tree audit, round 2 (same independent auditor, `4f45b8f5`) — failed
+
+F1, F2 and F3 verified fixed; F4 fixed for standalone and Workers projects. Five negative controls
+observed failing. Two new Lows, both fixed inline at the maintainer's direction.
+
+- **R2-F5 — the class 22 branch threw on a driver error whose `code`, `stack` or `severity` accessor
+  throws**, replacing the logged diagnostic with the accessor's error (S2). Fixed: every read the
+  scrub makes of a foreign error — in detection, rebuilding, the relink walk and the frozen-wrapper
+  copy — goes through one `safeRead` that answers `undefined` on a throw, matching `causeOf` in the
+  classifier. This also closes the auditor's observation that the Drizzle branch read `stack`
+  unguarded. A rejection that is a `Proxy` throwing on every read cannot be read, so it cannot be
+  scrubbed; only driver code produces one, and it is accepted as a residual.
+- **R2-F6 — an npm workspace root carried no Scarf opt-out**, and Scarf reads only the package.json
+  at npm's `INIT_CWD`, ignoring a member's. Fixed: the generated npm workspace root sets
+  `"scarfSettings": { "enabled": false }`; the four doc sites now say the setting belongs at the
+  root.
+- **Observation addressed:** a `baseUrl` carrying credentials is written into the page as given; the
+  openapi README and `PUBLIC_API.md` now say it must not carry any.
+
+The R2-F5 and R2-F6 fixes (`fix commit after 4f45b8f5` onward) were NOT re-audited, at the
+maintainer's direction (2026-10-18).

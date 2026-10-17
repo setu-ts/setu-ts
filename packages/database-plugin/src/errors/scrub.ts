@@ -15,22 +15,28 @@ export function scrubDriverError(error: unknown): unknown {
   const chain = causeChain(error);
   const replacements = new Map<object, object>();
   for (const node of chain) {
-    const candidate = node as { query?: unknown; params?: unknown };
+    if (!(node instanceof Error)) continue;
+    // Every read goes through `safeRead`: a driver error is foreign input, and
+    // an accessor that throws must not turn the error path into the fault.
+    const query = Object.hasOwn(node, 'query') ? safeRead(node, 'query') : undefined;
+    const params = Object.hasOwn(node, 'params') ? safeRead(node, 'params') : undefined;
+    const message = safeRead(node, 'message');
     if (
-      node instanceof Error &&
-      Object.hasOwn(node, 'query') &&
-      typeof candidate.query === 'string' &&
-      Object.hasOwn(node, 'params') &&
-      Array.isArray(candidate.params) &&
-      node.message.startsWith('Failed query: ')
+      typeof query === 'string' &&
+      Array.isArray(params) &&
+      typeof message === 'string' &&
+      message.startsWith('Failed query: ')
     ) {
-      const clean = new Error(`Failed query: ${candidate.query}`);
-      clean.name = node.name;
-      clean.stack = withFramesOf(clean.message, node.stack);
-      Object.defineProperty(clean, 'query', { value: candidate.query, enumerable: true });
+      const clean = new Error(`Failed query: ${query}`);
+      clean.name = nameOf(node);
+      clean.stack = withFramesOf(clean.message, safeRead(node, 'stack'));
+      Object.defineProperty(clean, 'query', { value: query, enumerable: true });
       replacements.set(node, clean);
-    } else if (isDataException(node)) {
-      replacements.set(node, scrubbedDataException(node));
+      continue;
+    }
+    const code = safeRead(node, 'code');
+    if (typeof code === 'string' && /^22[0-9A-Z]{3}$/.test(code)) {
+      replacements.set(node, scrubbedDataException(node, code));
     }
   }
   // Allocate every query replacement before linking, then link tail first: a
@@ -38,7 +44,7 @@ export function scrubDriverError(error: unknown): unknown {
   // replaced by a copy, and the nodes above it link to that copy. The error
   // path must never become the fault, so no relink is allowed to throw.
   for (const node of [...chain].reverse()) {
-    const cause = (node as { cause?: unknown }).cause;
+    const cause = safeRead(node as object, 'cause');
     const next =
       typeof cause === 'object' && cause !== null ? (replacements.get(cause) ?? cause) : cause;
     const target = replacements.get(node) ?? node;
@@ -57,12 +63,16 @@ export function scrubDriverError(error: unknown): unknown {
  * message, stack and own enumerable fields (a driver `code`, for example).
  */
 function copyWithCause(node: Error, cause: unknown): Error {
-  const copy = new Error(node.message, { cause });
-  for (const [key, value] of Object.entries(node)) {
-    if (key !== 'cause') Object.defineProperty(copy, key, { value, enumerable: true });
+  const message = safeRead(node, 'message');
+  const copy = new Error(typeof message === 'string' ? message : '', { cause });
+  for (const key of Object.keys(node)) {
+    if (key !== 'cause') {
+      Object.defineProperty(copy, key, { value: safeRead(node, key), enumerable: true });
+    }
   }
-  copy.name = node.name;
-  if (node.stack !== undefined) copy.stack = node.stack;
+  copy.name = nameOf(node);
+  const stack = safeRead(node, 'stack');
+  if (typeof stack === 'string') copy.stack = stack;
   return copy;
 }
 
@@ -70,34 +80,43 @@ function copyWithCause(node: Error, cause: unknown): Error {
  * Replaces the stack's header, which repeats the original message, with
  * `message`, keeping only the frame lines.
  */
-function withFramesOf(message: string, stack: string | undefined): string {
-  const lines = stack?.split('\n') ?? [];
+function withFramesOf(message: string, stack: unknown): string {
+  const lines = typeof stack === 'string' ? stack.split('\n') : [];
   const firstFrame = lines.findIndex((line) => /^\s*at\s/.test(line));
   return message + (firstFrame < 0 ? '' : `\n${lines.slice(firstFrame).join('\n')}`);
 }
 
 /**
- * SQLSTATE class 22 (data exception): PostgreSQL's message quotes the
- * rejected input (`invalid input syntax for type uuid: "<value>"`), so
- * it carries a bound value whatever the statement was.
+ * Reads one property of a foreign error, answering `undefined` when its
+ * accessor throws.
  */
-function isDataException(node: unknown): node is Error & { code: string } {
-  if (!(node instanceof Error)) return false;
-  const code: unknown = (node as { code?: unknown }).code;
-  return typeof code === 'string' && /^22[0-9A-Z]{3}$/.test(code);
+function safeRead(node: object, key: string): unknown {
+  try {
+    return (node as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/** The node's name when it is a string, otherwise `'Error'`. */
+function nameOf(node: object): string {
+  const name = safeRead(node, 'name');
+  return typeof name === 'string' ? name : 'Error';
 }
 
 /**
- * Rebuilds a data exception from its code alone, so classification still
- * reads the SQLSTATE while the message, stack header and driver fields
- * (`where`, `detail`) that quote the input are gone.
+ * Rebuilds a SQLSTATE class 22 (data exception) cause from its code alone:
+ * PostgreSQL's message quotes the rejected input
+ * (`invalid input syntax for type uuid: "<value>"`), so the message, stack
+ * header and driver fields (`where`, `detail`) all go, while classification
+ * still reads the code.
  */
-function scrubbedDataException(node: Error & { code: string }): Error {
-  const clean = new Error(`Data exception (SQLSTATE ${node.code})`);
-  clean.name = node.name;
-  clean.stack = withFramesOf(clean.message, node.stack);
-  Object.defineProperty(clean, 'code', { value: node.code, enumerable: true });
-  const severity = (node as { severity?: unknown }).severity;
+function scrubbedDataException(node: Error, code: string): Error {
+  const clean = new Error(`Data exception (SQLSTATE ${code})`);
+  clean.name = nameOf(node);
+  clean.stack = withFramesOf(clean.message, safeRead(node, 'stack'));
+  Object.defineProperty(clean, 'code', { value: code, enumerable: true });
+  const severity = safeRead(node, 'severity');
   if (typeof severity === 'string') {
     Object.defineProperty(clean, 'severity', { value: severity, enumerable: true });
   }

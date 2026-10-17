@@ -19,11 +19,11 @@ All notable changes to this project are documented here. The format follows
   packages fail startup with `OptionalDependencyUnavailableError`. CDN and custom-base modes use
   pinned 5.33.3 files with SHA-384 SRI; a custom base must be printable ASCII with no backslash, an
   HTTP(S) URL in serialized form or a path starting with a single `/`. Generated Node, Bun and Deno
-  projects declare the package, and a generated `package.json` sets
+  projects declare the package, and a generated standalone or npm workspace-root `package.json` sets
   `"scarfSettings": { "enabled": false }`: `swagger-ui-dist` depends on `@scarf/scarf`, whose npm
   `postinstall` otherwise reports platform, Node version and dependency data. If you install the
-  package yourself, add the same setting to your root `package.json`. Workers selects CDN and no
-  longer declares the package.
+  package yourself, add the same setting to your root `package.json` (in a workspace, the root;
+  Scarf ignores a member's). Workers selects CDN and no longer declares the package.
 - **M113f logging (`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/exceptions`,
   `@setu-ts/logger-plugin`, `@setu-ts/database-plugin`).** Scrub Drizzle bound values from messages
   and multiline stack headers while retaining SQL and classification, and rebuild a SQLSTATE class
