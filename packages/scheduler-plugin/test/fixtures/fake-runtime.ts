@@ -160,6 +160,9 @@ export class FakeRuntime implements IRuntimeServices {
       }
       await setImmediate();
     }
+    if (this.#timerErrors.length > 0) {
+      throw this.#timerErrors.shift();
+    }
     this.#time = epochMs;
   }
 

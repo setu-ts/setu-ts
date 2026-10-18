@@ -7570,15 +7570,16 @@ leaves the registry (on final settlement or `remove`), on `disconnect`, or by TT
 re-registering the same name after it fired gets a fresh slot and fires again.
 
 **A `delay` job is lost if the replica that claimed it leaves before firing.** The claim is decided
-at registration, so a replica that finds the slot held never re-attempts: if the claiming replica
-crashes or shuts down gracefully between registering the delay and firing it, no replica runs the
-handler and nothing reports it. The exposure window is the delay itself, so it matters for a long
-`delayMs` on a replica set that may lose a pod in that window. `cron` and `every` are unaffected:
-they claim at fire time, so the next fire re-contends. A separate per-handler mutex preserves
-overlap protection — a second fire of a job whose previous fire is still running is skipped locally.
-`every` jobs arm on an absolute epoch grid (`(floor(now / interval) + 1) * interval`), so replicas
-registered at different instants agree on slot keys; the first fire may come sooner than one full
-interval after registration.
+at registration, so a replica that already found the slot held never re-attempts: if the claiming
+replica crashes or shuts down gracefully between registering the delay and firing it, the original
+due fire is lost on every replica and nothing reports it. A graceful shutdown releases the slot, so
+a replica that registers the same name afterwards can claim it and schedule a new fire. The exposure
+window is the delay itself, so it matters for a long `delayMs` on a replica set that may lose a pod
+in that window. `cron` and `every` are unaffected: they claim at fire time, so the next fire
+re-contends. A separate per-handler mutex preserves overlap protection — a second fire of a job
+whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
+(`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
+slot keys; the first fire may come sooner than one full interval after registration.
 
 ### Declarative jobs and behaviours
 

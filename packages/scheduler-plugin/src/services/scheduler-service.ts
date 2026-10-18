@@ -624,8 +624,10 @@ export class SchedulerService implements IScheduler {
    * replica that finds the slot held sets `slotClaim = 'contended'` once and never
    * re-attempts. If the claiming replica then dies — a crash, or a graceful
    * {@linkcode disconnect}, which clears timers and releases the slot —
-   * between this registration and the fire, no replica runs the handler and
-   * nothing reports it. The exposure window is `delayMs`. `cron` and `every`
+   * between this registration and the fire, the original due fire is lost on
+   * every replica already registered and nothing reports it; a graceful
+   * disconnect frees the slot, so a LATER registration of the name can claim it
+   * and schedule a new fire. The exposure window is `delayMs`. `cron` and `every`
    * do not share it: they claim at fire time, so the next fire re-contends.
    */
   async #claimDelaySlot(entry: DelayRegistryEntry<unknown>): Promise<void> {
