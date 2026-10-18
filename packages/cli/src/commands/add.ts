@@ -38,6 +38,7 @@ import { detectPlugins } from '../utils/plugin-detector.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
 import {
+  callArguments,
   callsIdentifier,
   DEVTOOL_SOURCES_MODULE,
   factoryScope,
@@ -388,16 +389,23 @@ function seamGapLines(
   seam: AddSeam | undefined,
 ): readonly string[] {
   if (seam === undefined || source === undefined) return [];
-  if (composingStarter(source) !== undefined) return [];
+  // A starter that owns the plugin has its own arm guidance; one that does not
+  // (a REST starter has no `events` arm) leaves the call ours to check.
+  if (composingStarter(source)?.arms.has(bare) === true) return [];
   const provider = ZERO_CONFIG_WIRINGS.get(bare);
   if (provider === undefined) return [];
   const binding = providerBinding(source, bare, provider.symbol);
   const scope = factoryScope(source);
   if (binding === undefined || scope === undefined) return [];
-  const body = scope.code.slice(scope.start, scope.end);
-  if (!callsIdentifier(body, binding)) return [];
+  const calls = callArguments(scope.code.slice(scope.start, scope.end), binding);
+  if (calls.length === 0) return [];
+  // The CALL's own arguments decide, not a reference anywhere in the factory: a
+  // body that reads the barrel elsewhere and calls the provider bare still
+  // registers nothing. Fails open — options built elsewhere and passed by name
+  // draw the line, which says too much rather than nothing.
   const symbols = seam.imports.flatMap((item) => item.symbols);
-  if (symbols.every((symbol) => referencesIdentifier(body, symbol))) return [];
+  const wired = calls.some((args) => symbols.every((symbol) => referencesIdentifier(args, symbol)));
+  if (wired) return [];
   return [
     `  The existing ${binding}(…) call does not pass the generated artifacts; give it ${seam.args}.`,
     ...seam.imports

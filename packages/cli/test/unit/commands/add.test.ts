@@ -1305,6 +1305,46 @@ describe('setu add wires the generated-artifact seam', () => {
     expect(h.out.join('\n')).toContain('give it { handlers: EVENT_HANDLERS }');
   });
 
+  it('names the missing seam when the factory reads the barrel but calls the provider bare', async () => {
+    const installed = JSON.stringify({
+      imports: { '@setu-ts/events-plugin': `npm:@setu-ts/events-plugin@^${VERSION}` },
+    });
+    const config = `import { EventsPlugin } from '@setu-ts/events-plugin';\nimport { EVENT_HANDLERS } from './src/events/index.ts';\n${FUNCTIONAL_CONFIG.replace(
+      'return createApplication({',
+      'void EVENT_HANDLERS.length;\n  return createApplication({',
+    ).replace(
+      '...(devtool?.plugins ?? []),',
+      'EventsPlugin(),\n      ...(devtool?.plugins ?? []),',
+    )}`;
+    const h = harness({ '/app/deno.json': installed, '/app/setu.config.ts': config });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    const out = h.out.join('\n');
+    expect(out).toContain('give it { handlers: EVENT_HANDLERS }');
+    expect(out).not.toContain('Import EVENT_HANDLERS');
+  });
+
+  it('names the missing seam under a starter that does not own the plugin', async () => {
+    const installed = JSON.stringify({
+      imports: { '@setu-ts/events-plugin': `npm:@setu-ts/events-plugin@^${VERSION}` },
+    });
+    const config = `import { createRestApp } from '@setu-ts/rest-starter';
+import { EventsPlugin } from '@setu-ts/events-plugin';
+
+export function createApp() {
+  const app = createRestApp({});
+  app.register(EventsPlugin());
+  return app;
+}
+`;
+    const h = harness({ '/app/deno.json': installed, '/app/setu.config.ts': config });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    expect(h.out.join('\n')).toContain('give it { handlers: EVENT_HANDLERS }');
+  });
+
   it('resolves no seam for a provider that consumes none', () => {
     expect(addSeam('queue-plugin', new Set(['queue-plugin']))).toBeUndefined();
     expect(addSeam('auth-plugin', new Set(['auth-plugin']))).toBeUndefined();
