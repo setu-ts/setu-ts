@@ -2639,6 +2639,14 @@ authorization when RBAC is configured:
   registered, holding the `policies` option's definitions and any class-form policies
   DecoratorPlugin registers.
 
+**JWT time boundaries (M113m).** The first-party `JwtService.verify`, exposed as `IJwtService`, uses
+fractional seconds (`runtime.now() / 1000`) without clock tolerance. It rejects with `Token expired`
+once `now >= exp`, and with `Token not yet valid` while `now < nbf`: the not-before boundary is
+inclusive, and the expiry boundary is exclusive. Previously, a token could remain accepted for up to
+one second after `exp`; refresh before `exp`. The outside-issuer verifier (`issuers`) uses
+fractional seconds with `clockToleranceSec`: expiry is refused once `now >= exp + clockToleranceSec`
+(previously `>`), and not-before is refused while `now + clockToleranceSec < nbf` (unchanged).
+
 **Authorization policies (M110a).** `definePolicy({ name, abilities, before? })` validates a policy
 (lowercase kebab-case name, at least one ability, no ability named `before`) and returns a frozen
 copy typed by its ability names; register it through `AuthPlugin({ policies })`, which refuses a
@@ -2765,23 +2773,25 @@ what changed is that the refusal is legible.
 > `issuer` equals it exactly. `none` and `HS*` are refused before key lookup; keys are filtered by
 > `kty`/`crv`/`use`/`alg`/`key_ops`/`kid`; RS256, PS256, ES256, ES384 and EdDSA (`Ed25519`) verify
 > through `runtime.subtle` with zero npm dependencies. `iss` exact, `aud` contains `audience`, `exp`
-> required, `exp`/`nbf`/future `iat` within `clockToleranceSec` (default 30, max 300). Key sets are
-> cached on the monotonic clock (`keySet.ttlMs` 10 min), an unknown `kid` refetches at most once per
-> `keySet.minRefreshIntervalMs` (60 s) with concurrent refetches coalesced, the last good set
-> survives fetch failures for `keySet.maxStaleMs` (24 h) and is then dropped, and each fetch is
-> bounded by `keySet.fetchTimeoutMs` (5 s), 64 KiB and 64 keys. Every refusal — duplicate name or
-> issuer, empty audience, unsupported algorithm, out-of-range tolerance or timing, a `keySet.ttlMs`
-> above `keySet.maxStaleMs`, `http` without `issuers` or `signIn`, non-`https` non-loopback URL —
-> throws `AuthPluginConfigurationError` from `AuthPlugin(...)`. `http?: IAuthHttp` replaces the
-> default `fetch` seam. The `auth` health indicator stays `up` with `data.current: boolean` and
-> `data.issuers` carrying per-issuer `stale`/`expired`/`unfetched` states. It performs no I/O.
-> `typ: at+jwt` (RFC 9068) is not enforced (only a Keycloak `typ: "ID"` claim is refused), so the
-> API needs an audience distinct from any sign-in client id; multi-tenant Entra ID is not supported.
-> `IJwtService` remains self-issued only. `sub` is unique only within its issuer, so whenever an
-> issuer is not the only identity source — another issuer, a self-issued `jwt` (whose strategy also
-> maps `sub` to the id), an API key, a session or a custom strategy — `toPrincipal` should namespace
-> the id (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or keep their ids free
-> of the separator), since namespacing one side does not stop a local id of the same form colliding.
+> required, `exp`/`nbf`/future `iat` within `clockToleranceSec` (default 30, max 300). Expiry is
+> refused at `now >= exp + clockToleranceSec`; not-before is refused while
+> `now + clockToleranceSec < nbf`. Key sets are cached on the monotonic clock (`keySet.ttlMs` 10
+> min), an unknown `kid` refetches at most once per `keySet.minRefreshIntervalMs` (60 s) with
+> concurrent refetches coalesced, the last good set survives fetch failures for `keySet.maxStaleMs`
+> (24 h) and is then dropped, and each fetch is bounded by `keySet.fetchTimeoutMs` (5 s), 64 KiB and
+> 64 keys. Every refusal — duplicate name or issuer, empty audience, unsupported algorithm,
+> out-of-range tolerance or timing, a `keySet.ttlMs` above `keySet.maxStaleMs`, `http` without
+> `issuers` or `signIn`, non-`https` non-loopback URL — throws `AuthPluginConfigurationError` from
+> `AuthPlugin(...)`. `http?: IAuthHttp` replaces the default `fetch` seam. The `auth` health
+> indicator stays `up` with `data.current: boolean` and `data.issuers` carrying per-issuer
+> `stale`/`expired`/`unfetched` states. It performs no I/O. `typ: at+jwt` (RFC 9068) is not enforced
+> (only a Keycloak `typ: "ID"` claim is refused), so the API needs an audience distinct from any
+> sign-in client id; multi-tenant Entra ID is not supported. `IJwtService` remains self-issued only.
+> `sub` is unique only within its issuer, so whenever an issuer is not the only identity source —
+> another issuer, a self-issued `jwt` (whose strategy also maps `sub` to the id), an API key, a
+> session or a custom strategy — `toPrincipal` should namespace the id
+> (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or keep their ids free of the
+> separator), since namespacing one side does not stop a local id of the same form colliding.
 > `keySet.fetchTimeoutMs` may not exceed 2147483647, since a larger timer delay overflows.
 >
 > **Sign-in with an outside provider (M100c):** `signIn: SignInConfig` —
@@ -7680,6 +7690,25 @@ may now come sooner than one full interval after resume (never later). Grid alig
 deliberate — it is the same alignment that makes replicas agree on fire times and slot keys, and a
 resume that restarted the phase would let one replica's resumed job drift out of slot agreement with
 the others.
+
+### Timing and registration refusals (M113m)
+
+`delay`, `every`, `cron` and retry backoff wait in chunks of at most 2147483647 ms and check the
+wall clock on every wake. A job never runs before its due time, including after an early wake or a
+clock step backwards. There is no upper limit on a delay or interval: long delays and monthly cron
+waits are honoured instead of being clamped by Node, Deno or Bun to about 1 ms.
+
+The async registration call rejects with a `RangeError` for these values:
+
+| Registration             | Refused value                   | Message fragment                           |
+| ------------------------ | ------------------------------- | ------------------------------------------ |
+| `delay`                  | `delayMs` not finite or < 0     | `delayMs must be a finite number >= 0`     |
+| `every`                  | `intervalMs` not finite or <= 0 | `intervalMs must be a finite number > 0`   |
+| `delay`, `every`, `cron` | `retry.delay` not finite or < 0 | `retry.delay must be a finite number >= 0` |
+
+The message names the job and the rejected value. Zero `delayMs` and zero `retry.delay` are
+accepted; large finite values are accepted. These refusals are breaking: fix the value before
+registering the job.
 
 ### IScheduler Interface
 

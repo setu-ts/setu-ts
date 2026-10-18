@@ -6459,6 +6459,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   data fault on a later page read as a bad cursor, an M113f scrub that a frame-shaped bound value
   survived, and a `TypeError` the round-2 name helper introduced; all are fixed and NOT re-audited,
   at the maintainer's direction — complete (PR #470)
+- **Milestone 113m** (`packages/scheduler-plugin` + `packages/auth-plugin` — time the framework does
+  not honour; V9-63, V9-70): scheduler `delay`, `every`, `cron` and retry backoff honour long waits
+  in chunks of at most 2147483647 ms, checking the wall clock on every wake so jobs never run before
+  they are due; no upper delay or interval limit. Async registration rejects non-finite or negative
+  `delayMs`/`retry.delay`, and non-finite or non-positive `intervalMs`, with `RangeError`; zero
+  delay and retry delay remain accepted. First-party `JwtService.verify` uses fractional seconds
+  without clock tolerance, rejecting at `exp` and before `nbf`; outside-issuer verification rejects
+  at `exp + clockToleranceSec`, with its not-before check unchanged. Migration: fix invalid
+  scheduler values and refresh tokens before `exp` — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

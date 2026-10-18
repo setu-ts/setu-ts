@@ -12,6 +12,22 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Fix invalid scheduler times and refresh JWTs before expiry (M113m, breaking)
+
+**Fix invalid values before registering a job.** The async `delay` call now rejects with a
+`RangeError` for a non-finite or negative `delayMs`; `every` rejects for a non-finite or
+non-positive `intervalMs`; `delay`, `every` and `cron` reject for a non-finite or negative
+`retry.delay`. Check configured or computed values before registration. Zero `delayMs` and zero
+`retry.delay` are still accepted, and there is no upper delay or interval limit. Long waits now run
+until their due time instead of being clamped to about 1 ms.
+
+**Refresh before `exp`.** First-party `JwtService.verify` now uses fractional seconds without clock
+tolerance and rejects once `now >= exp`, instead of accepting a token for up to one second after
+expiry; it also rejects while `now < nbf`. Update tests or clients that assumed a token remained
+valid during the second of its `exp`. The outside-issuer verifier (`issuers`) now rejects exactly at
+`exp + clockToleranceSec` too (previously only after it); its not-before check remains
+`now + clockToleranceSec < nbf`.
+
 ### Key-change and cursor refusals answer `400`; Drizzle refuses unknown payload fields; bound PostgreSQL calls with `query_timeout` (M113g, breaking)
 
 **Catch `PrimaryKeyChangeError`, not the old answers, for a key change through `update`.** Every
