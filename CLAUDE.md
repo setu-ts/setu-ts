@@ -6492,7 +6492,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   itself. CSRF now consults no forwarded candidate when `Sec-Fetch-Site` is present and not
   `same-origin`, only `trustedProxies` with a trusted peer publishes an origin, and hosts follow a
   DNS/IPv6 grammar. Round 3 passed on `6f6b2014`; its default-port observation was fixed afterwards
-  and not re-audited, at the maintainer's direction — complete (PR pending)
+  and not re-audited, at the maintainer's direction — complete (PR #473)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
