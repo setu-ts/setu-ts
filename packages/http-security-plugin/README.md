@@ -159,8 +159,11 @@ Thus `csrf: {}` accepts same-origin browser mutations behind a standard TLS-term
 without extra configuration. The `Sec-Fetch-Site` gate is load-bearing: `X-Forwarded-*` are not
 forbidden request headers, and the CORS middleware echoes requested headers by default, so without
 it a script on any credentialed CORS origin could name its own host and pass. Browsers that do not
-send `Sec-Fetch-Site` fall back to the URL and published origins. This comparison grants no proxy
-trust to IP resolution, cookies or public URLs.
+send `Sec-Fetch-Site` fall back to the URL and published origins. A request whose `Sec-Fetch-Site`
+is present and anything but `same-origin` is checked against the URL origin and `trustedOrigins`
+only: a browser cannot send the target's real public origin cross-site, and a trusted proxy that
+passes a client's `X-Forwarded-Host` through would otherwise publish a host the attacker then
+matches. This comparison grants no proxy trust to IP resolution, cookies or public URLs.
 
 | Option            | Type            | Default | Description                                                      |
 | ----------------- | --------------- | ------- | ---------------------------------------------------------------- |
@@ -228,8 +231,9 @@ ports, and ignores every `X-Forwarded-*` header. The default reads `X-Forwarded-
 so the walk still checks the socket peer: a client connecting directly stays identified by its own
 address, and a trusted proxy sending one yields no client. Likewise in the default family a
 `proxyHops` header too short for the declared chain, or a chain of only trusted proxies, yields no
-client rather than the proxy's own address. `unknown` and obfuscated `for` values stop the trust
-walk without a client.
+client rather than the proxy's own address, and in `trustedProxies` mode so does a request from a
+trusted proxy carrying no forwarding header (or an empty one) in either family. `unknown` and
+obfuscated `for` values stop the trust walk without a client.
 
 IP security also publishes the public origin for `requestOriginOf(ctx)` and `publicRequestUrl(ctx)`
 from `@setu-ts/common`. Forwarded origin components are believed only in `trustedProxies` mode, when

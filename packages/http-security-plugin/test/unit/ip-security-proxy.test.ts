@@ -74,7 +74,8 @@ describe('proxy peer and public origin (M113n)', () => {
       origin: { protocol: 'https', host: 'public.example', origin: 'https://public.example' },
     });
     expect((await inspect(forged)).ip).toBe('7.7.7.7');
-    expect((await inspect({}, {}, '10.1.2.3')).ip).toBe('10.1.2.3');
+    // An untrusted peer with no header is the client; a trusted one recorded none.
+    expect((await inspect({}, {}, '198.51.100.9')).ip).toBe('198.51.100.9');
     expect((await inspect(forged, { trustProxy: false }, '10.1.2.3')).origin.origin).toBe(
       'http://internal:8080',
     );
@@ -105,6 +106,17 @@ describe('proxy peer and public origin (M113n)', () => {
   });
   // M113n audit F4: both families resolve no client rather than the proxy itself.
   it('resolves undefined, not the socket peer, when the header names no client', async () => {
+    // M113n audit N2: an absent or empty header from a trusted proxy, both families.
+    for (const [headers, options] of [
+      [{}, {}],
+      [{ 'X-Forwarded-For': '' }, {}],
+      [{}, { forwardedHeader: 'forwarded' }],
+      [{ Forwarded: '' }, { forwardedHeader: 'forwarded' }],
+    ] as const) {
+      const result = await inspect(headers, options, '10.1.2.3');
+      expect(result.ip, JSON.stringify(headers)).toBeUndefined();
+      expect(result.origin.origin).toBe('http://internal:8080');
+    }
     expect(
       (await inspect({ 'X-Forwarded-For': '10.9.9.9, 10.8.8.8' }, {}, '10.1.2.3')).ip,
     ).toBeUndefined();

@@ -21,14 +21,16 @@ All notable changes to this project are documented here. The format follows
   origin. A forwarded origin is believed only in `trustedProxies` mode with a trusted socket peer,
   and a forwarded host must be a DNS name or bracketed IPv6 literal. In the `X-Forwarded-*` family a
   `proxyHops` header too short for the chain, or an all-trusted chain, now resolves no client rather
-  than the proxy's own address, matching the `Forwarded` family.
+  than the proxy's own address, matching the `Forwarded` family; in `trustedProxies` mode so does a
+  trusted proxy sending no forwarding header.
 - **CSRF own origins behind TLS termination (M113n, `@setu-ts/http-security-plugin`).** `csrf: {}`
   also accepts the published public origin and, when the browser sends
   `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
-  candidate; without that gate a credentialed CORS origin could name its own host and pass.
-  Migration: remove redundant same-origin allowlist entries if desired; keep explicit
-  `trustedOrigins` for other application origins. The zero-config candidate grants no proxy trust to
-  other consumers.
+  candidate; without that gate a credentialed CORS origin could name its own host and pass. A
+  request whose `Sec-Fetch-Site` is present and not `same-origin` is checked against the URL origin
+  and `trustedOrigins` only. Migration: remove redundant same-origin allowlist entries if desired;
+  keep explicit `trustedOrigins` for other application origins. The zero-config candidate grants no
+  proxy trust to other consumers.
 
 - **Breaking: invalid scheduler time values reject at registration (M113m, 0.10.0,
   `@setu-ts/scheduler-plugin`).** The async `delay` call rejects with `RangeError` for a non-finite

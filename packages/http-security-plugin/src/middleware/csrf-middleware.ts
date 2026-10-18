@@ -19,13 +19,13 @@ export interface CsrfOptions {
   readonly enabled?: boolean;
   /**
    * Additional trusted origins (scheme+host) beyond the request's own origin.
-   * Implicitly trusts the URL origin, the published public origin, and — only
-   * when the browser itself reports `Sec-Fetch-Site: same-origin` — the
-   * validated leftmost X-Forwarded protocol/host candidate. Scripts cannot set
-   * `Sec-Fetch-Site`, while they can set `X-Forwarded-*` on a CORS request the
-   * server admits, so the candidate alone would let any credentialed CORS
-   * origin pass. This comparison grants no proxy trust to other consumers.
-   * Default: `[]`.
+   * Implicitly trusts the URL origin; the published public origin unless the
+   * browser reports `Sec-Fetch-Site` as anything but `same-origin`; and — only
+   * when it reports `same-origin` — the validated leftmost X-Forwarded
+   * protocol/host candidate. Scripts cannot set `Sec-Fetch-Site`, while they
+   * can set `X-Forwarded-*` on a CORS request the server admits, so either
+   * forwarded candidate alone would let a credentialed CORS origin pass. This
+   * comparison grants no proxy trust to other consumers. Default: `[]`.
    *
    * An origin allowlist cannot admit an IdP that serves
    * `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS
@@ -118,12 +118,22 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
     // Check if the source origin is trusted
     const requestOrigin = getRequestOrigin(ctx.request.url);
 
+    // A browser that reports the request as anything but same-origin cannot
+    // legitimately carry the target's public origin, so neither forwarded
+    // candidate is consulted: a trusted proxy passing a client's
+    // `X-Forwarded-Host` through would otherwise let a credentialed CORS
+    // origin publish, and then match, its own host (M113n audit N1).
+    const fetchSite = ctx.request.headers.get('Sec-Fetch-Site')?.trim().toLowerCase();
+    const forwardedCandidates = fetchSite === undefined || fetchSite === 'same-origin';
+
     // The request's own origin is always implicitly trusted
     if (
       requestOrigin &&
       (sourceOrigin === requestOrigin ||
-        sourceOrigin === requestOriginOf(ctx).origin ||
-        sameOriginBehindProxy(ctx, sourceOrigin, requestOrigin))
+        (forwardedCandidates &&
+          (sourceOrigin === requestOriginOf(ctx).origin ||
+            (fetchSite === 'same-origin' &&
+              sameOriginBehindProxy(ctx, sourceOrigin, requestOrigin)))))
     ) {
       await next();
       return;
@@ -187,7 +197,7 @@ function getRequestOrigin(url: string): string | null {
 
 /**
  * The zero-configuration proxy candidate: an `X-Forwarded-Proto`/`X-Forwarded-Host`
- * origin, believed only when the browser reports the request same-origin.
+ * origin, consulted only when the browser reports the request same-origin.
  *
  * `X-Forwarded-*` are not forbidden request headers, and the CORS middleware
  * echoes requested headers by default, so a script on a credentialed CORS
@@ -199,9 +209,6 @@ function sameOriginBehindProxy(
   sourceOrigin: string,
   requestOrigin: string,
 ): boolean {
-  if (ctx.request.headers.get('Sec-Fetch-Site')?.trim().toLowerCase() !== 'same-origin') {
-    return false;
-  }
   const url = new URL(ctx.request.url);
   return (
     sourceOrigin ===

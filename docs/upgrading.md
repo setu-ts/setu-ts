@@ -24,8 +24,9 @@ omitted from the list now resolves as the client and its forwarded headers are i
 callers cannot select their own identity with a forged header. `proxyHops` and the leftmost default
 still use header-only selection for the client IP, and in the `X-Forwarded-*` family a header too
 short for `proxyHops`, or an all-trusted chain, resolves no client rather than the proxy itself.
-Workers and plain fetch have no peer and retain the header-only path. Workers can use
-`ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites.
+With `trustedProxies`, a trusted proxy that sends no forwarding header also resolves no client, so
+make sure each proxy writes one. Workers and plain fetch have no peer and retain the header-only
+path. Workers can use `ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites.
 
 With IP security in `trustedProxies` mode and a trusted socket peer, React Router loaders/actions
 now see the public URL; no other mode publishes a forwarded origin. Update redirects or tests that

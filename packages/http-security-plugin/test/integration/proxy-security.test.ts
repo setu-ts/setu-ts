@@ -131,6 +131,49 @@ describe('proxy security through a kernel application', () => {
       await app.stop();
     }
   });
+  // M113n audit N1: a trusted proxy that passes a client's X-Forwarded-Host
+  // through publishes that host; a cross-site browser request must not match it.
+  it('refuses a published origin a cross-site request chose through a pass-through proxy', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HttpSecurityPlugin({
+          cors: { origin: ['https://evil.example'], credentials: true },
+          ipSecurity: { trustProxy: true, trustedProxies: ['10.0.0.0/8'] },
+          csrf: {},
+        }),
+      ],
+    });
+    app.router.post('/', (ctx) => ctx.response.text('accepted'));
+    await app.start();
+    const post = (origin: string, site: string | undefined, host: string | undefined) =>
+      app.inject({
+        method: 'POST',
+        url: 'http://internal/',
+        ip: '10.0.0.5',
+        headers: {
+          Origin: origin,
+          'X-Forwarded-For': '192.0.2.1',
+          'X-Forwarded-Proto': 'https',
+          ...(host === undefined ? {} : { 'X-Forwarded-Host': host }),
+          ...(site === undefined ? {} : { 'Sec-Fetch-Site': site }),
+        },
+      });
+    try {
+      for (const site of ['cross-site', 'same-site', 'none']) {
+        expect((await post('https://evil.example', site, 'evil.example')).statusCode, site).toBe(
+          403,
+        );
+      }
+      // Legitimate traffic through the same proxy is unaffected.
+      expect((await post('https://app.example', 'same-origin', 'app.example')).statusCode).toBe(
+        200,
+      );
+      expect((await post('https://app.example', undefined, 'app.example')).statusCode).toBe(200);
+    } finally {
+      await app.stop();
+    }
+  });
   // M113n audit F1: `X-Forwarded-*` are not forbidden request headers, and the
   // CORS middleware echoes requested headers by default, so a script on a
   // credentialed CORS origin could name its own host and match its own Origin.

@@ -398,17 +398,19 @@ appends or passes through client-supplied forwarding headers.
 7. No header value is logged or echoed in an error.
 
 **Residual, accepted.** A trusted proxy that passes a client's `X-Forwarded-Host` through untouched
-lets that client choose the published host; the docs require the proxy to overwrite both headers
-(Express makes the same trade). Browsers that send no `Sec-Fetch-Site` fall back to the URL and
-published origins for CSRF.
+lets that client choose the published host (its CSRF consequence is closed by N1 below); the docs
+require the proxy to overwrite both headers (Express makes the same trade). Browsers that send no
+`Sec-Fetch-Site` fall back to the URL and published origins for CSRF.
 
 **Findings.**
 
-| #   | Finding                                                                                                                                                    | Severity | Disposition                                                                                        |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------- |
-| R1  | Review: a malformed `Forwarded` header from a direct, untrusted client erased its client IP                                                                | Medium   | Fixed before the audit: a malformed header contributes no hops and the walk still checks the peer  |
-| F0  | Audit: no design security review                                                                                                                           | Blocking | Fixed: this section                                                                                |
-| F1  | Audit: a script on a credentialed CORS origin sent `X-Forwarded-Host: <its host>` and passed CSRF (403 → 200)                                              | High     | Fixed: the candidate requires `Sec-Fetch-Site: same-origin`; regression test reproduces the attack |
-| F2  | Audit: leftmost, `proxyHops`, custom-`ipHeader` and peerless modes published a client-chosen origin (host injection; `secure: 'auto'` dropped `Secure`)    | Medium   | Fixed: only `trustedProxies` with a trusted socket peer publishes a forwarded origin               |
-| F3  | Audit: the host check admitted URL-legal punctuation (`"`, `` ` ``, `{}`, a trailing dot)                                                                  | Low      | Fixed: DNS-name or bracketed-IPv6 grammar, 259-character bound                                     |
-| F4  | Audit: in the `X-Forwarded-*` family a short `proxyHops` header or an all-trusted chain resolved the proxy's own address, unlike `Forwarded` and the JSDoc | Low      | Fixed: both families resolve `undefined`                                                           |
+| #   | Finding                                                                                                                                                              | Severity | Disposition                                                                                                |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| R1  | Review: a malformed `Forwarded` header from a direct, untrusted client erased its client IP                                                                          | Medium   | Fixed before the audit: a malformed header contributes no hops and the walk still checks the peer          |
+| F0  | Audit: no design security review                                                                                                                                     | Blocking | Fixed: this section                                                                                        |
+| F1  | Audit: a script on a credentialed CORS origin sent `X-Forwarded-Host: <its host>` and passed CSRF (403 → 200)                                                        | High     | Fixed: the candidate requires `Sec-Fetch-Site: same-origin`; regression test reproduces the attack         |
+| F2  | Audit: leftmost, `proxyHops`, custom-`ipHeader` and peerless modes published a client-chosen origin (host injection; `secure: 'auto'` dropped `Secure`)              | Medium   | Fixed: only `trustedProxies` with a trusted socket peer publishes a forwarded origin                       |
+| F3  | Audit: the host check admitted URL-legal punctuation (`"`, `` ` ``, `{}`, a trailing dot)                                                                            | Low      | Fixed: DNS-name or bracketed-IPv6 grammar, 259-character bound                                             |
+| F4  | Audit: in the `X-Forwarded-*` family a short `proxyHops` header or an all-trusted chain resolved the proxy's own address, unlike `Forwarded` and the JSDoc           | Low      | Fixed: both families resolve `undefined`                                                                   |
+| N1  | Audit round 2: CSRF accepted the published origin with no `Sec-Fetch-Site` gate, so behind a pass-through proxy a credentialed CORS origin passed (cross-site → 200) | High     | Fixed: a present, non-`same-origin` `Sec-Fetch-Site` restricts CSRF to the URL origin and `trustedOrigins` |
+| N2  | Audit round 2: an absent or empty forwarding header from a trusted proxy resolved the proxy's own address, contradicting obligation 6                                | Low      | Fixed: `trustedProxies` mode walks the peer even with no header; a trusted peer resolves `undefined`       |

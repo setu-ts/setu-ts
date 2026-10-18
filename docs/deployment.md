@@ -48,9 +48,10 @@ Its `proto` and `host` come from the selected client's element. Malformed input,
 64 elements contributes no hops and no forwarded origin, so the socket peer is still checked: a
 direct client keeps its own address, and a trusted proxy sending it yields no client. Unknown and
 obfuscated hops cannot be returned as clients, and a `proxyHops` header too short for the chain, or
-a chain of only trusted proxies, yields no client in either family. Only `http`/`https` protocols,
-and DNS-name or bracketed-IPv6 hosts with an optional numeric port, are accepted; missing or
-rejected components use the request URL.
+a chain of only trusted proxies, yields no client in either family; with `trustedProxies`, so does a
+trusted proxy that sends no forwarding header. Only `http`/`https` protocols, and DNS-name or
+bracketed-IPv6 hosts with an optional numeric port, are accepted; missing or rejected components use
+the request URL.
 
 IP security publishes one public origin, believed only when a trusted socket peer was walked and the
 client came from the forwarded chain. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` from
@@ -63,7 +64,11 @@ public URL to loaders and actions. Without IP security these consumers use `ctx.
 sends `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
 candidate (URL host when absent). The gate matters because scripts can set `X-Forwarded-*` on a CORS
 request the server admits, and cannot set `Sec-Fetch-Site`. It grants no proxy trust to other
-consumers. Cross-site origins still fail; `trustedOrigins` adds explicit application origins.
+consumers. A request whose `Sec-Fetch-Site` is present and anything but `same-origin` is checked
+against the URL origin and `trustedOrigins` only: a browser cannot send the target's real public
+origin cross-site, and a trusted proxy that passes a client's `X-Forwarded-Host` through would
+otherwise publish a host the attacker then matches. Cross-site origins still fail; `trustedOrigins`
+adds explicit application origins.
 
 Cloudflare Workers and plain `adapter.fetch()` calls have no socket peer. On Workers use
 `ipSecurity: { trustProxy: true, ipHeader: 'CF-Connecting-IP' }`; Cloudflare overwrites that header.

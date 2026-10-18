@@ -248,15 +248,22 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
       const headerValue = ctx.request.headers.get(
         forwardedHeader === 'forwarded' ? 'Forwarded' : ipHeader,
       );
-      if (headerValue !== null && (forwardedHeader === 'forwarded' || headerValue !== '')) {
-        const elements = forwardedHeader === 'forwarded' ? parseForwarded(headerValue) : undefined;
+      const hasHeader =
+        headerValue !== null && (forwardedHeader === 'forwarded' || headerValue !== '');
+      // In `trustedProxies` mode an absent or empty header still walks the
+      // socket peer: a trusted proxy that recorded no client resolves no
+      // client, never its own address (M113n audit N2). Leftmost and
+      // `proxyHops` modes keep the peer when the header is absent.
+      if (hasHeader || trustedMatchers !== undefined) {
+        const raw = headerValue ?? '';
+        const elements = forwardedHeader === 'forwarded' ? parseForwarded(raw) : undefined;
         // A malformed Forwarded header contributes no hops rather than ending
         // resolution: the walk below still checks the socket peer, so a client
         // connecting directly cannot erase its own identity by sending garbage.
         const chain =
           forwardedHeader === 'forwarded'
             ? (elements ?? []).map((element) => element.ip)
-            : [...parseForwardedChain(headerValue)];
+            : [...parseForwardedChain(raw)];
         const forwardedLength = chain.length;
         if (trustedMatchers !== undefined && ctx.request.ip !== undefined) {
           chain.push(ctx.request.ip);
