@@ -36,11 +36,11 @@ All notable changes to this project are documented here. The format follows
   the target — with `InvalidCursorError` (branded `400 Bad Request`, fixed detail "The pagination
   cursor is not valid for this query.") before any backend call; the message names the entity and
   which check failed, never the token or its values. On Drizzle and Prisma a cursor that decodes but
-  carries a value of the wrong type for its sort column (PostgreSQL SQLSTATE class 22, or Prisma's
-  validation refusal) is answered the same way instead of a masked `500`; a page without a cursor
-  keeps the driver error. `UnsupportedQueryFeatureError` (`501`) remains for a backend that cannot
-  page the query at all, so `instanceof UnsupportedQueryFeatureError` no longer matches a malformed
-  cursor.
+  carries a value of the wrong type for its sort column (PostgreSQL `22P02`, `22003`, `22007` or
+  `22008`, or Prisma's validation refusal) is answered the same way instead of a masked `500`; a
+  page without a cursor keeps the driver error. `UnsupportedQueryFeatureError` (`501`) remains for a
+  backend that cannot page the query at all, so `instanceof UnsupportedQueryFeatureError` no longer
+  matches a malformed cursor.
 - **Breaking: Bigtable's key-change refusal answers `400` with `PrimaryKeyChangeError` (M113g,
   0.10.0, `@setu-ts/database-plugin`).** A Bigtable `update` or `updateWhere` whose key differs from
   the addressed row now answers `400 Bad Request` with `PrimaryKeyChangeError` (fixed detail "An
@@ -321,7 +321,10 @@ All notable changes to this project are documented here. The format follows
   unique-violation message is matched only as a message prefix too (`UNIQUE constraint failed:` or
   `D1_ERROR: UNIQUE constraint failed:`), so the same text no longer answers a false `409`, and an
   unknown-column refusal from the Drizzle and Memory adapters now quotes the field name escaped and
-  cut to 64 characters, so a field name cannot forge a log line.
+  cut to 64 characters, so a field name cannot forge a log line. The M113f scrub of a Drizzle
+  `Failed query` or a SQLSTATE class 22 error now removes the whole stack header even when a bound
+  value contains a line shaped like a stack frame; before, that line and every later bound value
+  survived into the logged stack.
 
 - **The second node-postgres connect-timeout message answered a masked `500` (V9-34, M113g, 0.10.0,
   `@setu-ts/database-plugin`).** pg-pool raises `Connection terminated due to connection timeout`

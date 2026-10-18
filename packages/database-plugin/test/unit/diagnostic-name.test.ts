@@ -5,6 +5,8 @@ import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createDrizzleDatabase } from '../../src/query/drizzle-database.ts';
 import { UnknownPayloadFieldError } from '../../src/errors.ts';
 import { unknownColumnError } from '../../src/query/query-builder.ts';
+import { renderDiagnosticName } from '../../src/errors/diagnostic-name.ts';
+import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 
 describe('bounded names in database diagnostics', () => {
   for (const [field, rendered] of [
@@ -83,5 +85,34 @@ describe('bounded names in database diagnostics', () => {
     );
     expect(error?.message).not.toMatch(/[\r\n]/);
     expect(error?.message).not.toContain('x'.repeat(65));
+  });
+});
+
+describe('non-string names (M113g audit L7)', () => {
+  it.each([
+    [123, '<number>'],
+    [null, '<null>'],
+    [undefined, '<undefined>'],
+    [[], '<object>'],
+  ])('renders %j as %s without throwing', (name, rendered) => {
+    expect(renderDiagnosticName(name)).toBe(rendered);
+  });
+
+  it('a memory select naming a non-string field rejects with the named refusal, never throws', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const source = adapter.createDataSource('U');
+    await source.create({ id: 'a', name: 'x' });
+    let result: Promise<unknown> | undefined;
+    expect(() => {
+      result = source.findAll({
+        where: {},
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: [123 as unknown as string],
+      });
+    }).not.toThrow();
+    await expect(result).rejects.toThrow(/has no <number> column/);
   });
 });

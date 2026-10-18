@@ -198,11 +198,18 @@ export function isUnansweredConnect(error: unknown): boolean {
   return candidates.some(({ message }) => classifyPgTimeout(message, hasStringCode) !== null);
 }
 
+/** The class 22 codes a supplied value can cause; see {@linkcode isValueTypeRefusal}. */
+const VALUE_REFUSAL_CODES: ReadonlySet<string> = new Set(['22P02', '22003', '22007', '22008']);
+
 /**
  * Whether the database refused a supplied value as the wrong type for its
- * column: a SQLSTATE class 22 (data exception) code anywhere in the cause
- * chain, or Prisma's client-side `PrismaClientValidationError`, which Prisma
- * raises before any SQL for a value its schema does not accept.
+ * column: one of the four SQLSTATE class 22 codes a supplied value can cause
+ * (`22P02` invalid text representation, `22003` numeric value out of range,
+ * `22007` invalid datetime format, `22008` datetime field overflow) anywhere
+ * in the cause chain, or Prisma's client-side `PrismaClientValidationError`,
+ * which Prisma raises before any SQL for a value its schema does not accept.
+ * Other class 22 codes (division by zero, `22012`) are data faults the server
+ * computes, not a refused input (M113g audit round 3, L5).
  *
  * Internal. The Drizzle and Prisma keyset pages use it to answer a forged,
  * well-formed cursor carrying a mistyped value with `InvalidCursorError`
@@ -215,7 +222,7 @@ export function isUnansweredConnect(error: unknown): boolean {
 export function isValueTypeRefusal(error: unknown): boolean {
   return causeChainMembers(error).some(
     ({ code, name }) =>
-      (typeof code === 'string' && /^22[0-9A-Z]{3}$/.test(code)) ||
+      (typeof code === 'string' && VALUE_REFUSAL_CODES.has(code)) ||
       name === 'PrismaClientValidationError',
   );
 }

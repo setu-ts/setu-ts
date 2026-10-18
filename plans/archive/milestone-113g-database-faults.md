@@ -228,9 +228,12 @@ because `cloudflare-plugin`'s D1 data source raises both and AI_GUIDELINES §2.2
   any SQL. SQLite, D1 and the document stores compare across types without an error, so they never
   produced the `500`. Maintainer decision (2026-10-18), option A of three: signed cursors (opt-in
   HMAC) are a separate later milestone; type-tagging the cursor cannot work without column types.
-- **Accepted imprecision:** on a cursor page, a class 22 refusal caused by the application's own
-  filter value is also answered `InvalidCursorError`. The same filter fails on the first page, which
-  carries no cursor and keeps the driver error, so the fault still surfaces.
+- **Narrowed after audit round 3 (L5):** only the four codes a supplied value can cause count —
+  `22P02`, `22003`, `22007`, `22008`. A server data fault such as division by zero (`22012`) on a
+  later page keeps the driver error, so it is never reported as the client's cursor.
+- **Accepted imprecision:** on a cursor page, one of those four codes caused by the application's
+  own filter value is also answered `InvalidCursorError`. The same filter fails on the first page,
+  which carries no cursor and keeps the driver error, so the fault still surfaces.
 - **Test home:** `test/unit/cursor-value-type.test.ts` (Drizzle over real operators and a real
   `pgTable`, Prisma, the predicate's table), `test/integration/real-drizzle-adapter.test.ts` (real
   PostgreSQL: a forged cursor with a text value for an integer sort column answers
@@ -444,3 +447,24 @@ real timeout. One new Low, plus one pre-existing observation folded in:
   `JSON.stringify` rendering as `UnknownPayloadFieldError`, through one internal helper.
 - **A well-formed forged cursor whose ordered value has the wrong type** reached the driver (masked
   `500`) rather than `InvalidCursorError`. **Fixed** as §3.5a (maintainer decision, option A).
+
+### 10.7 Committed-tree audit, round 3 (fresh-context Claude agent, `8852e2e7`) — failed; the final round
+
+L1–L4 and O1 confirmed closed, each with a probe and a negative control (both L1 layers shown
+load-bearing separately); every §10.4 obligation re-run and holding. Three new Low findings, none
+exposing data to a client. Fixed afterwards and **not re-audited**, at the maintainer's direction
+(three rounds, then fix and merge):
+
+- **L5 — a server data fault on a genuine cursor read as the client's bad cursor.** Any class 22
+  code counted; a view dividing by zero on a later page answered `400`. **Fixed:** the four value
+  codes only (§3.5a).
+- **L6 — a frame-shaped line in a bound value survived the scrub** (pre-existing since M113f;
+  reachable through §3.5a). `withFramesOf` kept everything from the first line matching `at …`, so a
+  value `x\n    at forged (evil.js:1:1)` kept itself and every later header line, later bound values
+  included, in the logged stack. **Fixed:** the header is located by the caught error's own message
+  and only what follows it is kept; when the message is not on the stack's first line, no frames are
+  kept.
+- **L7 — the O1 helper threw on a non-string field name**, synchronously from the memory data source
+  (a regression from O1). **Fixed:** a non-string renders as `<type>`.
+- **Observation, not fixed:** the memory adapter's unknown-column message lists every observed
+  column name; each is bounded, their number is not. The memory adapter is the development backend.

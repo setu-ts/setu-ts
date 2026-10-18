@@ -1032,9 +1032,9 @@ wrong shape for the target is refused with `InvalidCursorError` (from `@setu-ts/
 **`400 Bad Request`** with the fixed detail `The pagination cursor is not valid for this query.`,
 before any backend call. The error's `message` names the entity and which check failed, and never
 the token or its values. On Drizzle and Prisma, a cursor that decodes cleanly but carries a value of
-the wrong type for its sort column — PostgreSQL refuses it with a SQLSTATE class 22 data exception,
-Prisma with its own validation error — is answered the same `400`; a page requested without a cursor
-keeps the driver's error. `501` remains for a backend that cannot page the query at all.
+the wrong type for its sort column — PostgreSQL refuses it with `22P02`, `22003`, `22007` or
+`22008`, Prisma with its own validation error — is answered the same `400`; a page requested without
+a cursor keeps the driver's error. `501` remains for a backend that cannot page the query at all.
 
 **The error's `message` is never served.** It is the full diagnostic — it names entities, columns
 and sort keys — and it reaches the log alone, where `errorHandler` records it unmasked along with
