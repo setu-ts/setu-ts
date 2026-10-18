@@ -706,6 +706,7 @@ async function findPrismaPage(
     // and PostgreSQL with a class 22 code. Either way it is the client's
     // cursor, answered 400 (M113g, plan §3.5a). No cause is kept: Prisma's
     // validation message renders the whole query, values included.
+    // drops-cause: Prisma's validation message renders the query's values.
     if (decoded !== null && isValueTypeRefusal(error)) {
       throw new InvalidCursorError(`Entity '${entity}': cursor value rejected by the database.`);
     }

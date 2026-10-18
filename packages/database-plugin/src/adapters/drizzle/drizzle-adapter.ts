@@ -975,6 +975,8 @@ async function findDrizzlePage(
     // refuses it with a class 22 data exception; that is the client's cursor,
     // so it answers 400 rather than a masked 500 (M113g, plan §3.5a). A page
     // without a cursor keeps the driver error unchanged.
+    // drops-cause: the raw driver error quotes the forged value, so the cause
+    // forwarded is its value-free scrubbed copy rather than the caught value.
     if (decoded !== null && isValueTypeRefusal(error)) {
       throw new InvalidCursorError(`Entity '${entity}': cursor value rejected by the database.`, {
         cause: scrubDriverError(error),
