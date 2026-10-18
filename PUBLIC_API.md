@@ -9881,10 +9881,14 @@ receive a sorted insertion, otherwise the new framework key follows the existing
 Re-adding the same pin leaves the dependency map unchanged.
 
 The twelve safe zero-configuration providers listed in [the CLI guide](docs/cli.md) are registered
-above the emitted development-plugin anchor in either generator style. Unrecognized source is
-preserved. Starter compositions print their option arm; installing a package does not authorize a
-duplicate registration. Existing development diagnostics modules are refreshed with names-only
-approval maps and known plugin calls receive development-only options.
+above the emitted development-plugin anchor in either generator style. In a functional project,
+`events`, `cqrs`, `health` and `metrics` are registered with the generated-artifact barrel they
+consume, for example `EventsPlugin({ handlers: EVENT_HANDLERS })`, and an empty barrel is created
+when absent, so a handler a later `setu generate` writes is live. Class-based projects keep the bare
+call; their handlers arrive through the ingress barrel. Unrecognized source is preserved. Starter
+compositions print their option arm; installing a package does not authorize a duplicate
+registration. Existing development diagnostics modules are refreshed with names-only approval maps
+and known plugin calls receive development-only options.
 
 It writes the manifest and **reports** the install command rather than running it. The command
 matches the project's toolchain, detected from its manifests the same way `setu generate` detects
