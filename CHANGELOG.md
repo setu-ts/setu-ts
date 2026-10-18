@@ -377,6 +377,32 @@ All notable changes to this project are documented here. The format follows
   First-party tokens are refused at and after `exp`, closing the window of up to one second after
   expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and
   after `exp + clockToleranceSec`.
+- **`setu add` wires the barrel generated handlers live in (`@setu-ts/cli`).** In a functional
+  project `setu add events` registered a bare `EventsPlugin()`, so every handler a later
+  `setu generate event-handler` wrote into `src/events/index.ts` was subscribed by nothing and never
+  ran, with no message saying so. `setu add` now registers the seam `setu new` emits, derived from
+  the same registry: `EventsPlugin({ handlers: EVENT_HANDLERS })`,
+  `CqrsPlugin({ commandHandlers, queryHandlers })`, and the indicator and metric barrels for
+  `health` and `metrics`, each with its barrel import, and creates the empty barrel when the project
+  has none. Class-based projects are unchanged: their handlers reach the plugins through
+  `DecoratorPlugin`'s ingress barrel. A config that already imports the barrel, or that the command
+  cannot rewrite, gets printed guidance naming the seam form and the import. Existing projects are
+  not rewritten; re-running `setu add` on one whose call lacks the option names the option and the
+  import to add by hand. A project composed through a starter keeps its config, and the guidance now
+  names the arm value to pass (`events: { handlers: EVENT_HANDLERS }`), so the created barrel is
+  reached.
+- **`setu add health` on a Deno project says the start task needs `--allow-sys` (`@setu-ts/cli`).**
+  Without it the built-in `self` check fails and `/health` reports down. The Deno permission notes
+  (this one and storage's `--allow-write`) are no longer printed on other targets, where they do not
+  apply.
+- **`setu generate job` points at the queue and scheduler registration options (`@setu-ts/cli`).**
+  The generated job's comment recommended calling `queue.process()` or `scheduler.cron()` inside
+  another plugin's `register`, where the capability may not be registered yet. It now shows
+  `QueuePlugin({ processors: [...] })` and `SchedulerPlugin({ jobs: [...] })`, both checked to
+  type-check against the published packages.
+- **The database plugin README's Prisma example reads `process.env['DATABASE_URL']`
+  (`@setu-ts/database-plugin`).** It read `Deno.env.get(...)`, which does not exist on Node or Bun,
+  the runtimes npm users run.
 
 - **A value a client sends no longer makes a database error read as a timeout or an outage (M113g,
   0.10.0, `@setu-ts/database-plugin`).** PostgreSQL quotes a rejected value in its error message,

@@ -37,4 +37,19 @@ describe('job schematic', () => {
   it('declares the payload type the handler accepts', () => {
     expect(file.contents).toContain('export interface OrderItemJobData');
   });
+
+  it('names the declarative registration sites, not a plugin register body', () => {
+    // A capability resolved inside another plugin's `register` may not exist yet;
+    // the queue and scheduler options are the registration sites both plugins own.
+    expect(file.contents).toContain('QueuePlugin({');
+    expect(file.contents).toContain('name: ORDER_ITEM_JOB,');
+    expect(file.contents).toContain(
+      'processor: (job) => runOrderItemJob(job.data as OrderItemJobData),',
+    );
+    expect(file.contents).toContain('SchedulerPlugin({');
+    expect(file.contents).toContain("trigger: 'cron',");
+    expect(file.contents).toContain("} from './src/jobs/order-item.job.ts';");
+    expect(file.contents).not.toContain('natural home');
+    expect(file.contents).toContain('`SchedulerPlugin` is unavailable on Cloudflare Workers');
+  });
 });

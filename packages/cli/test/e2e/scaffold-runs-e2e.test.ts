@@ -338,7 +338,9 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
     } finally {
       await overlay.close();
     }
-  });
+    // An npm install plus a Node boot: the 30 s default timed out on CI, so this
+    // takes the budget the other npm-installing e2e cases use.
+  }, 900_000);
   // Membership is asserted, not just iterated. Removing a template from
   // `BOOTABLE` makes its build-and-boot assertions VANISH rather than fail, so
   // the whole gate stays green while covering strictly less — a one-word edit

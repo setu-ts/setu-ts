@@ -736,6 +736,21 @@ export function referencesIdentifier(code: string, name: string): boolean {
  * @returns Whether a direct call exists
  */
 export function callsIdentifier(code: string, name: string): boolean {
+  return callArguments(code, name).length > 0;
+}
+
+/**
+ * The argument text of every direct call of `name` in masked code, in source
+ * order — the same calls {@linkcode callsIdentifier} counts, so the two cannot
+ * disagree about what a call is. `setu add` reads it to tell a provider called
+ * WITH its generated-artifact seam from one called bare.
+ *
+ * @param code - Masked source
+ * @param name - An identifier
+ * @returns The text between each call's parentheses
+ */
+export function callArguments(code: string, name: string): readonly string[] {
+  const found: string[] = [];
   let closes: Int32Array | undefined;
   for (const reference of code.matchAll(identifierPattern(name, 'g'))) {
     let at = reference.index + name.length;
@@ -753,9 +768,9 @@ export function callsIdentifier(code: string, name: string): boolean {
     let before = reference.index;
     while (before > 0 && (isBlank(code[before - 1]!) || code[before - 1] === '\n')) before -= 1;
     if (code.slice(Math.max(0, before - 8), before).endsWith('function')) continue;
-    return true;
+    found.push(code.slice(at + 1, close));
   }
-  return false;
+  return found;
 }
 
 /** The reference pattern shared by every use check, global for counting. */

@@ -260,9 +260,13 @@ Run `setu add auth`, then this command again.
 
 For generated projects in either style, `setu add` registers the safe zero-configuration defaults
 for cqrs, events, messaging, queue, scheduler, websocket, cache, health, metrics, openapi, sse and
-realtime-backplane above the emitted development-plugin anchor. Other shapes receive registration
-guidance. Starter compositions receive their named option arm and a link to the starter README;
-configure that arm rather than registering the same plugin twice.
+realtime-backplane above the emitted development-plugin anchor. In a functional project, `events`,
+`cqrs`, `health` and `metrics` are registered with the generated-artifact barrel they consume, for
+example `EventsPlugin({ handlers: EVENT_HANDLERS })`, and an empty barrel is created when absent, so
+a handler a later `setu generate` writes is live. Class-based projects keep the bare call; their
+handlers arrive through the ingress barrel. Other shapes receive registration guidance. Starter
+compositions receive their named option arm and a link to the starter README; configure that arm
+rather than registering the same plugin twice.
 
 Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
 Generated guards use `requirePermission` from auth-plugin. The permission is evaluated by the
