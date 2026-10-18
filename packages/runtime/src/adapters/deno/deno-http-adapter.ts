@@ -48,7 +48,10 @@ export interface DenoServeHost {
   serve(options: {
     port: number;
     hostname?: string;
-    fetch: (request: Request) => Response | Promise<Response>;
+    fetch: (
+      request: Request,
+      info?: { remoteAddr?: { hostname?: string } },
+    ) => Response | Promise<Response>;
     /**
      * Replaces `Deno.serve`'s own startup banner. Supplied by the local
      * diagnostics listener so its line names the devtool rather than
@@ -179,9 +182,19 @@ export class DenoHttpServerHandle {
    * handshake. This ensures middleware (auth, metrics, security headers)
    * applies to upgrade requests uniformly.
    */
-  createFetchHandler(): (request: Request) => Response | Promise<Response> {
-    return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+  createFetchHandler(): (
+    request: Request,
+    info?: { remoteAddr?: { hostname?: string } },
+  ) => Response | Promise<Response> {
+    return (
+      request: Request,
+      info?: { remoteAddr?: { hostname?: string } },
+    ): Response | Promise<Response> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(
+        request,
+        this.#maxBodyBytes,
+        info?.remoteAddr?.hostname,
+      );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });

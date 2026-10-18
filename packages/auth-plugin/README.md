@@ -1223,15 +1223,14 @@ The default key resolves in this order: the authenticated principal, the client 
 | `(await import('@setu-ts/auth-plugin')).defaultRateLimitKey({ request: { ip: '203.0.113.7' }, state: new Map() })`  | `"ip:203.0.113.7"` |
 | `(await import('@setu-ts/auth-plugin')).defaultRateLimitKey({ request: {}, state: new Map() })`                     | `"anonymous"`      |
 
-`IRequest.ip` is the step worth knowing about: **no first-party adapter can populate it**, because a
-web `Request` carries no peer address, so it is set only by a custom `IHttpAdapter`. On the shipped
-runtimes, then, an unauthenticated request with no `ipSecurityMiddleware` reaches the shared bucket
-and the example below is **not** per IP.
+Node, Deno and Bun populate `IRequest.ip` with the socket peer, so an unauthenticated caller uses
+`ip:<peer>` even without IP security middleware. Workers and plain fetch calls have no peer and
+still use the shared bucket unless a trusted header or custom key resolves a client.
 
-To make it per caller, register `ipSecurityMiddleware` with `trustProxy` **and** the constraint that
-matches your deployment — or pass your own `keyGenerator`. `trustProxy` on its own takes the
-forwarded header's **leftmost** entry, which is safe only behind a proxy that OVERWRITES that
-header. The standard nginx idiom **appends**, and there the leftmost entry is supplied by the
+To make it per client behind a proxy, register `ipSecurityMiddleware` with `trustProxy` **and** the
+constraint that matches your deployment — or pass your own `keyGenerator`. `trustProxy` on its own
+takes the forwarded header's **leftmost** entry, which is safe only behind a proxy that OVERWRITES
+that header. The standard nginx idiom **appends**, and there the leftmost entry is supplied by the
 caller: a client rotating forged `X-Forwarded-For` values would get a fresh bucket per request,
 which is a weaker position than the shared `'anonymous'` one it replaced. Supply `trustedProxies`
 (your proxies' addresses or CIDR blocks) or `proxyHops` so the header is walked right to left and

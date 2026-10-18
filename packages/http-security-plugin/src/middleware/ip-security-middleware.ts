@@ -4,17 +4,17 @@
  * Resolves the client IP address and publishes it to
  * `ctx.state.set(CLIENT_IP_STATE_KEY, ip)`. Does not short-circuit.
  *
- * **`trustProxy` is the only working source since M23.** The web-standard
- * `fetch` mapping the HTTP adapters use cannot populate `IRequest.ip` — a web
- * `Request` carries no peer address — so the `request.ip` fallback below is
- * vestigial and `clientIp` is `undefined` unless `trustProxy` is on and the
- * configured header is present. The fallback is retained for a custom adapter
- * that does set `IRequest.ip`.
+ * Node, Deno and Bun supply the socket peer as `request.ip`. With
+ * `trustedProxies`, that peer must be trusted before any forwarded entry is
+ * believed. Workers and plain fetch calls have no peer. Also publishes the
+ * trusted public origin for consumers through `requestOriginOf` in common.
  *
  * @module
  */
-import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
+import { CLIENT_IP_STATE_KEY, REQUEST_ORIGIN_STATE_KEY, requestOriginOf } from '@setu-ts/common';
+import type { RequestOrigin } from '@setu-ts/common';
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { parseForwarded } from './forwarded-header.ts';
 
 /** Options for IP security middleware. */
 export interface IpSecurityOptions {
@@ -29,8 +29,9 @@ export interface IpSecurityOptions {
    * appends instead, in which case the leftmost entry is whatever the client
    * sent — set {@linkcode IpSecurityOptions.trustedProxies} or
    * {@linkcode IpSecurityOptions.proxyHops} so the client is resolved from the
-   * right. Note that with `false`, `clientIp` is `undefined` on all
-   * first-party adapters (see the module note).
+   * right. With `false`, the client is the socket peer on Node, Deno and Bun.
+   * Leftmost and `proxyHops` modes do not check the socket peer; prefer
+   * `trustedProxies` when proxy addresses are stable.
    */
   readonly trustProxy?: boolean;
   /**
@@ -43,9 +44,16 @@ export interface IpSecurityOptions {
    */
   readonly ipHeader?: string;
   /**
+   * Header family to read. Default `'x-forwarded'`; `'forwarded'` reads only
+   * RFC 7239 `Forwarded` and conflicts with `ipHeader`.
+   * @since 0.10.0
+   */
+  readonly forwardedHeader?: 'x-forwarded' | 'forwarded';
+  /**
    * Addresses of the proxies in front of this application, as literal
    * addresses or CIDR blocks. When supplied, the header is walked RIGHT to
-   * LEFT and the first entry that is not one of these is the client.
+   * LEFT, starting with the socket peer when available, and the first entry
+   * that is not one of these is the client.
    *
    * This is the standard algorithm, and what Express `trust proxy` and Fastify
    * `trustProxy` offer. It matters because the common nginx idiom
@@ -81,6 +89,8 @@ export interface IpSecurityOptions {
    * variable would otherwise do.
    *
    * Mutually exclusive with {@linkcode IpSecurityOptions.trustedProxies}.
+   * Does not count or check the socket peer. Prefer `trustedProxies` for
+   * proxies with stable addresses.
    *
    * @since 0.5.0
    */
@@ -187,6 +197,16 @@ function ipv4ToNumber(address: string): number | null {
  * @returns A middleware function that resolves and publishes the client IP
  */
 export function ipSecurityMiddleware(options: IpSecurityOptions = {}): MiddlewareFunction {
+  const forwardedHeader =
+    options.forwardedHeader === undefined ? 'x-forwarded' : options.forwardedHeader;
+  if (forwardedHeader !== 'x-forwarded' && forwardedHeader !== 'forwarded') {
+    throw new TypeError(
+      "ipSecurityMiddleware: forwardedHeader must be 'x-forwarded' or 'forwarded'.",
+    );
+  }
+  if (forwardedHeader === 'forwarded' && options.ipHeader !== undefined) {
+    throw new TypeError('ipSecurityMiddleware: forwardedHeader conflicts with ipHeader.');
+  }
   const enabled = options.enabled ?? true;
 
   if (!enabled) {
@@ -222,24 +242,42 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
   const trustedMatchers = trustedProxies?.map(compileTrustedProxy);
 
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
-    let ip: string | undefined;
-
+    let ip = ctx.request.ip;
+    let origin = requestOriginOf(ctx);
     if (trustProxy) {
-      const headerValue = ctx.request.headers.get(ipHeader);
-      if (headerValue) {
-        ip = resolveForwardedIp(headerValue, trustedMatchers, proxyHops);
+      const headerValue = ctx.request.headers.get(
+        forwardedHeader === 'forwarded' ? 'Forwarded' : ipHeader,
+      );
+      if (headerValue !== null && (forwardedHeader === 'forwarded' || headerValue !== '')) {
+        const elements = forwardedHeader === 'forwarded' ? parseForwarded(headerValue) : undefined;
+        // A malformed Forwarded header contributes no hops rather than ending
+        // resolution: the walk below still checks the socket peer, so a client
+        // connecting directly cannot erase its own identity by sending garbage.
+        const chain =
+          forwardedHeader === 'forwarded'
+            ? (elements ?? []).map((element) => element.ip)
+            : [...parseForwardedChain(headerValue)];
+        const forwardedLength = chain.length;
+        if (trustedMatchers !== undefined && ctx.request.ip !== undefined) {
+          chain.push(ctx.request.ip);
+        }
+        const index = resolveForwardedIndex(chain, trustedMatchers, proxyHops);
+        const selected = index === undefined ? undefined : chain[index];
+        // Unknown Forwarded hops are barriers, never a reason to guess a peer.
+        ip = forwardedHeader === 'forwarded' ? selected : (selected ?? ctx.request.ip);
+        if (selected !== undefined && index !== undefined && index < forwardedLength) {
+          const element = elements?.[index];
+          origin =
+            forwardedHeader === 'forwarded'
+              ? validatedForwardedOrigin(origin, element?.proto, element?.host)
+              : xForwardedOrigin(ctx, origin);
+        }
       }
-    }
-
-    // Fallback to request.ip when trustProxy is false or the header is absent
-    // or empty. The first-party adapters never set it (see the module note), so
-    // this resolves to `undefined` there.
-    if (!ip) {
-      ip = ctx.request.ip;
     }
 
     // Publish the resolved IP to state (even if undefined)
     ctx.state.set(CLIENT_IP_STATE_KEY, ip);
+    ctx.state.set(REQUEST_ORIGIN_STATE_KEY, origin);
 
     // Never short-circuit
     await next();
@@ -260,26 +298,25 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
  *   resolves to `undefined`.
  * - neither — return the leftmost entry, the released behaviour.
  *
- * @param headerValue - The raw header value
+ * @param chain - Wire-order entries, with the peer appended in trusted-proxy mode
  * @param trustedMatchers - Compiled trusted-proxy predicates, when configured
  * @param proxyHops - Declared proxy count, when configured
- * @returns The resolved address, or `undefined` when none can be resolved
+ * @returns The selected index, or `undefined` when none can be resolved
  */
-function resolveForwardedIp(
-  headerValue: string,
+function resolveForwardedIndex(
+  chain: readonly (string | undefined)[],
   trustedMatchers: readonly ((candidate: string) => boolean)[] | undefined,
   proxyHops: number | undefined,
-): string | undefined {
-  const chain = parseForwardedChain(headerValue);
+): number | undefined {
   if (chain.length === 0) {
     return undefined;
   }
 
   if (trustedMatchers !== undefined) {
     for (let i = chain.length - 1; i >= 0; i--) {
-      const entry = chain[i] as string;
-      if (!trustedMatchers.some((matches) => matches(entry))) {
-        return entry;
+      const entry = chain[i];
+      if (entry === undefined || !trustedMatchers.some((matches) => matches(entry))) {
+        return i;
       }
     }
     // Every entry is a trusted proxy: the client address was never recorded,
@@ -292,8 +329,54 @@ function resolveForwardedIp(
     if (index < 0) {
       return undefined;
     }
-    return chain[index];
+    return index;
   }
 
-  return chain[0];
+  return 0;
+}
+
+/**
+ * Validated leftmost X-Forwarded origin candidate. CSRF uses it only for its
+ * browser-origin comparison; it does not grant proxy trust to other consumers.
+ * @param ctx - The request carrying the headers
+ * @param fallback - The URL-derived origin
+ * @returns An origin with individually validated forwarded components
+ * @internal
+ */
+export function xForwardedOrigin(ctx: IRequestContext, fallback: RequestOrigin): RequestOrigin {
+  return validatedForwardedOrigin(
+    fallback,
+    ctx.request.headers.get('X-Forwarded-Proto')?.split(',')[0]?.trim(),
+    ctx.request.headers.get('X-Forwarded-Host')?.split(',')[0]?.trim(),
+  );
+}
+
+/** Validates components without deciding whether a proxy is trusted. */
+function validatedForwardedOrigin(
+  fallback: RequestOrigin,
+  proto: string | undefined,
+  forwardedHost: string | undefined,
+): RequestOrigin {
+  const candidate = proto?.toLowerCase();
+  const protocol = candidate === 'http' || candidate === 'https' ? candidate : fallback.protocol;
+  let host = fallback.host;
+  if (forwardedHost !== undefined) {
+    try {
+      const url = new URL(`http://${forwardedHost}`);
+      if (
+        url.host === forwardedHost.toLowerCase() &&
+        url.pathname === '/' &&
+        !/[/?#@\\]/.test(forwardedHost) &&
+        url.username === '' &&
+        url.password === '' &&
+        url.search === '' &&
+        url.hash === ''
+      ) {
+        host = url.host;
+      }
+    } catch {
+      // A rejected host keeps the URL host; never repair attacker input.
+    }
+  }
+  return { protocol, host, origin: `${protocol}://${host}` };
 }

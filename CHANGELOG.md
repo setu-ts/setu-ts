@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking: proxy client identity and public URLs (M113n, 0.10.0, `@setu-ts/runtime`,
+  `@setu-ts/common`, `@setu-ts/http-security-plugin`, `@setu-ts/auth-plugin`,
+  `@setu-ts/react-router-plugin`).** Node, Deno and Bun now populate `IRequest.ip` with the socket
+  peer, normalizing IPv4-mapped IPv6. Unauthenticated default rate-limit keys move from one
+  `anonymous` bucket to `ip:<peer>`. `trustedProxies` now checks that peer before accepting
+  forwarded entries; a direct caller's forged header is ignored. With IP security configured and a
+  trusted proxy, React Router loaders/actions receive the public URL. Migration: list every real
+  proxy or sidecar in `trustedProxies`, review rate-limit bucket sizing, and update code that
+  expected internal loader URLs. Workers and plain fetch have no peer; `proxyHops` and leftmost
+  selection retain their header-only semantics.
+- **CSRF own origins behind TLS termination (M113n, `@setu-ts/http-security-plugin`).** `csrf: {}`
+  also accepts the published public origin and the validated leftmost
+  `X-Forwarded-Proto`/`X-Forwarded-Host` browser-origin candidate. Migration: remove redundant
+  same-origin allowlist entries if desired; keep explicit `trustedOrigins` for other application
+  origins. The zero-config candidate grants no proxy trust to other consumers.
+
 - **Breaking: invalid scheduler time values reject at registration (M113m, 0.10.0,
   `@setu-ts/scheduler-plugin`).** The async `delay` call rejects with `RangeError` for a non-finite
   or negative `delayMs`; `every` rejects for a non-finite or non-positive `intervalMs`; `delay`,
@@ -289,6 +305,13 @@ All notable changes to this project are documented here. The format follows
   unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
 
 ### Added
+
+- **Reverse-proxy origin support (M113n, `@setu-ts/common`, `@setu-ts/http-security-plugin`,
+  `@setu-ts/session-plugin`, `@setu-ts/kernel`).** `REQUEST_ORIGIN_STATE_KEY`, `RequestOrigin`,
+  `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` share the trusted public origin;
+  `forwardedHeader: 'forwarded'` selects bounded RFC 7239 parsing instead of `X-Forwarded-*`;
+  session `cookie.secure: 'auto'` follows the resolved protocol (default stays `true`, and `'auto'`
+  conflicts with `sameSite: 'none'`); `InjectRequest.ip` supplies a peer in tests.
 
 - **Primary-key and cursor refusals, and a database call timeout (M113g, 0.10.0, `@setu-ts/common`,
   `@setu-ts/database-plugin`).** `@setu-ts/common` exports `assertPrimaryKeyUnchanged`, the one

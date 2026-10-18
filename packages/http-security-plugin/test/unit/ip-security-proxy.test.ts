@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { ipSecurityMiddleware } from '../../src/middleware/ip-security-middleware.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';
 import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
+import { requestOriginOf } from '@setu-ts/common';
 import type { IpSecurityOptions } from '../../src/middleware/ip-security-middleware.ts';
 
 /** Resolves the client IP for one header value under one configuration. */
@@ -36,6 +37,175 @@ async function resolve(
 // The chain an appending proxy produces from a request that arrived carrying a
 // forged `X-Forwarded-For: 7.7.7.7`.
 const APPENDED = '7.7.7.7, 198.51.100.9';
+
+describe('proxy peer and public origin (M113n)', () => {
+  async function inspect(
+    headers: Record<string, string>,
+    options: IpSecurityOptions = {},
+    ip?: string,
+  ) {
+    const { ctx } = createFakeContext({
+      request: {
+        url: 'http://internal:8080/a?q=1',
+        headers,
+        ...(ip === undefined ? {} : { ip }),
+      },
+    });
+    await ipSecurityMiddleware({ trustProxy: true, trustedProxies: ['10.0.0.0/8'], ...options })(
+      ctx,
+      () => Promise.resolve(),
+    );
+    return { ip: ctx.state.get(CLIENT_IP_STATE_KEY), origin: requestOriginOf(ctx) };
+  }
+  const forged = {
+    'X-Forwarded-For': '7.7.7.7',
+    'X-Forwarded-Proto': 'https',
+    'X-Forwarded-Host': 'PUBLIC.example',
+  };
+  it('ignores a direct peer forging the client address', async () => {
+    expect((await inspect(forged, {}, '198.51.100.9')).ip).toBe('198.51.100.9');
+  });
+  it('refuses a public origin forged by an untrusted peer', async () => {
+    expect((await inspect(forged, {}, '198.51.100.9')).origin.origin).toBe('http://internal:8080');
+  });
+  it('trusts header client and origin only after passing a trusted peer', async () => {
+    expect(await inspect(forged, {}, '10.1.2.3')).toEqual({
+      ip: '7.7.7.7',
+      origin: { protocol: 'https', host: 'public.example', origin: 'https://public.example' },
+    });
+    expect((await inspect(forged)).ip).toBe('7.7.7.7');
+    expect((await inspect({}, {}, '10.1.2.3')).ip).toBe('10.1.2.3');
+    expect((await inspect(forged, { trustProxy: false }, '10.1.2.3')).origin.origin).toBe(
+      'http://internal:8080',
+    );
+  });
+  it('keeps proxyHops and leftmost selection independent of the peer', async () => {
+    for (const options of [
+      { trustedProxies: undefined },
+      { trustedProxies: undefined, proxyHops: 1 },
+    ]) {
+      // Omit the option entirely for exactOptionalPropertyTypes.
+      const mode: IpSecurityOptions =
+        options.proxyHops === undefined ? {} : { proxyHops: options.proxyHops };
+      for (const peer of [undefined, '198.51.100.9']) {
+        const { ctx } = createFakeContext({
+          request: {
+            headers: { 'X-Forwarded-For': APPENDED },
+            ...(peer === undefined ? {} : { ip: peer }),
+          },
+        });
+        await ipSecurityMiddleware({ trustProxy: true, ...mode })(ctx, () => Promise.resolve());
+        expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('7.7.7.7');
+      }
+    }
+  });
+  it('validates each forwarded origin component and uses leftmost entries', async () => {
+    for (const host of [
+      'evil.example/path',
+      'user@evil.example',
+      'evil.example?x',
+      'evil.example#',
+      'evil.example\\path',
+      'bad host',
+      '',
+      'evil.example:80',
+    ]) {
+      expect(
+        (await inspect({ ...forged, 'X-Forwarded-Host': host }, {}, '10.1.2.3')).origin.host,
+        host,
+      ).toBe('internal:8080');
+    }
+    for (const proto of ['ftp', '', 'garbage']) {
+      expect(
+        (await inspect({ ...forged, 'X-Forwarded-Proto': proto }, {}, '10.1.2.3')).origin.protocol,
+      ).toBe('http');
+    }
+    expect(
+      (
+        await inspect(
+          {
+            ...forged,
+            'X-Forwarded-Proto': 'HTTPS, http',
+            'X-Forwarded-Host': 'public.example:8443, internal',
+          },
+          {},
+          '10.1.2.3',
+        )
+      ).origin.origin,
+    ).toBe('https://public.example:8443');
+    expect((await inspect({ 'X-Forwarded-For': '7.7.7.7' }, {}, '10.1.2.3')).origin.origin).toBe(
+      'http://internal:8080',
+    );
+  });
+  it('selects proto and host from the Forwarded client element', async () => {
+    const headers = {
+      Forwarded:
+        'for=192.0.2.1;proto=https;host=public.example, for=10.2.3.4;proto=http;host=internal',
+    };
+    expect(await inspect(headers, { forwardedHeader: 'forwarded' }, '10.1.2.3')).toMatchObject({
+      ip: '192.0.2.1',
+      origin: { origin: 'https://public.example' },
+    });
+    expect(
+      (await inspect(headers, { forwardedHeader: 'forwarded' }, '198.51.100.9')).origin.origin,
+    ).toBe('http://internal:8080');
+    expect((await inspect(headers, { forwardedHeader: 'forwarded' })).ip).toBe('192.0.2.1');
+  });
+  it('uses exactly one header family', async () => {
+    const headers = { ...forged, Forwarded: 'for=192.0.2.1;proto=http;host=rfc.example' };
+    expect(
+      (await inspect(headers, { forwardedHeader: 'forwarded' }, '10.1.2.3')).origin.origin,
+    ).toBe('http://rfc.example');
+    expect((await inspect(headers, {}, '10.1.2.3')).origin.origin).toBe('https://public.example');
+    expect(
+      (await inspect(forged, { forwardedHeader: 'forwarded' }, '10.1.2.3')).origin.origin,
+    ).toBe('http://internal:8080');
+  });
+  it('never guesses a client or forwarded origin for malformed or unknown hops', async () => {
+    for (const Forwarded of [
+      'for="unterminated',
+      'for=unknown;proto=https;host=evil.example',
+      'for=_obf;proto=https',
+      'proto=https',
+      'for=192.0.2.1,for=unknown',
+    ]) {
+      expect(
+        await inspect({ Forwarded }, { forwardedHeader: 'forwarded' }, '10.1.2.3'),
+      ).toMatchObject({ ip: undefined, origin: { origin: 'http://internal:8080' } });
+    }
+    expect(
+      (await inspect({ Forwarded: 'for=10.2.3.4' }, { forwardedHeader: 'forwarded' }, '10.1.2.3'))
+        .ip,
+    ).toBeUndefined();
+  });
+  it('lets a malformed Forwarded header from an untrusted direct peer erase nothing', async () => {
+    for (const Forwarded of ['garbage', '', 'for="unterminated']) {
+      expect(
+        await inspect({ Forwarded }, { forwardedHeader: 'forwarded' }, '203.0.113.9'),
+      ).toMatchObject({ ip: '203.0.113.9', origin: { origin: 'http://internal:8080' } });
+    }
+  });
+  it('validates header-family options at construction without echoing input', () => {
+    for (const enabled of [true, false]) {
+      for (const invalid of [null, false, 1]) {
+        expect(() =>
+          ipSecurityMiddleware({ enabled, forwardedHeader: invalid as unknown as 'forwarded' }),
+        ).toThrow('forwardedHeader');
+      }
+      expect(() =>
+        ipSecurityMiddleware({ enabled, forwardedHeader: 'secret-value' as 'forwarded' }),
+      ).toThrow('forwardedHeader');
+      expect(() =>
+        ipSecurityMiddleware({ enabled, forwardedHeader: 'forwarded', ipHeader: 'secret-value' }),
+      ).toThrow('ipHeader');
+      try {
+        ipSecurityMiddleware({ forwardedHeader: 'secret-value' as 'forwarded' });
+      } catch (error) {
+        expect(String(error)).not.toContain('secret-value');
+      }
+    }
+  });
+});
 
 describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
   it('with neither option, resolution stays LEFTMOST — unchanged', async () => {

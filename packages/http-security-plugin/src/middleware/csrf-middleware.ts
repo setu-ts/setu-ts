@@ -7,7 +7,8 @@
  * @module
  */
 import type { IRequestContext, MiddlewareFunction, PathPattern } from '@setu-ts/common';
-import { createPathMatcher, respondWithError } from '@setu-ts/common';
+import { createPathMatcher, respondWithError, requestOriginOf } from '@setu-ts/common';
+import { xForwardedOrigin } from './ip-security-middleware.ts';
 
 /** HTTP methods considered unsafe (mutable) for CSRF purposes. */
 const UNSAFE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -18,8 +19,9 @@ export interface CsrfOptions {
   readonly enabled?: boolean;
   /**
    * Additional trusted origins (scheme+host) beyond the request's own origin.
-   * The request's own origin (derived from `request.url`) is always implicitly
-   * trusted. Default: `[]`.
+   * Implicitly trusts the URL origin, the published public origin, and the
+   * validated leftmost X-Forwarded protocol/host candidate for browser CSRF.
+   * This last comparison does not grant proxy trust. Default: `[]`.
    *
    * An origin allowlist cannot admit an IdP that serves
    * `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS
@@ -113,7 +115,17 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
     const requestOrigin = getRequestOrigin(ctx.request.url);
 
     // The request's own origin is always implicitly trusted
-    if (requestOrigin && sourceOrigin === requestOrigin) {
+    if (
+      requestOrigin &&
+      (sourceOrigin === requestOrigin ||
+        sourceOrigin === requestOriginOf(ctx).origin ||
+        sourceOrigin ===
+          xForwardedOrigin(ctx, {
+            protocol: new URL(ctx.request.url).protocol === 'https:' ? 'https' : 'http',
+            host: new URL(ctx.request.url).host,
+            origin: requestOrigin,
+          }).origin)
+    ) {
       await next();
       return;
     }

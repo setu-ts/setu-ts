@@ -1,5 +1,13 @@
 # @setu-ts/react-router-plugin
 
+Behind a reverse proxy, the request bridge uses `publicRequestUrl(ctx)` from `@setu-ts/common` so
+loaders and actions see the public protocol and host when IP security has resolved them. Register
+`HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies: [...] } })` with the addresses
+of your proxies; choose `forwardedHeader: 'forwarded'` if they write RFC 7239 instead of
+`X-Forwarded-*`. With no IP security middleware, the bridge uses the original request URL. Use a
+configured base URL for security-sensitive links such as password resets. See
+[deployment behind a reverse proxy](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#behind-a-reverse-proxy).
+
 React SSR and file-based routing, by embedding **React Router v7 framework mode** as a plugin over a
 kernel catch-all handler. Registers an `SsrService` under `CAPABILITIES.SSR` (`'ssr'`).
 

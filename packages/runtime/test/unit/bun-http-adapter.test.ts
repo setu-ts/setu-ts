@@ -12,6 +12,35 @@ import {
   isBunHttpServerHandle,
 } from '../../src/adapters/bun/bun-http-adapter.ts';
 import { describe, expect, it } from 'vitest';
+import { createTestContext } from '@setu-ts/testing';
+
+describe('Bun socket peer', () => {
+  it('reads requestIP with the server receiver and tolerates null or absence', async () => {
+    const handle = new BunHttpServerHandle();
+    let peer: string | undefined;
+    handle.setHandler((request) => {
+      peer = request.ip;
+      return createTestContext().response;
+    });
+    const callback = handle.createServeCallback();
+    for (const server of [{ stop() {} }, { stop() {}, requestIP: () => null }]) {
+      await callback(new Request('http://localhost/'), server);
+      expect(peer).toBeUndefined();
+    }
+    const server = {
+      stop() {},
+      requestIP(request: Request) {
+        expect(this).toBe(server);
+        expect(request.url).toBe('http://localhost/');
+        return { address: '::ffff:10.1.2.3' };
+      },
+    };
+    await callback(new Request('http://localhost/'), server);
+    expect(peer).toBe('10.1.2.3');
+    await handle.createFetchHandler()(new Request('http://localhost/'));
+    expect(peer).toBeUndefined();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fake host

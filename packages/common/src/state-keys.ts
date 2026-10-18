@@ -50,6 +50,13 @@
 export const CLIENT_IP_STATE_KEY = 'http-security-plugin:client-ip';
 
 /**
+ * The trusted public `{ protocol, host }` published by IP security and read by
+ * `requestOriginOf`, session cookies, CSRF and the React Router bridge.
+ * @since 0.10.0
+ */
+export const REQUEST_ORIGIN_STATE_KEY = 'http-security-plugin:request-origin';
+
+/**
  * The `ctx.state` key under which `session-plugin`'s middleware parks the
  * live {@linkcode ISession} for the request, and from which
  * `multi-tenancy-plugin`'s tenant middleware reads it back for the

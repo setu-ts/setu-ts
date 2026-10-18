@@ -13,6 +13,57 @@ import {
 } from '../../src/adapters/node/node-http-adapter.ts';
 import { UPGRADE_INTENT } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
+import { createTestContext } from '@setu-ts/testing';
+
+describe('Node socket peer', () => {
+  it('reads incoming.socket.remoteAddress and tolerates absent env members', async () => {
+    const handle = new NodeHttpServerHandle();
+    let peer: string | undefined;
+    handle.setHandler((request) => {
+      peer = request.ip;
+      return createTestContext().response;
+    });
+    const fetch = handle.createFetchHandler();
+    for (const env of [undefined, {}, { incoming: {} }, { incoming: { socket: {} } }]) {
+      await fetch(new Request('http://localhost/'), env);
+      expect(peer).toBeUndefined();
+    }
+    await fetch(new Request('http://localhost/'), {
+      incoming: { socket: { remoteAddress: '::ffff:10.1.2.3' } },
+    });
+    expect(peer).toBe('10.1.2.3');
+  });
+  it('carries the peer through the raw upgrade pipeline', async () => {
+    const handle = new NodeHttpServerHandle();
+    const seen = Promise.withResolvers<string | undefined>();
+    handle.setUpgradeRouter(() => Promise.resolve(null));
+    handle.setHandler((request) => {
+      seen.resolve(request.ip);
+      return createTestContext().response;
+    });
+    let listener: ((...args: never[]) => void) | undefined;
+    const server = {
+      close() {},
+      on(_event: string, fn: (...args: never[]) => void) {
+        listener = fn;
+      },
+    };
+    handle.attachUpgradeListener(server);
+    listener!(
+      ...([
+        {
+          url: '/ws',
+          headers: { host: 'localhost' },
+          socket: { remoteAddress: '::ffff:192.0.2.1' },
+        },
+        { write() {}, destroy() {} },
+        new Uint8Array(),
+      ] as unknown as never[]),
+    );
+    expect(await seen.promise).toBe('192.0.2.1');
+    await Promise.resolve();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fake host

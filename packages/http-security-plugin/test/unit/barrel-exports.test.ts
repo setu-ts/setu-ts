@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 // Import the barrel to verify all expected exports are present
 import * as httpSecurity from '../../src/index.ts';
+import type { IpSecurityOptions } from '../../src/index.ts';
+
+it('exports the header-family option and keeps parsing and validation internal', () => {
+  const options: IpSecurityOptions = { forwardedHeader: 'forwarded' };
+  expect(typeof httpSecurity.ipSecurityMiddleware(options)).toBe('function');
+  expect('parseForwarded' in httpSecurity).toBe(false);
+  expect('xForwardedOrigin' in httpSecurity).toBe(false);
+});
 
 describe('barrel exports', () => {
   it('exports HttpSecurityPlugin factory', () => {

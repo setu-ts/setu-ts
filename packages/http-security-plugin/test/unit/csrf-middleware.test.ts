@@ -3,6 +3,56 @@ import { describe, expect, it } from 'vitest';
 
 import { csrfMiddleware } from '../../src/middleware/csrf-middleware.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';
+import { REQUEST_ORIGIN_STATE_KEY } from '@setu-ts/common';
+
+describe('CSRF behind a proxy', () => {
+  async function check(headers: Record<string, string>, published = false) {
+    const { ctx, response } = createFakeContext({
+      request: { method: 'POST', url: 'http://internal/form', headers },
+    });
+    if (published)
+      ctx.state.set(REQUEST_ORIGIN_STATE_KEY, { protocol: 'https', host: 'published.example' });
+    let downstream = false;
+    await csrfMiddleware()(ctx, () => {
+      downstream = true;
+      return Promise.resolve();
+    });
+    return { downstream, statuses: response.statuses };
+  }
+  it('accepts an https browser POST with zero proxy configuration', async () => {
+    expect(
+      (await check({ Origin: 'https://internal', 'X-Forwarded-Proto': 'https' })).downstream,
+    ).toBe(true);
+    expect(
+      (
+        await check({
+          Origin: 'https://public.example',
+          'X-Forwarded-Proto': 'HTTPS, http',
+          'X-Forwarded-Host': 'public.example, internal',
+        })
+      ).downstream,
+    ).toBe(true);
+  });
+  it('accepts the published origin through the common accessor', async () => {
+    expect((await check({ Origin: 'https://published.example' }, true)).downstream).toBe(true);
+  });
+  it('ignores ftp, empty and garbage forwarded protocol values', async () => {
+    for (const proto of ['ftp', '', 'garbage']) {
+      const result = await check({ Origin: `${proto}://internal`, 'X-Forwarded-Proto': proto });
+      expect(result.downstream, proto).toBe(false);
+      expect(result.statuses).toContain(403);
+    }
+  });
+  it('still short-circuits a cross-site origin with forwarded headers present', async () => {
+    const result = await check({
+      Origin: 'https://evil.example',
+      'X-Forwarded-Proto': 'https',
+      'X-Forwarded-Host': 'public.example',
+    });
+    expect(result.downstream).toBe(false);
+    expect(result.statuses).toContain(403);
+  });
+});
 
 describe('csrfMiddleware', () => {
   describe('enabled: false', () => {

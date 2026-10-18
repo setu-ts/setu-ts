@@ -107,10 +107,13 @@ export {
 } from './request-identity.ts';
 export {
   CLIENT_IP_STATE_KEY,
+  REQUEST_ORIGIN_STATE_KEY,
   CREDENTIAL_SOURCE_STATE_KEY,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_STATE_KEY,
 } from './state-keys.ts';
+export { publicRequestUrl, requestOriginOf } from './request-origin.ts';
+export type { RequestOrigin } from './request-origin.ts';
 
 // Path-exclusion matcher (M90a) — the one matcher four middlewares share
 export { createPathMatcher } from './path-matcher.ts';

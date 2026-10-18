@@ -18,6 +18,7 @@ import type {
 } from '@setu-ts/common';
 import {
   parseCookie,
+  requestOriginOf,
   serializeCookie,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_KEY,
@@ -204,7 +205,7 @@ export class SessionService implements ISessionService {
       // TTL, so a stolen copy of the original cookie would keep authenticating
       // after an explicit destroy.
       await this.#destroyStored(session.id, session.previousId);
-      ctx.response.appendHeader('set-cookie', this.#cookie('', 0));
+      ctx.response.appendHeader('set-cookie', this.#cookie(ctx, '', 0));
       return;
     }
 
@@ -262,7 +263,7 @@ export class SessionService implements ISessionService {
       JSON.stringify(payload),
       this.#deps.randomBytes,
     );
-    const header = this.#cookie(sealed, Math.ceil(ttlMs / 1000));
+    const header = this.#cookie(ctx, sealed, Math.ceil(ttlMs / 1000));
 
     // Checked BEFORE the store write, so a rejected commit leaves no trace. The
     // reverse order persisted a row for a session whose cookie was never sent,
@@ -378,13 +379,14 @@ export class SessionService implements ISessionService {
   }
 
   /** Builds the `Set-Cookie` header value for a value and remaining lifetime. */
-  #cookie(value: string, maxAge: number): string {
+  #cookie(ctx: IRequestContext, value: string, maxAge: number): string {
     const c = this.#config;
     return serializeCookie(c.cookieName, value, {
       maxAge,
       path: c.cookiePath,
       sameSite: c.cookieSameSite,
-      secure: c.cookieSecure,
+      secure:
+        c.cookieSecure === 'auto' ? requestOriginOf(ctx).protocol === 'https' : c.cookieSecure,
       httpOnly: c.cookieHttpOnly,
       ...(c.cookieDomain === undefined ? {} : { domain: c.cookieDomain }),
     });

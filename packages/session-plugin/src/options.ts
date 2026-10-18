@@ -45,8 +45,8 @@ export interface SessionCookieOptions {
   readonly domain?: string;
   /** `SameSite` policy. Default `'lax'`. */
   readonly sameSite?: 'strict' | 'lax' | 'none';
-  /** `Secure` attribute. Default `true`. */
-  readonly secure?: boolean;
+  /** `Secure` attribute. Default `true`; `'auto'` follows the trusted request protocol. */
+  readonly secure?: boolean | 'auto';
   /** `HttpOnly` attribute. Default `true`. */
   readonly httpOnly?: boolean;
 }
@@ -193,7 +193,7 @@ export interface ResolvedSessionConfig {
   readonly cookiePath: string;
   readonly cookieDomain?: string;
   readonly cookieSameSite: 'strict' | 'lax' | 'none';
-  readonly cookieSecure: boolean;
+  readonly cookieSecure: boolean | 'auto';
   readonly cookieHttpOnly: boolean;
   readonly maxAgeSeconds: number;
   readonly maxAgeMs: number;
@@ -208,7 +208,8 @@ export interface ResolvedSessionConfig {
  *
  * @param options - The caller's options
  * @returns The resolved configuration
- * @throws {TypeError} If `maxAge`, `idleTimeoutMs`, or `maxCookieBytes` is not a positive number
+ * @throws {TypeError} If a numeric option is not positive, `cookie.secure` is invalid,
+ *   or `cookie.secure: 'auto'` conflicts with `cookie.sameSite: 'none'`
  * @since 0.2.0
  */
 export function resolveSessionConfig(options: SessionPluginOptions = {}): ResolvedSessionConfig {
@@ -223,6 +224,18 @@ export function resolveSessionConfig(options: SessionPluginOptions = {}): Resolv
   }
 
   const cookie = options.cookie ?? {};
+  if (
+    cookie.secure !== undefined &&
+    typeof cookie.secure !== 'boolean' &&
+    cookie.secure !== 'auto'
+  ) {
+    throw new TypeError("SessionPlugin option 'cookie.secure' must be a boolean or 'auto'.");
+  }
+  if (cookie.secure === 'auto' && cookie.sameSite === 'none') {
+    throw new TypeError(
+      "SessionPlugin options 'cookie.secure' and 'cookie.sameSite' conflict: 'auto' cannot use 'none'.",
+    );
+  }
 
   // Built in two steps because exactOptionalPropertyTypes forbids assigning
   // `undefined` to an optional property — the optional keys are spread in only

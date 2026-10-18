@@ -152,6 +152,13 @@ origin echoes nothing.
 
 ### CsrfOptions
 
+The implicitly trusted own origins are the request URL origin, the public origin from
+`requestOriginOf(ctx)`, and the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host` candidate
+(falling back to the URL host). Thus `csrf: {}` accepts same-origin browser mutations behind a
+standard TLS-terminating proxy without extra configuration. This last comparison is specific to
+browser CSRF: a cross-site form cannot set those headers, and scripts setting them require a CORS
+preflight. It does not grant proxy trust to IP resolution, cookies or public URLs.
+
 | Option            | Type            | Default | Description                                                      |
 | ----------------- | --------------- | ------- | ---------------------------------------------------------------- |
 | `enabled?`        | `boolean`       | `true`  | Toggle CSRF                                                      |
@@ -186,13 +193,14 @@ and set `maxBodyBytes` to the same value or higher. See "Bounding the request bo
 
 ### IpSecurityOptions
 
-| Option            | Type                | Default           | Description                                                       |
-| ----------------- | ------------------- | ----------------- | ----------------------------------------------------------------- |
-| `enabled?`        | `boolean`           | `true`            | Toggle IP resolution                                              |
-| `trustProxy?`     | `boolean`           | `false`           | Read IP from proxy header                                         |
-| `ipHeader?`       | `string`            | `X-Forwarded-For` | Proxy header name                                                 |
-| `trustedProxies?` | `readonly string[]` | —                 | Proxy addresses or IPv4 CIDR blocks; resolves rightmost-untrusted |
-| `proxyHops?`      | `number`            | —                 | The nth entry from the right, when proxies have no fixed address  |
+| Option             | Type                           | Default           | Description                                                             |
+| ------------------ | ------------------------------ | ----------------- | ----------------------------------------------------------------------- |
+| `enabled?`         | `boolean`                      | `true`            | Toggle IP resolution                                                    |
+| `trustProxy?`      | `boolean`                      | `false`           | Read IP from proxy header                                               |
+| `ipHeader?`        | `string`                       | `X-Forwarded-For` | Proxy header name                                                       |
+| `forwardedHeader?` | `'x-forwarded' \| 'forwarded'` | `'x-forwarded'`   | Read exactly one header family; `'forwarded'` conflicts with `ipHeader` |
+| `trustedProxies?`  | `readonly string[]`            | —                 | Proxy addresses or IPv4 CIDR blocks; resolves rightmost-untrusted       |
+| `proxyHops?`       | `number`                       | —                 | The nth entry from the right, when proxies have no fixed address        |
 
 `trustedProxies` and `proxyHops` are **mutually exclusive** — supplying both throws at middleware
 construction. So does a `proxyHops` that is not a non-negative integer (`0` is the rightmost entry):
@@ -202,6 +210,33 @@ keyed on the client IP to one shared bucket. A `trustedProxies` entry whose CIDR
 digits is refused the same way: `Number('')` is `0`, so `'10.0.0.1/'` would otherwise compile to a
 `/0` matcher that trusts every IPv4 address. Omit the slash to compare an entry literally, which is
 already how a bare address and an IPv6 CIDR are handled.
+
+Node, Deno and Bun populate `IRequest.ip` with the **socket peer**, which behind a proxy is the
+proxy. Without `trustProxy`, that peer is published as `CLIENT_IP_STATE_KEY`. With `trustedProxies`,
+the peer is appended to the chain before walking right to left: a direct client cannot choose its
+identity by forging `X-Forwarded-For`. IPv4-mapped peers such as `::ffff:10.1.2.3` become
+`10.1.2.3`; native IPv6 proxies must be listed literally. IPv6 CIDR expansion is not supported.
+`proxyHops` and the leftmost default keep their header-only selection and do not check the peer;
+prefer `trustedProxies` for stable proxy addresses.
+
+`forwardedHeader: 'forwarded'` reads only RFC 7239 `Forwarded`, including quoted IPv6 addresses and
+ports, and ignores every `X-Forwarded-*` header. The default reads `X-Forwarded-*` only. A malformed
+`Forwarded` header (or one over 8 KiB or 64 elements) contributes no hops and no forwarded origin,
+so the walk still checks the socket peer: a client connecting directly stays identified by its own
+address, and a trusted proxy sending one yields no client. `unknown` and obfuscated `for` values
+stop the trust walk without a client.
+
+IP security also publishes the public origin for `requestOriginOf(ctx)` and `publicRequestUrl(ctx)`
+from `@setu-ts/common`. Forwarded origin components are believed only when the selected client came
+from the forwarded chain. In the default family the leftmost `X-Forwarded-Proto` and
+`X-Forwarded-Host` are used; with `Forwarded`, `proto` and `host` come from the selected client
+element. Only `http`/`https` protocols and URL-valid hosts without paths, user info, query or
+fragment are accepted; rejected or absent components fall back to the request URL. Session
+`secure: 'auto'` and React Router loaders share this decision.
+
+Workers and plain `adapter.fetch()` calls have no socket peer. On Cloudflare Workers use
+`ipSecurity: { trustProxy: true, ipHeader: 'CF-Connecting-IP' }`; Cloudflare overwrites that header.
+Build security-sensitive links, such as password resets, from a configured base URL.
 
 ### SecurityHeadersOptions
 
