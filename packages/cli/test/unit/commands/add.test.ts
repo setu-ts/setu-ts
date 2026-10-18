@@ -1241,6 +1241,70 @@ describe('setu add wires the generated-artifact seam', () => {
     expect(() => h.read('/app/src/events/index.ts')).toThrow();
   });
 
+  it('creates the barrel it wires when re-adding an installed package', async () => {
+    // The manifest already pins the package, so no manifest edit happens — but
+    // the config has no provider call, so it IS wired. The import it gains must
+    // resolve: the barrel is created whenever the config is edited to read it.
+    const installed = JSON.stringify({
+      imports: { '@setu-ts/events-plugin': `npm:@setu-ts/events-plugin@^${VERSION}` },
+    });
+    const h = harness({ '/app/deno.json': installed, '/app/setu.config.ts': FUNCTIONAL_CONFIG });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    expect(h.read('/app/setu.config.ts')).toContain(`from './src/events/index.ts'`);
+    expect(h.read('/app/src/events/index.ts')).toBe(EVENTS_SEAM.renderBarrel({}));
+  });
+
+  it('names the missing seam when an installed provider is called bare', async () => {
+    // The state of a project that ran `setu add events` before it wired the seam.
+    const installed = JSON.stringify({
+      imports: { '@setu-ts/events-plugin': `npm:@setu-ts/events-plugin@^${VERSION}` },
+    });
+    const bare = `import { EventsPlugin } from '@setu-ts/events-plugin';\n${FUNCTIONAL_CONFIG.replace(
+      '...(devtool?.plugins ?? []),',
+      'EventsPlugin(),\n      ...(devtool?.plugins ?? []),',
+    )}`;
+    const h = harness({ '/app/deno.json': installed, '/app/setu.config.ts': bare });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    expect(h.read('/app/setu.config.ts')).toBe(bare);
+    const out = h.out.join('\n');
+    expect(out).toContain('already installed');
+    expect(out).toContain(
+      'The existing EventsPlugin(…) call does not pass the generated artifacts; give it { handlers: EVENT_HANDLERS }.',
+    );
+    expect(out).toContain("Import EVENT_HANDLERS from './src/events/index.ts' for it.");
+  });
+
+  it('says nothing more when the existing call already passes the seam', async () => {
+    const installed = JSON.stringify({
+      imports: { '@setu-ts/events-plugin': `npm:@setu-ts/events-plugin@^${VERSION}` },
+    });
+    const wired = `import { EventsPlugin } from '@setu-ts/events-plugin';\nimport { EVENT_HANDLERS } from './src/events/index.ts';\n${FUNCTIONAL_CONFIG.replace(
+      '...(devtool?.plugins ?? []),',
+      'EventsPlugin({ handlers: EVENT_HANDLERS }),\n      ...(devtool?.plugins ?? []),',
+    )}`;
+    const h = harness({ '/app/deno.json': installed, '/app/setu.config.ts': wired });
+
+    expect(await h.run(['events'])).toBe(0);
+    expect(h.out.join('\n')).not.toContain('does not pass the generated artifacts');
+  });
+
+  it('names the missing seam on a fresh install whose config already calls the provider bare', async () => {
+    const bare = `import { EventsPlugin } from '@setu-ts/events-plugin';\n${FUNCTIONAL_CONFIG.replace(
+      '...(devtool?.plugins ?? []),',
+      'EventsPlugin(),\n      ...(devtool?.plugins ?? []),',
+    )}`;
+    const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': bare });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    expect(h.read('/app/setu.config.ts')).toBe(bare);
+    expect(h.out.join('\n')).toContain('give it { handlers: EVENT_HANDLERS }');
+  });
+
   it('resolves no seam for a provider that consumes none', () => {
     expect(addSeam('queue-plugin', new Set(['queue-plugin']))).toBeUndefined();
     expect(addSeam('auth-plugin', new Set(['auth-plugin']))).toBeUndefined();

@@ -349,6 +349,7 @@ function printWiringNote(
     scope !== undefined &&
     callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
   ) {
+    for (const line of seamGapLines(source, bare, seam)) log(line);
     return;
   }
   // No raw-text check here: a string or comment containing the registration's
@@ -365,6 +366,44 @@ function printWiringNote(
       log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
     }
   }
+}
+
+/**
+ * Guidance for a provider the factory already calls WITHOUT the seam it consumes.
+ *
+ * A config that registers a bare `EventsPlugin()` — the shape `setu add` emitted
+ * before it learned the seam, and the shape a hand-written config may carry —
+ * leaves every handler generated into `src/events/index.ts` registered nowhere.
+ * Neither the insert nor the "Register …" guidance fires for it, since the call
+ * exists, so this is the one place that says what the call is missing.
+ *
+ * @param source - The config source, if readable
+ * @param bare - Bare package name being added
+ * @param seam - The seam the provider consumes, if any
+ * @returns The lines to print; empty when there is nothing to say
+ */
+function seamGapLines(
+  source: string | undefined,
+  bare: string,
+  seam: AddSeam | undefined,
+): readonly string[] {
+  if (seam === undefined || source === undefined) return [];
+  if (composingStarter(source) !== undefined) return [];
+  const provider = ZERO_CONFIG_WIRINGS.get(bare);
+  if (provider === undefined) return [];
+  const binding = providerBinding(source, bare, provider.symbol);
+  const scope = factoryScope(source);
+  if (binding === undefined || scope === undefined) return [];
+  const body = scope.code.slice(scope.start, scope.end);
+  if (!callsIdentifier(body, binding)) return [];
+  const symbols = seam.imports.flatMap((item) => item.symbols);
+  if (symbols.every((symbol) => referencesIdentifier(body, symbol))) return [];
+  return [
+    `  The existing ${binding}(…) call does not pass the generated artifacts; give it ${seam.args}.`,
+    ...seam.imports
+      .filter((item) => !source.includes(`'${item.from}'`) && !source.includes(`"${item.from}"`))
+      .map((item) => `  Import ${item.symbols.join(', ')} from '${item.from}' for it.`),
+  ];
 }
 
 /**
@@ -752,17 +791,8 @@ export async function runAddCommand(
   const installedAfter = new Set(await detectPlugins(deps.fs, dir));
   installedAfter.add(bare);
   const seam = addSeam(bare, installedAfter);
-  // The barrels exist whether or not the config could be rewritten: the printed
-  // guidance names them, and an import of a missing module would not compile.
-  // Only on a real install — re-adding a present package writes nothing.
-  for (const file of edits.length > 0 ? (seam?.files ?? []) : []) {
-    const path = joinPath(dir, file.path);
-    try {
-      await deps.fs.readFile(path);
-    } catch {
-      edits.push({ path, contents: file.contents });
-    }
-  }
+  // Taken before the config is considered: a manifest edit means a real install.
+  const installing = edits.length > 0;
 
   const configPath = joinPath(dir, 'setu.config.ts');
   let configSource: string | undefined;
@@ -778,6 +808,22 @@ export async function runAddCommand(
   } catch {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
+  }
+
+  // The barrels exist whether or not the config could be rewritten: the printed
+  // guidance names them, and an import of a missing module would not compile.
+  // Written on a real install, AND whenever the config was just wired to read
+  // them — re-adding an installed package to a config with no provider call
+  // still wires it, and that import must resolve. A re-add that edits nothing
+  // writes nothing.
+  const configWired = edits.some((edit) => edit.path === configPath);
+  for (const file of installing || configWired ? (seam?.files ?? []) : []) {
+    const path = joinPath(dir, file.path);
+    try {
+      await deps.fs.readFile(path);
+    } catch {
+      edits.push({ path, contents: file.contents });
+    }
   }
 
   if (!found) {
@@ -824,6 +870,7 @@ export async function runAddCommand(
 
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
+    for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
     return EXIT_OK;
   }
 
