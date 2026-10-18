@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
   addableNames,
+  addSeam,
   pinnedInOtherNpmSection,
   resolveAddablePackage,
   runAddCommand,
@@ -21,6 +22,8 @@ import { parseArgs } from '../../../src/args.ts';
 import { runNewCommand } from '../../../src/commands/new.ts';
 import { listSchematics } from '../../../src/schematics/registry.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
+import { EVENTS_SEAM } from '../../../src/seams/events.ts';
+import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
 
 /** Builds a command harness over a fake filesystem. */
 function harness(files: Readonly<Record<string, string>> = {}) {
@@ -54,6 +57,35 @@ const DENO_MANIFEST = JSON.stringify(
   null,
   2,
 );
+
+/**
+ * A class-based project's manifest. A real one pins `decorator-plugin` — that pin is
+ * what selects the class-based generator — so a fixture pairing the class-based
+ * config with the bare manifest describes a project that cannot exist.
+ */
+const CLASS_BASED_MANIFEST = JSON.stringify(
+  {
+    tasks: { start: 'deno run main.ts' },
+    imports: {
+      '@setu-ts/decorator-plugin': 'jsr:@setu-ts/decorator-plugin@^1',
+      '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^1',
+    },
+  },
+  null,
+  2,
+);
+
+/** The class-based config with its decorator wiring removed: a functional scaffold. */
+const FUNCTIONAL_CONFIG = `import { createApplication } from '@setu-ts/kernel';
+
+export function createApp() {
+  return createApplication({
+    plugins: [
+      ...(devtool?.plugins ?? []),
+    ],
+  });
+}
+`;
 
 const CLASS_BASED_INGRESS_CONFIG = `import { createApplication } from '@setu-ts/kernel';
 import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
@@ -826,7 +858,7 @@ describe('runAddCommand', () => {
 
   it('activates an ingress provider in the generated class-based config', async () => {
     const h = harness({
-      '/app/deno.json': DENO_MANIFEST,
+      '/app/deno.json': CLASS_BASED_MANIFEST,
       '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
     });
 
@@ -840,7 +872,7 @@ describe('runAddCommand', () => {
 
   it('keeps an ingress config untouched under --dry-run', async () => {
     const h = harness({
-      '/app/deno.json': DENO_MANIFEST,
+      '/app/deno.json': CLASS_BASED_MANIFEST,
       '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
     });
 
@@ -1101,5 +1133,93 @@ describe('setu add — workspace roots', () => {
     });
     expect(await h.run(['cache', '--dir', 'apps/orders'])).toBe(0);
     expect(JSON.parse(h.read(member)).imports['@setu-ts/cache-plugin']).toBeDefined();
+  });
+});
+
+describe('setu add wires the generated-artifact seam', () => {
+  it('passes generated event handlers to EventsPlugin and creates the empty barrel', async () => {
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': FUNCTIONAL_CONFIG,
+    });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    const config = h.read('/app/setu.config.ts');
+    expect(config).toContain(`import { EVENT_HANDLERS } from './src/events/index.ts';`);
+    expect(config).toContain('      EventsPlugin({ handlers: EVENT_HANDLERS }),');
+    expect(h.read('/app/src/events/index.ts')).toBe(EVENTS_SEAM.renderBarrel({}));
+    expect(h.out.join('\n')).not.toContain('Register EventsPlugin');
+  });
+
+  it('passes both CQRS handler lists to CqrsPlugin from one barrel import', async () => {
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': FUNCTIONAL_CONFIG,
+    });
+
+    expect(await h.run(['cqrs'])).toBe(0);
+
+    const config = h.read('/app/setu.config.ts');
+    expect(config).toContain(
+      `import { COMMAND_HANDLERS, QUERY_HANDLERS } from './src/cqrs/index.ts';`,
+    );
+    expect(config).toContain(
+      'CqrsPlugin({ commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }),',
+    );
+    expect(config.split("'./src/cqrs/index.ts'")).toHaveLength(2);
+    expect(h.read('/app/src/cqrs/index.ts')).toBe(COMMAND_HANDLER_SEAM.renderBarrel({}));
+  });
+
+  it('keeps the bare call and writes no barrel in a class-based project', async () => {
+    const h = harness({
+      '/app/deno.json': CLASS_BASED_MANIFEST,
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    expect(h.read('/app/setu.config.ts')).toContain('      EventsPlugin(),');
+    expect(() => h.read('/app/src/events/index.ts')).toThrow();
+  });
+
+  it('leaves an existing barrel alone', async () => {
+    const existing = '// hand-kept\nexport const EVENT_HANDLERS = [];\n';
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': FUNCTIONAL_CONFIG,
+      '/app/src/events/index.ts': existing,
+    });
+
+    expect(await h.run(['events'])).toBe(0);
+    expect(h.read('/app/src/events/index.ts')).toBe(existing);
+  });
+
+  it('falls back to guidance naming the seam when the barrel is already referenced', async () => {
+    const config = `import { EVENT_HANDLERS } from './src/events/index.ts';\n${FUNCTIONAL_CONFIG}`;
+    const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    expect(h.read('/app/setu.config.ts')).toBe(config);
+    const out = h.out.join('\n');
+    expect(out).toContain('Register EventsPlugin({ handlers: EVENT_HANDLERS }) in setu.config.ts.');
+    expect(out).toContain("Import EVENT_HANDLERS from './src/events/index.ts' for it.");
+  });
+
+  it('writes no barrel when the package is already installed', async () => {
+    const installed = JSON.stringify({
+      imports: { '@setu-ts/events-plugin': `npm:@setu-ts/events-plugin@^${VERSION}` },
+    });
+    const h = harness({ '/app/deno.json': installed });
+
+    expect(await h.run(['events'])).toBe(0);
+    expect(h.out.join('\n')).toContain('already installed');
+    expect(() => h.read('/app/src/events/index.ts')).toThrow();
+  });
+
+  it('resolves no seam for a provider that consumes none', () => {
+    expect(addSeam('queue-plugin', new Set(['queue-plugin']))).toBeUndefined();
+    expect(addSeam('auth-plugin', new Set(['auth-plugin']))).toBeUndefined();
   });
 });

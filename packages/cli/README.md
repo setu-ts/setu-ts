@@ -453,8 +453,13 @@ so preserve application-specific policy outside that file.
 
 Adding one of the twelve safe zero-configuration providers wires its emitted plugin-list anchor in
 either style. Starter compositions instead name their option arm; configure that arm to avoid a
-duplicate registration. Manifest updates preserve existing key order. Deno frontend projects update
-imports without adding unused framework dependencies to their frontend package.json.
+duplicate registration. In a functional project, `events`, `cqrs`, `health` and `metrics` are
+registered with the generated-artifact barrel they consume, for example
+`EventsPlugin({ handlers: EVENT_HANDLERS })`, and an empty barrel is created when absent, so a
+handler a later `setu generate` writes is live. Class-based projects keep the bare call; their
+handlers arrive through the ingress barrel. Manifest updates preserve existing key order. Deno
+frontend projects update imports without adding unused framework dependencies to their frontend
+package.json.
 
 On a `cloudflare-workers` project, `setu add cloudflare` prints the registration that reads the
 platform sink — `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the

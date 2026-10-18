@@ -27,7 +27,7 @@ import {
   PROGRAM_NAME,
   type TargetRuntime,
 } from '../constants.ts';
-import { joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
+import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { stringFlag } from '../args.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
@@ -35,6 +35,8 @@ import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
+import { hostSeamSpecs } from '../seams/registry.ts';
+import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
 import {
   callsIdentifier,
   DEVTOOL_SOURCES_MODULE,
@@ -176,6 +178,45 @@ const ZERO_CONFIG_WIRINGS: ReadonlyMap<string, IPluginWiring> = new Map([
   ['realtime-backplane-plugin', { symbol: 'RealtimeBackplanePlugin' }],
 ]);
 
+/**
+ * The generated-artifact seam a zero-config provider consumes through its options.
+ *
+ * `setu new` wires each seam into `setu.config.ts` at scaffold time (for example
+ * `EventsPlugin({ handlers: EVENT_HANDLERS })` on `microservice`). `setu add` used to
+ * insert the bare call instead, so every handler a later `setu generate` wrote into
+ * the seam barrel was registered by nothing — the M60 defect class. This carries the
+ * same wiring `setu new` emits, derived from the same seam registry.
+ */
+export interface AddSeam {
+  /** Options argument for the provider call, e.g. `{ handlers: EVENT_HANDLERS }`. */
+  readonly args: string;
+  /** Config imports that bring the barrel symbols into scope. */
+  readonly imports: readonly { readonly symbols: readonly string[]; readonly from: string }[];
+  /** The seam barrels, rendered empty, for a project that has none yet. */
+  readonly files: readonly GeneratedFile[];
+}
+
+/**
+ * Resolves the seam a provider consumes in a project with the given packages.
+ *
+ * Class-based projects receive handlers through `DecoratorPlugin`'s ingress barrel,
+ * so `hostSeamSpecs` omits the functional event and CQRS seams there and this
+ * returns `undefined` — the bare call stays correct.
+ *
+ * @param bare - Bare package name being added
+ * @param installed - Bare package names installed after this add
+ * @returns The seam wiring, or `undefined` when the provider consumes none
+ */
+export function addSeam(bare: string, installed: ReadonlySet<string>): AddSeam | undefined {
+  const provider = ZERO_CONFIG_WIRINGS.get(bare);
+  if (provider === undefined) return undefined;
+  const specs = hostSeamSpecs(installed).filter((spec) => spec.requiresPlugin === bare);
+  if (specs.length === 0) return undefined;
+  const args = withPluginOptionSeams([{ pkg: bare, symbol: provider.symbol }], specs)[0]?.args;
+  if (args === undefined) return undefined;
+  return { args, imports: seamLocalImports(specs), files: seamFiles(specs) };
+}
+
 /** Starter-owned options, including optional arms that must first be configured. */
 const REST_ARMS: ReadonlyMap<string, string> = new Map([
   ['config-plugin', 'config'],
@@ -265,6 +306,7 @@ function printWiringNote(
   source: string | undefined,
   bare: string,
   log: (line: string) => void,
+  seam?: AddSeam,
 ): void {
   const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
@@ -305,11 +347,15 @@ function printWiringNote(
   // text silenced the guidance for a plugin nothing registers (audit round 5).
   // Only a real call in classified code, checked above, suppresses it.
   if (registration !== undefined) {
+    const call = seam === undefined ? registration : `${factory}(${seam.args})`;
     log(
       starter === undefined
-        ? `  Register ${registration} in setu.config.ts.`
-        : `  Register it after the factory returns: app.register(${registration});`,
+        ? `  Register ${call} in setu.config.ts.`
+        : `  Register it after the factory returns: app.register(${call});`,
     );
+    for (const item of seam?.imports ?? []) {
+      log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
+    }
   }
 }
 
@@ -471,10 +517,12 @@ function providerBinding(source: string, bare: string, symbol: string): string |
  *
  * @param source - Existing `setu.config.ts` contents
  * @param bare - Bare package name being added
+ * @param seam - The generated-artifact seam the provider consumes, if any: the
+ * call then carries its options and the barrel imports are added
  * @returns The updated config, or `undefined` when it is not an eligible
  * generated config or needs no change
  */
-export function withPluginWiring(source: string, bare: string): string | undefined {
+export function withPluginWiring(source: string, bare: string, seam?: AddSeam): string | undefined {
   const provider = ZERO_CONFIG_WIRINGS.get(bare);
   if (provider === undefined) return undefined;
 
@@ -520,18 +568,27 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   if (!source.includes(anchor) || referencesIdentifier(uses, factory)) {
     return undefined;
   }
+  // A barrel symbol already bound, or the barrel already imported, means the file
+  // carries wiring this edit cannot see the whole of: fail closed to guidance
+  // rather than declare an identifier twice.
+  for (const item of seam?.imports ?? []) {
+    if (visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`)) return undefined;
+    if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
+  }
 
-  const withImport = importedBinding === undefined ? `${providerImport}\n${source}` : source;
-  const insertion =
-    anchorMatch.index +
-    scope!.start +
-    (importedBinding === undefined ? providerImport.length + 1 : 0);
+  const prefix =
+    (importedBinding === undefined ? `${providerImport}\n` : '') +
+    (seam?.imports ?? [])
+      .map((item) => `import { ${item.symbols.join(', ')} } from '${item.from}';\n`)
+      .join('');
+  const withImport = `${prefix}${source}`;
+  const insertion = anchorMatch.index + scope!.start + prefix.length;
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
   const before = withImport.slice(lineStart, insertion);
   // On its own line the new call takes a line of its own at the same indentation;
   // inline it joins the array where it stands.
   const separator = before.trim() === '' ? `\n${before}` : ' ';
-  return `${withImport.slice(0, insertion)}${factory}(),${separator}${withImport.slice(insertion)}`;
+  return `${withImport.slice(0, insertion)}${factory}(${seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
 }
 
 /**
@@ -684,6 +741,21 @@ export async function runAddCommand(
   // decorated ingress class fail at startup because the capability was never
   // registered. Activate only the known generated shape; an application-owned
   // config can have arbitrary composition and is not ours to rewrite.
+  const installedAfter = new Set(await detectPlugins(deps.fs, dir));
+  installedAfter.add(bare);
+  const seam = addSeam(bare, installedAfter);
+  // The barrels exist whether or not the config could be rewritten: the printed
+  // guidance names them, and an import of a missing module would not compile.
+  // Only on a real install — re-adding a present package writes nothing.
+  for (const file of edits.length > 0 ? (seam?.files ?? []) : []) {
+    const path = joinPath(dir, file.path);
+    try {
+      await deps.fs.readFile(path);
+    } catch {
+      edits.push({ path, contents: file.contents });
+    }
+  }
+
   const configPath = joinPath(dir, 'setu.config.ts');
   let configSource: string | undefined;
   try {
@@ -692,7 +764,7 @@ export async function runAddCommand(
     // imports mean something its text does not say: no automatic wiring then.
     const wired = (await frameworkImportsRetargeted(deps.fs, dir))
       ? undefined
-      : withPluginWiring(config, bare);
+      : withPluginWiring(config, bare, seam);
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
     configSource = wired ?? config;
   } catch {
@@ -716,8 +788,7 @@ export async function runAddCommand(
     // A project without this managed module has not opted into source wiring.
   }
   if (existingSources !== undefined) {
-    const installed = new Set(await detectPlugins(deps.fs, dir));
-    installed.add(bare);
+    const installed = installedAfter;
     const names = await readDevtoolSourceNames(deps.fs, dir, installed, configSource ?? '');
     const sources = renderDevtoolSources(installed, names);
     const sourcesPath = joinPath(dir, sources.path);
@@ -782,7 +853,7 @@ export async function runAddCommand(
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
-  printWiringNote(configSource, bare, deps.log);
+  printWiringNote(configSource, bare, deps.log, seam);
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`
     // while nothing reads it (a read-free parameter must be underscored to pass

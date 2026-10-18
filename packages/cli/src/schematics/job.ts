@@ -73,21 +73,34 @@ export interface ${names.pascal}JobData {
  * Runs the ${names.kebab} job.
  *
  * The CLI does not wire this one: whether it is queue work or scheduled work is a
- * choice only you can make, and each needs something this module does not carry — a
- * running consumer, or a schedule. Pick ONE:
+ * choice only you can make. Register it in \`setu.config.ts\` with ONE of:
  *
  * \`\`\`typescript
  * // Queue work — a producer calls queue.add(${names.screaming}_JOB, data) elsewhere.
- * const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
- * await queue.process(${names.screaming}_JOB, (job) => run${names.pascal}Job(job.data));
+ * QueuePlugin({
+ *   processors: [
+ *     {
+ *       name: ${names.screaming}_JOB,
+ *       processor: (job) => run${names.pascal}Job(job.data as ${names.pascal}JobData),
+ *     },
+ *   ],
+ * }),
  *
  * // Scheduled work — the expression is yours; this one is every day at 02:00 UTC.
- * const scheduler = app.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
- * scheduler.cron(${names.screaming}_JOB, '0 2 * * *', () => run${names.pascal}Job({ id: '' }));
+ * SchedulerPlugin({
+ *   jobs: [
+ *     {
+ *       trigger: 'cron',
+ *       name: ${names.screaming}_JOB,
+ *       expression: '0 2 * * *',
+ *       handler: () => run${names.pascal}Job({ id: '' }),
+ *     },
+ *   ],
+ * }),
  * \`\`\`
  *
- * Both need a capability that exists only after \`app.start()\`, so a plugin's
- * \`register\` — see \`setu generate plugin\` — is the natural home for the call.
+ * Replace the existing \`QueuePlugin()\` or \`SchedulerPlugin()\` call rather than
+ * adding a second one: the kernel refuses a duplicate plugin name.
  *
  * @param data - The job payload
  */
