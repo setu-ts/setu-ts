@@ -8,6 +8,7 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
 
 import type {
   CursorPayload,
@@ -114,7 +115,7 @@ async function findD1Page(
     decoded = decodeCursor(query.cursor);
     if (decoded === null) {
       return Promise.reject(
-        new CloudflareUnsupportedError(`D1: entity '${target.table}': malformed cursor token`),
+        new InvalidCursorError(`Entity '${target.table}': malformed cursor token.`),
       );
     }
   }
@@ -124,10 +125,16 @@ async function findD1Page(
   const fingerprint = sortFingerprint(query.orderBy);
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
-      new CloudflareUnsupportedError(
-        `D1: entity '${target.table}': cursor fingerprint mismatch — expected ` +
-          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
-      ),
+      new InvalidCursorError(`Entity '${target.table}': cursor fingerprint mismatch.`),
+    );
+  }
+  if (
+    decoded !== null &&
+    (decoded.keyValues.length !== target.primaryKey.length ||
+      decoded.orderedValues.length !== Object.keys(query.orderBy).length)
+  ) {
+    return Promise.reject(
+      new InvalidCursorError(`Entity '${target.table}': cursor key shape mismatch.`),
     );
   }
 
@@ -234,6 +241,8 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
       const row = await prepareStatement(db, buildUpdate(target, id, data)).first();
       if (row === null) {
         throw new Error(`Entity '${target.table}' with id '${JSON.stringify(id)}' not found`);
@@ -251,6 +260,7 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       if (!checked.ok) throw new CloudflareUnsupportedError(checked.problem);
       where = checked.where;
       data = checked.data;
+      assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
       return await prepareStatement(db, buildUpdateWhere(target, id, where, data)).first();
     },
     async deleteWhere(id, where) {
@@ -389,6 +399,8 @@ export function createD1TransactionDataSource(
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
       buffer.assertOpen();
       const current = await committed.findById(id);
       if (current === null) {

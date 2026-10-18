@@ -772,7 +772,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
         offset: 0,
         select: [],
       }),
-    ).rejects.toThrow("has no 'sku' column for orderBy");
+    ).rejects.toThrow('has no "sku" column for orderBy');
 
     const drizzleSource = createDrizzleDataSource(
       createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
@@ -788,7 +788,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
         offset: 0,
         select: [],
       }),
-    ).rejects.toThrow("has no 'sku' column");
+    ).rejects.toThrow('has no "sku" column');
   });
 
   it('Memory and Drizzle both refuse an unknown select column, by name', async () => {
@@ -799,7 +799,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
 
     await expect(
       memorySource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
-    ).rejects.toThrow("has no 'sku' column for select");
+    ).rejects.toThrow('has no "sku" column for select');
 
     const drizzleSource = createDrizzleDataSource(
       createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
@@ -809,7 +809,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
     );
     await expect(
       drizzleSource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
-    ).rejects.toThrow("has no 'sku' column");
+    ).rejects.toThrow('has no "sku" column');
   });
 });
 

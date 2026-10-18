@@ -6435,6 +6435,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   raised — a budget-refused publish counted as a failure, a row id quoted in a store error, and a
   cubic continued-line join in the same gate — were fixed afterwards and not re-audited, at the
   maintainer's direction — complete (PR #469)
+- **Milestone 113g** (`packages/database-plugin` + `packages/common` + `packages/cloudflare-plugin`
+  — database calls and errors under faults and edge inputs; V9-25, V9-26, V9-33, V9-34, V9-48): an
+  `update`/`updateWhere` payload changing a primary key is refused with `PrimaryKeyChangeError`
+  (`400`) on all eight data sources through one `assertPrimaryKeyUnchanged` in `common`, checked and
+  written from one payload snapshot (a getter can no longer show the check one key and the write
+  another); measured on real Prisma 7.10, the row used to move. A bad client cursor answers
+  `InvalidCursorError` (`400`, a fixed detail naming no adapter), and on Drizzle and Prisma so does
+  a well-formed cursor whose value the database refuses by type (`22P02`/`22003`/`22007`/`22008`, or
+  Prisma's validation error). Drizzle refuses a missing key column when the repository is created
+  and an unknown payload field with `UnknownPayloadFieldError` (`400`, the maintainer's call over
+  the planned masked `500`). Both node-postgres connect timeouts answer `503`, and `query_timeout`
+  firing answers `504` through `DatabaseTimeoutError`, whose contract says a write's outcome is
+  unknown; the plugin adds no deadline of its own. Measured on a paused PostgreSQL 16: about 1 s
+  each, and about twice the bound inside a transaction because the `ROLLBACK` waits behind the hung
+  statement. Implemented by Codex, whose second run was cut short by its usage limit and finished by
+  Claude; opencode wrote the docs, and five of its seven driver-timeout names were invented or
+  misnamed until checked against the installed types. The committed-tree audit ran three
+  fresh-context Claude rounds (none by Codex, at the maintainer's direction). Round 1 found client
+  text quoted back by PostgreSQL classified as a timeout or outage (also true of the M90f pool
+  anchor), a raw field name in a log message, and Drizzle's own `enableRLS` passing as a column;
+  round 2 found the SQLite unique anchor matching client text the same way. Round 3 found a server
+  data fault on a later page read as a bad cursor, an M113f scrub that a frame-shaped bound value
+  survived, and a `TypeError` the round-2 name helper introduced; all are fixed and NOT re-audited,
+  at the maintainer's direction — complete (PR #470)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

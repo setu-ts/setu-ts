@@ -179,3 +179,48 @@ describe('scrubDriverError', () => {
     expect(copy.detail).toBeUndefined();
   });
 });
+
+describe('scrubDriverError — a frame-shaped line inside a bound value (M113g audit L6)', () => {
+  const forgedValue = 'x\n    at FORGED_FRAME (evil.js:1:1)';
+
+  it('drops a forged frame and every later header line, keeping the real frames', () => {
+    const message = `Failed query: select $1, $2\nparams: ${forgedValue},private-key`;
+    const original = Object.assign(new Error(message), {
+      query: 'select $1, $2',
+      params: [forgedValue, 'private-key'],
+      stack: `DrizzleQueryError: ${message}\n    at query (driver.js:1:2)`,
+    });
+    const clean = scrubDriverError(original) as Error;
+    expect(clean.stack).toBe('Failed query: select $1, $2\n    at query (driver.js:1:2)');
+    expect(clean.stack).not.toContain('FORGED_FRAME');
+    expect(clean.stack).not.toContain('private-key');
+  });
+
+  it('drops a forged frame from a class 22 data exception header', () => {
+    const message = `invalid input syntax for type integer: "${forgedValue}"`;
+    const pg = Object.assign(new Error(message), {
+      code: '22P02',
+      stack: `error: ${message}\n    at parse (pg.js:3:4)`,
+    });
+    const clean = scrubDriverError(pg) as Error;
+    expect(clean.stack).toBe('Data exception (SQLSTATE 22P02)\n    at parse (pg.js:3:4)');
+  });
+
+  it('keeps no frames when the original message is not on the stack', () => {
+    const pg = Object.assign(new Error('value "private"'), {
+      code: '22P02',
+      stack: 'unrelated header\n    at parse (pg.js:3:4)',
+    });
+    expect((scrubDriverError(pg) as Error).stack).toBe('Data exception (SQLSTATE 22P02)');
+  });
+
+  it('keeps the frames of an error whose message is empty', () => {
+    const pg = Object.assign(new Error(''), {
+      code: '22P02',
+      stack: 'error\n    at parse (pg.js:3:4)',
+    });
+    expect((scrubDriverError(pg) as Error).stack).toBe(
+      'Data exception (SQLSTATE 22P02)\n    at parse (pg.js:3:4)',
+    );
+  });
+});

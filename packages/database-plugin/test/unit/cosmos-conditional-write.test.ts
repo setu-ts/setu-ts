@@ -84,7 +84,7 @@ describe('Cosmos guarded conditional writes', () => {
   it('refuses partition moves and unguardable documents, maps 404, and propagates other faults', async () => {
     const fixture = setup();
     await expect(
-      fixture.source.updateWhere!('a', { role: 'owner' }, { id: 'ignored', name: 'new' }),
+      fixture.source.updateWhere!('a', { role: 'owner' }, { id: 'a', name: 'new' }),
     ).resolves.toMatchObject({ id: 'a' });
     delete fixture.fake.documents.get('User|"a"|a')!._etag;
     await expect(fixture.source.deleteWhere!('a', { role: 'owner' })).rejects.toThrow(/_etag/);

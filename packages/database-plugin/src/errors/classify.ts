@@ -13,15 +13,19 @@
  *
  * The signal table is per backend (§3.2 of the M90f plan). A **code** is
  * read first — SQLSTATE for the SQL backends, a gRPC status for Bigtable,
- * the Cosmos HTTP status — and driver **error names** and one **message
- * anchor** cover only the signals no code is carried on. Every anchor has a
+ * the Cosmos HTTP status — and driver **error names** and **message
+ * anchors** cover the remaining signals. Every anchor has a
  * real-backend test that fails if the driver's text changes, which is the
  * only thing that makes a message match safe.
  *
  * @module
  */
 import { isConnectionFaultCode, DuplicateKeyError } from '@setu-ts/common';
-import { DatabaseUnavailableError, SerializationConflictError } from '../errors.ts';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  SerializationConflictError,
+} from '../errors.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
 /**
@@ -34,10 +38,12 @@ import type { DatabaseAdapterType } from '../interfaces/index.ts';
  * - `'duplicate'` — the write would duplicate a primary key or a unique
  *   index; the operation did not happen and repeating it fails the same way
  *   (`409`).
+ * - `'timeout'` — the driver call bound elapsed; a write's outcome is
+ *   unknown and retries must be idempotent (`504`).
  *
  * @since 0.5.0
  */
-export type DriverErrorClass = 'conflict' | 'unavailable' | 'duplicate';
+export type DriverErrorClass = 'conflict' | 'unavailable' | 'duplicate' | 'timeout';
 
 /**
  * The maximum number of `cause` hops the walk performs.
@@ -87,7 +93,7 @@ const DUPLICATE_KEY_CODES: ReadonlySet<string> = new Set(['23505', 'P2002', 'ER_
  * `node:sqlite`'s message and the SQLite drivers Drizzle supports, for a
  * primary key and a unique index alike.
  */
-const SQLITE_UNIQUE_ANCHOR = 'UNIQUE constraint failed';
+const SQLITE_UNIQUE_ANCHOR = 'UNIQUE constraint failed:';
 
 /** SQLSTATE `57P03` — `cannot_connect_now`, refused by the server itself. */
 const PG_CANNOT_CONNECT_NOW = '57P03';
@@ -99,6 +105,10 @@ const PG_CANNOT_CONNECT_NOW = '57P03';
  * driver's wording moves.
  */
 const PG_POOL_TIMEOUT_ANCHOR = 'timeout exceeded when trying to connect';
+/** pg-pool bounds a new connection handshake separately from pool waiting. */
+const PG_NEW_CONNECTION_TIMEOUT_ANCHOR = 'Connection terminated due to connection timeout';
+/** Client-side pg query bound; the statement may already have run. */
+const PG_QUERY_TIMEOUT_ANCHOR = 'Query read timeout';
 
 /** The MongoDB error label marking a transaction conflict as retryable. */
 const MONGO_TRANSIENT_TRANSACTION_ERROR = 'TransientTransactionError';
@@ -144,6 +154,7 @@ export function classifyDriverError(
   if (
     error instanceof SerializationConflictError ||
     error instanceof DatabaseUnavailableError ||
+    error instanceof DatabaseTimeoutError ||
     error instanceof DuplicateKeyError
   ) {
     return null;
@@ -160,30 +171,73 @@ export function classifyDriverError(
     const matched = classifyStructured(members, adapterType);
     if (matched !== null) return matched;
   }
+  const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
   for (const members of candidates) {
-    const matched = classifyFallback(members);
+    const matched = classifyFallback(members, classifyPgTimeout(members.message, hasStringCode));
     if (matched !== null) return matched;
   }
   return null;
 }
 
 /**
- * Whether a thrown value is node-postgres pool exhaustion — the pool timing
- * out a connection request (M101a V8-3).
+ * Whether node-postgres timed out waiting for a pool client, a new
+ * connection handshake, or a query answer.
  *
  * Internal. The Drizzle reachability probe uses it to tell "every connection
- * is busy" from "the database refused": exhaustion is rethrown, so the
+ * is unanswered" from "the database refused": timeouts are rethrown, so the
  * service reports `undefined` rather than `false`. It matches the same
- * message anchor {@linkcode classifyDriverError} uses, over the same bounded,
- * cycle-safe cause walk, so the two cannot disagree about what exhaustion is.
+ * message anchors {@linkcode classifyDriverError} uses, over the same bounded,
+ * cycle-safe cause walk, so the two cannot disagree about an unanswered call.
  *
  * @param error - The thrown value
- * @returns `true` when any error in the cause chain carries the anchor
+ * @returns `true` when any error in the cause chain carries a timeout anchor
  */
-export function isPoolExhaustion(error: unknown): boolean {
+export function isUnansweredConnect(error: unknown): boolean {
+  const candidates = causeChainMembers(error);
+  const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
+  return candidates.some(({ message }) => classifyPgTimeout(message, hasStringCode) !== null);
+}
+
+/** The class 22 codes a supplied value can cause; see {@linkcode isValueTypeRefusal}. */
+const VALUE_REFUSAL_CODES: ReadonlySet<string> = new Set(['22P02', '22003', '22007', '22008']);
+
+/**
+ * Whether the database refused a supplied value as the wrong type for its
+ * column: one of the four SQLSTATE class 22 codes a supplied value can cause
+ * (`22P02` invalid text representation, `22003` numeric value out of range,
+ * `22007` invalid datetime format, `22008` datetime field overflow) anywhere
+ * in the cause chain, or Prisma's client-side `PrismaClientValidationError`,
+ * which Prisma raises before any SQL for a value its schema does not accept.
+ * Other class 22 codes (division by zero, `22012`) are data faults the server
+ * computes, not a refused input (M113g audit round 3, L5).
+ *
+ * Internal. The Drizzle and Prisma keyset pages use it to answer a forged,
+ * well-formed cursor carrying a mistyped value with `InvalidCursorError`
+ * instead of a masked `500` (M113g, plan §3.5a). Reads go through the same
+ * bounded, guarded cause walk as the classifier.
+ *
+ * @param error - The thrown value
+ * @returns `true` when the backend rejected a value's type
+ */
+export function isValueTypeRefusal(error: unknown): boolean {
   return causeChainMembers(error).some(
-    ({ message }) => typeof message === 'string' && message.includes(PG_POOL_TIMEOUT_ANCHOR),
+    ({ code, name }) =>
+      (typeof code === 'string' && VALUE_REFUSAL_CODES.has(code)) ||
+      name === 'PrismaClientValidationError',
   );
+}
+
+/** Fixed pg timeout messages are authoritative only on a chain without string codes. */
+function classifyPgTimeout(
+  message: unknown,
+  hasStringCode: boolean,
+): 'unavailable' | 'timeout' | null {
+  if (hasStringCode) return null;
+  if (message === PG_POOL_TIMEOUT_ANCHOR || message === PG_NEW_CONNECTION_TIMEOUT_ANCHOR) {
+    return 'unavailable';
+  }
+  if (message === PG_QUERY_TIMEOUT_ANCHOR) return 'timeout';
+  return null;
 }
 
 /**
@@ -289,10 +343,12 @@ function classifyStructured(
 }
 
 /**
- * Classifies fallback signals from errors that carried no machine-readable
- * driver signal anywhere in their cause chain.
+ * Classifies fallback signals after no structured rule matched the cause chain.
  */
-function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorClass | null {
+function classifyFallback(
+  { name, message }: DriverErrorMembers,
+  pgTimeout: 'unavailable' | 'timeout' | null,
+): DriverErrorClass | null {
   // Driver error names, for the signals no code is carried on. These are
   //    `name` STRINGS, deliberately — the classifier sees foreign objects,
   //    not classes it could `instanceof`.
@@ -306,13 +362,17 @@ function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorCla
     if (name === 'TimeoutError' || name === 'NetworkingError') return 'unavailable';
   }
 
-  // The two message anchors — node-postgres pool exhaustion and SQLite's
-  //    unique violation, neither of which carries a code. Reached last, only
+  // Message anchors — node-postgres connection/query timeouts and SQLite's
+  //    unique violation. SQLite may carry ERR_SQLITE_ERROR. Reached last, only
   //    after every structured signal missed; each is pinned by a test against
   //    the real engine.
+  if (pgTimeout !== null) return pgTimeout;
   if (typeof message === 'string') {
-    if (message.includes(PG_POOL_TIMEOUT_ANCHOR)) return 'unavailable';
-    if (message.includes(SQLITE_UNIQUE_ANCHOR)) return 'duplicate';
+    if (
+      message.startsWith(SQLITE_UNIQUE_ANCHOR) ||
+      message.startsWith(`D1_ERROR: ${SQLITE_UNIQUE_ANCHOR}`)
+    )
+      return 'duplicate';
   }
 
   return null;

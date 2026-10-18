@@ -21,7 +21,7 @@ import type { IMongoDatabase } from '../../src/adapters/mongo/mongo-client-types
 import { DatabaseService } from '../../src/index.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
 import { SerializationConflictError } from '../../src/errors.ts';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { DuplicateKeyError, PrimaryKeyChangeError } from '@setu-ts/common';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 
 /** `MONGO_URL` is the §7 gate variable; `MONGODB_URI` is the CI's name. */
@@ -266,9 +266,10 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
         ).resolves.toHaveLength(1);
         await expect(source.count({}, { type: 'or', filters: [] })).resolves.toBe(0);
 
-        // The server rejects a `$set` that would change `_id`, so the primary key
-        // must never reach the update payload.
-        await expect(source.update(1, { id: 99, name: 'renamed' })).resolves.toEqual({
+        await expect(source.update(1, { id: 99, name: 'renamed' })).rejects.toBeInstanceOf(
+          PrimaryKeyChangeError,
+        );
+        await expect(source.update(1, { id: 1, name: 'renamed' })).resolves.toEqual({
           id: 1,
           name: 'renamed',
         });
@@ -825,3 +826,32 @@ describe('MongoAdapter against a real server — duplicate key', () => {
     },
   );
 });
+
+it(
+  'M113g real MongoDB refuses changed keys and keeps the stored document unchanged',
+  { skip: skipReal },
+  async () => {
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m113g',
+      collections: {
+        User: { collection: `keys_${crypto.randomUUID().replaceAll('-', '')}`, primaryKey: 'id' },
+      },
+    });
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('User');
+      await source.create({ id: 'old', name: 'before' });
+      await expect(source.update('old', { id: 'new', name: 'after' })).rejects.toBeInstanceOf(
+        PrimaryKeyChangeError,
+      );
+      await expect(
+        source.updateWhere!('old', { name: 'before' }, { id: 'new' }),
+      ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
+      expect(await source.findById('old')).toMatchObject({ id: 'old', name: 'before' });
+      expect(await source.findById('new')).toBeNull();
+    } finally {
+      await adapter.disconnect();
+    }
+  },
+);

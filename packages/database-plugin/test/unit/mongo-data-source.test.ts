@@ -10,6 +10,7 @@
  *
  * @module
  */
+import { PrimaryKeyChangeError } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import type { IMongoSession } from '../../src/adapters/mongo/mongo-client-types.ts';
@@ -312,7 +313,10 @@ describe('update never sends the primary key to the driver', () => {
     const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
     await ds.create({ id: 7, name: 'first' });
 
-    await ds.update(7, { id: 9, name: 'renamed' });
+    await expect(ds.update(7, { id: 9, name: 'renamed' })).rejects.toBeInstanceOf(
+      PrimaryKeyChangeError,
+    );
+    await ds.update(7, { id: 7, name: 'renamed' });
 
     const call = client
       .db('testdb')
@@ -326,7 +330,10 @@ describe('update never sends the primary key to the driver', () => {
   it('still updates the addressed row and returns it with its key intact', async () => {
     const ds = makeDataSource();
     await ds.create({ id: 7, name: 'first' });
-    expect(await ds.update(7, { id: 9, name: 'renamed' })).toEqual({ id: 7, name: 'renamed' });
+    await expect(ds.update(7, { id: 9, name: 'renamed' })).rejects.toBeInstanceOf(
+      PrimaryKeyChangeError,
+    );
+    expect(await ds.update(7, { id: 7, name: 'renamed' })).toEqual({ id: 7, name: 'renamed' });
     // The row keeps its original key: `update` moves no row to a new id.
     expect(await ds.findById(7)).toEqual({ id: 7, name: 'renamed' });
   });
@@ -368,11 +375,8 @@ describe('the fake client honours the real driver where the adapter depends on i
 });
 
 describe('update strips the primary key before it can be converted', () => {
-  it('an unconvertible key in the payload does not fail the update', async () => {
-    // The key is discarded, so it must not be able to fail the call on its way
-    // out. Stripping AFTER `toDriverDocument` left `toDriverId` running first,
-    // and on an `idType: 'objectId'` target that throws for a value the update
-    // was never going to use.
+  it('refuses an unconvertible changed key before driver conversion', async () => {
+    // A changed mapped key is refused before the driver attempts conversion.
     const client = makeClient();
     const ds = createMongoDataSource(
       client,
@@ -386,7 +390,7 @@ describe('update strips the primary key before it can be converted', () => {
 
     await expect(
       ds.update(valid, { id: 'not-a-valid-objectid', name: 'renamed' }),
-    ).resolves.toMatchObject({ name: 'renamed' });
+    ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
   });
 
   it('a stray literal `_id` beside the mapped key never reaches $set', async () => {

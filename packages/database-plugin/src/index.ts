@@ -101,6 +101,8 @@ export {
   CosmosConcurrentModificationError,
   CosmosTransactionScopeError,
   DatabaseUnavailableError,
+  DatabaseTimeoutError,
+  UnknownPayloadFieldError,
   MongoTransactionUnavailableError,
   SerializationConflictError,
   UnsupportedFilterOperatorError,

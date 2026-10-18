@@ -12,6 +12,47 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Key-change and cursor refusals answer `400`; Drizzle refuses unknown payload fields; bound PostgreSQL calls with `query_timeout` (M113g, breaking)
+
+**Catch `PrimaryKeyChangeError`, not the old answers, for a key change through `update`.** Every
+`update` and `updateWhere` of the eight data sources now refuses a payload that carries a key column
+whose value differs from the addressed key, with `PrimaryKeyChangeError` (branded `400 Bad Request`,
+fixed detail "An update cannot change a row's primary key."), before any I/O. If your code relied on
+the old divergence — Drizzle, Prisma or D1 moving the row, or MongoDB, Cosmos DB or DynamoDB
+answering success with the key column stripped — the same call now rejects. An equal value is still
+accepted, compared as a string for `string`, `number`, `bigint` and `ObjectId`-like values and by
+time for `Date` values, so `update('5', { id: 5 })` works and `'05'` against `5` is refused.
+Bigtable's old `501` `UnsupportedQueryFeatureError` (`row-key`) answer is the same `400`; if you
+branch on `instanceof UnsupportedQueryFeatureError` or on the `501` status for a Bigtable key
+change, switch to `PrimaryKeyChangeError`.
+
+**Catch `InvalidCursorError` for a bad cursor.** A `?cursor=` token that is malformed, was made
+under a different sort, or is the wrong shape for the target now rejects with `InvalidCursorError`
+(branded `400 Bad Request`, fixed detail "The pagination cursor is not valid for this query.") from
+every `findPage` implementation, before any backend call; `instanceof UnsupportedQueryFeatureError`
+no longer matches it. `501` remains for a backend that cannot page the query at all, so a catch that
+meant "this backend cannot page" must now distinguish the two.
+
+**Pick the columns before a Drizzle write.** A Drizzle `create`, `update` or `updateWhere` payload
+that names a field that is not a column of the table is now refused by name before any I/O instead
+of being dropped by Drizzle, with `UnknownPayloadFieldError` (`400`); if you passed a whole DTO,
+project the table's columns first. A Drizzle table whose key column is not a column of the table is
+now refused when the repository is created (`getRepository`), instead of lazily inside `findById`,
+`update` or `delete` — check the table definition and the `primaryKey` override at startup, not on
+first use.
+
+**Bound PostgreSQL calls with `query_timeout`.** The plugin adds no call deadline of its own — a
+JavaScript deadline cannot cancel the statement, and inside a transaction it rejects while the
+statement may still commit. Set `query_timeout` (and `connectionTimeoutMillis` for the connect
+attempt) on the `Pool` you hand Drizzle; a query that hits the bound now answers
+`504 Gateway Timeout` with `DatabaseTimeoutError` (fixed detail "The database did not answer in
+time."), and node-postgres's second connect-timeout message
+(`Connection terminated due to connection timeout`) answers `503` beside
+`timeout exceeded when trying to connect` instead of a masked `500`. The timed-out statement may
+have run, so a write's outcome is unknown — make a retried write idempotent. The behaviour of a
+timed-out statement inside a transaction is measured in this milestone; see the
+`@setu-ts/database-plugin` README's `Bounding a call` section.
+
 ### Health `details` and `SwaggerOptions` (M113f, breaking)
 
 **V9-47:** `/health`, `/live`, and `/ready` now return status-only checks by default:

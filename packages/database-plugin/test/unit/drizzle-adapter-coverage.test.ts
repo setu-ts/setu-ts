@@ -438,7 +438,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await adapter.connect();
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await expect(ds.findAll(normalizeQuery({ where: { nickname: 'x' } }))).rejects.toThrow(
-        "Drizzle table 'user' has no 'nickname' column",
+        'Drizzle table \'user\' has no "nickname" column',
       );
     });
 
@@ -446,7 +446,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await adapter.connect();
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await expect(ds.findAll(normalizeQuery({ orderBy: { nickname: 'asc' } }))).rejects.toThrow(
-        "has no 'nickname' column",
+        'has no "nickname" column',
       );
     });
 
@@ -454,7 +454,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await adapter.connect();
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await expect(ds.findAll(normalizeQuery({ select: ['nickname'] }))).rejects.toThrow(
-        "has no 'nickname' column",
+        'has no "nickname" column',
       );
     });
 

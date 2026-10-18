@@ -49,7 +49,7 @@ describe('the observed column set', () => {
   it('reports every observed column in the diagnostic', () => {
     const rows = [{ id: 'a' }, { id: 'b', deletedAt: 1 }];
     expect(unknownColumnError('Product', rows, query({ select: ['sku'] }))?.message).toContain(
-      'Known columns: deletedAt, id.',
+      'Known columns: "deletedAt", "id".',
     );
   });
 });
@@ -73,7 +73,7 @@ describe('unknownColumnError', () => {
       [{ id: 'p1', name: 'Bolt' }],
       query({ select: ['sku'] }),
     );
-    expect(error?.message).toContain("entity 'Product' has no 'sku' column for select.");
+    expect(error?.message).toContain('entity \'Product\' has no "sku" column for select.');
   });
 
   it('lists the columns it did observe, so the typo is visible', () => {
@@ -82,7 +82,7 @@ describe('unknownColumnError', () => {
       [{ id: 'p1', name: 'Bolt' }],
       query({ orderBy: { nme: 'asc' } }),
     );
-    expect(error?.message).toContain('Known columns: id, name.');
+    expect(error?.message).toContain('Known columns: "id", "name".');
   });
 
   it('returns rather than throws, so a Promise-returning caller can reject', () => {
@@ -112,7 +112,7 @@ describe('MemoryAdapter column validation', () => {
     const adapter = await seeded();
     await expect(
       adapter.createDataSource('Product').findAll(query({ select: ['id', 'sku'] })),
-    ).rejects.toThrow("has no 'sku' column for select");
+    ).rejects.toThrow('has no "sku" column for select');
   });
 
   it('orders by a known column', async () => {
@@ -127,7 +127,7 @@ describe('MemoryAdapter column validation', () => {
     const adapter = await seeded();
     await expect(
       adapter.createDataSource('Product').findAll(query({ orderBy: { sku: 'desc' } })),
-    ).rejects.toThrow("has no 'sku' column for orderBy");
+    ).rejects.toThrow('has no "sku" column for orderBy');
   });
 
   it('accepts a column carried by only some rows', async () => {
@@ -169,7 +169,7 @@ describe('MemoryAdapter column validation', () => {
       const txn = await adapter.beginTransaction();
       await expect(
         txn.createDataSource('Product').findAll(query({ select: ['sku'] })),
-      ).rejects.toThrow("has no 'sku' column for select");
+      ).rejects.toThrow('has no "sku" column for select');
       await txn.rollback();
     });
 
@@ -178,7 +178,7 @@ describe('MemoryAdapter column validation', () => {
       const txn = await adapter.beginTransaction();
       await expect(
         txn.createDataSource('Product').findAll(query({ orderBy: { sku: 'asc' } })),
-      ).rejects.toThrow("has no 'sku' column for orderBy");
+      ).rejects.toThrow('has no "sku" column for orderBy');
       await txn.rollback();
     });
 

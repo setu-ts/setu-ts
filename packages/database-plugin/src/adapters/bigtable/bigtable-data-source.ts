@@ -15,6 +15,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   EntityKey,
   FilterExpression,
@@ -192,40 +194,6 @@ function keyFieldsOf(target: BigtableTarget, id: EntityKey): Record<string, unkn
   return { ...id };
 }
 
-/**
- * Refuses an update whose payload would move the row to a different key.
- *
- * Bigtable has no rename: writing a new key would create a SECOND row and
- * leave the original behind, so an update that appears to move a row would
- * silently duplicate it.
- *
- * @param target - The resolved entity target
- * @param id - The key being updated
- * @param data - The update payload
- * @throws {UnsupportedQueryFeatureError} When the payload disagrees with the key
- */
-function assertKeyUnchanged(
-  target: BigtableTarget,
-  id: EntityKey,
-  data: Readonly<Record<string, unknown>>,
-): void {
-  const current = keyFieldsOf(target, id);
-  for (const field of target.keyFields) {
-    if (!(field in data)) continue;
-    const supplied = data[field];
-    if (supplied === undefined) continue;
-    if (String(supplied) === String(current[field])) continue;
-    throw new UnsupportedQueryFeatureError(
-      'row-key',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' cannot move a row: update() was given ` +
-        `'${field}' = '${String(supplied)}' for the row keyed ` +
-        `'${String(current[field])}'. Bigtable has no rename — writing the new key would ` +
-        `create a second row and leave this one behind. Delete and re-create instead.`,
-    );
-  }
-}
-
 /** Everything one data source needs beyond the table handle. */
 export interface BigtableDataSourceOptions {
   /** How many server round trips one `findPage` may take. Defaults to 10. */
@@ -323,7 +291,8 @@ export function createBigtableDataSource(
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
       const rowKey = composeRowKey(target, id, 'update');
-      assertKeyUnchanged(target, id, data);
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
       const cells = buildCells(target, index, data, 'update');
       const hasCells = Object.keys(cells).length > 0;
 
@@ -397,10 +366,10 @@ export function createBigtableDataSource(
             }
             where = checked.where;
             data = checked.data;
+            assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
             const rowKey = composeRowKey(target, id, 'updateWhere');
             const test = preconditionTest(target, where);
             if (test === null) return null;
-            assertKeyUnchanged(target, id, data);
             const cells = buildCells(target, index, data, 'update');
             const matched = await table.row(rowKey).conditionalMutate(test, {
               onMatch: [{ method: 'insert', data: cells }],
@@ -559,7 +528,7 @@ export function createBigtableDataSource(
  * @param query - The page query
  * @param fingerprint - The sort fingerprint the query resolves to
  * @returns The start key, or `null` when the walk starts at the beginning
- * @throws {UnsupportedQueryFeatureError} When the token is malformed or was
+ * @throws {InvalidCursorError} When the token is malformed or was
  *   minted under a different sort
  */
 function decodeStartKey(
@@ -570,27 +539,20 @@ function decodeStartKey(
   if (query.cursor === undefined) return null;
   const decoded = decodeCursor(query.cursor);
   if (decoded === null) {
-    throw new UnsupportedQueryFeatureError(
-      'cursor-pagination',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' received a malformed cursor token.`,
-    );
+    throw new InvalidCursorError(`Entity '${target.entity}': malformed cursor token.`);
   }
   if (decoded.sortFingerprint !== fingerprint) {
-    throw new UnsupportedQueryFeatureError(
-      'cursor-pagination',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' received a cursor minted under sort ` +
-        `'${decoded.sortFingerprint}' but was asked for '${fingerprint}'.`,
-    );
+    throw new InvalidCursorError(`Entity '${target.entity}': cursor fingerprint mismatch.`);
   }
-  if (decoded.keyValues.length !== target.keyFields.length) {
-    throw new UnsupportedQueryFeatureError(
-      'cursor-pagination',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' received a cursor carrying ` +
-        `${decoded.keyValues.length} key values for a ${target.keyFields.length}-field row key.`,
-    );
+  if (
+    decoded.keyValues.length !== target.keyFields.length ||
+    decoded.keyValues.some(
+      (value) =>
+        (typeof value !== 'string' && typeof value !== 'number') ||
+        (target.keyFields.length > 1 && String(value).includes(target.separator)),
+    )
+  ) {
+    throw new InvalidCursorError(`Entity '${target.entity}': cursor key shape mismatch.`);
   }
   const fields: Record<string, unknown> = {};
   target.keyFields.forEach((field, position) => {

@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 /**
  * Start-key cursor pagination.
  *
@@ -8,7 +9,6 @@ import type { IDataSource, NormalizedQuery, PageResult } from '@setu-ts/common';
 import { decodeCursor, encodeCursor, sortFingerprint } from '@setu-ts/common';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
-import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
 
 /** Builds a fully-resolved page query. */
@@ -53,6 +53,27 @@ async function walk(source: IDataSource, base: Partial<NormalizedQuery>): Promis
 }
 
 describe('findPage', () => {
+  it('refuses decoded key segments incompatible with the target without leaking them', async () => {
+    const store = new FakeBigtableStore();
+    const target = resolveBigtableTarget('Order', {
+      Order: { rowKey: { fields: ['tenantId', 'orderId'], separator: '#' } },
+    });
+    const source = createBigtableDataSource(
+      createFakeBigtableClient(store).instance('i').table('Order'),
+      target,
+    );
+    const cursor = encodeCursor({
+      orderedValues: [],
+      keyValues: ['private#segment', 'o'],
+      sortFingerprint: '',
+    });
+    const error: unknown = await source.findPage!(query({ cursor, limit: 1 })).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(InvalidCursorError);
+    expect((error as Error).message).not.toContain('private#segment');
+    expect(store.reads).toEqual([]);
+  });
   it('walks every row exactly once over deliberately TIED non-key values', async () => {
     const { source } = setup();
     // Six rows carrying only two distinct `rank` values: a walk that omitted
@@ -131,7 +152,7 @@ describe('findPage', () => {
   it('refuses a malformed cursor token by name', async () => {
     const { source } = setup();
     await expect(source.findPage?.(query({ limit: 1, cursor: 'not-a-token!!' }))).rejects.toThrow(
-      UnsupportedQueryFeatureError,
+      InvalidCursorError,
     );
   });
 
@@ -143,7 +164,7 @@ describe('findPage', () => {
       sortFingerprint: 'name:desc',
     });
     await expect(source.findPage?.(query({ limit: 1, cursor: foreign }))).rejects.toThrow(
-      /minted under sort 'name:desc'/,
+      InvalidCursorError,
     );
   });
 
@@ -160,7 +181,7 @@ describe('findPage', () => {
       sortFingerprint: sortFingerprint({}),
     });
     await expect(source.findPage?.(query({ limit: 1, cursor: shortCursor }))).rejects.toThrow(
-      /1 key values for a 2-field row key/,
+      InvalidCursorError,
     );
   });
 

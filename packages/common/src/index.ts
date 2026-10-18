@@ -40,6 +40,8 @@ export type { SerializedError } from './errors/serialize-error.ts';
 export { MalformedRequestBodyError } from './errors/malformed-body.ts';
 // Duplicate key — the 409 every database backend's unique-violation maps onto
 export { DuplicateKeyError } from './errors/duplicate-key.ts';
+export { PrimaryKeyChangeError, assertPrimaryKeyUnchanged } from './errors/primary-key-change.ts';
+export { InvalidCursorError } from './errors/invalid-cursor.ts';
 export { OptionalDependencyUnavailableError } from './errors/optional-dependency.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with

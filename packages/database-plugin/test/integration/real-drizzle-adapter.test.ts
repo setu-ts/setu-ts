@@ -28,8 +28,18 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
-import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
-import { DuplicateKeyError } from '@setu-ts/common';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  SerializationConflictError,
+} from '../../src/errors.ts';
+import {
+  DuplicateKeyError,
+  encodeCursor,
+  InvalidCursorError,
+  PrimaryKeyChangeError,
+  sortFingerprint,
+} from '@setu-ts/common';
 import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { NormalizedQuery } from '@setu-ts/common';
@@ -1142,6 +1152,190 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
         expect(ready).toBe(503);
       } finally {
         await booted.stop();
+      }
+    },
+  );
+});
+
+describe('M113g real PostgreSQL identity and mapping refusals', () => {
+  for (const anchor of [
+    'Query read timeout',
+    'timeout exceeded when trying to connect',
+    'Connection terminated due to connection timeout',
+    'UNIQUE constraint failed',
+    'UNIQUE constraint failed: t.id',
+    'D1_ERROR: UNIQUE constraint failed: t.id',
+  ]) {
+    it(
+      `an integer insert of ${anchor} is not a timeout, outage, or duplicate`,
+      { skip: skipLivePg },
+      async () => {
+        const pool = new Pool({ connectionString: livePgUrl! });
+        const tableName = `m113g_input_${crypto.randomUUID().replaceAll('-', '')}`;
+        const table = pgTable(tableName, { id: text('id').primaryKey(), value: integer('value') });
+        const database = nodePostgresDrizzle(pool);
+        const adapter = new DrizzleAdapter({
+          drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+          drizzleTables: { Number: table },
+        });
+        try {
+          await pool.query(`CREATE TABLE "${tableName}" (id text primary key, value integer)`);
+          await adapter.connect();
+          const service = new DatabaseService(
+            adapter,
+            (entity) => adapter.createDataSource(entity),
+            'drizzle',
+          );
+          const repo = service.getRepository('Number');
+          const error: unknown = await repo.create({ id: 'invalid', value: anchor }).then(
+            () => null,
+            (error: unknown) => error,
+          );
+          expect(error).toBeInstanceOf(Error);
+          expect(error).not.toBeInstanceOf(DatabaseTimeoutError);
+          expect(error).not.toBeInstanceOf(DatabaseUnavailableError);
+          expect(error).not.toBeInstanceOf(DuplicateKeyError);
+          expect((error as Error).cause).toMatchObject({ code: '22P02' });
+          expect(await repo.findById('invalid')).toBeNull();
+          await repo.create({ id: 'valid', value: 42 });
+          expect(await repo.findById('valid')).toEqual({ id: 'valid', value: 42 });
+        } finally {
+          await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+          await pool.end();
+          await adapter.disconnect();
+        }
+      },
+    );
+  }
+  it(
+    'answers a well-formed cursor carrying a mistyped sort value with InvalidCursorError',
+    { skip: skipLivePg },
+    async () => {
+      const pool = new Pool({ connectionString: livePgUrl! });
+      const tableName = `m113g_cursor_${crypto.randomUUID().replaceAll('-', '')}`;
+      const table = pgTable(tableName, { id: text('id').primaryKey(), value: integer('value') });
+      const database = nodePostgresDrizzle(pool);
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+        drizzleTables: { Number: table },
+      });
+      try {
+        await pool.query(`CREATE TABLE "${tableName}" (id text primary key, value integer)`);
+        await pool.query(`INSERT INTO "${tableName}" VALUES ('a', 1), ('b', 2), ('c', 3)`);
+        await adapter.connect();
+        const service = new DatabaseService(
+          adapter,
+          (entity) => adapter.createDataSource(entity),
+          'drizzle',
+        );
+        const repo = service.getRepository('Number');
+        const orderBy = { value: 'asc' as const };
+        const forged = encodeCursor({
+          orderedValues: ['private-not-a-number'],
+          keyValues: ['a'],
+          sortFingerprint: sortFingerprint(orderBy),
+        });
+        const error: unknown = await repo.findPage({ orderBy, limit: 2, cursor: forged }).then(
+          () => null,
+          (error: unknown) => error,
+        );
+        expect(error).toBeInstanceOf(InvalidCursorError);
+        expect((error as Error).message).not.toContain('private-not-a-number');
+        // Control: the genuine cursor the first page mints still walks on.
+        const first = await repo.findPage({ orderBy, limit: 2 });
+        expect(first.rows.map((row) => (row as { id: string }).id)).toEqual(['a', 'b']);
+        const second = await repo.findPage({ orderBy, limit: 2, cursor: first.nextCursor! });
+        expect(second.rows.map((row) => (row as { id: string }).id)).toEqual(['c']);
+      } finally {
+        await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+        await pool.end();
+        await adapter.disconnect();
+      }
+    },
+  );
+  it('refuses a changed key and leaves the stored row unmoved', { skip: skipLivePg }, async () => {
+    const pool = new Pool({ connectionString: livePgUrl! });
+    const tableName = `m113g_keys_${crypto.randomUUID().replaceAll('-', '')}`;
+    const table = pgTable(tableName, { id: text('id').primaryKey(), name: text('name') });
+    const database = nodePostgresDrizzle(pool);
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+      drizzleTables: { User: table },
+    });
+    try {
+      await pool.query(`CREATE TABLE "${tableName}" (id text primary key, name text)`);
+      await adapter.connect();
+      const service = new DatabaseService(
+        adapter,
+        (entity) => adapter.createDataSource(entity),
+        'drizzle',
+      );
+      const repo = service.getRepository<Record<string, unknown>>('User');
+      await repo.create({ id: 'old', name: 'before' });
+      await expect(repo.update('old', { id: 'new', name: 'after' })).rejects.toBeInstanceOf(
+        PrimaryKeyChangeError,
+      );
+      await expect(
+        repo.updateWhere!('old', { name: 'before' }, { id: 'new' }),
+      ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
+      await service.transaction(async (uow) => {
+        await expect(uow.getRepository('User').update('old', { id: 'new' })).rejects.toBeInstanceOf(
+          PrimaryKeyChangeError,
+        );
+      });
+      expect(await service.getRepository('User').findById('old')).toEqual({
+        id: 'old',
+        name: 'before',
+      });
+      expect(await repo.findById('new')).toBeNull();
+    } finally {
+      await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+      await pool.end();
+    }
+  });
+  it(
+    'refuses a non-id table eagerly and serves it with a primaryKey override',
+    { skip: skipLivePg },
+    async () => {
+      const pool = new Pool({ connectionString: livePgUrl! });
+      const tableName = `m113g_mapping_${crypto.randomUUID().replaceAll('-', '')}`;
+      const table = pgTable(tableName, {
+        userKey: text('user_key').primaryKey(),
+        name: text('name'),
+      });
+      const database = nodePostgresDrizzle(pool);
+      const configured = createDrizzleDatabase(database, (db, work) => db.transaction(work));
+      const broken = new DrizzleAdapter({
+        drizzleInstance: configured,
+        drizzleTables: { User: table },
+      });
+      const mappedOptions: DrizzleAdapterOptions = {
+        drizzleInstance: configured,
+        drizzleTables: { User: table },
+        entities: { User: { primaryKey: 'userKey' } },
+      };
+      const adapter = new DrizzleAdapter(mappedOptions);
+      try {
+        await pool.query(`CREATE TABLE "${tableName}" (user_key text primary key, name text)`);
+        await broken.connect();
+        const service = new DatabaseService(
+          broken,
+          (entity) => broken.createDataSource(entity),
+          'drizzle',
+        );
+        expect(() => service.getRepository('User')).toThrow('has no "id" column');
+        await adapter.connect();
+        const mapped = new DatabaseService(
+          adapter,
+          (entity) => adapter.createDataSource(entity),
+          'drizzle',
+        ).getRepository('User');
+        await mapped.create({ userKey: 'u', name: 'before' });
+        await mapped.update('u', { name: 'after' });
+        expect(await mapped.findById('u')).toEqual({ userKey: 'u', name: 'after' });
+      } finally {
+        await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+        await pool.end();
       }
     },
   );

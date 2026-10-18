@@ -278,6 +278,12 @@ failing inside D1.
 
 Migrations stay a `wrangler d1 migrations` concern — the adapter has no `migrate()`.
 
+D1 honours the same two portable refusal rules `@setu-ts/database-plugin` answers: a primary-key
+change through `update` (or `updateWhere`) is refused with `PrimaryKeyChangeError` (`400`) instead
+of moving the row, and a cursor D1 cannot use — malformed, made under a different sort, or of the
+wrong shape for the target — is refused with `InvalidCursorError` (`400`) before any query runs.
+Both classes are exported from `@setu-ts/common`.
+
 ## Durable Objects — realtime backplane and distributed lock
 
 Both features need a Durable Object class **your application exports**, plus a wrangler stanza. No

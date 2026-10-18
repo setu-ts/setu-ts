@@ -29,7 +29,7 @@ export function scrubDriverError(error: unknown): unknown {
     ) {
       const clean = new Error(`Failed query: ${query}`);
       clean.name = nameOf(node);
-      clean.stack = withFramesOf(clean.message, safeRead(node, 'stack'));
+      clean.stack = withFramesOf(clean.message, safeRead(node, 'stack'), safeRead(node, 'message'));
       Object.defineProperty(clean, 'query', { value: query, enumerable: true });
       replacements.set(node, clean);
       continue;
@@ -78,12 +78,27 @@ function copyWithCause(node: Error, cause: unknown): Error {
 
 /**
  * Replaces the stack's header, which repeats the original message, with
- * `message`, keeping only the frame lines.
+ * `message`, keeping only what follows the header.
+ *
+ * The header is `<name>: <original message>`, and the original message may
+ * span lines and quote bound values — so the header is located by finding the
+ * original message itself, never by searching for the first frame-shaped
+ * line, which a value such as `x\n    at forged (evil.js:1:1)` would fake
+ * (M113g audit round 3, L6). When the original message is not found on the
+ * stack's first line, no frames are kept: losing frames is safe, keeping a
+ * header that may carry a value is not.
  */
-function withFramesOf(message: string, stack: unknown): string {
-  const lines = typeof stack === 'string' ? stack.split('\n') : [];
-  const firstFrame = lines.findIndex((line) => /^\s*at\s/.test(line));
-  return message + (firstFrame < 0 ? '' : `\n${lines.slice(firstFrame).join('\n')}`);
+function withFramesOf(message: string, stack: unknown, original: unknown): string {
+  if (typeof stack !== 'string') return message;
+  let rest: string | undefined;
+  if (typeof original === 'string' && original !== '') {
+    const at = stack.indexOf(original);
+    if (at >= 0 && !stack.slice(0, at).includes('\n')) rest = stack.slice(at + original.length);
+  } else {
+    const newline = stack.indexOf('\n');
+    rest = newline < 0 ? '' : stack.slice(newline);
+  }
+  return rest !== undefined && rest.startsWith('\n') ? message + rest : message;
 }
 
 /**
@@ -114,7 +129,7 @@ function nameOf(node: object): string {
 function scrubbedDataException(node: Error, code: string): Error {
   const clean = new Error(`Data exception (SQLSTATE ${code})`);
   clean.name = nameOf(node);
-  clean.stack = withFramesOf(clean.message, safeRead(node, 'stack'));
+  clean.stack = withFramesOf(clean.message, safeRead(node, 'stack'), safeRead(node, 'message'));
   Object.defineProperty(clean, 'code', { value: code, enumerable: true });
   const severity = safeRead(node, 'severity');
   if (typeof severity === 'string') {
