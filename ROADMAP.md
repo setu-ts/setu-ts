@@ -14421,7 +14421,7 @@ with its not-before check unchanged.
   bridge hands loaders the internal `http://` URL. Previously unowned; placed in this milestone by
   the maintainer (2026-10-19).
 
-**Decided in the plan** (`plans/milestone-113n-proxy-security.md`): the adapters populate
+**Decided in the plan** (`plans/archive/milestone-113n-proxy-security.md`): the adapters populate
 `IRequest.ip` from the socket peer; `trustedProxies` treats the peer as the last link of the chain;
 `ipSecurityMiddleware` resolves one trusted request origin from `X-Forwarded-*` or `Forwarded`
 (`forwardedHeader`) and publishes it for a `common` accessor; CSRF, a session
@@ -14927,7 +14927,7 @@ patch by construction and gains nothing new here.
 | 113k      | ⬜     | sdk + idempotency + http-security + database — the idempotency key from client to server (fix branches)                                                                                                                                                                                   |
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 113m      | ✅     | scheduler-plugin + auth-plugin — time the framework does not honour; PR #471                                                                                                                                                                                                              |
-| 113n      | ⬜     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy                                                                                                                                                                                      |
+| 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy                                                                                                                                                                                      |
 | 113o      | ⬜     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness                                                                                                                                                                                                 |
 | 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
