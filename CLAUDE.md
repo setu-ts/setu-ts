@@ -6482,7 +6482,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Breaking in behaviour: unauthenticated rate-limit keys become per peer. Implemented by Codex,
   which stopped once on a type the plan had wrong (`remoteAddress?: string | undefined`). Review
   found a malformed `Forwarded` header from a direct client erasing its identity; it now contributes
-  no hops and the peer is still checked — complete (PR pending)
+  no hops and the peer is still checked. The security audit ran three fresh-context rounds. Round 1
+  failed on no design review (now plan §10) and four findings: the zero-config CSRF candidate let
+  any credentialed CORS origin pass by sending `X-Forwarded-Host` with its own host (High, since
+  scripts can set that header and the CORS middleware echoes it), leftmost/`proxyHops`/peerless
+  modes published a client-chosen origin (Medium; `secure: 'auto'` then dropped `Secure`), a
+  too-loose host check, and a peer fallback. Round 2 found the same CSRF bypass through the
+  published origin behind a pass-through proxy (High) and a trusted proxy with no header resolving
+  itself. CSRF now consults no forwarded candidate when `Sec-Fetch-Site` is present and not
+  `same-origin`, only `trustedProxies` with a trusted peer publishes an origin, and hosts follow a
+  DNS/IPv6 grammar. Round 3 passed on `6f6b2014`; its default-port observation was fixed afterwards
+  and not re-audited, at the maintainer's direction — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

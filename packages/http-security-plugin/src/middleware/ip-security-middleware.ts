@@ -381,13 +381,21 @@ function validatedForwardedOrigin(
   const candidate = proto?.toLowerCase();
   const protocol = candidate === 'http' || candidate === 'https' ? candidate : fallback.protocol;
   let host = fallback.host;
-  if (forwardedHost !== undefined && isPlainHost(forwardedHost)) {
+  // A browser's `Origin` never carries the scheme's default port, so a proxy
+  // writing `$host:$server_port` would otherwise publish an origin no
+  // same-origin request matches (M113n audit round 3 observation).
+  const defaultPort = protocol === 'https' ? ':443' : ':80';
+  const candidateHost =
+    forwardedHost?.endsWith(defaultPort) === true
+      ? forwardedHost.slice(0, -defaultPort.length)
+      : forwardedHost;
+  if (candidateHost !== undefined && isPlainHost(candidateHost)) {
     try {
-      const url = new URL(`http://${forwardedHost}`);
+      const url = new URL(`${protocol}://${candidateHost}`);
       if (
-        url.host === forwardedHost.toLowerCase() &&
+        url.host === candidateHost.toLowerCase() &&
         url.pathname === '/' &&
-        !/[/?#@\\]/.test(forwardedHost) &&
+        !/[/?#@\\]/.test(candidateHost) &&
         url.username === '' &&
         url.password === '' &&
         url.search === '' &&

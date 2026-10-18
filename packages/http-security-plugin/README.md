@@ -232,7 +232,9 @@ so the walk still checks the socket peer: a client connecting directly stays ide
 address, and a trusted proxy sending one yields no client. Likewise in the default family a
 `proxyHops` header too short for the declared chain, or a chain of only trusted proxies, yields no
 client rather than the proxy's own address, and in `trustedProxies` mode so does a request from a
-trusted proxy carrying no forwarding header (or an empty one) in either family. `unknown` and
+trusted proxy carrying no forwarding header (or an empty one) in either family. This describes
+`CLIENT_IP_STATE_KEY` only: `defaultRateLimitKey` in `@setu-ts/auth-plugin` then falls back to
+`IRequest.ip`, the socket peer, so such requests share the proxy's rate-limit bucket. `unknown` and
 obfuscated `for` values stop the trust walk without a client.
 
 IP security also publishes the public origin for `requestOriginOf(ctx)` and `publicRequestUrl(ctx)`
@@ -244,9 +246,9 @@ headers. In the default family the leftmost `X-Forwarded-Proto` and `X-Forwarded
 the trusted proxy must overwrite both rather than pass a client's copy through (nginx forwards a
 client's `X-Forwarded-Host` unless told otherwise); with `Forwarded`, `proto` and `host` come from
 the selected client element. Only `http`/`https` protocols, and hosts that are DNS names (letters,
-digits, inner hyphens, no trailing dot) or bracketed IPv6 literals with an optional numeric port,
-are accepted; rejected or absent components fall back to the request URL. Session `secure: 'auto'`
-and React Router loaders share this decision.
+digits, inner hyphens, no trailing dot) or bracketed IPv6 literals with an optional numeric port
+(the scheme default port is dropped), are accepted; rejected or absent components fall back to the
+request URL. Session `secure: 'auto'` and React Router loaders share this decision.
 
 Workers and plain `adapter.fetch()` calls have no socket peer. On Cloudflare Workers use
 `ipSecurity: { trustProxy: true, ipHeader: 'CF-Connecting-IP' }`; Cloudflare overwrites that header.

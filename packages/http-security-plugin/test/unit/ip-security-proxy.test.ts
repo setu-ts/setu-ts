@@ -130,6 +130,25 @@ describe('proxy peer and public origin (M113n)', () => {
         .ip,
     ).toBeUndefined();
   });
+  // M113n audit round 3: a browser Origin never carries the default port.
+  it('drops the scheme default port from a forwarded host', async () => {
+    const cases: readonly (readonly [string, string, string])[] = [
+      ['https', 'public.example:443', 'https://public.example'],
+      ['http', 'public.example:80', 'http://public.example'],
+      ['https', '[2001:db8::1]:443', 'https://[2001:db8::1]'],
+      ['https', 'public.example:80', 'https://public.example:80'],
+      ['http', 'public.example:443', 'http://public.example:443'],
+      ['https', 'public.example:8443', 'https://public.example:8443'],
+    ];
+    for (const [proto, host, expected] of cases) {
+      const { origin } = await inspect(
+        { ...forged, 'X-Forwarded-Proto': proto, 'X-Forwarded-Host': host },
+        {},
+        '10.1.2.3',
+      );
+      expect(origin.origin, `${proto} ${host}`).toBe(expected);
+    }
+  });
   // M113n audit F3: URL-legal punctuation never reaches the published origin.
   it('refuses forwarded hosts outside the DNS and IPv6 grammar', async () => {
     for (const host of [
@@ -207,7 +226,6 @@ describe('proxy peer and public origin (M113n)', () => {
       'evil.example\\path',
       'bad host',
       '',
-      'evil.example:80',
     ]) {
       expect(
         (await inspect({ ...forged, 'X-Forwarded-Host': host }, {}, '10.1.2.3')).origin.host,

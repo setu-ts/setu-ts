@@ -3446,13 +3446,14 @@ the forwarded chain; leftmost, `proxyHops` and any request without a peer publis
 The values are the leftmost `X-Forwarded-Proto` and `X-Forwarded-Host` for the default family (the
 trusted proxy must overwrite both), or `proto` and `host` from the selected `Forwarded` element.
 Protocol must be `http` or `https` (case-insensitive); host must be a DNS name (letters, digits,
-inner hyphens, no trailing dot) or a bracketed IPv6 literal, with an optional numeric port, at most
-259 characters, and must round-trip through `new URL('http://' + host)` unchanged except for case.
-Rejected or absent components fall back to the URL. `requestOriginOf(ctx)` and
-`publicRequestUrl(ctx)` in common expose that decision to session `secure: 'auto'`, CSRF and the
-React Router bridge. Security-sensitive links should use a configured base URL. Workers has no peer;
-use `trustProxy: true` with `ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites; that header
-vouches for the client address only, and the public origin stays the request URL.
+inner hyphens, no trailing dot) or a bracketed IPv6 literal, with an optional numeric port (the
+scheme default port is dropped, as a browser `Origin` never carries it), at most 259 characters, and
+must round-trip through `new URL('http://' + host)` unchanged except for case. Rejected or absent
+components fall back to the URL. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` in common expose
+that decision to session `secure: 'auto'`, CSRF and the React Router bridge. Security-sensitive
+links should use a configured base URL. Workers has no peer; use `trustProxy: true` with
+`ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites; that header vouches for the client
+address only, and the public origin stays the request URL.
 
 ---
 
