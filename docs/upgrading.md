@@ -12,6 +12,36 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Review `IRequest.ip`, rate-limit buckets and loader URLs (M113n, 0.10.0, breaking)
+
+Node, Deno and Bun now set `IRequest.ip` to the socket peer, normalized from IPv4-mapped IPv6.
+Unauthenticated `defaultRateLimitKey` calls therefore use `ip:<peer>` instead of one global
+`anonymous` bucket. Review limiter budgets; behind a proxy register IP security with
+`trustProxy: true` and `trustedProxies` to count clients rather than proxies.
+
+The trusted-proxy walk now starts at that peer. List every legitimate proxy or sidecar; a sidecar
+omitted from the list now resolves as the client and its forwarded headers are ignored. Direct
+callers cannot select their own identity with a forged header. `proxyHops` and the leftmost default
+still use header-only selection for the client IP, and in the `X-Forwarded-*` family a header too
+short for `proxyHops`, or an all-trusted chain, resolves no client rather than the proxy itself.
+With `trustedProxies`, a trusted proxy that sends no forwarding header also resolves no client, so
+make sure each proxy writes one. Workers and plain fetch have no peer and retain the header-only
+path. Workers can use `ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites.
+
+With IP security in `trustedProxies` mode and a trusted socket peer, React Router loaders/actions
+now see the public URL; no other mode publishes a forwarded origin. Update redirects or tests that
+expected the internal URL. `requestOriginOf` and `publicRequestUrl` in `@setu-ts/common` expose the
+same origin. Select `forwardedHeader: 'forwarded'` for RFC 7239 instead of `X-Forwarded-*`; do not
+also set `ipHeader`. Configure your proxy to overwrite the chosen origin headers. Use a configured
+base URL for security-sensitive links.
+
+`csrf: {}` works behind standard TLS termination using a validated `X-Forwarded-*` own-origin
+candidate, even without IP security, for requests whose browser sends `Sec-Fetch-Site: same-origin`
+(every current browser does). This comparison grants no proxy trust to session cookies or URLs.
+Session `cookie.secure: 'auto'` follows the trusted origin protocol; its default stays `true`.
+`'auto'` with `sameSite: 'none'` is refused at construction. See
+[Behind a reverse proxy](./deployment.md#behind-a-reverse-proxy).
+
 ### Fix invalid scheduler times that reject with `RangeError` and refresh JWTs before `exp` (M113m, breaking)
 
 **Fix invalid values before registering a job.** The async `delay` call now rejects with a

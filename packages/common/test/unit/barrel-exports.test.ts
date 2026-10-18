@@ -9,6 +9,21 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
+import type { RequestOrigin } from '../../src/index.ts';
+
+describe('public request origin exports', () => {
+  it('exports the origin accessors, key and return type', () => {
+    const origin: RequestOrigin = {
+      protocol: 'https',
+      host: 'example.com',
+      origin: 'https://example.com',
+    };
+    expect(common.REQUEST_ORIGIN_STATE_KEY).toBe('http-security-plugin:request-origin');
+    expect(typeof common.requestOriginOf).toBe('function');
+    expect(typeof common.publicRequestUrl).toBe('function');
+    expect(origin.protocol).toBe('https');
+  });
+});
 it('exports the portable key and cursor refusals', () => {
   expect(typeof common.PrimaryKeyChangeError).toBe('function');
   expect(typeof common.assertPrimaryKeyUnchanged).toBe('function');

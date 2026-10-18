@@ -170,19 +170,19 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
  * Default rate-limit key, in order of preference:
  *
  * 1. `ctx.request.user?.id` — the authenticated principal, when auth middleware ran first.
- * 2. `ctx.state.get(CLIENT_IP_STATE_KEY)` — the IP `ipSecurityMiddleware` publishes (it needs
- *    `trustProxy` plus a proxy header to resolve one). **See the warning below: on its own
- *    `trustProxy` can make this key attacker-controlled.**
- * 3. `ctx.request.ip` — set only by a custom `IHttpAdapter`; the first-party adapters
- *    cannot populate it, because a web `Request` carries no peer address (M23).
+ * 2. `ctx.state.get(CLIENT_IP_STATE_KEY)` — the client IP `ipSecurityMiddleware` publishes.
+ *    With proxy trust off it publishes the socket peer. **See the warning below:
+ *    `trustProxy` alone can make this key attacker-controlled.**
+ * 3. `ctx.request.ip` — the socket peer on Node, Deno and Bun (M113n), normalized
+ *    from IPv4-mapped IPv6. Workers and plain fetch calls have no peer.
  * 4. `'anonymous'`.
  *
  * **The `'anonymous'` fallback makes the limiter one GLOBAL counter** — `max`
  * requests per window across ALL callers, which both starves legitimate traffic
- * and fails to limit any individual client. The previous default went straight
- * from `ctx.request.ip` to `'anonymous'`, so on every first-party adapter that
- * is exactly what it did. Register `ipSecurityMiddleware`, put this after
- * authentication, or pass your own `keyGenerator`.
+ * and fails to limit any individual client. Socket-serving adapters now count
+ * per peer even without IP security. Behind a proxy, register IP security to
+ * resolve clients rather than proxies; on Workers supply a trusted header or
+ * your own `keyGenerator`. Put the limiter after authentication to count users.
  *
  * **`trustProxy: true` alone is not enough, and this is the sharper hazard of
  * the two.** It resolves the LEFTMOST entry of the proxy header, which is safe

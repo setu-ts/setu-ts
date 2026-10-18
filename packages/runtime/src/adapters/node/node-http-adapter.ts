@@ -68,6 +68,8 @@ export interface NodeOutgoing {
  * The second argument `@hono/node-server` passes to a fetch callback.
  */
 export interface NodeFetchEnv {
+  /** The socket peer, supplied by node-server on served requests. */
+  readonly incoming?: { readonly socket?: { readonly remoteAddress?: string | undefined } };
   /** The Node response the reply is written to. */
   readonly outgoing?: NodeOutgoing;
 }
@@ -100,7 +102,10 @@ export interface NodeServeHost {
     // published interface references no type the barrel does not export.
     fetch: (
       request: Request,
-      env?: { readonly outgoing?: { writeHead(status: number, ...rest: unknown[]): unknown } },
+      env?: {
+        readonly incoming?: { readonly socket?: { readonly remoteAddress?: string | undefined } };
+        readonly outgoing?: { writeHead(status: number, ...rest: unknown[]): unknown };
+      },
     ) => Response | Promise<Response>;
     port: number;
     hostname?: string;
@@ -279,7 +284,7 @@ export class NodeHttpServerHandle {
 
     emitter.on('upgrade', (...args: never[]): void => {
       const [incoming, socket, head] = args as unknown as [
-        NodeIncomingMessage,
+        NodeIncomingMessage & { readonly socket?: { readonly remoteAddress?: string | undefined } },
         RawUpgradeSocket,
         unknown,
       ];
@@ -299,12 +304,18 @@ export class NodeHttpServerHandle {
    * handler, then check for UPGRADE_INTENT.
    */
   #handleUpgrade(
-    incoming: NodeIncomingMessage,
+    incoming: NodeIncomingMessage & {
+      readonly socket?: { readonly remoteAddress?: string | undefined };
+    },
     socket: RawUpgradeSocket,
     head: unknown,
   ): Promise<void> {
     const request = createUpgradeRequest(incoming);
-    const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+    const frameworkRequest = mapWebRequestToFrameworkRequest(
+      request,
+      this.#maxBodyBytes,
+      incoming.socket?.remoteAddress,
+    );
     return this.#handleUpgradePipeline(incoming, frameworkRequest, socket, head);
   }
 
@@ -376,7 +387,11 @@ export class NodeHttpServerHandle {
    */
   createFetchHandler(): NodeFetchCallback {
     return (request: Request, env?: NodeFetchEnv): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(
+        request,
+        this.#maxBodyBytes,
+        env?.incoming?.socket?.remoteAddress,
+      );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });

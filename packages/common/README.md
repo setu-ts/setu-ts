@@ -238,12 +238,14 @@ package fits the plugin architecture.
 | `parseJsonBody`                       | function  |
 | `parsePublishOptions`                 | function  |
 | `parseTraceparentToContext`           | function  |
+| `publicRequestUrl`                    | function  |
 | `publishHeaderNameProblem`            | function  |
 | `publishHeaderValueProblem`           | function  |
 | `publishIdProblem`                    | function  |
 | `replaceLocale`                       | function  |
 | `replacePrincipal`                    | function  |
 | `replaceTenant`                       | function  |
+| `requestOriginOf`                     | function  |
 | `resolveKeysetSort`                   | function  |
 | `resolveProbeTiming`                  | function  |
 | `resolveRegistryEntry`                | function  |
@@ -299,6 +301,7 @@ package fits the plugin architecture.
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
+| `REQUEST_ORIGIN_STATE_KEY`            | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
 | `RESERVED_HEADER_PREFIXES`            | const     |
 | `RESPONSE_METADATA`                   | const     |
@@ -708,6 +711,7 @@ package fits the plugin architecture.
 | `Redactor`                            | type      |
 | `RegistryFactory`                     | type      |
 | `RequestHandler`                      | type      |
+| `RequestOrigin`                       | type      |
 | `ResilientCall`                       | type      |
 | `ResponseSnapshot`                    | type      |
 | `ResponseSnapshotInit`                | type      |

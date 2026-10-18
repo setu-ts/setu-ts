@@ -123,6 +123,8 @@ export interface ApplicationOptions {
  * @since 0.1.0
  */
 export interface InjectRequest {
+  /** Socket peer to carry into `IRequest.ip`; omitted by default. */
+  ip?: string;
   /** HTTP method. */
   method: string;
   /** Full request URL. */
@@ -991,6 +993,7 @@ class Application implements IKernelApplication {
     let form: Promise<FormBody> | undefined;
 
     const syntheticRequest: IRequest = {
+      ...(request.ip !== undefined ? { ip: request.ip } : {}),
       method: request.method as IRequest['method'],
       url: fullUrl,
       get path() {

@@ -66,6 +66,13 @@ export interface BunServeHost {
  */
 export interface BunServer {
   /**
+   * Returns the socket peer; older injected hosts may omit this operation.
+   * @param request - The native server request
+   * @returns The peer address, or null when unavailable
+   * @since 0.10.0
+   */
+  requestIP?(request: Request): { address: string } | null;
+  /**
    * Stops the server gracefully.
    */
   stop(): void;
@@ -202,7 +209,11 @@ export class BunHttpServerHandle {
       request: Request,
       server: BunServer,
     ): Response | undefined | Promise<Response | undefined> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(
+        request,
+        this.#maxBodyBytes,
+        server.requestIP?.(request)?.address,
+      );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });

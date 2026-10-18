@@ -6,6 +6,7 @@
  */
 
 import type { HandlerResult } from '@setu-ts/common';
+import { publicRequestUrl } from '@setu-ts/common';
 import type {
   IRequestContext,
   PopulateLoadContext,
@@ -45,7 +46,7 @@ export async function bridgeRequestToRR(
   const method = ctx.request.method.toUpperCase();
   const body = method === 'GET' || method === 'HEAD' ? undefined : await ctx.request.bytes();
 
-  const webRequest = new Request(ctx.request.url, {
+  const webRequest = new Request(publicRequestUrl(ctx), {
     method: ctx.request.method,
     headers: ctx.request.headers,
     // ctx.signal is always live (M42) — lets RR abort loaders on disconnect.

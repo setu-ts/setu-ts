@@ -125,6 +125,14 @@ finding out from production traffic.
 
 ## Expiry
 
+Cookie `secure` defaults to `true`. Set `cookie: { secure: 'auto' }` when the same deployment serves
+local HTTP and proxied HTTPS: it emits `Secure` exactly when `requestOriginOf(ctx).protocol` is
+`https`, including on cookie deletion. Register IP security with `trustProxy: true` and your
+`trustedProxies` so TLS termination is reflected in that origin. Without IP security it follows
+`ctx.request.url`. `false` remains available for local HTTP. `'auto'` with `sameSite: 'none'` throws
+at construction because `SameSite=None` forces `Secure` regardless. See
+[deployment behind a reverse proxy](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#behind-a-reverse-proxy).
+
 `maxAge` (default `7200` seconds) is enforced from a stamp **inside** the payload, not from the
 cookie's `Max-Age` — that attribute is client-controlled, so a server that trusts it has no expiry
 at all.
@@ -387,7 +395,7 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 | `cookie.path`       | `/`              |                                                                                                                                                                                                                              |
 | `cookie.domain`     | —                | Omitted means a host-only cookie                                                                                                                                                                                             |
 | `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                                                                                                                                                                     |
-| `cookie.secure`     | `true`           | Set `false` only for plain-HTTP local development                                                                                                                                                                            |
+| `cookie.secure`     | `true`           | `boolean \| 'auto'`; auto follows the trusted protocol and conflicts with `sameSite: 'none'`                                                                                                                                 |
 | `cookie.httpOnly`   | `true`           |                                                                                                                                                                                                                              |
 | `csrf`              | —                | Presence enables form CSRF                                                                                                                                                                                                   |
 | `csrf.exemptBearer` | `true`           | Only a bearer request a header-credential strategy authenticated AND that restored no session (a new session) skips form CSRF; a valid session cookie still needs a token even with a valid bearer token; `Basic` never does |

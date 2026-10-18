@@ -6468,6 +6468,31 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   without clock tolerance, rejecting at `exp` and before `nbf`; outside-issuer verification rejects
   at `exp + clockToleranceSec`, with its not-before check unchanged. Migration: fix invalid
   scheduler values and refresh tokens before `exp` — complete (PR #471)
+- **Milestone 113n** (`packages/http-security-plugin` + `packages/runtime` + `packages/common` +
+  `packages/kernel` + `packages/session-plugin` + `packages/react-router-plugin` — security behind a
+  reverse proxy; V9-65, V9-66, plus the RFC 7239 `Forwarded` header, `Secure` cookies and public
+  URLs, placed here by the maintainer): the Node, Deno and Bun adapters set `IRequest.ip` from the
+  socket peer, normalizing the `::ffff:` form all three report on a dual-stack listener, and
+  `trustedProxies` treats the peer as the last link, so a direct client forging `X-Forwarded-For`
+  keeps its own address. `ipSecurityMiddleware` resolves one trusted request origin from
+  `X-Forwarded-*` or `Forwarded` (`forwardedHeader`, one family only) and publishes it for the
+  `common` accessors `requestOriginOf`/`publicRequestUrl`; CSRF accepts it and a zero-config
+  `X-Forwarded-Proto` candidate, the session cookie gains `secure: 'auto'`, and the React Router
+  bridge hands loaders the public URL. `InjectRequest.ip` carries a peer through `inject()`.
+  Breaking in behaviour: unauthenticated rate-limit keys become per peer. Implemented by Codex,
+  which stopped once on a type the plan had wrong (`remoteAddress?: string | undefined`). Review
+  found a malformed `Forwarded` header from a direct client erasing its identity; it now contributes
+  no hops and the peer is still checked. The security audit ran three fresh-context rounds. Round 1
+  failed on no design review (now plan §10) and four findings: the zero-config CSRF candidate let
+  any credentialed CORS origin pass by sending `X-Forwarded-Host` with its own host (High, since
+  scripts can set that header and the CORS middleware echoes it), leftmost/`proxyHops`/peerless
+  modes published a client-chosen origin (Medium; `secure: 'auto'` then dropped `Secure`), a
+  too-loose host check, and a peer fallback. Round 2 found the same CSRF bypass through the
+  published origin behind a pass-through proxy (High) and a trusted proxy with no header resolving
+  itself. CSRF now consults no forwarded candidate when `Sec-Fetch-Site` is present and not
+  `same-origin`, only `trustedProxies` with a trusted peer publishes an origin, and hosts follow a
+  DNS/IPv6 grammar. Round 3 passed on `6f6b2014`; its default-port observation was fixed afterwards
+  and not re-audited, at the maintainer's direction — complete (PR #473)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

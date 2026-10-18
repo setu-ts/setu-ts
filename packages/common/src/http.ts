@@ -42,7 +42,10 @@ export interface IRequest {
   readonly path: string;
   /** Request headers (web-standard `Headers`). */
   readonly headers: Headers;
-  /** Client IP address, when derivable. */
+  /**
+   * Socket peer on Node, Deno and Bun; absent on Workers and plain fetch calls.
+   * Behind a proxy this is the proxy. Read `CLIENT_IP_STATE_KEY` for the resolved client.
+   */
   readonly ip?: string;
   /**
    * The authenticated principal, populated by authentication middleware.

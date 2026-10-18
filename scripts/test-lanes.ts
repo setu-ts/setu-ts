@@ -44,6 +44,7 @@ export const DENO_LANE_TESTS = [
   'packages/diagnostics-plugin/test/integration/security.test.ts',
   'packages/runtime/test/unit/local-diagnostics-listener.test.ts',
   'packages/runtime/test/integration/read-stream-real.test.ts',
+  'packages/runtime/test/integration/peer-address-real.test.ts',
   'packages/runtime/test/integration/signal-real.test.ts',
   'packages/realtime-backplane-plugin/test/integration/realtime-observations-redis.test.ts',
 ] as const;

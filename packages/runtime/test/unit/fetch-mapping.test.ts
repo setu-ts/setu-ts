@@ -12,6 +12,37 @@ import { describe, expect, it } from 'vitest';
 import type { FormBody, IRequest, ResponseSnapshot } from '@setu-ts/common';
 import { UnsupportedFormEncodingError } from '@setu-ts/common';
 
+describe('fetch-mapping socket peers', () => {
+  it('keeps one request shape with and without a peer', () => {
+    const raw = new Request('http://localhost/');
+    const withPeer = mapWebRequestToFrameworkRequest(raw, undefined, '192.0.2.1');
+    const withoutPeer = mapWebRequestToFrameworkRequest(raw);
+    expect(withPeer.ip).toBe('192.0.2.1');
+    expect(withoutPeer.ip).toBeUndefined();
+    expect(Object.getPrototypeOf(withPeer)).toBe(Object.getPrototypeOf(withoutPeer));
+    expect(Object.hasOwn(withPeer, 'ip')).toBe(true);
+    expect(Object.hasOwn(withoutPeer, 'ip')).toBe(true);
+    expect(Object.keys(withPeer)).toEqual(Object.keys(withoutPeer));
+  });
+  it('normalizes only mapped dotted-quad peers', () => {
+    for (const [input, expected] of [
+      ['::ffff:10.1.2.3', '10.1.2.3'],
+      ['::FFFF:10.1.2.3', '10.1.2.3'],
+      ['::ffff:abcd', '::ffff:abcd'],
+      ['2001:db8::1', '2001:db8::1'],
+      ['::ffff:999.1.2.3', '::ffff:999.1.2.3'],
+      ['::ffff:1.2.3', '::ffff:1.2.3'],
+      ['::ffff:255.249.199.99', '255.249.199.99'],
+      ['', undefined],
+      ['127.0.0.1', '127.0.0.1'],
+    ]) {
+      expect(
+        mapWebRequestToFrameworkRequest(new Request('http://localhost/'), undefined, input).ip,
+      ).toBe(expected);
+    }
+  });
+});
+
 /**
  * Reads the form off a served request. `mapWebRequestToFrameworkRequest`
  * ALWAYS provides the accessor; the guard keeps the optional member's type

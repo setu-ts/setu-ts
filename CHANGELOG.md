@@ -8,6 +8,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking: proxy client identity and public URLs (M113n, #473, 0.10.0, `@setu-ts/runtime`,
+  `@setu-ts/common`, `@setu-ts/http-security-plugin`, `@setu-ts/auth-plugin`,
+  `@setu-ts/react-router-plugin`).** Node, Deno and Bun now populate `IRequest.ip` with the socket
+  peer, normalizing IPv4-mapped IPv6. Unauthenticated default rate-limit keys move from one
+  `anonymous` bucket to `ip:<peer>`. `trustedProxies` now checks that peer before accepting
+  forwarded entries; a direct caller's forged header is ignored. With IP security configured and a
+  trusted proxy, React Router loaders/actions receive the public URL. Migration: list every real
+  proxy or sidecar in `trustedProxies`, review rate-limit bucket sizing, and update code that
+  expected internal loader URLs. Workers and plain fetch have no peer; `proxyHops` and leftmost
+  selection retain their header-only semantics for the client IP and never publish a forwarded
+  origin. A forwarded origin is believed only in `trustedProxies` mode with a trusted socket peer,
+  and a forwarded host must be a DNS name or bracketed IPv6 literal. In the `X-Forwarded-*` family a
+  `proxyHops` header too short for the chain, or an all-trusted chain, now resolves no client rather
+  than the proxy's own address, matching the `Forwarded` family; in `trustedProxies` mode so does a
+  trusted proxy sending no forwarding header.
+- **CSRF own origins behind TLS termination (M113n, #473, `@setu-ts/http-security-plugin`).**
+  `csrf: {}` also accepts the published public origin and, when the browser sends
+  `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
+  candidate; without that gate a credentialed CORS origin could name its own host and pass. A
+  request whose `Sec-Fetch-Site` is present and not `same-origin` is checked against the URL origin
+  and `trustedOrigins` only. Migration: remove redundant same-origin allowlist entries if desired;
+  keep explicit `trustedOrigins` for other application origins. The zero-config candidate grants no
+  proxy trust to other consumers.
+
 - **Breaking: invalid scheduler time values reject at registration (M113m, 0.10.0,
   `@setu-ts/scheduler-plugin`).** The async `delay` call rejects with `RangeError` for a non-finite
   or negative `delayMs`; `every` rejects for a non-finite or non-positive `intervalMs`; `delay`,
@@ -290,6 +314,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Reverse-proxy origin support (M113n, #473, `@setu-ts/common`, `@setu-ts/http-security-plugin`,
+  `@setu-ts/session-plugin`, `@setu-ts/kernel`).** `REQUEST_ORIGIN_STATE_KEY`, `RequestOrigin`,
+  `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` share the trusted public origin;
+  `forwardedHeader: 'forwarded'` selects bounded RFC 7239 parsing instead of `X-Forwarded-*`;
+  session `cookie.secure: 'auto'` follows the resolved protocol (default stays `true`, and `'auto'`
+  conflicts with `sameSite: 'none'`); `InjectRequest.ip` supplies a peer in tests.
+
 - **Primary-key and cursor refusals, and a database call timeout (M113g, 0.10.0, `@setu-ts/common`,
   `@setu-ts/database-plugin`).** `@setu-ts/common` exports `assertPrimaryKeyUnchanged`, the one
   shared check every `update`/`updateWhere` of the eight data sources runs before any I/O, and the
@@ -346,7 +377,7 @@ All notable changes to this project are documented here. The format follows
   First-party tokens are refused at and after `exp`, closing the window of up to one second after
   expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and
   after `exp + clockToleranceSec`.
-- **`setu add` wires the barrel generated handlers live in (`@setu-ts/cli`).** In a functional
+- **`setu add` wires the barrel generated handlers live in (`@setu-ts/cli`, #472).** In a functional
   project `setu add events` registered a bare `EventsPlugin()`, so every handler a later
   `setu generate event-handler` wrote into `src/events/index.ts` was subscribed by nothing and never
   ran, with no message saying so. `setu add` now registers the seam `setu new` emits, derived from
@@ -360,13 +391,13 @@ All notable changes to this project are documented here. The format follows
   import to add by hand. A project composed through a starter keeps its config, and the guidance now
   names the arm value to pass (`events: { handlers: EVENT_HANDLERS }`), so the created barrel is
   reached.
-- **`setu add health` on a Deno project says the start task needs `--allow-sys` (`@setu-ts/cli`).**
-  Without it the built-in `self` check fails and `/health` reports down. The Deno permission notes
-  (this one and storage's `--allow-write`) are no longer printed on other targets, where they do not
-  apply.
-- **`setu generate job` points at the queue and scheduler registration options (`@setu-ts/cli`).**
-  The generated job's comment recommended calling `queue.process()` or `scheduler.cron()` inside
-  another plugin's `register`, where the capability may not be registered yet. It now shows
+- **`setu add health` on a Deno project says the start task needs `--allow-sys` (`@setu-ts/cli`,
+  #472).** Without it the built-in `self` check fails and `/health` reports down. The Deno
+  permission notes (this one and storage's `--allow-write`) are no longer printed on other targets,
+  where they do not apply.
+- **`setu generate job` points at the queue and scheduler registration options (`@setu-ts/cli`,
+  #472).** The generated job's comment recommended calling `queue.process()` or `scheduler.cron()`
+  inside another plugin's `register`, where the capability may not be registered yet. It now shows
   `QueuePlugin({ processors: [...] })` and `SchedulerPlugin({ jobs: [...] })`, both checked to
   type-check against the published packages.
 - **The database plugin README's Prisma example reads `process.env['DATABASE_URL']`

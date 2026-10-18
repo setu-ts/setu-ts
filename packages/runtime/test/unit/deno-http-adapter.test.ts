@@ -12,6 +12,27 @@ import {
   isDenoHttpServerHandle,
 } from '../../src/adapters/deno/deno-http-adapter.ts';
 import { describe, expect, it } from 'vitest';
+import { createTestContext } from '@setu-ts/testing';
+
+describe('Deno socket peer', () => {
+  it('reads info.remoteAddr.hostname and accepts a one-argument host', async () => {
+    const handle = new DenoHttpServerHandle({
+      serve: () => ({ shutdown: () => Promise.resolve() }),
+    });
+    let peer: string | undefined;
+    handle.setHandler((request) => {
+      peer = request.ip;
+      return createTestContext().response;
+    });
+    const fetch = handle.createFetchHandler();
+    for (const info of [undefined, {}, { remoteAddr: {} }]) {
+      await fetch(new Request('http://localhost/'), info);
+      expect(peer).toBeUndefined();
+    }
+    await fetch(new Request('http://localhost/'), { remoteAddr: { hostname: '::ffff:10.1.2.3' } });
+    expect(peer).toBe('10.1.2.3');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fake host

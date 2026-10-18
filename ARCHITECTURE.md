@@ -972,9 +972,11 @@ Each runtime has its own implementation:
 - **BunHttpAdapter** — Uses `Bun.serve()`.
 - **CloudflareWorkersHttpAdapter** — Exports `fetch` only; `listen` throws.
 
-Because the mapping is web-standard, `IRequest.ip` is intentionally left unset — a web `Request`
-carries no client address (the pre-M23 Node adapter derived it from `socket.remoteAddress`).
-Consumers needing the client IP read a proxy header (`X-Forwarded-For` / `X-Real-IP`) in middleware.
+Node, Deno and Bun supply the socket peer to the shared mapping as `IRequest.ip` (M113n),
+normalizing IPv4-mapped IPv6. Workers and plain fetch calls have no peer. Behind a proxy the peer is
+the proxy; IP security checks it against `trustedProxies` before walking the forwarded chain, then
+publishes the client IP and public origin. Session cookies, CSRF and the React Router bridge read
+that origin through the common accessor.
 
 ### Why Only Runtime May Use Runtime-Specific APIs
 

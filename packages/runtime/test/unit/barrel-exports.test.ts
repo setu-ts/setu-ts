@@ -7,6 +7,33 @@
 
 import * as barrel from '../../src/index.ts';
 import { describe, expect, it } from 'vitest';
+import type { NodeServeHost, DenoServeHost, BunServer } from '../../src/index.ts';
+
+describe('proxy peer host types from the barrel', () => {
+  it('accepts native peer callbacks and keeps normalization internal', async () => {
+    const nodeFetch: Parameters<NodeServeHost['serve']>[0]['fetch'] = (_request, env) =>
+      new Response(env?.incoming?.socket?.remoteAddress ?? 'absent');
+    const denoFetch: Parameters<DenoServeHost['serve']>[0]['fetch'] = (_request, info) =>
+      new Response(info?.remoteAddr?.hostname ?? 'absent');
+    const server: BunServer = { stop() {}, requestIP: () => ({ address: '192.0.2.3' }) };
+    const request = new Request('http://localhost/');
+    expect(
+      await (
+        await nodeFetch(request, { incoming: { socket: { remoteAddress: undefined } } })
+      ).text(),
+    ).toBe('absent');
+    expect(
+      await (
+        await nodeFetch(request, { incoming: { socket: { remoteAddress: '192.0.2.1' } } })
+      ).text(),
+    ).toBe('192.0.2.1');
+    expect(await (await denoFetch(request, { remoteAddr: { hostname: '192.0.2.2' } })).text()).toBe(
+      '192.0.2.2',
+    );
+    expect(server.requestIP?.(request)?.address).toBe('192.0.2.3');
+    expect('normalizePeerAddress' in barrel).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Present exports (values)

@@ -22,6 +22,11 @@ const decoder = new TextDecoder();
 /** Shared empty body — a bodyless request allocates nothing. */
 const EMPTY_BODY = new Uint8Array(0);
 
+// Compiled once: mapped IPv4 is the normal peer form on a dual-stack host.
+// Testing the full address avoids per-request arrays, callbacks and match objects.
+const MAPPED_IPV4_PEER =
+  /^::ffff:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[0-9]{1,2})\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[0-9]{1,2})\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[0-9]{1,2})\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[0-9]{1,2})$/i;
+
 /**
  * Raised when a request body exceeds the configured
  * {@linkcode RuntimeOptions.maxBodyBytes} cap.
@@ -79,6 +84,7 @@ class FrameworkRequest implements IRequest {
   readonly method: HttpMethod;
   readonly url: string;
   readonly path: string;
+  readonly ip?: string;
 
   readonly #raw: Request;
   #body: Promise<Uint8Array> | undefined;
@@ -87,12 +93,21 @@ class FrameworkRequest implements IRequest {
   #headers: Headers | undefined;
   readonly #maxBodyBytes: number | undefined;
 
-  constructor(raw: Request, method: HttpMethod, url: string, path: string, maxBodyBytes?: number) {
+  constructor(
+    raw: Request,
+    method: HttpMethod,
+    url: string,
+    path: string,
+    maxBodyBytes?: number,
+    peerAddress?: string,
+  ) {
     this.#raw = raw;
     this.method = method;
     this.url = url;
     this.path = path;
     this.#maxBodyBytes = maxBodyBytes;
+    const ip = normalizePeerAddress(peerAddress);
+    if (ip !== undefined) this.ip = ip;
   }
 
   /**
@@ -380,16 +395,28 @@ export function extractPath(url: string): string {
  *   cap rejects with {@linkcode RequestBodyTooLargeError}, which no request
  *   header can disable. `RuntimePlugin({ maxBodyBytes })` is what threads it
  *   here.
+ * @param peerAddress - Optional socket peer supplied by the runtime host
  * @returns The framework request
  */
-export function mapWebRequestToFrameworkRequest(request: Request, maxBodyBytes?: number): IRequest {
+export function mapWebRequestToFrameworkRequest(
+  request: Request,
+  maxBodyBytes?: number,
+  peerAddress?: string,
+): IRequest {
   return new FrameworkRequest(
     request,
     request.method.toUpperCase() as HttpMethod,
     request.url,
     extractPath(request.url),
     maxBodyBytes,
+    peerAddress,
   );
+}
+
+/** Normalizes socket peers without changing native IPv6 literals. */
+function normalizePeerAddress(address: string | undefined): string | undefined {
+  if (address === '') return undefined;
+  return address !== undefined && MAPPED_IPV4_PEER.test(address) ? address.slice(7) : address;
 }
 
 /**
