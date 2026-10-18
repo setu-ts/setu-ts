@@ -7566,19 +7566,19 @@ delay's intended fire time is `now + delayMs` and carries per-replica startup sk
 what identifies "the same one-shot job" across replicas. The suffix is load-bearing: the bare
 `scheduler:job:<name>` is the per-handler mutex, and a slot holding that key would make the mutex
 acquire at fire time always lose to the slot's own claim. A delay's slot is released when the job
-leaves the registry (on fire, `remove`, or TTL expiry), so re-registering the same name after it
-fired gets a fresh slot and fires again.
+leaves the registry (on final settlement or `remove`), on `disconnect`, or by TTL expiry, so
+re-registering the same name after it fired gets a fresh slot and fires again.
 
 **A `delay` job is lost if the replica that claimed it leaves before firing.** The claim is decided
 at registration, so a replica that finds the slot held never re-attempts: if the claiming replica
-crashes — or shuts down gracefully, since `disconnect()` clears timers without releasing the slot —
-between registering the delay and firing it, no replica runs the handler and nothing reports it. The
-exposure window is the delay itself, so it matters for a long `delayMs` on a replica set that may
-lose a pod in that window. `cron` and `every` are unaffected: they claim at fire time, so the next
-fire re-contends. A separate per-handler mutex preserves overlap protection — a second fire of a job
-whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
-(`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
-slot keys; the first fire may come sooner than one full interval after registration.
+crashes or shuts down gracefully between registering the delay and firing it, no replica runs the
+handler and nothing reports it. The exposure window is the delay itself, so it matters for a long
+`delayMs` on a replica set that may lose a pod in that window. `cron` and `every` are unaffected:
+they claim at fire time, so the next fire re-contends. A separate per-handler mutex preserves
+overlap protection — a second fire of a job whose previous fire is still running is skipped locally.
+`every` jobs arm on an absolute epoch grid (`(floor(now / interval) + 1) * interval`), so replicas
+registered at different instants agree on slot keys; the first fire may come sooner than one full
+interval after registration.
 
 ### Declarative jobs and behaviours
 
@@ -7710,9 +7710,14 @@ The message names the job, option and rule without echoing the rejected value. Z
 zero `retry.delay` are accepted; large finite values are accepted. These refusals are breaking: fix
 the value before registering the job.
 
-Disconnect, remove and pause cancel pending retry backoff without another attempt. Pause retains the
-job configuration; resume schedules a fresh fire with attempt 1 using the original delay or the next
-cron/interval boundary, rather than continuing the remaining backoff.
+Disconnect, remove and pause cancel pending retry backoff without another attempt. A one-shot that
+already succeeded or exhausted its retries is removed even while paused and is not re-run. A
+one-shot paused mid-retry stays registered; resume starts it from attempt 1 using the original
+delay. Recurring jobs resume at the next cron/interval boundary. Remaining backoff is discarded. A
+cancelled fire is not reported as success: diagnostics settle it with `false`, counting it in
+`failed` because there is no separate cancellation counter. An in-flight handler may still reach a
+final success or failure after cancellation. Disconnect releases every one-shot `:once` slot,
+including unfinished jobs.
 
 ### IScheduler Interface
 

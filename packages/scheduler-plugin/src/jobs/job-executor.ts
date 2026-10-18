@@ -188,6 +188,9 @@ interface RunOptions {
   attempts?: SchedulerAttemptObserver | undefined;
 }
 
+/** Internal fire result; exhausted retries still reject and are classified by the caller. */
+export type RunOutcome = 'succeeded' | 'failed' | 'cancelled';
+
 /**
  * Runs a handler with retry and backoff.
  *
@@ -197,7 +200,8 @@ interface RunOptions {
  * @param data - Optional payload
  * @param retry - Optional retry configuration
  * @param options - Runtime and optional logger
- * @returns The final settled result, or fulfillment on cancellation without another attempt
+ * @returns `succeeded`, or `cancelled` before a final outcome
+ * @throws The handler's error when retries are exhausted (the `failed` outcome)
  */
 export async function run<T = unknown>(
   jobId: string,
@@ -206,7 +210,7 @@ export async function run<T = unknown>(
   data: T | undefined,
   retry: RetryOptions | undefined,
   options: RunOptions,
-): Promise<void> {
+): Promise<RunOutcome> {
   const { runtime, logger, attempts, signal } = options;
   const limit = retry?.limit ?? 1;
   let attempt = 0;
@@ -238,10 +242,10 @@ export async function run<T = unknown>(
       await (attempts === undefined || CHAIN_WRAPPED.has(handler)
         ? handler(job)
         : invokeHandler(handler, job, 'await'));
-      return;
+      return 'succeeded';
     } catch (error) {
-      if (signal?.aborted) return;
       if (attempt < limit) {
+        if (signal?.aborted) return 'cancelled';
         const backoffMs = retry !== undefined ? computeBackoffMs(attempt, retry) : 1000;
         logger?.warn(`Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`, {
           error: error instanceof Error ? error.message : String(error),
@@ -255,6 +259,7 @@ export async function run<T = unknown>(
       }
     }
   }
+  return 'cancelled';
 }
 
 /**

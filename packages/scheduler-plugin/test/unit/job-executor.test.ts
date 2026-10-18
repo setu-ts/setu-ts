@@ -12,7 +12,7 @@ describe('JobExecutor.run', () => {
     const controller = new AbortController();
     controller.abort();
     let calls = 0;
-    await run(
+    const outcome = await run(
       'id1',
       'cancelled',
       () => {
@@ -25,6 +25,7 @@ describe('JobExecutor.run', () => {
         signal: controller.signal,
       },
     );
+    expect(outcome).toBe('cancelled');
     expect(calls).toBe(0);
     expect(runtime.getPendingTimerCount()).toBe(0);
   });
@@ -44,7 +45,7 @@ describe('JobExecutor.run', () => {
       { runtime, signal: controller.signal },
     );
     expect(runtime.getPendingTimerCount()).toBe(0);
-    await expect(pending).resolves.toBeUndefined();
+    await expect(pending).resolves.toBe('cancelled');
   });
 
   it('runs handler successfully', async () => {
@@ -53,7 +54,9 @@ describe('JobExecutor.run', () => {
     const handler: SchedulerJobHandler = () => {
       called = true;
     };
-    await run('id1', 'job1', handler, undefined, undefined, { runtime });
+    await expect(run('id1', 'job1', handler, undefined, undefined, { runtime })).resolves.toBe(
+      'succeeded',
+    );
     expect(called).toBe(true);
   });
 

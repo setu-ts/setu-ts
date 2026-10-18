@@ -334,8 +334,12 @@ All notable changes to this project are documented here. The format follows
   the wall clock on each wake, so a job never runs before its due time. Previously, Node, Deno and
   Bun clamped an over-limit timer to about 1 ms: `delay(30 days)` fired at once, and monthly cron
   jobs could fire early. Delays and intervals have no upper limit. Disconnect, remove and pause
-  cancel retry backoff without another attempt. Pause retains the configuration; resume starts a
-  fresh fire at attempt 1 using the original delay or the next cron/interval boundary.
+  cancel retry backoff without another attempt. A one-shot that already succeeded or exhausted its
+  retries is removed even while paused and is not re-run; one paused mid-retry stays registered and
+  resumes from attempt 1 using the original delay. Recurring jobs resume at the next cron/interval
+  boundary. Cancelled fires settle diagnostics with `false` (counted in `failed`, never
+  `succeeded`). Disconnect releases one-shot slots regardless of outcome, and an old fire cannot
+  remove or release a replacement registered under the same name.
 - **JWT validity boundaries now honour fractional seconds (V9-70, M113m, `@setu-ts/auth-plugin`).**
   First-party tokens are refused at and after `exp`, closing the window of up to one second after
   expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and

@@ -21,6 +21,13 @@ non-positive `intervalMs`; `delay`, `every` and `cron` reject for a non-finite o
 `retry.delay` are still accepted, and there is no upper delay or interval limit. Long waits now run
 until their due time instead of being clamped to about 1 ms.
 
+**Pause only re-runs unfinished one-shots.** A one-shot that already succeeded or exhausted its
+retries is removed even while paused and is not re-run. A one-shot paused mid-retry stays registered
+and resumes from attempt 1 with its original delay, discarding remaining backoff. Disconnect
+releases its `:once` slot regardless of outcome. A cancelled fire is not reported as success:
+diagnostics settle it with `false` and count it in `failed`, since no separate cancellation counter
+exists. An in-flight handler can still reach a final success or failure after pause or disconnect.
+
 **Refresh before `exp`.** First-party `JwtService.verify` now uses fractional seconds without clock
 tolerance and rejects once `now >= exp`, instead of accepting a token for up to one second after
 expiry; it also rejects while `now < nbf`. Update tests or clients that assumed a token remained

@@ -70,9 +70,14 @@ registering jobs.
 An exponential backoff that overflows to `Infinity` with an enormous retry limit now waits forever
 instead of retrying after about 1 ms.
 
-Disconnect, remove and pause cancel pending retry backoff without another attempt. Pause retains the
-job configuration; resume schedules a fresh fire with attempt 1 using the original delay or the next
-cron/interval boundary, rather than continuing the remaining backoff.
+Disconnect, remove and pause cancel pending retry backoff without another attempt. A one-shot that
+already succeeded or exhausted its retries is removed even while paused and is not re-run. A
+one-shot paused mid-retry stays registered; resume starts it from attempt 1 using the original
+delay. Recurring jobs resume at the next cron/interval boundary. Remaining backoff is discarded. A
+cancelled fire is not reported as success: diagnostics settle it with `false`, counting it in
+`failed` because there is no separate cancellation counter. An in-flight handler may still reach a
+final success or failure after cancellation. Disconnect releases every one-shot `:once` slot,
+including unfinished jobs.
 
 ## Options
 

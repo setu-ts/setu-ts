@@ -41,6 +41,7 @@ import { cronNextMs } from '../cron/cron-parser.ts';
 import { DEFAULT_ACQUIRE_TIMEOUT_MS } from '../lock/distributed-lock.ts';
 import { JobRegistry } from '../jobs/job-registry.ts';
 import { run } from '../jobs/job-executor.ts';
+import type { RunOutcome } from '../jobs/job-executor.ts';
 import { armAt } from '../timers/bounded-timer.ts';
 import type { FireObservation } from '../diagnostics/scheduler-observations.ts';
 import type { SchedulerObservationCollector } from '../diagnostics/scheduler-observations.ts';
@@ -190,11 +191,13 @@ export class SchedulerService implements IScheduler {
   }
 
   /**
-   * Disconnect the service (clear all timers and stop).
+   * Disconnect the service: stop future attempts, clear timers, and release
+   * all one-shot slots. In-flight handlers may still reach a final outcome.
    */
   async disconnect(): Promise<void> {
     this.#connected = false;
 
+    const releases: Promise<void>[] = [];
     for (const name of this.#names) {
       try {
         const entry = this.#registry.get(name);
@@ -202,11 +205,15 @@ export class SchedulerService implements IScheduler {
         if (entry.timerHandle !== null) {
           this.#runtime.clearTimeout(entry.timerHandle);
         }
+        if (entry.kind === 'delay') {
+          releases.push(this.#releaseDelaySlot(entry));
+        }
       } catch {
         // ignore — entry may have been removed during disconnect
       }
     }
     this.#names.clear();
+    await Promise.all(releases);
   }
 
   /**
@@ -390,9 +397,11 @@ export class SchedulerService implements IScheduler {
    *
    * Cancels the main timer and ends the current retry run, including its
    * backoff. An in-flight handler may settle, but cannot retry. Configuration
-   * is retained, including one-shot jobs: resume schedules a fresh fire with
-   * attempt 1, using the original delay or next cron/interval boundary rather
-   * than preserving the remaining backoff, just as it resets the main timer.
+   * is retained for unfinished jobs: a one-shot that reaches success or
+   * exhausts its retries is removed even while paused and is not re-run.
+   * A one-shot paused mid-retry resumes from attempt 1 using the original
+   * delay; recurring jobs use their next cron/interval boundary. Remaining
+   * backoff is discarded. A cancelled fire is not reported as successful.
    */
   async pause(name: string): Promise<void> {
     this.#registry.pause(name, (handle) => {
@@ -546,7 +555,7 @@ export class SchedulerService implements IScheduler {
    * fires.** Because the claim is decided here rather than at fire time, a
    * replica that finds the slot held sets `slotClaim = 'contended'` once and never
    * re-attempts. If the claiming replica then dies — a crash, or a graceful
-   * {@linkcode disconnect}, which clears timers WITHOUT releasing the slot —
+   * {@linkcode disconnect}, which clears timers and releases the slot —
    * between this registration and the fire, no replica runs the handler and
    * nothing reports it. The exposure window is `delayMs`. `cron` and `every`
    * do not share it: they claim at fire time, so the next fire re-contends.
@@ -585,9 +594,13 @@ export class SchedulerService implements IScheduler {
     if (entry.slotToken === null) {
       return; // This entry never held the slot — nothing to release.
     }
+    // Claim the release synchronously so remove/disconnect/fire cleanup cannot
+    // release twice, or later release a replacement entry's claim.
+    const token = entry.slotToken;
+    entry.slotToken = null;
     const slotKey = this.#delaySlotKey(entry);
     try {
-      await this.#lock.release(slotKey, entry.slotToken);
+      await this.#lock.release(slotKey, token);
     } catch (error) {
       this.#logger?.error(`Job '${entry.name}': could not release fire slot`, {
         error: error instanceof Error ? error.message : String(error),
@@ -615,7 +628,7 @@ export class SchedulerService implements IScheduler {
     lockKey: string,
     fireObs: FireObservation | null,
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<RunOutcome | null> {
     const collector = this.#collector;
     let token: string | null;
     try {
@@ -626,7 +639,7 @@ export class SchedulerService implements IScheduler {
         error: error instanceof Error ? error.message : String(error),
       });
       collector?.fireSettled(fireObs, 'lock-failed', null, null);
-      return;
+      return null;
     }
 
     if (token === null) {
@@ -635,7 +648,7 @@ export class SchedulerService implements IScheduler {
       // per-fire dedup; that is the slot lock's job (M70l C3).
       this.#logger?.debug(`Job '${entry.name}': lock held elsewhere, skipping this fire`);
       collector?.fireSettled(fireObs, 'contended', null, null);
-      return;
+      return null;
     }
 
     // Observed dispatch: clocks are read ONLY here, and only through the
@@ -658,13 +671,23 @@ export class SchedulerService implements IScheduler {
         attempts === undefined
           ? { runtime: this.#runtime, logger: this.#logger, signal }
           : { runtime: this.#runtime, logger: this.#logger, attempts, signal };
-      await run(jobId, entry.name, entry.handler, entry.data, entry.retry, runOptions);
+      const outcome = await run(
+        jobId,
+        entry.name,
+        entry.handler,
+        entry.data,
+        entry.retry,
+        runOptions,
+      );
       collector?.fireSettled(
         fireObs,
         'dispatched',
-        true,
+        // The collector counts null as failed too: false honestly means this
+        // fire did not succeed, including cancellation before attempt 1.
+        outcome === 'succeeded',
         collector?.elapsedSince(dispatchStart) ?? null,
       );
+      return outcome;
     } catch (error) {
       // Handler exhausted retries — log but do not crash the scheduler loop.
       this.#logger?.error(`Job '${entry.name}' failed permanently`, {
@@ -676,6 +699,7 @@ export class SchedulerService implements IScheduler {
         false,
         collector?.elapsedSince(dispatchStart) ?? null,
       );
+      return 'failed';
     } finally {
       try {
         await this.#lock.release(lockKey, token);
@@ -764,28 +788,34 @@ export class SchedulerService implements IScheduler {
     // Skipping a fire must never cancel the schedule: a contended lock is the
     // NORMAL multi-instance path, and a lock backend blip is transient. Every
     // lock failure below is contained here so the re-arm logic still runs.
-    if (slotClaimed) {
-      await this.#runWithLock(entry, lockKey, fireObs, signal);
-    }
-
-    // The stopped fire must not remove a paused one-shot or interfere with
-    // a fresh fire armed by resume (or a replacement registered after remove).
-    if (signal.aborted) return;
+    const outcome = slotClaimed ? await this.#runWithLock(entry, lockKey, fireObs, signal) : null;
 
     // One-shot delay jobs are removed after firing, regardless of pause state.
     if (entry.kind === 'delay') {
+      // Only an unfinished paused fire is resumable. Success and exhausted
+      // retries are final even if pause aborted the fire while it was running.
+      // Disconnect must release the slot regardless of the run's outcome.
+      if (signal.aborted && this.#connected && outcome !== 'succeeded' && outcome !== 'failed') {
+        return;
+      }
       // F2: the entry is leaving the registry — release the slot it claimed
       // at registration so a later re-registration under the same name gets
       // a fresh slot. (No-op when this entry never held it.)
       await this.#releaseDelaySlot(entry);
       // C6 FIX: Guard against mid-fire remove() — if remove() was called while
       // the handler was in flight, the entry is already gone; skip removing again.
-      if (this.#registry.has(entry.name)) {
+      if (this.#registry.has(entry.name) && this.#registry.get(entry.name) === entry) {
+        // Resume may already have armed this entry again while its handler
+        // settled. A final result must not leave that timer live.
+        if (entry.timerHandle !== null) this.#runtime.clearTimeout(entry.timerHandle);
         this.#registry.remove(entry.name);
         this.#names.delete(entry.name);
       }
       return;
     }
+
+    // Only a non-aborted recurring fire may re-arm.
+    if (signal.aborted) return;
 
     // C3 FIX: Guard for disconnect() — if service disconnected while fire was in flight,
     // do not re-arm a new timer.
