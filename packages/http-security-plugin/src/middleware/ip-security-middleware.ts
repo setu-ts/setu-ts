@@ -159,13 +159,27 @@ function compileTrustedProxy(entry: string): (candidate: string) => boolean {
       const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
       const base = (networkValue & mask) >>> 0;
       return (candidate: string): boolean => {
-        const value = ipv4ToNumber(candidate);
+        const value = ipv4ToNumber(unmapIpv4(candidate));
         return value !== null && (value & mask) >>> 0 === base;
       };
     }
   }
-  const literal = entry.toLowerCase();
-  return (candidate: string): boolean => candidate.toLowerCase() === literal;
+  const literal = unmapIpv4(entry).toLowerCase();
+  return (candidate: string): boolean => unmapIpv4(candidate).toLowerCase() === literal;
+}
+
+/** An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`). */
+const MAPPED_IPV4 = /^::ffff:([0-9]{1,3}(?:\.[0-9]{1,3}){3})$/i;
+
+/**
+ * Unmaps `::ffff:a.b.c.d` to `a.b.c.d` for matching, as the runtime adapters
+ * already do for the socket peer. A dual-stack proxy may write a forwarded hop
+ * in the mapped form, which would otherwise never match an IPv4 trusted entry.
+ */
+function unmapIpv4(candidate: string): string {
+  const match = MAPPED_IPV4.exec(candidate);
+  const address = match?.[1];
+  return address !== undefined && ipv4ToNumber(address) !== null ? address : candidate;
 }
 
 /** Converts a dotted-quad IPv4 literal to its numeric value, or `null`. */

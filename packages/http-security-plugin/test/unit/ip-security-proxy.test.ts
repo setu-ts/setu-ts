@@ -130,6 +130,33 @@ describe('proxy peer and public origin (M113n)', () => {
         .ip,
     ).toBeUndefined();
   });
+  it('matches IPv4-mapped forwarded hops against IPv4 trusted proxies', async () => {
+    expect(
+      (await inspect({ 'X-Forwarded-For': '7.7.7.7, ::ffff:10.2.3.4' }, {}, '10.1.2.3')).ip,
+    ).toBe('7.7.7.7');
+    expect(
+      (
+        await inspect(
+          { 'X-Forwarded-For': '7.7.7.7, ::FFFF:10.2.3.4' },
+          { trustedProxies: ['::ffff:10.2.3.4'] },
+          '::ffff:10.2.3.4',
+        )
+      ).ip,
+    ).toBe('7.7.7.7');
+    expect(
+      (
+        await inspect(
+          { Forwarded: 'for=7.7.7.7, for="[::ffff:10.2.3.4]"' },
+          { forwardedHeader: 'forwarded' },
+          '10.1.2.3',
+        )
+      ).ip,
+    ).toBe('7.7.7.7');
+    // A malformed mapped form is compared literally and trusts nothing.
+    expect(
+      (await inspect({ 'X-Forwarded-For': '7.7.7.7, ::ffff:10.2.3.999' }, {}, '10.1.2.3')).ip,
+    ).toBe('::ffff:10.2.3.999');
+  });
   // M113n audit round 3: a browser Origin never carries the default port.
   it('drops the scheme default port from a forwarded host', async () => {
     const cases: readonly (readonly [string, string, string])[] = [

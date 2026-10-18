@@ -3156,7 +3156,8 @@ import {
 } from '@setu-ts/auth-plugin';
 
 // Global: 100 requests per minute; retain the default probe exclusions.
-// Keyed by authenticated user, else ONE shared 'anonymous' bucket (see above).
+// Keyed by authenticated user, else the socket peer (ip:<peer>) on Node/Deno/Bun,
+// else ONE shared 'anonymous' bucket (see above).
 app.middleware.add(
   rateLimitMiddleware({
     windowMs: 60_000,
