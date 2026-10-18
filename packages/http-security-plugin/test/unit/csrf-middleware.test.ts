@@ -19,9 +19,11 @@ describe('CSRF behind a proxy', () => {
     });
     return { downstream, statuses: response.statuses };
   }
+  const SAME_ORIGIN = { 'Sec-Fetch-Site': 'same-origin' };
   it('accepts an https browser POST with zero proxy configuration', async () => {
     expect(
-      (await check({ Origin: 'https://internal', 'X-Forwarded-Proto': 'https' })).downstream,
+      (await check({ Origin: 'https://internal', 'X-Forwarded-Proto': 'https', ...SAME_ORIGIN }))
+        .downstream,
     ).toBe(true);
     expect(
       (
@@ -29,16 +31,33 @@ describe('CSRF behind a proxy', () => {
           Origin: 'https://public.example',
           'X-Forwarded-Proto': 'HTTPS, http',
           'X-Forwarded-Host': 'public.example, internal',
+          'Sec-Fetch-Site': ' Same-Origin ',
         })
       ).downstream,
     ).toBe(true);
+  });
+  it('ignores the forwarded candidate unless the browser reports same-origin', async () => {
+    for (const site of [undefined, 'cross-site', 'same-site', 'none', '']) {
+      const result = await check({
+        Origin: 'https://partner.example',
+        'X-Forwarded-Proto': 'https',
+        'X-Forwarded-Host': 'partner.example',
+        ...(site === undefined ? {} : { 'Sec-Fetch-Site': site }),
+      });
+      expect(result.downstream, String(site)).toBe(false);
+      expect(result.statuses).toContain(403);
+    }
   });
   it('accepts the published origin through the common accessor', async () => {
     expect((await check({ Origin: 'https://published.example' }, true)).downstream).toBe(true);
   });
   it('ignores ftp, empty and garbage forwarded protocol values', async () => {
     for (const proto of ['ftp', '', 'garbage']) {
-      const result = await check({ Origin: `${proto}://internal`, 'X-Forwarded-Proto': proto });
+      const result = await check({
+        Origin: `${proto}://internal`,
+        'X-Forwarded-Proto': proto,
+        ...SAME_ORIGIN,
+      });
       expect(result.downstream, proto).toBe(false);
       expect(result.statuses).toContain(403);
     }
@@ -48,6 +67,7 @@ describe('CSRF behind a proxy', () => {
       Origin: 'https://evil.example',
       'X-Forwarded-Proto': 'https',
       'X-Forwarded-Host': 'public.example',
+      ...SAME_ORIGIN,
     });
     expect(result.downstream).toBe(false);
     expect(result.statuses).toContain(403);

@@ -3395,20 +3395,21 @@ omits that header.
 #### CSRF (`csrfMiddleware`)
 
 Stateless Origin/Referer validation for unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`). The
-request's URL origin, `requestOriginOf(ctx).origin`, and the validated leftmost
-`X-Forwarded-Proto`/`X-Forwarded-Host` candidate (URL host when absent) are implicitly trusted. The
-last candidate works without proxy configuration specifically for browser CSRF: a cross-site form
-cannot set those headers and scripts setting them trigger CORS preflight. It does not grant proxy
-trust to other consumers. `trustedOrigins` adds further allowed origins. Both headers absent → pass
-through (non-browser clients). Optional `customHeader` requires that header on unsafe methods (403
-when absent). `exclude` lists paths (exact string or `RegExp`) that skip the check entirely —
-checked before the method test, so an excluded path is never inspected. It is for a protocol
-endpoint whose own defences make the check redundant (the SAML ACS: its signed assertion, single-use
-request and binding cookie), not for an application form route. An origin allowlist cannot admit an
-IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) — the browser posts with
-`Origin: null`, and `trustedOrigins: ['null']` admits every opaque-origin `POST` on every route — so
-the documented SAML recipe is `exclude: ['/auth/<provider>/acs']` here and in the session plugin's
-form CSRF.
+request's URL origin, `requestOriginOf(ctx).origin`, and — only when the request carries
+`Sec-Fetch-Site: same-origin` — the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
+candidate (URL host when absent) are implicitly trusted. The gate is required: `X-Forwarded-*` are
+not forbidden request headers and the CORS middleware echoes requested headers by default, so a
+script on a credentialed CORS origin could otherwise name its own host; scripts cannot set
+`Sec-Fetch-Site`. It does not grant proxy trust to other consumers. `trustedOrigins` adds further
+allowed origins. Both headers absent → pass through (non-browser clients). Optional `customHeader`
+requires that header on unsafe methods (403 when absent). `exclude` lists paths (exact string or
+`RegExp`) that skip the check entirely — checked before the method test, so an excluded path is
+never inspected. It is for a protocol endpoint whose own defences make the check redundant (the SAML
+ACS: its signed assertion, single-use request and binding cookie), not for an application form
+route. An origin allowlist cannot admit an IdP that serves `Referrer-Policy: no-referrer` (Keycloak
+does) — the browser posts with `Origin: null`, and `trustedOrigins: ['null']` admits every
+opaque-origin `POST` on every route — so the documented SAML recipe is
+`exclude: ['/auth/<provider>/acs']` here and in the session plugin's form CSRF.
 
 #### Request Size (`requestSizeMiddleware`)
 
@@ -3431,18 +3432,24 @@ exclusive; `proxyHops` must be a non-negative safe integer. Never short-circuits
 conflict throw at construction. Its parser handles quoted strings, escapes, IPv6 and IPv4 ports;
 malformed input, over 8 KiB, or over 64 elements contributes no hops and no forwarded origin, so the
 socket peer is still checked — a direct client keeps its own address, a trusted proxy sending it
-yields no client. Unknown or obfuscated hops cannot match a trusted proxy and are never returned as
-clients. The two header families are never merged.
+yields no client. In the default family a `proxyHops` header too short for the chain, or a chain of
+only trusted proxies, also resolves `undefined`, never the socket peer. Unknown or obfuscated hops
+cannot match a trusted proxy and are never returned as clients. The two header families are never
+merged.
 
 The middleware publishes `{ protocol, host }` under `REQUEST_ORIGIN_STATE_KEY`. Forwarded values are
-believed only when the selected client came from the forwarded chain: leftmost `X-Forwarded-Proto`
-and `X-Forwarded-Host` for the default family, or `proto` and `host` from the selected `Forwarded`
-element. Protocol must be `http` or `https` (case-insensitive); host must round-trip through
-`new URL('http://' + host)` unchanged except for case and contain no path, userinfo, query or
-fragment. Rejected or absent components fall back to the URL. `requestOriginOf(ctx)` and
+believed only with `trustedProxies`, a socket peer present and trusted, and the selected client from
+the forwarded chain; leftmost, `proxyHops` and any request without a peer publish the URL origin.
+The values are the leftmost `X-Forwarded-Proto` and `X-Forwarded-Host` for the default family (the
+trusted proxy must overwrite both), or `proto` and `host` from the selected `Forwarded` element.
+Protocol must be `http` or `https` (case-insensitive); host must be a DNS name (letters, digits,
+inner hyphens, no trailing dot) or a bracketed IPv6 literal, with an optional numeric port, at most
+259 characters, and must round-trip through `new URL('http://' + host)` unchanged except for case.
+Rejected or absent components fall back to the URL. `requestOriginOf(ctx)` and
 `publicRequestUrl(ctx)` in common expose that decision to session `secure: 'auto'`, CSRF and the
 React Router bridge. Security-sensitive links should use a configured base URL. Workers has no peer;
-use `trustProxy: true` with `ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites.
+use `trustProxy: true` with `ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites; that header
+vouches for the client address only, and the public origin stays the request URL.
 
 ---
 

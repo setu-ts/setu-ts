@@ -356,3 +356,59 @@ committed-tree security audit by a fresh agent runs after code review, before th
 - A peer address on Cloudflare Workers — not available on the platform (§3.2).
 - Changing `proxyHops` or leftmost client-IP semantics — §3.4.
 - Expanding IPv6 CIDR in `trustedProxies` — released floor, unchanged.
+
+## 10. Design security review (recorded after implementation)
+
+The committed-tree security audit of `bd23aff8` failed because this plan had no design review while
+the diff crosses a trust boundary (F0 below). This section is recorded after implementation — the
+M101a / M113a precedent — and is not presented as having guided the design.
+
+**Flows reviewed.** (a) The socket peer each Node, Deno and Bun adapter reads into `IRequest.ip`,
+and its IPv4-mapped normalization. (b) The client-IP walk over `X-Forwarded-For`, a custom
+`ipHeader`, or RFC 7239 `Forwarded`, in leftmost, `proxyHops` and `trustedProxies` modes, with the
+peer appended in the last. (c) The public origin published under `REQUEST_ORIGIN_STATE_KEY` from
+`X-Forwarded-Proto`/`X-Forwarded-Host` or a `Forwarded` element, consumed by `publicRequestUrl` (the
+React Router bridge) and session `secure: 'auto'`. (d) The CSRF own-origin set, including the
+zero-configuration `X-Forwarded-*` candidate. (e) The `Forwarded` parser on client input.
+
+**Assets.** The client identity that rate limits and IP allowlists key on; the public host and
+protocol that loaders build redirects and markup from; the `Secure` attribute of the session cookie;
+the CSRF decision for state-changing requests; event-loop availability.
+
+**Attackers.** A client connecting directly to the application (bypassing or in front of the proxy).
+A cross-site page in a victim's browser. A script on an origin the application admits for
+credentialed CORS (a partner origin, or one with an XSS hole). A misconfigured trusted proxy that
+appends or passes through client-supplied forwarding headers.
+
+**Obligations.**
+
+1. A direct client in `trustedProxies` mode cannot choose its client IP or the public origin: the
+   peer is walked first, and an untrusted peer is the client.
+2. A forwarded origin is believed only when a walk passed a trusted socket peer. Leftmost,
+   `proxyHops`, custom-`ipHeader` modes without `trustedProxies`, and requests with no peer never
+   checked who wrote the headers and so publish the URL origin.
+3. A forwarded host reaching `publicRequestUrl` is a DNS name or bracketed IPv6 literal with an
+   optional numeric port, bounded in length; a protocol is `http` or `https`.
+4. The CSRF zero-config candidate is believed only for a request the browser itself marks
+   `Sec-Fetch-Site: same-origin`, a header scripts cannot set; `X-Forwarded-*` are not forbidden
+   headers and the CORS middleware echoes requested headers by default.
+5. The `Forwarded` parser is linear, bounded (8 KiB, 64 elements), never throws out of the
+   middleware, and stores parameters in a `Map`.
+6. A header that resolves no client yields `undefined` in both families, never the proxy's address.
+7. No header value is logged or echoed in an error.
+
+**Residual, accepted.** A trusted proxy that passes a client's `X-Forwarded-Host` through untouched
+lets that client choose the published host; the docs require the proxy to overwrite both headers
+(Express makes the same trade). Browsers that send no `Sec-Fetch-Site` fall back to the URL and
+published origins for CSRF.
+
+**Findings.**
+
+| #   | Finding                                                                                                                                                    | Severity | Disposition                                                                                        |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------- |
+| R1  | Review: a malformed `Forwarded` header from a direct, untrusted client erased its client IP                                                                | Medium   | Fixed before the audit: a malformed header contributes no hops and the walk still checks the peer  |
+| F0  | Audit: no design security review                                                                                                                           | Blocking | Fixed: this section                                                                                |
+| F1  | Audit: a script on a credentialed CORS origin sent `X-Forwarded-Host: <its host>` and passed CSRF (403 → 200)                                              | High     | Fixed: the candidate requires `Sec-Fetch-Site: same-origin`; regression test reproduces the attack |
+| F2  | Audit: leftmost, `proxyHops`, custom-`ipHeader` and peerless modes published a client-chosen origin (host injection; `secure: 'auto'` dropped `Secure`)    | Medium   | Fixed: only `trustedProxies` with a trusted socket peer publishes a forwarded origin               |
+| F3  | Audit: the host check admitted URL-legal punctuation (`"`, `` ` ``, `{}`, a trailing dot)                                                                  | Low      | Fixed: DNS-name or bracketed-IPv6 grammar, 259-character bound                                     |
+| F4  | Audit: in the `X-Forwarded-*` family a short `proxyHops` header or an all-trusted chain resolved the proxy's own address, unlike `Forwarded` and the JSDoc | Low      | Fixed: both families resolve `undefined`                                                           |

@@ -19,9 +19,13 @@ export interface CsrfOptions {
   readonly enabled?: boolean;
   /**
    * Additional trusted origins (scheme+host) beyond the request's own origin.
-   * Implicitly trusts the URL origin, the published public origin, and the
-   * validated leftmost X-Forwarded protocol/host candidate for browser CSRF.
-   * This last comparison does not grant proxy trust. Default: `[]`.
+   * Implicitly trusts the URL origin, the published public origin, and — only
+   * when the browser itself reports `Sec-Fetch-Site: same-origin` — the
+   * validated leftmost X-Forwarded protocol/host candidate. Scripts cannot set
+   * `Sec-Fetch-Site`, while they can set `X-Forwarded-*` on a CORS request the
+   * server admits, so the candidate alone would let any credentialed CORS
+   * origin pass. This comparison grants no proxy trust to other consumers.
+   * Default: `[]`.
    *
    * An origin allowlist cannot admit an IdP that serves
    * `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS
@@ -119,12 +123,7 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
       requestOrigin &&
       (sourceOrigin === requestOrigin ||
         sourceOrigin === requestOriginOf(ctx).origin ||
-        sourceOrigin ===
-          xForwardedOrigin(ctx, {
-            protocol: new URL(ctx.request.url).protocol === 'https:' ? 'https' : 'http',
-            host: new URL(ctx.request.url).host,
-            origin: requestOrigin,
-          }).origin)
+        sameOriginBehindProxy(ctx, sourceOrigin, requestOrigin))
     ) {
       await next();
       return;
@@ -184,4 +183,32 @@ function getRequestOrigin(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The zero-configuration proxy candidate: an `X-Forwarded-Proto`/`X-Forwarded-Host`
+ * origin, believed only when the browser reports the request same-origin.
+ *
+ * `X-Forwarded-*` are not forbidden request headers, and the CORS middleware
+ * echoes requested headers by default, so a script on a credentialed CORS
+ * origin could otherwise send `X-Forwarded-Host: <its own host>` and match its
+ * own `Origin` (M113n audit F1). `Sec-Fetch-Site` is forbidden to scripts.
+ */
+function sameOriginBehindProxy(
+  ctx: IRequestContext,
+  sourceOrigin: string,
+  requestOrigin: string,
+): boolean {
+  if (ctx.request.headers.get('Sec-Fetch-Site')?.trim().toLowerCase() !== 'same-origin') {
+    return false;
+  }
+  const url = new URL(ctx.request.url);
+  return (
+    sourceOrigin ===
+    xForwardedOrigin(ctx, {
+      protocol: url.protocol === 'https:' ? 'https' : 'http',
+      host: url.host,
+      origin: requestOrigin,
+    }).origin
+  );
 }

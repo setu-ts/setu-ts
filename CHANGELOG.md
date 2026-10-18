@@ -17,12 +17,18 @@ All notable changes to this project are documented here. The format follows
   trusted proxy, React Router loaders/actions receive the public URL. Migration: list every real
   proxy or sidecar in `trustedProxies`, review rate-limit bucket sizing, and update code that
   expected internal loader URLs. Workers and plain fetch have no peer; `proxyHops` and leftmost
-  selection retain their header-only semantics.
+  selection retain their header-only semantics for the client IP and never publish a forwarded
+  origin. A forwarded origin is believed only in `trustedProxies` mode with a trusted socket peer,
+  and a forwarded host must be a DNS name or bracketed IPv6 literal. In the `X-Forwarded-*` family a
+  `proxyHops` header too short for the chain, or an all-trusted chain, now resolves no client rather
+  than the proxy's own address, matching the `Forwarded` family.
 - **CSRF own origins behind TLS termination (M113n, `@setu-ts/http-security-plugin`).** `csrf: {}`
-  also accepts the published public origin and the validated leftmost
-  `X-Forwarded-Proto`/`X-Forwarded-Host` browser-origin candidate. Migration: remove redundant
-  same-origin allowlist entries if desired; keep explicit `trustedOrigins` for other application
-  origins. The zero-config candidate grants no proxy trust to other consumers.
+  also accepts the published public origin and, when the browser sends
+  `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
+  candidate; without that gate a credentialed CORS origin could name its own host and pass.
+  Migration: remove redundant same-origin allowlist entries if desired; keep explicit
+  `trustedOrigins` for other application origins. The zero-config candidate grants no proxy trust to
+  other consumers.
 
 - **Breaking: invalid scheduler time values reject at registration (M113m, 0.10.0,
   `@setu-ts/scheduler-plugin`).** The async `delay` call rejects with `RangeError` for a non-finite

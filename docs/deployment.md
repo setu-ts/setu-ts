@@ -36,8 +36,10 @@ List only your actual proxies. With `trustedProxies`, the walk starts at the pee
 direct caller's forged headers cannot choose its client IP or public origin. The header-only path is
 retained when no peer is available. IPv4 CIDR is supported; list native IPv6 proxies literally.
 `proxyHops` and the leftmost default retain header-only selection and never check the peer; use
-`trustedProxies` when proxy addresses are stable. Configure the proxy to overwrite the origin
-headers it forwards, and restrict direct access to the application where possible.
+`trustedProxies` when proxy addresses are stable; only `trustedProxies` mode with a trusted socket
+peer publishes a forwarded origin. Configure the proxy to overwrite `X-Forwarded-Proto` and
+`X-Forwarded-Host` rather than pass a client's copy through, and restrict direct access to the
+application where possible.
 
 The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the leftmost
 `X-Forwarded-Proto`, and the leftmost `X-Forwarded-Host`. Choose `forwardedHeader: 'forwarded'` when
@@ -45,25 +47,28 @@ your proxy writes RFC 7239 `Forwarded`; this reads only that family and conflict
 Its `proto` and `host` come from the selected client's element. Malformed input, over 8 KiB, or over
 64 elements contributes no hops and no forwarded origin, so the socket peer is still checked: a
 direct client keeps its own address, and a trusted proxy sending it yields no client. Unknown and
-obfuscated hops cannot be returned as clients. Only `http`/`https` protocols and hosts without path,
-credentials, query or fragment are accepted; missing or rejected components use the request URL.
+obfuscated hops cannot be returned as clients, and a `proxyHops` header too short for the chain, or
+a chain of only trusted proxies, yields no client in either family. Only `http`/`https` protocols,
+and DNS-name or bracketed-IPv6 hosts with an optional numeric port, are accepted; missing or
+rejected components use the request URL.
 
-IP security publishes one public origin, believed only when the client came from the forwarded
-chain. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` from `@setu-ts/common` expose it. Session
-`secure: 'auto'` sets `Secure` for that origin's HTTPS protocol, including deletion; the default
-remains `true`. `'auto'` with `sameSite: 'none'` is refused at construction because `SameSite=None`
-forces `Secure`. The React Router bridge passes the public URL to loaders and actions. Without IP
-security these consumers use `ctx.request.url`.
+IP security publishes one public origin, believed only when a trusted socket peer was walked and the
+client came from the forwarded chain. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` from
+`@setu-ts/common` expose it. Session `secure: 'auto'` sets `Secure` for that origin's HTTPS
+protocol, including deletion; the default remains `true`. `'auto'` with `sameSite: 'none'` is
+refused at construction because `SameSite=None` forces `Secure`. The React Router bridge passes the
+public URL to loaders and actions. Without IP security these consumers use `ctx.request.url`.
 
-`csrf: {}` implicitly trusts the URL origin, that published public origin, and the validated
-leftmost `X-Forwarded-Proto`/`X-Forwarded-Host` candidate (URL host when absent). This final
-candidate works without proxy configuration specifically for browser CSRF: cross-site forms cannot
-set those headers, and scripts setting them trigger CORS preflight. It grants no proxy trust to
-other consumers. Cross-site origins still fail; `trustedOrigins` adds explicit application origins.
+`csrf: {}` implicitly trusts the URL origin, that published public origin, and, when the browser
+sends `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
+candidate (URL host when absent). The gate matters because scripts can set `X-Forwarded-*` on a CORS
+request the server admits, and cannot set `Sec-Fetch-Site`. It grants no proxy trust to other
+consumers. Cross-site origins still fail; `trustedOrigins` adds explicit application origins.
 
 Cloudflare Workers and plain `adapter.fetch()` calls have no socket peer. On Workers use
 `ipSecurity: { trustProxy: true, ipHeader: 'CF-Connecting-IP' }`; Cloudflare overwrites that header.
-Build security-sensitive links, including password resets, from a configured base URL, rather than a
+That header vouches for the client address only; the public origin comes from the request URL. Build
+security-sensitive links, including password resets, from a configured base URL, rather than a
 request-derived host.
 
 ## Container images

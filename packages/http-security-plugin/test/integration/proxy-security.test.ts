@@ -119,10 +119,61 @@ describe('proxy security through a kernel application', () => {
           await app.inject({
             method: 'POST',
             url: 'http://internal/',
-            headers: { Origin: 'https://internal', 'X-Forwarded-Proto': 'https' },
+            headers: {
+              Origin: 'https://internal',
+              'X-Forwarded-Proto': 'https',
+              'Sec-Fetch-Site': 'same-origin',
+            },
           })
         ).statusCode,
       ).toBe(200);
+    } finally {
+      await app.stop();
+    }
+  });
+  // M113n audit F1: `X-Forwarded-*` are not forbidden request headers, and the
+  // CORS middleware echoes requested headers by default, so a script on a
+  // credentialed CORS origin could name its own host and match its own Origin.
+  it('refuses a credentialed CORS origin naming itself in X-Forwarded-Host', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HttpSecurityPlugin({
+          cors: { origin: ['https://partner.example'], credentials: true },
+          csrf: {},
+        }),
+      ],
+    });
+    app.router.post('/', (ctx) => ctx.response.text('accepted'));
+    await app.start();
+    try {
+      const preflight = await app.fetch(
+        new Request('http://internal/', {
+          method: 'OPTIONS',
+          headers: {
+            Origin: 'https://partner.example',
+            'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'x-forwarded-host,x-forwarded-proto',
+          },
+        }),
+      );
+      // The preflight admits the headers, which is what makes the attack reachable.
+      expect(preflight.headers.get('access-control-allow-headers')).toBe(
+        'x-forwarded-host,x-forwarded-proto',
+      );
+      for (const site of [undefined, 'cross-site', 'same-site']) {
+        const response = await app.inject({
+          method: 'POST',
+          url: 'http://internal/',
+          headers: {
+            Origin: 'https://partner.example',
+            'X-Forwarded-Proto': 'https',
+            'X-Forwarded-Host': 'partner.example',
+            ...(site === undefined ? {} : { 'Sec-Fetch-Site': site }),
+          },
+        });
+        expect(response.statusCode, String(site)).toBe(403);
+      }
     } finally {
       await app.stop();
     }

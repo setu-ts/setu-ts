@@ -263,9 +263,22 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
         }
         const index = resolveForwardedIndex(chain, trustedMatchers, proxyHops);
         const selected = index === undefined ? undefined : chain[index];
-        // Unknown Forwarded hops are barriers, never a reason to guess a peer.
-        ip = forwardedHeader === 'forwarded' ? selected : (selected ?? ctx.request.ip);
-        if (selected !== undefined && index !== undefined && index < forwardedLength) {
+        // A header that resolves no client (a `proxyHops` chain too short, an
+        // all-trusted chain, an `unknown` Forwarded hop) resolves `undefined` in
+        // both families. Falling back to the socket peer would key every caller
+        // behind one proxy on that proxy's address.
+        ip = selected;
+        // The forwarded origin is believed only when the walk itself passed a
+        // trusted socket peer. Leftmost, `proxyHops`, and a deployment with no
+        // peer (Workers, plain fetch) never checked who wrote the headers, so a
+        // client could choose the public host and protocol (M113n audit F2).
+        if (
+          trustedMatchers !== undefined &&
+          ctx.request.ip !== undefined &&
+          selected !== undefined &&
+          index !== undefined &&
+          index < forwardedLength
+        ) {
           const element = elements?.[index];
           origin =
             forwardedHeader === 'forwarded'
@@ -336,8 +349,9 @@ function resolveForwardedIndex(
 }
 
 /**
- * Validated leftmost X-Forwarded origin candidate. CSRF uses it only for its
- * browser-origin comparison; it does not grant proxy trust to other consumers.
+ * Validated leftmost X-Forwarded origin candidate. IP security believes it only
+ * after a trusted socket peer; CSRF uses it only for a `Sec-Fetch-Site:
+ * same-origin` browser request. The function itself decides no trust.
  * @param ctx - The request carrying the headers
  * @param fallback - The URL-derived origin
  * @returns An origin with individually validated forwarded components
@@ -360,7 +374,7 @@ function validatedForwardedOrigin(
   const candidate = proto?.toLowerCase();
   const protocol = candidate === 'http' || candidate === 'https' ? candidate : fallback.protocol;
   let host = fallback.host;
-  if (forwardedHost !== undefined) {
+  if (forwardedHost !== undefined && isPlainHost(forwardedHost)) {
     try {
       const url = new URL(`http://${forwardedHost}`);
       if (
@@ -379,4 +393,41 @@ function validatedForwardedOrigin(
     }
   }
   return { protocol, host, origin: `${protocol}://${host}` };
+}
+
+/** Longest host accepted: a 253-character name plus `:` and a five-digit port. */
+const MAX_HOST_LENGTH = 259;
+
+/** One DNS label: letters, digits and inner hyphens. Linear to match. */
+const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+/**
+ * Restricts a forwarded host to a DNS name or bracketed IPv6 literal with an
+ * optional numeric port. The WHATWG URL parser admits quotes, backticks, braces
+ * and a trailing dot, and this value reaches loader URLs and markup through
+ * `publicRequestUrl` (M113n audit F3). The URL check in
+ * {@linkcode validatedForwardedOrigin} still applies afterwards.
+ */
+function isPlainHost(candidate: string): boolean {
+  if (candidate.length === 0 || candidate.length > MAX_HOST_LENGTH) {
+    return false;
+  }
+  const value = candidate.toLowerCase();
+  let name = value;
+  if (value.startsWith('[')) {
+    const close = value.indexOf(']');
+    if (close === -1 || !/^\[[0-9a-f:.]+\]$/.test(value.slice(0, close + 1))) {
+      return false;
+    }
+    const rest = value.slice(close + 1);
+    return rest === '' || /^:[0-9]{1,5}$/.test(rest);
+  }
+  const colon = value.lastIndexOf(':');
+  if (colon !== -1) {
+    if (!/^[0-9]{1,5}$/.test(value.slice(colon + 1))) {
+      return false;
+    }
+    name = value.slice(0, colon);
+  }
+  return name.split('.').every((label) => DNS_LABEL.test(label));
 }

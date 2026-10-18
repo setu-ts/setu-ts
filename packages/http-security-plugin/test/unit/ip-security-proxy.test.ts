@@ -79,6 +79,93 @@ describe('proxy peer and public origin (M113n)', () => {
       'http://internal:8080',
     );
   });
+  // M113n audit F2: only a walk that passed a trusted socket peer vouches for
+  // the forwarded protocol and host.
+  it('never publishes a forwarded origin from a mode that did not check the peer', async () => {
+    const modes: IpSecurityOptions[] = [{}, { proxyHops: 0 }, { ipHeader: 'CF-Connecting-IP' }];
+    for (const mode of modes) {
+      const { ctx } = createFakeContext({
+        request: {
+          url: 'https://shop.example/',
+          headers: {
+            ...forged,
+            'CF-Connecting-IP': '7.7.7.7',
+            'X-Forwarded-Host': 'attacker.example',
+            'X-Forwarded-Proto': 'http',
+          },
+          ip: '10.1.2.3',
+        },
+      });
+      await ipSecurityMiddleware({ trustProxy: true, ...mode })(ctx, () => Promise.resolve());
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY), JSON.stringify(mode)).toBe('7.7.7.7');
+      expect(requestOriginOf(ctx).origin, JSON.stringify(mode)).toBe('https://shop.example');
+    }
+    // Trusted-proxy mode with no socket peer (Workers, plain fetch) checked nobody.
+    expect((await inspect(forged)).origin.origin).toBe('http://internal:8080');
+  });
+  // M113n audit F4: both families resolve no client rather than the proxy itself.
+  it('resolves undefined, not the socket peer, when the header names no client', async () => {
+    expect(
+      (await inspect({ 'X-Forwarded-For': '10.9.9.9, 10.8.8.8' }, {}, '10.1.2.3')).ip,
+    ).toBeUndefined();
+    const short = createFakeContext({
+      request: { headers: { 'X-Forwarded-For': '7.7.7.7' }, ip: '10.1.2.3' },
+    }).ctx;
+    await ipSecurityMiddleware({ trustProxy: true, proxyHops: 3 })(short, () => Promise.resolve());
+    expect(short.state.get(CLIENT_IP_STATE_KEY)).toBeUndefined();
+    expect(
+      (await inspect({ Forwarded: 'for=10.9.9.9' }, { forwardedHeader: 'forwarded' }, '10.1.2.3'))
+        .ip,
+    ).toBeUndefined();
+  });
+  // M113n audit F3: URL-legal punctuation never reaches the published origin.
+  it('refuses forwarded hosts outside the DNS and IPv6 grammar', async () => {
+    for (const host of [
+      'a"b',
+      "a'b",
+      'a`b',
+      'a{b}',
+      'a!b',
+      'a~b',
+      'evil.example.',
+      '.evil.example',
+      'a..b',
+      '-a.example',
+      'a-.example',
+      'a.example:',
+      'a.example:x',
+      'a.example:123456',
+      '[::1',
+      '[::1]x',
+      '[g::1]',
+      `${'a'.repeat(260)}`,
+    ]) {
+      expect(
+        (await inspect({ ...forged, 'X-Forwarded-Host': host }, {}, '10.1.2.3')).origin.host,
+        host,
+      ).toBe('internal:8080');
+    }
+    const accepted: readonly (readonly [string, string])[] = [
+      ['Api-1.Example.com', 'api-1.example.com'],
+      ['public.example:8443', 'public.example:8443'],
+      ['[::1]', '[::1]'],
+      ['[2001:db8::1]:8443', '[2001:db8::1]:8443'],
+    ];
+    for (const [host, expected] of accepted) {
+      expect(
+        (await inspect({ ...forged, 'X-Forwarded-Host': host }, {}, '10.1.2.3')).origin.host,
+      ).toBe(expected);
+    }
+    expect(
+      (
+        await inspect(
+          { Forwarded: 'for=192.0.2.1;host="a\\"b"' },
+          { forwardedHeader: 'forwarded' },
+          '10.1.2.3',
+        )
+      ).origin.host,
+    ).toBe('internal:8080');
+  });
   it('keeps proxyHops and leftmost selection independent of the peer', async () => {
     for (const options of [
       { trustedProxies: undefined },

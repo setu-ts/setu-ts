@@ -153,11 +153,14 @@ origin echoes nothing.
 ### CsrfOptions
 
 The implicitly trusted own origins are the request URL origin, the public origin from
-`requestOriginOf(ctx)`, and the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host` candidate
-(falling back to the URL host). Thus `csrf: {}` accepts same-origin browser mutations behind a
-standard TLS-terminating proxy without extra configuration. This last comparison is specific to
-browser CSRF: a cross-site form cannot set those headers, and scripts setting them require a CORS
-preflight. It does not grant proxy trust to IP resolution, cookies or public URLs.
+`requestOriginOf(ctx)`, and, only when the browser sends `Sec-Fetch-Site: same-origin`, the
+validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host` candidate (falling back to the URL host).
+Thus `csrf: {}` accepts same-origin browser mutations behind a standard TLS-terminating proxy
+without extra configuration. The `Sec-Fetch-Site` gate is load-bearing: `X-Forwarded-*` are not
+forbidden request headers, and the CORS middleware echoes requested headers by default, so without
+it a script on any credentialed CORS origin could name its own host and pass. Browsers that do not
+send `Sec-Fetch-Site` fall back to the URL and published origins. This comparison grants no proxy
+trust to IP resolution, cookies or public URLs.
 
 | Option            | Type            | Default | Description                                                      |
 | ----------------- | --------------- | ------- | ---------------------------------------------------------------- |
@@ -223,20 +226,29 @@ prefer `trustedProxies` for stable proxy addresses.
 ports, and ignores every `X-Forwarded-*` header. The default reads `X-Forwarded-*` only. A malformed
 `Forwarded` header (or one over 8 KiB or 64 elements) contributes no hops and no forwarded origin,
 so the walk still checks the socket peer: a client connecting directly stays identified by its own
-address, and a trusted proxy sending one yields no client. `unknown` and obfuscated `for` values
-stop the trust walk without a client.
+address, and a trusted proxy sending one yields no client. Likewise in the default family a
+`proxyHops` header too short for the declared chain, or a chain of only trusted proxies, yields no
+client rather than the proxy's own address. `unknown` and obfuscated `for` values stop the trust
+walk without a client.
 
 IP security also publishes the public origin for `requestOriginOf(ctx)` and `publicRequestUrl(ctx)`
-from `@setu-ts/common`. Forwarded origin components are believed only when the selected client came
-from the forwarded chain. In the default family the leftmost `X-Forwarded-Proto` and
-`X-Forwarded-Host` are used; with `Forwarded`, `proto` and `host` come from the selected client
-element. Only `http`/`https` protocols and URL-valid hosts without paths, user info, query or
-fragment are accepted; rejected or absent components fall back to the request URL. Session
-`secure: 'auto'` and React Router loaders share this decision.
+from `@setu-ts/common`. Forwarded origin components are believed only in `trustedProxies` mode, when
+the request has a socket peer, that peer is trusted, and the selected client came from the forwarded
+chain. Leftmost, `proxyHops` and custom-`ipHeader` modes without `trustedProxies`, and any request
+with no peer (Workers, plain fetch), never publish a forwarded origin: nothing checked who wrote the
+headers. In the default family the leftmost `X-Forwarded-Proto` and `X-Forwarded-Host` are used, so
+the trusted proxy must overwrite both rather than pass a client's copy through (nginx forwards a
+client's `X-Forwarded-Host` unless told otherwise); with `Forwarded`, `proto` and `host` come from
+the selected client element. Only `http`/`https` protocols, and hosts that are DNS names (letters,
+digits, inner hyphens, no trailing dot) or bracketed IPv6 literals with an optional numeric port,
+are accepted; rejected or absent components fall back to the request URL. Session `secure: 'auto'`
+and React Router loaders share this decision.
 
 Workers and plain `adapter.fetch()` calls have no socket peer. On Cloudflare Workers use
 `ipSecurity: { trustProxy: true, ipHeader: 'CF-Connecting-IP' }`; Cloudflare overwrites that header.
-Build security-sensitive links, such as password resets, from a configured base URL.
+It vouches for the client address only: the public origin there comes from the request URL, which
+Workers already receives as the public one. Build security-sensitive links, such as password resets,
+from a configured base URL.
 
 ### SecurityHeadersOptions
 
