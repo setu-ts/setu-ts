@@ -356,7 +356,13 @@ All notable changes to this project are documented here. The format follows
   has none. Class-based projects are unchanged: their handlers reach the plugins through
   `DecoratorPlugin`'s ingress barrel. A config that already imports the barrel, or that the command
   cannot rewrite, gets printed guidance naming the seam form and the import. Existing projects are
-  not rewritten: add the option and import by hand if `setu add` registered the bare call earlier.
+  not rewritten: add the option and import by hand if `setu add` registered the bare call earlier. A
+  project composed through a starter keeps its config, and the guidance now names the arm value to
+  pass (`events: { handlers: EVENT_HANDLERS }`), so the created barrel is reached.
+- **`setu add health` on a Deno project says the start task needs `--allow-sys` (`@setu-ts/cli`).**
+  Without it the built-in `self` check fails and `/health` reports down. The Deno permission notes
+  (this one and storage's `--allow-write`) are no longer printed on other targets, where they do not
+  apply.
 - **`setu generate job` points at the queue and scheduler registration options (`@setu-ts/cli`).**
   The generated job's comment recommended calling `queue.process()` or `scheduler.cron()` inside
   another plugin's `register`, where the capability may not be registered yet. It now shows

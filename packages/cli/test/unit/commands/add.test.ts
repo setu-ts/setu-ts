@@ -997,6 +997,29 @@ describe('setu add — permission notes (X8-9)', () => {
     expect(output).toContain("'local' provider");
   });
 
+  it('should tell a Deno health installer that the self check needs --allow-sys', async () => {
+    // Measured on a bare Deno scaffold: without the flag the built-in `self`
+    // indicator fails and `/health` (so `/ready`) reports down.
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+
+    expect(await h.run(['health'])).toBe(0);
+
+    expect(h.out.join('\n')).toContain('--allow-sys');
+  });
+
+  it('should print no Deno permission note on a Node project', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ name: 'app', dependencies: {} }, null, 2),
+    });
+
+    expect(await h.run(['health'])).toBe(0);
+    expect(await h.run(['storage'])).toBe(0);
+
+    const output = h.out.join('\n');
+    expect(output).not.toContain('--allow-sys');
+    expect(output).not.toContain('--allow-write');
+  });
+
   it('should say nothing about permissions for a package that needs none', async () => {
     // The note must not become boilerplate printed after every add, or it stops
     // being read.
@@ -1221,5 +1244,26 @@ describe('setu add wires the generated-artifact seam', () => {
   it('resolves no seam for a provider that consumes none', () => {
     expect(addSeam('queue-plugin', new Set(['queue-plugin']))).toBeUndefined();
     expect(addSeam('auth-plugin', new Set(['auth-plugin']))).toBeUndefined();
+  });
+
+  it('names the seam for a starter-owned arm, so generated handlers reach it', async () => {
+    const starter = `import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
+
+export async function createApp() {
+  return await createFullStackAppFromConfig(() => ({}));
+}
+`;
+    const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': starter });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    expect(h.read('/app/setu.config.ts')).toBe(starter);
+    const out = h.out.join('\n');
+    expect(out).toContain('configure its events arm');
+    expect(out).toContain(
+      'Pass the generated artifacts through it: events: { handlers: EVENT_HANDLERS }',
+    );
+    expect(out).toContain("Import EVENT_HANDLERS from './src/events/index.ts' for it.");
+    expect(h.read('/app/src/events/index.ts')).toBe(EVENTS_SEAM.renderBarrel({}));
   });
 });

@@ -313,6 +313,14 @@ function printWiringNote(
     const arm = starter.arms.get(bare);
     if (arm !== undefined) {
       log(`  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`);
+      // The barrel exists by now; without this line nothing would ever pass it to
+      // the arm, so every handler generated into it would register nowhere.
+      if (seam !== undefined) {
+        log(`  Pass the generated artifacts through it: ${arm}: ${seam.args}`);
+        for (const item of seam.imports) {
+          log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
+        }
+      }
       log(
         `  See https://github.com/setu-ts/setu-ts/blob/develop/packages/starters/${starter.pkg}/README.md`,
       );
@@ -864,7 +872,9 @@ export async function runAddCommand(
     deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
     deps.log('  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").');
   }
-  printPermissionNote(specifier, deps.log);
+  // Both notes concern a Deno start task's permission flags; on another target
+  // they describe nothing the developer can act on.
+  if (runtime === 'deno') printPermissionNote(specifier, deps.log);
   return EXIT_OK;
 }
 
@@ -925,6 +935,15 @@ const PERMISSION_NOTES: ReadonlyMap<string, readonly string[]> = new Map([
     [
       "  The 'local' provider writes files, so a Deno project needs --allow-write",
       '  in its start task. Cloud providers (s3/gcs/azure/b2) do not.',
+    ],
+  ],
+  [
+    // The built-in `self` indicator reads the host name. Measured on a bare Deno
+    // scaffold: without the flag `/health` answers `down`, so `/ready` fails too.
+    '@setu-ts/health-plugin',
+    [
+      "  The built-in 'self' check reads the host name, so a Deno project needs",
+      '  --allow-sys in its start task, or /health reports down.',
     ],
   ],
 ]);
