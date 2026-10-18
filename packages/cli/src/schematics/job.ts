@@ -101,6 +101,8 @@ export interface ${names.pascal}JobData {
  *
  * Replace the existing \`QueuePlugin()\` or \`SchedulerPlugin()\` call rather than
  * adding a second one: the kernel refuses a duplicate plugin name.
+ * \`SchedulerPlugin\` is unavailable on Cloudflare Workers (it refuses to start
+ * there); use a Cron Trigger through \`@setu-ts/cloudflare-plugin\` instead.
  *
  * @param data - The job payload
  */
