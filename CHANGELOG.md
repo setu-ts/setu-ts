@@ -339,7 +339,9 @@ All notable changes to this project are documented here. The format follows
   resumes from attempt 1 using the original delay. Recurring jobs resume at the next cron/interval
   boundary. Cancelled fires settle diagnostics with `false` (counted in `failed`, never
   `succeeded`). Disconnect releases one-shot slots regardless of outcome, and an old fire cannot
-  remove or release a replacement registered under the same name.
+  remove or release a replacement registered under the same name. Each release at disconnect is
+  bounded by `acquireTimeoutMs`. `resume()` now rejects on a disconnected service, waits for a fire
+  still settling before arming, and re-claims a one-shot slot released at disconnect.
 - **JWT validity boundaries now honour fractional seconds (V9-70, M113m, `@setu-ts/auth-plugin`).**
   First-party tokens are refused at and after `exp`, closing the window of up to one second after
   expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and

@@ -94,6 +94,10 @@ export class SchedulerService implements IScheduler {
   #names: Set<string> = new Set();
   /** One cancellation scope per entry's scheduled fire, replaced on resume/re-arm. */
   #runControllers = new WeakMap<RegistryEntry<unknown>, AbortController>();
+  /** The fire currently running for an entry, so resume never overlaps it. */
+  #inFlight = new WeakMap<RegistryEntry<unknown>, Promise<void>>();
+  /** Entries resumed while a fire was in flight; armed when that fire settles. */
+  #rearmOnSettle = new WeakSet<RegistryEntry<unknown>>();
 
   /**
    * The M98k collector, set only by the owning SchedulerPlugin through
@@ -192,7 +196,10 @@ export class SchedulerService implements IScheduler {
 
   /**
    * Disconnect the service: stop future attempts, clear timers, and release
-   * all one-shot slots. In-flight handlers may still reach a final outcome.
+   * every one-shot slot this service holds, each release bounded by the
+   * acquire timeout. In-flight handlers may still reach a final outcome. A
+   * slot still being claimed by an unfinished `delay()` call is not released
+   * here; it expires on its own TTL.
    */
   async disconnect(): Promise<void> {
     this.#connected = false;
@@ -412,14 +419,41 @@ export class SchedulerService implements IScheduler {
 
   /**
    * Resume a paused job.
+   *
+   * Rejects on a disconnected service. When a fire paused earlier is still
+   * settling, the job is armed only once that fire has settled, so the
+   * resumed fire never overlaps it; a one-shot that fire finished is not
+   * re-armed. A one-shot whose slot was released by a disconnect re-claims it.
    */
   async resume(name: string): Promise<void> {
+    if (!this.#connected) {
+      throw new Error('SchedulerService is not connected');
+    }
     const entry = this.#registry.get(name);
     if (!entry.paused) {
       // Idempotent — already running
       return;
     }
 
+    if (entry.kind === 'delay' && entry.slotClaim === 'claimed' && entry.slotToken === null) {
+      // The slot was released at disconnect; another replica may hold it now.
+      await this.#claimDelaySlot(entry);
+      // A remove() or re-registration during the claim wins.
+      if (!this.#registry.has(name) || this.#registry.get(name) !== entry) return;
+    }
+
+    if (this.#inFlight.has(entry)) {
+      entry.paused = false;
+      entry.generation = (entry.generation ?? 0) + 1;
+      this.#rearmOnSettle.add(entry);
+      return;
+    }
+
+    this.#armResumed(entry);
+  }
+
+  /** Computes the resumed entry's next fire and arms it. */
+  #armResumed(entry: RegistryEntry<unknown>): void {
     const now = this.#runtime.now();
 
     let nextRunAtMs: number;
@@ -463,8 +497,12 @@ export class SchedulerService implements IScheduler {
     if (entry.kind === 'delay') {
       await this.#releaseDelaySlot(entry);
     }
-    this.#registry.remove(name);
-    this.#names.delete(name);
+    // An in-flight fire may have removed this entry, and a new one may have
+    // been registered under the name, while the release was awaited.
+    if (this.#registry.has(name) && this.#registry.get(name) === entry) {
+      this.#registry.remove(name);
+      this.#names.delete(name);
+    }
   }
 
   /**
@@ -494,7 +532,7 @@ export class SchedulerService implements IScheduler {
     return armAt(
       this.#runtime,
       entry.nextRunAtMs,
-      () => this.#fire(entry, controller.signal),
+      () => this.#track(entry, this.#fire(entry, controller.signal)),
       (handle) => {
         entry.timerHandle = handle;
       },
@@ -600,7 +638,16 @@ export class SchedulerService implements IScheduler {
     entry.slotToken = null;
     const slotKey = this.#delaySlotKey(entry);
     try {
-      await this.#lock.release(slotKey, token);
+      if (this.#acquireTimeoutMs === 0) {
+        await this.#lock.release(slotKey, token);
+      } else {
+        const timeoutMs = this.#acquireTimeoutMs;
+        await withDeadline(() => this.#lock.release(slotKey, token), {
+          timeoutMs,
+          timing: this.#timing,
+          onTimeout: () => new Error(`lock release did not settle within ${timeoutMs} ms`),
+        });
+      }
     } catch (error) {
       this.#logger?.error(`Job '${entry.name}': could not release fire slot`, {
         error: error instanceof Error ? error.message : String(error),
@@ -710,6 +757,30 @@ export class SchedulerService implements IScheduler {
         });
       }
     }
+  }
+
+  /**
+   * Records a running fire and, once it settles, arms an entry that was
+   * resumed meanwhile — unless the fire removed it, it was paused again, or
+   * the service disconnected. Returns the fire itself so its failure channel
+   * is unchanged.
+   */
+  #track(entry: RegistryEntry<unknown>, fire: Promise<void>): Promise<void> {
+    this.#inFlight.set(entry, fire);
+    const settle = (): void => {
+      this.#inFlight.delete(entry);
+      if (!this.#rearmOnSettle.delete(entry)) return;
+      if (
+        this.#connected &&
+        !entry.paused &&
+        this.#registry.has(entry.name) &&
+        this.#registry.get(entry.name) === entry
+      ) {
+        this.#armResumed(entry);
+      }
+    };
+    fire.then(settle, settle);
+    return fire;
   }
 
   async #fire(entry: RegistryEntry<unknown>, signal: AbortSignal): Promise<void> {

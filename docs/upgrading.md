@@ -27,6 +27,7 @@ and resumes from attempt 1 with its original delay, discarding remaining backoff
 releases its `:once` slot regardless of outcome. A cancelled fire is not reported as success:
 diagnostics settle it with `false` and count it in `failed`, since no separate cancellation counter
 exists. An in-flight handler can still reach a final success or failure after pause or disconnect.
+`resume()` now rejects on a disconnected service: call `connect()` first.
 
 **Refresh before `exp`.** First-party `JwtService.verify` now uses fractional seconds without clock
 tolerance and rejects once `now >= exp`, instead of accepting a token for up to one second after

@@ -76,8 +76,11 @@ one-shot paused mid-retry stays registered; resume starts it from attempt 1 usin
 delay. Recurring jobs resume at the next cron/interval boundary. Remaining backoff is discarded. A
 cancelled fire is not reported as success: diagnostics settle it with `false`, counting it in
 `failed` because there is no separate cancellation counter. An in-flight handler may still reach a
-final success or failure after cancellation. Disconnect releases every one-shot `:once` slot,
-including unfinished jobs.
+final success or failure after cancellation. If a job is resumed while that handler is still
+running, it is armed only once the handler settles, so the two never overlap. Disconnect releases
+every one-shot `:once` slot this service holds, each release bounded by `acquireTimeoutMs`;
+`resume()` rejects on a disconnected service, and after reconnecting a one-shot re-claims its slot,
+so a replica that claimed it meanwhile runs the job instead.
 
 ## Options
 
