@@ -94,6 +94,8 @@ export class JwtVerifier {
 
   /**
    * Verifies a token and returns its claims.
+   * Rejects at or after `exp + clockToleranceSec` and strictly before
+   * `nbf - clockToleranceSec`, using fractional seconds from the runtime clock.
    *
    * Never throws: every failure is an `{ ok: false }` outcome carrying a fixed
    * reason code, never a value from the token.
@@ -177,7 +179,7 @@ export class JwtVerifier {
     if (typeof exp !== 'number' || !Number.isFinite(exp)) {
       return 'exp-missing';
     }
-    if (now > exp + skew) {
+    if (now >= exp + skew) {
       return 'expired';
     }
     if (nbf !== undefined && (typeof nbf !== 'number' || now + skew < nbf)) {

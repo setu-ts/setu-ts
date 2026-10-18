@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking: invalid scheduler time values reject at registration (M113m, 0.10.0,
+  `@setu-ts/scheduler-plugin`).** The async `delay` call rejects with `RangeError` for a non-finite
+  or negative `delayMs`; `every` rejects for a non-finite or non-positive `intervalMs`; `delay`,
+  `every` and `cron` reject for a non-finite or negative `retry.delay`. Messages name the job and
+  the option and rule without echoing the rejected value: `delayMs must be a finite number >= 0`,
+  `intervalMs must be a finite number > 0`, or `retry.delay must be a finite number >= 0`. Zero
+  `delayMs` and zero `retry.delay` remain accepted, with no upper delay or interval limit.
+  Migration: fix the invalid value before registering the job; these values were previously
+  accepted.
+- **Breaking: JWT expiry is exclusive (V9-70, M113m, 0.10.0, `@setu-ts/auth-plugin`).** First-party
+  `JwtService.verify` uses fractional seconds (`runtime.now() / 1000`) without clock tolerance: it
+  rejects with `Token expired` once `now >= exp`, and with `Token not yet valid` while `now < nbf`.
+  The outside-issuer verifier (`issuers`) rejects once `now >= exp + clockToleranceSec` (was `>`);
+  its not-before check remains `now + clockToleranceSec < nbf`. Migration: refresh before `exp` and
+  update tests or clients that assumed a first-party token remained valid during the second of its
+  `exp`; outside-issuer tokens also stop being accepted exactly at the tolerance-adjusted expiry
+  boundary.
+
 - **Breaking: a primary-key change through `update` is refused on every adapter (M113g, 0.10.0,
   `@setu-ts/database-plugin`, `@setu-ts/cloudflare-plugin`).** Every `update` and `updateWhere` (and
   the transaction-scoped variants) of the eight data sources — Memory, Drizzle, Prisma, MongoDB,
@@ -310,6 +328,24 @@ All notable changes to this project are documented here. The format follows
   Stopped Kafka/Pub/Sub report down; a hung probe reports unknown, which still leaves health up.
 
 ### Fixed
+
+- **Long scheduler waits no longer fire early (V9-63, M113m, `@setu-ts/scheduler-plugin`).**
+  `delay`, `every`, `cron` and retry backoff now wait in chunks of at most 2147483647 ms and check
+  the wall clock on each wake, so a job never runs before its due time. Previously, Node, Deno and
+  Bun clamped an over-limit timer to about 1 ms: `delay(30 days)` fired at once, and monthly cron
+  jobs could fire early. Delays and intervals have no upper limit. Disconnect, remove and pause
+  cancel retry backoff without another attempt. A one-shot that already succeeded or exhausted its
+  retries is removed even while paused and is not re-run; one paused mid-retry stays registered and
+  resumes from attempt 1 using the original delay. Recurring jobs resume at the next cron/interval
+  boundary. Cancelled fires settle diagnostics with `false` (counted in `failed`, never
+  `succeeded`). Disconnect releases one-shot slots regardless of outcome, and an old fire cannot
+  remove or release a replacement registered under the same name. Each release at disconnect is
+  bounded by `acquireTimeoutMs`. `resume()` now rejects on a disconnected service, waits for a fire
+  still settling before arming, and re-claims a one-shot slot released at disconnect.
+- **JWT validity boundaries now honour fractional seconds (V9-70, M113m, `@setu-ts/auth-plugin`).**
+  First-party tokens are refused at and after `exp`, closing the window of up to one second after
+  expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and
+  after `exp + clockToleranceSec`.
 
 - **A value a client sends no longer makes a database error read as a timeout or an outage (M113g,
   0.10.0, `@setu-ts/database-plugin`).** PostgreSQL quotes a rejected value in its error message,

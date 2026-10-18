@@ -250,6 +250,19 @@ describe('RedisLock C2 - PX flag', () => {
   });
 });
 
+describe('RedisLock - integer PX', () => {
+  it('rounds a fractional TTL up to whole milliseconds', async () => {
+    const fake = new FakeRedisClient();
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: fake });
+    await lock.connect();
+    await lock.acquire('key1', 30_000.25);
+    const setCall = fake.calls.find((c) => c.method === 'set');
+    expect(setCall!.args).toContain(30_001);
+    expect(setCall!.args).not.toContain(30_000.25);
+    await lock.disconnect();
+  });
+});
+
 // C5 TEST: release uses atomic EVAL
 describe('RedisLock C5 - atomic release', () => {
   it('releases lock via atomic EVAL (C5)', async () => {

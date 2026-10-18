@@ -265,8 +265,10 @@ export class RedisLock implements IDistributedLock {
     const token = crypto.randomUUID();
     let result: string | null;
     try {
-      // C2 FIX: Use 'NX', 'PX', ttlMs format that real ioredis expects
-      result = await client.set(key, token, 'NX', 'PX', ttlMs);
+      // C2 FIX: Use 'NX', 'PX', ttlMs format that real ioredis expects.
+      // Redis refuses a non-integer PX, and a fractional delayMs makes the
+      // one-shot slot TTL fractional, so round up (never shorten the lease).
+      result = await client.set(key, token, 'NX', 'PX', Math.ceil(ttlMs));
     } catch (error) {
       try {
         await client.eval(RELEASE_SCRIPT, 1, key, token);
