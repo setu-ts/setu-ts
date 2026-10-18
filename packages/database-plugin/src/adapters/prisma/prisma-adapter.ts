@@ -804,6 +804,20 @@ function createPrismaDataSourceInner(
         )
       : error;
 
+  // An accepted key column (equal to the addressed key, compared as a string)
+  // is removed after the check: it changes nothing, and Prisma type-checks
+  // `data` against the model, so `{ id: 5 }` on a `String @id` would be
+  // refused even though the key is unchanged.
+  const withoutKeyColumns = (
+    id: EntityKey,
+    data: Partial<Record<string, unknown>>,
+  ): Partial<Record<string, unknown>> => {
+    const payload = { ...data };
+    assertPrimaryKeyUnchanged(entity, keyColumns, id, payload);
+    for (const column of keyColumns) delete payload[column];
+    return payload;
+  };
+
   const assertPreconditionFields = (where: Readonly<Record<string, string | number>>): void => {
     if (
       Object.keys(where).some(
@@ -851,8 +865,7 @@ function createPrismaDataSourceInner(
     create: (data) => delegate.create({ data }),
 
     async update(id, data) {
-      data = { ...data };
-      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
+      data = withoutKeyColumns(id, data);
       if (typeof id === 'object' && compoundKeyField === undefined) {
         throw new UnsupportedQueryFeatureError(
           'composite-key',
@@ -904,8 +917,7 @@ function createPrismaDataSourceInner(
         throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', checked.problem);
       }
       where = checked.where;
-      data = checked.data;
-      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
+      data = withoutKeyColumns(id, checked.data);
       assertPreconditionFields(where);
       try {
         return await delegate.update({

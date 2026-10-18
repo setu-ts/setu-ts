@@ -740,6 +740,9 @@ function createDrizzleDataSourceInner(
       findDrizzlePage(instance, drizzleTable, entity, query, operators, keyColumns),
 
     async create(data) {
+      // One own-property snapshot, checked and written: a getter on the
+      // caller's object cannot show the check one value and the write another.
+      data = { ...data };
       assertPayloadColumns(data);
       const rows = await returningRows(
         instance.insert(drizzleTable).values(data),
@@ -781,13 +784,15 @@ function createDrizzleDataSourceInner(
     },
 
     async updateWhere(id, where, data) {
-      assertPayloadColumns(data);
       const checked = checkWritePrecondition(where, data);
       if (!checked.ok) {
         throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', checked.problem);
       }
       where = checked.where;
+      // The private copy checkWritePrecondition returns is the one checked and
+      // the one written, so the caller's object is read exactly once.
       data = checked.data;
+      assertPayloadColumns(data);
       assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
       assertPreconditionColumns(drizzleTable, where);
       const values = keyValues(id, keyColumns, `updateWhere on '${entity}'`);
