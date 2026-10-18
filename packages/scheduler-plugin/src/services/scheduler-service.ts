@@ -98,6 +98,10 @@ export class SchedulerService implements IScheduler {
   #inFlight = new WeakMap<RegistryEntry<unknown>, Promise<void>>();
   /** Entries resumed while a fire was in flight; armed when that fire settles. */
   #rearmOnSettle = new WeakSet<RegistryEntry<unknown>>();
+  /** A resume still awaiting its slot re-claim; a second resume waits for it. */
+  #pendingResume = new WeakMap<RegistryEntry<unknown>, Promise<void>>();
+  /** Counts pause() calls per entry, so a resume can see a pause made during its await. */
+  #pauseCount = new WeakMap<RegistryEntry<unknown>, number>();
 
   /**
    * The M98k collector, set only by the owning SchedulerPlugin through
@@ -414,7 +418,9 @@ export class SchedulerService implements IScheduler {
     this.#registry.pause(name, (handle) => {
       this.#runtime.clearTimeout(handle);
     });
-    this.#runControllers.get(this.#registry.get(name))?.abort();
+    const entry = this.#registry.get(name);
+    this.#pauseCount.set(entry, (this.#pauseCount.get(entry) ?? 0) + 1);
+    this.#runControllers.get(entry)?.abort();
   }
 
   /**
@@ -423,7 +429,9 @@ export class SchedulerService implements IScheduler {
    * Rejects on a disconnected service. When a fire paused earlier is still
    * settling, the job is armed only once that fire has settled, so the
    * resumed fire never overlaps it; a one-shot that fire finished is not
-   * re-armed. A one-shot whose slot was released by a disconnect re-claims it.
+   * re-armed. A one-shot whose slot was released by a disconnect re-claims it;
+   * a pause, remove or disconnect during that claim wins over this resume, and
+   * a concurrent resume waits for it rather than claiming a second time.
    */
   async resume(name: string): Promise<void> {
     if (!this.#connected) {
@@ -435,11 +443,30 @@ export class SchedulerService implements IScheduler {
       return;
     }
 
+    const pending = this.#pendingResume.get(entry);
+    if (pending !== undefined) {
+      await pending;
+      return this.resume(name);
+    }
+
     if (entry.kind === 'delay' && entry.slotClaim === 'claimed' && entry.slotToken === null) {
       // The slot was released at disconnect; another replica may hold it now.
-      await this.#claimDelaySlot(entry);
-      // A remove() or re-registration during the claim wins.
-      if (!this.#registry.has(name) || this.#registry.get(name) !== entry) return;
+      const pauses = this.#pauseCount.get(entry) ?? 0;
+      const claim = this.#claimDelaySlot(entry);
+      this.#pendingResume.set(entry, claim);
+      try {
+        await claim;
+      } finally {
+        this.#pendingResume.delete(entry);
+      }
+      if (!this.#connected || !this.#registry.has(name) || this.#registry.get(name) !== entry) {
+        // Removed, replaced or disconnected during the claim: give back the
+        // slot just taken, or no replica could run the job until its TTL.
+        await this.#releaseDelaySlot(entry);
+        return;
+      }
+      // A pause during the claim wins; the entry stays paused, slot held.
+      if ((this.#pauseCount.get(entry) ?? 0) !== pauses) return;
     }
 
     if (this.#inFlight.has(entry)) {
@@ -454,6 +481,9 @@ export class SchedulerService implements IScheduler {
 
   /** Computes the resumed entry's next fire and arms it. */
   #armResumed(entry: RegistryEntry<unknown>): void {
+    // disconnect() clears #names; a job armed after a reconnect must be
+    // visible to the next disconnect, which walks #names.
+    this.#names.add(entry.name);
     const now = this.#runtime.now();
 
     let nextRunAtMs: number;
@@ -762,8 +792,10 @@ export class SchedulerService implements IScheduler {
   /**
    * Records a running fire and, once it settles, arms an entry that was
    * resumed meanwhile — unless the fire removed it, it was paused again, or
-   * the service disconnected. Returns the fire itself so its failure channel
-   * is unchanged.
+   * the service disconnected. A fire that rejects (only an unexpected fault,
+   * such as a throwing logger, can do so) is contained here and reported
+   * through the logger, best-effort, rather than escaping from a timer. The
+   * returned promise settles once the fire has, and never rejects.
    */
   #track(entry: RegistryEntry<unknown>, fire: Promise<void>): Promise<void> {
     this.#inFlight.set(entry, fire);
@@ -779,8 +811,16 @@ export class SchedulerService implements IScheduler {
         this.#armResumed(entry);
       }
     };
-    fire.then(settle, settle);
-    return fire;
+    return fire.then(settle, (error: unknown) => {
+      settle();
+      try {
+        this.#logger?.error(`Job '${entry.name}': fire failed unexpectedly`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch {
+        // The logger itself failed; nothing further can report it.
+      }
+    });
   }
 
   async #fire(entry: RegistryEntry<unknown>, signal: AbortSignal): Promise<void> {

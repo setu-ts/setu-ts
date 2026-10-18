@@ -24,6 +24,15 @@ class GatedReleaseLock extends MemoryLock {
   }
 }
 
+/** A MemoryLock whose `:once` acquires wait on a gate while it is set. */
+class GatedAcquireLock extends MemoryLock {
+  gate: Promise<void> | null = null;
+  override async acquire(key: string, ttlMs: number): Promise<string | null> {
+    if (key.endsWith(':once') && this.gate !== null) await this.gate;
+    return super.acquire(key, ttlMs);
+  }
+}
+
 describe('scheduler lifecycle races (M113m audit round 3)', () => {
   const services: SchedulerService[] = [];
   afterEach(async () => {
@@ -176,5 +185,136 @@ describe('scheduler lifecycle races (M113m audit round 3)', () => {
     await service.resume('job');
     await runtime.advanceTo(runtime.now() + 1_000);
     expect(handler).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('resume re-claim races (M113m audit round 4)', () => {
+  const services: SchedulerService[] = [];
+  afterEach(async () => {
+    for (const service of services.splice(0)) await service.disconnect();
+  });
+
+  /** A paused one-shot whose slot was released at disconnect, reconnected. */
+  async function released(lock: GatedAcquireLock, runtime: FakeRuntime) {
+    const service = new SchedulerService(runtime, lock);
+    services.push(service);
+    await service.connect();
+    const handler = vi.fn();
+    await service.delay('job', 100, handler);
+    await service.pause('job');
+    await service.disconnect();
+    await service.connect();
+    const gate = deferred();
+    lock.gate = gate.promise;
+    return { service, handler, gate };
+  }
+
+  it('G1: a pause during the re-claim wins over the resume', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new GatedAcquireLock(runtime);
+    const { service, handler, gate } = await released(lock, runtime);
+    const resuming = service.resume('job');
+    await service.pause('job');
+    gate.resolve();
+    await resuming;
+    await runtime.advanceTo(runtime.now() + 1_000);
+    expect(handler).not.toHaveBeenCalled();
+    expect(runtime.getPendingTimerCount()).toBe(0);
+  });
+
+  it('G1: two concurrent resumes claim once and run the job once', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new GatedAcquireLock(runtime);
+    const { service, handler, gate } = await released(lock, runtime);
+    const acquires = vi.spyOn(lock, 'acquire');
+    const first = service.resume('job');
+    const second = service.resume('job');
+    gate.resolve();
+    await Promise.all([first, second]);
+    await runtime.advanceTo(runtime.now() + 1_000);
+    expect(acquires.mock.calls.filter(([key]) => key.endsWith(':once'))).toHaveLength(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('G1: a remove during the re-claim releases the slot it took', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new GatedAcquireLock(runtime);
+    const { service, gate } = await released(lock, runtime);
+    const resuming = service.resume('job');
+    await service.remove('job');
+    gate.resolve();
+    await resuming;
+    lock.gate = null;
+    const other = new SchedulerService(runtime, lock);
+    services.push(other);
+    await other.connect();
+    const otherRuns = vi.fn();
+    await other.delay('job', 10, otherRuns);
+    await runtime.advanceTo(runtime.now() + 1_000);
+    expect(otherRuns).toHaveBeenCalledTimes(1);
+  });
+
+  it('G1: a disconnect during the re-claim neither arms the job nor keeps the slot', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new GatedAcquireLock(runtime);
+    const { service, handler, gate } = await released(lock, runtime);
+    const resuming = service.resume('job');
+    await service.disconnect();
+    gate.resolve();
+    await resuming;
+    await runtime.advanceTo(runtime.now() + 1_000);
+    expect(handler).not.toHaveBeenCalled();
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    lock.gate = null;
+    expect(await lock.acquire('scheduler:job:job:once', 1_000)).not.toBeNull();
+  });
+
+  it('G2: a job resumed after reconnecting is stopped by the next disconnect', async () => {
+    const runtime = new FakeRuntime();
+    const service = new SchedulerService(runtime, new MemoryLock(runtime));
+    services.push(service);
+    await service.connect();
+    const handler = vi.fn();
+    await service.every('tick', 100, handler);
+    await service.pause('tick');
+    await service.disconnect();
+    await service.connect();
+    await service.resume('tick');
+    await service.disconnect();
+    await runtime.advanceTo(runtime.now() + 1_000);
+    expect(handler).not.toHaveBeenCalled();
+    expect(runtime.getPendingTimerCount()).toBe(0);
+  });
+
+  it('G3: a fire that rejects is contained and logged', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const error = vi.fn();
+    const logger = {
+      level: 'debug' as const,
+      fatal: vi.fn(),
+      error,
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: () => {
+        throw new Error('canary-logger-throw');
+      },
+      trace: vi.fn(),
+      child: () => logger,
+    };
+    // A second replica holds the slot, so this fire takes the contended path,
+    // where the debug log throws and the fire rejects.
+    const holder = new SchedulerService(runtime, lock);
+    services.push(holder);
+    await holder.connect();
+    await holder.delay('job', 10, () => {});
+    const service = new SchedulerService(runtime, lock, { logger });
+    services.push(service);
+    await service.connect();
+    await service.delay('job', 10, () => {});
+    await runtime.advanceTo(runtime.now() + 100);
+    expect(error).toHaveBeenCalledWith("Job 'job': fire failed unexpectedly", {
+      error: 'canary-logger-throw',
+    });
   });
 });

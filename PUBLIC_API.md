@@ -7720,7 +7720,8 @@ final success or failure after cancellation. If a job is resumed while that hand
 running, it is armed only once the handler settles, so the two never overlap. Disconnect releases
 every one-shot `:once` slot this service holds, each release bounded by `acquireTimeoutMs`;
 `resume()` rejects on a disconnected service, and after reconnecting a one-shot re-claims its slot,
-so a replica that claimed it meanwhile runs the job instead.
+so a replica that claimed it meanwhile runs the job instead. A pause, remove or disconnect during
+that re-claim wins over the resume, and a second `resume()` waits for the first.
 
 ### IScheduler Interface
 
