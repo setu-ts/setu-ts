@@ -47,6 +47,42 @@ await scheduler.pause('poll-inbox');
 await scheduler.resume('poll-inbox');
 ```
 
+## Timing and registration refusals
+
+`delay`, `every`, `cron` and retry backoff honour long waits in timer chunks of at most 2147483647
+ms, checking the wall clock on every wake. A job never runs before its due time, even after an early
+wake or a clock step backwards. There is no upper limit on a delay or interval: `delay(30 days)`
+waits the full 30 days, and monthly cron jobs wait until their next due instant. Previously, Node,
+Deno and Bun clamped an over-limit timer to about 1 ms, so these jobs could fire early.
+
+Invalid time values now make the async registration call reject with a `RangeError`:
+
+| Registration             | Refused value                   | Message fragment                           |
+| ------------------------ | ------------------------------- | ------------------------------------------ |
+| `delay`                  | `delayMs` not finite or < 0     | `delayMs must be a finite number >= 0`     |
+| `every`                  | `intervalMs` not finite or <= 0 | `intervalMs must be a finite number > 0`   |
+| `delay`, `every`, `cron` | `retry.delay` not finite or < 0 | `retry.delay must be a finite number >= 0` |
+
+Each message names the job, option and rule without echoing the rejected value. Zero `delayMs` and
+zero `retry.delay` are accepted; large finite values are accepted. Fix invalid values before
+registering jobs.
+
+An exponential backoff that overflows to `Infinity` with an enormous retry limit now waits forever
+instead of retrying after about 1 ms.
+
+Disconnect, remove and pause cancel pending retry backoff without another attempt. A one-shot that
+already succeeded or exhausted its retries is removed even while paused and is not re-run. A
+one-shot paused mid-retry stays registered; resume starts it from attempt 1 using the original
+delay. Recurring jobs resume at the next cron/interval boundary. Remaining backoff is discarded. A
+cancelled fire is not reported as success: diagnostics settle it with `false`, counting it in
+`failed` because there is no separate cancellation counter. An in-flight handler may still reach a
+final success or failure after cancellation. If a job is resumed while that handler is still
+running, it is armed only once the handler settles, so the two never overlap. Disconnect releases
+every one-shot `:once` slot this service holds, each release bounded by `acquireTimeoutMs`;
+`resume()` rejects on a disconnected service, and after reconnecting a one-shot re-claims its slot,
+so a replica that claimed it meanwhile runs the job instead. A pause, remove or disconnect during
+that re-claim wins over the resume, and a second `resume()` waits for the first.
+
 ## Options
 
 | Option            | Type                                                                 | Default  | Description                                                                                                                                                                                     |

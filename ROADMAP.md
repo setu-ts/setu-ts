@@ -14389,6 +14389,21 @@ env provider), V9-78 (the deployment guide describes only the Deno image).
 - **V9-70** — a JWT is accepted for up to 1 s after `exp` (`exp < now` with `now` in whole seconds);
   RFC 7519 rejects at or after `exp`.
 
+**Shipped.** Scheduler `delay`, `every`, `cron` and retry backoff wait in chunks of at most
+2147483647 ms, checking the wall clock on each wake so jobs never run before they are due, with no
+upper delay or interval limit. Async registration rejects invalid delay, interval and retry-delay
+values with `RangeError`. First-party JWT verification uses fractional seconds without tolerance and
+refuses at `exp` and before `nbf`; the outside-issuer verifier refuses at `exp + clockToleranceSec`,
+with its not-before check unchanged.
+
+- [x] **Scheduler timing** — bounded, due-checked waits for all four paths; registration refusals
+      for non-finite/negative delays and retry delays, and non-finite/non-positive intervals.
+- [x] **JWT boundaries** — first-party fractional-second `exp`/`nbf` checks and outside-issuer
+      expiry at the tolerance-adjusted boundary.
+- [x] **Documentation** — scheduler and auth READMEs, `PUBLIC_API.md`, `CHANGELOG.md`,
+      `docs/upgrading.md`, this section and Progress Tracking row `113m`, and the `CLAUDE.md`
+      Current status entry.
+
 ### Milestone 113n: Security Behind a Reverse Proxy
 
 **Package(s):** `packages/http-security-plugin`, `packages/runtime`
@@ -14902,7 +14917,7 @@ patch by construction and gains nothing new here.
 | 113j      | ✅     | messaging-plugin + database-plugin — outbox and inbox signals; PR #469                                                                                                                                                                                                                    |
 | 113k      | ⬜     | sdk + idempotency + http-security + database — the idempotency key from client to server (fix branches)                                                                                                                                                                                   |
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
-| 113m      | ⬜     | scheduler-plugin + auth-plugin — time the framework does not honour                                                                                                                                                                                                                       |
+| 113m      | ✅     | scheduler-plugin + auth-plugin — time the framework does not honour; PR #471                                                                                                                                                                                                              |
 | 113n      | ⬜     | http-security-plugin + runtime — security behind a reverse proxy                                                                                                                                                                                                                          |
 | 113o      | ⬜     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness                                                                                                                                                                                                 |
 | 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |

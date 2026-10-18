@@ -265,11 +265,11 @@ export class RefreshTokenService {
 }
 
 /**
- * Return the instant at which JwtService will reject a token with this `exp`.
+ * Return the retention deadline for revocation of a token with this `exp`.
  *
- * JwtService accepts `exp === floor(now / 1000)`, so revocation must remain
- * active until the next whole second. A custom signer that omits `exp` falls
- * back to the conservative lifetime calculated after signing.
+ * JwtService rejects at `exp`. Retaining revocation for one additional second
+ * provides a safety margin against clock differences. A custom signer that
+ * omits `exp` falls back to the conservative lifetime calculated after signing.
  */
 function accessTokenRevocationExpiry(token: string, fallback: number): number {
   const encodedPayload = token.split('.')[1];

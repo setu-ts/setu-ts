@@ -2639,6 +2639,14 @@ authorization when RBAC is configured:
   registered, holding the `policies` option's definitions and any class-form policies
   DecoratorPlugin registers.
 
+**JWT time boundaries (M113m).** The first-party `JwtService.verify`, exposed as `IJwtService`, uses
+fractional seconds (`runtime.now() / 1000`) without clock tolerance. It rejects with `Token expired`
+once `now >= exp`, and with `Token not yet valid` while `now < nbf`: the not-before boundary is
+inclusive, and the expiry boundary is exclusive. Previously, a token could remain accepted for up to
+one second after `exp`; refresh before `exp`. The outside-issuer verifier (`issuers`) uses
+fractional seconds with `clockToleranceSec`: expiry is refused once `now >= exp + clockToleranceSec`
+(previously `>`), and not-before is refused while `now + clockToleranceSec < nbf` (unchanged).
+
 **Authorization policies (M110a).** `definePolicy({ name, abilities, before? })` validates a policy
 (lowercase kebab-case name, at least one ability, no ability named `before`) and returns a frozen
 copy typed by its ability names; register it through `AuthPlugin({ policies })`, which refuses a
@@ -2765,23 +2773,25 @@ what changed is that the refusal is legible.
 > `issuer` equals it exactly. `none` and `HS*` are refused before key lookup; keys are filtered by
 > `kty`/`crv`/`use`/`alg`/`key_ops`/`kid`; RS256, PS256, ES256, ES384 and EdDSA (`Ed25519`) verify
 > through `runtime.subtle` with zero npm dependencies. `iss` exact, `aud` contains `audience`, `exp`
-> required, `exp`/`nbf`/future `iat` within `clockToleranceSec` (default 30, max 300). Key sets are
-> cached on the monotonic clock (`keySet.ttlMs` 10 min), an unknown `kid` refetches at most once per
-> `keySet.minRefreshIntervalMs` (60 s) with concurrent refetches coalesced, the last good set
-> survives fetch failures for `keySet.maxStaleMs` (24 h) and is then dropped, and each fetch is
-> bounded by `keySet.fetchTimeoutMs` (5 s), 64 KiB and 64 keys. Every refusal — duplicate name or
-> issuer, empty audience, unsupported algorithm, out-of-range tolerance or timing, a `keySet.ttlMs`
-> above `keySet.maxStaleMs`, `http` without `issuers` or `signIn`, non-`https` non-loopback URL —
-> throws `AuthPluginConfigurationError` from `AuthPlugin(...)`. `http?: IAuthHttp` replaces the
-> default `fetch` seam. The `auth` health indicator stays `up` with `data.current: boolean` and
-> `data.issuers` carrying per-issuer `stale`/`expired`/`unfetched` states. It performs no I/O.
-> `typ: at+jwt` (RFC 9068) is not enforced (only a Keycloak `typ: "ID"` claim is refused), so the
-> API needs an audience distinct from any sign-in client id; multi-tenant Entra ID is not supported.
-> `IJwtService` remains self-issued only. `sub` is unique only within its issuer, so whenever an
-> issuer is not the only identity source — another issuer, a self-issued `jwt` (whose strategy also
-> maps `sub` to the id), an API key, a session or a custom strategy — `toPrincipal` should namespace
-> the id (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or keep their ids free
-> of the separator), since namespacing one side does not stop a local id of the same form colliding.
+> required, `exp`/`nbf`/future `iat` within `clockToleranceSec` (default 30, max 300). Expiry is
+> refused at `now >= exp + clockToleranceSec`; not-before is refused while
+> `now + clockToleranceSec < nbf`. Key sets are cached on the monotonic clock (`keySet.ttlMs` 10
+> min), an unknown `kid` refetches at most once per `keySet.minRefreshIntervalMs` (60 s) with
+> concurrent refetches coalesced, the last good set survives fetch failures for `keySet.maxStaleMs`
+> (24 h) and is then dropped, and each fetch is bounded by `keySet.fetchTimeoutMs` (5 s), 64 KiB and
+> 64 keys. Every refusal — duplicate name or issuer, empty audience, unsupported algorithm,
+> out-of-range tolerance or timing, a `keySet.ttlMs` above `keySet.maxStaleMs`, `http` without
+> `issuers` or `signIn`, non-`https` non-loopback URL — throws `AuthPluginConfigurationError` from
+> `AuthPlugin(...)`. `http?: IAuthHttp` replaces the default `fetch` seam. The `auth` health
+> indicator stays `up` with `data.current: boolean` and `data.issuers` carrying per-issuer
+> `stale`/`expired`/`unfetched` states. It performs no I/O. `typ: at+jwt` (RFC 9068) is not enforced
+> (only a Keycloak `typ: "ID"` claim is refused), so the API needs an audience distinct from any
+> sign-in client id; multi-tenant Entra ID is not supported. `IJwtService` remains self-issued only.
+> `sub` is unique only within its issuer, so whenever an issuer is not the only identity source —
+> another issuer, a self-issued `jwt` (whose strategy also maps `sub` to the id), an API key, a
+> session or a custom strategy — `toPrincipal` should namespace the id
+> (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or keep their ids free of the
+> separator), since namespacing one side does not stop a local id of the same form colliding.
 > `keySet.fetchTimeoutMs` may not exceed 2147483647, since a larger timer delay overflows.
 >
 > **Sign-in with an outside provider (M100c):** `signIn: SignInConfig` —
@@ -7556,16 +7566,17 @@ delay's intended fire time is `now + delayMs` and carries per-replica startup sk
 what identifies "the same one-shot job" across replicas. The suffix is load-bearing: the bare
 `scheduler:job:<name>` is the per-handler mutex, and a slot holding that key would make the mutex
 acquire at fire time always lose to the slot's own claim. A delay's slot is released when the job
-leaves the registry (on fire, `remove`, or TTL expiry), so re-registering the same name after it
-fired gets a fresh slot and fires again.
+leaves the registry (on final settlement or `remove`), on `disconnect`, or by TTL expiry, so
+re-registering the same name after it fired gets a fresh slot and fires again.
 
 **A `delay` job is lost if the replica that claimed it leaves before firing.** The claim is decided
-at registration, so a replica that finds the slot held never re-attempts: if the claiming replica
-crashes — or shuts down gracefully, since `disconnect()` clears timers without releasing the slot —
-between registering the delay and firing it, no replica runs the handler and nothing reports it. The
-exposure window is the delay itself, so it matters for a long `delayMs` on a replica set that may
-lose a pod in that window. `cron` and `every` are unaffected: they claim at fire time, so the next
-fire re-contends. A separate per-handler mutex preserves overlap protection — a second fire of a job
+at registration, so a replica that already found the slot held never re-attempts: if the claiming
+replica crashes or shuts down gracefully between registering the delay and firing it, the original
+due fire is lost on every replica and nothing reports it. A graceful shutdown releases the slot, so
+a replica that registers the same name afterwards can claim it and schedule a new fire. The exposure
+window is the delay itself, so it matters for a long `delayMs` on a replica set that may lose a pod
+in that window. `cron` and `every` are unaffected: they claim at fire time, so the next fire
+re-contends. A separate per-handler mutex preserves overlap protection — a second fire of a job
 whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
 (`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
 slot keys; the first fire may come sooner than one full interval after registration.
@@ -7680,6 +7691,38 @@ may now come sooner than one full interval after resume (never later). Grid alig
 deliberate — it is the same alignment that makes replicas agree on fire times and slot keys, and a
 resume that restarted the phase would let one replica's resumed job drift out of slot agreement with
 the others.
+
+### Timing and registration refusals (M113m)
+
+`delay`, `every`, `cron` and retry backoff wait in chunks of at most 2147483647 ms and check the
+wall clock on every wake. A job never runs before its due time, including after an early wake or a
+clock step backwards. There is no upper limit on a delay or interval: long delays and monthly cron
+waits are honoured instead of being clamped by Node, Deno or Bun to about 1 ms.
+
+The async registration call rejects with a `RangeError` for these values:
+
+| Registration             | Refused value                   | Message fragment                           |
+| ------------------------ | ------------------------------- | ------------------------------------------ |
+| `delay`                  | `delayMs` not finite or < 0     | `delayMs must be a finite number >= 0`     |
+| `every`                  | `intervalMs` not finite or <= 0 | `intervalMs must be a finite number > 0`   |
+| `delay`, `every`, `cron` | `retry.delay` not finite or < 0 | `retry.delay must be a finite number >= 0` |
+
+The message names the job, option and rule without echoing the rejected value. Zero `delayMs` and
+zero `retry.delay` are accepted; large finite values are accepted. These refusals are breaking: fix
+the value before registering the job.
+
+Disconnect, remove and pause cancel pending retry backoff without another attempt. A one-shot that
+already succeeded or exhausted its retries is removed even while paused and is not re-run. A
+one-shot paused mid-retry stays registered; resume starts it from attempt 1 using the original
+delay. Recurring jobs resume at the next cron/interval boundary. Remaining backoff is discarded. A
+cancelled fire is not reported as success: diagnostics settle it with `false`, counting it in
+`failed` because there is no separate cancellation counter. An in-flight handler may still reach a
+final success or failure after cancellation. If a job is resumed while that handler is still
+running, it is armed only once the handler settles, so the two never overlap. Disconnect releases
+every one-shot `:once` slot this service holds, each release bounded by `acquireTimeoutMs`;
+`resume()` rejects on a disconnected service, and after reconnecting a one-shot re-claims its slot,
+so a replica that claimed it meanwhile runs the job instead. A pause, remove or disconnect during
+that re-claim wins over the resume, and a second `resume()` waits for the first.
 
 ### IScheduler Interface
 

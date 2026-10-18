@@ -147,6 +147,10 @@ export class JwtService implements IJwtService {
     return `${message}.${signatureB64}`;
   }
 
+  /**
+   * Verifies the signature and claims without clock tolerance. Time is read in
+   * fractional seconds: rejects at or after `exp`, and strictly before `nbf`.
+   */
   async verify<T = Readonly<Record<string, unknown>>>(token: string): Promise<T> {
     const parts = token.split('.');
     if (parts.length !== 3) {
@@ -201,13 +205,13 @@ export class JwtService implements IJwtService {
     }
 
     // Validate time-based claims
-    const now = Math.floor(this.runtime.now() / 1000);
+    const now = this.runtime.now() / 1000;
     const payloadObj = payload as Record<string, unknown>;
 
-    if (typeof payloadObj.exp === 'number' && payloadObj.exp < now) {
+    if (typeof payloadObj.exp === 'number' && payloadObj.exp <= now) {
       throw new Error('Token expired');
     }
-    if (typeof payloadObj.nbf === 'number' && payloadObj.nbf > now) {
+    if (typeof payloadObj.nbf === 'number' && now < payloadObj.nbf) {
       throw new Error('Token not yet valid');
     }
 
