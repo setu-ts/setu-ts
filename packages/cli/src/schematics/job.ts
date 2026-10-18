@@ -76,6 +76,12 @@ export interface ${names.pascal}JobData {
  * choice only you can make. Register it in \`setu.config.ts\` with ONE of:
  *
  * \`\`\`typescript
+ * import {
+ *   ${names.screaming}_JOB,
+ *   run${names.pascal}Job,
+ *   type ${names.pascal}JobData,
+ * } from './src/jobs/${names.kebab}.job.ts';
+ *
  * // Queue work — a producer calls queue.add(${names.screaming}_JOB, data) elsewhere.
  * QueuePlugin({
  *   processors: [

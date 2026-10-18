@@ -48,6 +48,7 @@ describe('job schematic', () => {
     );
     expect(file.contents).toContain('SchedulerPlugin({');
     expect(file.contents).toContain("trigger: 'cron',");
+    expect(file.contents).toContain("} from './src/jobs/order-item.job.ts';");
     expect(file.contents).not.toContain('natural home');
     expect(file.contents).toContain('`SchedulerPlugin` is unavailable on Cloudflare Workers');
   });
