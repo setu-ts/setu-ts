@@ -33,7 +33,13 @@ import {
   DatabaseUnavailableError,
   SerializationConflictError,
 } from '../../src/errors.ts';
-import { DuplicateKeyError, PrimaryKeyChangeError } from '@setu-ts/common';
+import {
+  DuplicateKeyError,
+  encodeCursor,
+  InvalidCursorError,
+  PrimaryKeyChangeError,
+  sortFingerprint,
+} from '@setu-ts/common';
 import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { NormalizedQuery } from '@setu-ts/common';
@@ -1156,9 +1162,12 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
     'Query read timeout',
     'timeout exceeded when trying to connect',
     'Connection terminated due to connection timeout',
+    'UNIQUE constraint failed',
+    'UNIQUE constraint failed: t.id',
+    'D1_ERROR: UNIQUE constraint failed: t.id',
   ]) {
     it(
-      `an integer insert of ${anchor} is not a timeout or outage`,
+      `an integer insert of ${anchor} is not a timeout, outage, or duplicate`,
       { skip: skipLivePg },
       async () => {
         const pool = new Pool({ connectionString: livePgUrl! });
@@ -1185,6 +1194,7 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
           expect(error).toBeInstanceOf(Error);
           expect(error).not.toBeInstanceOf(DatabaseTimeoutError);
           expect(error).not.toBeInstanceOf(DatabaseUnavailableError);
+          expect(error).not.toBeInstanceOf(DuplicateKeyError);
           expect((error as Error).cause).toMatchObject({ code: '22P02' });
           expect(await repo.findById('invalid')).toBeNull();
           await repo.create({ id: 'valid', value: 42 });
@@ -1197,6 +1207,52 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
       },
     );
   }
+  it(
+    'answers a well-formed cursor carrying a mistyped sort value with InvalidCursorError',
+    { skip: skipLivePg },
+    async () => {
+      const pool = new Pool({ connectionString: livePgUrl! });
+      const tableName = `m113g_cursor_${crypto.randomUUID().replaceAll('-', '')}`;
+      const table = pgTable(tableName, { id: text('id').primaryKey(), value: integer('value') });
+      const database = nodePostgresDrizzle(pool);
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+        drizzleTables: { Number: table },
+      });
+      try {
+        await pool.query(`CREATE TABLE "${tableName}" (id text primary key, value integer)`);
+        await pool.query(`INSERT INTO "${tableName}" VALUES ('a', 1), ('b', 2), ('c', 3)`);
+        await adapter.connect();
+        const service = new DatabaseService(
+          adapter,
+          (entity) => adapter.createDataSource(entity),
+          'drizzle',
+        );
+        const repo = service.getRepository('Number');
+        const orderBy = { value: 'asc' as const };
+        const forged = encodeCursor({
+          orderedValues: ['private-not-a-number'],
+          keyValues: ['a'],
+          sortFingerprint: sortFingerprint(orderBy),
+        });
+        const error: unknown = await repo.findPage({ orderBy, limit: 2, cursor: forged }).then(
+          () => null,
+          (error: unknown) => error,
+        );
+        expect(error).toBeInstanceOf(InvalidCursorError);
+        expect((error as Error).message).not.toContain('private-not-a-number');
+        // Control: the genuine cursor the first page mints still walks on.
+        const first = await repo.findPage({ orderBy, limit: 2 });
+        expect(first.rows.map((row) => (row as { id: string }).id)).toEqual(['a', 'b']);
+        const second = await repo.findPage({ orderBy, limit: 2, cursor: first.nextCursor! });
+        expect(second.rows.map((row) => (row as { id: string }).id)).toEqual(['c']);
+      } finally {
+        await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+        await pool.end();
+        await adapter.disconnect();
+      }
+    },
+  );
   it('refuses a changed key and leaves the stored row unmoved', { skip: skipLivePg }, async () => {
     const pool = new Pool({ connectionString: livePgUrl! });
     const tableName = `m113g_keys_${crypto.randomUUID().replaceAll('-', '')}`;
@@ -1267,7 +1323,7 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
           (entity) => broken.createDataSource(entity),
           'drizzle',
         );
-        expect(() => service.getRepository('User')).toThrow("has no 'id' column");
+        expect(() => service.getRepository('User')).toThrow('has no "id" column');
         await adapter.connect();
         const mapped = new DatabaseService(
           adapter,

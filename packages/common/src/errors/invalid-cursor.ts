@@ -17,9 +17,12 @@ export class InvalidCursorError extends Error {
   /** Stable error discriminant. */
   override readonly name = 'InvalidCursorError';
 
-  /** @param message - A diagnostic naming the entity and check, never cursor content */
-  constructor(message: string) {
-    super(message);
+  /**
+   * @param message - A diagnostic naming the entity and check, never cursor content
+   * @param options - Standard error options; `cause` keeps a scrubbed driver error for the log
+   */
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     withHttpStatusHint(this, {
       status: 400,
       title: 'Bad Request',

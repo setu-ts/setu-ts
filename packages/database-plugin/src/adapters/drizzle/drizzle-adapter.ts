@@ -43,7 +43,9 @@ import {
   PoolSaturatedProbeSkipped,
   readPoolCapacity,
 } from '../../health/database-capacity.ts';
-import { isUnansweredConnect } from '../../errors/classify.ts';
+import { isUnansweredConnect, isValueTypeRefusal } from '../../errors/classify.ts';
+import { scrubDriverError } from '../../errors/scrub.ts';
+import { renderDiagnosticName } from '../../errors/diagnostic-name.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
 import {
@@ -964,7 +966,22 @@ async function findDrizzlePage(
   if (probeLimit > 0) {
     builder = builder.limit(probeLimit);
   }
-  const found = await builder;
+  let found: Record<string, unknown>[];
+  try {
+    found = await builder;
+  } catch (error) {
+    // A well-formed cursor can still carry a value of the wrong type for its
+    // sort column — the cursor records no column types to check. PostgreSQL
+    // refuses it with a class 22 data exception; that is the client's cursor,
+    // so it answers 400 rather than a masked 500 (M113g, plan §3.5a). A page
+    // without a cursor keeps the driver error unchanged.
+    if (decoded !== null && isValueTypeRefusal(error)) {
+      throw new InvalidCursorError(`Entity '${entity}': cursor value rejected by the database.`, {
+        cause: scrubDriverError(error),
+      });
+    }
+    throw error;
+  }
 
   // 6. Probe outcome: more than `limit` rows means a next page exists and the
   //    LAST returned row mints the cursor; otherwise the page is terminal.
@@ -1017,7 +1034,7 @@ function assertPreconditionColumns(table: DrizzleTable, where: Record<string, un
 function columnFor(table: DrizzleTable, entity: string, field: string): unknown {
   if (!hasColumn(table, field)) {
     throw new Error(
-      `Drizzle table '${entity}' has no '${field}' column required by the database repository.`,
+      `Drizzle table '${entity}' has no ${renderDiagnosticName(field)} column required by the database repository.`,
     );
   }
   return table[field];

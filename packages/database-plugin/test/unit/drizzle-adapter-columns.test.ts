@@ -300,7 +300,7 @@ describe('DrizzleAdapter table registry', () => {
     });
     await adapter.connect();
     expect(() => adapter.createDataSource('TenantFlag')).toThrow(
-      "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
+      'Drizzle table \'TenantFlag\' has no "id" column required by the database repository.',
     );
     expect(seen).toEqual([]);
   });
@@ -468,7 +468,7 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
     });
     await adapter.connect();
     expect(() => adapter.createDataSource('TenantFlag')).toThrow(
-      "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
+      'Drizzle table \'TenantFlag\' has no "id" column required by the database repository.',
     );
   });
 
@@ -823,7 +823,7 @@ describe('M113g eager key and payload columns', () => {
     });
     await adapter.connect();
     const tx = await adapter.beginTransaction();
-    expect(() => tx.createDataSource('Broken')).toThrow("has no 'id' column");
+    expect(() => tx.createDataSource('Broken')).toThrow('has no "id" column');
     await tx.rollback();
   });
   for (const method of ['create', 'update', 'updateWhere'] as const) {
@@ -891,7 +891,7 @@ describe('M113g eager key and payload columns', () => {
         { where: { [field]: true } },
         { filter: { type: 'comparison' as const, field, operator: 'eq' as const, value: true } },
       ]) {
-        await expect(repo.findAll(query)).rejects.toThrow(`has no '${field}' column`);
+        await expect(repo.findAll(query)).rejects.toThrow(`has no "${field}" column`);
       }
       await expect(
         repo.updateWhere!('5', { [field]: 'value' }, { name: 'Ada' }),

@@ -32,6 +32,7 @@
  * @module
  */
 import { withHttpStatusHint } from '@setu-ts/common';
+import { renderDiagnosticName } from './errors/diagnostic-name.ts';
 
 /**
  * A write names a field absent from the entity's schema. No write was sent.
@@ -54,9 +55,7 @@ export class UnknownPayloadFieldError extends Error {
    * @param field - The unknown payload field
    */
   constructor(entity: string, field: string) {
-    super(
-      `Entity '${entity}' has no payload field ${JSON.stringify(field.slice(0, 64))}${field.length > 64 ? '…' : ''}.`,
-    );
+    super(`Entity '${entity}' has no payload field ${renderDiagnosticName(field)}.`);
     withHttpStatusHint(this, {
       status: 400,
       title: 'Bad Request',

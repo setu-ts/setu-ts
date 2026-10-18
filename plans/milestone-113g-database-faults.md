@@ -214,6 +214,28 @@ because `cloudflare-plugin`'s D1 data source raises both and AI_GUIDELINES §2.2
   `packages/common/test/unit/invalid-cursor-error.test.ts`, D1 case in `d1-database.test.ts`,
   `refusal-status.test.ts` (served body field by field).
 
+### 3.5a A well-formed cursor carrying a mistyped value (added after audit round 2)
+
+- **Decision:** when the Drizzle or Prisma `findPage` was given a cursor and the backend refuses the
+  query because a value has the wrong type for its column — a SQLSTATE class 22 code anywhere in the
+  cause chain, or Prisma's client-side `PrismaClientValidationError` — the page rejects with
+  `InvalidCursorError` (`400`) instead of the masked `500`. Detection is one internal
+  `isValueTypeRefusal` in `errors/classify.ts`. Drizzle keeps the scrubbed driver error as `cause`;
+  Prisma keeps none, because its validation message renders the whole query. A page without a cursor
+  is unchanged.
+- **Why:** the cursor records no column types, so a forged cursor that decodes cleanly can carry
+  `"abc"` for an integer sort column; PostgreSQL refuses it (class 22) and Prisma refuses it before
+  any SQL. SQLite, D1 and the document stores compare across types without an error, so they never
+  produced the `500`. Maintainer decision (2026-10-18), option A of three: signed cursors (opt-in
+  HMAC) are a separate later milestone; type-tagging the cursor cannot work without column types.
+- **Accepted imprecision:** on a cursor page, a class 22 refusal caused by the application's own
+  filter value is also answered `InvalidCursorError`. The same filter fails on the first page, which
+  carries no cursor and keeps the driver error, so the fault still surfaces.
+- **Test home:** `test/unit/cursor-value-type.test.ts` (Drizzle over real operators and a real
+  `pgTable`, Prisma, the predicate's table), `test/integration/real-drizzle-adapter.test.ts` (real
+  PostgreSQL: a forged cursor with a text value for an integer sort column answers
+  `InvalidCursorError`, and a genuine cursor still walks).
+
 ### 3.6 Served bodies are asserted through a real application
 
 - **Decision:** `refusal-status.test.ts` boots a kernel app with
@@ -402,3 +424,23 @@ Three Low findings, no data exposure. Fixes decided here, before the re-audit:
   through a relation nested write (`{ tenant: { connect: … } }`), which `assertPrimaryKeyUnchanged`
   (scalar columns only) does not see. Unverified against a generated client; stated as a residual in
   the database README's key-change paragraph.
+
+### 10.6 Committed-tree audit, round 2 (fresh-context Claude agent, `68f293e2`) — failed
+
+L1–L3 confirmed closed, each with a probe and a negative control, including a real `docker pause`
+showing genuine pg timeout chains carry no string `code`, so the round-1 rule does not suppress a
+real timeout. One new Low, plus one pre-existing observation folded in:
+
+- **L4 — the SQLite unique anchor still matched client text** (`classify.ts`, `includes` on any
+  member, any adapter): a value `UNIQUE constraint failed` that PostgreSQL quotes back answered a
+  false `409`. **Fix:** a member matches only when its `message` STARTS with
+  `UNIQUE constraint failed:` or `D1_ERROR: UNIQUE constraint failed:` — measured, `node:sqlite`
+  throws `UNIQUE constraint failed: t.id` (`code: 'ERR_SQLITE_ERROR'`, `errcode: 1555`), and the D1
+  shape is pinned in this file's comment. The no-code rule cannot apply here, since a genuine
+  `node:sqlite` error carries a string code; quoted client text always sits inside a longer driver
+  message.
+- **O1 (pre-existing since M66, the L2 class) — `columnFor` and the memory query builder wrote a
+  caller-chosen field name raw** into their unknown-column messages. **Fix:** the same bounded
+  `JSON.stringify` rendering as `UnknownPayloadFieldError`, through one internal helper.
+- **A well-formed forged cursor whose ordered value has the wrong type** reached the driver (masked
+  `500`) rather than `InvalidCursorError`. **Fixed** as §3.5a (maintainer decision, option A).

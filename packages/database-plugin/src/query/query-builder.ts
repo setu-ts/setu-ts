@@ -6,6 +6,7 @@
  */
 import type { FilterExpression, NormalizedQuery, OrderDirection } from '@setu-ts/common';
 import type { CountOptions, FindOptions, PageOptions } from './find-options.ts';
+import { renderDiagnosticName } from '../errors/diagnostic-name.ts';
 
 /**
  * Normalized query representation that adapters can evaluate.
@@ -360,8 +361,8 @@ export function unknownColumnError(
   for (const [clause, field] of fields) {
     if (!known.has(field)) {
       return new Error(
-        `Memory adapter: entity '${entity}' has no '${field}' column for ${clause}. ` +
-          `Known columns: ${[...known].sort().join(', ')}.`,
+        `Memory adapter: entity '${entity}' has no ${renderDiagnosticName(field)} column for ${clause}. ` +
+          `Known columns: ${[...known].sort().map(renderDiagnosticName).join(', ')}.`,
       );
     }
   }

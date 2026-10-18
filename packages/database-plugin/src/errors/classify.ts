@@ -14,7 +14,7 @@
  * The signal table is per backend (§3.2 of the M90f plan). A **code** is
  * read first — SQLSTATE for the SQL backends, a gRPC status for Bigtable,
  * the Cosmos HTTP status — and driver **error names** and **message
- * anchors** cover only the signals no code is carried on. Every anchor has a
+ * anchors** cover the remaining signals. Every anchor has a
  * real-backend test that fails if the driver's text changes, which is the
  * only thing that makes a message match safe.
  *
@@ -93,7 +93,7 @@ const DUPLICATE_KEY_CODES: ReadonlySet<string> = new Set(['23505', 'P2002', 'ER_
  * `node:sqlite`'s message and the SQLite drivers Drizzle supports, for a
  * primary key and a unique index alike.
  */
-const SQLITE_UNIQUE_ANCHOR = 'UNIQUE constraint failed';
+const SQLITE_UNIQUE_ANCHOR = 'UNIQUE constraint failed:';
 
 /** SQLSTATE `57P03` — `cannot_connect_now`, refused by the server itself. */
 const PG_CANNOT_CONNECT_NOW = '57P03';
@@ -196,6 +196,28 @@ export function isUnansweredConnect(error: unknown): boolean {
   const candidates = causeChainMembers(error);
   const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
   return candidates.some(({ message }) => classifyPgTimeout(message, hasStringCode) !== null);
+}
+
+/**
+ * Whether the database refused a supplied value as the wrong type for its
+ * column: a SQLSTATE class 22 (data exception) code anywhere in the cause
+ * chain, or Prisma's client-side `PrismaClientValidationError`, which Prisma
+ * raises before any SQL for a value its schema does not accept.
+ *
+ * Internal. The Drizzle and Prisma keyset pages use it to answer a forged,
+ * well-formed cursor carrying a mistyped value with `InvalidCursorError`
+ * instead of a masked `500` (M113g, plan §3.5a). Reads go through the same
+ * bounded, guarded cause walk as the classifier.
+ *
+ * @param error - The thrown value
+ * @returns `true` when the backend rejected a value's type
+ */
+export function isValueTypeRefusal(error: unknown): boolean {
+  return causeChainMembers(error).some(
+    ({ code, name }) =>
+      (typeof code === 'string' && /^22[0-9A-Z]{3}$/.test(code)) ||
+      name === 'PrismaClientValidationError',
+  );
 }
 
 /** Fixed pg timeout messages are authoritative only on a chain without string codes. */
@@ -314,8 +336,7 @@ function classifyStructured(
 }
 
 /**
- * Classifies fallback signals from errors that carried no machine-readable
- * driver signal anywhere in their cause chain.
+ * Classifies fallback signals after no structured rule matched the cause chain.
  */
 function classifyFallback(
   { name, message }: DriverErrorMembers,
@@ -335,12 +356,16 @@ function classifyFallback(
   }
 
   // Message anchors — node-postgres connection/query timeouts and SQLite's
-  //    unique violation, none of which carries a code. Reached last, only
+  //    unique violation. SQLite may carry ERR_SQLITE_ERROR. Reached last, only
   //    after every structured signal missed; each is pinned by a test against
   //    the real engine.
   if (pgTimeout !== null) return pgTimeout;
   if (typeof message === 'string') {
-    if (message.includes(SQLITE_UNIQUE_ANCHOR)) return 'duplicate';
+    if (
+      message.startsWith(SQLITE_UNIQUE_ANCHOR) ||
+      message.startsWith(`D1_ERROR: ${SQLITE_UNIQUE_ANCHOR}`)
+    )
+      return 'duplicate';
   }
 
   return null;

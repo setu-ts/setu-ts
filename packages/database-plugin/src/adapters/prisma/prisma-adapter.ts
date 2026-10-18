@@ -36,6 +36,7 @@ import {
   resolveKeysetSort,
   sortFingerprint,
 } from '@setu-ts/common';
+import { isValueTypeRefusal } from '../../errors/classify.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import {
   UnsupportedFilterOperatorError,
@@ -685,18 +686,31 @@ async function findPrismaPage(
     normalized.select.length > 0
       ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
       : [];
-  const found = await delegate.findMany(
-    buildFindManyArgs(
-      prismaWhere(normalized.where, conjoinFilters(normalized.filter, keyset), provider),
-      keysetSort,
-      probeLimit,
-      // A cursor replaces the offset outright (§3.10 refuses the two
-      // together), but a cursor-LESS page must still honour it — passing a
-      // literal 0 silently served page one for `findPage({ offset: 20 })`.
-      decoded === null ? normalized.offset : 0,
-      internalSelect,
-    ),
-  );
+  let found: Record<string, unknown>[];
+  try {
+    found = await delegate.findMany(
+      buildFindManyArgs(
+        prismaWhere(normalized.where, conjoinFilters(normalized.filter, keyset), provider),
+        keysetSort,
+        probeLimit,
+        // A cursor replaces the offset outright (§3.10 refuses the two
+        // together), but a cursor-LESS page must still honour it — passing a
+        // literal 0 silently served page one for `findPage({ offset: 20 })`.
+        decoded === null ? normalized.offset : 0,
+        internalSelect,
+      ),
+    );
+  } catch (error) {
+    // A well-formed cursor carrying a value of the wrong type for its sort
+    // column: Prisma refuses it before any SQL (PrismaClientValidationError)
+    // and PostgreSQL with a class 22 code. Either way it is the client's
+    // cursor, answered 400 (M113g, plan §3.5a). No cause is kept: Prisma's
+    // validation message renders the whole query, values included.
+    if (decoded !== null && isValueTypeRefusal(error)) {
+      throw new InvalidCursorError(`Entity '${entity}': cursor value rejected by the database.`);
+    }
+    throw error;
+  }
 
   // 6. Probe outcome: more than `limit` rows means a next page exists and the
   //    LAST returned row mints the cursor; otherwise the page is terminal.

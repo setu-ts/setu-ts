@@ -11,6 +11,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
 import { classifyDriverError, isUnansweredConnect } from '../../src/errors/classify.ts';
 import {
   DatabaseTimeoutError,
@@ -168,6 +169,50 @@ const DUPLICATE_SIGNALS: ReadonlyArray<{
 ];
 
 describe('classifyDriverError — duplicate-key signals (409, not retryable)', () => {
+  it('classifies a real node:sqlite duplicate even with its string code', () => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec('CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)');
+      let error: unknown;
+      try {
+        database.exec('INSERT INTO t VALUES (1)');
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({
+        message: 'UNIQUE constraint failed: t.id',
+        code: 'ERR_SQLITE_ERROR',
+        errcode: 1555,
+      });
+      expect(classifyDriverError(error, 'drizzle')).toBe('duplicate');
+      expect(classifyDriverError(new Error('Failed query', { cause: error }))).toBe('duplicate');
+    } finally {
+      database.close();
+    }
+  });
+
+  for (const anchor of [
+    'UNIQUE constraint failed',
+    'UNIQUE constraint failed: t.id',
+    'D1_ERROR: UNIQUE constraint failed: t.id',
+  ]) {
+    it(`does not classify quoted SQLite anchor ${anchor} as a duplicate`, () => {
+      const driver = Object.assign(
+        new Error(`invalid input syntax for type integer: "${anchor}"`),
+        { code: '22P02' },
+      );
+      for (const error of [
+        driver,
+        new Error(`Failed query: insert into "numbers" values ($1)\nparams: ${anchor}`, {
+          cause: driver,
+        }),
+        new Error(`Failed query: insert into "numbers" values ($1)\nparams: ${anchor}`),
+      ]) {
+        expect(classifyDriverError(error, 'drizzle')).toBeNull();
+      }
+    });
+  }
+
   for (const { backend, error, adapterType } of DUPLICATE_SIGNALS) {
     it(backend, () => {
       expect(classifyDriverError(error, adapterType)).toBe('duplicate');
