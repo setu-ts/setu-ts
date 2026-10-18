@@ -6467,7 +6467,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   delay and retry delay remain accepted. First-party `JwtService.verify` uses fractional seconds
   without clock tolerance, rejecting at `exp` and before `nbf`; outside-issuer verification rejects
   at `exp + clockToleranceSec`, with its not-before check unchanged. Migration: fix invalid
-  scheduler values and refresh tokens before `exp` — complete (PR pending)
+  scheduler values and refresh tokens before `exp` — complete (PR #471)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
