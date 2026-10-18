@@ -6458,7 +6458,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   round 2 found the SQLite unique anchor matching client text the same way. Round 3 found a server
   data fault on a later page read as a bad cursor, an M113f scrub that a frame-shaped bound value
   survived, and a `TypeError` the round-2 name helper introduced; all are fixed and NOT re-audited,
-  at the maintainer's direction — complete (PR pending)
+  at the maintainer's direction — complete (PR #470)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
