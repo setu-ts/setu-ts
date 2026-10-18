@@ -12,10 +12,11 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/scheduler-plugin`).** The async `delay` call rejects with `RangeError` for a non-finite
   or negative `delayMs`; `every` rejects for a non-finite or non-positive `intervalMs`; `delay`,
   `every` and `cron` reject for a non-finite or negative `retry.delay`. Messages name the job and
-  the option: `delayMs must be a finite number >= 0`, `intervalMs must be a finite number > 0`, or
-  `retry.delay must be a finite number >= 0`. Zero `delayMs` and zero `retry.delay` remain accepted,
-  with no upper delay or interval limit. Migration: fix the invalid value before registering the
-  job; these values were previously accepted.
+  the option and rule without echoing the rejected value: `delayMs must be a finite number >= 0`,
+  `intervalMs must be a finite number > 0`, or `retry.delay must be a finite number >= 0`. Zero
+  `delayMs` and zero `retry.delay` remain accepted, with no upper delay or interval limit.
+  Migration: fix the invalid value before registering the job; these values were previously
+  accepted.
 - **Breaking: JWT expiry is exclusive (V9-70, M113m, 0.10.0, `@setu-ts/auth-plugin`).** First-party
   `JwtService.verify` uses fractional seconds (`runtime.now() / 1000`) without clock tolerance: it
   rejects with `Token expired` once `now >= exp`, and with `Token not yet valid` while `now < nbf`.
@@ -332,7 +333,9 @@ All notable changes to this project are documented here. The format follows
   `delay`, `every`, `cron` and retry backoff now wait in chunks of at most 2147483647 ms and check
   the wall clock on each wake, so a job never runs before its due time. Previously, Node, Deno and
   Bun clamped an over-limit timer to about 1 ms: `delay(30 days)` fired at once, and monthly cron
-  jobs could fire early. Delays and intervals have no upper limit.
+  jobs could fire early. Delays and intervals have no upper limit. Disconnect, remove and pause
+  cancel retry backoff without another attempt. Pause retains the configuration; resume starts a
+  fresh fire at attempt 1 using the original delay or the next cron/interval boundary.
 - **JWT validity boundaries now honour fractional seconds (V9-70, M113m, `@setu-ts/auth-plugin`).**
   First-party tokens are refused at and after `exp`, closing the window of up to one second after
   expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and

@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Fix invalid scheduler times and refresh JWTs before expiry (M113m, breaking)
+### Fix invalid scheduler times that reject with `RangeError` and refresh JWTs before `exp` (M113m, breaking)
 
 **Fix invalid values before registering a job.** The async `delay` call now rejects with a
 `RangeError` for a non-finite or negative `delayMs`; `every` rejects for a non-finite or

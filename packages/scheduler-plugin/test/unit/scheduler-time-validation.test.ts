@@ -26,6 +26,36 @@ describe('scheduler time validation', () => {
       : service[kind]('time-validation', value, () => {}, options);
   }
 
+  const unsafeValues: readonly [string, unknown][] = [
+    ['Symbol', Symbol('invalid time')],
+    [
+      'throwing toString',
+      {
+        toString: () => {
+          throw new Error('must not stringify');
+        },
+      },
+    ],
+  ];
+  for (const [label, value] of unsafeValues) {
+    for (const kind of ['delay', 'every', 'cron'] as const) {
+      if (kind !== 'cron') {
+        it(`${kind} rejects ${label} with RangeError without rendering the value`, async () => {
+          await expect(register(kind, value as never)).rejects.toBeInstanceOf(RangeError);
+          expect(runtime.getPendingTimerCount()).toBe(0);
+          await register(kind, 1);
+        });
+      }
+      it(`${kind} rejects retry.delay ${label} with RangeError without rendering the value`, async () => {
+        await expect(
+          register(kind, 1, { retry: { limit: 2, delay: value as never, backoff: 'fixed' } }),
+        ).rejects.toBeInstanceOf(RangeError);
+        expect(runtime.getPendingTimerCount()).toBe(0);
+        await register(kind, 1);
+      });
+    }
+  }
+
   for (const kind of ['delay', 'every'] as const) {
     const option = kind === 'delay' ? 'delayMs' : 'intervalMs';
     for (const value of [-1, NaN, Infinity, -Infinity, ...(kind === 'every' ? [0] : [])]) {

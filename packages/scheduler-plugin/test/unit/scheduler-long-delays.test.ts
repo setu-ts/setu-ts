@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SchedulerService } from '../../src/services/scheduler-service.ts';
 import { MemoryLock } from '../../src/lock/memory-lock.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -9,9 +9,11 @@ const MONTH_MS = 30 * DAY_MS;
 describe('scheduler honours long waits', () => {
   let runtime: FakeRuntime;
   let service: SchedulerService;
+  let lock: MemoryLock;
   beforeEach(async () => {
     runtime = new FakeRuntime();
-    service = new SchedulerService(runtime, new MemoryLock(runtime));
+    lock = new MemoryLock(runtime);
+    service = new SchedulerService(runtime, lock);
     await service.connect();
   });
   afterEach(async () => {
@@ -137,4 +139,43 @@ describe('scheduler honours long waits', () => {
     expect(times).toEqual([0, 15 * DAY_MS, 45 * DAY_MS]);
     expect(runtime.getPendingTimerCount()).toBe(0);
   });
+
+  for (const action of ['disconnect', 'remove', 'pause'] as const) {
+    for (const elapsed of [0, 25 * DAY_MS]) {
+      it(`${action} ends a long backoff at day ${elapsed / DAY_MS} without another attempt`, async () => {
+        runtime.setTime(0);
+        const releases = vi.spyOn(lock, 'release');
+        const attempts: number[] = [];
+        await service.delay(
+          'cancel-backoff',
+          0,
+          (job) => {
+            attempts.push(job.attempts);
+            if (attempts.length === 1) throw new Error('retry me');
+          },
+          { retry: { limit: 3, delay: 40 * DAY_MS, backoff: 'fixed' } },
+        );
+        await runtime.advanceTo(elapsed);
+        expect(attempts).toEqual([1]);
+        expect(runtime.getPendingTimerCount()).toBe(1);
+        if (action === 'disconnect') await service.disconnect();
+        else await service[action]('cancel-backoff');
+        expect(runtime.getPendingTimerCount()).toBe(0);
+        await runtime.advanceTo(elapsed);
+        // Cancellation settles the executor and releases its handler mutex.
+        expect(releases).toHaveBeenCalledWith('scheduler:job:cancel-backoff', expect.any(String));
+        await runtime.advanceTo(100 * DAY_MS);
+        expect(attempts).toEqual([1]);
+        expect(runtime.getPendingTimerCount()).toBe(0);
+        if (action === 'pause') {
+          await expect(service.getNextRun('cancel-backoff')).rejects.toThrow('paused');
+          await service.resume('cancel-backoff');
+          await runtime.advanceTo(100 * DAY_MS);
+          expect(attempts).toEqual([1, 1]);
+          expect(runtime.getPendingTimerCount()).toBe(0);
+          await expect(service.getNextRun('cancel-backoff')).rejects.toThrow('No scheduled job');
+        }
+      });
+    }
+  }
 });

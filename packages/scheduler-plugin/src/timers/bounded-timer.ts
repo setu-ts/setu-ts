@@ -40,11 +40,29 @@ export function armAt(
  *
  * @param runtime - Clock and timer services
  * @param dueAtMs - Absolute deadline in epoch milliseconds
- * @returns A promise resolved at or after the deadline, even for long waits
+ * @param signal - Cancels the live chunk and resolves the wait immediately
+ * @returns A promise resolved when due or cancelled, even for long waits
  * @internal
  */
-export function sleepUntil(runtime: IRuntimeServices, dueAtMs: number): Promise<void> {
+export function sleepUntil(
+  runtime: IRuntimeServices,
+  dueAtMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
-    armAt(runtime, dueAtMs, resolve, () => {});
+    let liveHandle: TimerHandle;
+    const finish = (): void => {
+      signal?.removeEventListener('abort', cancel);
+      resolve();
+    };
+    const cancel = (): void => {
+      runtime.clearTimeout(liveHandle);
+      finish();
+    };
+    armAt(runtime, dueAtMs, finish, (handle) => {
+      liveHandle = handle;
+    });
+    signal?.addEventListener('abort', cancel, { once: true });
   });
 }

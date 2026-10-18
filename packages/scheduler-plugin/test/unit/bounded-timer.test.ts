@@ -87,9 +87,11 @@ describe('bounded timers', () => {
 
   it('sleepUntil resolves only when its long deadline is due', async () => {
     const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
     const due = runtime.now() + MONTH_MS;
     let settled = false;
-    const pending = sleepUntil(runtime, due).then(() => {
+    const pending = sleepUntil(runtime, due, controller.signal).then(() => {
       settled = true;
     });
     await runtime.advanceTo(due - 1);
@@ -97,6 +99,33 @@ describe('bounded timers', () => {
     await runtime.advanceTo(due);
     await pending;
     expect(settled).toBe(true);
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    controller.abort();
+    expect(runtime.getPendingTimerCount()).toBe(0);
+  });
+
+  it('sleepUntil with an already aborted signal settles without arming a timer', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    controller.abort();
+    const pending = sleepUntil(runtime, runtime.now() + MONTH_MS, controller.signal);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    await pending;
+  });
+
+  it('sleepUntil cancellation clears the latest chunk and settles before the deadline', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    const start = runtime.now();
+    const pending = sleepUntil(runtime, start + MONTH_MS, controller.signal);
+    await runtime.advanceTo(start + MAX_TIMER_MS);
+    controller.abort();
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    await pending;
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    await runtime.advanceTo(start + MONTH_MS);
+    expect(runtime.getPendingTimerCount()).toBe(0);
   });
 
   it('a past deadline fires on the next tick, never synchronously', async () => {

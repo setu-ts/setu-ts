@@ -7,6 +7,46 @@ import { run } from '../../src/jobs/job-executor.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('JobExecutor.run', () => {
+  it('an already aborted run settles without invoking the handler', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    await run(
+      'id1',
+      'cancelled',
+      () => {
+        calls++;
+      },
+      undefined,
+      undefined,
+      {
+        runtime,
+        signal: controller.signal,
+      },
+    );
+    expect(calls).toBe(0);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+  });
+
+  it('aborting during a failing handler settles without arming backoff', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    const pending = run(
+      'id1',
+      'cancelled',
+      () => {
+        controller.abort();
+        throw new Error('failed after cancellation');
+      },
+      undefined,
+      { limit: 3, delay: 1000, backoff: 'fixed' },
+      { runtime, signal: controller.signal },
+    );
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    await expect(pending).resolves.toBeUndefined();
+  });
+
   it('runs handler successfully', async () => {
     const runtime = new FakeRuntime();
     let called = false;

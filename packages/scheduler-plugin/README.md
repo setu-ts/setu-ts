@@ -63,11 +63,16 @@ Invalid time values now make the async registration call reject with a `RangeErr
 | `every`                  | `intervalMs` not finite or <= 0 | `intervalMs must be a finite number > 0`   |
 | `delay`, `every`, `cron` | `retry.delay` not finite or < 0 | `retry.delay must be a finite number >= 0` |
 
-Each message also names the job and the rejected value. Zero `delayMs` and zero `retry.delay` are
-accepted; large finite values are accepted. Fix invalid values before registering jobs.
+Each message names the job, option and rule without echoing the rejected value. Zero `delayMs` and
+zero `retry.delay` are accepted; large finite values are accepted. Fix invalid values before
+registering jobs.
 
 An exponential backoff that overflows to `Infinity` with an enormous retry limit now waits forever
 instead of retrying after about 1 ms.
+
+Disconnect, remove and pause cancel pending retry backoff without another attempt. Pause retains the
+job configuration; resume schedules a fresh fire with attempt 1 using the original delay or the next
+cron/interval boundary, rather than continuing the remaining backoff.
 
 ## Options
 

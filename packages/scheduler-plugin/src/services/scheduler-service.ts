@@ -91,6 +91,8 @@ export class SchedulerService implements IScheduler {
   #timing: ProbeTiming;
   #connected = false;
   #names: Set<string> = new Set();
+  /** One cancellation scope per entry's scheduled fire, replaced on resume/re-arm. */
+  #runControllers = new WeakMap<RegistryEntry<unknown>, AbortController>();
 
   /**
    * The M98k collector, set only by the owning SchedulerPlugin through
@@ -196,6 +198,7 @@ export class SchedulerService implements IScheduler {
     for (const name of this.#names) {
       try {
         const entry = this.#registry.get(name);
+        this.#runControllers.get(entry)?.abort();
         if (entry.timerHandle !== null) {
           this.#runtime.clearTimeout(entry.timerHandle);
         }
@@ -300,9 +303,7 @@ export class SchedulerService implements IScheduler {
     }
 
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
-      throw new RangeError(
-        `Job '${name}': intervalMs must be a finite number > 0; got ${intervalMs}`,
-      );
+      throw new RangeError(`Job '${name}': intervalMs must be a finite number > 0`);
     }
     this.#validateRetryDelay(name, options?.retry);
 
@@ -345,7 +346,7 @@ export class SchedulerService implements IScheduler {
     }
 
     if (!Number.isFinite(delayMs) || delayMs < 0) {
-      throw new RangeError(`Job '${name}': delayMs must be a finite number >= 0; got ${delayMs}`);
+      throw new RangeError(`Job '${name}': delayMs must be a finite number >= 0`);
     }
     this.#validateRetryDelay(name, options?.retry);
 
@@ -386,11 +387,18 @@ export class SchedulerService implements IScheduler {
 
   /**
    * Pause a scheduled job.
+   *
+   * Cancels the main timer and ends the current retry run, including its
+   * backoff. An in-flight handler may settle, but cannot retry. Configuration
+   * is retained, including one-shot jobs: resume schedules a fresh fire with
+   * attempt 1, using the original delay or next cron/interval boundary rather
+   * than preserving the remaining backoff, just as it resets the main timer.
    */
   async pause(name: string): Promise<void> {
     this.#registry.pause(name, (handle) => {
       this.#runtime.clearTimeout(handle);
     });
+    this.#runControllers.get(this.#registry.get(name))?.abort();
   }
 
   /**
@@ -437,6 +445,7 @@ export class SchedulerService implements IScheduler {
    */
   async remove(name: string): Promise<void> {
     const entry = this.#registry.get(name);
+    this.#runControllers.get(entry)?.abort();
     if (entry.timerHandle !== null) {
       this.#runtime.clearTimeout(entry.timerHandle);
     }
@@ -461,9 +470,7 @@ export class SchedulerService implements IScheduler {
   /** Refuses invalid retry delays before registration; large finite waits are valid. */
   #validateRetryDelay(name: string, retry: RetryOptions | undefined): void {
     if (retry !== undefined && (!Number.isFinite(retry.delay) || retry.delay < 0)) {
-      throw new RangeError(
-        `Job '${name}': retry.delay must be a finite number >= 0; got ${retry.delay}`,
-      );
+      throw new RangeError(`Job '${name}': retry.delay must be a finite number >= 0`);
     }
   }
 
@@ -473,10 +480,12 @@ export class SchedulerService implements IScheduler {
    * handle so pause, remove and disconnect cancel the current chunk.
    */
   #armTimer(entry: RegistryEntry<unknown>): TimerHandle {
+    const controller = new AbortController();
+    this.#runControllers.set(entry, controller);
     return armAt(
       this.#runtime,
       entry.nextRunAtMs,
-      () => this.#fire(entry),
+      () => this.#fire(entry, controller.signal),
       (handle) => {
         entry.timerHandle = handle;
       },
@@ -605,6 +614,7 @@ export class SchedulerService implements IScheduler {
     entry: RegistryEntry<unknown>,
     lockKey: string,
     fireObs: FireObservation | null,
+    signal: AbortSignal,
   ): Promise<void> {
     const collector = this.#collector;
     let token: string | null;
@@ -646,8 +656,8 @@ export class SchedulerService implements IScheduler {
       const jobId = this.#runtime.uuid();
       const runOptions =
         attempts === undefined
-          ? { runtime: this.#runtime, logger: this.#logger }
-          : { runtime: this.#runtime, logger: this.#logger, attempts };
+          ? { runtime: this.#runtime, logger: this.#logger, signal }
+          : { runtime: this.#runtime, logger: this.#logger, attempts, signal };
       await run(jobId, entry.name, entry.handler, entry.data, entry.retry, runOptions);
       collector?.fireSettled(
         fireObs,
@@ -678,7 +688,7 @@ export class SchedulerService implements IScheduler {
     }
   }
 
-  async #fire(entry: RegistryEntry<unknown>): Promise<void> {
+  async #fire(entry: RegistryEntry<unknown>, signal: AbortSignal): Promise<void> {
     // C4 FIX: Capture generation at fire START to detect if pause()+resume() fires during await
     const fireGen = entry.generation ?? 0;
 
@@ -755,8 +765,12 @@ export class SchedulerService implements IScheduler {
     // NORMAL multi-instance path, and a lock backend blip is transient. Every
     // lock failure below is contained here so the re-arm logic still runs.
     if (slotClaimed) {
-      await this.#runWithLock(entry, lockKey, fireObs);
+      await this.#runWithLock(entry, lockKey, fireObs, signal);
     }
+
+    // The stopped fire must not remove a paused one-shot or interfere with
+    // a fresh fire armed by resume (or a replacement registered after remove).
+    if (signal.aborted) return;
 
     // One-shot delay jobs are removed after firing, regardless of pause state.
     if (entry.kind === 'delay') {

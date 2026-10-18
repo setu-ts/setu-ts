@@ -178,6 +178,8 @@ function invokeHandler<T>(
 interface RunOptions {
   runtime: IRuntimeServices;
   logger?: ILogger | undefined;
+  /** Stops future attempts and cancels backoff; an in-flight handler may settle. */
+  signal?: AbortSignal;
   /**
    * The M98k attempt observer for an observed dispatch. Absent — the
    * default — the executor runs exactly the pre-M98k path: no observation
@@ -195,7 +197,7 @@ interface RunOptions {
  * @param data - Optional payload
  * @param retry - Optional retry configuration
  * @param options - Runtime and optional logger
- * @returns The final settled result
+ * @returns The final settled result, or fulfillment on cancellation without another attempt
  */
 export async function run<T = unknown>(
   jobId: string,
@@ -205,11 +207,11 @@ export async function run<T = unknown>(
   retry: RetryOptions | undefined,
   options: RunOptions,
 ): Promise<void> {
-  const { runtime, logger, attempts } = options;
+  const { runtime, logger, attempts, signal } = options;
   const limit = retry?.limit ?? 1;
   let attempt = 0;
 
-  while (true) {
+  while (!signal?.aborted) {
     attempt++;
     // N6 FIX: Remove the `?? undefined as T` pattern that defeats type safety.
     // The `data` parameter is `T | undefined`, so `T` is inferred as `unknown | undefined`
@@ -238,12 +240,13 @@ export async function run<T = unknown>(
         : invokeHandler(handler, job, 'await'));
       return;
     } catch (error) {
+      if (signal?.aborted) return;
       if (attempt < limit) {
         const backoffMs = retry !== undefined ? computeBackoffMs(attempt, retry) : 1000;
         logger?.warn(`Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`, {
           error: error instanceof Error ? error.message : String(error),
         });
-        await sleepUntil(runtime, runtime.now() + backoffMs);
+        await sleepUntil(runtime, runtime.now() + backoffMs, signal);
       } else {
         logger?.error(`Job '${jobName}' failed after ${attempt} attempt(s)`, {
           error: error instanceof Error ? error.message : String(error),
