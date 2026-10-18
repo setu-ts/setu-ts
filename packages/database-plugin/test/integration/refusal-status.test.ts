@@ -58,7 +58,7 @@ describe('M113g caller-safe fault bodies', () => {
         const service = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
         return ctx.response.json(
           await service.getRepository('PrivateEntity').update('private-key', {
-            privateUnknownField: 'private-value',
+            ['privateUnknownField\n' + 'x'.repeat(200)]: 'private-value',
           }),
         );
       },

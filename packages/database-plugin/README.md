@@ -940,7 +940,11 @@ Cosmos DB, Cloud Bigtable and the D1 adapter in `@setu-ts/cloudflare-plugin` —
 addressed key's value is refused with `PrimaryKeyChangeError` (`400`), before any I/O. An equal
 value is accepted; it is compared as a string for `string`, `number`, `bigint` and `ObjectId`-like
 values, and by time for `Date` values. That is why `update('5', { id: 5 })` is accepted — a route
-parameter is a string, a JSON body carries a number — while `'05'` against `5` is refused.
+parameter is a string, a JSON body carries a number — while `'05'` against `5` is refused. The check
+covers scalar key columns. Through Prisma, a body passed straight to `update` can still change a key
+column that is also a relation's foreign key with a nested relation write such as
+`{ tenant: { connect: … } }`; this case has not been tested against a generated client, so write the
+fields you mean rather than forwarding a body.
 
 The first two rows are things this adapter can decide, and it does. The primary key is the one
 constraint it knows, and every lookup by id addresses the first match, so a `create` whose

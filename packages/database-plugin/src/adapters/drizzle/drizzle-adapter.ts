@@ -986,9 +986,12 @@ async function findDrizzlePage(
 const COUNT_ALIAS = 'value';
 
 function hasColumn(value: unknown, field: string): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  const columns = (value as Record<symbol, unknown>)[Symbol.for('drizzle:Columns')];
+  if (columns !== null && typeof columns === 'object' && !Array.isArray(columns)) {
+    return Object.prototype.hasOwnProperty.call(columns, field);
+  }
   return (
-    value !== null &&
-    typeof value === 'object' &&
     Object.prototype.hasOwnProperty.call(value, field) &&
     (value as Record<string, unknown>)[field] !== undefined
   );

@@ -171,8 +171,9 @@ export function classifyDriverError(
     const matched = classifyStructured(members, adapterType);
     if (matched !== null) return matched;
   }
+  const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
   for (const members of candidates) {
-    const matched = classifyFallback(members);
+    const matched = classifyFallback(members, classifyPgTimeout(members.message, hasStringCode));
     if (matched !== null) return matched;
   }
   return null;
@@ -192,13 +193,22 @@ export function classifyDriverError(
  * @returns `true` when any error in the cause chain carries a timeout anchor
  */
 export function isUnansweredConnect(error: unknown): boolean {
-  return causeChainMembers(error).some(
-    ({ message }) =>
-      typeof message === 'string' &&
-      (message.includes(PG_POOL_TIMEOUT_ANCHOR) ||
-        message.includes(PG_NEW_CONNECTION_TIMEOUT_ANCHOR) ||
-        message.includes(PG_QUERY_TIMEOUT_ANCHOR)),
-  );
+  const candidates = causeChainMembers(error);
+  const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
+  return candidates.some(({ message }) => classifyPgTimeout(message, hasStringCode) !== null);
+}
+
+/** Fixed pg timeout messages are authoritative only on a chain without string codes. */
+function classifyPgTimeout(
+  message: unknown,
+  hasStringCode: boolean,
+): 'unavailable' | 'timeout' | null {
+  if (hasStringCode) return null;
+  if (message === PG_POOL_TIMEOUT_ANCHOR || message === PG_NEW_CONNECTION_TIMEOUT_ANCHOR) {
+    return 'unavailable';
+  }
+  if (message === PG_QUERY_TIMEOUT_ANCHOR) return 'timeout';
+  return null;
 }
 
 /**
@@ -307,7 +317,10 @@ function classifyStructured(
  * Classifies fallback signals from errors that carried no machine-readable
  * driver signal anywhere in their cause chain.
  */
-function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorClass | null {
+function classifyFallback(
+  { name, message }: DriverErrorMembers,
+  pgTimeout: 'unavailable' | 'timeout' | null,
+): DriverErrorClass | null {
   // Driver error names, for the signals no code is carried on. These are
   //    `name` STRINGS, deliberately — the classifier sees foreign objects,
   //    not classes it could `instanceof`.
@@ -325,13 +338,8 @@ function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorCla
   //    unique violation, none of which carries a code. Reached last, only
   //    after every structured signal missed; each is pinned by a test against
   //    the real engine.
+  if (pgTimeout !== null) return pgTimeout;
   if (typeof message === 'string') {
-    if (
-      message.includes(PG_POOL_TIMEOUT_ANCHOR) ||
-      message.includes(PG_NEW_CONNECTION_TIMEOUT_ANCHOR)
-    )
-      return 'unavailable';
-    if (message.includes(PG_QUERY_TIMEOUT_ANCHOR)) return 'timeout';
     if (message.includes(SQLITE_UNIQUE_ANCHOR)) return 'duplicate';
   }
 

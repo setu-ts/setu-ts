@@ -308,6 +308,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A value a client sends no longer makes a database error read as a timeout or an outage (M113g,
+  0.10.0, `@setu-ts/database-plugin`).** PostgreSQL quotes a rejected value in its error message,
+  and the node-postgres timeout messages were matched anywhere in the error chain, so a body sending
+  `"Query read timeout"` to an integer column answered `504`, and the two connect timeout messages
+  answered `503`. The three messages now match only as the whole message of an error that carries no
+  SQLSTATE code anywhere in its chain. The pool-wait message
+  (`timeout exceeded when trying to connect`) had the same flaw since 0.5.0.
+
 - **The second node-postgres connect-timeout message answered a masked `500` (V9-34, M113g, 0.10.0,
   `@setu-ts/database-plugin`).** pg-pool raises `Connection terminated due to connection timeout`
   when a new client's connect times out — the common case during a pause, when the pool has room to

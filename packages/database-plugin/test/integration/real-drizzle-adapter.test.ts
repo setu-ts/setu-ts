@@ -28,7 +28,11 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
-import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  SerializationConflictError,
+} from '../../src/errors.ts';
 import { DuplicateKeyError, PrimaryKeyChangeError } from '@setu-ts/common';
 import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -1148,6 +1152,51 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
 });
 
 describe('M113g real PostgreSQL identity and mapping refusals', () => {
+  for (const anchor of [
+    'Query read timeout',
+    'timeout exceeded when trying to connect',
+    'Connection terminated due to connection timeout',
+  ]) {
+    it(
+      `an integer insert of ${anchor} is not a timeout or outage`,
+      { skip: skipLivePg },
+      async () => {
+        const pool = new Pool({ connectionString: livePgUrl! });
+        const tableName = `m113g_input_${crypto.randomUUID().replaceAll('-', '')}`;
+        const table = pgTable(tableName, { id: text('id').primaryKey(), value: integer('value') });
+        const database = nodePostgresDrizzle(pool);
+        const adapter = new DrizzleAdapter({
+          drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+          drizzleTables: { Number: table },
+        });
+        try {
+          await pool.query(`CREATE TABLE "${tableName}" (id text primary key, value integer)`);
+          await adapter.connect();
+          const service = new DatabaseService(
+            adapter,
+            (entity) => adapter.createDataSource(entity),
+            'drizzle',
+          );
+          const repo = service.getRepository('Number');
+          const error: unknown = await repo.create({ id: 'invalid', value: anchor }).then(
+            () => null,
+            (error: unknown) => error,
+          );
+          expect(error).toBeInstanceOf(Error);
+          expect(error).not.toBeInstanceOf(DatabaseTimeoutError);
+          expect(error).not.toBeInstanceOf(DatabaseUnavailableError);
+          expect((error as Error).cause).toMatchObject({ code: '22P02' });
+          expect(await repo.findById('invalid')).toBeNull();
+          await repo.create({ id: 'valid', value: 42 });
+          expect(await repo.findById('valid')).toEqual({ id: 'valid', value: 42 });
+        } finally {
+          await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+          await pool.end();
+          await adapter.disconnect();
+        }
+      },
+    );
+  }
   it('refuses a changed key and leaves the stored row unmoved', { skip: skipLivePg }, async () => {
     const pool = new Pool({ connectionString: livePgUrl! });
     const tableName = `m113g_keys_${crypto.randomUUID().replaceAll('-', '')}`;

@@ -92,7 +92,7 @@ describe('database-plugin barrel exports — M90f driver classifications', () =>
     expect(typeof database.UnknownPayloadFieldError).toBe('function');
     const unknownField = new database.UnknownPayloadFieldError('User', 'extra');
     expect(unknownField.name).toBe('UnknownPayloadFieldError');
-    expect(unknownField.message).toBe("Entity 'User' has no payload field 'extra'.");
+    expect(unknownField.message).toBe('Entity \'User\' has no payload field "extra".');
     expect(common.httpStatusHintOf(unknownField)).toEqual({
       status: 400,
       title: 'Bad Request',

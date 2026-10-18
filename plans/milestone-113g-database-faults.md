@@ -374,3 +374,31 @@ Confirm on the merge commit: no new message interpolates a key value, payload va
 `InvalidCursorError` and every capability site keeps `501`; the key check runs before any backend
 call on all eight adapters (the conformance test's "no write recorded" assertion); the served bodies
 of §3.6 carry none of the forbidden strings.
+
+### 10.5 Committed-tree audit, round 1 (fresh-context Claude agent, `c182e2ea`) — failed
+
+Three Low findings, no data exposure. Fixes decided here, before the re-audit:
+
+- **L1 — client-chosen text classified as a timeout or outage.** `classifyFallback` matched the
+  three node-postgres anchors with `includes` on every cause member, before the M113f scrub, so a
+  value PostgreSQL quotes back
+  (`22P02 invalid input syntax for type integer: "Query read timeout"`), or drizzle's unscrubbed
+  `Failed query … params:` wrapper carrying it, answered `504`/`503`. The pool-wait anchor had the
+  same flaw since M90f. **Fix:** the three node-postgres anchors match only a cause member whose
+  `message` EQUALS the anchor exactly (pg-pool and pg throw these as fixed strings,
+  `pg-pool/index.js:224`, `:276`, `pg/lib/client.js:707`), and only when no member of the chain
+  carries a string `code` (a coded error is authoritative). The SQLite unique anchor is unchanged.
+  `isUnansweredConnect` uses the same matcher.
+- **L2 — a caller-chosen field name reached the log message raw** (unbounded, CR/LF forges a line
+  under the pretty logger). **Fix:** `UnknownPayloadFieldError`'s message renders the field as
+  `JSON.stringify` of its first 64 UTF-16 code units, followed by `…` when truncated. The served
+  detail is unchanged.
+- **L3 — `hasColumn` accepted Drizzle's own non-column property `enableRLS`.** **Fix:** when the
+  table carries Drizzle's column map (`table[Symbol.for('drizzle:Columns')]`,
+  `drizzle-orm/table.js:4`), a field is a column only if that map has it as an own key; a table
+  object without the map keeps the own-property rule. Applies to every `hasColumn` caller (payload,
+  `select`, `orderBy`, `where`).
+- **Observation recorded, not fixed:** a Prisma `update` given a raw body can change a key column
+  through a relation nested write (`{ tenant: { connect: … } }`), which `assertPrimaryKeyUnchanged`
+  (scalar columns only) does not see. Unverified against a generated client; stated as a residual in
+  the database README's key-change paragraph.

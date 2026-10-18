@@ -54,7 +54,9 @@ export class UnknownPayloadFieldError extends Error {
    * @param field - The unknown payload field
    */
   constructor(entity: string, field: string) {
-    super(`Entity '${entity}' has no payload field '${field}'.`);
+    super(
+      `Entity '${entity}' has no payload field ${JSON.stringify(field.slice(0, 64))}${field.length > 64 ? '…' : ''}.`,
+    );
     withHttpStatusHint(this, {
       status: 400,
       title: 'Bad Request',

@@ -14100,7 +14100,7 @@ re-run against a newly published version.
 | **M113d** | design | Workers builds and the edge cache                                     | V9-1 **High, REGRESSION**, V9-23 **High**, V9-4                                          | `common`, `react-router`, `cloudflare`, `cli`, and the 14 packages whose loaders were converted                                                                           |
 | **M113e** | design | identity and session semantics a client cannot predict                | V9-28, V9-27, V9-46, V9-50                                                               | `auth-plugin`, `session-plugin`                                                                                                                                           |
 | **M113f** | design | what reaches logs and public endpoints                                | V9-45, V9-47, V9-43, V9-41, V9-49, V9-80, V9-82                                          | `exceptions`, `logger`, `database`, `health`, `openapi`, `kernel`                                                                                                         |
-| **M113g** | design | database calls and errors under faults and edge inputs                | V9-25, V9-33, V9-26, V9-34, V9-48                                                        | `database-plugin`                                                                                                                                                         |
+| **M113g** | design | database calls and errors under faults and edge inputs                | V9-25, V9-33, V9-26, V9-34, V9-48                                                        | `database-plugin`, `common`, `cloudflare-plugin`                                                                                                                          |
 | **M113h** | fix    | generated output that is wrong                                        | V9-8, V9-17, V9-38, V9-39, V9-9, V9-11, V9-42, V9-67, V9-81                              | `cli`, `runtime`, `logger-plugin`, `kernel`                                                                                                                               |
 | **M113i** | fix    | CLI commands whose refusals and guidance mislead                      | V9-5, V9-12, V9-13, V9-30, V9-40, V9-60, V9-61, V9-62, V9-75                             | `cli`                                                                                                                                                                     |
 | **M113j** | fix    | outbox and inbox signals                                              | V9-20, V9-21, V9-22, V9-10                                                               | `messaging-plugin`, `database-plugin`, `cli` JSDoc, `scripts/`, `test/`, `docs/`, `PUBLIC_API.md`, `ARCHITECTURE.md`, the other package READMEs                           |
@@ -14297,7 +14297,11 @@ six are fixed; the round-2 fixes were NOT re-audited, at the maintainer's direct
 
 ### Milestone 113g: Database Calls and Errors Under Faults and Edge Inputs
 
-**Package(s):** `packages/database-plugin`
+**Package(s):** `packages/database-plugin`, `packages/common`, `packages/cloudflare-plugin`
+
+The list is corrected from `database-plugin` alone: `common` carries the shared key check and the
+two refusal classes, because the D1 adapter in `cloudflare-plugin` raises both and may not import
+`database-plugin`.
 
 - **V9-25** — a primary-key change through `update` is applied on Drizzle and silently ignored on
   MongoDB, where the README's guarantees table says it is refused.

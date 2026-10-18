@@ -19,7 +19,11 @@ import { drizzle } from 'drizzle-orm/pg-proxy';
 import { pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
 import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
+import {
+  createDrizzleDatabase,
+  DatabaseService,
+  UnknownPayloadFieldError,
+} from '../../src/index.ts';
 import { drizzle as sqliteDrizzle } from 'drizzle-orm/sqlite-proxy';
 import { encodeCursor, keysetPredicate } from '@setu-ts/common';
 
@@ -845,11 +849,63 @@ describe('M113g eager key and payload columns', () => {
             : source.updateWhere!('5', { name: 'before' }, data);
       await expect(call({ name: 'Ada', extra: 'private-payload' })).rejects.toMatchObject({
         name: 'UnknownPayloadFieldError',
-        message: "Entity 'User' has no payload field 'extra'.",
+        message: 'Entity \'User\' has no payload field "extra".',
       });
       expect(seen).toEqual([]);
       await call({ name: 'Ada', extra: undefined });
       expect(seen).toHaveLength(1);
     });
   }
+
+  it('refuses real pgTable enableRLS as a payload, projection, sort, or predicate column', async () => {
+    expect(Object.hasOwn(tenants, 'enableRLS')).toBe(true);
+    const seen: string[] = [];
+    const database = drizzle((sql) => {
+      seen.push(sql);
+      return Promise.resolve({ rows: [['5', 'Ada']] });
+    });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(database, (instance, work) =>
+        instance.transaction(work),
+      ),
+      drizzleTables: { User: tenants },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(
+      adapter,
+      (entity) => adapter.createDataSource(entity),
+      'drizzle',
+    );
+    const repo = service.getRepository('User');
+    for (const write of [
+      () => repo.create({ id: '5', name: 'Ada', enableRLS: true }),
+      () => repo.update('5', { enableRLS: true }),
+      () => repo.updateWhere!('5', { name: 'before' }, { enableRLS: true }),
+    ]) {
+      await expect(write()).rejects.toBeInstanceOf(UnknownPayloadFieldError);
+    }
+    for (const field of ['enableRLS', 'missing']) {
+      for (const query of [
+        { select: [field] },
+        { orderBy: { [field]: 'asc' as const } },
+        { where: { [field]: true } },
+        { filter: { type: 'comparison' as const, field, operator: 'eq' as const, value: true } },
+      ]) {
+        await expect(repo.findAll(query)).rejects.toThrow(`has no '${field}' column`);
+      }
+      await expect(
+        repo.updateWhere!('5', { [field]: 'value' }, { name: 'Ada' }),
+      ).rejects.toMatchObject({
+        feature: 'write-precondition',
+      });
+    }
+    expect(seen).toEqual([]);
+    expect(await repo.create({ id: '5', name: 'Ada' })).toEqual({ id: '5', name: 'Ada' });
+    expect(await repo.update('5', { name: 'Ada' })).toEqual({ id: '5', name: 'Ada' });
+    expect(
+      await repo.findAll({ select: ['id', 'name'], orderBy: { name: 'asc' }, where: { id: '5' } }),
+    ).toEqual([{ id: '5', name: 'Ada' }]);
+    expect(seen).toHaveLength(3);
+    await adapter.disconnect();
+  });
 });

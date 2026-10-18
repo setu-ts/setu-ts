@@ -305,6 +305,43 @@ describe('M113g measured pg timeout signals', () => {
         expected,
       );
       expect(isUnansweredConnect(error)).toBe(true);
+      expect(isUnansweredConnect(new Error('Failed query', { cause: error }))).toBe(true);
+    });
+    it(`does not classify client text quoting ${message} as a pg timeout`, () => {
+      const driver = Object.assign(
+        new Error(`invalid input syntax for type integer: "${message}"`),
+        { code: '22P02' },
+      );
+      const wrapper = new Error(
+        `Failed query: insert into "numbers" values ($1)\nparams: ${message}`,
+        {
+          cause: driver,
+        },
+      );
+      for (const error of [
+        driver,
+        wrapper,
+        new Error(`prefix ${message}`),
+        new Error(`${message}\n`),
+      ]) {
+        expect(classifyDriverError(error, 'drizzle')).toBeNull();
+        expect(isUnansweredConnect(error)).toBe(false);
+      }
+    });
+    it(`a string code anywhere in the chain vetoes the exact pg message ${message}`, () => {
+      for (const code of ['22P02', '']) {
+        for (const error of [
+          Object.assign(new Error(message), { code }),
+          new Error(message, { cause: { code } }),
+          Object.assign(new Error('Failed query', { cause: new Error(message) }), { code }),
+        ]) {
+          expect(classifyDriverError(error, 'drizzle')).toBeNull();
+          expect(isUnansweredConnect(error)).toBe(false);
+        }
+      }
+      const numericCode = Object.assign(new Error(message), { code: 123 });
+      expect(classifyDriverError(numericCode, 'drizzle')).toBe(expected);
+      expect(isUnansweredConnect(numericCode)).toBe(true);
     });
   }
   it('passes already classified timeouts through without rewrapping', () => {
