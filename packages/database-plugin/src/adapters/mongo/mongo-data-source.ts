@@ -11,6 +11,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   CursorPayload,
   EntityKey,
@@ -241,6 +243,8 @@ export function createMongoDataSource(
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.collection, target.primaryKey, id, data);
       // The primary key never travels in an update payload: `id` already
       // addresses the row, and MongoDB refuses a `$set` that would change
       // `_id` ("Performing an update on the path '_id' would modify the
@@ -305,6 +309,7 @@ export function createMongoDataSource(
       }
       where = checked.where;
       data = checked.data;
+      assertPrimaryKeyUnchanged(target.collection, target.primaryKey, id, data);
       const mapped = mapQueryToDriver(
         { where, orderBy: {}, limit: -1, offset: 0, select: [] },
         target,
@@ -397,11 +402,7 @@ export function createMongoDataSource(
         decoded = decodeCursor(normalized.cursor);
         if (decoded === null) {
           return Promise.reject(
-            new UnsupportedQueryFeatureError(
-              'cursor-pagination',
-              'mongo',
-              `cursor-pagination: entity '${target.collection}': malformed cursor token`,
-            ),
+            new InvalidCursorError(`Entity '${target.collection}': malformed cursor token.`),
           );
         }
       }
@@ -411,12 +412,16 @@ export function createMongoDataSource(
       const fingerprint = sortFingerprint(normalized.orderBy);
       if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
         return Promise.reject(
-          new UnsupportedQueryFeatureError(
-            'cursor-pagination',
-            'mongo',
-            `cursor-pagination: entity '${target.collection}': cursor fingerprint ` +
-              `mismatch — expected '${fingerprint}', got '${decoded.sortFingerprint}'`,
-          ),
+          new InvalidCursorError(`Entity '${target.collection}': cursor fingerprint mismatch.`),
+        );
+      }
+      if (
+        decoded !== null &&
+        (decoded.keyValues.length !== target.primaryKey.length ||
+          decoded.orderedValues.length !== Object.keys(normalized.orderBy).length)
+      ) {
+        return Promise.reject(
+          new InvalidCursorError(`Entity '${target.collection}': cursor key shape mismatch.`),
         );
       }
 

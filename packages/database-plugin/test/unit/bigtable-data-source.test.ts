@@ -188,13 +188,17 @@ describe('update', () => {
       orderId: 'o1',
       total: 3,
     });
-    await expect(source.update(key, { tenantId: 't2' })).rejects.toThrow(/cannot move a row/);
+    await expect(source.update(key, { tenantId: 't2' })).rejects.toThrow(
+      /cannot change the primary key/,
+    );
   });
 
   it('refuses a payload that would move the row to a different key', async () => {
     const { source } = setup();
     await source.create({ id: 'u1', name: 'ada' });
-    await expect(source.update('u1', { id: 'u2' })).rejects.toThrow(/cannot move a row/);
+    await expect(source.update('u1', { id: 'u2' })).rejects.toThrow(
+      /cannot change the primary key/,
+    );
   });
 
   it('accepts a payload restating the SAME key value', async () => {

@@ -9,6 +9,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
+it('exports the portable key and cursor refusals', () => {
+  expect(typeof common.PrimaryKeyChangeError).toBe('function');
+  expect(typeof common.assertPrimaryKeyUnchanged).toBe('function');
+  expect(typeof common.InvalidCursorError).toBe('function');
+});
 import type { ReconnectMode, ReconnectSupervisorOptions } from '../../src/index.ts';
 
 describe('shared reconnect exports', () => {

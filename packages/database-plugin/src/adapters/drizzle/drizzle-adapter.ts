@@ -7,6 +7,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
 import type { FilterComparison, TransactionOptions } from '@setu-ts/common';
 import { escapeLikePattern } from '../../query/like-escape.ts';
@@ -41,10 +43,14 @@ import {
   PoolSaturatedProbeSkipped,
   readPoolCapacity,
 } from '../../health/database-capacity.ts';
-import { isPoolExhaustion } from '../../errors/classify.ts';
+import { isUnansweredConnect } from '../../errors/classify.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
-import { UnsupportedIsolationLevelError, UnsupportedQueryFeatureError } from '../../errors.ts';
+import {
+  UnknownPayloadFieldError,
+  UnsupportedIsolationLevelError,
+  UnsupportedQueryFeatureError,
+} from '../../errors.ts';
 import {
   normalizePageQuery,
   PageNormalizationError,
@@ -400,8 +406,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * - When `poolStats` reports every connection busy with callers waiting
    *   (`idle === 0 && waiting > 0`), no `SELECT 1` is queued at all — a
    *   queued probe is one more waiter on the pool it is measuring.
-   * - A rejection that IS pool exhaustion (the node-postgres connection
-   *   timeout) is rethrown, since the database never answered either way.
+   * - A pool-wait, new-connection or query-read timeout is rethrown,
+   *   since the database never answered either way.
    *
    * The `database` indicator then reads the capacity snapshot to tell a
    * saturated pool (`up`, `reachable: 'unknown'`) from an unanswered probe.
@@ -415,7 +421,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       await this.rawQuery('SELECT 1');
       return true;
     } catch (error) {
-      if (isPoolExhaustion(error)) {
+      if (isUnansweredConnect(error)) {
         throw error;
       }
       return false;
@@ -688,6 +694,14 @@ function createDrizzleDataSourceInner(
   const drizzleTable = table as DrizzleTable;
   const primaryKeyOverride = entities?.[entity]?.primaryKey;
   const keyColumns = resolveKeyColumns(primaryKeyOverride ?? 'id');
+  for (const column of keyColumns) columnFor(drizzleTable, entity, column);
+  const assertPayloadColumns = (data: Readonly<Record<string, unknown>>): void => {
+    for (const field of Object.keys(data)) {
+      if (data[field] !== undefined && !hasColumn(drizzleTable, field)) {
+        throw new UnknownPayloadFieldError(entity, field);
+      }
+    }
+  };
 
   return {
     async findById(id) {
@@ -724,6 +738,7 @@ function createDrizzleDataSourceInner(
       findDrizzlePage(instance, drizzleTable, entity, query, operators, keyColumns),
 
     async create(data) {
+      assertPayloadColumns(data);
       const rows = await returningRows(
         instance.insert(drizzleTable).values(data),
         entity,
@@ -733,6 +748,9 @@ function createDrizzleDataSourceInner(
     },
 
     async update(id, data) {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
+      assertPayloadColumns(data);
       const values = keyValues(id, keyColumns, `update on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
         operators.eq(columnFor(drizzleTable, entity, col), values[i]),
@@ -761,12 +779,14 @@ function createDrizzleDataSourceInner(
     },
 
     async updateWhere(id, where, data) {
+      assertPayloadColumns(data);
       const checked = checkWritePrecondition(where, data);
       if (!checked.ok) {
         throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', checked.problem);
       }
       where = checked.where;
       data = checked.data;
+      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
       assertPreconditionColumns(drizzleTable, where);
       const values = keyValues(id, keyColumns, `updateWhere on '${entity}'`);
       const keyPredicates = keyColumns.map((col, index) =>
@@ -887,13 +907,7 @@ async function findDrizzlePage(
   if (normalized.cursor !== undefined) {
     decoded = decodeCursor(normalized.cursor);
     if (decoded === null) {
-      return Promise.reject(
-        new UnsupportedQueryFeatureError(
-          'cursor-pagination',
-          'drizzle',
-          `cursor-pagination: entity '${entity}': malformed cursor token`,
-        ),
-      );
+      return Promise.reject(new InvalidCursorError(`Entity '${entity}': malformed cursor token.`));
     }
   }
 
@@ -902,13 +916,15 @@ async function findDrizzlePage(
   const fingerprint = sortFingerprint(normalized.orderBy);
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
-      new UnsupportedQueryFeatureError(
-        'cursor-pagination',
-        'drizzle',
-        `cursor-pagination: entity '${entity}': cursor fingerprint mismatch — expected ` +
-          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
-      ),
+      new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`),
     );
+  }
+  if (
+    decoded !== null &&
+    (decoded.keyValues.length !== keyColumns.length ||
+      decoded.orderedValues.length !== Object.keys(normalized.orderBy).length)
+  ) {
+    return Promise.reject(new InvalidCursorError(`Entity '${entity}': cursor key shape mismatch.`));
   }
 
   // 4. Keyset predicate through the shared builder; it is a FilterExpression,

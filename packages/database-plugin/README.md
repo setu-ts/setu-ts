@@ -406,6 +406,16 @@ DatabasePlugin({
 });
 ```
 
+A Drizzle table whose key column is not a column of the table is refused when the repository is
+created — `getRepository` (and the Unit of Work's data source) — naming the table and the missing
+column, instead of surfacing lazily inside `findById`, `update` or `delete`. A `create`, `update` or
+`updateWhere` payload that names a field that is not a column of the table is likewise refused by
+name before any I/O, instead of being dropped by Drizzle and surfacing as the driver's raw
+`Failed query`. That refusal is `UnknownPayloadFieldError`, answered `400 Bad Request` with the
+fixed detail `The request names a field this resource does not have.` — a body passed straight to
+`repo.update(id, body)` carries the client's fields, so an extra one is the caller's error. The
+message names the entity and the field for the log; the served detail names neither.
+
 ### Nested JSON path filters
 
 A `filter` whose `field` is a path array (`['profile', 'city']`) addresses inside a JSON column, and
@@ -914,15 +924,23 @@ is **never given a schema**, so what it can and cannot enforce follows from that
 matters most to the people it is aimed at: develop against the default, deploy against Prisma or
 Drizzle, and an unenforced rule becomes a 500 in production.
 
-| Behaviour                           | Memory                                        | Prisma / Drizzle |
-| ----------------------------------- | --------------------------------------------- | ---------------- |
-| Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name  |
-| Unknown `where` / `filter` field    | Matches nothing                               | Refused          |
-| Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused          |
-| Changing a primary key by `update`  | **Refused**                                   | Refused (Mongo)  |
-| Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced         |
-| Column types                        | Not enforced — a string into an Int is stored | Enforced         |
-| Foreign keys, checks, defaults      | Not enforced                                  | Enforced         |
+| Behaviour                           | Memory                                        | Prisma / Drizzle                         |
+| ----------------------------------- | --------------------------------------------- | ---------------------------------------- |
+| Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name                          |
+| Unknown `where` / `filter` field    | Matches nothing                               | Refused                                  |
+| Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused                                  |
+| Changing a primary key by `update`  | **Refused** (`PrimaryKeyChangeError`, `400`)  | Refused (`PrimaryKeyChangeError`, `400`) |
+| Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced                                 |
+| Column types                        | Not enforced — a string into an Int is stored | Enforced                                 |
+| Foreign keys, checks, defaults      | Not enforced                                  | Enforced                                 |
+
+This refusal is now portable. On **every** adapter — Memory, Drizzle, Prisma, MongoDB, DynamoDB,
+Cosmos DB, Cloud Bigtable and the D1 adapter in `@setu-ts/cloudflare-plugin` — an `update` or
+`updateWhere` payload that carries a key column whose value is not `undefined` and differs from the
+addressed key's value is refused with `PrimaryKeyChangeError` (`400`), before any I/O. An equal
+value is accepted; it is compared as a string for `string`, `number`, `bigint` and `ObjectId`-like
+values, and by time for `Date` values. That is why `update('5', { id: 5 })` is accepted — a route
+parameter is a string, a JSON body carries a number — while `'05'` against `5` is refused.
 
 The first two rows are things this adapter can decide, and it does. The primary key is the one
 constraint it knows, and every lookup by id addresses the first match, so a `create` whose
@@ -951,14 +969,15 @@ test.
 
 ## What a driver condition returns to the client
 
-Three driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
+Four driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
 answered as typed errors, so a caller can `instanceof` them instead of matching message text:
 
-| Condition                                                                                                                                                                                                                                           | Thrown as                    | Served status |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
-| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                          | `SerializationConflictError` | `409`         |
-| The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, the pg pool timeout, `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
-| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                         | `DuplicateKeyError`          | `409`         |
+| Condition                                                                                                                                                                                                                                                                                                                                                                  | Thrown as                    | Served status |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
+| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                                                                                                                                                 | `SerializationConflictError` | `409`         |
+| The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, both node-postgres connect-timeout messages (`timeout exceeded when trying to connect`, `Connection terminated due to connection timeout`), `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
+| node-postgres's `query_timeout` fired on a query (the driver's `Query read timeout` rejection)                                                                                                                                                                                                                                                                             | `DatabaseTimeoutError`       | `504`         |
+| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                                                                                                                                                | `DuplicateKeyError`          | `409`         |
 
 `DuplicateKeyError` is exported from `@setu-ts/common`, not from this package, because more than one
 package raises or recognises it (the D1 adapter in `@setu-ts/cloudflare-plugin`, and any store that
@@ -969,11 +988,14 @@ at `commit()` (D1's batch, a Cosmos transactional batch, a DynamoDB `TransactWri
 by a create's guard, a buffered memory or Bigtable create) is mapped too; every other commit
 rejection is still rethrown unchanged, because its outcome can be unknown.
 
-All three carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
+All four carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
 reachable for the log (M90j) — and none serves driver text: the body's `detail` is a fixed sentence.
-**No classified answer carries `Retry-After`**: the hint channel has no header, and the framework
-holds no honest horizon for a pool's saturation. Catch-then-throw sites and the typed Drizzle
-builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's row.
+Unlike a `DatabaseUnavailableError`, a `DatabaseTimeoutError` does not say the operation did not
+happen: the timed-out statement may have run, so a write's outcome is unknown and a retry of a write
+must be idempotent. **No classified answer carries `Retry-After`**: the hint channel has no header,
+and the framework holds no honest horizon for a pool's saturation. Catch-then-throw sites and the
+typed Drizzle builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's
+row.
 
 ## What a refused query returns to the client
 
@@ -1000,6 +1022,13 @@ asked for. This is the shape you meet when **switching backends**, which is what
 contract is for: an application that works on MongoDB will answer `501` on an ordered endpoint under
 DynamoDB rather than the `500 Internal Server Error` it used to (M89b).
 
+A cursor the backend cannot use is not one of these. A `?cursor=` token that is malformed, that was
+made under a different sort (a sort-fingerprint mismatch), or whose decoded key-value list is the
+wrong shape for the target is refused with `InvalidCursorError` (from `@setu-ts/common`), answered
+**`400 Bad Request`** with the fixed detail `The pagination cursor is not valid for this query.`,
+before any backend call. The error's `message` names the entity and which check failed, and never
+the token or its values. `501` remains for a backend that cannot page the query at all.
+
 **The error's `message` is never served.** It is the full diagnostic — it names entities, columns
 and sort keys — and it reaches the log alone, where `errorHandler` records it unmasked along with
 the cause chain. The served `detail` is composed from the framework's own identifiers, which is what
@@ -1025,6 +1054,33 @@ The transaction and concurrency errors (`MongoTransactionUnavailableError`,
 `CosmosTransactionScopeError`, `CosmosConcurrentModificationError`, `BigtableTransactionScopeError`)
 deliberately keep the masked `500`: they may quote backend state, and a concurrency conflict is
 transient rather than permanent. Branch on them with `instanceof` — every one is exported.
+
+## Bounding a call
+
+The plugin adds no call deadline of its own. A JavaScript deadline cannot cancel the statement — the
+connection stays occupied, so a deadline only moves the hang from the caller to pool exhaustion —
+and inside a transaction it rejects while the statement may still commit. The bound is the driver's
+own, enforced by the driver that owns the connection; on node-postgres a query that hits
+`query_timeout` rejects with the driver's `Query read timeout`, and the timed-out client is released
+with the error and removed from the pool, so the bound does not leak a connection. A call that hits
+the bound is answered `504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run,
+so a write's outcome is unknown and a retry of a write must be idempotent.
+
+| Adapter                  | The driver's own call bound                                                                                                                  | Status               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| Drizzle on node-postgres | Set `query_timeout` and `connectionTimeoutMillis` on the `Pool` you pass Drizzle                                                             | **verified** (M113g) |
+| Prisma                   | no per-call option; Prisma 7 runs over a driver adapter, so set that driver's bound (for `@prisma/adapter-pg`, the same `pg` `Pool` options) | **unverified**       |
+| MongoDB                  | `MongoClient`'s `timeoutMS` (client-side operation timeout), or a per-operation `maxTimeMS`                                                  | **unverified**       |
+| DynamoDB                 | the AWS SDK v3 `NodeHttpHandler` `requestTimeout`                                                                                            | **unverified**       |
+| Cosmos DB                | `connectionPolicy.requestTimeout` on the `CosmosClient` options                                                                              | **unverified**       |
+| Bigtable                 | the gRPC call deadline (`timeout` in google-gax call options)                                                                                | **unverified**       |
+| D1                       | none the binding exposes; only the platform's own query limits apply                                                                         | **unverified**       |
+
+Inside `service.transaction(...)` the bound applies twice. The timed-out statement rejects after
+`query_timeout`, and the `ROLLBACK` that follows waits behind it on the same connection until its
+own bound expires, so the caller receives `DatabaseTimeoutError` after about twice `query_timeout`
+(measured: about 2.03 s with `query_timeout: 1000` against a paused PostgreSQL 16), still while the
+database is paused. It is a bound on each statement, not a deadline on the transaction.
 
 ## Health reporting
 
@@ -1115,6 +1171,7 @@ imperative begin/commit.
 | `CosmosTransactionScopeError`             | class     |
 | `DatabaseService`                         | class     |
 | `DatabaseTenantDataStore`                 | class     |
+| `DatabaseTimeoutError`                    | class     |
 | `DatabaseUnavailableError`                | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
@@ -1130,6 +1187,7 @@ imperative begin/commit.
 | `TenantStoreStrategyUnsupportedError`     | class     |
 | `TransactionalStoreUnavailableError`      | class     |
 | `UnitOfWork`                              | class     |
+| `UnknownPayloadFieldError`                | class     |
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedIsolationLevelError`          | class     |
 | `UnsupportedMigrationError`               | class     |

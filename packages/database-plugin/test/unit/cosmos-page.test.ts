@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 /**
  * Unit tests for the Cosmos keyset page: the one-extra-row probe, the
  * projection widening and narrowing, and the three refusals.
@@ -11,7 +12,6 @@ import { encodeCursor, sortFingerprint } from '@setu-ts/common';
 import { createCosmosDataSource } from '../../src/adapters/cosmos/cosmos-data-source.ts';
 import { resolveCosmosTarget } from '../../src/adapters/cosmos/cosmos-mapping.ts';
 import { PartitionKeyResolver } from '../../src/adapters/cosmos/cosmos-partition-key.ts';
-import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
 
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
@@ -109,7 +109,7 @@ describe('findPage', () => {
     const { source } = makeSource([[]]);
     await expect(
       source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 1, cursor: 'not-a-cursor' })),
-    ).rejects.toThrow(UnsupportedQueryFeatureError);
+    ).rejects.toThrow(InvalidCursorError);
   });
 
   it('refuses a cursor minted under a different sort', async () => {

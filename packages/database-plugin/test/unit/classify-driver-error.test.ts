@@ -11,8 +11,12 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { classifyDriverError } from '../../src/errors/classify.ts';
-import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
+import { classifyDriverError, isUnansweredConnect } from '../../src/errors/classify.ts';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  SerializationConflictError,
+} from '../../src/errors.ts';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
 
@@ -285,5 +289,30 @@ describe('classifyDriverError — already-classified errors', () => {
   it('a package-owned DatabaseUnavailableError returns null too', () => {
     const mine = new DatabaseUnavailableError('pool exhausted', { cause: { code: '08006' } });
     expect(classifyDriverError(mine)).toBe(null);
+  });
+});
+
+describe('M113g measured pg timeout signals', () => {
+  for (const [message, expected] of [
+    ['timeout exceeded when trying to connect', 'unavailable'],
+    ['Connection terminated due to connection timeout', 'unavailable'],
+    ['Query read timeout', 'timeout'],
+  ] as const) {
+    it(`classifies ${message} including Drizzle wrappers`, () => {
+      const error = new Error(message);
+      expect(classifyDriverError(error, 'drizzle')).toBe(expected);
+      expect(classifyDriverError(new Error('Failed query', { cause: error }), 'drizzle')).toBe(
+        expected,
+      );
+      expect(isUnansweredConnect(error)).toBe(true);
+    });
+  }
+  it('passes already classified timeouts through without rewrapping', () => {
+    expect(
+      classifyDriverError(
+        new DatabaseTimeoutError('bounded', { cause: new Error('Query read timeout') }),
+      ),
+    ).toBeNull();
+    expect(isUnansweredConnect({ code: 'ECONNREFUSED' })).toBe(false);
   });
 });

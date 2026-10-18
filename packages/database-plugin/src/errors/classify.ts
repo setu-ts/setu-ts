@@ -13,15 +13,19 @@
  *
  * The signal table is per backend (§3.2 of the M90f plan). A **code** is
  * read first — SQLSTATE for the SQL backends, a gRPC status for Bigtable,
- * the Cosmos HTTP status — and driver **error names** and one **message
- * anchor** cover only the signals no code is carried on. Every anchor has a
+ * the Cosmos HTTP status — and driver **error names** and **message
+ * anchors** cover only the signals no code is carried on. Every anchor has a
  * real-backend test that fails if the driver's text changes, which is the
  * only thing that makes a message match safe.
  *
  * @module
  */
 import { isConnectionFaultCode, DuplicateKeyError } from '@setu-ts/common';
-import { DatabaseUnavailableError, SerializationConflictError } from '../errors.ts';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  SerializationConflictError,
+} from '../errors.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
 /**
@@ -34,10 +38,12 @@ import type { DatabaseAdapterType } from '../interfaces/index.ts';
  * - `'duplicate'` — the write would duplicate a primary key or a unique
  *   index; the operation did not happen and repeating it fails the same way
  *   (`409`).
+ * - `'timeout'` — the driver call bound elapsed; a write's outcome is
+ *   unknown and retries must be idempotent (`504`).
  *
  * @since 0.5.0
  */
-export type DriverErrorClass = 'conflict' | 'unavailable' | 'duplicate';
+export type DriverErrorClass = 'conflict' | 'unavailable' | 'duplicate' | 'timeout';
 
 /**
  * The maximum number of `cause` hops the walk performs.
@@ -99,6 +105,10 @@ const PG_CANNOT_CONNECT_NOW = '57P03';
  * driver's wording moves.
  */
 const PG_POOL_TIMEOUT_ANCHOR = 'timeout exceeded when trying to connect';
+/** pg-pool bounds a new connection handshake separately from pool waiting. */
+const PG_NEW_CONNECTION_TIMEOUT_ANCHOR = 'Connection terminated due to connection timeout';
+/** Client-side pg query bound; the statement may already have run. */
+const PG_QUERY_TIMEOUT_ANCHOR = 'Query read timeout';
 
 /** The MongoDB error label marking a transaction conflict as retryable. */
 const MONGO_TRANSIENT_TRANSACTION_ERROR = 'TransientTransactionError';
@@ -144,6 +154,7 @@ export function classifyDriverError(
   if (
     error instanceof SerializationConflictError ||
     error instanceof DatabaseUnavailableError ||
+    error instanceof DatabaseTimeoutError ||
     error instanceof DuplicateKeyError
   ) {
     return null;
@@ -168,21 +179,25 @@ export function classifyDriverError(
 }
 
 /**
- * Whether a thrown value is node-postgres pool exhaustion — the pool timing
- * out a connection request (M101a V8-3).
+ * Whether node-postgres timed out waiting for a pool client, a new
+ * connection handshake, or a query answer.
  *
  * Internal. The Drizzle reachability probe uses it to tell "every connection
- * is busy" from "the database refused": exhaustion is rethrown, so the
+ * is unanswered" from "the database refused": timeouts are rethrown, so the
  * service reports `undefined` rather than `false`. It matches the same
- * message anchor {@linkcode classifyDriverError} uses, over the same bounded,
- * cycle-safe cause walk, so the two cannot disagree about what exhaustion is.
+ * message anchors {@linkcode classifyDriverError} uses, over the same bounded,
+ * cycle-safe cause walk, so the two cannot disagree about an unanswered call.
  *
  * @param error - The thrown value
- * @returns `true` when any error in the cause chain carries the anchor
+ * @returns `true` when any error in the cause chain carries a timeout anchor
  */
-export function isPoolExhaustion(error: unknown): boolean {
+export function isUnansweredConnect(error: unknown): boolean {
   return causeChainMembers(error).some(
-    ({ message }) => typeof message === 'string' && message.includes(PG_POOL_TIMEOUT_ANCHOR),
+    ({ message }) =>
+      typeof message === 'string' &&
+      (message.includes(PG_POOL_TIMEOUT_ANCHOR) ||
+        message.includes(PG_NEW_CONNECTION_TIMEOUT_ANCHOR) ||
+        message.includes(PG_QUERY_TIMEOUT_ANCHOR)),
   );
 }
 
@@ -306,12 +321,17 @@ function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorCla
     if (name === 'TimeoutError' || name === 'NetworkingError') return 'unavailable';
   }
 
-  // The two message anchors — node-postgres pool exhaustion and SQLite's
-  //    unique violation, neither of which carries a code. Reached last, only
+  // Message anchors — node-postgres connection/query timeouts and SQLite's
+  //    unique violation, none of which carries a code. Reached last, only
   //    after every structured signal missed; each is pinned by a test against
   //    the real engine.
   if (typeof message === 'string') {
-    if (message.includes(PG_POOL_TIMEOUT_ANCHOR)) return 'unavailable';
+    if (
+      message.includes(PG_POOL_TIMEOUT_ANCHOR) ||
+      message.includes(PG_NEW_CONNECTION_TIMEOUT_ANCHOR)
+    )
+      return 'unavailable';
+    if (message.includes(PG_QUERY_TIMEOUT_ANCHOR)) return 'timeout';
     if (message.includes(SQLITE_UNIQUE_ANCHOR)) return 'duplicate';
   }
 

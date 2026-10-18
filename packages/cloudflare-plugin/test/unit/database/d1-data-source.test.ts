@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 import { WorkersResponse } from '../../../../../test/node-helpers.ts';
 import { afterAll, beforeAll } from 'vitest';
 const nativeResponse = globalThis.Response;
@@ -481,7 +482,7 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
           cursor: '!!!notb64',
         }),
       ),
-    ).rejects.toThrow(CloudflareUnsupportedError);
+    ).rejects.toThrow(InvalidCursorError);
     await expect(
       source.findPage!(
         query({
@@ -514,7 +515,7 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
           cursor: p1.nextCursor as string,
         }),
       ),
-    ).rejects.toThrow(CloudflareUnsupportedError);
+    ).rejects.toThrow(InvalidCursorError);
     await expect(
       source.findPage!(
         query({
@@ -543,7 +544,7 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
           cursor: mismatched,
         }),
       ),
-    ).rejects.toThrow(CloudflareUnsupportedError);
+    ).rejects.toThrow(InvalidCursorError);
     await expect(
       source.findPage!(
         query({

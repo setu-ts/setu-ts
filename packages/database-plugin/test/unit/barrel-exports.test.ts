@@ -88,6 +88,16 @@ describe('database-plugin barrel exports — M90f driver classifications', () =>
     // re-export leaves the errors unit tests green (the M56 defect class).
     expect(typeof database.SerializationConflictError).toBe('function');
     expect(typeof database.DatabaseUnavailableError).toBe('function');
+    expect(typeof database.DatabaseTimeoutError).toBe('function');
+    expect(typeof database.UnknownPayloadFieldError).toBe('function');
+    const unknownField = new database.UnknownPayloadFieldError('User', 'extra');
+    expect(unknownField.name).toBe('UnknownPayloadFieldError');
+    expect(unknownField.message).toBe("Entity 'User' has no payload field 'extra'.");
+    expect(common.httpStatusHintOf(unknownField)).toEqual({
+      status: 400,
+      title: 'Bad Request',
+      detail: 'The request names a field this resource does not have.',
+    });
 
     const conflict = new database.SerializationConflictError('diagnostic', {
       cause: { code: '40001' },
@@ -108,7 +118,7 @@ describe('database-plugin barrel exports — M90f driver classifications', () =>
 
   it('keeps the M101a saturation and progress internals OUT of the public surface', () => {
     for (const name of [
-      'isPoolExhaustion',
+      'isUnansweredConnect',
       'PoolSaturatedProbeSkipped',
       'QueryProgressTracker',
       'readQueryProgress',

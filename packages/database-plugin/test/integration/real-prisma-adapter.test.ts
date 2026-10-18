@@ -35,7 +35,7 @@ import { PrismaRepository } from '../../src/adapters/prisma/prisma-repository.ts
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { DuplicateKeyError, PrimaryKeyChangeError } from '@setu-ts/common';
 import type { PrismaAdapterOptions } from '../../src/interfaces/index.ts';
 
 const postgresUrl = process.env['POSTGRES_URL'];
@@ -115,6 +115,46 @@ async function connectPrisma(queries?: string[]): Promise<GeneratedPrismaClient>
 }
 
 describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
+  it(
+    'M113g refuses a changed key through update and leaves the row unmoved',
+    { skip: skipReal },
+    async () => {
+      const client = await connectPrisma();
+      const adapter = new PrismaAdapter({ prismaClient: client });
+      await adapter.connect();
+      try {
+        const source = adapter.createDataSource('AuditEvent');
+        const id = `m113g-old-${suffix}`;
+        const movedId = `m113g-new-${suffix}`;
+        const row = {
+          id,
+          run: suffix,
+          userId: 'before',
+          createdAt: new Date(0),
+          profile: {},
+        };
+        await source.create(row);
+        const outcome: unknown = await source
+          .update(id, { id: movedId, userId: 'after' })
+          .catch((error: unknown) => error);
+        // Read through the real delegate as well as a fresh adapter data source:
+        // even a failed refusal assertion must leave evidence of the backend state.
+        const oldRow = await client.auditEvent.findUnique({ where: { id } });
+        const newRow = await client.auditEvent.findUnique({ where: { id: movedId } });
+        expect({ outcome, oldRow, newRow }).toMatchObject({
+          outcome: expect.any(PrimaryKeyChangeError),
+          oldRow: row,
+          newRow: null,
+        });
+        const fresh = adapter.createDataSource('AuditEvent');
+        expect(await fresh.findById(id)).toEqual(row);
+        expect(await fresh.findById(movedId)).toBeNull();
+      } finally {
+        await adapter.disconnect();
+        await client.$disconnect();
+      }
+    },
+  );
   it(
     'M105 emits one conjoined UPDATE or DELETE and carries conditionals into interactive transactions',
     { skip: skipReal },

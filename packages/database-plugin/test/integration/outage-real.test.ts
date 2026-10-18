@@ -31,6 +31,109 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { DatabasePlugin } from '../../src/index.ts';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { pgTable, text } from 'drizzle-orm/pg-core';
+import {
+  DrizzleAdapter,
+  createDrizzleDatabase,
+  DatabaseService,
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+} from '../../src/index.ts';
+
+const postgresUrl = process.env['POSTGRES_URL'];
+
+describe('M113g REAL paused PostgreSQL driver bounds', { skip: postgresUrl === undefined }, () => {
+  it('bounds open and new connection reads, recovers, and records transaction latency', async () => {
+    const parsed = new URL(postgresUrl!);
+    if (parsed.hostname !== '127.0.0.1' || parsed.port !== '55432')
+      throw new Error('M113g pause proof requires the owned throwaway PostgreSQL on port 55432.');
+    const containerId = await containerIdForPort(55432);
+    if ((await docker(['inspect', '--format', '{{.Name}}', containerId])).trim() !== '/m113g-pg')
+      throw new Error('M113g pause proof refuses a container it does not own.');
+    const pool = new Pool({
+      connectionString: postgresUrl!,
+      query_timeout: 1000,
+      connectionTimeoutMillis: 1000,
+    });
+    const tableName = `m113g_bounds_${crypto.randomUUID().replaceAll('-', '')}`;
+    const table = pgTable(tableName, { id: text('id').primaryKey() });
+    const database = drizzle(pool);
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+      drizzleTables: { Measurement: table },
+    });
+    const service = new DatabaseService(
+      adapter,
+      (entity) => adapter.createDataSource(entity),
+      'drizzle',
+    );
+    let paused = false;
+    let scheduledUnpause: Promise<void> = Promise.resolve();
+    const measurements: Record<string, unknown> = {};
+    const timedReject = async (
+      label: string,
+      operation: () => Promise<unknown>,
+    ): Promise<unknown> => {
+      const start = performance.now();
+      const error: unknown = await operation().catch((caught: unknown) => caught);
+      measurements[label] = {
+        elapsedMs: performance.now() - start,
+        name: error instanceof Error ? error.name : 'not-an-error',
+      };
+      return error;
+    };
+    try {
+      await pool.query(`CREATE TABLE "${tableName}" (id text primary key)`);
+      await pool.query(`INSERT INTO "${tableName}" VALUES ('warm')`);
+      await adapter.connect();
+      const repo = service.getRepository('Measurement');
+      expect(await repo.findById('warm')).toEqual({ id: 'warm' });
+      await docker(['pause', containerId]);
+      paused = true;
+      const pauseStart = performance.now();
+      expect(await timedReject('open', () => repo.findById('warm'))).toBeInstanceOf(
+        DatabaseTimeoutError,
+      );
+      expect(await timedReject('new', () => repo.findById('warm'))).toBeInstanceOf(
+        DatabaseUnavailableError,
+      );
+      for (const label of ['open', 'new']) {
+        const elapsed = (measurements[label] as { elapsedMs: number }).elapsedMs;
+        expect(elapsed).toBeGreaterThan(800);
+        expect(elapsed).toBeLessThan(2500);
+      }
+      await wait(Math.max(0, 5200 - (performance.now() - pauseStart)));
+      await docker(['unpause', containerId]);
+      paused = false;
+      expect(await repo.findById('warm')).toEqual({ id: 'warm' });
+      expect(
+        await timedReject('transaction', () =>
+          service.transaction(async (uow) => {
+            const scoped = uow.getRepository('Measurement');
+            await scoped.findById('warm');
+            await docker(['pause', containerId]);
+            paused = true;
+            scheduledUnpause = wait(5200).then(async () => {
+              await docker(['unpause', containerId]);
+              paused = false;
+            });
+            await scoped.findById('warm');
+          }),
+        ),
+      ).toBeInstanceOf(DatabaseTimeoutError);
+      await scheduledUnpause;
+      expect(await repo.findById('warm')).toEqual({ id: 'warm' });
+      process.stdout.write(`M113g PostgreSQL measurements ${JSON.stringify(measurements)}\n`);
+    } finally {
+      await scheduledUnpause;
+      if (paused) await docker(['unpause', containerId]);
+      await pool.query(`DROP TABLE IF EXISTS "${tableName}"`).catch(() => {});
+      await pool.end();
+    }
+  });
+});
 
 const mongoUrl =
   process.env['MONGODB_URL'] ?? process.env['MONGO_URL'] ?? process.env['MONGODB_URI'];

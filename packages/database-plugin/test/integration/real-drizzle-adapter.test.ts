@@ -29,7 +29,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
 import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { DuplicateKeyError, PrimaryKeyChangeError } from '@setu-ts/common';
 import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { NormalizedQuery } from '@setu-ts/common';
@@ -1142,6 +1142,95 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
         expect(ready).toBe(503);
       } finally {
         await booted.stop();
+      }
+    },
+  );
+});
+
+describe('M113g real PostgreSQL identity and mapping refusals', () => {
+  it('refuses a changed key and leaves the stored row unmoved', { skip: skipLivePg }, async () => {
+    const pool = new Pool({ connectionString: livePgUrl! });
+    const tableName = `m113g_keys_${crypto.randomUUID().replaceAll('-', '')}`;
+    const table = pgTable(tableName, { id: text('id').primaryKey(), name: text('name') });
+    const database = nodePostgresDrizzle(pool);
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+      drizzleTables: { User: table },
+    });
+    try {
+      await pool.query(`CREATE TABLE "${tableName}" (id text primary key, name text)`);
+      await adapter.connect();
+      const service = new DatabaseService(
+        adapter,
+        (entity) => adapter.createDataSource(entity),
+        'drizzle',
+      );
+      const repo = service.getRepository<Record<string, unknown>>('User');
+      await repo.create({ id: 'old', name: 'before' });
+      await expect(repo.update('old', { id: 'new', name: 'after' })).rejects.toBeInstanceOf(
+        PrimaryKeyChangeError,
+      );
+      await expect(
+        repo.updateWhere!('old', { name: 'before' }, { id: 'new' }),
+      ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
+      await service.transaction(async (uow) => {
+        await expect(uow.getRepository('User').update('old', { id: 'new' })).rejects.toBeInstanceOf(
+          PrimaryKeyChangeError,
+        );
+      });
+      expect(await service.getRepository('User').findById('old')).toEqual({
+        id: 'old',
+        name: 'before',
+      });
+      expect(await repo.findById('new')).toBeNull();
+    } finally {
+      await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+      await pool.end();
+    }
+  });
+  it(
+    'refuses a non-id table eagerly and serves it with a primaryKey override',
+    { skip: skipLivePg },
+    async () => {
+      const pool = new Pool({ connectionString: livePgUrl! });
+      const tableName = `m113g_mapping_${crypto.randomUUID().replaceAll('-', '')}`;
+      const table = pgTable(tableName, {
+        userKey: text('user_key').primaryKey(),
+        name: text('name'),
+      });
+      const database = nodePostgresDrizzle(pool);
+      const configured = createDrizzleDatabase(database, (db, work) => db.transaction(work));
+      const broken = new DrizzleAdapter({
+        drizzleInstance: configured,
+        drizzleTables: { User: table },
+      });
+      const mappedOptions: DrizzleAdapterOptions = {
+        drizzleInstance: configured,
+        drizzleTables: { User: table },
+        entities: { User: { primaryKey: 'userKey' } },
+      };
+      const adapter = new DrizzleAdapter(mappedOptions);
+      try {
+        await pool.query(`CREATE TABLE "${tableName}" (user_key text primary key, name text)`);
+        await broken.connect();
+        const service = new DatabaseService(
+          broken,
+          (entity) => broken.createDataSource(entity),
+          'drizzle',
+        );
+        expect(() => service.getRepository('User')).toThrow("has no 'id' column");
+        await adapter.connect();
+        const mapped = new DatabaseService(
+          adapter,
+          (entity) => adapter.createDataSource(entity),
+          'drizzle',
+        ).getRepository('User');
+        await mapped.create({ userKey: 'u', name: 'before' });
+        await mapped.update('u', { name: 'after' });
+        expect(await mapped.findById('u')).toEqual({ userKey: 'u', name: 'after' });
+      } finally {
+        await pool.query(`DROP TABLE IF EXISTS "${tableName}"`);
+        await pool.end();
       }
     },
   );

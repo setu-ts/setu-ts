@@ -130,11 +130,13 @@ because `cloudflare-plugin`'s D1 data source raises both and AI_GUIDELINES §2.2
 - **Decision:** `createDrizzleDataSourceInner` resolves every key column through `columnFor` once,
   when the data source is built (so `getRepository` and `uow`'s `createDataSource` refuse), with the
   existing message. `create`, `update` and `updateWhere` refuse, before any I/O, a payload own key
-  whose value is not `undefined` and which is not a column of the table (`hasColumn`), with
-  `UnsupportedQueryFeatureError('payload-field', 'drizzle', "Drizzle table '<e>' has no '<f>' column; the payload field would be dropped.")`.
-  `'payload-field'` is NOT added to `QUERY_SHAPE_FEATURES`, so it stays a masked `500`: the field
-  name is chosen by application code, not by a client, so it is a deployment/programming fault (the
-  `'mapping'` reasoning at `errors.ts:78-85`) and its message names a column a client must not see.
+  whose value is not `undefined` and which is not a column of the table (`hasColumn`), with a new
+  exported `UnknownPayloadFieldError` (database-plugin), hint
+  `{ status: 400, title: 'Bad Request', detail: 'The request names a field this resource does not have.' }`.
+  The `message` names the entity and the field; the served detail names neither. **Revised in review
+  (maintainer decision, 2026-10-18):** the first draft left this a masked `500` on the grounds that
+  application code chooses field names, but `repo.update(id, body)` passes a client's body through,
+  so a client's extra field would have answered `500` and an error-level log.
 - **Why:** today a misspelled or mis-mapped field is dropped by Drizzle and the row is written
   without it (or fails NOT NULL with the raw driver text); Prisma already refuses the same call. The
   tenant-column mis-mapping in V9-26 becomes the same named refusal on the first write.
@@ -227,12 +229,13 @@ because `cloudflare-plugin`'s D1 data source raises both and AI_GUIDELINES §2.2
 **Breaking for implementors:** an out-of-repo `IDataSource` is not forced to change, but the
 behaviour of every in-repo adapter changes (§3.1, §3.2, §3.5) — `ships in minor 0.10.0`.
 
-| Exported symbol                          | Kind     | Consumer / real code path that READS it                                                                     |
-| ---------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `PrimaryKeyChangeError` (common)         | class    | thrown by `assertPrimaryKeyUnchanged`; `errorHandler` reads its hint; applications `instanceof` it          |
-| `assertPrimaryKeyUnchanged` (common)     | function | every `update`/`updateWhere` in `database-plugin`'s seven adapters and `cloudflare-plugin`'s D1 data source |
-| `InvalidCursorError` (common)            | class    | thrown by the eight `findPage` implementations; `errorHandler` reads its hint                               |
-| `DatabaseTimeoutError` (database-plugin) | class    | built by `classifiedOrOriginal` for the `timeout` kind; `errorHandler` reads its hint                       |
+| Exported symbol                              | Kind     | Consumer / real code path that READS it                                                                     |
+| -------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `PrimaryKeyChangeError` (common)             | class    | thrown by `assertPrimaryKeyUnchanged`; `errorHandler` reads its hint; applications `instanceof` it          |
+| `assertPrimaryKeyUnchanged` (common)         | function | every `update`/`updateWhere` in `database-plugin`'s seven adapters and `cloudflare-plugin`'s D1 data source |
+| `InvalidCursorError` (common)                | class    | thrown by the eight `findPage` implementations; `errorHandler` reads its hint                               |
+| `DatabaseTimeoutError` (database-plugin)     | class    | built by `classifiedOrOriginal` for the `timeout` kind; `errorHandler` reads its hint                       |
+| `UnknownPayloadFieldError` (database-plugin) | class    | thrown by the Drizzle data source's write paths (§3.2); `errorHandler` reads its hint                       |
 
 `isUnansweredConnect` and the `timeout` kind stay internal (not barrel-exported).
 

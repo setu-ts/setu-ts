@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
+import { DatabaseService } from '../../src/services/database-service.ts';
 import type {
   HandlerResult,
   IDatabaseAdapter,
@@ -33,6 +34,120 @@ import { DynamoAdapter } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
 import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-types.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
+import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
+import { createDrizzleDatabase } from '../../src/index.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
+
+describe('M113g caller-safe fault bodies', () => {
+  it('serves an unknown Drizzle payload field as a safe 400', async () => {
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (db, work) =>
+        db.transaction(work),
+      ),
+      drizzleTables: { PrivateEntity: createFakeDrizzleTable('private_table') },
+    });
+    const app = createApplication({
+      plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter })],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+    app.router.post('/fault', {
+      handler: async (ctx) => {
+        const service = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        return ctx.response.json(
+          await service.getRepository('PrivateEntity').update('private-key', {
+            privateUnknownField: 'private-value',
+          }),
+        );
+      },
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'POST', url: 'http://localhost/fault' });
+      expect(response.statusCode).toBe(400);
+      const body = response.json<Record<string, unknown>>();
+      expect(body).toEqual({
+        type: 'about:blank',
+        title: 'Bad Request',
+        status: 400,
+        detail: 'The request names a field this resource does not have.',
+        instance: '/fault',
+      });
+      expect(body).not.toHaveProperty('message');
+      for (const forbidden of [
+        'privateUnknownField',
+        'private-value',
+        'private-key',
+        'PrivateEntity',
+        'private_table',
+        'drizzle',
+      ])
+        expect(JSON.stringify(body)).not.toContain(forbidden);
+    } finally {
+      await app.stop();
+    }
+  });
+  for (const kind of ['key', 'cursor', 'timeout'] as const) {
+    it(`serves ${kind} refusal with exact RFC 9457 fields and no private values`, async () => {
+      const adapter = new MemoryAdapter();
+      const app = createApplication({
+        plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter })],
+      });
+      app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+      app.router.get('/fault', {
+        handler: async (ctx) => {
+          const service = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+          const repo = service.getRepository('PrivateEntity');
+          if (kind === 'key')
+            return ctx.response.json(await repo.update('private-key', { id: 'private-payload' }));
+          if (kind === 'cursor')
+            return ctx.response.json(await repo.findPage({ cursor: 'private-cursor', limit: 1 }));
+          const source = adapter.createDataSource('PrivateEntity');
+          source.findById = () =>
+            Promise.reject(
+              new Error('Failed query: private-query', { cause: new Error('Query read timeout') }),
+            );
+          const timed = new DatabaseService(adapter, () => source, 'drizzle');
+          return ctx.response.json(
+            await timed.getRepository('PrivateEntity').findById('private-key'),
+          );
+        },
+      });
+      await app.start();
+      try {
+        const response = await app.inject({ method: 'GET', url: 'http://localhost/fault' });
+        const status = kind === 'timeout' ? 504 : 400;
+        expect(response.statusCode).toBe(status);
+        const body = response.json<Record<string, unknown>>();
+        expect(body['type']).toBe('about:blank');
+        expect(body['title']).toBe(kind === 'timeout' ? 'Gateway Timeout' : 'Bad Request');
+        expect(body['status']).toBe(status);
+        expect(body['detail']).toBe(
+          kind === 'key'
+            ? "An update cannot change a row's primary key."
+            : kind === 'cursor'
+              ? 'The pagination cursor is not valid for this query.'
+              : 'The database did not answer in time.',
+        );
+        expect(body).not.toHaveProperty('message');
+        for (const forbidden of [
+          'memory',
+          'drizzle',
+          'PrivateEntity',
+          'private-key',
+          'private-payload',
+          'private-cursor',
+          'private-query',
+        ])
+          expect(JSON.stringify(body)).not.toContain(forbidden);
+      } finally {
+        await app.stop();
+      }
+    });
+  }
+});
 
 /** A client whose commands are never reached: every case refuses at translation. */
 function idleDynamoClient(): IDynamoClient {

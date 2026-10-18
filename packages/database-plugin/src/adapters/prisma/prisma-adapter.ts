@@ -9,6 +9,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   DatabaseAdapterOptions,
   PrismaAdapterOptions,
@@ -644,13 +646,7 @@ async function findPrismaPage(
   if (normalized.cursor !== undefined) {
     decoded = decodeCursor(normalized.cursor);
     if (decoded === null) {
-      return Promise.reject(
-        new UnsupportedQueryFeatureError(
-          'cursor-pagination',
-          'prisma',
-          `cursor-pagination: entity '${entity}': malformed cursor token`,
-        ),
-      );
+      return Promise.reject(new InvalidCursorError(`Entity '${entity}': malformed cursor token.`));
     }
   }
 
@@ -659,13 +655,15 @@ async function findPrismaPage(
   const fingerprint = sortFingerprint(normalized.orderBy);
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
-      new UnsupportedQueryFeatureError(
-        'cursor-pagination',
-        'prisma',
-        `cursor-pagination: entity '${entity}': cursor fingerprint mismatch — expected ` +
-          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
-      ),
+      new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`),
     );
+  }
+  if (
+    decoded !== null &&
+    (decoded.keyValues.length !== keyColumns.length ||
+      decoded.orderedValues.length !== Object.keys(normalized.orderBy).length)
+  ) {
+    return Promise.reject(new InvalidCursorError(`Entity '${entity}': cursor key shape mismatch.`));
   }
 
   // 4. Keyset predicate through the shared builder; it is a FilterExpression,
@@ -838,6 +836,8 @@ function createPrismaDataSourceInner(
     create: (data) => delegate.create({ data }),
 
     async update(id, data) {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
       if (typeof id === 'object' && compoundKeyField === undefined) {
         throw new UnsupportedQueryFeatureError(
           'composite-key',
@@ -890,6 +890,7 @@ function createPrismaDataSourceInner(
       }
       where = checked.where;
       data = checked.data;
+      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
       assertPreconditionFields(where);
       try {
         return await delegate.update({

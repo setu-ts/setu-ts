@@ -1,4 +1,6 @@
 /** DynamoDB implementation of the per-entity IDataSource port. @module */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type { EntityKey, IDataSource, NormalizedQuery, PageResult } from '@setu-ts/common';
 import {
   checkWritePrecondition,
@@ -232,6 +234,8 @@ export function createDynamoDataSource(
       }
     },
     async update(id, data): Promise<Record<string, unknown>> {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(entity, target.keyColumns, id, data);
       const identifier = key(id, 'update');
       for (const name of Object.keys(data)) assertWritableAttributeName(name);
       const entries = Object.entries(data).filter(
@@ -325,6 +329,7 @@ export function createDynamoDataSource(
             }
             where = checked.where;
             data = checked.data;
+            assertPrimaryKeyUnchanged(entity, target.keyColumns, id, data);
             const identifier = key(id, 'updateWhere');
             const entries = Object.entries(data).filter(
               ([name, value]) => value !== undefined && !target.keyColumns.includes(name),
@@ -434,27 +439,21 @@ export function createDynamoDataSource(
       let start: DynamoAttributeMap | undefined;
       if (query.cursor !== undefined) {
         const decoded = decodeCursor(query.cursor);
-        if (
-          decoded === null ||
-          decoded.sortFingerprint !== fingerprint ||
-          decoded.keyValues.length !== path.cursorKeyColumns.length
-        ) {
-          throw new UnsupportedQueryFeatureError(
-            'cursor-pagination',
-            ADAPTER,
-            `DynamoDB entity '${entity}' received a malformed cursor.`,
-          );
+        if (decoded === null) {
+          throw new InvalidCursorError(`Entity '${entity}': malformed cursor token.`);
+        }
+        if (decoded.sortFingerprint !== fingerprint) {
+          throw new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`);
+        }
+        if (decoded.keyValues.length !== path.cursorKeyColumns.length) {
+          throw new InvalidCursorError(`Entity '${entity}': cursor key shape mismatch.`);
         }
         const rebuilt: Record<string, DynamoAttributeValue> = {};
         for (const [index, column] of path.cursorKeyColumns.entries()) {
           const attribute = decodeKeyAttribute(decoded.keyValues[index]);
           if (attribute === null) {
             return Promise.reject(
-              new UnsupportedQueryFeatureError(
-                'cursor-pagination',
-                ADAPTER,
-                `DynamoDB entity '${entity}' received a malformed cursor.`,
-              ),
+              new InvalidCursorError(`Entity '${entity}': cursor key shape mismatch.`),
             );
           }
           rebuilt[column] = attribute;

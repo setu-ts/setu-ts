@@ -14,6 +14,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   CursorPayload,
   EntityKey,
@@ -448,6 +450,8 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
       const address = await addressOf(id, 'update');
       if (address === null) throw missingRow(target, id);
       const resolved = await partitionKeys.resolve(target);
@@ -575,6 +579,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
             }
             where = checked.where;
             data = checked.data;
+            assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
             return await guardedWrite(id, where, data);
           },
           async deleteWhere(id, where) {
@@ -610,11 +615,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         decoded = decodeCursor(normalized.cursor);
         if (decoded === null) {
           return Promise.reject(
-            new UnsupportedQueryFeatureError(
-              'cursor-pagination',
-              'cosmos',
-              `cursor-pagination: entity '${target.container}': malformed cursor token`,
-            ),
+            new InvalidCursorError(`Entity '${target.container}': malformed cursor token.`),
           );
         }
       }
@@ -622,12 +623,16 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       const fingerprint = sortFingerprint(normalized.orderBy);
       if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
         return Promise.reject(
-          new UnsupportedQueryFeatureError(
-            'cursor-pagination',
-            'cosmos',
-            `cursor-pagination: entity '${target.container}': cursor fingerprint mismatch — ` +
-              `expected '${fingerprint}', got '${decoded.sortFingerprint}'`,
-          ),
+          new InvalidCursorError(`Entity '${target.container}': cursor fingerprint mismatch.`),
+        );
+      }
+      if (
+        decoded !== null &&
+        (decoded.keyValues.length !== [target.primaryKey].length ||
+          decoded.orderedValues.length !== Object.keys(normalized.orderBy).length)
+      ) {
+        return Promise.reject(
+          new InvalidCursorError(`Entity '${target.container}': cursor key shape mismatch.`),
         );
       }
 

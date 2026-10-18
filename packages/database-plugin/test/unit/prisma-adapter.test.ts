@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 /**
  * Unit tests for PrismaAdapter using a fake Prisma client.
  *
@@ -905,7 +906,7 @@ describe('PrismaAdapter', () => {
           select: [],
           cursor: 'not-base64!!!',
         }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      ).rejects.toThrow(InvalidCursorError);
     });
 
     it('rejects by name when the cursor fingerprint does not match the sort', async () => {
@@ -933,7 +934,7 @@ describe('PrismaAdapter', () => {
           select: [],
           cursor: first.nextCursor ?? '',
         }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      ).rejects.toThrow(InvalidCursorError);
     });
 
     it('refuses a non-zero offset beside a cursor at findPage (§3.10)', async () => {

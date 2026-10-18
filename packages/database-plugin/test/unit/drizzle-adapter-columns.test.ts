@@ -295,11 +295,10 @@ describe('DrizzleAdapter table registry', () => {
       drizzleTables: { Tenant: tenants, TenantFlag: tenantFlags },
     });
     await adapter.connect();
-    // Default primaryKey is ['id']; the composite object is handed to keyValues
-    // which names the missing required column instead of columnFor throwing.
-    await expect(
-      adapter.createDataSource('TenantFlag').findById({ tenantId: 't1', flag: 'x' }),
-    ).rejects.toThrow(/missing required column 'id'/);
+    expect(() => adapter.createDataSource('TenantFlag')).toThrow(
+      "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
+    );
+    expect(seen).toEqual([]);
   });
 
   it('still serves a repository for the single-key table beside it', async () => {
@@ -464,7 +463,7 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
       drizzleTables: { Tenant: tenants, TenantFlag: tenantFlags },
     });
     await adapter.connect();
-    await expect(adapter.createDataSource('TenantFlag').findById('t1')).rejects.toThrow(
+    expect(() => adapter.createDataSource('TenantFlag')).toThrow(
       "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
     );
   });
@@ -809,4 +808,48 @@ describe('DrizzleAdapter reachability probe (M95b §3.5)', () => {
     expect(service.hasReachabilityProbe).toBe(false);
     expect(await service.reachability()).toBeUndefined();
   });
+});
+
+describe('M113g eager key and payload columns', () => {
+  it('refuses missing key columns in transaction data-source creation', async () => {
+    const database = drizzle(() => Promise.resolve({ rows: [] }));
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(database, (instance, work) => work(instance as never)),
+      drizzleTables: { Broken: tenantFlags },
+    });
+    await adapter.connect();
+    const tx = await adapter.beginTransaction();
+    expect(() => tx.createDataSource('Broken')).toThrow("has no 'id' column");
+    await tx.rollback();
+  });
+  for (const method of ['create', 'update', 'updateWhere'] as const) {
+    it(`${method} refuses defined unknown payload fields before I/O`, async () => {
+      const seen: string[] = [];
+      const database = drizzle((sql) => {
+        seen.push(sql);
+        return Promise.resolve({ rows: [['5', 'Ada']] });
+      });
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(database, (instance, work) =>
+          instance.transaction(work),
+        ),
+        drizzleTables: { User: tenants },
+      });
+      await adapter.connect();
+      const source = adapter.createDataSource('User');
+      const call = (data: Record<string, unknown>) =>
+        method === 'create'
+          ? source.create(data)
+          : method === 'update'
+            ? source.update('5', data)
+            : source.updateWhere!('5', { name: 'before' }, data);
+      await expect(call({ name: 'Ada', extra: 'private-payload' })).rejects.toMatchObject({
+        name: 'UnknownPayloadFieldError',
+        message: "Entity 'User' has no payload field 'extra'.",
+      });
+      expect(seen).toEqual([]);
+      await call({ name: 'Ada', extra: undefined });
+      expect(seen).toHaveLength(1);
+    });
+  }
 });

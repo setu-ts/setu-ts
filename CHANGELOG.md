@@ -8,6 +8,43 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking: a primary-key change through `update` is refused on every adapter (M113g, 0.10.0,
+  `@setu-ts/database-plugin`, `@setu-ts/cloudflare-plugin`).** Every `update` and `updateWhere` (and
+  the transaction-scoped variants) of the eight data sources — Memory, Drizzle, Prisma, MongoDB,
+  DynamoDB, Cosmos DB, Cloud Bigtable and D1 — now runs one shared check
+  (`assertPrimaryKeyUnchanged`, exported from `@setu-ts/common`) before any I/O: a payload that
+  carries a key column whose value is not `undefined` and differs from the addressed key's value is
+  refused with `PrimaryKeyChangeError` (branded `400 Bad Request`, fixed detail "An update cannot
+  change a row's primary key."); the message names the entity and the column, never a key value. An
+  equal value is accepted, compared as a string for `string`, `number`, `bigint` and `ObjectId`-like
+  values and by time for `Date` values, so `update('5', { id: 5 })` works while `'05'` against `5`
+  is refused. Before: Drizzle, Prisma and D1 moved the row; MongoDB, Cosmos DB and DynamoDB answered
+  success with the key column stripped; Memory answered a masked `500`.
+- **Breaking: Drizzle refuses a missing key column and an unknown payload field by name (M113g,
+  0.10.0, `@setu-ts/database-plugin`).** A Drizzle data source whose key column is not a column of
+  its table is now refused when the repository is created — `getRepository` and the Unit of Work's
+  data source — instead of surfacing lazily inside `findById`, `update` or `delete`. A `create`,
+  `update` or `updateWhere` payload that names a field that is not a column of the table is now
+  refused by name before any I/O (`UnknownPayloadFieldError`, `400 Bad Request`, fixed detail "The
+  request names a field this resource does not have.") instead of being dropped by Drizzle and
+  surfacing as the driver's raw `Failed query`. Before: the field was dropped and the row was
+  written without it, or the write failed NOT NULL with raw driver text.
+- **Breaking: a cursor the backend cannot use answers `400` with `InvalidCursorError` (M113g,
+  0.10.0, `@setu-ts/database-plugin`, `@setu-ts/cloudflare-plugin`).** Every `findPage`
+  implementation of the eight data sources now refuses a cursor the backend cannot use — a malformed
+  token, a sort-fingerprint mismatch, or a decoded key-value list whose length or kinds do not fit
+  the target — with `InvalidCursorError` (branded `400 Bad Request`, fixed detail "The pagination
+  cursor is not valid for this query.") before any backend call; the message names the entity and
+  which check failed, never the token or its values. `UnsupportedQueryFeatureError` (`501`) remains
+  for a backend that cannot page the query at all, so `instanceof UnsupportedQueryFeatureError` no
+  longer matches a malformed cursor.
+- **Breaking: Bigtable's key-change refusal answers `400` with `PrimaryKeyChangeError` (M113g,
+  0.10.0, `@setu-ts/database-plugin`).** A Bigtable `update` or `updateWhere` whose key differs from
+  the addressed row now answers `400 Bad Request` with `PrimaryKeyChangeError` (fixed detail "An
+  update cannot change a row's primary key.") instead of `501` with `UnsupportedQueryFeatureError`
+  (`row-key`); the served detail no longer names the feature, and the message no longer echoes
+  either key value.
+
 - **BREAKING V9-47 — public health bodies (M113f, `@setu-ts/health-plugin`).** `/health`, `/live`
   and `/ready` omit indicator data and latency by default. Migration: set `details: true` for
   dashboards needing the old body. Programmatic reports stay full; gRPC and diagnostics are
@@ -38,7 +75,7 @@ All notable changes to this project are documented here. The format follows
   a last-resort JSON sink for unhandled errors and handled 5xx without a logger. Logger
   `excludePaths` now accepts patterns.
 
-- **Breaking: outbox and inbox `release` refusals carry HTTP status hints (M113j, 0.10.0,
+- **Breaking: outbox and inbox `release` refusals carry HTTP status hints (M113j, #469, 0.10.0,
   `@setu-ts/messaging-plugin`).** An unhandled `release` refusal under `errorHandler` answers its
   own status instead of a masked `500`: `400` for a bad row id (`invalid-id` — the outbox's former
   missing-id `TypeError` is now `OutboxRowStateError('invalid-id')`), `404` for an absent row
@@ -232,6 +269,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Primary-key and cursor refusals, and a database call timeout (M113g, 0.10.0, `@setu-ts/common`,
+  `@setu-ts/database-plugin`).** `@setu-ts/common` exports `assertPrimaryKeyUnchanged`, the one
+  shared check every `update`/`updateWhere` of the eight data sources runs before any I/O, and the
+  two classes that check and the `findPage` implementations throw: `PrimaryKeyChangeError` (a key
+  change through `update`, branded `400 Bad Request` with the fixed detail "An update cannot change
+  a row's primary key.") and `InvalidCursorError` (a cursor the backend cannot use, branded
+  `400 Bad Request` with the fixed detail "The pagination cursor is not valid for this query.").
+  `@setu-ts/database-plugin` exports `UnknownPayloadFieldError` (a Drizzle write naming a field that
+  is not a column, `400 Bad Request`) and `DatabaseTimeoutError`, the class a `DatabaseService`
+  interception throws when node-postgres's `query_timeout` fires (the driver's `Query read timeout`
+  rejection), branded `504 Gateway Timeout` with the fixed detail "The database did not answer in
+  time." The statement may have run, so a write's outcome is unknown and a retry of a write must be
+  idempotent.
+
 - **`PasswordHasherOptions` and `PasswordHasher.needsRehash` (M113e, `@setu-ts/auth-plugin`).**
   `new PasswordHasher(runtime, { iterations })` sets the count for new hashes (100,000–10,000,000,
   refused at construction otherwise, `NaN` included); `needsRehash(stored)` reports a hash made with
@@ -257,7 +308,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **A paused relay's late publish settlement (M113j, 0.10.0, `@setu-ts/messaging-plugin`).** A
+- **The second node-postgres connect-timeout message answered a masked `500` (V9-34, M113g, 0.10.0,
+  `@setu-ts/database-plugin`).** pg-pool raises `Connection terminated due to connection timeout`
+  when a new client's connect times out — the common case during a pause, when the pool has room to
+  open a connection — and the message was unclassified, so a call that never reached the database
+  answered a masked `500`. It is now classified `unavailable` and answered `503` beside
+  `timeout exceeded when trying to connect`; under either message the query was never sent, so
+  `DatabaseUnavailableError`'s "the operation did not happen, and may be retried" holds. A connect
+  that does not complete inside the bound is also why the Drizzle probe reports `degraded` rather
+  than `down`.
+
+- **A paused relay's late publish settlement (M113j, #469, 0.10.0, `@setu-ts/messaging-plugin`).** A
   `markSent` or `markFailure` for a publish the relay already invoked now runs to its own
   `storeTimeoutMs` bound even when a pause has exhausted the sweep budget, and its answer is
   observed when it arrives after the bound: a `markSent` or `markFailure` that finds the row already
@@ -269,12 +330,12 @@ All notable changes to this project are documented here. The format follows
   writes nothing and reports no `store-write-failing`. The database outbox store's
   unrecognized-status error no longer quotes the row id (`@setu-ts/database-plugin`), and the
   `check:docs` continued-line rule (P3) joins each command once instead of from every line.
-- **Stale `npm:` specifiers in committed docs (M113j, V9-22's widened scope and V9-10's `npm:zod`
-  half).** Every `npm:` import and every prose, table or comment claim that a package loads as
-  `npm:<pkg>` — about 80 lines across ~20 files, plus one `cli` JSDoc — now names the bare package
-  the loaders have used since M111a. The fence engine no longer rewrites `npm:` specifiers (the
-  `@hono/hono` → `hono` alias rewrite stays), and `check:docs` refuses a stale one by name: P7 names
-  a quoted `npm:` specifier in an import position, P8 any other `npm:<pkg>` reference (Deno
+- **Stale `npm:` specifiers in committed docs (M113j, #469, V9-22's widened scope and V9-10's
+  `npm:zod` half).** Every `npm:` import and every prose, table or comment claim that a package
+  loads as `npm:<pkg>` — about 80 lines across ~20 files, plus one `cli` JSDoc — now names the bare
+  package the loaders have used since M111a. The fence engine no longer rewrites `npm:` specifiers
+  (the `@hono/hono` → `hono` alias rewrite stays), and `check:docs` refuses a stale one by name: P7
+  names a quoted `npm:` specifier in an import position, P8 any other `npm:<pkg>` reference (Deno
   `add`/`install` arguments and `@setu-ts`/`@jsr` specifiers are exempt).
 - **A Redis client built without a reporter wrote its errors to the console (M113c).** Since 0.8.0
   the cache store, queue adapter, Redis Streams broker, realtime backplane, rate-limit store,

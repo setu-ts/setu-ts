@@ -14,9 +14,10 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseService } from '../../src/services/database-service.ts';
+import { httpStatusHintOf } from '@setu-ts/common';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IDatabaseAdapter, NormalizedQuery, PageResult } from '@setu-ts/common';
-import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import { DatabaseTimeoutError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import {
@@ -445,5 +446,41 @@ describe('DatabaseService', () => {
       );
       await expect(repo.findPage({ orderBy: { n: 'asc' } })).rejects.toThrow('no findPage member');
     });
+  });
+});
+
+describe('M113g driver timeout interception', () => {
+  it('returns DatabaseTimeoutError with a 504 hint and scrubbed cause', async () => {
+    const adapter = new MemoryAdapter();
+    const source = adapter.createDataSource('PrivateEntity');
+    source.findById = () =>
+      Promise.reject(
+        Object.assign(
+          new Error('Failed query: select secret where id = $1\nparams: private-key', {
+            cause: new Error('Query read timeout'),
+          }),
+          { query: 'select secret where id = $1', params: ['private-key'] },
+        ),
+      );
+    const service = new DatabaseService(adapter, () => source, 'drizzle');
+    const error: unknown = await service
+      .getRepository('PrivateEntity')
+      .findById('private-key')
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(DatabaseTimeoutError);
+    expect(httpStatusHintOf(error)).toEqual({
+      status: 504,
+      title: 'Gateway Timeout',
+      detail: 'The database did not answer in time.',
+    });
+    const cause = (error as Error).cause;
+    expect(cause).toBeInstanceOf(Error);
+    expect(cause).not.toHaveProperty('params');
+    expect((cause as Error).message).toBe('Failed query: select secret where id = $1');
+    expect((cause as Error).stack).not.toContain('private-key');
+    expect((cause as Error).cause).toMatchObject({ message: 'Query read timeout' });
+    const bare = new DatabaseTimeoutError('bounded');
+    expect(bare.name).toBe('DatabaseTimeoutError');
+    expect(bare.cause).toBeUndefined();
   });
 });

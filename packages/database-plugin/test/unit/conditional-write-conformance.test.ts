@@ -1,3 +1,4 @@
+import { PrimaryKeyChangeError } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import type { WritePrecondition } from '@setu-ts/common';
 import { sources } from '../fixtures/conditional-sources.ts';
@@ -27,7 +28,7 @@ describe('conditional adapter native error paths', () => {
     await fixture.source.create({ id: 'a', role: 'owner', name: 'old' });
     await expect(
       fixture.source.updateWhere!('a', { role: 'owner' }, { id: 'b' }),
-    ).rejects.toMatchObject({ feature: 'update' });
+    ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
     expect(fixture.calls).toEqual([]);
     const error = new Error('driver fault');
     fixture.fail(error);
@@ -45,10 +46,13 @@ describe('conditional adapter native error paths', () => {
   it('MongoDB key-only payload still checks the conjoined predicate', async () => {
     const source = sources.find((entry) => entry.name === 'mongodb')!.make();
     await source.create({ id: 'a', role: 'owner' });
-    expect(await source.updateWhere!('a', { role: 'owner' }, { id: 'ignored' })).toMatchObject({
+    await expect(
+      source.updateWhere!('a', { role: 'owner' }, { id: 'ignored' }),
+    ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
+    expect(await source.updateWhere!('a', { role: 'owner' }, { id: 'a' })).toMatchObject({
       id: 'a',
     });
-    expect(await source.updateWhere!('a', { role: 'other' }, { id: 'ignored' })).toBeNull();
+    expect(await source.updateWhere!('a', { role: 'other' }, { id: 'a' })).toBeNull();
     expect(await source.findById('ignored')).toBeNull();
   });
   it('memory validates before mutation and preserves key immutability', async () => {

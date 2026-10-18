@@ -33,6 +33,7 @@ import {
 } from '../query/drizzle-query.ts';
 import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dynamo-data-source.ts';
 import {
+  DatabaseTimeoutError,
   DatabaseUnavailableError,
   SerializationConflictError,
   UnsupportedIsolationLevelError,
@@ -89,6 +90,11 @@ function classifiedOrOriginal(
   const kind = classifyDriverError(error, adapterType);
   error = scrubDriverError(error);
   if (kind === 'duplicate') return duplicateKeyError(error, entity);
+  if (kind === 'timeout') {
+    return new DatabaseTimeoutError('The database did not answer within the driver call bound.', {
+      cause: error,
+    });
+  }
   if (kind === 'conflict') {
     return new SerializationConflictError(
       'The database rejected the write because a concurrent transaction changed the same data.',

@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { PrimaryKeyChangeError } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import {
   createCosmosDataSource,
@@ -68,8 +69,10 @@ describe('update — patch path', () => {
 
   it('never writes the primary key, so a row is not moved to a new key', async () => {
     const { source, fake } = makeSource(seeded);
-    await source.update({ id: 'o1', tenantId: 't1' }, { id: 'other', total: 2 });
-    expect(fake.recorder.patches[0]).toEqual([{ op: 'set', path: '/total', value: 2 }]);
+    await expect(
+      source.update({ id: 'o1', tenantId: 't1' }, { id: 'other', total: 2 }),
+    ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
+    expect(fake.recorder.patches).toEqual([]);
   });
 
   it('drops a restated partition key rather than refusing it', async () => {
@@ -80,7 +83,7 @@ describe('update — patch path', () => {
 
   it('reads the row rather than sending an empty patch when nothing is left to write', async () => {
     const { source, fake } = makeSource(seeded);
-    const row = await source.update({ id: 'o1', tenantId: 't1' }, { id: 'ignored' });
+    const row = await source.update({ id: 'o1', tenantId: 't1' }, { id: 'o1' });
     expect(row).toEqual({ id: 'o1', tenantId: 't1', total: 1, keep: 'yes' });
     expect(fake.recorder.patches).toEqual([]);
   });

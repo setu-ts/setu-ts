@@ -183,6 +183,7 @@ package fits the plugin architecture.
 
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
+| `assertPrimaryKeyUnchanged`           | function  |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
 | `authorizationFailureInit`            | function  |
@@ -273,8 +274,10 @@ package fits the plugin architecture.
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
 | `DuplicateKeyError`                   | class     |
+| `InvalidCursorError`                  | class     |
 | `MalformedRequestBodyError`           | class     |
 | `OptionalDependencyUnavailableError`  | class     |
+| `PrimaryKeyChangeError`               | class     |
 | `ReconnectSupervisor`                 | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |

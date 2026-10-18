@@ -270,9 +270,9 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `OpenApiSchemaObject`     | interface |
 | `OpenApiServiceOptions`   | interface |
 | `SwaggerUiOptions`        | interface |
-| `SwaggerOptions`          | type      |
 | `SchemaIo`                | type      |
 | `SchemaNodeHook`          | type      |
+| `SwaggerOptions`          | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
