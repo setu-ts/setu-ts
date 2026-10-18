@@ -378,15 +378,19 @@ describe('RefreshTokenService', () => {
         store: new MemoryRefreshTokenStore(runtime),
         runtime,
         accessToken: { expiresIn: '1h' },
-        refreshTokenExpiresIn: '1s',
+        refreshTokenExpiresIn: '2s',
         accessTokenRevocationStore,
       });
       const first = await service.issue({ id: 'user-123' });
       const firstAccessJti = (await jwt.verify<{ jti: string }>(first.accessToken)).jti;
-      runtime.setNow(500);
+      runtime.setNow(1_500);
       const second = await service.refresh(first.refreshToken);
 
-      runtime.setNow(1_000); // first record expired; second record remains live until 1,500.
+      // The ancestor expires at 2,000; the descendant JWT expires at 3,000
+      // (iat is floored), and its store record remains live until 3,500.
+      runtime.setNow(2_000);
+      await expect(jwt.verify(first.refreshToken)).rejects.toThrow('Token expired');
+      await expect(jwt.verify(second!.refreshToken)).resolves.toMatchObject({ type: 'refresh' });
       expect(await service.revoke(second!.refreshToken)).toBe(true);
       expect(await accessTokenRevocationStore.isRevoked(firstAccessJti)).toBe(true);
     });

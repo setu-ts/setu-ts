@@ -25,6 +25,7 @@ import type {
   IRuntimeServices,
   IScheduler,
   ProbeTiming,
+  RetryOptions,
   ScheduleOptions,
   SchedulerJobHandler,
   TimerHandle,
@@ -40,6 +41,7 @@ import { cronNextMs } from '../cron/cron-parser.ts';
 import { DEFAULT_ACQUIRE_TIMEOUT_MS } from '../lock/distributed-lock.ts';
 import { JobRegistry } from '../jobs/job-registry.ts';
 import { run } from '../jobs/job-executor.ts';
+import { armAt } from '../timers/bounded-timer.ts';
 import type { FireObservation } from '../diagnostics/scheduler-observations.ts';
 import type { SchedulerObservationCollector } from '../diagnostics/scheduler-observations.ts';
 
@@ -239,6 +241,8 @@ export class SchedulerService implements IScheduler {
 
   /**
    * Schedule a recurring job using a 5-field cron expression (UTC).
+   * Long waits use bounded chunks and never dispatch before the due time.
+   * @throws {RangeError} Rejects a non-finite or negative `retry.delay`.
    */
   async cron<T = unknown>(
     name: string,
@@ -249,6 +253,8 @@ export class SchedulerService implements IScheduler {
     if (!this.#connected) {
       throw new Error('SchedulerService is not connected');
     }
+
+    this.#validateRetryDelay(name, options?.retry);
 
     const now = this.#runtime.now();
     const nextRunAtMs = cronNextMs(expression, now);
@@ -279,6 +285,9 @@ export class SchedulerService implements IScheduler {
    * registered at different instants compute IDENTICAL fire times and agree
    * on distributed-lock slot keys (M70l). The period is unchanged; only the
    * phase moves, and never later than `intervalMs` after registration.
+   * Long intervals use bounded timer chunks without an upper interval limit.
+   * @throws {RangeError} Rejects a non-finite or non-positive `intervalMs`,
+   * or a non-finite or negative `retry.delay`.
    */
   async every<T = unknown>(
     name: string,
@@ -289,6 +298,13 @@ export class SchedulerService implements IScheduler {
     if (!this.#connected) {
       throw new Error('SchedulerService is not connected');
     }
+
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      throw new RangeError(
+        `Job '${name}': intervalMs must be a finite number > 0; got ${intervalMs}`,
+      );
+    }
+    this.#validateRetryDelay(name, options?.retry);
 
     const now = this.#runtime.now();
     const nextRunAtMs = this.#gridAlignedNextRun(now, intervalMs);
@@ -314,6 +330,9 @@ export class SchedulerService implements IScheduler {
 
   /**
    * Schedule a one-shot delayed job.
+   * Long delays use bounded chunks and never dispatch before the due time.
+   * Zero is accepted; there is no upper delay limit.
+   * @throws {RangeError} Rejects a non-finite or negative `delayMs` or `retry.delay`.
    */
   async delay<T = unknown>(
     name: string,
@@ -324,6 +343,11 @@ export class SchedulerService implements IScheduler {
     if (!this.#connected) {
       throw new Error('SchedulerService is not connected');
     }
+
+    if (!Number.isFinite(delayMs) || delayMs < 0) {
+      throw new RangeError(`Job '${name}': delayMs must be a finite number >= 0; got ${delayMs}`);
+    }
+    this.#validateRetryDelay(name, options?.retry);
 
     const now = this.#runtime.now();
     const nextRunAtMs = now + delayMs;
@@ -434,27 +458,29 @@ export class SchedulerService implements IScheduler {
 
   // --- Internal helpers ---
 
+  /** Refuses invalid retry delays before registration; large finite waits are valid. */
+  #validateRetryDelay(name: string, retry: RetryOptions | undefined): void {
+    if (retry !== undefined && (!Number.isFinite(retry.delay) || retry.delay < 0)) {
+      throw new RangeError(
+        `Job '${name}': retry.delay must be a finite number >= 0; got ${retry.delay}`,
+      );
+    }
+  }
+
   /**
-   * Arms the timer for the delay to `entry.nextRunAtMs`, for every kind.
-   *
-   * F1: an `every` entry must NOT be armed for a full `intervalMs` — its
-   * `nextRunAtMs` is grid-aligned (§3.3), so arming for the interval would
-   * run the job one full interval LATER than the boundary it was aligned to,
-   * defeating the grid alignment entirely. The delay is
-   * `Math.max(0, nextRunAtMs - now)`: the distance to the intended fire
-   * (the next epoch grid boundary for `every`), never later than that
-   * boundary and never negative for a timer armed after its time passed.
+   * Arms bounded chunks to `nextRunAtMs`, checking the due time on every wake.
+   * `every` retains its epoch grid alignment. Every re-arm updates the live
+   * handle so pause, remove and disconnect cancel the current chunk.
    */
   #armTimer(entry: RegistryEntry<unknown>): TimerHandle {
-    const now = this.#runtime.now();
-    const delay = Math.max(0, entry.nextRunAtMs - now);
-
-    const handle = this.#runtime.setTimeout(async () => {
-      await this.#fire(entry);
-    }, delay);
-
-    entry.timerHandle = handle;
-    return handle;
+    return armAt(
+      this.#runtime,
+      entry.nextRunAtMs,
+      () => this.#fire(entry),
+      (handle) => {
+        entry.timerHandle = handle;
+      },
+    );
   }
 
   /**

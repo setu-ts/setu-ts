@@ -31,7 +31,8 @@ describe('issuer claim validation', () => {
   });
 
   it('applies the default 30 s skew to exp on both sides of the boundary', async () => {
-    expect(await outcome(valid({ exp: nowSec - 30 }))).toBe('ok');
+    expect(await outcome(valid({ exp: nowSec - 30 + 0.001 }))).toBe('ok');
+    expect(await outcome(valid({ exp: nowSec - 30 }))).toBe('expired');
     expect(await outcome(valid({ exp: nowSec - 31 }))).toBe('expired');
     expect(await outcome(valid({ exp: nowSec - 1 }), 0)).toBe('expired');
   });

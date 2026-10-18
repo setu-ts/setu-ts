@@ -47,6 +47,28 @@ await scheduler.pause('poll-inbox');
 await scheduler.resume('poll-inbox');
 ```
 
+## Timing and registration refusals
+
+`delay`, `every`, `cron` and retry backoff honour long waits in timer chunks of at most 2147483647
+ms, checking the wall clock on every wake. A job never runs before its due time, even after an early
+wake or a clock step backwards. There is no upper limit on a delay or interval: `delay(30 days)`
+waits the full 30 days, and monthly cron jobs wait until their next due instant. Previously, Node,
+Deno and Bun clamped an over-limit timer to about 1 ms, so these jobs could fire early.
+
+Invalid time values now make the async registration call reject with a `RangeError`:
+
+| Registration             | Refused value                   | Message fragment                           |
+| ------------------------ | ------------------------------- | ------------------------------------------ |
+| `delay`                  | `delayMs` not finite or < 0     | `delayMs must be a finite number >= 0`     |
+| `every`                  | `intervalMs` not finite or <= 0 | `intervalMs must be a finite number > 0`   |
+| `delay`, `every`, `cron` | `retry.delay` not finite or < 0 | `retry.delay must be a finite number >= 0` |
+
+Each message also names the job and the rejected value. Zero `delayMs` and zero `retry.delay` are
+accepted; large finite values are accepted. Fix invalid values before registering jobs.
+
+An exponential backoff that overflows to `Infinity` with an enormous retry limit now waits forever
+instead of retrying after about 1 ms.
+
 ## Options
 
 | Option            | Type                                                                 | Default  | Description                                                                                                                                                                                     |

@@ -2,7 +2,7 @@
  * Job executor with retry and backoff.
  *
  * Runs the handler, and on rejection with `attempt < retry.limit`
- * waits the computed backoff (via `runtime.setTimeout`) and retries.
+ * waits the computed backoff in bounded, due-checked timer chunks and retries.
  * At `attempt === retry.limit` it gives up.
  *
  * @module
@@ -18,6 +18,7 @@ import type {
 } from '@setu-ts/common';
 import { composeBehaviorChain } from '@setu-ts/common';
 import { computeBackoffMs } from '../retry/retry-handler.ts';
+import { sleepUntil } from '../timers/bounded-timer.ts';
 import type {
   SchedulerAttemptObserver,
   SchedulerAttemptSettle,
@@ -242,9 +243,7 @@ export async function run<T = unknown>(
         logger?.warn(`Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`, {
           error: error instanceof Error ? error.message : String(error),
         });
-        await new Promise<void>((resolve) => {
-          runtime.setTimeout(resolve, backoffMs);
-        });
+        await sleepUntil(runtime, runtime.now() + backoffMs);
       } else {
         logger?.error(`Job '${jobName}' failed after ${attempt} attempt(s)`, {
           error: error instanceof Error ? error.message : String(error),

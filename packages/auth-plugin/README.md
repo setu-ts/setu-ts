@@ -102,6 +102,19 @@ app.router.post('/auth/login', async (ctx) => {
 });
 ```
 
+## JWT time boundaries
+
+The first-party `JwtService.verify` (the `IJwtService` registered under `'jwt'`) reads time as
+fractional seconds, `runtime.now() / 1000`, with no clock tolerance. It rejects with `Token expired`
+once `now >= exp`, and with `Token not yet valid` while `now < nbf`. At `nbf` the token passes the
+not-before check; at `exp` it fails the expiry check. Previously, a token could be accepted for up
+to one second after `exp`; clients must refresh before `exp`.
+
+The outside-issuer verifier configured through `issuers` also uses fractional seconds, but applies
+`clockToleranceSec`: it rejects as expired once `now >= exp + clockToleranceSec` (previously `>`),
+and as not yet valid while `now + clockToleranceSec < nbf` (unchanged). The tolerance defaults to 30
+seconds and is at most 300 seconds.
+
 ## Strategies
 
 - **JwtStrategy** — passive bearer-token authentication. Extracts `Authorization: Bearer <token>`,
@@ -464,14 +477,15 @@ AuthPlugin({
   with `algorithms`. `none` and every `HS*` algorithm are refused before any key is looked up, so a
   token signed with HMAC using the provider's public key as the secret cannot pass.
 - **Claims.** `iss` exact, `aud` must contain `audience`, `exp` required; `exp`, `nbf` and a future
-  `iat` allow `clockToleranceSec` (default 30, at most 300). `toPrincipal` receives the full
-  verified claims and decides where roles live — the plugin never guesses. **Namespace the id
-  whenever this issuer is not the only identity source** — `sub` is unique only within its issuer,
-  and a self-issued `jwt`, another issuer, an API key, a session or a custom strategy can each
-  produce the same id. ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the example) separates an
-  outside `sub` from the other sources only if none of them can produce an id of that form — a
-  self-issued `sub` or a user-chosen username could — so namespace every source (for example
-  ``{ id: `local|${id}` }``) or keep the other sources' ids free of the separator.
+  `iat` allow `clockToleranceSec` (default 30, at most 300). Expiry is refused at
+  `now >= exp + clockToleranceSec`; not-before is refused while `now + clockToleranceSec < nbf`.
+  `toPrincipal` receives the full verified claims and decides where roles live — the plugin never
+  guesses. **Namespace the id whenever this issuer is not the only identity source** — `sub` is
+  unique only within its issuer, and a self-issued `jwt`, another issuer, an API key, a session or a
+  custom strategy can each produce the same id. ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the
+  example) separates an outside `sub` from the other sources only if none of them can produce an id
+  of that form — a self-issued `sub` or a user-chosen username could — so namespace every source
+  (for example ``{ id: `local|${id}` }``) or keep the other sources' ids free of the separator.
 - **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
   unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
   concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound
