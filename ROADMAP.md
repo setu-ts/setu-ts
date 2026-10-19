@@ -14765,11 +14765,16 @@ drift between the two.
 
 **Open questions the plan must settle.**
 
-1. **Do agents read `node_modules`?** Several agent tools skip git-ignored paths when searching,
-   though a direct read works. The pilot's brief already pointed at `node_modules/.../*.d.ts` and
-   the model followed it; the plan must confirm this for the card path, or fall back to copying
-   cards into the project (the pilot used `.setu/docs/`) on `setu add`, with `setu agents` filling
-   in cards for packages installed some other way.
+1. **Do agents read `node_modules`, and does it exist?** It exists for every project the CLI
+   generates: npm and pnpm create it, `bun install` (1.4.2) creates `node_modules/@setu-ts/<pkg>/`
+   with the README and sources in it, a Workers project is developed against an npm install (only
+   the deployed bundle has none), and generated Deno projects set `nodeModulesDir: "auto"`. It does
+   NOT exist under Yarn Plug'n'Play or a Deno project without `nodeModulesDir`. Several agent tools
+   also skip git-ignored paths when searching, though a direct read works; the pilot's brief pointed
+   at `node_modules/.../*.d.ts` and the model followed it. The plan must confirm the card path is
+   read, and decide the fallback for the projects without `node_modules`: copying cards into the
+   project (the pilot used `.setu/docs/`) on `setu add`, with `setu agents` filling in cards for
+   packages installed some other way.
 2. **The card file's name and location in the tarball**, and whether a non-plugin package (`kernel`,
    `common`, `runtime`, `testing`) gets one. The pilot gave `common`, `runtime` and `testing` cards
    from the start.
