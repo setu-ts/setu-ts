@@ -548,13 +548,19 @@ describe('runNewCommand', () => {
         'HttpSecurityPlugin',
         'OpenApiPlugin',
       ]) {
-        if (symbol !== 'ValidationPlugin') {
+        if (symbol !== 'ValidationPlugin' && symbol !== 'LoggerPlugin') {
           expect(config).toContain(`${symbol}()`);
         }
       }
       // M70f (C3): validation answers in the same Problem Details shape the
       // `errorHandler` emits for thrown errors, so it is NOT argument-free.
       expect(config).toContain("ValidationPlugin({ errorFormat: 'rfc9457' })");
+      // M113h §3.9: the scaffold opts in to request logging, excluding the probe
+      // and scrape paths so a kubelet does not write a line per poll. The file
+      // has been through Prettier, so the call is wrapped.
+      expect(config).toContain('LoggerPlugin({');
+      expect(config).toContain('requestLogging: true');
+      expect(config).toContain("excludePaths: ['/live', '/ready', '/health', '/metrics'],");
       expect(config).toContain("ConfigPlugin({ envFilePath: '.env', envFileOptional: true })");
       // Three plugins take a generated-artifact seam, so they are NOT argument-free.
       // Asserted by their actual call so a dropped seam shows up here rather than only

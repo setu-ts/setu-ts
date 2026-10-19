@@ -39,6 +39,19 @@ describe('workspaceRootFiles', () => {
     );
   });
 
+  it('ignores the React Router typegen directory for members too (V9-11)', () => {
+    // Unanchored, so a full-stack member's `apps/<member>/.react-router/` is
+    // covered by the same rule as the root's.
+    expect(contentsOf('.gitignore')).toContain('.react-router/\n');
+  });
+
+  it('ignores each member dotenv file, and keeps the example (V9-39)', () => {
+    const ignore = contentsOf('.gitignore');
+    expect(ignore).toContain('\n.env\n');
+    expect(ignore).toContain('.env.*');
+    expect(ignore).toContain('!.env.example');
+  });
+
   it('plans no path twice', () => {
     expect(firstDuplicatePath(workspaceRootFiles('acme', 3000, HTTP, DENO))).toBeUndefined();
   });
@@ -151,5 +164,9 @@ describe('the workspace README transport section', () => {
   it('carries the transport operational note when it has one', () => {
     expect(readmeFor('pubsub')).toContain('Topics are NOT');
     expect(readmeFor('service-bus')).toContain('NO entities');
+    // V9-17: the subject scope every member must use, stated where a workspace
+    // developer will look before publishing.
+    expect(readmeFor('nats')).toContain('must start with `app.`');
+    expect(readmeFor('nats')).toContain("topic: 'app.realtime'");
   });
 });

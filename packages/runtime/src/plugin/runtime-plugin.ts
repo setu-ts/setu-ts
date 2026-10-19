@@ -7,7 +7,13 @@
  * @module
  */
 
-import type { IHttpAdapter, IPlugin, IPluginContext, RuntimePlatform } from '@setu-ts/common';
+import type {
+  IHttpAdapter,
+  ILogger,
+  IPlugin,
+  IPluginContext,
+  RuntimePlatform,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { createLocalDiagnosticsListenerFactory } from '../diagnostics/local-diagnostics-listener.ts';
@@ -188,6 +194,30 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
       });
       ctx.services.register(CAPABILITIES.RUNTIME, services);
 
+      // Last-resort reporter for a server-side fault an adapter cannot answer
+      // with a response — a Node WebSocket handshake with `ws` absent or `ws`
+      // itself throwing. Resolved at CALL time rather than registration time:
+      // this plugin registers first (HIGHEST priority), so a logger mounted
+      // later is the one that must see it, and before that the runtime's own
+      // stderr sink does. Guarded: reporting must never turn an already failing
+      // request into a crashed one.
+      const reportError = (record: Readonly<Record<string, unknown>>): void => {
+        try {
+          if (ctx.services.has(CAPABILITIES.LOGGER)) {
+            // The logger method itself is the level, so neither the level nor
+            // the message belongs in the metadata.
+            const metadata = Object.fromEntries(
+              Object.entries(record).filter(([key]) => key !== 'msg' && key !== 'level'),
+            );
+            ctx.services.get<ILogger>(CAPABILITIES.LOGGER).error(String(record['msg']), metadata);
+            return;
+          }
+          services.reportError?.(record);
+        } catch {
+          // A broken logger or sink must not replace the original failure.
+        }
+      };
+
       // Register HTTP adapter
       const httpAdapterFactory = (
         httpAdapters as Record<
@@ -201,7 +231,10 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
       // `exactOptionalPropertyTypes`: omit the member entirely when unset, so
       // an adapter reading `options?.maxBodyBytes` sees the same `undefined`
       // either way and no caller can pass an explicit `undefined`.
-      const httpAdapter = httpAdapterFactory(maxBodyBytes === undefined ? {} : { maxBodyBytes });
+      const httpAdapter = httpAdapterFactory({
+        ...(maxBodyBytes === undefined ? {} : { maxBodyBytes }),
+        reportError,
+      });
       ctx.services.register(CAPABILITIES.HTTP_ADAPTER, httpAdapter);
 
       // Register the runtime-owned local diagnostics listener factory (M98b).

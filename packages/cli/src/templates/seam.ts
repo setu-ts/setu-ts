@@ -200,6 +200,52 @@ export function withPluginOptionSeams(
 }
 
 /**
+ * Each `DecoratorPlugin` option and the barrel export that feeds it.
+ *
+ * One table, shared by {@linkcode decoratorKeyFor} and
+ * {@linkcode decoratorExportFor}, so a new decorator seam cannot map to a key
+ * whose export the report names differently.
+ */
+const DECORATOR_ARMS = [
+  ['controllers', APP_CONTROLLERS_EXPORT],
+  ['services', APP_SERVICES_EXPORT],
+  ['ingress', INGRESS_HANDLERS_EXPORT],
+] as const;
+
+/**
+ * The `DecoratorPlugin` option key a seam's barrel feeds, if any.
+ *
+ * Keyed on the barrel's EXPORT rather than its schematic name, so the same
+ * family in its functional shape (which exports nothing for the plugin) maps to
+ * nothing, and controller and class-based route — two schematics sharing one
+ * barrel — map to one key. This is the single table both
+ * {@linkcode decoratorSeamExtras} and `setu generate`'s unwired-barrel report
+ * read.
+ *
+ * @param spec - The seam
+ * @returns The decorator key, or `undefined` when the barrel feeds no plugin arm
+ */
+export function decoratorKeyFor(
+  spec: SeamSpec,
+): 'controllers' | 'services' | 'ingress' | undefined {
+  return DECORATOR_ARMS.find(([, symbol]) => spec.exports.includes(symbol))?.[0];
+}
+
+/**
+ * The barrel export that feeds a seam's `DecoratorPlugin` option.
+ *
+ * The companion of {@linkcode decoratorKeyFor}, from the same table: the key
+ * alone is not enough to render the line a developer must add, because the
+ * option spreads the named export.
+ *
+ * @param spec - The seam
+ * @returns The exported identifier, or `undefined` when the barrel feeds no plugin arm
+ */
+export function decoratorExportFor(spec: SeamSpec): string | undefined {
+  return DECORATOR_ARMS.find(([, symbol]) => spec.exports.includes(symbol))?.[1];
+}
+
+/**
  * The extra controller and service identifiers the decorator wiring must name, beyond
  * the module barrel.
  *
@@ -215,15 +261,13 @@ export function decoratorSeamExtras(seams: readonly SeamSpec[]): {
   readonly services: readonly string[];
   readonly ingress: readonly string[];
 } {
-  const schematics = new Set(seams.map((spec) => spec.schematic));
+  const keys = new Set(seams.map(decoratorKeyFor));
   return {
     // Gated on the EXPORT, not the schematic name: both modes generate
     // controllers, but only the class-based barrel declares APP_CONTROLLERS —
     // spreading it in a functional project would name a symbol that is not there.
-    controllers: seams.some((spec) => spec.exports.includes(APP_CONTROLLERS_EXPORT))
-      ? [`...${APP_CONTROLLERS_EXPORT}`]
-      : [],
-    services: schematics.has('service') ? [`...${APP_SERVICES_EXPORT}`] : [],
-    ingress: schematics.has('ingress') ? [`...${INGRESS_HANDLERS_EXPORT}`] : [],
+    controllers: keys.has('controllers') ? [`...${APP_CONTROLLERS_EXPORT}`] : [],
+    services: keys.has('services') ? [`...${APP_SERVICES_EXPORT}`] : [],
+    ingress: keys.has('ingress') ? [`...${INGRESS_HANDLERS_EXPORT}`] : [],
   };
 }

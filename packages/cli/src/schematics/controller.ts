@@ -34,8 +34,11 @@ import type { IRequestContext } from '@setu-ts/common';
  * HTTP controller for the ${names.kebab} resource.
  *
  * Registered through the \`${APP_CONTROLLERS_EXPORT}\` barrel in
- * \`${HTTP_SEAM_DIR}/index.ts\`, which \`setu.config.ts\` passes to \`DecoratorPlugin\` —
- * so this class needs no further wiring.
+ * \`${HTTP_SEAM_DIR}/index.ts\`: \`setu.config.ts\` passes it as
+ * \`DecoratorPlugin({ controllers: [...${APP_CONTROLLERS_EXPORT}] })\`, or a starter
+ * does through its \`decorators: { controllers: … }\` arm. \`setu generate\` reports
+ * when the config references neither, so this class is never claimed wired
+ * without it.
  *
  * A decorated handler receives ONLY the arguments its \`@Params(...)\` names, in
  * that order: the plugin builds the argument list from that declaration alone

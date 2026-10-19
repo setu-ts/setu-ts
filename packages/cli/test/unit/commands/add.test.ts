@@ -1392,3 +1392,90 @@ export async function createApp() {
     expect(h.read('/app/src/events/index.ts')).toBe(EVENTS_SEAM.renderBarrel({}));
   });
 });
+
+describe('setu add — the Node ws peer (M113h §3.8a)', () => {
+  /** A Node project manifest, as `detectTargetRuntime` recognizes one. */
+  function nodeManifest(dependencies: Readonly<Record<string, string>> = {}): string {
+    return JSON.stringify(
+      { name: 'svc', scripts: { start: 'tsx main.ts' }, dependencies },
+      null,
+      2,
+    );
+  }
+
+  it('adds ws at its peer range on Node and names it', async () => {
+    const h = harness({ '/app/package.json': nodeManifest() });
+
+    expect(await h.run(['websocket'])).toBe(0);
+
+    const dependencies = JSON.parse(h.read('/app/package.json')).dependencies as Record<
+      string,
+      string
+    >;
+    expect(dependencies['@setu-ts/websocket-plugin']).toBe(`^${VERSION}`);
+    expect(dependencies['ws']).toBe('^8.18.0');
+    expect(h.out.join('\n')).toContain(
+      'added ws (the Node WebSocket server, an optional peer of @setu-ts/runtime)',
+    );
+  });
+
+  it('adds ws when the plugin is already pinned — the recovery path', async () => {
+    // A project scaffolded before the peer arm carries the plugin but not `ws`,
+    // and its first upgrade answers 500. Re-running the command must repair it.
+    const h = harness({
+      '/app/package.json': nodeManifest({ '@setu-ts/websocket-plugin': `^${VERSION}` }),
+    });
+
+    expect(await h.run(['websocket'])).toBe(0);
+
+    expect(JSON.parse(h.read('/app/package.json')).dependencies['ws']).toBe('^8.18.0');
+    expect(h.out.join('\n')).toContain('added ws (the Node WebSocket server');
+  });
+
+  it('never overwrites an existing ws pin', async () => {
+    const h = harness({ '/app/package.json': nodeManifest({ ws: '^7.0.0' }) });
+
+    expect(await h.run(['websocket'])).toBe(0);
+
+    expect(JSON.parse(h.read('/app/package.json')).dependencies['ws']).toBe('^7.0.0');
+    expect(h.out.join('\n')).not.toContain('added ws');
+  });
+
+  for (const [runtime, manifest, extra] of [
+    [
+      'Bun',
+      JSON.stringify(
+        { name: 'svc', scripts: { start: 'bun run main.ts' }, dependencies: {} },
+        null,
+        2,
+      ),
+      {},
+    ],
+    [
+      'Workers',
+      JSON.stringify(
+        { name: 'svc', scripts: { start: 'wrangler dev' }, dependencies: {} },
+        null,
+        2,
+      ),
+      { '/app/wrangler.toml': 'name = "edge"\n', '/app/deno.json': DENO_MANIFEST },
+    ],
+  ] as const) {
+    it(`adds no peer on ${runtime}`, async () => {
+      const h = harness({ '/app/package.json': manifest, ...extra });
+
+      expect(await h.run(['websocket'])).toBe(0);
+
+      expect(JSON.parse(h.read('/app/package.json')).dependencies['ws']).toBeUndefined();
+      expect(h.out.join('\n')).not.toContain('added ws');
+    });
+  }
+
+  it('adds no peer for a package that declares none', async () => {
+    const h = harness({ '/app/package.json': nodeManifest() });
+
+    expect(await h.run(['auth'])).toBe(0);
+
+    expect(JSON.parse(h.read('/app/package.json')).dependencies['ws']).toBeUndefined();
+  });
+});

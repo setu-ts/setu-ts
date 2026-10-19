@@ -7,7 +7,7 @@ import { PLUGIN_HEALTH_INDICATORS } from '../utils/plugin-claims.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
-import { readEnvFilePath } from '../templates/env-file.ts';
+import { configuredEnvFilePath } from '../templates/env-file.ts';
 
 /** CLI-owned policy module, refreshed when a plugin is installed. */
 export const DEVTOOL_SOURCES_MODULE = 'src/devtool/diagnostics.ts';
@@ -1270,11 +1270,8 @@ export async function readDevtoolSourceNames(
     }
   }
   let envKeys: readonly string[] = [];
-  const configuredPath = /\benvFilePath:\s*'([^']+)'/.exec(config)?.[1];
-  const parsedPath = readEnvFilePath(
-    configuredPath === undefined ? {} : { 'env-file': configuredPath },
-  );
-  const envExample = parsedPath.ok ? `${parsedPath.path ?? '.env'}.example` : '.env.example';
+  const configuredPath = configuredEnvFilePath(config);
+  const envExample = `${configuredPath ?? '.env'}.example`;
   try {
     const env = new TextDecoder().decode(await fs.readFile(joinPath(dir, envExample)));
     envKeys = env.split(/\r?\n/).flatMap((line) => /^([A-Z][A-Z0-9_]*)=/.exec(line)?.[1] ?? []);

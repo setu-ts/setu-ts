@@ -12,6 +12,7 @@
  */
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import { NPM_TOOLING_DEV_DEPENDENCIES } from './npm-tooling.ts';
 
 /**
  * React Router major the emitted project is written against.
@@ -234,7 +235,11 @@ export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> =
   'react-dom': '^19.2.0',
   '@types/react': '^19.2.0',
   '@types/react-dom': '^19.2.0',
-  typescript: '^5.9.2',
+  // The tooling's pin, not a second opinion: `npm-tooling.ts` holds the whole
+  // npm toolchain to one TypeScript line, and `~5.9.2` here overrode it on
+  // EVERY npm target, because this list is merged after the tooling's. `@react-
+  // router/dev@8` accepts TypeScript 6 (`^5.1.0 || ^6.0.0 || ^7.0.0`).
+  typescript: NPM_TOOLING_DEV_DEPENDENCIES.typescript,
   vite: '^8.0.0',
 };
 

@@ -269,6 +269,14 @@ app.register({
 await app.start({ port: 3000 });
 ```
 
+### Startup logging
+
+After `adapter.listen` succeeds, the kernel logs one `info` record through `CAPABILITIES.LOGGER`
+when one is registered: `Server listening` with the `port`, and `hostname` only when one was
+supplied. A `port: 0` start logs `Server listening on an ephemeral port` with no port field. With no
+logger, nothing is logged; a logger that throws never fails `start()`. Deno also keeps its own
+native listening banner, so a Deno start shows both lines.
+
 ### Route Introspection
 
 `app.router.listRoutes()` returns `RouteInfo` entries. Each entry has an optional `owner`: it is the
@@ -374,6 +382,17 @@ own status: the read can now REJECT, and a `catch` that assumes a parse failure 
 cause and the wrong remedy. `@setu-ts/graphql-plugin`'s two HTTP transports answer `413` with
 `extensions.code: 'REQUEST_BODY_TOO_LARGE'`, and `@setu-ts/storage-plugin`'s upload middleware
 serves the hint through `respondWithError`.
+
+### Reporting a failed WebSocket handshake
+
+`HttpAdapterOptions.reportError?: (record: Readonly<Record<string, unknown>>) => void`
+(`@since 0.10.0`) is a last-resort sink for a server-side Node handshake failure: `ws` is not
+installed, or it throws while upgrading. `RuntimePlugin` supplies one resolved at call time — the
+registered logger's `error`, else `IRuntimeServices.reportError`, with a throwing logger swallowed.
+The Node adapter reports
+`{ level: 'error', msg: 'WebSocket handshake failed', ...serializeError(cause) }` at most once per
+distinct message per handle, then refuses the upgrade with the same `500` and no body as before.
+Deno, Workers and Bun ignore the option; omitted, the refusal is silent.
 
 ### Accessing Runtime Services
 

@@ -6531,6 +6531,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   non-compiling documents was false for `request` and `opts`, and a path parameter or operation
   named `encodeURIComponent` (pre-existing) shadowed the global every generated path calls, so it
   joins both rename sets — complete (PR #476)
+- **Milestone 113h** (`cli` + `runtime` + `kernel` — generated output that is wrong; V9-8, V9-17,
+  V9-38, V9-39, V9-9, V9-11, V9-42, V9-67, V9-81, on one `fix/` branch): `setu generate` reports a
+  decorator barrel `setu.config.ts` does not reference (naming the starter's `decorators` arm in a
+  starter-composed project) and the generated comments stop claiming the wiring; NATS scaffolds emit
+  `streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`; `setu adopt` records probe support from
+  the project's dependencies, moves a single-segment dotenv pair with a member `.gitignore`, and
+  rewrites the entry the CLI actually emits; workspace `.gitignore`/`.dockerignore` keep dotenv
+  files out of git and images; a Workers full-stack scaffold declares Node types and its `check`
+  builds first; `.react-router/` is ignored; `setu add websocket` writes `ws` on Node and a failed
+  Node handshake is reported once per distinct error through the new
+  `HttpAdapterOptions.reportError`; the kernel logs `Server listening` and scaffolds turn request
+  logging on with probe paths excluded. `logger-plugin` needed no source change. Implemented by
+  opencode on `opencode/deepseek-v4.1-flash-free` (the maintainer's choice for this milestone),
+  whose first pass made a test fit instead of fixing V9-9 (a fresh Workers scaffold still failed its
+  own `check`) and left generated files failing their own format check; both fixed. The security
+  audit ran four rounds: three fresh Claude agents, then Codex for round 4 at the maintainer's
+  direction for this session. Round 1 found a High — `adopt` moved `.env` out from under an anchored
+  root `/.env` rule, so `git add -A` staged it — plus a `.dockerignore` comment overclaiming
+  coverage and a quadratic regex; rounds 2–4 found Lows in the fixes (a failed conversion left files
+  moved with no rollback; a member `.gitignore` read through a link to `/dev/zero`; dry runs that
+  promised a clean plan the real run refused). All are fixed; the last (move destinations outside
+  the dry-run preflight) was NOT re-audited, at the maintainer's direction. Trap recorded: an
+  `opencode run` session kept editing through opencode's background service after its client had
+  exited — complete (PR #477)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

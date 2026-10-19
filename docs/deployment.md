@@ -106,6 +106,26 @@ rather than its source.
 Building from source also means an image tracks your working tree rather than a published snapshot,
 which is what you want during a version bump, when the pinned version is not on npm yet.
 
+### Dotenv files never reach an image
+
+The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
+`!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
+cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
+match those patterns is **not** covered. `setu generate app` and `setu adopt` print one line naming
+such a file by its path from the workspace root (for example `apps/billing/local.env`), which is the
+form to add to `.dockerignore`: that file sits at the workspace root, and a pattern without a slash
+matches only there. The CLI cannot edit a file you own for you.
+
+`setu adopt` moves a configured single-segment dotenv pair into the member, where the member's
+`envFilePath` reads it, and writes `apps/<member>/.gitignore` with `/<name>` for the moved dotenv
+file (never its `.example`, which stays committed). The member rule matters because a root rule such
+as `/.env` is anchored to the repository root and would stop matching after the move; a nested
+`.gitignore` is anchored to its own directory, so the secret stays ignored. When the moved name is
+not covered by the generic rules, adopt prints the same `.dockerignore` note. A multi-segment
+`envFilePath` is left at the root with the step printed: move it by hand and add an ignore rule
+beside it, because a pattern containing a slash is anchored to its directory and the root rule would
+stop matching after the move.
+
 ### Pin the base image and pnpm
 
 Both Dockerfiles use a `node:24` base and install the same pnpm version the root `package.json` pins

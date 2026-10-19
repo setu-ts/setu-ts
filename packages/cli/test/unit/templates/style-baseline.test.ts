@@ -6,7 +6,7 @@ import * as nodeFs from 'node:fs/promises';
  * `test/fixtures/capture-template-baseline.ts` BEFORE any template change in
  * M99e, refreshed for M101g's reviewed factory and smoke-test changes:
  *
- *   deno run --allow-read --allow-write packages/cli/test/fixtures/capture-template-baseline.ts
+ *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *
  * It is regenerated only by that invocation and never edited by hand. This
  * test re-renders every (host, runtime) pair the script captured — through the

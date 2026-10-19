@@ -3,6 +3,11 @@ import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { listBrokers, listQueues, listTransports } from '../../src/workspace/transport.ts';
+import type { TransportSpec } from '../../src/workspace/transport.ts';
+import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
+import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+import { resolveHost } from '../../src/templates/project-files.ts';
+import { getTemplate } from '../../src/templates/registry.ts';
 
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
@@ -64,6 +69,36 @@ describe('a --broker scaffold', () => {
     expect(config).toContain("broker: 'redis-streams'");
     expect(config).toContain('process.env.REDIS_URL');
     expect(config).toContain("'redis://127.0.0.1:6379'");
+  });
+
+  it('renders the NATS stream subject set and its README note (V9-17)', async () => {
+    const h = harness();
+    expect(await h.run(['svc', '--template', 'microservice', '--broker', 'nats'])).toBe(0);
+    const config = h.fs.read('/work/svc/setu.config.ts');
+    expect(config).toContain("broker: 'nats'");
+    expect(config).toContain("streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']");
+    // Pinned as one exact block, at the indentation the config renderer places a
+    // plugin call: the multi-line form is what `deno fmt`/Prettier produce, so a
+    // one-line regression is a scaffold that fails its own format check.
+    expect(config).toContain(
+      [
+        '      MessagingPlugin({',
+        "        broker: 'nats',",
+        "        url: process.env.NATS_URL ?? 'nats://127.0.0.1:4222',",
+        "        streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>'],",
+        '      }),',
+      ].join('\n'),
+    );
+    // The scope is an operational fact the developer cannot guess, so it is in
+    // the standalone README as well as the workspace one.
+    const readme = h.fs.read('/work/svc/README.md');
+    expect(readme).toContain('must start with `app.`');
+    expect(readme).toContain('MESSAGING');
+    // Wrapped to the generated width with the inline code span kept whole, which
+    // is what `deno fmt --check` on a fresh scaffold requires.
+    expect(readme).toContain(
+      'must set\n`topic: ' + "'app.realtime'" + '` — its default `setu-ts.realtime`',
+    );
   });
 
   it('differs from the default microservice scaffold', async () => {
@@ -237,5 +272,43 @@ describe('broker and queue refusals', () => {
     expect(config).toContain('MessagingPlugin()');
     expect(config).not.toContain('broker:');
     expect(h.fs.has('/work/svc/docker/compose.yaml')).toBe(false);
+  });
+});
+
+describe('the transport note carried by both overlay arms', () => {
+  // No registered transport declares a note AND both arms, but both overlays
+  // read the same `connection.note`, so a spec that did would print the
+  // paragraph twice without the guard. Driven directly rather than left as an
+  // assumption about which arms can coexist.
+  const spec: TransportSpec = {
+    name: 'redis',
+    description: 'synthetic transport with one note and both arms',
+    plugins: [],
+    messagingArgs: () => `{ broker: 'redis-streams' }`,
+    queueArgs: () => `{ adapter: 'redis' }`,
+    connection: {
+      variable: 'REDIS_URL',
+      localDefault: 'redis://127.0.0.1:6379',
+      urlOverridable: true,
+      note: 'Start the broker before the app.',
+    },
+  };
+
+  it('appends the note once when both arms apply', () => {
+    const host = resolveHost(getTemplate('microservice')!, 'deno');
+    const afterBroker = withBrokerArgs(host, spec, workspaceProfile('deno'));
+    expect(afterBroker.transportNotes).toEqual(['Start the broker before the app.']);
+
+    const afterQueue = withQueueArgs(afterBroker, spec, workspaceProfile('deno'));
+    expect(afterQueue.transportNotes).toEqual(['Start the broker before the app.']);
+  });
+
+  it('treats absent client lists as optional while still rewriting', () => {
+    const host = resolveHost(getTemplate('microservice')!, 'deno');
+    const afterBroker = withBrokerArgs(host, spec, workspaceProfile('deno'));
+    const afterQueue = withQueueArgs(afterBroker, spec, workspaceProfile('deno'));
+
+    expect(afterBroker.plugins.some((wiring) => wiring.pkg === 'messaging-plugin')).toBe(true);
+    expect(afterQueue.plugins.some((wiring) => wiring.pkg === 'queue-plugin')).toBe(true);
   });
 });

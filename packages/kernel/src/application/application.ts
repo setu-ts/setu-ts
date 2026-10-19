@@ -808,6 +808,7 @@ class Application implements IKernelApplication {
       if (listenOperation !== undefined) {
         collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'ok');
       }
+      this.#announceListening(options.port, options.hostname);
     }
   }
 
@@ -2193,6 +2194,36 @@ class Application implements IKernelApplication {
           { plugin, capability },
         );
       }
+    } catch {
+      // The logger itself failed or none is resolvable — no safe channel
+      // remains without violating the no-console rule; degrade silently.
+    }
+  }
+
+  /**
+   * Announces a successful `adapter.listen` through the registered logger.
+   *
+   * Node and Bun print nothing of their own, so before this a booted project
+   * looked the same whether it had bound a socket or was still starting. Deno
+   * also prints its native "Listening on" banner; this line is additive there,
+   * and both are accurate. A `port: 0` request reports an ephemeral port rather
+   * than the literal zero. A missing or itself-broken logger degrades silently:
+   * it must never turn a successful start into a failure.
+   *
+   * @param port - The port `adapter.listen` was asked for
+   * @param hostname - The configured hostname, absent when none was supplied
+   */
+  #announceListening(port: number, hostname?: string): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      if (port === 0) {
+        logger.info('Server listening on an ephemeral port');
+        return;
+      }
+      logger.info('Server listening', hostname === undefined ? { port } : { port, hostname });
     } catch {
       // The logger itself failed or none is resolvable — no safe channel
       // remains without violating the no-console rule; degrade silently.

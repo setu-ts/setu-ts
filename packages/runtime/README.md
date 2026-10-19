@@ -102,6 +102,15 @@ the one way to say unbounded. A value that is not a non-negative integer throws 
 `RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
 silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
 
+### Reporting a failed WebSocket handshake
+
+`HttpAdapterOptions` accepts `reportError?: (record: Readonly<Record<string, unknown>>) => void`
+(`@since 0.10.0`). `RuntimePlugin` supplies one resolved at CALL time: the registered logger's
+`error`, else `IRuntimeServices.reportError`, and a throwing logger never fails the report. The Node
+adapter calls it at most once per distinct message per handle when a server-side handshake fails —
+`ws` is missing or throws — before answering `500`; Deno, Workers and Bun ignore the option.
+Omitted, the refusal is silent as before.
+
 `adapters` and `httpAdapters` are marked `@internal` — they exist so unit tests can run without OS
 permissions or real runtime globals, not as application configuration.
 

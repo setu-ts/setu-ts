@@ -142,6 +142,12 @@ describe('what an npm workspace renders', () => {
     const ignore = rootFile('.gitignore');
     expect(ignore).toContain('node_modules/');
     expect(ignore).toContain('apps/*/node_modules/');
+    // Both profiles ignore React Router's typegen directory (V9-11).
+    expect(ignore).toContain('.react-router/');
+    // Both profiles ignore each member's dotenv file, keeping the example (V9-39).
+    expect(ignore).toContain('.env\n');
+    expect(ignore).toContain('.env.*');
+    expect(ignore).toContain('!.env.example');
   });
 
   it('records the runtime, so every later command reads it back', () => {

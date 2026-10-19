@@ -57,6 +57,9 @@ import { scanModules } from '../utils/module-scanner.ts';
 import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
+import { decoratorExportFor, decoratorKeyFor } from '../templates/seam.ts';
+import { composingStarter } from '../utils/starter-arms.ts';
+import { maskSourceCode } from '../devtool/sources.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
 import {
   legacyLayoutNotice,
@@ -526,6 +529,12 @@ export async function runGenerateCommand(
     // alternative, a provenance marker in the artifact, would un-wire every artifact
     // in every project generated before this release.
     reportAdoptions(adoptions, 'Adopted', deps.error);
+    // The barrel is managed and now lists the artifact, but the developer's config
+    // may never have consumed it — an inline project generated before the seam
+    // existed, or a starter-composed one whose decorators arm was never filled in.
+    // The CLI cannot edit that config (M101g), so it prints the exact line instead
+    // of letting the file appear wired when nothing registers it.
+    await reportUnwiredDecoratorSeams(deps.fs, dir, generated, installed, deps.error);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
@@ -539,6 +548,66 @@ export async function runGenerateCommand(
   }
 
   return EXIT_OK;
+}
+
+/**
+ * Reports each generated decorator barrel `setu.config.ts` does not reference.
+ *
+ * The command owns the barrel but not the config, and M101g limits what it may
+ * edit there to text it can classify. A starter-composed config owns
+ * `DecoratorPlugin` behind its own `decorators` arm, so that form is named in
+ * the report instead of an inline call the config does not have.
+ *
+ * Strings and comments are masked before the search, so a mention there does
+ * not count as wired. An unclassifiable config is reported: the mask cannot
+ * prove the mention is code, and a false report is recoverable while a silent
+ * unwired barrel is not. A config that cannot be read reports nothing, because
+ * there is no file to point at.
+ *
+ * @param fs - The filesystem to read the config through
+ * @param dir - The project directory
+ * @param generated - The files this run wrote, relative to the project
+ * @param installed - The `@setu-ts` packages detected in the project
+ * @param error - The command's error channel
+ */
+async function reportUnwiredDecoratorSeams(
+  fs: IFileSystem,
+  dir: string,
+  generated: readonly GeneratedFile[],
+  installed: ReadonlySet<string>,
+  error: (message: string) => void,
+): Promise<void> {
+  const written = new Set(generated.map((file) => file.path));
+  const seams = new Map<
+    string,
+    { readonly key: 'controllers' | 'services' | 'ingress'; readonly symbol: string }
+  >();
+  for (const spec of scanSeamSpecs(installed)) {
+    if (!written.has(spec.barrel) || seams.has(spec.barrel)) continue;
+    const key = decoratorKeyFor(spec);
+    const symbol = decoratorExportFor(spec);
+    if (key === undefined || symbol === undefined) continue;
+    seams.set(spec.barrel, { key, symbol });
+  }
+  if (seams.size === 0) return;
+
+  const config = await readConfigModule(fs, dir);
+  if (config === '') return;
+  const code = maskSourceCode(config);
+  const starter = composingStarter(config);
+
+  for (const [barrel, { key, symbol }] of seams) {
+    // Unclassifiable (`undefined`) fails toward reporting.
+    if (code !== undefined && new RegExp(`\\b${symbol}\\b`).test(code)) continue;
+    if (starter !== undefined) {
+      error(`${starter.symbol} owns DecoratorPlugin; merge the barrel into its decorators arm:`);
+      error(`  decorators: { ${key}: [...${symbol}] }`);
+    } else {
+      error(`setu.config.ts does not reference ${symbol}; add it to DecoratorPlugin:`);
+      error(`  ${key}: [...${symbol}]`);
+    }
+    error(`  import { ${symbol} } from './${barrel}';`);
+  }
 }
 
 /**

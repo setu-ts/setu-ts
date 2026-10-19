@@ -390,10 +390,21 @@ try {
       expect(installed.code, installed.output).toBe(0);
       const booted = await withNodeServer(project, async (origin) => {
         const statuses: number[] = [];
-        for (const path of DOCS_PATHS) statuses.push((await fetch(`${origin}${path}`)).status);
+        // `/health` is requested too, so the log assertions below can prove the
+        // scaffold's configured exclusion actually suppresses its line.
+        for (const path of [...DOCS_PATHS, '/health']) {
+          statuses.push((await fetch(`${origin}${path}`)).status);
+        }
         return statuses;
       });
-      expect(booted.result, booted.output).toEqual([200, 200, 200, 200]);
+      expect(booted.result, booted.output).toEqual([200, 200, 200, 200, 200]);
+      // M113h §3.9: Node used to boot silently. The kernel announces the bound
+      // port, the opt-in request logger reports a normal request, and the
+      // generated `excludePaths` keeps a probe's line out of the log.
+      expect(booted.output).toContain('Server listening');
+      expect(booted.output).toContain('"msg":"request completed"');
+      expect(booted.output).toContain('"path":"/"');
+      expect(booted.output).not.toContain('"/health"');
     } finally {
       await overlay.close();
     }

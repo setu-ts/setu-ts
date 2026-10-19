@@ -14330,6 +14330,22 @@ swallows `loadWsModule`'s error), V9-81 (no startup line in any configuration, a
 `LoggerPlugin()` logs no requests, so a fresh app prints nothing while it serves — ASP.NET and
 NestJS both announce startup).
 
+**Shipped.** All nine rows on one `fix/` branch (plan
+`plans/archive/milestone-113h-generated-output.md`). `setu generate` reports a decorator barrel
+`setu.config.ts` does not reference, naming the starter's `decorators` arm in a starter-composed
+project, and the generated comments no longer claim the wiring (V9-8). NATS scaffolds emit
+`streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`, proven against a real NATS server
+(V9-17). `setu adopt` records probe support from the project's dependencies, moves a single-segment
+dotenv pair into the member, and rewrites the entry the CLI actually emits; the workspace
+`.dockerignore` and `.gitignore` keep dotenv files out of images and git (V9-38, V9-39, V9-42). A
+Workers full-stack scaffold declares the Node types its Vite config needs and its `check` builds
+first, so a fresh scaffold passes its own check; every full-stack scaffold pins TypeScript `~6.0.3`
+(V9-9). `.react-router/` is ignored everywhere a build output is (V9-11). `setu add websocket`
+writes `ws` on Node, and a failed Node handshake is reported once per distinct error through the new
+`HttpAdapterOptions.reportError` (V9-67). The kernel logs `Server listening` when a logger is
+registered, and scaffolds turn request logging on with the probe paths excluded (V9-81).
+`logger-plugin` needed no source change.
+
 ### Milestone 113i: CLI Commands Whose Refusals and Guidance Mislead
 
 **Package(s):** `packages/cli` — **fix** letter.
@@ -15074,7 +15090,7 @@ patch by construction and gains nothing new here.
 | 113e      | ✅     | auth-plugin + session-plugin — identity and session semantics a client cannot predict; PR #467                                                                                                                                                                                            |
 | 113f      | ✅     | exceptions + logger + database + health + openapi — what reaches logs and public endpoints; PR #468                                                                                                                                                                                       |
 | 113g      | ✅     | database-plugin + common + cloudflare — database calls and errors under faults and edge inputs; PR #470                                                                                                                                                                                   |
-| 113h      | ⬜     | cli — generated output that is wrong (fix branches)                                                                                                                                                                                                                                       |
+| 113h      | ✅     | cli + runtime + kernel — generated output that is wrong; PR #477                                                                                                                                                                                                                          |
 | 113i      | ⬜     | cli — commands whose refusals and guidance mislead (fix branches)                                                                                                                                                                                                                         |
 | 113j      | ✅     | messaging-plugin + database-plugin — outbox and inbox signals; PR #469                                                                                                                                                                                                                    |
 | 113k      | ✅     | sdk + idempotency + http-security + database — the idempotency key from client to server; PR #476                                                                                                                                                                                         |

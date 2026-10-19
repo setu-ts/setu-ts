@@ -101,9 +101,9 @@ describe('workspaceK8sFiles', () => {
     );
   });
 
-  // `/live` and `/ready` exist only when the member registers HealthPlugin, which
-  // depends on its template — an HTTP probe against a member without one would
-  // fail readiness forever, so the generated probe is transport-agnostic.
+  // `/live` and `/ready` exist only when the member declares health support — an
+  // HTTP probe against a member without one would fail readiness forever, so the
+  // generated probe is transport-agnostic.
   it('probes the socket rather than a health path it cannot guarantee', () => {
     const yaml = objectsFor([{ name: 'orders', port: 3000 }]);
     expect(yaml).toContain('tcpSocket:');
@@ -147,6 +147,17 @@ describe('workspaceK8sFiles', () => {
     expect(readme).toContain('envsubst');
   });
 
+  it('names both commands that record probe support, and its limit', () => {
+    const files = workspaceK8sFiles(
+      manifestOf([{ name: 'orders', port: 3000 }], 'http'),
+      transportSpec('http'),
+    );
+    const readme = files.find((f) => f.path === `${K8S_DIR}/README.md`)?.contents ?? '';
+    expect(readme).toContain('`setu generate app` or `setu adopt`');
+    expect(readme).toContain('DECLARED health support');
+    expect(readme).toContain('a dependency, not proof');
+  });
+
   it('sorts members so a reordered manifest is not a diff', () => {
     const yaml = objectsFor([
       { name: 'orders', port: 3000 },
@@ -158,8 +169,8 @@ describe('workspaceK8sFiles', () => {
 
 // X2-7. Every generated Deployment used a TCP probe plus a comment telling the
 // developer to switch to `httpGet` "once" the member registers HealthPlugin — a
-// decision the generator already holds the answer to, since the template is an
-// argument to `setu generate app` and the manifest is rendered per member.
+// decision the generator already holds the answer to: `setu generate app` records
+// it from the template and `setu adopt` from the project's own dependencies.
 describe('probe selection', () => {
   /** Renders the deployment for one member. */
   const render = (member: { name: string; port: number; healthProbes?: boolean }): string => {
@@ -180,7 +191,7 @@ describe('probe selection', () => {
   const probeKinds = (yaml: string): readonly string[] =>
     [...yaml.matchAll(/(readiness|liveness)Probe:\n\s+(\w+):/g)].map((match) => match[2] ?? '');
 
-  it('uses HTTP probes for a member generated WITH a template', () => {
+  it('uses HTTP probes for a member recorded with health support', () => {
     const yaml = render({ name: 'orders', port: 3000, healthProbes: true });
 
     expect(probeKinds(yaml)).toEqual(['httpGet', 'httpGet']);
@@ -188,7 +199,7 @@ describe('probe selection', () => {
     expect(yaml).toContain('path: /live');
   });
 
-  it('keeps the TCP probe for a template-less member, which serves neither path', () => {
+  it('keeps the TCP probe for a member with no declared health support', () => {
     // Pointing a probe at a 404 would make the member permanently unready, so
     // this arm is a real requirement rather than caution.
     const yaml = render({ name: 'orders', port: 3000, healthProbes: false });

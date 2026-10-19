@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { projectFiles, resolveHost, servedRoutes } from '../../../src/templates/project-files.ts';
+import {
+  BROKER_COMPOSE_FILE,
+  projectFiles,
+  resolveHost,
+  servedRoutes,
+} from '../../../src/templates/project-files.ts';
 import type { TargetRuntime } from '../../../src/constants.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
@@ -238,14 +243,34 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(manifestOf('deno')).toMatchObject({ nodeModulesDir: 'auto' });
   });
 
-  it('excludes the build output from fmt and lint, and ignores it', () => {
+  it('pins the tooling TypeScript line on every full-stack target (V9-9)', () => {
+    // The template's own list is merged AFTER the tooling's, so its old
+    // `^5.9.2` silently overrode `~6.0.3` on every npm target. `@react-
+    // router/dev@8` accepts TypeScript 6, so one pin serves both.
+    for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
+      const files = [
+        ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
+      ];
+      const pkg = JSON.parse(contentsOf(files, 'package.json')) as {
+        devDependencies: Record<string, string>;
+      };
+      expect(pkg.devDependencies['typescript'], runtime).toBe('~6.0.3');
+    }
+  });
+
+  it('excludes the build and typegen output from fmt and lint, and ignores them', () => {
     const manifest = manifestOf('deno') as unknown as {
       fmt: { exclude?: readonly string[] };
       lint: { exclude?: readonly string[] };
     };
-    expect(manifest.fmt.exclude).toEqual(['build']);
-    expect(manifest.lint.exclude).toEqual(['build']);
-    expect(contentsOf([...projectFiles('shop', 'deno', host)], '.gitignore')).toContain('build/\n');
+    // `.react-router/` is React Router's typegen directory (V9-11): generated
+    // source the project does not own, so it is excluded and ignored exactly
+    // like the build.
+    expect(manifest.fmt.exclude).toEqual(['build', '.react-router']);
+    expect(manifest.lint.exclude).toEqual(['build', '.react-router']);
+    const gitignore = contentsOf([...projectFiles('shop', 'deno', host)], '.gitignore');
+    expect(gitignore).toContain('build/\n');
+    expect(gitignore).toContain('.react-router/\n');
   });
 
   it('emits a development entry and a dev task that skips the production build', () => {
@@ -407,6 +432,33 @@ describe('the Cloudflare Workers target', () => {
     expect(pkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
   });
 
+  it('builds before type-checking a Workers project with an npm build (V9-9)', () => {
+    // The Workers entry imports the compiled server build, which does not exist
+    // until the build runs; `tsc` cannot declare a relative module ambiently
+    // (TS2436), so the check script itself has to build first.
+    const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const fullStackPkg = JSON.parse(
+      contentsOf([...projectFiles('edge', 'cloudflare-workers', fullStack)], 'package.json'),
+    ) as { scripts: Record<string, string> };
+    expect(fullStackPkg.scripts['check']).toBe('npm run build && tsc --noEmit');
+
+    // A rest Worker imports no build output, so its check stays the bare one.
+    const restPkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
+      scripts: Record<string, string>;
+    };
+    expect(restPkg.scripts['check']).toBe('tsc --noEmit');
+  });
+
+  it("ignores the frontend toolchain's generated directories (V9-11)", () => {
+    // Workers is the npm-manifest path that emits ESLint and Prettier configs,
+    // so the full-stack typegen directory has to reach them here as well as
+    // Deno's fmt/lint excludes.
+    const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const files = [...projectFiles('edge', 'cloudflare-workers', fullStack)];
+    expect(contentsOf(files, 'eslint.config.js')).toContain(`'.react-router/'`);
+    expect(contentsOf(files, '.prettierignore')).toContain('.react-router/');
+  });
+
   it('pins wrangler and workers-types as a set whose peer ranges intersect', () => {
     const pkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
       devDependencies: Record<string, string>;
@@ -443,8 +495,86 @@ describe('the Cloudflare Workers target', () => {
       compilerOptions: Record<string, unknown>;
     };
 
-    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types', 'vite/client']);
+    // `node` because the same tsconfig type-checks the emitted `vite.config.ts`,
+    // which imports `node:fs` (V9-9).
+    expect(tsconfig.compilerOptions['types']).toEqual([
+      '@cloudflare/workers-types',
+      'node',
+      'vite/client',
+    ]);
     expect(tsconfig.compilerOptions['lib']).toEqual(['DOM', 'DOM.Iterable', 'ES2022']);
+    // The Workers entry imports the compiled server build, which has no
+    // declarations; `allowJs` is what lets `tsc --noEmit` read it after a build.
+    expect(tsconfig.compilerOptions['allowJs']).toBe(true);
+  });
+
+  it('declares @types/node for a Workers project with an npm build (V9-9)', () => {
+    const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const pkg = JSON.parse(
+      contentsOf([...projectFiles('edge', 'cloudflare-workers', fullStack)], 'package.json'),
+    ) as {
+      devDependencies: Record<string, string>;
+    };
+
+    expect(pkg.devDependencies['@types/node']).toBe('^24.0.0');
+    // A Workers project with no npm build has no `node:` import to type.
+    const rest = resolveHost(getTemplate('rest')!, 'cloudflare-workers');
+    const restPkg = JSON.parse(
+      contentsOf([...projectFiles('edge', 'cloudflare-workers', rest)], 'package.json'),
+    ) as {
+      devDependencies: Record<string, string>;
+    };
+    expect(restPkg.devDependencies['@types/node']).toBeUndefined();
+    expect(restPkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
+  });
+
+  it('adds no Node types or build ignores where the Workers template has no npm build', () => {
+    const rest = resolveHost(getTemplate('rest')!, 'cloudflare-workers');
+    const files = [...projectFiles('edge', 'cloudflare-workers', rest)];
+    const tsconfig = JSON.parse(contentsOf(files, 'tsconfig.json')) as {
+      compilerOptions: Record<string, unknown>;
+    };
+
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types']);
+    expect(tsconfig.compilerOptions['allowJs']).toBeUndefined();
+    expect(contentsOf(files, 'eslint.config.js')).not.toContain("'build/'");
+    expect(contentsOf(files, '.prettierignore')).not.toContain('build/');
+  });
+
+  it('ignores only the build output when an npm build declares no generated dirs', () => {
+    // `generatedDirs` is optional so a future toolchain that writes nothing
+    // beside its build needs no entry; one ignore list must still carry the
+    // build itself.
+    const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+    const manifest = fullStack.manifest;
+    expect(manifest?.npmBuild).toBeDefined();
+    if (manifest?.npmBuild === undefined) return;
+    const { generatedDirs: _generated, ...npmBuild } = manifest.npmBuild;
+    const host = { ...fullStack, manifest: { ...manifest, npmBuild } };
+    const files = [...projectFiles('edge', 'cloudflare-workers', host)];
+
+    expect(contentsOf(files, 'eslint.config.js')).toContain(`'build/'`);
+    expect(contentsOf(files, 'eslint.config.js')).not.toContain(`'.react-router/'`);
+    expect(contentsOf(files, '.prettierignore')).toContain('build/');
+    expect(contentsOf(files, '.prettierignore')).not.toContain('.react-router/');
+  });
+
+  it('dispatches a single queue directly instead of routing on its name', () => {
+    // The generated Worker handles one queue without a `switch`; a second queue
+    // is what makes routing necessary. Both shapes must stay correct because a
+    // template may declare either.
+    const microservice = resolveHost(getTemplate('microservice')!, 'cloudflare-workers');
+    const [worker] = microservice.workerExports;
+    expect(worker).toBeDefined();
+    if (worker === undefined) return;
+    const [route] = worker.routes;
+    expect(route).toBeDefined();
+    if (route === undefined) return;
+    const host = { ...microservice, workerExports: [{ ...worker, routes: [route] }] };
+    const entry = contentsOf([...projectFiles('edge', 'cloudflare-workers', host)], 'src/index.ts');
+
+    expect(entry).toContain(`await ${route.symbol}(app)(payload);`);
+    expect(entry).not.toContain(`case '${route.queueName}':`);
   });
 
   it('leaves the tsconfig of every other npm target unchanged', () => {
@@ -478,6 +608,35 @@ describe('the Cloudflare Workers target', () => {
     // The two facts a reader cannot infer from the stanza alone.
     expect(toml).toContain('max_batch_timeout = 0');
     expect(toml).toContain('EXPORTED from your own src/index.ts');
+  });
+});
+
+describe('a standalone README transport note', () => {
+  it('renders a transport note and re-wraps it to the emitted width (V9-17)', () => {
+    // The text comes from `TransportSpec.connection.note`, carried onto the host
+    // by the broker overlay. A standalone project has no spec at render time, so
+    // the host is the only source. The note is LONGER than one line so the
+    // programmatic re-wrap is what makes the project pass its own fmt --check.
+    const note =
+      'Every topic published through NATS must start with `app.`. The broker creates its ' +
+      '`MESSAGING` stream with the subjects `app.>`, `rr.req.app.>` and `rr.inbox.>` on first ' +
+      'start, and uses a pre-existing stream exactly as it is.';
+    const host = resolveHost(getTemplate('microservice')!, 'deno');
+    const files = projectFiles('svc', 'deno', {
+      ...host,
+      files: [...host.files, { path: BROKER_COMPOSE_FILE, contents: '' }],
+      transportNotes: [note],
+    });
+    const readme = contentsOf([...files], 'README.md');
+
+    expect(readme).toContain('## Local transport services');
+    expect(readme).toContain('must start with `app.`');
+    expect(readme).toContain('`MESSAGING`');
+    // `deno fmt` reflows at 100 columns; a hand-broken paragraph authored around
+    // a shorter line would fail the scaffold's own check.
+    for (const line of readme.split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(100);
+    }
   });
 });
 

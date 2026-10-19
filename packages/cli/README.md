@@ -118,6 +118,19 @@ No target emits an `.npmrc` or a JSR registry mapping: every target takes the fr
 
 Every target also gets a `README.md` and a `.gitignore`.
 
+## Adopting an existing project
+
+```bash
+setu adopt --name orders --port 8101
+```
+
+Converts a generated single-service project into a workspace whose first member is that project. It
+moves only the entries the CLI emits, so `.git`, CI configuration and the lockfile stay at the root;
+records whether the project's dependencies declare health and metrics support; moves the configured
+dotenv pair when its path is a single segment; and rewrites `main.ts` to bind the port the workspace
+allocated it. A multi-segment `envFilePath` is left in place and the step to move it by hand is
+printed.
+
 ## Generating code
 
 ```bash
@@ -145,6 +158,11 @@ setu g service user-profile        # `g` is an alias, `n` aliases `new`
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.
+
+A decorator barrel is a registration list. When `setu.config.ts` does not reference its export,
+`setu generate` prints the exact line to add — inline `DecoratorPlugin({ <key>: [...<EXPORT>] })`,
+or the `decorators: { <key>: [...<EXPORT>] }` arm of the starter that composes the application. A
+mention in a comment or a string does not count as wired.
 
 ### Plugin awareness
 

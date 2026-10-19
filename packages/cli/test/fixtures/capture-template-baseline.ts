@@ -8,7 +8,7 @@ import * as nodeFs from 'node:fs/promises';
  * writes the map. Run it from the repository root BEFORE any template change
  * you want the baseline to reflect:
  *
- *   deno run --allow-read --allow-write packages/cli/test/fixtures/capture-template-baseline.ts
+ *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *
  * It is NOT a gate: no task runs it. A stale fixture is only a problem if a
  * template's output changed and the fixture was not re-captured — and that is
@@ -108,7 +108,7 @@ async function capture(): Promise<number> {
   return Object.keys(baseline).length;
 }
 
-// Runs only when executed directly (`deno run …`), never when the test imports
+// Runs only when executed directly (`node …`), never when the test imports
 // this module for its exports.
 if (import.meta.main) {
   const count = await capture();

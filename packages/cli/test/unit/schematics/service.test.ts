@@ -119,6 +119,17 @@ describe('service schematic', () => {
       expect(barrelOf(files, 'service').contents).toContain('readonly Constructor[]');
     });
 
+    it('names both ways the barrel is consumed, and never claims it is wired', () => {
+      const barrel = barrelOf(files, 'service').contents;
+      expect(barrel).not.toContain('needs no further wiring');
+      expect(barrel).toContain('DecoratorPlugin({ services: [...APP_SERVICES] })');
+      expect(barrel).toContain('decorators: { services:');
+      // The artifact's own class comment carries the same truth.
+      expect(files[0].contents).not.toContain('needs no further wiring');
+      expect(files[0].contents).toContain('DecoratorPlugin({ services: [...APP_SERVICES] })');
+      expect(files[0].contents).toContain('decorators: { services:');
+    });
+
     it('satisfies the seam contract', () => {
       assertSeamContract('service', 'order-item', ['gizmo', 'billing'], { plugins });
     });

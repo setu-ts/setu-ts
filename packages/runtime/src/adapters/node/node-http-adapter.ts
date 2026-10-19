@@ -26,6 +26,7 @@ import type {
 import {
   isPromiseLike,
   OptionalDependencyUnavailableError,
+  serializeError,
   upgradeIntentOf,
 } from '@setu-ts/common';
 import {
@@ -228,6 +229,13 @@ export function suppressDefaultContentType(outgoing: NodeOutgoing): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * The most distinct handshake-failure messages one handle reports. A missing
+ * `ws` produces one; the cap stops a hostile peer that varies the failure from
+ * growing the set without bound.
+ */
+const MAX_REPORTED_HANDSHAKE_ERRORS = 16;
+
+/**
  * Internal handle for a Node HTTP server.
  *
  * @internal - Not exported from package index
@@ -238,10 +246,19 @@ export class NodeHttpServerHandle {
   readonly #upgrades = new UpgradeRouterStore();
   readonly #coordinator: NodeUpgradeCoordinator;
   readonly #maxBodyBytes: number | undefined;
+  readonly #reportError: ((record: Readonly<Record<string, unknown>>) => void) | undefined;
+  /**
+   * Distinct handshake-failure messages already reported through this handle.
+   * One `ws`-absent refusal per upgrade is the same fault; a client must not be
+   * able to make the log grow by reconnecting, so a message reports once, and
+   * the set is bounded.
+   */
+  readonly #reportedHandshakeErrors = new Set<string>();
 
-  constructor(wsModule?: WsModuleLike, maxBodyBytes?: number) {
+  constructor(wsModule?: WsModuleLike, options?: HttpAdapterOptions) {
     this.#coordinator = new NodeUpgradeCoordinator(wsModule);
-    this.#maxBodyBytes = maxBodyBytes;
+    this.#maxBodyBytes = options?.maxBodyBytes;
+    this.#reportError = options?.reportError;
   }
 
   /**
@@ -349,11 +366,37 @@ export class NodeHttpServerHandle {
     } catch (cause) {
       // The kernel already accepted, so release whatever the consumer reserved
       // for this socket before refusing on the wire.
+      this.#reportHandshakeFailure(cause);
       intent.sink.onClose({
         code: ABNORMAL_CLOSURE,
         reason: cause instanceof Error ? cause.message : 'Handshake failed',
       });
       rejectRawUpgrade(socket, 500);
+    }
+  }
+
+  /**
+   * Reports a handshake failure at most once per distinct message.
+   *
+   * Only this catch — a server-side fault (`ws` missing, or `ws` throwing) — is
+   * reported. Node's listener catch and the Deno and Workers handshake catches
+   * are client-triggerable and stay silent (plan §3.8c). The record is
+   * `serializeError` of the cause: the load error's message and stack, no
+   * request data.
+   *
+   * @param cause - The thrown handshake failure
+   */
+  #reportHandshakeFailure(cause: unknown): void {
+    const reportError = this.#reportError;
+    if (reportError === undefined) return;
+    const serialized = serializeError(cause);
+    if (this.#reportedHandshakeErrors.has(serialized.message)) return;
+    if (this.#reportedHandshakeErrors.size >= MAX_REPORTED_HANDSHAKE_ERRORS) return;
+    this.#reportedHandshakeErrors.add(serialized.message);
+    try {
+      reportError({ level: 'error', msg: 'WebSocket handshake failed', ...serialized });
+    } catch {
+      // Reporting must never change the refusal that is already happening.
     }
   }
 
@@ -474,7 +517,8 @@ export function isNodeHttpServerHandle(handle: ServerHandle): handle is NodeHttp
  *
  * @param host - Injected Node serve host (defaults to lazy @hono/node-server)
  * @param wsModule - Injected `ws` module (defaults to a lazy `ws` import)
- * @param options - Adapter options; `maxBodyBytes` bounds the body read
+ * @param options - Adapter options; `maxBodyBytes` bounds the body read and
+ * `reportError` receives a server-side handshake failure
  */
 export class NodeHttpAdapter implements IHttpAdapter {
   #host: NodeServeHost;
@@ -482,7 +526,7 @@ export class NodeHttpAdapter implements IHttpAdapter {
 
   constructor(host?: NodeServeHost, wsModule?: WsModuleLike, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultNodeServeHost;
-    this.#handle = new NodeHttpServerHandle(wsModule, options?.maxBodyBytes);
+    this.#handle = new NodeHttpServerHandle(wsModule, options);
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {

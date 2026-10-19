@@ -697,6 +697,25 @@ describe('runAppCommand', () => {
       expect(h.err.text()).toContain('registers ConfigPlugin');
       expect(h.fs.writes).toEqual([]);
     });
+
+    // The generated .dockerignore covers .env and .env.* names only. A custom name
+    // still boots, but would be copied into the image, so the step is printed (F2).
+    it('names a custom env-file the generated container rules do not cover', async () => {
+      const custom = harness([{ name: 'orders', port: 3000 }]);
+      expect(
+        await custom.run(['app', 'billing', '--template', 'rest', '--env-file', 'local.env']),
+      ).toBe(0);
+      expect(custom.out.text()).toContain(
+        'Add apps/billing/local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
+          'so this file would be copied into the image.',
+      );
+
+      const covered = harness([{ name: 'orders', port: 3000 }]);
+      expect(
+        await covered.run(['app', 'billing', '--template', 'rest', '--env-file', '.env.prod']),
+      ).toBe(0);
+      expect(covered.out.text()).not.toContain('to .dockerignore:');
+    });
   });
 
   describe('a member with the discovery plugin', () => {
