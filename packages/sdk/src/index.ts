@@ -24,6 +24,7 @@ export type {
   ClientRetryPolicy,
   IClientTiming,
   IHttpClient,
+  OperationRequestOptions,
 } from './http/contracts.ts';
 
 // Re-exported common types

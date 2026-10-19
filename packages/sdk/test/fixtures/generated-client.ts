@@ -2,7 +2,7 @@
  * Auto-generated SDK client. Do not edit manually.
  */
 
-import type { ClientResponse, IHttpClient } from '../../src/index.ts';
+import type { ClientResponse, IHttpClient, OperationRequestOptions } from '../../src/index.ts';
 import { HttpClientError } from '../../src/index.ts';
 
 export type User = {
@@ -33,13 +33,19 @@ export function isGetUserByIdError(e: unknown): e is GetUserByIdError {
 }
 
 export interface Api {
-  listUsers(opts?: ListUsersArgs): Promise<ClientResponse<User[]>>;
-  getUserById(id: string): Promise<ClientResponse<User>>;
+  listUsers(
+    opts?: ListUsersArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<User[]>>;
+  getUserById(id: string, request?: OperationRequestOptions): Promise<ClientResponse<User>>;
 }
 
 export function createApi(client: IHttpClient): Api {
   /** listUsers */
-  function listUsers(opts?: ListUsersArgs): Promise<ClientResponse<User[]>> {
+  function listUsers(
+    opts?: ListUsersArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<User[]>> {
     return client.request<User[]>({
       method: 'GET',
       path: 'users',
@@ -51,14 +57,21 @@ export function createApi(client: IHttpClient): Api {
         }
         return headers;
       })(),
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 
   /** getUserById */
-  function getUserById(id: string): Promise<ClientResponse<User>> {
+  function getUserById(
+    id: string,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<User>> {
     return client.request<User>({
       method: 'GET',
       path: `users/${encodeURIComponent(id)}`,
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 

@@ -339,6 +339,15 @@ All notable changes to this project are documented here. The format follows
   session `cookie.secure: 'auto'` follows the resolved protocol (default stays `true`, and `'auto'`
   conflicts with `sameSite: 'none'`); `InjectRequest.ip` supplies a peer in tests.
 
+- **`OperationRequestOptions` and a per-call key on generated operations (V9-15, M113k, 0.10.0,
+  `@setu-ts/sdk`).** `@setu-ts/sdk` exports `OperationRequestOptions`, whose `idempotencyKey` and
+  `signal` carry the same meaning as the same-named fields of `ClientRequest`; `headers` is
+  deliberately absent, because header parameters the document declares are typed fields of `opts`.
+  Every generated operation now takes an optional trailing `request?: OperationRequestOptions`,
+  after its path parameters and after `opts`; the generated code forwards only those two fields.
+  Existing calls are unaffected, and an object implementing a previously generated `Api` stays
+  assignable.
+
 - **Primary-key and cursor refusals, and a database call timeout (M113g, 0.10.0, `@setu-ts/common`,
   `@setu-ts/database-plugin`).** `@setu-ts/common` exports `assertPrimaryKeyUnchanged`, the one
   shared check every `update`/`updateWhere` of the eight data sources runs before any I/O, and the
@@ -395,6 +404,25 @@ All notable changes to this project are documented here. The format follows
   First-party tokens are refused at and after `exp`, closing the window of up to one second after
   expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and
   after `exp + clockToleranceSec`.
+- **The SDK generator no longer emits source that shadows its own bindings (M113k, 0.10.0,
+  `@setu-ts/sdk`).** A path parameter whose identifier is `client`, `opts`, `request` or
+  `encodeURIComponent` is emitted with a `_` prefix; before, `client` made the method call
+  `.request` on a string and `opts` beside a query parameter emitted a duplicate parameter. Path
+  parameters are positional, so no caller changes. An operation whose method name is `client` or
+  `encodeURIComponent` is emitted as `_client` or `_encodeURIComponent`; before, `client` was a
+  duplicate identifier and `encodeURIComponent` shadowed the global every generated path calls. A
+  document component named `OperationRequestOptions` is refused like `ClientResponse` rather than
+  shadowing the generated file's import.
+- **Idempotency documentation corrected and completed (V9-14, V9-16, M113k, 0.10.0,
+  `@setu-ts/idempotency-plugin`, `@setu-ts/http-security-plugin`, `@setu-ts/database-plugin`,
+  `@setu-ts/sdk`).** The `http-security-plugin` CORS example now lists `idempotency-key` in
+  `allowedHeaders` and `idempotent-replayed` in `exposedHeaders`, so a keyed cross-origin browser
+  call preflights and the page can read `Idempotent-Replayed`. The tier-C table schema is documented
+  in the `database-plugin` README; the idempotency README names the `ioredis` install step and the
+  `OptionalDependencyUnavailableError` startup failure; its guarantee 2, M105 purge-race sentence
+  and `within` `ttlMs` floor are corrected; a "From a browser" section documents the CORS options,
+  the `request` parameter and a renamed key header. The SDK README's Keyed retries names the
+  per-call form and the `Access-Control-Expose-Headers` requirement.
 - **`setu add` wires the barrel generated handlers live in (`@setu-ts/cli`, #472).** In a functional
   project `setu add events` registered a bare `EventsPlugin()`, so every handler a later
   `setu generate event-handler` wrote into `src/events/index.ts` was subscribed by nothing and never

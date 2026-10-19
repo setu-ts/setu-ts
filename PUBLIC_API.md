@@ -1281,9 +1281,11 @@ creates the encoded result (`${id}.r`), and commits. It uses two creates, with n
 incomplete, foreign-kind and invalid-envelope records, and deletes a complete record only when an
 in-transaction re-read still finds it expired. That re-read narrows but does not close one race: two
 concurrent purges can delete a record a client re-created between them (closed on MongoDB; about one
-round trip on PostgreSQL READ COMMITTED; the deferred commit on DynamoDB and D1). A conditional
-delete (M105) would close it. `verify` runs the two-create pattern and rolls it back before the
-first call.
+round trip on PostgreSQL READ COMMITTED; the deferred commit on DynamoDB and D1). The portable
+repository does offer a conditional delete (`deleteWhere(id, where)`, M105), but the purge does not
+use it: a record is two rows (`id` and `${id}.r`) that must go together, and deferred-write
+transaction sources omit conditional members. `verify` runs the two-create pattern and rolls it back
+before the first call.
 
 `TransactionalStoreUnavailableError` carries `entity` and `reason`: `'cosmos-unsupported'`,
 `'bigtable-unsupported'`, `'mongodb-standalone'` or `'entity-unavailable'`. An adapter refusal can
@@ -13803,6 +13805,21 @@ A keyed request carries a non-safelisted header, so a cross-origin browser call 
 preflight; the server must list the configured header (default `Idempotency-Key`) in
 `Access-Control-Allow-Headers`.
 
+### OperationRequestOptions
+
+```typescript
+interface OperationRequestOptions {
+  readonly idempotencyKey?: string;
+  readonly signal?: AbortSignal;
+}
+```
+
+The per-call options every generated operation takes as its optional trailing `request` parameter,
+after the path parameters and after `opts`. `idempotencyKey` and `signal` carry the same meaning as
+the same-named fields of `ClientRequest`, and the generated code forwards only those two fields.
+`headers` is deliberately absent: header parameters the document declares are already typed fields
+of the operation's `opts`, and a free header map would conflict with the key header.
+
 ### ClientResponse
 
 ```typescript
@@ -13964,6 +13981,7 @@ interface OpenApiCodegenOptions {
 | Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                                                                                                                                                                                                                                                                                |
 | Parameter alias          | PascalCase from `operationId` plus the parameter name plus `Param`, emitted only when the parameter schema is inline and spans lines                                                                                                                                                                                                                                                           |
 | Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                                                                                                                                                                                                                                                                                       |
+| Local-identifier rename  | a path parameter whose identifier is `client`, `opts`, `request` or `encodeURIComponent` gets a `_` prefix (positional, so callers are unaffected); an operation whose method name is `client` or `encodeURIComponent` gets a `_` prefix — each name otherwise shadows a factory binding or the global the generated paths call                                                                |
 | Duplicate derived name   | a name the document or the caller WROTE throws `OpenApiCodegenError` naming both originals — component schemas, `*Args`, `*Error` unions, the guard, the client interface and the `apiTypeName`/`factoryName` options share ONE registry. A HOISTED alias instead allocates: its preferred name, then `…Response<status>Body` on the success arm, then a registry-allocated `2`, `3`, … suffix |
 
 **No multi-line type is written at a use site.** An inline (non-`$ref`) request body, parameter or
@@ -14017,6 +14035,11 @@ required. Query keys and header names keep their original OpenAPI spelling; only
 field identifier is derived, and header values are stringified so a non-`string` header schema
 compiles.
 
+Every operation ends with an optional trailing `request?: OperationRequestOptions`, after the path
+parameters and after `opts`; it is optional even when `opts` is required. The generated code
+forwards only the `idempotencyKey` and `signal` fields, each carrying the same meaning as the
+same-named field of `ClientRequest`.
+
 All eight operation slots are generated, including `trace`. Path-item-level `parameters` are merged
 into every operation on that path, with an operation's own entry overriding a shared one of the same
 `name` and `in`. Document text emitted into a comment has comment terminators escaped and line
@@ -14030,8 +14053,9 @@ interfaces, `*Error` unions, the narrowing guards, the client interface and the
 `apiTypeName`/`factoryName` options all draw from ONE registry, so a component named `ListUsersArgs`
 beside an operation `listUsers` is refused rather than emitting two declarations of one name; a
 `cookie` parameter; a path placeholder with no matching `in: 'path'` parameter; an `in: 'path'`
-parameter absent from the template; two placeholders deriving onto one argument name; and a
-malformed local `$ref`.
+parameter absent from the template; two placeholders deriving onto one argument name; a document
+component named `OperationRequestOptions`, the type the generated operations' trailing `request`
+parameter claims from `sdkImport`, refused like `ClientResponse`; and a malformed local `$ref`.
 
 **A hoisted alias is the one emitted name that does NOT throw on a collision — it allocates.** The
 four hoisted aliases (a request body, a parameter, a success response, an error body) name an

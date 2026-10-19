@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import * as barrel from '../../src/index.ts';
 
 describe('@setu-ts/sdk barrel', () => {
+  it('exports per-operation request options as a type', () => {
+    const request: barrel.OperationRequestOptions = { idempotencyKey: 'k' };
+    expect(request.idempotencyKey).toBe('k');
+  });
+
   it('exports exactly the documented runtime surface', () => {
     const actual = Object.keys(barrel).sort();
     const expected = [

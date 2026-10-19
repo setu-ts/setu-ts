@@ -3,7 +3,7 @@
  * Followed redirect target bodies are not described here and are typed as unknown.
  */
 
-import type { ClientResponse, IHttpClient } from '../../src/index.ts';
+import type { ClientResponse, IHttpClient, OperationRequestOptions } from '../../src/index.ts';
 import { HttpClientError } from '../../src/index.ts';
 
 export type FollowRedirectError = HttpClientError<unknown> & { readonly status: 303 };
@@ -12,15 +12,17 @@ export function isFollowRedirectError(e: unknown): e is FollowRedirectError {
 }
 
 export interface Api {
-  followRedirect(): Promise<ClientResponse<unknown>>;
+  followRedirect(request?: OperationRequestOptions): Promise<ClientResponse<unknown>>;
 }
 
 export function createApi(client: IHttpClient): Api {
   /** followRedirect */
-  function followRedirect(): Promise<ClientResponse<unknown>> {
+  function followRedirect(request?: OperationRequestOptions): Promise<ClientResponse<unknown>> {
     return client.request<unknown>({
       method: 'GET',
       path: 'redirect',
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 

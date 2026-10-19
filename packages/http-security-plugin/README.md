@@ -45,7 +45,8 @@ app.register(
       methods: ['GET', 'POST', 'PUT', 'DELETE'],
       // Omit `allowedHeaders` and an allowed origin's preflight echoes whatever
       // the browser asked for. List them here to allow only those.
-      allowedHeaders: ['content-type', 'authorization'],
+      allowedHeaders: ['content-type', 'authorization', 'idempotency-key'],
+      exposedHeaders: ['idempotent-replayed'],
       maxAge: 86400,
     },
     // Security headers — ON by default; customize here
@@ -73,6 +74,9 @@ app.register(
   }),
 );
 ```
+
+A keyed SDK request carries a non-safelisted header, so the preflight must allow `idempotency-key`.
+The page can read `Idempotent-Replayed` only when it is exposed through `exposedHeaders`.
 
 ### Per-Route Middleware
 
