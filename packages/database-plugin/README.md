@@ -308,6 +308,64 @@ CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
 Map it with `drizzleTables: { Inbox: pgTable('setu_inbox', { … }) }` (JS keys `envelopeId`,
 `updatedAt`, `lastError` over the snake_case columns; `updated_at` in `{ mode: 'number' }`).
 
+### Tier-C idempotency store
+
+`createDatabaseIdempotencyStore()` uses the default entity name `Idempotency`. Create the PostgreSQL
+table before using the store:
+
+```sql
+CREATE TABLE setu_idempotency (
+  id          text   PRIMARY KEY,
+  kind        text   NOT NULL,
+  role        text   NOT NULL,
+  fingerprint text   NOT NULL,
+  created_at  bigint NOT NULL,
+  expires_at  bigint NOT NULL,
+  result      text
+);
+CREATE INDEX setu_idempotency_expiry ON setu_idempotency (kind, role, expires_at);
+```
+
+For SQLite (including D1), use:
+
+```sql
+CREATE TABLE setu_idempotency (
+  id          TEXT    PRIMARY KEY,
+  kind        TEXT    NOT NULL,
+  role        TEXT    NOT NULL,
+  fingerprint TEXT    NOT NULL,
+  createdAt   INTEGER NOT NULL,
+  expiresAt   INTEGER NOT NULL,
+  result      TEXT
+);
+CREATE INDEX setu_idempotency_expiry ON setu_idempotency (kind, role, expiresAt);
+```
+
+The expiry index serves the purge query over `kind`, `role`, and expiry time. For Drizzle on
+PostgreSQL, register the table under the default entity name:
+
+```typescript
+import { bigint, pgTable, text } from 'drizzle-orm/pg-core';
+
+const tables = {
+  drizzleTables: {
+    Idempotency: pgTable('setu_idempotency', {
+      id: text('id').primaryKey(),
+      kind: text('kind').notNull(),
+      role: text('role').notNull(),
+      fingerprint: text('fingerprint').notNull(),
+      createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+      expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+      result: text('result'),
+    }),
+  },
+};
+```
+
+Pass `tables.drizzleTables` as the database plugin's `drizzleTables` option. The JavaScript keys
+`createdAt` and `expiresAt` map to `created_at` and `expires_at`; `{ mode: 'number' }` keeps epoch
+milliseconds numeric for the store.
+
 ## Scoped RBAC sources
 
 `createDatabaseGrantSource({ entity })` and `createDatabaseRoleSource({ entity })` feed AuthPlugin's

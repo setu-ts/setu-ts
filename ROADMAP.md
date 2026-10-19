@@ -14377,6 +14377,16 @@ V9-14 (tier-C has no published table schema; the README still calls in-transacti
 later milestone"), V9-15 (generated SDK operations take no per-call `idempotencyKey`), V9-16 (the
 CORS example refuses `idempotency-key` and nothing says to expose `idempotent-replayed`).
 
+**Shipped.** Every generated SDK operation takes an optional trailing
+`request?: OperationRequestOptions` (`idempotencyKey`, `signal`), forwarded field by field to the
+client, so a keyed call needs no interceptor. A path parameter named `client`, `opts`, `request` or
+`encodeURIComponent`, or an operation named `client` or `encodeURIComponent`, could shadow a binding
+the generated code uses; each is now renamed with a `_` prefix through one helper shared by the
+parameter list and the path template. The CORS example allows `idempotency-key` and exposes
+`idempotent-replayed`, pinned by a test that runs it; the tier-C table schema is in the
+database-plugin README, pinned to the real-backend SQL fixtures; and the idempotency README's stale
+claims, `ttlMs` range and `ioredis` step are corrected.
+
 ### Milestone 113l: Documentation That Does Not Match the Code, or Is Missing
 
 **Package(s):** docs only — one `docs/…` branch.
@@ -15083,7 +15093,7 @@ patch by construction and gains nothing new here.
 | 113h      | ✅     | cli + runtime + kernel — generated output that is wrong; PR #477                                                                                                                                                                                                                          |
 | 113i      | ⬜     | cli — commands whose refusals and guidance mislead (fix branches)                                                                                                                                                                                                                         |
 | 113j      | ✅     | messaging-plugin + database-plugin — outbox and inbox signals; PR #469                                                                                                                                                                                                                    |
-| 113k      | ⬜     | sdk + idempotency + http-security + database — the idempotency key from client to server (fix branches)                                                                                                                                                                                   |
+| 113k      | ✅     | sdk + idempotency + http-security + database — the idempotency key from client to server; PR #476                                                                                                                                                                                         |
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 113m      | ✅     | scheduler-plugin + auth-plugin — time the framework does not honour; PR #471                                                                                                                                                                                                              |
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |

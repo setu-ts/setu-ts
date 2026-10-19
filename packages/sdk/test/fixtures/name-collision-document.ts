@@ -22,6 +22,37 @@ import type { SdkOpenApiDocument } from '../../src/codegen/openapi-types.ts';
 export const nameCollisionDocument: SdkOpenApiDocument = {
   openapi: '3.1.0',
   paths: {
+    '/clients/{client}': {
+      get: {
+        operationId: 'client',
+        parameters: [{ name: 'client', in: 'path', required: true }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+    '/options/{opts}': {
+      get: {
+        operationId: 'opts',
+        parameters: [
+          { name: 'opts', in: 'path', required: true },
+          { name: 'filter', in: 'query' },
+        ],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+    '/encoded/{encodeURIComponent}': {
+      get: {
+        operationId: 'encodeURIComponent',
+        parameters: [{ name: 'encodeURIComponent', in: 'path', required: true }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+    '/requests/{request}': {
+      get: {
+        operationId: 'request',
+        parameters: [{ name: 'request', in: 'path', required: true }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
     '/items': {
       get: {
         operationId: 'get-items',

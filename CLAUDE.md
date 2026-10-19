@@ -6511,6 +6511,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   re-read after validation (now a frozen copy), the Deno runner header said `-A` for a runner that
   boots the whole app, and two §10 residuals were not stated in the docs. The fixes were not
   re-audited, at the maintainer's direction — complete (PR #475)
+- **Milestone 113k** (`packages/sdk` + docs in `idempotency-plugin`, `http-security-plugin`,
+  `database-plugin` — the idempotency key from client to server; V9-14, V9-15, V9-16): every
+  generated operation takes an optional trailing `request?: OperationRequestOptions`
+  (`idempotencyKey`, `signal`), forwarded by two conditional spreads so a JavaScript caller's extra
+  properties never reach `client.request`; the name is claimed like the other SDK imports. Writing
+  the plan's probes found two pre-existing generator defects the new parameter would widen — a path
+  parameter named `client` shadowed the factory's client, and one named `opts` emitted a duplicate
+  parameter; an operation named `client` was `TS2300` — so path parameters named `client`/`opts`/
+  `request` and an operation named `client` gain a `_` prefix through one `pathArgumentName` used at
+  all three path-parameter sites. The CORS example allows `idempotency-key` and exposes
+  `idempotent-replayed`, run by a kernel-app test that also pins the README literal; the tier-C DDL
+  and Drizzle mapping are in the database-plugin README, pinned to the SQL fixtures; the idempotency
+  README gains "From a browser", the `ttlMs` range, the `ioredis` step and corrected guarantee-2 and
+  purge-race text. Implemented by Codex (no plan contradiction; six negative controls failed as
+  intended), docs by opencode on the local model in a separate worktree. The design security review
+  is plan §10. The fresh-context committed-tree audit passed round 1 on `c859bbef` with no security
+  finding; its observations were fixed afterwards: the docs' claim that every rename only touched
+  non-compiling documents was false for `request` and `opts`, and a path parameter or operation
+  named `encodeURIComponent` (pre-existing) shadowed the global every generated path calls, so it
+  joins both rename sets — complete (PR #476)
 - **Milestone 113h** (`cli` + `runtime` + `kernel` — generated output that is wrong; V9-8, V9-17,
   V9-38, V9-39, V9-9, V9-11, V9-42, V9-67, V9-81, on one `fix/` branch): `setu generate` reports a
   decorator barrel `setu.config.ts` does not reference (naming the starter's `decorators` arm in a
