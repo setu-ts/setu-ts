@@ -268,15 +268,21 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     return EXIT_ERROR;
   }
 
-  // Every path this writes is checked here, BEFORE a dry run prints a plan and
-  // before the transaction moves anything. The planner checks the member's own
-  // generated files; the root's are added above, and a dangling link at one of
-  // those (`.dockerignore` is the one a repository commits) makes the real write
-  // refuse while `findExisting` reports the link as absent. A dry run that
-  // promised a clean plan for it would be worse than no dry run.
-  for (const file of planned) {
+  // Every path this writes or moves TO is checked here, BEFORE a dry run prints a
+  // plan and before the transaction moves anything. The planner checks the
+  // member's own generated files and every move's SOURCE; the root's generated
+  // files are added above, and the moves' destinations are otherwise unchecked
+  // until `moveFile` runs. A link committed at one of either (`.dockerignore` for
+  // a write, `apps/svc/README.md` for a move) makes the real run refuse while
+  // `findExisting` reports the link as absent — so the world would learn about it
+  // only after the moves had started, and a dry run would have promised a clean
+  // plan for it. That would be worse than no dry run.
+  for (const path of [
+    ...planned.map((file) => file.path),
+    ...plan.files.map((file) => joinPath(project, file.to)),
+  ]) {
     try {
-      await assertInsideProject(deps.fs, project, file.path);
+      await assertInsideProject(deps.fs, project, path);
     } catch (cause) {
       deps.error(cause instanceof Error ? cause.message : String(cause));
       return EXIT_ERROR;

@@ -259,4 +259,35 @@ describe('setu adopt on a real scaffold', () => {
     expect(err.join('\n')).not.toContain('Nothing was changed: every move was undone.');
     expect(await snapshotTree(project)).toEqual(before);
   });
+
+  // A committed link at a MOVE destination is not a generated file, so it used
+  // to escape the up-front check: `adopt --dry-run` printed a clean plan while
+  // the real run refused at `moveFile` and rolled the earlier moves back.
+  it('refuses a linked move destination before a dry run or a conversion moves', async () => {
+    expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
+
+    const project = `${root}/svc`;
+    const outside = `${root}/outside-readme`;
+    await nodeFs.writeFile(outside, 'outside\n');
+    await nodeFs.mkdir(`${project}/apps/svc`, { recursive: true });
+    await nodeFs.symlink(outside, `${project}/apps/svc/README.md`);
+    const before = await snapshotTree(project);
+
+    out.length = 0;
+    err.length = 0;
+    expect(await run(['adopt', '--dir', project, '--dry-run'])).toBe(1);
+    expect(err.join('\n')).toContain('symbolic link');
+    expect(out.join('\n')).not.toContain('would move');
+    expect(out.join('\n')).not.toContain('would create');
+    expect(await snapshotTree(project)).toEqual(before);
+
+    out.length = 0;
+    err.length = 0;
+    expect(await run(['adopt', '--dir', project])).toBe(1);
+    expect(err.join('\n')).toContain('symbolic link');
+    expect(out.join('\n')).not.toContain('moved ');
+    expect(err.join('\n')).not.toContain('Nothing was changed: every move was undone.');
+    expect(await snapshotTree(project)).toEqual(before);
+    expect(await nodeFs.readFile(outside, 'utf8')).toBe('outside\n');
+  });
 });

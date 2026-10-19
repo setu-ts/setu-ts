@@ -864,6 +864,36 @@ describe('runAdoptCommand', () => {
     expect(fs.has('/work/svc/apps/svc/main.ts')).toBe(false);
   });
 
+  // A MOVE's destination is not a generated file, so the up-front loop used to
+  // skip it: `moveFile` refused after the earlier moves had run and the
+  // transaction rolled them back, which is a real run disagreeing with a clean
+  // dry run.
+  it('refuses a planned move destination that resolves outside the project before moving', async () => {
+    const fs = createFakeFs(PROJECT);
+    const realPath = fs.realPath?.bind(fs);
+    expect(realPath).toBeDefined();
+    if (realPath === undefined) return;
+    fs.realPath = (path) =>
+      path === '/work/svc/apps/svc/README.md'
+        ? Promise.resolve('/outside/README.md')
+        : realPath(path);
+    const out = createRecorder();
+    const err = createRecorder();
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs,
+      cwd: '/work/svc',
+      log: out.sink,
+      error: err.sink,
+    });
+
+    expect(code).toBe(1);
+    expect(err.text()).toContain('symbolic link');
+    expect(out.text()).not.toContain('moved ');
+    expect(fs.writes).toEqual([]);
+    expect(fs.has('/work/svc/README.md')).toBe(true);
+    expect(fs.has('/work/svc/apps/svc/README.md')).toBe(false);
+  });
+
   it('reports an inspection failure before moving project files', async () => {
     const fs = createFakeFs(PROJECT);
     const out = createRecorder();
