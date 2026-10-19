@@ -114,7 +114,11 @@ describe('the migration runner, per target', () => {
 
   it('runs as a Deno main module on Deno', () => {
     const runner = runnerFor('deno');
-    expect(runner).toContain('//   deno run -A src/migrations/run.ts          # apply');
+    expect(runner).toContain(
+      '//   deno run --allow-net --allow-env --allow-read --allow-sys src/migrations/run.ts          # apply',
+    );
+    expect(runner).not.toContain('deno run -A');
+    expect(runner).toContain('Grant the same permission flags as your `start` task');
     expect(runner).toContain('if (import.meta.main) {');
     expect(runner).toContain("Deno.args.includes('--down')");
     expect(runner).not.toContain('node:url');

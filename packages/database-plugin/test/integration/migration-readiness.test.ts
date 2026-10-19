@@ -87,6 +87,23 @@ describe('migration readiness through a running application', () => {
     }
   });
 
+  // Audit F2: register() reads the validated copy, never the caller's options again.
+  it('evaluates the names validated at construction, not a later mutation', async () => {
+    const migrations = ['one'];
+    const pending = boot({ migrations });
+    migrations.push('two', 'three');
+    const { app } = await pending;
+    try {
+      await createMigrationLedger(app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)).record(
+        'one',
+        'now',
+      );
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('absent readiness preserves the exact database health data', async () => {
     const { app } = await boot();
     try {

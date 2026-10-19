@@ -403,7 +403,10 @@ Measured locally through `createMigrationLedger` and repository read-back (2026-
 
 Other adapters were not measured for duplicate rejection. The ledger propagates the adapter's create
 rejection unchanged. **Run one migration job**: no portable lock prevents two jobs from applying a
-change concurrently. A duplicate ledger insert makes the race visible after execution.
+change concurrently. A duplicate ledger insert makes the race visible after execution. **The ledger
+is only as trustworthy as whoever can write it**: a database principal able to write
+`setu_migrations` can mark a replica ready, or make the runner skip or re-run a migration — the same
+trust it already holds over the schema.
 
 `setu generate migration` maintains `run.ts` and `index.ts` and exports `MIGRATION_NAMES` from the
 barrel. Migrations receive `{ database }`. The runner applies only pending names oldest first;
@@ -413,10 +416,12 @@ make migrations idempotent. A failure stops the run and names the migration.
 
 On socket targets, executing `run.ts` dynamically loads `setu.config.ts`, awaits `createApp()`,
 starts the whole app without a port, resolves the default database and stops the app in `finally`.
-Importing `runMigrations` does not load the application. For a named connection, call
-`runMigrations('up', { database, ledger: createMigrationLedger(database) })` from your own module.
-Workers emit no entry block: call the function from code holding platform bindings or use
-`wrangler d1 migrations`.
+Every plugin's start-up effects therefore run for the runner's lifetime — queue processors,
+scheduled jobs and broker subscriptions included. On Deno, run it with the same permission flags as
+your `start` task rather than `-A`. Importing `runMigrations` does not load the application. For a
+named connection, call `runMigrations('up', { database, ledger: createMigrationLedger(database) })`
+from your own module. Workers emit no entry block: call the function from code holding platform
+bindings or use `wrangler d1 migrations`.
 
 ## Options
 

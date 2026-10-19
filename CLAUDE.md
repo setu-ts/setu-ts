@@ -6505,7 +6505,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   discovery backend outage with a warm cache now reports `up`, keeping the condition in `data`.
   Implemented by Codex, which measured a duplicate `record` rejecting with `DuplicateKeyError` on
   memory, Drizzle/PostgreSQL, a MongoDB replica set and DynamoDB Local. Review split the runner's
-  error so a migration that ran but whose ledger row failed says so — complete (PR pending)
+  error so a migration that ran but whose ledger row failed says so. The committed-tree security
+  audit (design review recorded as plan §10) failed round 1 on four Lows: discovery `up` is
+  process-wide while the docs promised a warm cache serves every name, readiness options were
+  re-read after validation (now a frozen copy), the Deno runner header said `-A` for a runner that
+  boots the whole app, and two §10 residuals were not stated in the docs — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

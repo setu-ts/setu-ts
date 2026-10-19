@@ -11656,10 +11656,10 @@ provider read, so a backend that was never reached is `down`, not `up` (the X10-
 means a stale cache is being served. `isHealthy()` is the cached reachability probe (Consul
 `/v1/status/leader`, Kubernetes a `limit=1` EndpointSlice LIST).
 
-| Status | Meaning                                                                         |
-| ------ | ------------------------------------------------------------------------------- |
-| `up`   | The provider is reachable, or has resolved before and can serve its warm cache. |
-| `down` | The provider has never resolved and is unreachable.                             |
+| Status | Meaning                                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable`. |
+| `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.

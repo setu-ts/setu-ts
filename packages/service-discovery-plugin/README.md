@@ -241,10 +241,10 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 - `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
   `limit=1` EndpointSlice LIST).
 
-| Status | Meaning                                                                         |
-| ------ | ------------------------------------------------------------------------------- |
-| `up`   | The provider is reachable, or has resolved before and can serve its warm cache. |
-| `down` | The provider has never resolved and is unreachable.                             |
+| Status | Meaning                                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable`. |
+| `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.

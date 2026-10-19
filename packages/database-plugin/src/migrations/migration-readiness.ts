@@ -5,24 +5,53 @@ import type { DatabaseReadinessOptions, IDatabaseService } from '../interfaces/i
 import { createMigrationLedger } from './migration-ledger.ts';
 
 /** Validate before registration; diagnostics name options, never their values. */
-export function validateMigrationReadiness(options: DatabaseReadinessOptions): void {
-  const names = options.migrations;
-  if (
-    !Array.isArray(names) ||
-    names.length > 10_000 ||
-    Array.from(names).some((name: unknown) => typeof name !== 'string' || name.trim() === '') ||
-    new Set(names).size !== names.length
-  ) {
-    throw new TypeError(
-      'readiness.migrations must be an array of unique non-empty strings, at most 10000',
-    );
+export function validateMigrationReadiness(
+  options: DatabaseReadinessOptions,
+): DatabaseReadinessOptions {
+  const failure =
+    'readiness.migrations must be an array of unique non-empty strings, at most 10000';
+  if (typeof options !== 'object' || options === null) {
+    throw new TypeError('readiness must be an object with a migrations array');
+  }
+  // Read every option exactly ONCE and keep a private frozen copy (the M105/M106
+  // pattern): re-reading the caller's object after validation would let a getter
+  // or a later mutation hand register() names that never passed this check.
+  let source: unknown;
+  let ledgerEntity: unknown;
+  let length: unknown;
+  try {
+    source = options.migrations;
+    ledgerEntity = options.ledgerEntity;
+    length = Array.isArray(source) ? source.length : undefined;
+  } catch {
+    throw new TypeError(failure);
+  }
+  if (typeof length !== 'number' || length > 10_000) throw new TypeError(failure);
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < length; index++) {
+    let name: unknown;
+    try {
+      name = (source as readonly unknown[])[index];
+    } catch {
+      throw new TypeError(failure);
+    }
+    if (typeof name !== 'string' || name.trim() === '' || seen.has(name)) {
+      throw new TypeError(failure);
+    }
+    seen.add(name);
+    names.push(name);
   }
   if (
-    options.ledgerEntity !== undefined &&
-    (typeof options.ledgerEntity !== 'string' || options.ledgerEntity.trim() === '')
+    ledgerEntity !== undefined &&
+    (typeof ledgerEntity !== 'string' || ledgerEntity.trim() === '')
   ) {
     throw new TypeError('readiness.ledgerEntity must be a non-empty string');
   }
+  return Object.freeze({
+    migrations: Object.freeze(names),
+    ...(ledgerEntity === undefined ? {} : { ledgerEntity }),
+  });
 }
 
 /** Compose the existing indicator with an independent bounded, cached ledger read. */

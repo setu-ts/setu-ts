@@ -104,7 +104,9 @@ const PLUGIN_NAME = 'database-plugin';
  * @since 0.1.0
  */
 export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
-  if (options?.readiness !== undefined) validateMigrationReadiness(options.readiness);
+  // The validated, frozen copy is the only one register() reads (audit F2).
+  const readinessOptions =
+    options?.readiness === undefined ? undefined : validateMigrationReadiness(options.readiness);
   const adapterType = options?.type ?? DEFAULT_ADAPTER;
   const connectionName = options?.name ?? 'default';
   const adapterOptions = buildAdapterOptions(options?.options);
@@ -284,9 +286,9 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         return { status: 'up', data: { ...data, reachable: true } };
       };
       const readiness =
-        options?.readiness === undefined
+        readinessOptions === undefined
           ? undefined
-          : createMigrationReadiness(service, options.readiness, resolveProbeTiming(ctx.runtime));
+          : createMigrationReadiness(service, readinessOptions, resolveProbeTiming(ctx.runtime));
       ctx.health.register(
         `${token}`,
         readiness === undefined

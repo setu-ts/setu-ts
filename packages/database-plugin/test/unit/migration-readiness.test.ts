@@ -6,7 +6,10 @@ import {
   DatabaseService,
   MemoryAdapter,
 } from '../../src/index.ts';
-import { createMigrationReadiness } from '../../src/migrations/migration-readiness.ts';
+import {
+  createMigrationReadiness,
+  validateMigrationReadiness,
+} from '../../src/migrations/migration-readiness.ts';
 
 afterEach(() => vi.useRealTimers());
 
@@ -134,5 +137,66 @@ describe('migration readiness', () => {
         },
       }),
     ).not.toThrow();
+  });
+
+  // Audit F2: the options are read once and a frozen copy is what register() uses.
+  describe('reads the options once and keeps a frozen copy', () => {
+    const failure =
+      'readiness.migrations must be an array of unique non-empty strings, at most 10000';
+
+    it('ignores a getter that answers differently after validation', () => {
+      let reads = 0;
+      const options = {
+        get migrations(): readonly string[] {
+          reads += 1;
+          return reads === 1 ? ['a'] : (['', ''] as readonly string[]);
+        },
+      };
+      const copy = validateMigrationReadiness(options);
+      expect(reads).toBe(1);
+      expect(copy.migrations).toEqual(['a']);
+      expect(Object.isFrozen(copy)).toBe(true);
+      expect(Object.isFrozen(copy.migrations)).toBe(true);
+    });
+
+    it('is unaffected by mutating the caller array afterwards', () => {
+      const migrations = ['a'];
+      const copy = validateMigrationReadiness({ migrations });
+      migrations.push('a', '');
+      expect(copy.migrations).toEqual(['a']);
+    });
+
+    it('copies only the validated fields', () => {
+      expect(validateMigrationReadiness({ migrations: ['a'], ledgerEntity: 'h' })).toEqual({
+        migrations: ['a'],
+        ledgerEntity: 'h',
+      });
+      expect(validateMigrationReadiness({ migrations: [] })).toEqual({ migrations: [] });
+    });
+
+    it.each([null, 'readiness', 7])('refuses a non-object readiness (%s) by name', (value) => {
+      expect(() =>
+        DatabasePlugin({ readiness: value as unknown as { migrations: readonly string[] } }),
+      ).toThrow('readiness must be an object with a migrations array');
+    });
+
+    it('refuses a throwing getter, length, or index with its own fixed message', () => {
+      const throwing = new Proxy(['a'], {
+        get(target, key, receiver) {
+          if (key === 'length' || key === '0') throw new Error('canary-secret');
+          return Reflect.get(target, key, receiver) as unknown;
+        },
+      });
+      for (const options of [
+        {
+          get migrations(): readonly string[] {
+            throw new Error('canary-secret');
+          },
+        },
+        { migrations: throwing },
+      ]) {
+        expect(() => validateMigrationReadiness(options)).toThrow(failure);
+      }
+    });
   });
 });
