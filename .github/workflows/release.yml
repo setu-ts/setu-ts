@@ -26,7 +26,11 @@ jobs:
     name: Release gates
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: ubuntu-latest moved to Ubuntu 26 on 2026-10-19, and the
+    # mongo:8 service refuses to start on Linux 6.19+ ("MongoDB cannot start: Linux kernel
+    # versions 6.19 and newer has a known incompatibility", SERVER-121912). Unpin once a
+    # MongoDB release that supports the newer kernel is adopted here.
+    runs-on: ubuntu-24.04
     # The same backend environment as the `node` job in ci.yml, because the
     # gates below re-run that job's suite and it is not the same suite without
     # them. GitHub sets CI=true in EVERY workflow, so `test/apps-gate.test.ts`
