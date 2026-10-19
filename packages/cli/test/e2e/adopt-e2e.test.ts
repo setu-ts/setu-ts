@@ -9,6 +9,7 @@
  * @module
  */
 import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
+import { existsSync } from 'node:fs';
 import * as nodeFs from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
@@ -20,6 +21,9 @@ import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
+
+/** `/dev/zero` is the unbounded read this suite must prove is never opened. */
+const HAS_DEV_ZERO = existsSync('/dev/zero');
 
 /** Boots the member and asks the recorded health path. */
 const READY_PROBE = `import { createApp } from './setu.config.ts';
@@ -196,10 +200,52 @@ describe('setu adopt on a real scaffold', () => {
     expect(await snapshotTree(project)).toEqual(before);
   });
 
-  // The write batch refuses a dangling link before writing through it, but the
-  // moves have already happened by then: without the rollback the project's
-  // `.env` is left under apps/ and would be staged by a root `/.env` rule.
-  it('rolls every move back when a root target is a dangling link', async () => {
+  // A committed link at the member's own `.gitignore` used to be READ while
+  // planning. A link to `/dev/zero` never reaches EOF, so the run consumed memory
+  // without bound before the containment check could refuse it. The refusal now
+  // happens before the read; the timeout is the assertion that it does not hang.
+  it.skipIf(!HAS_DEV_ZERO)(
+    'refuses a member .gitignore linked to /dev/zero without reading it',
+    { timeout: 10_000 },
+    async () => {
+      expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
+
+      const project = `${root}/svc`;
+      await nodeFs.mkdir(`${project}/apps/svc`, { recursive: true });
+      await nodeFs.symlink('/dev/zero', `${project}/apps/svc/.gitignore`);
+      const before = await snapshotTree(project);
+
+      out.length = 0;
+      err.length = 0;
+      expect(await run(['adopt', '--dir', project, '--dry-run'])).toBe(1);
+      expect(err.join('\n')).toContain('symbolic link');
+      expect(out.join('\n')).not.toContain('would move');
+      expect(await snapshotTree(project)).toEqual(before);
+    },
+  );
+
+  // The root files are written by the command, not planned by `planAdoption`, so
+  // the planner's up-front check never saw them: the dry run printed a clean plan
+  // for a conversion the real run refused after moving files.
+  it('refuses a dangling root file link before a dry run prints a plan', async () => {
+    expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
+
+    const project = `${root}/svc`;
+    await nodeFs.symlink(`${root}/missing-dockerignore`, `${project}/.dockerignore`);
+    const before = await snapshotTree(project);
+
+    out.length = 0;
+    err.length = 0;
+    expect(await run(['adopt', '--dir', project, '--dry-run'])).toBe(1);
+    expect(err.join('\n')).toContain('link to something that does not exist');
+    expect(out.join('\n')).not.toContain('would move');
+    expect(out.join('\n')).not.toContain('would create');
+    expect(await snapshotTree(project)).toEqual(before);
+  });
+
+  // The up-front check refuses before the transaction moves anything, so there
+  // is nothing to roll back and no "every move was undone" line describes it.
+  it('refuses a dangling root target before moving anything', async () => {
     expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
 
     const project = `${root}/svc`;
@@ -210,7 +256,7 @@ describe('setu adopt on a real scaffold', () => {
     err.length = 0;
     expect(await run(['adopt', '--dir', project])).toBe(1);
     expect(err.join('\n')).toContain('link to something that does not exist');
-    expect(err.join('\n')).toContain('Nothing was changed: every move was undone.');
+    expect(err.join('\n')).not.toContain('Nothing was changed: every move was undone.');
     expect(await snapshotTree(project)).toEqual(before);
   });
 });

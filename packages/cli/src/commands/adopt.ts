@@ -28,6 +28,7 @@ import { interruptionMessage, throwIfInterrupted } from '../utils/interruption.t
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
+  assertInsideProject,
   findExisting,
   type GeneratedFile,
   joinPath,
@@ -265,6 +266,21 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
       )}`,
     );
     return EXIT_ERROR;
+  }
+
+  // Every path this writes is checked here, BEFORE a dry run prints a plan and
+  // before the transaction moves anything. The planner checks the member's own
+  // generated files; the root's are added above, and a dangling link at one of
+  // those (`.dockerignore` is the one a repository commits) makes the real write
+  // refuse while `findExisting` reports the link as absent. A dry run that
+  // promised a clean plan for it would be worse than no dry run.
+  for (const file of planned) {
+    try {
+      await assertInsideProject(deps.fs, project, file.path);
+    } catch (cause) {
+      deps.error(cause instanceof Error ? cause.message : String(cause));
+      return EXIT_ERROR;
+    }
   }
 
   if (args.flags['dry-run'] === true) {

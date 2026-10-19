@@ -371,6 +371,55 @@ describe('runAdoptCommand', () => {
       }
     });
 
+    // A directory, a FIFO or a link is not something the conversion wrote, and
+    // reading one is how a committed special file hangs or exhausts the run.
+    it('refuses a member .gitignore that is a directory, before moving anything', async () => {
+      const h = withEnv('.env', {
+        '/work/svc/.env': 'SECRET=1\n',
+        '/work/svc/apps/svc/.gitignore/keep.txt': 'not a file\n',
+      });
+
+      expect(await h.run([])).toBe(1);
+
+      expect(h.err.text()).toContain('apps/svc/.gitignore');
+      expect(h.err.text()).toContain('not a regular file');
+      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.has('/work/svc/.env')).toBe(true);
+      expect(h.fs.has('/work/svc/main.ts')).toBe(true);
+    });
+
+    // The bound is checked from `stat`, so an oversized file is refused rather
+    // than read: the fake records every read so this cannot pass by luck.
+    it('refuses a member .gitignore larger than 64 KiB without reading it', async () => {
+      const target = '/work/svc/apps/svc/.gitignore';
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+        '/work/svc/.env': 'SECRET=1\n',
+        [target]: 'x'.repeat(64 * 1024 + 1),
+      });
+      const reads: string[] = [];
+      const readFile = fs.readFile.bind(fs);
+      fs.readFile = (path) => {
+        reads.push(path);
+        return readFile(path);
+      };
+      const out = createRecorder();
+      const err = createRecorder();
+      const code = await runAdoptCommand(parseArgs([]), {
+        fs,
+        cwd: '/work/svc',
+        log: out.sink,
+        error: err.sink,
+      });
+
+      expect(code).toBe(1);
+      expect(err.text()).toContain('larger than the 64 KiB');
+      expect(reads).not.toContain(target);
+      expect(fs.writes).toEqual([]);
+      expect(fs.has('/work/svc/.env')).toBe(true);
+    });
+
     // The generated .dockerignore covers .env and .env.* only. A custom name would
     // be copied into the image, so the step to add it is printed.
     it('prints the .dockerignore step only for a name the generic rules miss', async () => {
@@ -784,6 +833,35 @@ describe('runAdoptCommand', () => {
     expect(await h.run(['--dry-run'])).toBe(1);
     expect(h.out.text()).toContain('WOULD REFUSE');
     expect(h.fs.writes).toEqual([]);
+  });
+
+  // A ROOT file the conversion writes is not part of the planner's `creates`
+  // list, so it used to escape the up-front containment check: the dry run
+  // printed a clean plan and the real run refused only after moving files.
+  it('refuses a planned root file that resolves outside the project before moving', async () => {
+    const fs = createFakeFs(PROJECT);
+    const realPath = fs.realPath?.bind(fs);
+    expect(realPath).toBeDefined();
+    if (realPath === undefined) return;
+    fs.realPath = (path) =>
+      path === '/work/svc/.dockerignore'
+        ? Promise.resolve('/outside/.dockerignore')
+        : realPath(path);
+    const out = createRecorder();
+    const err = createRecorder();
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs,
+      cwd: '/work/svc',
+      log: out.sink,
+      error: err.sink,
+    });
+
+    expect(code).toBe(1);
+    expect(err.text()).toContain('symbolic link');
+    expect(out.text()).not.toContain('moved ');
+    expect(fs.writes).toEqual([]);
+    expect(fs.has('/work/svc/main.ts')).toBe(true);
+    expect(fs.has('/work/svc/apps/svc/main.ts')).toBe(false);
   });
 
   it('reports an inspection failure before moving project files', async () => {

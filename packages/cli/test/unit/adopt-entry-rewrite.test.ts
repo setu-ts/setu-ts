@@ -98,7 +98,11 @@ describe('adopt entry rewrite', () => {
     expect(code).toBe(1);
     expect(err.text()).toContain('disk full during entry rewrite');
     expect(err.text()).toContain(ENTRY_PATH);
-    expect(fs.read(ENTRY_PATH)).toBe(ENTRY);
+    expect(err.text()).toContain('Nothing was changed: every move was undone.');
+    // The partial destination write is gone with the move, and the original entry
+    // is back at the root.
+    expect(fs.has(ENTRY_PATH)).toBe(false);
+    expect(fs.read('/work/svc/main.ts')).toBe(ENTRY);
     expect(out.text()).not.toContain('Converted into');
     expect(out.text()).not.toContain('does not carry the start line');
   });
