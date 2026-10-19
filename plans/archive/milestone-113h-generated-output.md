@@ -1,6 +1,6 @@
 # Milestone 113h — Generated output that is wrong (`@setu-ts/cli`, `@setu-ts/runtime`, `@setu-ts/kernel`)
 
-> **Status:** Planning. Branch: `fix/m113h-generated-output` (a **fix** letter: the ROADMAP lets
+> **Status:** Complete. Branch: `fix/m113h-generated-output` (a **fix** letter: the ROADMAP lets
 > each row ship on its own `fix/…` branch; all nine ship on this one, the M113j precedent).
 > `develop` and `main` are protected — all work and every fix stays on this branch until it merges
 > via a single PR into `develop`.

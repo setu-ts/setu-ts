@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readEnvFilePath } from '../../src/templates/env-file.ts';
+import { configuredEnvFilePath, readEnvFilePath } from '../../src/templates/env-file.ts';
 
 describe('readEnvFilePath', () => {
   it('accepts an omitted flag and a valid nested relative path', () => {
@@ -25,5 +25,28 @@ describe('readEnvFilePath', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.message).toContain('inside the generated project');
     }
+  });
+});
+
+describe('configuredEnvFilePath', () => {
+  it('reads a single-segment configured path', () => {
+    const source = `{ envFilePath: '.env', envFileOptional: true }`;
+    expect(configuredEnvFilePath(source)).toBe('.env');
+    expect(configuredEnvFilePath(`{ envFilePath: 'name.env' }`)).toBe('name.env');
+  });
+
+  it('returns a valid multi-segment path, leaving the move decision to the caller', () => {
+    expect(configuredEnvFilePath(`{ envFilePath: 'config/.env.local' }`)).toBe('config/.env.local');
+  });
+
+  it('returns undefined when no path is configured', () => {
+    expect(configuredEnvFilePath('export const plugins = [];')).toBeUndefined();
+    expect(configuredEnvFilePath(`{ envFileOptional: true }`)).toBeUndefined();
+  });
+
+  it('returns undefined for a path that fails validation', () => {
+    expect(configuredEnvFilePath(`{ envFilePath: '../.env' }`)).toBeUndefined();
+    expect(configuredEnvFilePath(`{ envFilePath: '/etc/env' }`)).toBeUndefined();
+    expect(configuredEnvFilePath(`{ envFilePath: 'env file' }`)).toBeUndefined();
   });
 });

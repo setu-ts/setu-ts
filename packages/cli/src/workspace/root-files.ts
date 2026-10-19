@@ -166,7 +166,7 @@ ${wrapProse(
     `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
     `the local address, and the generated Compose stack overrides the variable with the ` +
     `broker's service name, because two containers do not share a loopback interface.`,
-)}${transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`}`
+)}${transport.connection.note === undefined ? '' : `\n\n${wrapProse(transport.connection.note)}`}`
   }${
     transport.compose === undefined
       ? ''
@@ -207,10 +207,14 @@ members can only meet on a bus they share. Every service added later inherits it
       path: '.gitignore',
       contents:
         profile.manifestKind === 'deno'
-          ? 'node_modules/\ncoverage/\n'
+          ? 'node_modules/\ncoverage/\n.react-router/\n.env\n.env.*\n!.env.example\n'
           : // Both locations: Bun installs into each MEMBER's node_modules as well as
             // the root, measured — an ignore listing only the root would commit them.
-            'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n',
+            // `.react-router/` is unanchored, so it covers a full-stack member's
+            // typegen directory as well as the root's. The dotenv rules are
+            // unanchored too, so they cover each member's own `.env`.
+            'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n' +
+            '.react-router/\n.env\n.env.*\n!.env.example\n',
     },
   ];
 }

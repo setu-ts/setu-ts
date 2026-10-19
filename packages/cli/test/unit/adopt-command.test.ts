@@ -12,6 +12,7 @@ import {
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 import { COMPOSE_FILE, DOCKERFILE } from '../../src/workspace/compose.ts';
+import { InterruptedError } from '../../src/utils/interruption.ts';
 
 /** A scaffolded project, plus the repository files that must NOT move. */
 const PROJECT: Readonly<Record<string, string>> = {
@@ -224,6 +225,217 @@ describe('runAdoptCommand', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  describe('probe support recorded from the project dependencies', () => {
+    /** Runs adopt over the project with the given `@setu-ts` imports declared. */
+    const adoptWith = async (imports: Readonly<Record<string, string>>): Promise<Harness> => {
+      const h = harness({
+        ...PROJECT,
+        '/work/svc/deno.json': JSON.stringify({ tasks: {}, imports }),
+      });
+      expect(await h.run([])).toBe(0);
+      return h;
+    };
+
+    /** The member record the command persisted. */
+    const member = (h: Harness): { healthProbes?: boolean; metricsEndpoint?: boolean } =>
+      (
+        JSON.parse(h.fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
+          members: { healthProbes?: boolean; metricsEndpoint?: boolean }[];
+        }
+      ).members[0]!;
+
+    it('records both when the project declares a starter', async () => {
+      const h = await adoptWith({ '@setu-ts/rest-starter': 'npm:@setu-ts/rest-starter@^0.9.0' });
+
+      expect(member(h)).toMatchObject({ healthProbes: true, metricsEndpoint: true });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+httpGet:/);
+      expect(yaml).toContain('prometheus.io/scrape');
+    });
+
+    it('records health support alone from health-plugin', async () => {
+      const h = await adoptWith({ '@setu-ts/health-plugin': 'npm:@setu-ts/health-plugin@^0.9.0' });
+
+      expect(member(h)).toMatchObject({ healthProbes: true, metricsEndpoint: false });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+httpGet:/);
+      expect(yaml).not.toContain('prometheus.io/scrape');
+    });
+
+    it('records the metrics endpoint alone from metrics-plugin', async () => {
+      const h = await adoptWith({
+        '@setu-ts/metrics-plugin': 'npm:@setu-ts/metrics-plugin@^0.9.0',
+      });
+
+      expect(member(h)).toMatchObject({ healthProbes: false, metricsEndpoint: true });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+tcpSocket:/);
+      expect(yaml).toContain('prometheus.io/scrape');
+    });
+
+    it('records neither when the project declares no supporting package', async () => {
+      const h = await adoptWith({ '@setu-ts/logger-plugin': 'npm:@setu-ts/logger-plugin@^0.9.0' });
+
+      expect(member(h)).toMatchObject({ healthProbes: false, metricsEndpoint: false });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+tcpSocket:/);
+      expect(yaml).not.toContain('prometheus.io/scrape');
+    });
+  });
+
+  describe('the configured dotenv pair (V9-39)', () => {
+    /** A config naming one env path, plus the files the pair needs. */
+    const withEnv = (envFilePath: string, files: Readonly<Record<string, string>>) =>
+      harness({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '${envFilePath}', envFileOptional: true };\n`,
+        ...files,
+      });
+
+    it('moves the default pair with the member, so the member reads its own env', async () => {
+      const h = withEnv('.env', {
+        '/work/svc/.env': 'SECRET=1\n',
+        '/work/svc/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/.env')).toBe(false);
+      expect(h.fs.has('/work/svc/.env.example')).toBe(false);
+      expect(h.fs.read('/work/svc/apps/svc/.env')).toBe('SECRET=1\n');
+      expect(h.fs.read('/work/svc/apps/svc/.env.example')).toBe('SECRET=\n');
+      expect(h.out.text()).toContain('moved .env -> apps/svc/.env');
+    });
+
+    it('moves a custom single-segment name', async () => {
+      const h = withEnv('name.env', {
+        '/work/svc/name.env': 'SECRET=1\n',
+        '/work/svc/name.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/name.env')).toBe(false);
+      expect(h.fs.read('/work/svc/apps/svc/name.env')).toBe('SECRET=1\n');
+    });
+
+    it('does not move a multi-segment path, and prints the step to take', async () => {
+      const h = withEnv('config/.env', {
+        '/work/svc/config/.env': 'SECRET=1\n',
+        '/work/svc/config/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      // A root ignore pattern containing a slash is anchored, so moving the file
+      // would silently stop ignoring it; the developer is told to move it by hand.
+      expect(h.fs.read('/work/svc/config/.env')).toBe('SECRET=1\n');
+      expect(h.fs.has('/work/svc/apps/svc/config/.env')).toBe(false);
+      expect(h.out.text()).toContain('spans directories, so it was not moved');
+      expect(h.out.text()).toContain('move it into apps/svc/config/.env by hand');
+    });
+
+    it('prints the by-hand note only after the conversion succeeds', async () => {
+      const h = withEnv('config/.env', {
+        '/work/svc/config/.env': 'SECRET=1\n',
+        '/work/svc/config/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      const output = h.out.text();
+      const converted = output.indexOf('Converted into a workspace');
+      const note = output.indexOf('spans directories, so it was not moved');
+      expect(converted).toBeGreaterThanOrEqual(0);
+      expect(note).toBeGreaterThan(converted);
+    });
+
+    it('prints no by-hand note when the conversion fails after planning', async () => {
+      const h = withEnv('config/.env', {
+        '/work/svc/config/.env': 'SECRET=1\n',
+        '/work/svc/config/.env.example': 'SECRET=\n',
+      });
+      // Planning has already produced the note by now; the first move fails.
+      h.fs.writeFile = () => Promise.reject(new Error('disk full'));
+
+      expect(await h.run([])).toBe(1);
+      expect(h.err.text()).toContain('disk full');
+      expect(h.out.text()).not.toContain('spans directories');
+    });
+
+    it('moves nothing, and does not fail, when neither file exists', async () => {
+      const h = withEnv('.env', {});
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/apps/svc/.env')).toBe(false);
+    });
+
+    it('leaves a configured path that is a directory where it is', async () => {
+      // `src` passes the path validation, but adopting it as the dotenv file
+      // would list the whole directory as one move rather than walk it.
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: 'src', envFileOptional: true };\n`,
+      });
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(true);
+      if (plan.ok) expect(plan.files.map((file) => file.from)).not.toContain('src');
+    });
+
+    it('does not plan a configured path a static entry already moved', async () => {
+      // `README.md` is a legal dotenv name and is also in the adopted entry set.
+      // A second move would list the same destination twice.
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: 'README.md', envFileOptional: true };\n`,
+      });
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(true);
+      if (plan.ok) {
+        expect(plan.files.filter((file) => file.from === 'README.md')).toHaveLength(1);
+      }
+    });
+
+    it('refuses a configured path that resolves outside the project', async () => {
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+        '/work/svc/.env': 'SECRET=1\n',
+      });
+      const realPath = fs.realPath?.bind(fs);
+      expect(realPath).toBeDefined();
+      if (realPath === undefined) return;
+      fs.realPath = (path) =>
+        path === '/work/svc/.env' ? Promise.resolve('/outside/.env') : realPath(path);
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(false);
+      if (!plan.ok) expect(plan.message).toContain('symbolic link');
+    });
+
+    it('skips the pair when the config cannot be read', async () => {
+      // The config was stat-able before planning; a read failure here leaves the
+      // file where it is rather than failing the conversion.
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+        '/work/svc/.env': 'SECRET=1\n',
+      });
+      const readFile = fs.readFile.bind(fs);
+      fs.readFile = (path) =>
+        path === '/work/svc/setu.config.ts'
+          ? Promise.reject(new Error('read refused'))
+          : readFile(path);
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(true);
+      if (plan.ok) expect(plan.files.map((file) => file.from)).not.toContain('.env');
+    });
+  });
+
   it('refuses a directory with no Setu project in it', async () => {
     const h = harness({ '/work/svc/main.ts': 'x' });
     expect(await h.run([])).toBe(1);
@@ -364,7 +576,9 @@ describe('runAdoptCommand', () => {
     const manifest = JSON.parse(h.fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
       members: { name: string; port: number }[];
     };
-    expect(manifest.members).toEqual([{ name: 'svc', port: 4000 }]);
+    expect(manifest.members).toEqual([
+      { name: 'svc', port: 4000, healthProbes: false, metricsEndpoint: false },
+    ]);
     expect(h.fs.read(`/work/svc/apps/svc/${DISCOVERY_MODULE}`)).toContain(
       'export const SERVICE_PORT = 4000;',
     );
@@ -691,6 +905,14 @@ it('reports scalar failures while planning top-level and nested adoption paths',
   }
 });
 
+it('reports an Error from walking a nested directory', async () => {
+  const fs = createFakeFs(PROJECT);
+  fs.readdir = () => Promise.reject(new Error('cannot enumerate'));
+  const result = await planAdoption(fs, '/work/svc', 'apps/svc');
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.message).toContain('cannot enumerate');
+});
+
 it('prunes only directories and preserves ordinary top-level files', async () => {
   const fs = createFakeFs({ '/root/config.ts': 'keep' });
   expect(await pruneAdoptedDirectories(fs, '/root', ['config.ts', 'absent'])).toEqual([]);
@@ -731,6 +953,22 @@ it('reports write and entry-read failures without throwing scalar errors', async
     expect(await h.run(['adopt'])).toBe(1);
     expect(h.err.text()).toContain('refused');
   }
+});
+
+it('rethrows an interruption raised while rewriting the entry', async () => {
+  const h = harness();
+  const write = h.fs.writeFile.bind(h.fs);
+  let entryWrites = 0;
+  h.fs.writeFile = (path, bytes) => {
+    // The move wrote the entry once; the port rewrite is the second write.
+    if (path === '/work/svc/apps/svc/main.ts' && ++entryWrites === 2) {
+      return Promise.reject(new InterruptedError());
+    }
+    return write(path, bytes);
+  };
+
+  expect(await h.run(['adopt'])).toBe(130);
+  expect(h.err.text()).toContain('Interrupted;');
 });
 
 it('reports a scalar failure from the application log and refuses an unnamed root project', async () => {

@@ -192,6 +192,15 @@ describe('workspaceContainerFiles', () => {
     it('keeps the repository history out of the build context', () => {
       expect(ignore()).toContain('\n.git\n');
     });
+
+    it('keeps every dotenv file out, and keeps the example (V9-39)', () => {
+      const contents = ignore();
+      expect(contents).toContain('\n**/.env\n');
+      expect(contents).toContain('**/.env.*');
+      expect(contents).toContain('!**/.env.example');
+      // The limit is stated, not implied: a custom --env-file name is not covered.
+      expect(contents).toContain('--env-file name that is not .env-like is not covered');
+    });
   });
 
   describe('the Compose file', () => {

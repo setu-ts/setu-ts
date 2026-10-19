@@ -72,6 +72,7 @@ function renderServicesBarrel(artifacts: SeamArtifacts): string {
   const names = seamNames(artifacts, 'service');
   const header = seamHeader('setu generate service', [
     `DecoratorPlugin({ services: [...${APP_SERVICES_EXPORT}] })`,
+    `a starter's \`decorators: { services: [...${APP_SERVICES_EXPORT}] }\` arm`,
   ]);
   const imports = [
     `import type { Constructor } from '@setu-ts/common';`,

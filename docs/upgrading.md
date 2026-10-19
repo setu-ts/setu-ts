@@ -12,6 +12,31 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Refresh generated output for M113h (0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`, `@setu-ts/kernel`)
+
+New scaffolds emit the corrected output; an existing project keeps working, and these steps are what
+adopts the fixes.
+
+- **NATS.** New scaffolds set `streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`, so every
+  topic published through NATS must start with `app.`. An existing project keeps its own stream and
+  subjects. If it uses `RealtimeBackplanePlugin` on the `'messaging'` transport, set
+  `topic: 'app.realtime'`; its default `setu-ts.realtime` is outside the emitted set. Only one
+  stream per account may own `rr.inbox.>`, so remove the scaffold's `MESSAGING` stream before
+  adopting the set on an account that already has one.
+- **Ignore rules.** Add `**/.env`, `**/.env.*` and `!**/.env.example` to `.dockerignore`, and
+  `.env`, `.env.*`, `!.env.example` to the workspace root `.gitignore`. A custom `--env-file name`
+  is not covered by the generic rules.
+- **`ws` on Node.** Re-run `setu add websocket`; it writes the `ws` peer into `package.json` even
+  when the plugin is already installed. A missing `ws` now also reports the failed handshake once
+  instead of refusing silently.
+- **Workers full-stack `check`.** A Workers full-stack project's `check` script now runs the build
+  first, because its entry imports the compiled server build. An existing project can change its
+  `check` script to `npm run build && tsc --noEmit`.
+- **Adopted workspaces.** `setu adopt` records `healthProbes`/`metricsEndpoint` from the project's
+  dependencies. A workspace adopted before this release keeps its manifest as written: an absent
+  record stays "unknown", so its Kubernetes probes stay `tcpSocket` and its Prometheus annotations
+  stay off until you set the fields.
+
 ### Pass the database and ledger to `runMigrations` (M113o, 0.10.0)
 
 Regenerate managed `src/migrations/run.ts` and `index.ts` with `setu generate migration`. Replace

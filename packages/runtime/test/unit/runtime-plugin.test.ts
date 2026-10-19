@@ -10,10 +10,12 @@ import { RuntimePlugin } from '../../src/plugin/runtime-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IHttpAdapter,
+  ILogger,
   IPluginContext,
   IRuntimeServices,
   RuntimePlatform,
 } from '@setu-ts/common';
+import type { HttpAdapterOptions } from '../../src/adapters/shared/adapter-options.ts';
 import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -207,6 +209,24 @@ describe('runtime-plugin | default factory mappings', () => {
     expect(typeof adapter.fetch).toBe('function');
     expect(typeof adapter.listen).toBe('function');
     expect(typeof adapter.close).toBe('function');
+  });
+
+  it('closes the local diagnostics listener when the application closes', () => {
+    const hooks: Array<() => void> = [];
+    const ctx = createCtx();
+    ctx.lifecycle.onClose = (hook: () => void) => {
+      hooks.push(hook);
+    };
+    const plugin = RuntimePlugin({
+      platform: 'deno',
+      adapters: { deno: () => createFakeRuntimeServices('deno') },
+    });
+    plugin.register(ctx as any);
+
+    // The kernel runs close hooks on both the normal and failed-startup paths,
+    // so the listener must be released from one even when nothing was registered.
+    expect(hooks).toHaveLength(1);
+    expect(() => hooks[0]?.()).not.toThrow();
   });
 
   it('maps bun to BunHttpAdapter via custom factory', () => {
@@ -433,5 +453,135 @@ describe('runtime-plugin | maxBodyBytes option domain', () => {
         adapters: { deno: () => createFakeRuntimeServices('deno') },
       }),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reportError — resolved at call time (M113h §3.8b)
+// ---------------------------------------------------------------------------
+
+/** Registers the plugin against a registry-backed ctx and captures its options. */
+function createReportingHarness(services: IRuntimeServices): {
+  readonly captured: HttpAdapterOptions;
+  readonly ctx: { readonly services: { register(capability: string, value: unknown): void } };
+} {
+  let captured: HttpAdapterOptions | undefined;
+  const plugin = RuntimePlugin({
+    platform: 'node',
+    adapters: { node: () => services },
+    httpAdapters: {
+      node: (options) => {
+        captured = options;
+        return new FakeHttpAdapter();
+      },
+    },
+  });
+
+  const ctx: any = {
+    lifecycle: noopLifecycle(),
+    services: {
+      registry: new Map<string, unknown>(),
+      register(capability: string, value: unknown): void {
+        this.registry.set(capability, value);
+      },
+      get(capability: string) {
+        return this.registry.get(capability);
+      },
+      has(capability: string) {
+        return this.registry.has(capability);
+      },
+    },
+  };
+  plugin.register(ctx);
+
+  return { captured: captured!, ctx };
+}
+
+/** A logger whose `error` records its arguments. */
+function recordingLogger(errors: Array<{ message: string; metadata?: unknown }>): ILogger {
+  const logger: ILogger = {
+    level: 'debug',
+    fatal() {},
+    error(message, metadata) {
+      errors.push({ message, metadata });
+    },
+    warn() {},
+    info() {},
+    debug() {},
+    trace() {},
+    child() {
+      return logger;
+    },
+  };
+  return logger;
+}
+
+describe('runtime-plugin | reportError', () => {
+  it('routes to the registered logger, resolved at CALL time', () => {
+    const errors: Array<{ message: string; metadata?: unknown }> = [];
+    const { captured, ctx } = createReportingHarness(createFakeRuntimeServices('node'));
+    // The logger plugin registers AFTER RuntimePlugin (HIGHEST priority), so it
+    // is absent during `register` — the reporter must still find it later.
+    ctx.services.register(CAPABILITIES.LOGGER, recordingLogger(errors));
+
+    captured.reportError!({
+      level: 'error',
+      msg: 'WebSocket handshake failed',
+      message: 'npm install ws',
+    });
+
+    expect(errors).toEqual([
+      {
+        message: 'WebSocket handshake failed',
+        metadata: { message: 'npm install ws' },
+      },
+    ]);
+    // The logger method IS the level, and the message is its first argument, so
+    // neither is repeated in the metadata.
+    expect(errors[0]?.metadata).not.toHaveProperty('level');
+    expect(errors[0]?.metadata).not.toHaveProperty('msg');
+  });
+
+  it('falls back to services.reportError when no logger is registered', () => {
+    const reported: Readonly<Record<string, unknown>>[] = [];
+    const services = {
+      ...createFakeRuntimeServices('node'),
+      reportError: (record: Readonly<Record<string, unknown>>): void => {
+        reported.push(record);
+      },
+    };
+    const { captured } = createReportingHarness(services);
+
+    captured.reportError!({ level: 'error', msg: 'WebSocket handshake failed' });
+
+    expect(reported).toEqual([{ level: 'error', msg: 'WebSocket handshake failed' }]);
+  });
+
+  it('swallows a throwing logger without falling through to reportError', () => {
+    const reported: Readonly<Record<string, unknown>>[] = [];
+    const services = {
+      ...createFakeRuntimeServices('node'),
+      reportError: (record: Readonly<Record<string, unknown>>): void => {
+        reported.push(record);
+      },
+    };
+    const { captured, ctx } = createReportingHarness(services);
+    const errors: Array<{ message: string; metadata?: unknown }> = [];
+    const logger = recordingLogger(errors);
+    ctx.services.register(CAPABILITIES.LOGGER, {
+      ...logger,
+      error() {
+        throw new Error('broken logger');
+      },
+    });
+
+    expect(() => captured.reportError!({ msg: 'WebSocket handshake failed' })).not.toThrow();
+    expect(reported).toEqual([]);
+  });
+
+  it('is silent when neither a logger nor a reportError sink exists', () => {
+    const { captured } = createReportingHarness(createFakeRuntimeServices('node'));
+
+    expect(() => captured.reportError!({ msg: 'WebSocket handshake failed' })).not.toThrow();
   });
 });

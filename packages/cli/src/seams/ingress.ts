@@ -39,6 +39,7 @@ function renderIngressBarrel(artifacts: SeamArtifacts): string {
   return assembleSeamBarrel(
     seamHeader('setu generate job / ws-route / event-handler / command-handler / query-handler', [
       `DecoratorPlugin({ ingress: [...${INGRESS_HANDLERS_EXPORT}] })`,
+      `a starter's \`decorators: { ingress: [...${INGRESS_HANDLERS_EXPORT}] }\` arm`,
     ]),
     [`import type { Constructor } from '@setu-ts/common';`, imports]
       .filter((line) => line !== '')

@@ -106,6 +106,18 @@ rather than its source.
 Building from source also means an image tracks your working tree rather than a published snapshot,
 which is what you want during a version bump, when the pinned version is not on npm yet.
 
+### Dotenv files never reach an image
+
+The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
+`!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
+cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
+match those patterns is **not** covered — add it to `.dockerignore` and `.gitignore` yourself.
+
+`setu adopt` moves a configured single-segment dotenv pair into the member, where the member's
+`envFilePath` reads it. A multi-segment `envFilePath` is left at the root with the step printed:
+move it by hand and add an ignore rule beside it, because a pattern containing a slash is anchored
+to its directory and the root rule would stop matching after the move.
+
 ### Pin the base image and pnpm
 
 Both Dockerfiles use a `node:24` base and install the same pnpm version the root `package.json` pins

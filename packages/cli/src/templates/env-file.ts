@@ -48,3 +48,22 @@ export function readEnvFilePath(
   }
   return { ok: true, path: value };
 }
+
+/**
+ * The dotenv path a configuration declares, when it declares a valid one.
+ *
+ * One reader for the devtool's approved-key scan and for `setu adopt`, so a
+ * project cannot name one path to the tooling and a different one to the
+ * conversion. Validation is {@linkcode readEnvFilePath}'s, so an absolute path,
+ * an empty or `.`/`..` segment, or a character outside the accepted set makes
+ * the declaration unusable rather than moving a file somewhere unexpected.
+ *
+ * @param configSource - The project's `setu.config.ts` text
+ * @returns The validated relative path, or `undefined` when none is declared or it is unusable
+ */
+export function configuredEnvFilePath(configSource: string): string | undefined {
+  const configured = /\benvFilePath:\s*'([^']+)'/.exec(configSource)?.[1];
+  if (configured === undefined) return undefined;
+  const parsed = readEnvFilePath({ 'env-file': configured });
+  return parsed.ok ? parsed.path : undefined;
+}

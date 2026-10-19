@@ -1,5 +1,6 @@
 import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import { dirname } from 'node:path';
 /**
  * A Workers scaffold's npm devDependencies resolve against the live registry.
  *
@@ -36,6 +37,7 @@ import * as nodeFs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
+import { npmInstall, npmRun, startOverlay } from '../fixtures/node-project.ts';
 
 /** Whether `npm` can be spawned on this machine. */
 async function npmAvailable(): Promise<boolean> {
@@ -103,4 +105,40 @@ describe('a Workers scaffold resolves its npm dependencies', () => {
       },
     );
   }
+
+  // V9-9: one `tsconfig.json` type-checks the Worker source AND `vite.config.ts`,
+  // which imports `node:fs`. Before the fix the Workers project named neither
+  // `@types/node` nor `node` in `types`, so its own `npm run check` failed on a
+  // pristine scaffold. Installed from the overlay because that is the tree's own
+  // packed tarballs — the same thing npm serves after a release.
+  it(
+    'type-checks the Workers full-stack scaffold with its own check script',
+    { skip: !hasNpm && !onCi, timeout: 900_000 },
+    async () => {
+      const dir = await tempDir({ prefix: 'setu-workers-check-' });
+      const overlay = await startOverlay();
+      try {
+        const host = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
+        for (const file of projectFiles('edge', 'cloudflare-workers', host)) {
+          const path = `${dir}/${file.path}`;
+          await nodeFs.mkdir(dirname(path), { recursive: true });
+          await nodeFs.writeFile(path, file.contents);
+        }
+
+        const install = await npmInstall(dir, overlay);
+        expect(install.code, install.output.slice(-4000)).toBe(0);
+
+        // The entry imports `../build/server/index.js`, which exists only after a
+        // build. A pristine scaffold's own `check` script therefore builds
+        // first; this asserts the scaffold as emitted, with no manual step.
+        const check = await npmRun(dir, 'check');
+        // The output is in the assertion so a failure names the missing type
+        // rather than only the exit code.
+        expect(check.code, check.output.slice(-4000)).toBe(0);
+      } finally {
+        await overlay.close();
+        await nodeFs.rm(dir, { recursive: true });
+      }
+    },
+  );
 });

@@ -27,6 +27,25 @@ const MESSAGING_PACKAGE = 'messaging-plugin';
 const QUEUE_PACKAGE = 'queue-plugin';
 
 /**
+ * Carries a transport's operational note onto the host, once.
+ *
+ * Both overlays read the same `connection.note`, and a transport with both arms
+ * (redis, rabbitmq) applies both, so an append without the guard would print the
+ * paragraph twice in the generated README.
+ *
+ * @param host - The host the arm rewrote
+ * @param spec - The selected transport
+ * @returns The host with the note appended, or unchanged when there is none
+ */
+function withTransportNote(host: ResolvedHost, spec: TransportSpec): ResolvedHost {
+  const note = spec.connection?.note;
+  if (note === undefined) return host;
+  const notes = host.transportNotes ?? [];
+  if (notes.includes(note)) return host;
+  return { ...host, transportNotes: [...notes, note] };
+}
+
+/**
  * Rewrites the host's `MessagingPlugin` wiring to the transport's broker arm.
  *
  * A no-op when the spec declares no messaging arm or no connection (the
@@ -48,14 +67,17 @@ export function withBrokerArgs(
 ): ResolvedHost {
   if (spec.connection === undefined || spec.messagingArgs === undefined) return host;
   if (!host.plugins.some((wiring) => wiring.pkg === MESSAGING_PACKAGE)) return host;
-  return withClientDependencies(
-    rewritePluginArgs(
-      host,
-      MESSAGING_PACKAGE,
-      spec.messagingArgs,
-      renderConnection(spec.connection, profile, override),
+  return withTransportNote(
+    withClientDependencies(
+      rewritePluginArgs(
+        host,
+        MESSAGING_PACKAGE,
+        spec.messagingArgs,
+        renderConnection(spec.connection, profile, override),
+      ),
+      spec.messagingClients ?? [],
     ),
-    spec.messagingClients ?? [],
+    spec,
   );
 }
 
@@ -81,14 +103,17 @@ export function withQueueArgs(
 ): ResolvedHost {
   if (spec.connection === undefined || spec.queueArgs === undefined) return host;
   if (!host.plugins.some((wiring) => wiring.pkg === QUEUE_PACKAGE)) return host;
-  return withClientDependencies(
-    rewritePluginArgs(
-      host,
-      QUEUE_PACKAGE,
-      spec.queueArgs,
-      renderConnection(spec.connection, profile, override),
+  return withTransportNote(
+    withClientDependencies(
+      rewritePluginArgs(
+        host,
+        QUEUE_PACKAGE,
+        spec.queueArgs,
+        renderConnection(spec.connection, profile, override),
+      ),
+      spec.queueClients ?? [],
     ),
-    spec.queueClients ?? [],
+    spec,
   );
 }
 

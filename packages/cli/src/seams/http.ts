@@ -113,8 +113,13 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
     ];
 
     const wiring = [
-      ...(classBased && controllers.length > 0
-        ? [`DecoratorPlugin({ controllers: [...${APP_CONTROLLERS_EXPORT}] })`]
+      ...(classBased
+        ? [
+            ...(controllers.length > 0
+              ? [`DecoratorPlugin({ controllers: [...${APP_CONTROLLERS_EXPORT}] })`]
+              : []),
+            `a starter's \`decorators: { controllers: [...${APP_CONTROLLERS_EXPORT}] }\` arm`,
+          ]
         : []),
       `${REGISTER_ROUTES_EXPORT}(app.router, app.services);`,
     ];

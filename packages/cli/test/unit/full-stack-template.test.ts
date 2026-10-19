@@ -248,6 +248,16 @@ describe('full-stack template | the runtime-dependent argument', () => {
     }
   });
 
+  it('opts into request logging with the probe and scrape paths excluded (M113h §3.9)', () => {
+    // The scaffold opts in; `LoggerPlugin`'s own default stays off. The excluded
+    // paths are the ones a kubelet probes and Prometheus scrapes.
+    for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
+      expect(argsFor(runtime)).toContain(
+        "logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },",
+      );
+    }
+  });
+
   it('carries no di option by default', () => {
     for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
       expect(argsFor(runtime)).not.toContain('di:');

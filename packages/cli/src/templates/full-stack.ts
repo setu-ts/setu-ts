@@ -148,7 +148,11 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
       session: {
         secret: config.getOrThrow<string>('SESSION_SECRET'),
         csrf: ${csrf},
-      },${discovery}
+      },
+      // Opted in by the scaffold, with the probe and scrape paths excluded so a
+      // kubelet does not write a log line per poll. The plugin's own default
+      // (off) is unchanged.
+      logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },${discovery}
       // Preserve Origin on native form posts; send no cross-origin referrer.
       httpSecurity: { headers: { referrerPolicy: 'same-origin' } },${context.swaggerAssets === 'cdn' ? "\n      openapi: { swagger: { assets: 'cdn' } }," : ''}
     }),
@@ -260,6 +264,10 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
       // while `package.json` resolves the shim from `node_modules`.
       denoCommand: 'deno run -A npm:@react-router/dev build',
       outputDir: 'build',
+      // React Router's typegen writes here (`react-router typegen`, and the Vite
+      // plugin during dev/build). It is generated source, not the project's, so
+      // it is ignored and excluded exactly like the build.
+      generatedDirs: ['.react-router'],
       devEntry: FULL_STACK_DEV_ENTRY,
     },
     npmDependencies: { ...FULL_STACK_NPM_DEPENDENCIES, 'swagger-ui-dist': '^5' },

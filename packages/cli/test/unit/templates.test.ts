@@ -370,6 +370,10 @@ describe('class-based template', () => {
       // M70f (C3): validation answers in the same Problem Details shape the
       // `errorHandler` emits for thrown errors, so it carries an `errorFormat`.
       'validation-plugin',
+      // M113h (V9-81): the REST plugin list states request logging and the probe
+      // paths it excludes, so every template built from it — this one included —
+      // carries that argument.
+      'logger-plugin',
     ]);
     for (const wiring of CLASS_BASED_TEMPLATE.plugins) {
       if (withArgs.has(wiring.pkg)) {

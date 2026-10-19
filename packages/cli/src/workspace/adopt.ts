@@ -24,6 +24,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { CONFIG_MODULE } from '../constants.ts';
+import { configuredEnvFilePath } from '../templates/env-file.ts';
 import { assertInsideProject, joinPath } from '../utils/file-writer.ts';
 import { escapeName } from '../utils/names.ts';
 
@@ -66,6 +67,37 @@ export const ADOPTED_ENTRIES: readonly string[] = [
  */
 export const ADOPTED_DIRECTORIES: readonly string[] = ['src', 'app', 'test'];
 
+/** The starter packages that register `HealthPlugin` and `MetricsPlugin` themselves. */
+const STARTER_PACKAGES: ReadonlySet<string> = new Set([
+  'rest-starter',
+  'microservice-starter',
+  'full-stack-starter',
+]);
+
+/**
+ * What an existing project's dependencies declare about its probe endpoints.
+ *
+ * Recorded in the member's manifest entry so the Kubernetes renderer — which sees
+ * only the manifest — can decide between `httpGet` and `tcpSocket` probes. A
+ * starter registers both plugins unconditionally, which is why any of them counts
+ * for both. This is a dependency declaration, not proof of registration: a
+ * project can declare the plugin and never register it, which the generated
+ * README warns about alongside custom endpoint paths.
+ *
+ * @param installed - The bare `@setu-ts` package names the project declares
+ * @returns Whether the member declares health probes and a metrics endpoint
+ */
+export function probeSupport(installed: ReadonlySet<string>): {
+  readonly healthProbes: boolean;
+  readonly metricsEndpoint: boolean;
+} {
+  const starter = [...STARTER_PACKAGES].some((pkg) => installed.has(pkg));
+  return {
+    healthProbes: starter || installed.has('health-plugin'),
+    metricsEndpoint: starter || installed.has('metrics-plugin'),
+  };
+}
+
 /** One entry a conversion will relocate. */
 export interface AdoptedFile {
   /** Path relative to the project root, e.g. `src/routes/index.ts`. */
@@ -76,7 +108,12 @@ export interface AdoptedFile {
 
 /** What planning a conversion produced. */
 export type AdoptPlan =
-  | { readonly ok: true; readonly files: readonly AdoptedFile[] }
+  | {
+      readonly ok: true;
+      readonly files: readonly AdoptedFile[];
+      /** A step the developer must take by hand, in the order it is reported. */
+      readonly notes?: readonly string[];
+    }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -176,7 +213,69 @@ export async function planAdoption(
     }
   }
 
-  return { ok: true, files };
+  // The dotenv pair is not a static entry: its name comes from the project's own
+  // `envFilePath`. It moves with the member because each member runs in
+  // `apps/<member>/`, where `envFilePath: '.env'` would otherwise read nothing —
+  // and the miss is silent because the generated config sets `envFileOptional`.
+  const notes: string[] = [];
+  const configured = await readConfiguredEnvPath(fs, project);
+  if (configured !== undefined) {
+    if (configured.includes('/')) {
+      // A `.gitignore` pattern WITH a slash is anchored to its directory, so the
+      // root rule would stop matching after the move. Left in place, with the step
+      // named rather than silently unignored.
+      notes.push(
+        `The configured envFilePath "${configured}" spans directories, so it was not moved: ` +
+          `move it into ${joinPath(memberRoot, configured)} by hand and add an ignore rule for ` +
+          `it — a pattern containing a slash is anchored to its directory.`,
+      );
+    } else {
+      const planned = new Set(files.map((file) => file.from));
+      for (const name of [configured, `${configured}.example`]) {
+        if (planned.has(name)) continue;
+        let isDirectory: boolean;
+        try {
+          isDirectory = (await fs.stat(joinPath(project, name))).isDirectory;
+        } catch {
+          // Absent: the example is optional, and a project need not commit either.
+          continue;
+        }
+        if (isDirectory) continue;
+        try {
+          await assertInsideProject(fs, project, joinPath(project, name));
+        } catch (cause) {
+          return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
+        }
+        files.push({ from: name, to: joinPath(memberRoot, name) });
+      }
+    }
+  }
+
+  return { ok: true, files, ...(notes.length === 0 ? {} : { notes }) };
+}
+
+/**
+ * Reads a project's configured dotenv path, tolerating an unreadable config.
+ *
+ * The config's presence was checked before planning; this is the contents read.
+ * A failure here means the file cannot be moved meaningfully anyway, so planning
+ * skips the pair rather than turning conversion into a read error.
+ *
+ * @param fs - The filesystem to read through
+ * @param project - The project directory
+ * @returns The validated path, or `undefined`
+ */
+async function readConfiguredEnvPath(
+  fs: IFileSystem,
+  project: string,
+): Promise<string | undefined> {
+  try {
+    return configuredEnvFilePath(
+      new TextDecoder().decode(await fs.readFile(joinPath(project, CONFIG_MODULE))),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 /** What a single move did. */
@@ -280,13 +379,15 @@ export async function pruneAdoptedDirectories(
 /**
  * Rewrites the member's entry to bind its allocated port.
  *
- * A standalone project's entry binds the literal `3000`; a member binds the port
- * the workspace allocated it, read from the generated discovery module, so the
- * port it binds and the port its siblings dial stay ONE datum.
+ * A standalone project's entry either reads `PORT` from the runtime services (the
+ * current form, defaulting to `3000`) or carries the legacy literal `3000`; a
+ * member binds the port the workspace allocated it, read from the generated
+ * discovery module, so the port it binds and the port its siblings dial stay ONE
+ * datum.
  *
- * Returns `undefined` when the entry no longer has the literal to replace — a
- * developer may have changed it — and the caller then reports the two lines to
- * change rather than guessing at an edit.
+ * Returns `undefined` when either piece is missing — the start line or the
+ * `createApp` import — because a developer may have changed the entry, and the
+ * caller then reports the two lines to change rather than guessing at an edit.
  *
  * @param entry - The existing entry's contents
  * @param symbol - The exported constant to bind instead
@@ -298,12 +399,27 @@ export function rewriteEntryPort(
   symbol: string,
   specifier: string,
 ): string | undefined {
-  const binding = /await app\.start\(\{ port: 3000 \}\);/;
-  if (!binding.test(entry)) return undefined;
+  // Both shipped forms: the current entry reads PORT from the runtime services
+  // (X4-10), and a project scaffolded before that carries the literal. Quotes
+  // are either kind because Prettier may have rewritten the file.
+  const current = /await app\.start\(\{ port: Number\(runtime\.env\.PORT \?\? (['"])3000\1\) \}\);/;
+  const legacy = /await app\.start\(\{ port: 3000 \}\);/;
+  const binding = current.exec(entry) ?? legacy.exec(entry);
+  if (binding === null) return undefined;
 
-  const imported = entry.replace(
-    `import { createApp } from './${CONFIG_MODULE}';\n`,
-    `import { createApp } from './${CONFIG_MODULE}';\nimport { ${symbol} } from '${specifier}';\n`,
-  );
-  return imported.replace(binding, `await app.start({ port: ${symbol} });`);
+  // The import goes immediately after the createApp import, wherever that is and
+  // whichever quote style the file uses. Without it there is no `createApp` call
+  // to keep the port beside, so the entry is not the shape this rewrites.
+  const configImport = new RegExp(
+    `import \\{ [^}]+ \\} from (['"])\\./${CONFIG_MODULE.replace(/\./g, '\\.')}\\1;`,
+  ).exec(entry);
+  if (configImport === null) return undefined;
+
+  const afterImport = configImport.index + configImport[0].length;
+  const withImport =
+    entry.slice(0, afterImport) +
+    `\nimport { ${symbol} } from '${specifier}';` +
+    entry.slice(afterImport);
+
+  return withImport.replace(binding[0], `await app.start({ port: ${symbol} });`);
 }

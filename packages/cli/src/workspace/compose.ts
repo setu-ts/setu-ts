@@ -220,6 +220,12 @@ function dockerignore(): string {
     '.gitignore',
     'coverage',
     `${MEMBERS_DIR}/*/main.dev.ts`,
+    // Dotenv files never reach an image, wherever a member keeps them.
+    '# Dotenv files, including a custom single-segment name. A custom',
+    '# --env-file name that is not .env-like is not covered by these rules.',
+    '**/.env',
+    '**/.env.*',
+    '!**/.env.example',
     // The Dockerfile itself is passed with -f and read from the client, so
     // ignoring the directory costs nothing and keeps k8s/ and docker/ out of the
     // image.

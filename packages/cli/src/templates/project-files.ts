@@ -32,6 +32,7 @@ import type {
 import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
+import { wrapProse } from '../utils/wrap-prose.ts';
 import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
 import { frameworkSpecifier } from './framework-specifier.ts';
 import {
@@ -108,6 +109,15 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
 export interface ResolvedHost {
   /** Connector port, read by the generated README. */
   readonly devtoolPort?: number;
+  /**
+   * Operational facts a selected transport contributes to the generated README.
+   *
+   * Appended by {@linkcode withBrokerArgs}/{@linkcode withQueueArgs} from
+   * `TransportSpec.connection.note`. Declared internal: the workspace root README
+   * reads the spec directly, while a standalone project has no spec left at
+   * render time, so the overlay carries the text forward.
+   */
+  readonly transportNotes?: readonly string[];
   readonly plugins: readonly Wiring[];
   /** Module exports the Workers entry declares beside `fetch`. */
   readonly workerExports: readonly WorkerExport[];
@@ -1372,7 +1382,21 @@ function tsconfigOptions(
           // A template's own `lib` wins: a frontend build needs the DOM for the code
           // it ships to a browser.
           lib: template?.['lib'] ?? ['ES2022'],
-          types: [WORKERS_TYPES_PACKAGE, ...templateTypes(template)],
+          types: [
+            WORKERS_TYPES_PACKAGE,
+            // The template's npm build (Vite) imports `node:fs`, and the same
+            // `tsconfig.json` type-checks it. A Workers project without one
+            // names no Node declarations at all.
+            ...(manifest?.npmBuild === undefined ? [] : ['node']),
+            ...templateTypes(template),
+          ],
+          // The Workers entry statically imports the compiled React Router
+          // server build (`build/server/index.js`), which has no declarations.
+          // The `check` script builds first, so the file exists; without
+          // `allowJs`, `tsc --noEmit` still reports TS7016 on it even though
+          // that import is what `wrangler dev` runs. A rest or microservice
+          // Worker imports no JavaScript build.
+          ...(manifest?.npmBuild === undefined ? {} : { allowJs: true }),
         }
       : {};
   // Every npm-manifest target type-checks with its own `tsc` (M111d §3.7), and
@@ -1415,6 +1439,23 @@ function templateTypes(options?: Readonly<Record<string, unknown>>): readonly un
 
 /** The ambient type package a Workers project's `tsconfig.json` names. */
 const WORKERS_TYPES_PACKAGE = '@cloudflare/workers-types';
+
+/**
+ * Every directory a template's frontend toolchain generates.
+ *
+ * One list feeds all four standalone consumers — `.gitignore`, ESLint's ignores,
+ * `.prettierignore`, and Deno's `fmt`/`lint` excludes — so a toolchain that
+ * writes typegen output beside its build cannot be ignored by one and linted by
+ * another. A template with no npm build contributes nothing.
+ *
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The build output first, then any further generated directories
+ */
+function generatedOutputDirs(manifest?: TemplateManifest): readonly string[] {
+  const build = manifest?.npmBuild;
+  if (build === undefined) return [];
+  return [build.outputDir, ...(build.generatedDirs ?? [])];
+}
 
 /**
  * The `compilerOptions` a generated `deno.json` carries.
@@ -1504,6 +1545,16 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
 const NODE_RUNNER = 'tsx';
 
 /**
+ * The `@types/node` range a generated project pins.
+ *
+ * One constant because two targets now need it: every Node project, whose entry
+ * registers a shutdown listener on `process`, and a Workers project with an npm
+ * build, whose single `tsconfig.json` type-checks a `vite.config.ts` that
+ * imports `node:fs`.
+ */
+const NODE_TYPES_RANGE = '^24.0.0';
+
+/**
  * npm packages a generated project needs because of its RUNTIME, not its
  * template.
  *
@@ -1514,15 +1565,19 @@ const NODE_RUNNER = 'tsx';
  * NODE_RUNNER}.
  *
  * @param runtime - The selected runtime target
+ * @param manifest - The template's manifest contributions, when it declares them
  * @returns devDependencies to merge, empty for every target but Node
  */
-function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
+function runtimeDevDependencies(
+  runtime: TargetRuntime,
+  manifest?: TemplateManifest,
+): Readonly<Record<string, string>> {
   // Node: see NODE_RUNNER — the start script invokes it, so it must be
   // installed. `@types/node` is what declares the `process` the entry's shutdown
   // listener registers on; without it a generated project's own `tsc` reports an
   // undeclared name while `tsx` runs the file regardless, so nothing but this
   // would catch it.
-  if (runtime === 'node') return { '@types/node': '^24.0.0', tsx: '^4.20.0' };
+  if (runtime === 'node') return { '@types/node': NODE_TYPES_RANGE, tsx: '^4.20.0' };
   // Bun gets `@types/bun` rather than `@types/node`: it is the package Bun's own
   // documentation prescribes, and it supplies the `process` declarations by
   // depending on `@types/node` — so the entry's listener type-checks without the
@@ -1553,6 +1608,12 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
     return {
       wrangler: '~4.148.0',
       [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
+      // A full-stack Workers project runs ONE `tsconfig.json` over both the
+      // Worker source and `vite.config.ts`, which imports `node:fs` — so the
+      // Node declarations have to be present for its own `npm run check` to
+      // pass. A rest or microservice Workers project has no such file and gets
+      // nothing extra.
+      ...(manifest?.npmBuild === undefined ? {} : { '@types/node': NODE_TYPES_RANGE }),
     };
   }
   return {};
@@ -1609,14 +1670,23 @@ function standaloneNpmFiles(
     // Through the same helper the Node branch uses, so runtime-level
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
-    ...runtimeDevDependencies(runtime),
+    ...runtimeDevDependencies(runtime, manifest),
     ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
     ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
     ...(onWorkers
-      ? { ...NPM_TOOLING_SCRIPTS, dev: 'wrangler dev', deploy: 'wrangler deploy' }
+      ? {
+          ...NPM_TOOLING_SCRIPTS,
+          // A template with a build has its Workers entry import the compiled
+          // server module, which does not exist until that build runs. The
+          // check therefore builds first, the same order `start` and `test`
+          // use. Every other target and template keeps the bare `tsc --noEmit`.
+          ...(manifest?.npmBuild === undefined ? {} : { check: 'npm run build && tsc --noEmit' }),
+          dev: 'wrangler dev',
+          deploy: 'wrangler deploy',
+        }
       : {}),
   };
 
@@ -1650,7 +1720,7 @@ function standaloneNpmFiles(
         2,
       )}\n`,
     },
-    ...(onWorkers ? npmToolingFiles(manifest?.npmBuild?.outputDir) : []),
+    ...(onWorkers ? npmToolingFiles(generatedOutputDirs(manifest)) : []),
   ];
 }
 
@@ -1741,6 +1811,14 @@ export function projectFiles(
   // backing services; without this line the scaffold cannot complete
   // app.start() until the reader discovers the file on their own.
   const hasBrokerServices = host.files.some((file) => file.path === BROKER_COMPOSE_FILE);
+  // A selected transport's operational note (NATS's subject scope, Pub/Sub's
+  // missing topic creation). Wrapped programmatically at the emitted width: the
+  // workspace README already reflows its own note this way, and hand-wrapping a
+  // paragraph whose interpolated values change length fails `fmt --check` (X2-4).
+  const transportNotes =
+    (host.transportNotes ?? []).length === 0
+      ? ''
+      : `\n${(host.transportNotes ?? []).map((note) => wrapProse(note)).join('\n\n')}\n`;
   const readme = `# ${projectName}
 
 A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
@@ -1754,7 +1832,7 @@ ${
       // `QueuePlugin()` in memory, connecting to nothing.
       `\n## Local transport services\n\nStart these FIRST: the transport plugins you selected ` +
       `connect while the application registers, and\ndo not retry, so \`start\` fails against a ` +
-      `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n`
+      `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n${transportNotes}`
     : ''
 }
 ## Run
@@ -1793,10 +1871,13 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
   const gitignore = `${
     runtime !== 'deno' || host.manifest?.npmBuild !== undefined ? 'node_modules/\n' : ''
   }coverage/\n${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
-    // A frontend build's output is generated, so it is ignored like any other
-    // build artifact — the generated file used to list only `coverage/` and the
-    // env file, which left a minified bundle tracked (D2).
-    manifest?.npmBuild === undefined ? '' : `${manifest.npmBuild.outputDir}/\n`
+    // A frontend build's output and its typegen directory are generated, so
+    // they are ignored like any other build artifact — the generated file used
+    // to list only `coverage/` and the env file, which left a minified bundle
+    // tracked (D2) and a `.react-router/` typegen directory committed.
+    generatedOutputDirs(manifest)
+      .map((dir) => `${dir}/\n`)
+      .join('')
   }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}${
     // M113d §3.10: on Workers the local variables live in `.dev.vars` (the file
     // `wrangler dev` reads), never committed.
@@ -1866,7 +1947,7 @@ describe('application composition', () => {
       contents: `${JSON.stringify(
         {
           tasks: denoTasks(runtime, host, manifest),
-          ...(isWorkspaceMember ? {} : rootManifestSettings(manifest?.npmBuild?.outputDir)),
+          ...(isWorkspaceMember ? {} : rootManifestSettings(generatedOutputDirs(manifest))),
           // A `package.json` switches Deno to node_modules resolution, and the
           // full-stack template is the one that emits one on a Deno target. A
           // pristine scaffold then failed its OWN `check:app` on a cold
@@ -1929,7 +2010,7 @@ describe('application composition', () => {
           // rather than left as a branch no input can take.
           devDependencies: {
             ...npmDevFrameworkDependencies(host, runtime),
-            ...runtimeDevDependencies(runtime),
+            ...runtimeDevDependencies(runtime, manifest),
             ...NPM_TOOLING_DEV_DEPENDENCIES,
             ...host.extraDevDependencies,
             ...manifest?.npmDevDependencies,
@@ -1947,7 +2028,7 @@ describe('application composition', () => {
         2,
       )}\n`,
     });
-    for (const file of npmToolingFiles(manifest?.npmBuild?.outputDir)) files.push(file);
+    for (const file of npmToolingFiles(generatedOutputDirs(manifest))) files.push(file);
   }
 
   files.push({

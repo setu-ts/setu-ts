@@ -278,6 +278,16 @@ export interface TemplateManifest {
      */
     readonly outputDir: string;
     /**
+     * Further generated directories, treated exactly like {@linkcode outputDir}.
+     *
+     * A frontend toolchain may write typegen output beside its build rather than
+     * inside it: React Router's `react-router typegen` writes `.react-router`,
+     * which is generated source the project does not own. Listed here, it is
+     * gitignored and excluded from ESLint, Prettier and Deno's `fmt`/`lint` by
+     * the same rule as the build output.
+     */
+    readonly generatedDirs?: readonly string[];
+    /**
      * A development entry emitted on every server target (never Workers), with
      * a `dev` task or script that runs it. Omitted → neither is emitted.
      */

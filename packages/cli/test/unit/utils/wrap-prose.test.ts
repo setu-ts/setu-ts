@@ -74,6 +74,17 @@ describe('wrapProse', () => {
     expect(wrapProse(`before ${long} after`).split('\n')).toEqual(['before', long, 'after']);
   });
 
+  it('keeps an inline code span with spaces on one line', () => {
+    // `deno fmt` never breaks inside backticks, so a span carrying a space (the
+    // NATS note's `topic: 'app.realtime'`) must move as one word rather than be
+    // split at the space — the output is immediately rejected otherwise.
+    const long = 'x'.repeat(LINE_WIDTH - 20);
+    expect(wrapProse(`${long} \`topic: 'app.realtime'\` tail`).split('\n')).toEqual([
+      long,
+      "`topic: 'app.realtime'` tail",
+    ]);
+  });
+
   it('returns an empty string for input with no words', () => {
     expect(wrapProse('')).toBe('');
     expect(wrapProse('   \n  ')).toBe('');

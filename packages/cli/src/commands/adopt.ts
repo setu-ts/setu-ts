@@ -39,9 +39,11 @@ import {
   ADOPTED_DIRECTORIES,
   moveFile,
   planAdoption,
+  probeSupport,
   pruneAdoptedDirectories,
   rewriteEntryPort,
 } from '../workspace/adopt.ts';
+import { detectPlugins } from '../utils/plugin-detector.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import {
@@ -156,6 +158,11 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     return EXIT_ERROR;
   }
 
+  // Read from the project's own manifest BEFORE anything moves, and persisted in
+  // the member record: the Kubernetes renderer has only the manifest, and later
+  // `generate app` / `ports --reallocate` re-renders must keep the same answer.
+  const support = probeSupport(await detectPlugins(deps.fs, project));
+
   // The toolchain the project already uses, not a choice: a project with a
   // package.json is a Node or Bun one, and converting it into a Deno workspace
   // would leave a root whose members its toolchain cannot install.
@@ -170,7 +177,7 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     // service talks without being asked to. `--transport` belongs to a workspace
     // created fresh.
     transport: DEFAULT_TRANSPORT,
-    members: [{ name: names.kebab, port: basePort }],
+    members: [{ name: names.kebab, port: basePort, ...support }],
   };
   const transport = transportSpec(DEFAULT_TRANSPORT);
 
@@ -402,9 +409,13 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
 
     deps.log('');
     deps.log(`Converted into a workspace with ${names.kebab} on port ${basePort}.`);
+    // Printed only after the conversion succeeded: a "move it by hand" note
+    // beside a conversion that was refused or rolled back would describe work
+    // the developer never has to do.
+    for (const note of plan.notes ?? []) deps.log(note);
     if (rewritten === undefined) {
       deps.log('');
-      deps.log(`Its entry does not carry the port literal this rewrites, so bind the allocated`);
+      deps.log(`Its entry does not carry the start line this rewrites, so bind the allocated`);
       deps.log(`port yourself — two lines in ${joinPath(memberRoot, 'main.ts')}:`);
       deps.log(`  import { ${SERVICE_PORT_EXPORT} } from '${DISCOVERY_SPECIFIER}';`);
       deps.log(`  await app.start({ port: ${SERVICE_PORT_EXPORT} });`);

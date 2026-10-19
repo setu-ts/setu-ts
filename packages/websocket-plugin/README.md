@@ -30,6 +30,11 @@ the cost of all of that.
 On Node, install `ws` (`npm install ws` / `deno add npm:ws`). It is an **optional** dependency
 loaded lazily on the first accepted upgrade, so a plain HTTP application never pulls it in; if it is
 missing when an upgrade arrives you get a clear error naming the install command.
+`setu add websocket` writes that peer into `package.json` on a Node project, and re-running it
+repairs a project where it is missing. When `RuntimePlugin` registers the application, a failed Node
+handshake is also reported through `HttpAdapterOptions.reportError` — once per distinct message,
+never once per upgrade — so a missing `ws` is visible in the log instead of only as a refused
+socket.
 
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes

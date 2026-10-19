@@ -28,6 +28,14 @@ describe('root manifest settings', () => {
     expect(String(rootManifestSettings()['//minimumDependencyAge'])).toContain('24 hours');
   });
 
+  it('excludes every generated directory from fmt and lint (V9-11)', () => {
+    // The build output AND a toolchain's typegen directory arrive as one list,
+    // so a full-stack project does not let `deno fmt` rewrite `.react-router/`.
+    const settings = rootManifestSettings(['build', '.react-router']);
+    expect(settings['fmt']).toMatchObject({ exclude: ['build', '.react-router'] });
+    expect(settings['lint']).toMatchObject({ exclude: ['build', '.react-router'] });
+  });
+
   it('carries the formatting the CLI actually emits', () => {
     // The CLI writes single-quoted source; Deno's default is double. Without
     // this a fresh scaffold fails `deno fmt --check` on files the CLI itself

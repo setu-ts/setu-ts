@@ -59,10 +59,19 @@ describe('interrupted scaffolding on the real filesystem', () => {
       await fixture(async (root, fs) => {
         expect(await cli(root, fs).run(['new', 'svc', '--template', 'rest'])).toBe(0);
         const project = `${root}/svc`;
-        // The entry rewrite targets the pre-runtime-port scaffold shape.
-        await nodeFs.writeFile(`${project}/main.ts`, 'await app.start({ port: 3000 });\n');
+        // The entry rewrite targets the pre-runtime-port scaffold shape, which
+        // needs both the start line and the createApp import it sits beside.
+        await nodeFs.writeFile(
+          `${project}/main.ts`,
+          `import { createApp } from './setu.config.ts';\n` +
+            `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
+        );
         await nodeFs.mkdir(`${project}/src/empty/nested`, { recursive: true });
         const before = await snapshot(project);
+        // The rest scaffold's dotenv pair is part of the move now (V9-39), so the
+        // snapshot below proves an interruption restores it to the root too.
+        expect(Array.isArray(before['.env'])).toBe(true);
+        expect(Array.isArray(before['.env.example'])).toBe(true);
         const controller = new AbortController();
         let triggered = false;
         let mainWrites = 0;

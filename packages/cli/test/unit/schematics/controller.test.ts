@@ -28,6 +28,14 @@ describe('controller schematic', () => {
     expect(barrelOf(files, 'controller').contents).toContain('readonly Constructor[]');
   });
 
+  it('names both ways the barrel is consumed, and never claims it is wired', () => {
+    expect(barrelOf(files, 'controller').contents).not.toContain('needs no further wiring');
+    expect(file.contents).not.toContain('needs no further wiring');
+    expect(file.contents).toContain('DecoratorPlugin({ controllers: [...APP_CONTROLLERS] })');
+    expect(file.contents).toContain('decorators: { controllers:');
+    expect(barrelOf(files, 'controller').contents).toContain('decorators: { controllers:');
+  });
+
   it('emits it at src/controllers/order-item.controller.ts', () => {
     expect(file.path).toBe('src/controllers/order-item.controller.ts');
   });

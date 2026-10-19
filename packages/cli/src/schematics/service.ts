@@ -12,9 +12,12 @@
  * project, where it works today.
  *
  * Both modes emit a barrel, and the difference matters: the class one is the
- * registration `setu.config.ts` passes to `DecoratorPlugin`, while the functional one
- * is a convenience re-export nothing imports for you. The functional barrel is also
- * what makes the scan admit these files — see `seams/services.ts`.
+ * registration `setu.config.ts` passes to `DecoratorPlugin` — inline as
+ * `DecoratorPlugin({ services: [...APP_SERVICES] })`, or through a starter's
+ * `decorators: { services: … }` arm — while the functional one is a convenience
+ * re-export nothing imports for you. `setu generate` reports when the class
+ * barrel is written but `setu.config.ts` references neither form, so the barrel
+ * alone is never claimed to be wired.
  *
  * @module
  */
@@ -72,9 +75,12 @@ function renderInjectableService(names: DerivedNames): string {
 /**
  * ${names.pascal} domain service.
  *
- * Registered through the \`${APP_SERVICES_EXPORT}\` barrel in \`src/services/index.ts\`,
- * which \`setu.config.ts\` passes to \`DecoratorPlugin\` — so this class needs no further
- * wiring. Consumers reach it with \`@Inject('${serviceSeamToken(names.kebab)}')\` on a
+ * Registered through the \`${APP_SERVICES_EXPORT}\` barrel in \`src/services/index.ts\`:
+ * \`setu.config.ts\` passes it as
+ * \`DecoratorPlugin({ services: [...${APP_SERVICES_EXPORT}] })\`, or a starter does
+ * through its \`decorators: { services: … }\` arm. \`setu generate\` reports when the
+ * config references neither, so this class is never claimed wired without it.
+ * Consumers reach it with \`@Inject('${serviceSeamToken(names.kebab)}')\` on a
  * constructor parameter, which works whether or not a container is registered.
  *
  * Resolving it BY HAND depends on the composition, because the two paths register
@@ -123,9 +129,10 @@ export function generateService(
   };
 
   // Both modes emit the barrel, but they are not the same barrel. The class one is a
-  // REGISTRATION: `setu.config.ts` imports `APP_SERVICES` and hands it to
-  // `DecoratorPlugin`. The functional one is a convenience re-export that nothing
-  // imports for you — there is no plugin option taking a list of functions.
+  // REGISTRATION for `DecoratorPlugin({ services })` or a starter's `decorators` arm —
+  // and `setu generate` reports when the config references it from neither. The
+  // functional one is a convenience re-export that nothing imports for you — there is
+  // no plugin option taking a list of functions.
   const spec = classBased ? SERVICES_SEAM : FUNCTIONAL_SERVICES_SEAM;
 
   return [

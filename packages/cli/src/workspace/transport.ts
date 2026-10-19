@@ -264,6 +264,18 @@ const DEFAULT_BROKER_SUBSCRIPTION = 'messaging-consumers';
 const SQL_EDGE_PASSWORD_VARIABLE = 'MSSQL_SA_PASSWORD';
 
 /**
+ * The subjects the NATS broker's `MESSAGING` stream owns.
+ *
+ * Declared once and rendered into every NATS wiring, because the broker has no
+ * default: absent `streamSubjects` it creates nothing and fails at startup with
+ * `JetStreamStreamError`. The fixed `app` scope is intentional — workspace
+ * members share one stream, and only one stream per account may own
+ * `rr.inbox.>`. These are the RPC-capable subjects the messaging plugin's own
+ * README documents (`rr.req.<topic>` / `rr.inbox.<uuid>`).
+ */
+const NATS_STREAM_SUBJECTS = ['app.>', 'rr.req.app.>', 'rr.inbox.>'] as const;
+
+/**
  * Re-indents a rendered connection expression by one nesting level.
  *
  * {@linkcode WorkspaceRuntimeProfile.envRead} bakes a FIXED continuation indent
@@ -385,17 +397,35 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     messagingClients: ['nats'],
     description: 'NATS broker shared by every member',
     plugins: [],
-    messagingArgs: (connection) => `{ broker: 'nats', url: ${connection} }`,
+    // The stream subject set is mandatory on this arm: `NatsMessagingOptions`
+    // has no default, and the broker creates the stream ONLY from the subjects
+    // it is given — a NATS server with `-js` alone does not create anything.
+    // `app` is a fixed scope because every workspace member shares the one
+    // `MESSAGING` stream (cross-member pub/sub needs it): the first member to
+    // start creates it and later members use it as is, so a per-member prefix
+    // would leave every other member's subjects uncaptured. The RPC subjects are
+    // the ones the README documents; `>` alone is refused by NATS, and `*.>`
+    // overlaps `$JS.API.>`.
+    messagingArgs: (connection) =>
+      `{\n        broker: 'nats',\n        url: ${connection},\n        streamSubjects: [${NATS_STREAM_SUBJECTS.map((subject) => `'${subject}'`).join(', ')}],\n      }`,
     connection: {
       variable: 'NATS_URL',
       localDefault: 'nats://127.0.0.1:4222',
       urlOverridable: true,
+      note:
+        'Every topic published through NATS must start with `app.`. The broker creates its ' +
+        '`MESSAGING` stream with the subjects `app.>`, `rr.req.app.>` and `rr.inbox.>` on first ' +
+        'start, and uses a pre-existing stream exactly as it is. A `RealtimeBackplanePlugin` on ' +
+        "the `'messaging'` transport must set `topic: 'app.realtime'` — its default " +
+        '`setu-ts.realtime` falls outside that subject set.',
     },
     compose: {
       services: `  nats:
     image: nats:2
-    # JetStream is not optional for this broker: NatsBroker publishes into a
-    # stream, and a server started without -js refuses the stream creation.
+    # JetStream is not optional for this broker: the generated MessagingPlugin
+    # passes the stream subjects below, and the plugin creates the MESSAGING
+    # stream from them on first start. A server started without -js refuses that
+    # creation outright.
     command: ['-js']
     ports:
       - '\${NATS_PORT:-4222}:4222'

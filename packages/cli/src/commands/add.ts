@@ -35,8 +35,10 @@ import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
+import { composingStarter } from '../utils/starter-arms.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
+import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import {
   callArguments,
   callsIdentifier,
@@ -74,6 +76,15 @@ interface IAddablePackage {
   readonly pkg: string;
   /** Packages used only while developing belong in npm devDependencies. */
   readonly section?: 'dev';
+  /**
+   * Optional peer packages a package manager will not install for the
+   * consumer. Written into `package.json` `dependencies` only on the runtimes
+   * listed here, at their {@linkcode CLIENT_RANGES} range.
+   */
+  readonly peers?: {
+    readonly runtimes: readonly TargetRuntime[];
+    readonly packages: readonly string[];
+  };
 }
 
 /**
@@ -127,7 +138,7 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['testing', { pkg: 'testing', section: 'dev' }],
   ['telemetry', { pkg: 'telemetry-plugin' }],
   ['validation', { pkg: 'validation-plugin' }],
-  ['websocket', { pkg: 'websocket-plugin' }],
+  ['websocket', { pkg: 'websocket-plugin', peers: { runtimes: ['node'], packages: ['ws'] } }],
   ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
 
@@ -218,55 +229,6 @@ export function addSeam(bare: string, installed: ReadonlySet<string>): AddSeam |
   if (args === undefined) return undefined;
   return { args, imports: seamLocalImports(specs), files: seamFiles(specs) };
 }
-
-/** Starter-owned options, including optional arms that must first be configured. */
-const REST_ARMS: ReadonlyMap<string, string> = new Map([
-  ['config-plugin', 'config'],
-  ['logger-plugin', 'logger'],
-  ['validation-plugin', 'validation'],
-  ['http-security-plugin', 'httpSecurity'],
-  ['health-plugin', 'health'],
-  ['metrics-plugin', 'metrics'],
-  ['openapi-plugin', 'openapi'],
-  ['decorator-plugin', 'decorators'],
-  ['database-plugin', 'database'],
-  ['auth-plugin', 'auth'],
-  ['websocket-plugin', 'realtime.websocket'],
-  ['sse-plugin', 'realtime.sse'],
-  ['realtime-backplane-plugin', 'realtime.backplane'],
-  ['session-plugin', 'session'],
-  ['di-plugin', 'di'],
-  ['graphql-plugin', 'graphql'],
-  ['service-discovery-plugin', 'serviceDiscovery'],
-]);
-const MICROSERVICE_ARMS: ReadonlyMap<string, string> = new Map([
-  ...REST_ARMS,
-  ['messaging-plugin', 'messaging'],
-  ['queue-plugin', 'queue'],
-  ['resilience-plugin', 'resilience'],
-  ['telemetry-plugin', 'telemetry'],
-]);
-const FULL_STACK_ARMS: ReadonlyMap<string, string> = new Map([
-  ...MICROSERVICE_ARMS,
-  ['cache-plugin', 'cache'],
-  ['events-plugin', 'events'],
-  ['cqrs-plugin', 'cqrs'],
-  ['scheduler-plugin', 'scheduler'],
-  ['audit-plugin', 'audit'],
-  ['secrets-plugin', 'secrets'],
-  ['storage-plugin', 'storage'],
-  ['mail-plugin', 'mail'],
-  ['feature-flags-plugin', 'featureFlags'],
-  ['notification-plugin', 'notifications'],
-  ['multi-tenancy-plugin', 'multiTenancy'],
-  ['react-router-plugin', 'reactRouter'],
-  ['static-plugin', 'static'],
-]);
-const STARTER_ARMS = [
-  { symbol: 'createRestApp', pkg: 'rest-starter', arms: REST_ARMS },
-  { symbol: 'createMicroserviceApp', pkg: 'microservice-starter', arms: MICROSERVICE_ARMS },
-  { symbol: 'createFullStackAppFromConfig', pkg: 'full-stack-starter', arms: FULL_STACK_ARMS },
-] as const;
 
 /** The concrete registration to show when configuration belongs to the application. */
 function registrationLine(bare: string): string | undefined {
@@ -416,19 +378,6 @@ function seamGapLines(
 }
 
 /**
- * The starter a configuration composes through, if it imports one at all. Any
- * starter import counts — `createRestApp`, or `buildRestPlugins` spread into a
- * synchronous factory — since either registers plugins this file never names, and
- * a second registration is a duplicate plugin name at boot (audit round 6).
- * Read with comments masked where the file classifies, else from raw text, which
- * errs toward starter guidance.
- */
-function composingStarter(source: string): (typeof STARTER_ARMS)[number] | undefined {
-  const visible = maskComments(source) ?? source;
-  return STARTER_ARMS.find(({ pkg }) => packageSpecifierCount(visible, pkg) > 0);
-}
-
-/**
  * Resolves what the user typed to a bare package name.
  *
  * @param input - The `<plugin>` argument
@@ -532,6 +481,67 @@ export function withDependency(
       : afterScope + 1;
   entries.splice(insertion, 0, [specifier, range]);
   return `${JSON.stringify({ ...parsed, [section]: Object.fromEntries(entries) }, null, 2)}\n`;
+}
+
+/**
+ * The optional peer packages a package needs installed on a given runtime.
+ *
+ * @param bare - Bare package name being added
+ * @param runtime - The detected target runtime
+ * @returns Each peer and the range to record for it; empty when the package
+ * declares none or the runtime is not listed
+ */
+function peerPackagesFor(
+  bare: string,
+  runtime: TargetRuntime,
+): readonly { readonly name: string; readonly range: string }[] {
+  const peers = [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.peers;
+  if (peers === undefined || !peers.runtimes.includes(runtime)) return [];
+  return peers.packages.map((name) => {
+    const range = CLIENT_RANGES[name];
+    if (range === undefined) {
+      throw new Error(`No client range for peer ${name}; add it to CLIENT_RANGES.`);
+    }
+    return { name, range };
+  });
+}
+
+/**
+ * Adds optional peer packages to a manifest's `dependencies`, never replacing
+ * an existing pin.
+ *
+ * `setu add websocket` on Node must install `ws` — an optional peer of
+ * `@setu-ts/runtime` that a package manager will not install for the consumer —
+ * or the first upgrade answers 500 with nothing in the log. A peer already
+ * pinned at any range is left exactly as it is: a hand-pinned version may be
+ * deliberate, and this command cannot know why.
+ *
+ * @param source - The manifest's current contents
+ * @param peers - Each peer and the range to record for it
+ * @returns The rewritten manifest and the peers actually added
+ */
+function withPeerDependencies(
+  source: string,
+  peers: readonly { readonly name: string; readonly range: string }[],
+): { readonly contents: string; readonly added: readonly string[] } {
+  if (peers.length === 0) return { contents: source, added: [] };
+  const parsed = JSON.parse(source) as Record<string, unknown>;
+  const existing = parsed['dependencies'];
+  const dependencies =
+    existing !== null && typeof existing === 'object'
+      ? { ...(existing as Record<string, string>) }
+      : {};
+  const added: string[] = [];
+  for (const peer of peers) {
+    if (peer.name in dependencies) continue;
+    dependencies[peer.name] = peer.range;
+    added.push(peer.name);
+  }
+  if (added.length === 0) return { contents: source, added: [] };
+  return {
+    contents: `${JSON.stringify({ ...parsed, dependencies }, null, 2)}\n`,
+    added,
+  };
 }
 
 /**
@@ -749,6 +759,8 @@ export async function runAddCommand(
   const edits: { readonly path: string; readonly contents: string }[] = [];
   let found = false;
   let alreadyPresent = false;
+  const peerPackages = peerPackagesFor(bare, runtime);
+  const addedPeers: string[] = [];
 
   for (const target of targets) {
     if (runtime === 'deno' && target.file === 'package.json') continue;
@@ -761,34 +773,43 @@ export async function runAddCommand(
     }
     found = true;
 
+    let updated: string | undefined;
     if (pinnedInOtherNpmSection(source, target.file, target.section, specifier, target.range)) {
       alreadyPresent = true;
-      continue;
-    }
-
-    let updated: string | undefined;
-    try {
-      updated = withDependency(source, target.section, specifier, target.range);
-    } catch {
-      const read = await readJsonManifest(deps.fs, path);
-      if (read.kind === 'ok' && read.format === 'jsonc') {
-        deps.error(
-          `${escapeName(
-            path,
-          )} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
-            `Add this line under "${target.section}" yourself: ` +
-            `"${specifier}": "${target.range}"`,
-        );
-      } else {
-        deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
+    } else {
+      try {
+        updated = withDependency(source, target.section, specifier, target.range);
+      } catch {
+        const read = await readJsonManifest(deps.fs, path);
+        if (read.kind === 'ok' && read.format === 'jsonc') {
+          deps.error(
+            `${escapeName(
+              path,
+            )} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+              `Add this line under "${target.section}" yourself: ` +
+              `"${specifier}": "${target.range}"`,
+          );
+        } else {
+          deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
+        }
+        return EXIT_ERROR;
       }
-      return EXIT_ERROR;
+      if (updated === undefined) alreadyPresent = true;
     }
 
-    if (updated === undefined) {
-      alreadyPresent = true;
-      continue;
+    // Optional peers ride the SAME manifest rewrite — a second edit for one path
+    // fails as a duplicate — and are applied even when the framework package is
+    // already pinned, so re-running `setu add websocket` is how an affected
+    // project recovers.
+    if (target.file === 'package.json') {
+      const merged = withPeerDependencies(updated ?? source, peerPackages);
+      if (merged.added.length > 0) {
+        updated = merged.contents;
+        addedPeers.push(...merged.added);
+      }
     }
+
+    if (updated === undefined) continue;
     edits.push({ path, contents: updated });
   }
 
@@ -914,6 +935,9 @@ export async function runAddCommand(
     return EXIT_ERROR;
   }
   for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+  if (addedPeers.includes('ws')) {
+    deps.log('added ws (the Node WebSocket server, an optional peer of @setu-ts/runtime)');
+  }
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
