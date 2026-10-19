@@ -221,8 +221,9 @@ function dockerignore(): string {
     'coverage',
     `${MEMBERS_DIR}/*/main.dev.ts`,
     // Dotenv files never reach an image, wherever a member keeps them.
-    '# Dotenv files, including a custom single-segment name. A custom',
-    '# --env-file name that is not .env-like is not covered by these rules.',
+    '# Dotenv files whose names are .env or .env.*, except .env.example, which is',
+    '# kept for the image. A custom --env-file name such as local.env is NOT',
+    '# covered by these rules; add it to this file by hand.',
     '**/.env',
     '**/.env.*',
     '!**/.env.example',

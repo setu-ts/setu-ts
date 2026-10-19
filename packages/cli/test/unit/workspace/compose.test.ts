@@ -198,8 +198,11 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain('\n**/.env\n');
       expect(contents).toContain('**/.env.*');
       expect(contents).toContain('!**/.env.example');
-      // The limit is stated, not implied: a custom --env-file name is not covered.
-      expect(contents).toContain('--env-file name that is not .env-like is not covered');
+      // The limit is stated, not implied: the rules cover .env and .env.* only,
+      // and a custom --env-file name must be added by hand (F2).
+      expect(contents).toContain('Dotenv files whose names are .env or .env.*');
+      expect(contents).toContain('A custom --env-file name such as local.env is NOT');
+      expect(contents).toContain('add it to this file by hand');
     });
   });
 

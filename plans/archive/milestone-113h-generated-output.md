@@ -432,5 +432,23 @@ pnpm run release:verify <version>
 - **The NATS subject set** captures only `app.>`, `rr.req.app.>` and `rr.inbox.>` — never a
   catch-all.
 
+**Attackers and audit obligations** (added after audit round 1, which found §10 listed neither):
+
+- **A developer's own repository tooling (git, Docker).** Not hostile, but the place a secret leaks.
+  Obligations: after `setu adopt`, a moved dotenv file is ignored by real `git check-ignore` under
+  any root `.gitignore`, including an anchored `/.env` (round-1 F1 — fixed with a member
+  `.gitignore`); a real `docker build` context excludes `.env`/`.env.*` and keeps `.env.example`;
+  any name the generic rules do not cover is printed as a step, never claimed covered (F2).
+- **A crafted `envFilePath` or a symlinked dotenv file.** Obligation: adopt moves nothing outside
+  the project and refuses a symlink that resolves outside it.
+- **A remote client sending WebSocket upgrades.** Obligations: it cannot trigger the handshake
+  report (only the server-fault path reports), cannot grow it past 16 messages per handle, and a
+  throwing logger cannot change the refusal on the wire.
+- **Request contents reaching logs.** Obligation: scaffolded request logging records method, path,
+  status and duration — no query, cookie or `Authorization` value — and skips the probe paths.
+  Accepted residual: a secret carried in a URL PATH segment is logged as-is.
+- **A pathological `main.ts`.** Obligation: the entry rewrite is linear in the file size (F3).
+- **NATS subjects.** Obligation: the emitted set is never a catch-all.
+
 A committed-tree security audit is required (V9-39 changes what reaches a container image and git),
 run by a fresh Claude agent per `.roo/skills/security-audit/SKILL.md`.

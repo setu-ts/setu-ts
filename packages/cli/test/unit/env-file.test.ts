@@ -1,6 +1,30 @@
 import { describe, expect, it } from 'vitest';
 
-import { configuredEnvFilePath, readEnvFilePath } from '../../src/templates/env-file.ts';
+import {
+  configuredEnvFilePath,
+  isCoveredDotenvName,
+  readEnvFilePath,
+} from '../../src/templates/env-file.ts';
+
+describe('isCoveredDotenvName', () => {
+  it('covers the default name and .env.* names the container rules match', () => {
+    for (const name of ['.env', '.env.local', '.env.prod']) {
+      expect(isCoveredDotenvName(name)).toBe(true);
+    }
+  });
+
+  // `.env.example` matches `.env.*` too, but the generated rules deliberately KEEP
+  // it for the image, so it is not covered as a secret file.
+  it('does not cover the example the rules deliberately keep', () => {
+    expect(isCoveredDotenvName('.env.example')).toBe(false);
+  });
+
+  it('does not cover a custom name outside the .env family', () => {
+    for (const name of ['local.env', 'secrets', '.env.']) {
+      expect(isCoveredDotenvName(name)).toBe(false);
+    }
+  });
+});
 
 describe('readEnvFilePath', () => {
   it('accepts an omitted flag and a valid nested relative path', () => {

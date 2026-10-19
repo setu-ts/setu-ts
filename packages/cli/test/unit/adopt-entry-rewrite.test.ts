@@ -213,4 +213,33 @@ describe('rewriteEntryPort', () => {
     const entry = `const app = await makeApp();\nawait app.start({ port: 3000 });\n`;
     expect(rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER)).toBeUndefined();
   });
+
+  // The old `import { [^}]+ } from …` regex backtracked quadratically on
+  // project-supplied text: 80k repetitions of `import { ` followed by a `}` and a
+  // normal entry took ~20 s. The line scan is linear, so this returns almost
+  // immediately (F3).
+  it('does not backtrack on a line that repeats the import prefix', { timeout: 30_000 }, () => {
+    const entry = `${'import { '.repeat(80_000)}}\n${ENTRY}`;
+
+    const started = performance.now();
+    const rewritten = rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER);
+    const elapsed = performance.now() - started;
+
+    expect(rewritten).toBeDefined();
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('returns undefined when the import line has a } in its middle', () => {
+    const entry =
+      `import { createApp, nested: { a: 1 } } from './setu.config.ts';\n` +
+      `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`;
+    expect(rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER)).toBeUndefined();
+  });
+
+  it('returns undefined when the import line has nothing between its braces', () => {
+    const entry =
+      `import {  } from './setu.config.ts';\n` +
+      `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`;
+    expect(rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER)).toBeUndefined();
+  });
 });

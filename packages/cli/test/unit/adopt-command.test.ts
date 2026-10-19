@@ -319,6 +319,73 @@ describe('runAdoptCommand', () => {
       expect(h.fs.read('/work/svc/apps/svc/name.env')).toBe('SECRET=1\n');
     });
 
+    // A root rule such as `/.env` is anchored to the repository root, so it stops
+    // matching once the file moves under apps/. A nested .gitignore is anchored to
+    // its own directory and keeps the secret ignored (F1).
+    it('writes a member .gitignore anchored to the moved dotenv file', async () => {
+      const h = withEnv('.env', {
+        '/work/svc/.env': 'SECRET=1\n',
+        '/work/svc/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      const ignore = h.fs.read('/work/svc/apps/svc/.gitignore');
+      expect(ignore).toContain('/.env');
+      // The example is committed, so it is deliberately absent from the rules.
+      expect(ignore).not.toContain('/.env.example');
+    });
+
+    it('anchors a custom single-segment dotenv name in the member .gitignore', async () => {
+      const h = withEnv('local.env', { '/work/svc/local.env': 'SECRET=1\n' });
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.read('/work/svc/apps/svc/.gitignore')).toContain('/local.env');
+    });
+
+    it('writes no member .gitignore when no dotenv file moves', async () => {
+      const h = withEnv('.env', {});
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/apps/svc/.gitignore')).toBe(false);
+    });
+
+    // The member directory is new, so this cannot happen in practice — but the
+    // rule is appended rather than replacing whatever is already there.
+    it('appends to a member .gitignore that already exists', async () => {
+      for (const existing of ['coverage/', 'coverage/\n']) {
+        const fs = createFakeFs({
+          ...PROJECT,
+          '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+          '/work/svc/.env': 'SECRET=1\n',
+          '/work/svc/apps/svc/.gitignore': existing,
+        });
+        const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+        expect(plan.ok).toBe(true);
+        if (!plan.ok) continue;
+        const created = plan.creates?.find((file) => file.path === 'apps/svc/.gitignore');
+        expect(created?.contents).toBe('coverage/\n/.env\n');
+      }
+    });
+
+    // The generated .dockerignore covers .env and .env.* only. A custom name would
+    // be copied into the image, so the step to add it is printed.
+    it('prints the .dockerignore step only for a name the generic rules miss', async () => {
+      const covered = withEnv('.env', { '/work/svc/.env': 'SECRET=1\n' });
+      expect(await covered.run([])).toBe(0);
+      expect(covered.out.text()).not.toContain('Add .env to .dockerignore');
+
+      const custom = withEnv('local.env', { '/work/svc/local.env': 'SECRET=1\n' });
+      expect(await custom.run([])).toBe(0);
+      expect(custom.out.text()).toContain(
+        'Add local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
+          'so this file would be copied into the image.',
+      );
+    });
+
     it('does not move a multi-segment path, and prints the step to take', async () => {
       const h = withEnv('config/.env', {
         '/work/svc/config/.env': 'SECRET=1\n',

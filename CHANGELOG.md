@@ -401,8 +401,13 @@ All notable changes to this project are documented here. The format follows
 - **`setu adopt` moves the configured dotenv pair (V9-39, M113h, 0.10.0, `@setu-ts/cli`).** A
   single-segment `envFilePath` and its `.example` move into the member, and a multi-segment path
   stays put with one line saying to move it by hand and why the root ignore rule cannot cover it.
-  The workspace `.gitignore` gains `.env`, `.env.*` and `!.env.example`; the `.dockerignore` gains
-  `**/.env`, `**/.env.*` and `!**/.env.example`.
+  The moved dotenv file also gains `apps/<member>/.gitignore` with `/<name>`, because a root rule
+  such as `/.env` is anchored to the repository root and would otherwise stop matching after the
+  move; it is written through the conversion's transaction, so an interrupted adopt rolls it back. A
+  custom name the generic `.env`/`.env.*` rules do not cover (for example `local.env`) prints one
+  line naming it and the `.dockerignore` line to add. The workspace `.gitignore` gains `.env`,
+  `.env.*` and `!.env.example`; the `.dockerignore` gains `**/.env`, `**/.env.*` and
+  `!**/.env.example`, and its comment states that a custom `--env-file` name is not covered.
 - **A Workers full-stack scaffold type-checks and builds first (V9-9, M113h, 0.10.0,
   `@setu-ts/cli`).** The Workers `tsconfig.json` names `node` beside `@cloudflare/workers-types` and
   the manifest adds `@types/node`, so the emitted `vite.config.ts` no longer fails its own check.
@@ -417,6 +422,9 @@ All notable changes to this project are documented here. The format follows
   rewrite matches the current `port: Number(runtime.env.PORT ?? '3000')` form as well as the legacy
   literal `3000`, inserting the discovery import after the `createApp` import, so an adopted member
   binds `SERVICE_PORT` instead of printing a hand-edit message for the form the CLI itself writes.
+  The config import is found by scanning lines rather than by a `import { [^}]+ } from …` regex,
+  which backtracked quadratically on project-supplied text (80k repetitions of `import { ` took ~20
+  s).
 - **`setu add websocket` declares the `ws` peer on Node (V9-67, M113h, 0.10.0, `@setu-ts/cli`,
   `@setu-ts/runtime`).** `ws` is written into `package.json` at `^8.18.0`, also when
   `@setu-ts/websocket-plugin` is already present, and an existing entry is never overwritten.

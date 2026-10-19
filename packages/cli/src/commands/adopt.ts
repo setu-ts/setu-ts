@@ -209,6 +209,11 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
         : file,
     );
 
+  // Files the conversion writes beside the moves — currently the member's own
+  // `.gitignore` for a moved dotenv file. They go through this same batch, so an
+  // interruption rolls them back with everything else.
+  for (const file of plan.creates ?? []) created.push(file);
+
   created.push({
     path: joinPath(memberRoot, DISCOVERY_MODULE),
     contents: renderDiscoveryModule(manifest.members[0]!, manifest.members, profile),

@@ -111,12 +111,18 @@ which is what you want during a version bump, when the pinned version is not on 
 The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
 `!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
 cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
-match those patterns is **not** covered — add it to `.dockerignore` and `.gitignore` yourself.
+match those patterns is **not** covered. `setu generate app` prints one line naming such a file and
+the `.dockerignore` line to add by hand, because the CLI cannot edit a file you own for you.
 
 `setu adopt` moves a configured single-segment dotenv pair into the member, where the member's
-`envFilePath` reads it. A multi-segment `envFilePath` is left at the root with the step printed:
-move it by hand and add an ignore rule beside it, because a pattern containing a slash is anchored
-to its directory and the root rule would stop matching after the move.
+`envFilePath` reads it, and writes `apps/<member>/.gitignore` with `/<name>` for the moved dotenv
+file (never its `.example`, which stays committed). The member rule matters because a root rule such
+as `/.env` is anchored to the repository root and would stop matching after the move; a nested
+`.gitignore` is anchored to its own directory, so the secret stays ignored. When the moved name is
+not covered by the generic rules, adopt prints the same `.dockerignore` note. A multi-segment
+`envFilePath` is left at the root with the step printed: move it by hand and add an ignore rule
+beside it, because a pattern containing a slash is anchored to its directory and the root rule would
+stop matching after the move.
 
 ### Pin the base image and pnpm
 

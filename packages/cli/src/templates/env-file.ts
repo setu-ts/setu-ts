@@ -20,6 +20,27 @@ export function renderConfigOptions(envFilePath: string): string {
   return `{ envFilePath: '${envFilePath}', envFileOptional: true }`;
 }
 
+/**
+ * Whether the generated container rules keep a dotenv file out of an image.
+ *
+ * The generated `.dockerignore` covers exactly `.env` and `.env.*` names. It
+ * additionally KEEPS `.env.example` (it is committed and meant to be visible),
+ * so this returns `false` for it — not because it is a secret, but because the
+ * generic dotenv rules deliberately exclude it from what they match.
+ *
+ * A custom `--env-file` name such as `local.env` or `secrets` is not covered and
+ * must be added to `.dockerignore` by hand.
+ *
+ * @param name - The final path segment of a dotenv file
+ * @returns Whether `.env`/`.env.*` rules match it
+ */
+export function isCoveredDotenvName(name: string): boolean {
+  return (
+    name === '.env' ||
+    (name.startsWith('.env.') && name.length > '.env.'.length && name !== '.env.example')
+  );
+}
+
 /** A parsed environment-file path. */
 export type EnvFilePathResult =
   { readonly ok: true; readonly path?: string } | { readonly ok: false; readonly message: string };

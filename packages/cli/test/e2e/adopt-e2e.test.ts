@@ -101,4 +101,37 @@ describe('setu adopt on a real scaffold', () => {
     const result = (await bootAndProbe(member, READY_PROBE)) as { status?: number };
     expect(result.status).toBe(200);
   });
+
+  // F1: a root rule `/.env` is anchored to the repository root and stops matching
+  // the file once it lives under apps/. The member's own .gitignore keeps it
+  // ignored, which is checked by git itself rather than by reading the rule.
+  it('keeps a moved dotenv file ignored when the root .gitignore is anchored', async () => {
+    const port = await unusedPort();
+    expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
+
+    const project = `${root}/svc`;
+    await nodeFs.writeFile(`${project}/.gitignore`, 'node_modules/\n/.env\n');
+
+    expect(await run(['adopt', '--dir', project, '--port', String(port)])).toBe(0);
+    expect(err.join('\n')).toBe('');
+
+    const member = `${project}/apps/svc`;
+
+    expect((await runProcess('git', { args: ['init', '-q'], cwd: project })).code).toBe(0);
+    expect(
+      (await runProcess('git', { args: ['check-ignore', '-q', 'apps/svc/.env'], cwd: project }))
+        .code,
+    ).toBe(0);
+    // The example is committed, so it must NOT be ignored.
+    expect(
+      (
+        await runProcess('git', {
+          args: ['check-ignore', '-q', 'apps/svc/.env.example'],
+          cwd: project,
+        })
+      ).code,
+    ).not.toBe(0);
+
+    expect(await nodeFs.readFile(`${member}/.gitignore`, 'utf8')).toContain('/.env');
+  });
 });
