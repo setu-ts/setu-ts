@@ -164,7 +164,7 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
     await app.stop();
   });
 
-  it("reports 'degraded' after a provider failure with a warm cache", async () => {
+  it("reports 'up' after a provider failure with a warm cache", async () => {
     const provider = createFakeProvider([instance({ id: 'a' })]);
     const health = healthCapture();
     const app = createApplication({
@@ -184,7 +184,7 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
     await discovery.resolve('billing');
 
     const result = await health.check('service-discovery');
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     expect((result.data as { degraded: boolean }).degraded).toBe(true);
 
     await app.stop();

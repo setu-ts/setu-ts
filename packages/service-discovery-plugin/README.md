@@ -241,11 +241,10 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 - `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
   `limit=1` EndpointSlice LIST).
 
-| Status     | Meaning                                                              |
-| ---------- | -------------------------------------------------------------------- |
-| `up`       | The provider has resolved at least once and is reachable.            |
-| `degraded` | A stale cache is being served, or the backend just went unreachable. |
-| `down`     | The provider has never resolved and is unreachable.                  |
+| Status | Meaning                                                                         |
+| ------ | ------------------------------------------------------------------------------- |
+| `up`   | The provider is reachable, or has resolved before and can serve its warm cache. |
+| `down` | The provider has never resolved and is unreachable.                             |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
@@ -297,8 +296,9 @@ drifts.
 ## Readiness and dependency outages (M113b)
 
 Provider reachability probes are invoked as methods, retaining their receiver. Healthy Kubernetes
-and Consul providers therefore report reachable and allow `/ready` to return 200. Stale-cache
-`degraded` semantics remain unchanged.
+and Consul providers therefore report reachable and allow `/ready` to return 200. Since M113o, a
+warm-cache outage also reports `up`, keeping serving replicas in rotation. `data.degraded` still
+signals a failed refresh serving stale data; `data.reachable` exposes backend reachability.
 
 The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
 at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an

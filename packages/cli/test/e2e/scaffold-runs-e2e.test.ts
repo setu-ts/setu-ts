@@ -322,6 +322,65 @@ async function advertisedPaths(project: string): Promise<string[]> {
 }
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
+  it('runs two generated migrations twice in one serving app and reflects the ledger in /ready', async () => {
+    expect(await run(['new', 'shop', '--runtime', 'deno', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    expect(await run(['add', 'database', '--dir', project])).toBe(0);
+    expect(await run(['g', 'migration', 'one', '--dir', project])).toBe(0);
+    expect(await run(['g', 'migration', 'two', '--dir', project])).toBe(0);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    expect(config).toContain('...GENERATED_PLUGINS,');
+    await nodeFs.writeFile(
+      configPath,
+      "import { MIGRATION_NAMES } from './src/migrations/index.ts';\n" +
+        "import { DatabasePlugin } from '@setu-ts/database-plugin';\n" +
+        config.replace(
+          '      ...GENERATED_PLUGINS,',
+          '      DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } }),\n      ...GENERATED_PLUGINS,',
+        ),
+    );
+    await useWorkspacePackages(project);
+    await nodeFs.writeFile(
+      `${project}/migration-proof.ts`,
+      `
+import { CAPABILITIES } from '@setu-ts/common';
+import { createMigrationLedger } from '@setu-ts/database-plugin';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import { createApp } from './setu.config.ts';
+import { runMigrations } from './src/migrations/run.ts';
+import { MIGRATION_NAMES } from './src/migrations/index.ts';
+const app = await createApp();
+try {
+  await app.start();
+  const ready = () => app.inject({ method: 'GET', url: 'http://127.0.0.1/ready' });
+  if ((await ready()).statusCode !== 503) throw new Error('pending must be unready');
+  const database = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+  const ledger = createMigrationLedger(database);
+  await runMigrations('up', { database, ledger });
+  await runMigrations('up', { database, ledger });
+  if (JSON.stringify(await ledger.applied()) !== JSON.stringify(MIGRATION_NAMES)) throw new Error('history differs');
+  await new Promise((resolve) => setTimeout(resolve, 5100));
+  if ((await ready()).statusCode !== 200) throw new Error('current must be ready');
+} finally { await app.stop(); }
+`,
+    );
+    const formatted = await denoRun(project, ['fmt']);
+    expect(formatted.code, formatted.output).toBe(0);
+    const linted = await denoRun(project, ['lint']);
+    expect(linted.code, linted.output).toBe(0);
+    const checked = await denoRun(project, ['check', 'migration-proof.ts']);
+    expect(checked.code, checked.output).toBe(0);
+    const proof = await denoRun(project, [
+      'run',
+      '-A',
+      '--node-modules-dir=none',
+      'migration-proof.ts',
+    ]);
+    expect(proof.code, proof.output).toBe(0);
+    expect(proof.output.match(/^up /gm)).toHaveLength(2);
+  });
+
   it('boots a Node REST scaffold with self-hosted Swagger assets', async () => {
     expect(await run(['new', '--runtime', 'node', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;

@@ -12,6 +12,25 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Pass the database and ledger to `runMigrations` (M113o, 0.10.0)
+
+Regenerate managed `src/migrations/run.ts` and `index.ts` with `setu generate migration`. Replace
+custom `runMigrations('up')` calls with
+`runMigrations('up', { database, ledger: createMigrationLedger(database) })`, importing
+`createMigrationLedger` from `@setu-ts/database-plugin`. Existing zero-argument `up`/`down` methods
+remain assignable; new migrations can receive `{ database }`.
+
+Create the application-owned ledger table or entity mapping described in the database-plugin README
+before running. Run one migration job and make each change idempotent: ledger writes follow changes
+outside any transaction. Memory history exists only in the serving process. Import `MIGRATION_NAMES`
+from `./src/migrations/index.ts` and opt in with
+`DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } })`. Socket entry points boot the whole
+app without a port; named connections need a caller resolving that connection. Workers runners have
+no executable entry block: call from code holding bindings or use `wrangler d1 migrations`.
+
+Discovery warm-cache outages now keep the indicator `up`. If you alerted on `degraded`, inspect
+`data.degraded` and `data.reachable` instead; `/ready` keeps serving warm replicas.
+
 ### Review `IRequest.ip`, rate-limit buckets and loader URLs (M113n, 0.10.0, breaking)
 
 Node, Deno and Bun now set `IRequest.ip` to the socket peer, normalized from IPv4-mapped IPv6.

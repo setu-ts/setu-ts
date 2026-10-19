@@ -325,6 +325,8 @@ export type { CosmosEntityMapping } from '../adapters/cosmos/cosmos-mapping.ts';
  * @since 0.2.0
  */
 export interface DatabaseConnectionOptions {
+  /** Optional schema readiness, evaluated by this connection's health indicator. @since 0.10.0 */
+  readonly readiness?: DatabaseReadinessOptions;
   /**
    * Named connection for multi-database support. Defaults to `'default'`.
    *
@@ -348,6 +350,39 @@ export interface DatabaseConnectionOptions {
    * @since 0.1.0
    */
   readonly options?: DatabaseAdapterOptions;
+}
+
+/** Expected migration set for a connection's readiness check. @since 0.10.0 */
+export interface DatabaseReadinessOptions {
+  /** Unique non-empty names, at most 10,000. Only counts appear in health data. */
+  readonly migrations: readonly string[];
+  /** Application-owned entity; defaults to MIGRATION_LEDGER_ENTITY. Match the ledger's entity override. */
+  readonly ledgerEntity?: string;
+}
+
+/** Migration history consumed by runners and readiness. @since 0.10.0 */
+export interface IMigrationLedger {
+  /** @returns Applied names; rejects with MigrationLedgerError above 10,000 rows. */
+  applied(): Promise<readonly string[]>;
+  /**
+   * Records a successful migration; duplicate names propagate the adapter's create error.
+   * @param name - Migration filename without extension
+   * @param appliedAt - Caller-supplied ISO-8601 timestamp
+   * @returns Completion of the insert
+   */
+  record(name: string, appliedAt: string): Promise<void>;
+  /**
+   * Removes a reversed migration, resolving even when absent.
+   * @param name - Migration filename without extension
+   * @returns Completion of the delete
+   */
+  remove(name: string): Promise<void>;
+}
+
+/** Repository-backed migration ledger configuration. @since 0.10.0 */
+export interface MigrationLedgerOptions {
+  /** Non-empty entity, default MIGRATION_LEDGER_ENTITY. Match readiness.ledgerEntity when overriding. */
+  readonly entity?: string;
 }
 
 /**

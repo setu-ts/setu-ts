@@ -679,6 +679,16 @@ describe('runGenerateCommand', () => {
       '/app/src/migrations/index.ts',
       '/app/src/migrations/run.ts',
     ]);
+    expect(h.out.text()).toContain('readiness: { migrations: MIGRATION_NAMES }');
+    expect(h.out.text()).toContain('./src/migrations/index.ts');
+    expect(h.out.text()).toContain('setu_migrations table: https://');
+  });
+
+  it('prints no migration hint for other schematics or dry runs', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
+    expect(await h.run(['service', 'billing'])).toBe(0);
+    expect(await h.run(['migration', 'orders', '--dry-run'])).toBe(0);
+    expect(h.out.text()).not.toContain('readiness:');
   });
 });
 

@@ -14439,11 +14439,12 @@ with its not-before check unchanged.
   and withdraws every replica even while a warm cache still serves requests. M113b leaves this
   mapping unchanged.
 
-**Decisions the plan takes:** a migration ledger written by the generated runner and an opt-in
-database readiness check against the expected migration state. Reachability alone does not prove the
-application schema is usable. The plan also decides whether a warm-cache discovery-backend outage
-reports `up` with `data.degraded: true`, keeping the shared failure visible without draining every
-replica.
+**Implementation:** a repository-backed migration ledger written by the generated runner and an
+opt-in `readiness.migrations` check. Pending names report `degraded`, unreadable ledgers `down`, and
+additional names preserve status during rolling deploys. `MIGRATION_NAMES` comes from the managed
+barrel. SQL ledger DDL remains application-owned; memory history is process-local. Workers runners
+are callable from code holding bindings and have no standalone entry block. Warm-cache discovery
+outages report `up`, with `degraded` and reachability retained in data.
 
 **Deliverables**
 
@@ -14928,6 +14929,6 @@ patch by construction and gains nothing new here.
 | 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 113m      | ✅     | scheduler-plugin + auth-plugin — time the framework does not honour; PR #471                                                                                                                                                                                                              |
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |
-| 113o      | ⬜     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness                                                                                                                                                                                                 |
+| 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness                                                                                                                                                                                                 |
 | 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |

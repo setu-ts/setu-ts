@@ -6493,6 +6493,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `same-origin`, only `trustedProxies` with a trusted peer publishes an origin, and hosts follow a
   DNS/IPv6 grammar. Round 3 passed on `6f6b2014`; its default-port observation was fixed afterwards
   and not re-audited, at the maintainer's direction — complete (PR #473)
+- **Milestone 113o** (`database-plugin` + `cli` + `service-discovery-plugin` — schema-aware and
+  stale-cache readiness; V9-68 and the discovery stale-cache case): `createMigrationLedger` records
+  applied migrations in an application-owned `setu_migrations` entity over the repository surface,
+  and `DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } })` compares it with what the
+  build expects — a missing migration reads `degraded` (`/ready` 503, `/health` 200), an unreadable
+  ledger `down`, and names a newer build applied leave the status alone so old replicas stay ready
+  during a rolling deploy. The generated `run.ts` boots the app with no port, hands each migration
+  the database, skips applied ones and records each after it succeeds; on Workers it emits no entry
+  block, since a `tsx` process holds no bindings. A memory-adapter ledger is process-local. A
+  discovery backend outage with a warm cache now reports `up`, keeping the condition in `data`.
+  Implemented by Codex, which measured a duplicate `record` rejecting with `DuplicateKeyError` on
+  memory, Drizzle/PostgreSQL, a MongoDB replica set and DynamoDB Local. Review split the runner's
+  error so a migration that ran but whose ledger row failed says so — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 

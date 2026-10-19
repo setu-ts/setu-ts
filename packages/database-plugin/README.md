@@ -336,13 +336,96 @@ A check's question is one query: the subject's rows that are global or in one of
 More than `limit` matching rows (default 10 001 for grants, 100 000 for role rows) refuse the
 question, so the check denies, rather than answering with an arbitrary subset.
 
+## Migrations and readiness
+
+Opt in on any connection with `DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } })`,
+importing `MIGRATION_NAMES` from your generated `./src/migrations/index.ts`. Without `readiness`,
+the indicator's status and data are unchanged. After the existing reachability checks, a separate
+ledger probe caches reads for 5 seconds and bounds each read at 2 seconds:
+
+| Ledger                                        | Indicator                               | Migration data                         |
+| --------------------------------------------- | --------------------------------------- | -------------------------------------- |
+| Expected names missing                        | `degraded`: `/ready` 503, `/health` 200 | `{ state: 'pending', pending: count }` |
+| All expected names present                    | Existing `up` or `degraded` status      | `{ state: 'current', applied: count }` |
+| Read rejected, timed out, or over 10,000 rows | `down`                                  | `{ state: 'unreadable' }`              |
+
+Additional names from a newer build add `unknown: count` to current data and preserve status, so old
+replicas stay ready during rolling deploys. Names never appear in health data. An already-down
+connection skips the ledger. Expected names must be unique non-empty strings, at most 10,000;
+`ledgerEntity`, when supplied, must be non-empty. Invalid options throw `TypeError` at construction
+without echoing values. This checks migration history, not every application table: an intact ledger
+cannot prove that someone has not independently dropped a business table.
+
+`createMigrationLedger(database, { entity? })` returns `IMigrationLedger`: `applied()` reads names,
+`record(name, appliedAt)` inserts caller-supplied ISO-8601 time, and `remove(name)` resolves even if
+absent. `MigrationLedgerOptions.entity` and `DatabaseReadinessOptions.ledgerEntity` both default to
+`MIGRATION_LEDGER_ENTITY` (`'setu_migrations'`); override both together. `applied()` requests only
+`id`, with a limit of 10,001, and rejects above 10,000 rows with `MigrationLedgerError`, whose
+`reason` is `'oversized'`. The framework reads no clock for ledger writes and never creates schema.
+
+Create this PostgreSQL table (also shipped in `test/fixtures/migration-ledger-postgres.sql`):
+
+```sql
+CREATE TABLE setu_migrations (
+  id text PRIMARY KEY,
+  applied_at text NOT NULL
+);
+```
+
+SQLite / D1 (`test/fixtures/migration-ledger-sqlite.sql`):
+
+```sql
+CREATE TABLE setu_migrations (
+  id TEXT PRIMARY KEY NOT NULL,
+  appliedAt TEXT NOT NULL
+);
+```
+
+| Adapter  | Application setup                                                                                                                                    |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prisma   | Create the SQL table and expose a `setu_migrations` model with `id` and `appliedAt` mapped to `applied_at`.                                          |
+| Drizzle  | Create the SQL table and add `setu_migrations` to `drizzleTables`, with `id: text('id').primaryKey()` and `appliedAt: text('applied_at').notNull()`. |
+| D1       | Create the SQLite table above, whose `appliedAt` column matches the repository field directly.                                                       |
+| MongoDB  | No DDL; the default entity collection is sufficient, or map it through `collections`.                                                                |
+| DynamoDB | Provision a table with partition key `id`; map `entities.setu_migrations` to `{ table: 'your-table', partitionKey: 'id' }`.                          |
+| Cosmos   | Provision a container with partition path `/id`; map `containers.setu_migrations` to `{ container: 'your-container', partitionKey: 'id' }`.          |
+| Bigtable | Provision a table and map `tables.setu_migrations` with its row-key and column-family configuration, as for other entities.                          |
+| Memory   | No DDL. History is process-local; run migrations in the serving process. A separate runner process loses its history at exit.                        |
+
+Measured locally through `createMigrationLedger` and repository read-back (2026-10-19):
+
+| Adapter                   | Duplicate `record` rejection | Preserved driver cause                                                   |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------------ |
+| Memory                    | `DuplicateKeyError`          | None                                                                     |
+| Drizzle / real PostgreSQL | `DuplicateKeyError`          | Drizzle `Error` → pg `DatabaseError` (`name: 'error'`, SQLSTATE `23505`) |
+| MongoDB replica set       | `DuplicateKeyError`          | `MongoServerError`, code `11000`                                         |
+| DynamoDB Local            | `DuplicateKeyError`          | `ConditionalCheckFailedException`                                        |
+
+Other adapters were not measured for duplicate rejection. The ledger propagates the adapter's create
+rejection unchanged. **Run one migration job**: no portable lock prevents two jobs from applying a
+change concurrently. A duplicate ledger insert makes the race visible after execution.
+
+`setu generate migration` maintains `run.ts` and `index.ts` and exports `MIGRATION_NAMES` from the
+barrel. Migrations receive `{ database }`. The runner applies only pending names oldest first;
+`--down` reverses only applied names newest first. It writes/removes the row after each successful
+change, outside any transaction. A crash between a change and its ledger write re-runs that change:
+make migrations idempotent. A failure stops the run and names the migration.
+
+On socket targets, executing `run.ts` dynamically loads `setu.config.ts`, awaits `createApp()`,
+starts the whole app without a port, resolves the default database and stops the app in `finally`.
+Importing `runMigrations` does not load the application. For a named connection, call
+`runMigrations('up', { database, ledger: createMigrationLedger(database) })` from your own module.
+Workers emit no entry block: call the function from code holding platform bindings or use
+`wrangler d1 migrations`.
+
 ## Options
 
-| Option    | Type                                                                                                 | Default     | Description                              |
-| --------- | ---------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------- |
-| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'cosmos' \| 'bigtable' \| 'custom'` | `'memory'`  | Backend adapter.                         |
-| `name`    | `string`                                                                                             | `'default'` | Named connection for multi-database use. |
-| `options` | per-arm (see `type`)                                                                                 | —           | Adapter-specific configuration.          |
+| Option      | Type                                                                                                 | Default     | Description                                                                                                   |
+| ----------- | ---------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `type`      | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'cosmos' \| 'bigtable' \| 'custom'` | `'memory'`  | Backend adapter.                                                                                              |
+| `name`      | `string`                                                                                             | `'default'` | Named connection for multi-database use.                                                                      |
+| `options`   | per-arm (see `type`)                                                                                 | —           | Adapter-specific configuration.                                                                               |
+| `readiness` | `DatabaseReadinessOptions`                                                                           | —           | Opt-in expected migration names and ledger entity; see [Migrations and readiness](#migrations-and-readiness). |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
@@ -1162,6 +1245,7 @@ imperative begin/commit.
 | `createInjectedDynamoLoader`              | function  |
 | `createLazyBigtableLoader`                | function  |
 | `createLazyDynamoLoader`                  | function  |
+| `createMigrationLedger`                   | function  |
 | `createPrismaDataSource`                  | function  |
 | `DatabasePlugin`                          | function  |
 | `decodeCursor`                            | function  |
@@ -1185,6 +1269,7 @@ imperative begin/commit.
 | `DynamoAdapter`                           | class     |
 | `InboxStoreUnavailableError`              | class     |
 | `MemoryAdapter`                           | class     |
+| `MigrationLedgerError`                    | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
 | `OutboxStoreUnavailableError`             | class     |
@@ -1200,6 +1285,7 @@ imperative begin/commit.
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
+| `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |
 | `BigtableCell`                            | interface |
 | `BigtableClientConfiguration`             | interface |
@@ -1238,6 +1324,7 @@ imperative begin/commit.
 | `DatabaseInboxStoreOptions`               | interface |
 | `DatabaseOutboxStoreOptions`              | interface |
 | `DatabasePoolCapacity`                    | interface |
+| `DatabaseReadinessOptions`                | interface |
 | `DatabaseRoleSourceOptions`               | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
@@ -1289,6 +1376,7 @@ imperative begin/commit.
 | `IDatabaseService`                        | interface |
 | `IDataSource`                             | interface |
 | `IDynamoClient`                           | interface |
+| `IMigrationLedger`                        | interface |
 | `IMongoClient`                            | interface |
 | `IMongoCollection`                        | interface |
 | `IMongoCollectionFindOneAndUpdateOptions` | interface |
@@ -1300,6 +1388,7 @@ imperative begin/commit.
 | `IRepository`                             | interface |
 | `IUnitOfWork`                             | interface |
 | `MemoryDatabaseOptions`                   | interface |
+| `MigrationLedgerOptions`                  | interface |
 | `MongoAdapterOptionsBase`                 | interface |
 | `MongoDatabaseOptions`                    | interface |
 | `MongoEntityMapping`                      | interface |
