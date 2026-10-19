@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Generated output corrections (M113h, 0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`,
+- **Generated output corrections (M113h, #477, 0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`,
   `@setu-ts/kernel`).** New scaffolds opt into request logging with `/live`, `/ready`, `/health` and
   `/metrics` excluded, and a booted application logs one `Server listening` record when a logger is
   registered. NATS scaffolds carry a stream subject set under the `app.` scope, every full-stack
@@ -385,20 +385,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **A decorator barrel the config does not consume is reported (V9-8, M113h, 0.10.0,
+- **A decorator barrel the config does not consume is reported (V9-8, M113h, #477, 0.10.0,
   `@setu-ts/cli`).** Service and controller comments and the decorator barrel headers name the
   inline `DecoratorPlugin` form and a starter's `decorators` arm. After writing a barrel,
   `setu generate` prints the exact `DecoratorPlugin` or starter `decorators` lines and the import
   when `setu.config.ts` does not reference the barrel's export.
-- **Every NATS scaffold carries a stream subject set (V9-17, M113h, 0.10.0, `@setu-ts/cli`).**
+- **Every NATS scaffold carries a stream subject set (V9-17, M113h, #477, 0.10.0, `@setu-ts/cli`).**
   Standalone and workspace scaffolds emit `streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`,
   so every published topic starts with `app.`. The generated README and Compose note name the scope
   and the `RealtimeBackplanePlugin` `topic: 'app.realtime'` that the `'messaging'` transport needs.
-- **`setu adopt` records declared probe support (V9-38, M113h, 0.10.0, `@setu-ts/cli`).** The member
-  record in `setu.workspace.json` gains `healthProbes` and `metricsEndpoint` from the project's own
-  `health-plugin`/`metrics-plugin` or starter dependency, so its Kubernetes probes and Prometheus
-  annotations follow declared support and survive later re-renders.
-- **`setu adopt` moves the configured dotenv pair (V9-39, M113h, 0.10.0, `@setu-ts/cli`).** A
+- **`setu adopt` records declared probe support (V9-38, M113h, #477, 0.10.0, `@setu-ts/cli`).** The
+  member record in `setu.workspace.json` gains `healthProbes` and `metricsEndpoint` from the
+  project's own `health-plugin`/`metrics-plugin` or starter dependency, so its Kubernetes probes and
+  Prometheus annotations follow declared support and survive later re-renders.
+- **`setu adopt` moves the configured dotenv pair (V9-39, M113h, #477, 0.10.0, `@setu-ts/cli`).** A
   single-segment `envFilePath` and its `.example` move into the member, and a multi-segment path
   stays put with one line saying to move it by hand and why the root ignore rule cannot cover it.
   The moved dotenv file also gains `apps/<member>/.gitignore` with `/<name>`, because a root rule
@@ -409,29 +409,29 @@ All notable changes to this project are documented here. The format follows
   `.env.*` and `!.env.example`; the `.dockerignore` gains `**/.env`, `**/.env.*` and
   `!**/.env.example`, and its comment states that a custom `--env-file` name is not covered. A
   conversion that fails part-way is now rolled back, so no moved file is left under the member.
-- **A Workers full-stack scaffold type-checks and builds first (V9-9, M113h, 0.10.0,
+- **A Workers full-stack scaffold type-checks and builds first (V9-9, M113h, #477, 0.10.0,
   `@setu-ts/cli`).** The Workers `tsconfig.json` names `node` beside `@cloudflare/workers-types` and
   the manifest adds `@types/node`, so the emitted `vite.config.ts` no longer fails its own check.
   `allowJs` reads the compiled server build, and a Workers full-stack `check` script is
   `npm run build && tsc --noEmit` so that build exists first; every full-stack manifest pins
   TypeScript `~6.0.3`.
-- **The React Router typegen directory is generated output (V9-11, M113h, 0.10.0, `@setu-ts/cli`).**
-  `.react-router/` joins the build output in the standalone `.gitignore`, ESLint ignores,
-  `.prettierignore` and the Deno `fmt`/`lint` excludes, and the workspace root `.gitignore` ignores
-  it for every member.
-- **`setu adopt` rewrites the entry the CLI emits (V9-42, M113h, 0.10.0, `@setu-ts/cli`).** The port
-  rewrite matches the current `port: Number(runtime.env.PORT ?? '3000')` form as well as the legacy
-  literal `3000`, inserting the discovery import after the `createApp` import, so an adopted member
-  binds `SERVICE_PORT` instead of printing a hand-edit message for the form the CLI itself writes.
-  The config import is found by scanning lines rather than by a `import { [^}]+ } from …` regex,
-  which backtracked quadratically on project-supplied text (80k repetitions of `import { ` took ~20
-  s).
-- **`setu add websocket` declares the `ws` peer on Node (V9-67, M113h, 0.10.0, `@setu-ts/cli`,
+- **The React Router typegen directory is generated output (V9-11, M113h, #477, 0.10.0,
+  `@setu-ts/cli`).** `.react-router/` joins the build output in the standalone `.gitignore`, ESLint
+  ignores, `.prettierignore` and the Deno `fmt`/`lint` excludes, and the workspace root `.gitignore`
+  ignores it for every member.
+- **`setu adopt` rewrites the entry the CLI emits (V9-42, M113h, #477, 0.10.0, `@setu-ts/cli`).**
+  The port rewrite matches the current `port: Number(runtime.env.PORT ?? '3000')` form as well as
+  the legacy literal `3000`, inserting the discovery import after the `createApp` import, so an
+  adopted member binds `SERVICE_PORT` instead of printing a hand-edit message for the form the CLI
+  itself writes. The config import is found by scanning lines rather than by a
+  `import { [^}]+ } from …` regex, which backtracked quadratically on project-supplied text (80k
+  repetitions of `import { ` took ~20 s).
+- **`setu add websocket` declares the `ws` peer on Node (V9-67, M113h, #477, 0.10.0, `@setu-ts/cli`,
   `@setu-ts/runtime`).** `ws` is written into `package.json` at `^8.18.0`, also when
   `@setu-ts/websocket-plugin` is already present, and an existing entry is never overwritten.
   `HttpAdapterOptions.reportError` lets a failed Node WebSocket handshake report once per distinct
   message through the registered logger, or the runtime sink when none is registered.
-- **The kernel announces it is listening and scaffolds log requests (V9-81, M113h, 0.10.0,
+- **The kernel announces it is listening and scaffolds log requests (V9-81, M113h, #477, 0.10.0,
   `@setu-ts/kernel`, `@setu-ts/cli`).** After a successful listen the kernel logs `Server listening`
   with the port and hostname, or `Server listening on an ephemeral port` for port `0`, and logs
   nothing without a logger. New scaffolds enable request logging and exclude `/live`, `/ready`,

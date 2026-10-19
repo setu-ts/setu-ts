@@ -6534,7 +6534,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   promised a clean plan the real run refused). All are fixed; the last (move destinations outside
   the dry-run preflight) was NOT re-audited, at the maintainer's direction. Trap recorded: an
   `opencode run` session kept editing through opencode's background service after its client had
-  exited — complete (PR pending)
+  exited — complete (PR #477)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
