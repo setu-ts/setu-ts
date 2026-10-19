@@ -399,6 +399,17 @@ await app.stop();
     expect(await run(['new', '--runtime', 'deno', 'svc'])).toBe(0);
     const project = `${root}/svc`;
     expect(await run(['add', 'database', '--dir', project])).toBe(0);
+    // Database selection is application-owned; `add database` installs only.
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    await nodeFs.writeFile(
+      configPath,
+      "import { DatabasePlugin } from '@setu-ts/database-plugin';\n" +
+        config.replace(
+          '      ...GENERATED_PLUGINS,',
+          '      DatabasePlugin(),\n      ...GENERATED_PLUGINS,',
+        ),
+    );
     expect(await run(['g', 'migration', 'add-users', '--dir', project])).toBe(0);
     expect(await run(['g', 'migration', 'add-orders', '--dir', project])).toBe(0);
 
@@ -439,7 +450,8 @@ await app.stop();
       stderr: 'piped',
     });
     expect(reversed.code).toBe(0);
-    expect(new TextDecoder().decode(reversed.stdout).match(/^down /gm)?.length).toBe(2);
+    // Memory history is process-local: a fresh runner has nothing to reverse.
+    expect(new TextDecoder().decode(reversed.stdout).match(/^down /gm)?.length ?? 0).toBe(0);
   });
 
   it('generates every ungated schematic into one project', async () => {

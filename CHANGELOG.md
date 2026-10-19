@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Migration ledger and readiness (M113o, 0.10.0, `@setu-ts/database-plugin`, `@setu-ts/cli`).**
+  Added `createMigrationLedger`, `IMigrationLedger`, `MigrationLedgerOptions`,
+  `MIGRATION_LEDGER_ENTITY`, `MigrationLedgerError`, and `DatabaseReadinessOptions`. Optional
+  `readiness: { migrations: MIGRATION_NAMES }` drains replicas with pending migrations and marks
+  unreadable ledgers down; unknown names preserve status for rolling deploys. SQL schema remains
+  application-owned. Generated runners record successful migrations and skip applied names.
+  **Breaking generated signature:** replace `runMigrations('up')` with
+  `runMigrations('up', { database, ledger: createMigrationLedger(database) })`; migrations may
+  accept `{ database }`. Socket entry points boot and stop the app; Workers emit only the callable
+  runner. Because the runner imports `@setu-ts/common`, `setu generate migration` now also requires
+  that package to be declared (every scaffold declares it), and `setu add common` adds it. A ledger
+  created without an explicit entity uses its connection's `readiness.ledgerEntity`, so the
+  generated runner and the readiness check agree.
+- **Discovery warm-cache readiness (M113o, 0.10.0, `@setu-ts/service-discovery-plugin`).** A serving
+  warm cache now reports `up` during backend outages instead of `degraded`, keeping replicas in
+  rotation. `data.degraded`, `reachable`, and `everResolved` remain visible; never-resolved and
+  unreachable stays `down`. Update status-based alerts to inspect the data fields.
+
 - **Breaking: proxy client identity and public URLs (M113n, #473, 0.10.0, `@setu-ts/runtime`,
   `@setu-ts/common`, `@setu-ts/http-security-plugin`, `@setu-ts/auth-plugin`,
   `@setu-ts/react-router-plugin`).** Node, Deno and Bun now populate `IRequest.ip` with the socket

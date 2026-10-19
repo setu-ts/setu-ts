@@ -164,7 +164,21 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
           : undefined,
     },
   ],
-  ['migration', { factory: generateMigration, requiresPlugin: 'database-plugin' }],
+  [
+    'migration',
+    {
+      factory: generateMigration,
+      // The generated runner imports CAPABILITIES from @setu-ts/common, which a
+      // project must declare itself: a transitive copy is not importable under
+      // pnpm or a Deno import map (PR #475 review).
+      requiresPluginWhen: (installed) =>
+        !installed.has('database-plugin')
+          ? 'database-plugin'
+          : !installed.has('common')
+            ? 'common'
+            : undefined,
+    },
+  ],
   ['ws-route', { factory: generateWsRoute, requiresPlugin: 'websocket-plugin' }],
   ['sse', { factory: generateSse, requiresPlugin: 'sse-plugin' }],
 ]);

@@ -29,8 +29,9 @@ describe('schematic registry', () => {
   });
 
   it('gates exactly the nine plugin-dependent schematics', () => {
+    // A conditional gate counts when it refuses a bare project.
     const gated = listSchematics()
-      .filter((s) => s.requiresPlugin !== undefined)
+      .filter((s) => (s.requiresPlugin ?? s.requiresPluginWhen?.(new Set())) !== undefined)
       .map((s) => s.name);
     // `controller` left this list in M70h/E8: it is now mode-aware rather than
     // gated, so it works in a bare project.

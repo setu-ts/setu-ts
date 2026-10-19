@@ -26,7 +26,7 @@
  *   That stays exactly true after D5, and the distinction is worth stating
  *   because the schematic now emits a barrel and a runner of its own. Those are
  *   **project-local**: `src/migrations/run.ts` is the generated project's file,
- *   run directly (`deno run -A src/migrations/run.ts`), and no `setu.config.ts`
+ *   run directly (`deno run --allow-net --allow-env --allow-read --allow-sys src/migrations/run.ts`), and no `setu.config.ts`
  *   imports it and no plugin option consumes it. It is deliberately NOT wired to
  *   a `db:migrate` task: a task every scaffold advertises would fail with a
  *   module-not-found in the great majority of projects, which never generate a

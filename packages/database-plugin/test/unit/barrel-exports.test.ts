@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import * as common from '@setu-ts/common';
 import * as database from '../../src/index.ts';
+import type {
+  DatabaseReadinessOptions,
+  IMigrationLedger,
+  MigrationLedgerOptions,
+} from '../../src/index.ts';
+
+describe('migration ledger barrel exports', () => {
+  it('exports the ledger runtime surface and its three consumed types', async () => {
+    expect(typeof database.createMigrationLedger).toBe('function');
+    expect(database.MIGRATION_LEDGER_ENTITY).toBe('setu_migrations');
+    expect(new database.MigrationLedgerError().reason).toBe('oversized');
+    const readiness: DatabaseReadinessOptions = { migrations: [] };
+    const options: MigrationLedgerOptions = { entity: 'history' };
+    const applied: IMigrationLedger['applied'] = () => Promise.resolve(readiness.migrations);
+    expect(options.entity).toBe('history');
+    await expect(applied()).resolves.toEqual([]);
+  });
+});
 
 describe('conditional fallback helper', () => {
   it('stays internal', () => {

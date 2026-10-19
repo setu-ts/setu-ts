@@ -516,6 +516,11 @@ export async function runGenerateCommand(
       deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+    if (schematicName === 'migration' && customName === undefined) {
+      deps.log(
+        'Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: https://github.com/setu-ts/setu-ts/tree/develop/packages/database-plugin#migrations-and-readiness',
+      );
+    }
     // After the write, so a refused or failed run never reports a claim it did not
     // make. Reported once — the next scan finds the file in the barrel — because the
     // alternative, a provenance marker in the artifact, would un-wire every artifact

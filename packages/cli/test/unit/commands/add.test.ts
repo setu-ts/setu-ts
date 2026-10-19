@@ -134,14 +134,35 @@ describe('resolveAddablePackage', () => {
     // gate on this branch — and it could not have noticed a NEWLY gated
     // schematic whose plugin is missing here, which is the failure it exists to
     // prevent: `setu generate` would name a command that then refuses.
+    // Conditional gates are evaluated over the installed sets that reach each arm,
+    // so a gate naming a package only in some compositions (`common` for
+    // `migration`) is covered too.
+    const sets: readonly ReadonlySet<string>[] = [
+      new Set(),
+      new Set(['database-plugin']),
+      new Set(['decorator-plugin', 'di-plugin']),
+    ];
     const gates = listSchematics()
-      .map(({ requiresPlugin }) => requiresPlugin)
+      .flatMap(({ requiresPlugin, requiresPluginWhen }) => [
+        requiresPlugin,
+        ...sets.map((installed) => requiresPluginWhen?.(installed)),
+      ])
       .filter((plugin): plugin is string => plugin !== undefined);
 
     expect(gates.length, 'no gated schematics — this check would be vacuous').toBeGreaterThan(0);
     for (const plugin of gates) {
       expect(resolveAddablePackage(plugin), plugin).toBe(plugin);
     }
+  });
+});
+
+describe('setu add common', () => {
+  it('pins common, the package a generated migration runner imports', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await h.run(['common'])).toBe(0);
+    expect(JSON.parse(h.read('/app/deno.json')).imports['@setu-ts/common']).toBe(
+      `npm:@setu-ts/common@^${VERSION}`,
+    );
   });
 });
 

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateMigration } from '../../../src/schematics/migration.ts';
+import { getSchematic } from '../../../src/schematics/registry.ts';
 import { gateOf, options } from './_shared.ts';
+import * as nodeFs from 'node:fs/promises';
+import { NODE_SOURCE_ARGS, run as runProcess, tempDir } from '../../../../../test/node-helpers.ts';
 
 describe('migration schematic', () => {
   const files = generateMigration(deriveNames('add-orders'), options());
@@ -37,13 +40,20 @@ describe('migration schematic', () => {
     const body = barrel?.contents ?? '';
 
     expect(body).toContain("'20200101000000-add-users'");
+    expect(body).toContain(
+      'export const MIGRATION_NAMES: readonly string[] = MIGRATIONS.map((entry) => entry.name)',
+    );
     expect(body.indexOf("'20200101000000-add-users'")).toBeLessThan(
       body.indexOf("'20260728123045-add-orders'"),
     );
   });
 
-  it('is gated on database-plugin', () => {
-    expect(gateOf('migration')).toBe('database-plugin');
+  it('is gated on database-plugin, then on common, which the runner imports', () => {
+    const gate = getSchematic('migration')?.requiresPluginWhen;
+    expect(gateOf('migration')).toBeUndefined();
+    expect(gate?.(new Set())).toBe('database-plugin');
+    expect(gate?.(new Set(['database-plugin']))).toBe('common');
+    expect(gate?.(new Set(['database-plugin', 'common']))).toBeUndefined();
   });
 
   it('names the file from the INJECTED clock, not the wall clock', () => {
@@ -109,7 +119,11 @@ describe('the migration runner, per target', () => {
 
   it('runs as a Deno main module on Deno', () => {
     const runner = runnerFor('deno');
-    expect(runner).toContain('//   deno run -A src/migrations/run.ts          # apply');
+    expect(runner).toContain(
+      '//   deno run --allow-net --allow-env --allow-read --allow-sys src/migrations/run.ts          # apply',
+    );
+    expect(runner).not.toContain('deno run -A');
+    expect(runner).toContain('Grant the same permission flags as your `start` task');
     expect(runner).toContain('if (import.meta.main) {');
     expect(runner).toContain("Deno.args.includes('--down')");
     expect(runner).not.toContain('node:url');
@@ -121,7 +135,6 @@ describe('the migration runner, per target', () => {
   // global there would not even type-check.
   for (const [runtime, command] of [
     ['node', 'npx tsx src/migrations/run.ts'],
-    ['cloudflare-workers', 'npx tsx src/migrations/run.ts'],
     ['bun', 'bun run src/migrations/run.ts'],
   ] as const) {
     it(`runs as the entry script on ${runtime}`, () => {
@@ -136,4 +149,108 @@ describe('the migration runner, per target', () => {
       expect(runner).not.toContain('import.meta.main');
     });
   }
+
+  it('emits no entry block on Workers, where bindings belong to the caller', () => {
+    const runner = runnerFor('cloudflare-workers');
+    expect(runner).toContain('export async function runMigrations(');
+    expect(runner).toContain('wrangler d1 migrations');
+    expect(runner).not.toContain('if (import.meta');
+    expect(runner).not.toContain('setu.config.ts');
+    expect(runner).not.toContain('node:url');
+    expect(runner).not.toContain('process.');
+    expect(runner).not.toContain('Deno.');
+  });
+
+  it('loads the app dynamically only inside the socket target entry guard', () => {
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      const runner = runnerFor(runtime);
+      expect(runner.indexOf("await import('../../setu.config.ts')")).toBeGreaterThan(
+        runner.indexOf('if (import.meta'),
+      );
+      expect(runner).toContain('const app = await createApp();');
+      expect(runner).toContain('await app.start();');
+      expect(runner).toContain('finally {\n    await app.stop();');
+    }
+  });
+
+  it('executes generated code: skips applied, records after success, reverses newest first and stops on failure', async () => {
+    const directory = await tempDir({ prefix: 'migration-runner-' });
+    try {
+      await nodeFs.writeFile(`${directory}/run.ts`, runnerFor('node'));
+      await nodeFs.writeFile(
+        `${directory}/index.ts`,
+        `
+export const events: string[] = [];
+export let fail = false;
+export function failNext() { fail = true; }
+export const MIGRATIONS = ['one', 'two', 'three'].map((name) => ({ name, migration: {
+  async up(context: { database: object }) {
+    if (!context.database) throw new Error('missing database');
+    events.push('up ' + name);
+    if (fail && name === 'two') throw new Error('driver failure');
+  },
+  async down() { events.push('down ' + name); },
+} }));
+`,
+      );
+      await nodeFs.writeFile(
+        `${directory}/probe.ts`,
+        `
+import assert from 'node:assert/strict';
+import { runMigrations } from './run.ts';
+import { events, failNext } from './index.ts';
+const names = new Set(['one']);
+const ledger = {
+  async applied() { return [...names]; },
+  async record(name: string, at: string) {
+    assert.match(at, /^\\d{4}-\\d{2}-\\d{2}T/);
+    events.push('record ' + name); names.add(name);
+  },
+  async remove(name: string) { events.push('remove ' + name); names.delete(name); },
+};
+const options = { database: {}, ledger };
+await runMigrations('up', options);
+assert.deepEqual(events, ['up two', 'record two', 'up three', 'record three']);
+events.length = 0;
+await runMigrations('up', options);
+assert.deepEqual(events, []);
+await runMigrations('down', options);
+assert.deepEqual(events, ['down three', 'remove three', 'down two', 'remove two', 'down one', 'remove one']);
+events.length = 0;
+await runMigrations('down', options);
+assert.deepEqual(events, []);
+failNext();
+await assert.rejects(runMigrations('up', options), (error: Error) => {
+  assert.equal(error.message, 'Migration two failed on up');
+  assert.equal((error.cause as Error).message, 'driver failure');
+  return true;
+});
+assert.deepEqual(events, ['up one', 'record one', 'up two']);
+assert.deepEqual([...names], ['one']);
+// A change that ran but whose ledger write failed says so, rather than
+// reporting the change itself as failed (a racing runner wrote the row first).
+events.length = 0;
+const raced = {
+  async applied() { return ['one', 'two']; },
+  async record() { throw new Error('duplicate key'); },
+  async remove() {},
+};
+await assert.rejects(runMigrations('up', { database: {}, ledger: raced }), (error: Error) => {
+  assert.equal(error.message, 'Migration three ran up, but its ledger row was not updated');
+  assert.equal((error.cause as Error).message, 'duplicate key');
+  return true;
+});
+assert.deepEqual(events, ['up three']);
+`,
+      );
+      const result = await runProcess(process.execPath, {
+        args: [...NODE_SOURCE_ARGS, `${directory}/probe.ts`],
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      expect(result.code, new TextDecoder().decode(result.stderr)).toBe(0);
+    } finally {
+      await nodeFs.rm(directory, { recursive: true });
+    }
+  });
 });

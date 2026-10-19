@@ -236,7 +236,7 @@ generated artifact reaches its registration site with **no edit to a file you ow
 | `event-handler`    | `events-plugin`             | `src/events/` or `src/ingress/`  | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode         |
 | `guard`            | `auth-plugin`               | `src/guards/`                    | Nothing — attach it per route                                                         |
 | `job`              | `queue-plugin` (class mode) | `src/jobs/` or `src/ingress/`    | Transport-agnostic function, or `DecoratorPlugin({ ingress })` in class mode          |
-| `migration`        | `database-plugin`           | `src/migrations/`                | Nothing — no framework code reads migrations                                          |
+| `migration`        | `database-plugin`, `common` | `src/migrations/`                | Nothing — no framework code reads migrations                                          |
 | `ws-route`         | `websocket-plugin`          | `src/plugins/` or `src/ingress/` | The `plugins: [...]` array, or `DecoratorPlugin({ ingress })` in class mode           |
 | `sse`              | `sse-plugin`                | `src/controllers/`               | A `register…Routes(router)` call, or `DecoratorPlugin({ controllers })` in class mode |
 

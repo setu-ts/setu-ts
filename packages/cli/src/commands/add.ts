@@ -93,6 +93,7 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['auth', { pkg: 'auth-plugin' }],
   ['cache', { pkg: 'cache-plugin' }],
   ['cloudflare', { pkg: 'cloudflare-plugin' }],
+  ['common', { pkg: 'common' }],
   ['config', { pkg: 'config-plugin' }],
   ['cqrs', { pkg: 'cqrs-plugin' }],
   ['database', { pkg: 'database-plugin' }],

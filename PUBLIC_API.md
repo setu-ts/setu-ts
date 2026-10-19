@@ -1157,6 +1157,32 @@ module-private; status classification is unchanged.
 
 Provides database access with repository pattern and unit of work.
 
+### Migration ledger and schema readiness (M113o)
+
+`createMigrationLedger(database: IDatabaseService, options?: MigrationLedgerOptions): IMigrationLedger`
+uses the repository surface. `MigrationLedgerOptions.entity` defaults to the exported
+`MIGRATION_LEDGER_ENTITY = 'setu_migrations'`.
+`IMigrationLedger.applied(): Promise<readonly string[]>` reads only `id` with a 10,001-row limit;
+more than 10,000 rows throws the exported `MigrationLedgerError` (`reason: 'oversized'`).
+`record(name: string, appliedAt: string): Promise<void>` inserts `{ id: name, appliedAt }` and
+propagates duplicate-create errors. `remove(name: string): Promise<void>` resolves even when absent.
+Entity options must be non-empty strings.
+
+Every `DatabaseConnectionOptions` arm accepts `readiness?: DatabaseReadinessOptions`:
+`{ readonly migrations: readonly string[]; readonly ledgerEntity?: string }`. Expected names must be
+unique non-empty strings, at most 10,000; `ledgerEntity` defaults to `MIGRATION_LEDGER_ENTITY`, and
+`createMigrationLedger(database)` without an explicit `entity` uses the `ledgerEntity` that
+connection was registered with, so the generated runner writes where readiness reads. Invalid
+readiness options throw `TypeError` at plugin construction, naming the option without echoing
+values. Absent readiness preserves the indicator's status and data. Otherwise, after a non-down
+result, a separate 5-second cached, 2-second bounded ledger read adds `data.migrations`:
+unreadable/rejected/timed-out/oversized → `down` with `{ state: 'unreadable' }`; missing expected
+names → `degraded` with `{ state: 'pending', pending: count }`; current → unchanged status with
+`{ state: 'current', applied: count }`, adding `unknown: count` for names this build does not list.
+Unknown names preserve rolling-deploy readiness. Already-down results bypass the ledger. Only
+counts, never names, appear in data. See the database-plugin README for application-owned SQL DDL,
+entity mappings, measured duplicate errors and the process-local memory caveat.
+
 ### Registration
 
 ```typescript
@@ -9850,7 +9876,7 @@ setu generate command-handler create-user      # requires @setu-ts/cqrs-plugin
 setu generate query-handler get-user           # requires @setu-ts/cqrs-plugin
 setu generate event-handler user-created       # requires @setu-ts/events-plugin
 setu generate job send-welcome-email
-setu generate migration add-users-table        # requires @setu-ts/database-plugin
+setu generate migration add-users-table        # requires @setu-ts/database-plugin and @setu-ts/common
 
 # Custom schematics, loaded from .setu-ts/schematics/<schematic>.ts
 setu generate custom my-schematic order-item
@@ -11631,14 +11657,16 @@ provider read, so a backend that was never reached is `down`, not `up` (the X10-
 means a stale cache is being served. `isHealthy()` is the cached reachability probe (Consul
 `/v1/status/leader`, Kubernetes a `limit=1` EndpointSlice LIST).
 
-| Status     | Meaning                                                              |
-| ---------- | -------------------------------------------------------------------- |
-| `up`       | The provider has resolved at least once and is reachable.            |
-| `degraded` | A stale cache is being served, or the backend just went unreachable. |
-| `down`     | The provider has never resolved and is unreachable.                  |
+| Status | Meaning                                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable`. |
+| `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
+
+Since M113o, serving a stale cache or losing backend reachability after resolution keeps `up`.
+`data.degraded` and `data.reachable` preserve visibility without draining serving replicas.
 
 ## Programmatic vs Decorator API
 

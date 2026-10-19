@@ -7,12 +7,19 @@
  *
  * @module
  */
-import type { ILogger, IPlugin, IPluginContext, TimerHandle } from '@setu-ts/common';
+import type {
+  HealthCheckResult,
+  ILogger,
+  IPlugin,
+  IPluginContext,
+  TimerHandle,
+} from '@setu-ts/common';
 import {
   CAPABILITIES,
   createCachedProbe,
   createCapabilityToken,
   PLUGIN_PRIORITY,
+  resolveProbeTiming,
 } from '@setu-ts/common';
 import type {
   BigtableAdapterOptions,
@@ -43,6 +50,11 @@ import {
 } from '../health/database-capacity.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
 import { VERSION } from '../version.ts';
+import {
+  createMigrationReadiness,
+  validateMigrationReadiness,
+} from '../migrations/migration-readiness.ts';
+import { bindLedgerEntity } from '../migrations/migration-ledger.ts';
 
 /** Default adapter when none is specified. */
 const DEFAULT_ADAPTER: DatabaseAdapterType = 'memory';
@@ -93,6 +105,9 @@ const PLUGIN_NAME = 'database-plugin';
  * @since 0.1.0
  */
 export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
+  // The validated, frozen copy is the only one register() reads (audit F2).
+  const readinessOptions =
+    options?.readiness === undefined ? undefined : validateMigrationReadiness(options.readiness);
   const adapterType = options?.type ?? DEFAULT_ADAPTER;
   const connectionName = options?.name ?? 'default';
   const adapterOptions = buildAdapterOptions(options?.options);
@@ -149,6 +164,11 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
       // Register the database service.
       ctx.services.register<IDatabaseService>(token, service);
+      // A ledger created for this connection without an explicit entity — the
+      // generated run.ts — writes where readiness reads (PR #475 review).
+      if (readinessOptions?.ledgerEntity !== undefined) {
+        bindLedgerEntity(service, readinessOptions.ledgerEntity);
+      }
 
       // Register health indicator. M90b: the LIFECYCLE gate is uncached, so
       // a closed service reads down immediately — never from an outcome
@@ -191,7 +211,7 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       // the same `idle === 0 && waiting > 0` — reads `degraded`.
       const progress = new QueryProgressTracker();
 
-      ctx.health.register(`${token}`, async () => {
+      const indicator = async (): Promise<HealthCheckResult> => {
         progress.observe(readQueryProgress(adapter), ctx.runtime.hrtime());
         const capacity = readPoolCapacity(adapter);
         const data = {
@@ -270,7 +290,21 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           return { status: 'degraded', data: { ...data, reachable: 'unknown' } };
         }
         return { status: 'up', data: { ...data, reachable: true } };
-      });
+      };
+      const readiness =
+        readinessOptions === undefined
+          ? undefined
+          : createMigrationReadiness(service, readinessOptions, resolveProbeTiming(ctx.runtime));
+      ctx.health.register(
+        `${token}`,
+        readiness === undefined
+          ? indicator
+          : async () => {
+              const result = await readiness(await indicator());
+              // Closing while the ledger read awaits must not revive this connection.
+              return service.isClosed ? indicator() : result;
+            },
+      );
 
       // Register shutdown hook.
       ctx.lifecycle.onClose(async () => {
