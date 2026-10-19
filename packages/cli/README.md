@@ -141,7 +141,7 @@ setu g service user-profile        # `g` is an alias, `n` aliases `new`
 | `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`                          |
 | `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`                          |
 | `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`                        |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`                      |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`, `common`            |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.

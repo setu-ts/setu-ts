@@ -17,7 +17,8 @@ All notable changes to this project are documented here. The format follows
   **Breaking generated signature:** replace `runMigrations('up')` with
   `runMigrations('up', { database, ledger: createMigrationLedger(database) })`; migrations may
   accept `{ database }`. Socket entry points boot and stop the app; Workers emit only the callable
-  runner.
+  runner. Because the runner imports `@setu-ts/common`, `setu generate migration` now also requires
+  that package to be declared (every scaffold declares it), and `setu add common` adds it.
 - **Discovery warm-cache readiness (M113o, 0.10.0, `@setu-ts/service-discovery-plugin`).** A serving
   warm cache now reports `up` during backend outages instead of `degraded`, keeping replicas in
   rotation. `data.degraded`, `reachable`, and `everResolved` remain visible; never-resolved and

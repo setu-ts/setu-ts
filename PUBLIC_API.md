@@ -9875,7 +9875,7 @@ setu generate command-handler create-user      # requires @setu-ts/cqrs-plugin
 setu generate query-handler get-user           # requires @setu-ts/cqrs-plugin
 setu generate event-handler user-created       # requires @setu-ts/events-plugin
 setu generate job send-welcome-email
-setu generate migration add-users-table        # requires @setu-ts/database-plugin
+setu generate migration add-users-table        # requires @setu-ts/database-plugin and @setu-ts/common
 
 # Custom schematics, loaded from .setu-ts/schematics/<schematic>.ts
 setu generate custom my-schematic order-item

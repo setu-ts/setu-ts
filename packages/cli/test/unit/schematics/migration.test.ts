@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateMigration } from '../../../src/schematics/migration.ts';
+import { getSchematic } from '../../../src/schematics/registry.ts';
 import { gateOf, options } from './_shared.ts';
 import * as nodeFs from 'node:fs/promises';
 import { NODE_SOURCE_ARGS, run as runProcess, tempDir } from '../../../../../test/node-helpers.ts';
@@ -47,8 +48,12 @@ describe('migration schematic', () => {
     );
   });
 
-  it('is gated on database-plugin', () => {
-    expect(gateOf('migration')).toBe('database-plugin');
+  it('is gated on database-plugin, then on common, which the runner imports', () => {
+    const gate = getSchematic('migration')?.requiresPluginWhen;
+    expect(gateOf('migration')).toBeUndefined();
+    expect(gate?.(new Set())).toBe('database-plugin');
+    expect(gate?.(new Set(['database-plugin']))).toBe('common');
+    expect(gate?.(new Set(['database-plugin', 'common']))).toBeUndefined();
   });
 
   it('names the file from the INJECTED clock, not the wall clock', () => {

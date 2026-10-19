@@ -214,7 +214,8 @@ describe('runGenerateCommand', () => {
         expect(await blocked.run([schematic, 'thing'])).toBe(1);
         expect(blocked.err.text()).toContain(plugin);
 
-        const allowed = harness({ '/app/deno.json': DENO_MANIFEST(plugin) });
+        // `common` is in every scaffold's base set; `migration` also requires it.
+        const allowed = harness({ '/app/deno.json': DENO_MANIFEST(plugin, 'common') });
         expect(await allowed.run([schematic, 'thing'])).toBe(0);
       });
     }
@@ -669,8 +670,15 @@ describe('runGenerateCommand', () => {
     expect(h.err.text()).not.toContain('still holds');
   });
 
-  it('uses the injected clock for the migration filename', async () => {
+  it('refuses migration without common, naming the command that adds it', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
+    expect(await h.run(['migration', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('common');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('uses the injected clock for the migration filename', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin', 'common') });
     expect(await h.run(['migration', 'add-orders'])).toBe(0);
     // The runner and its barrel ride along since D5 — the migration used to be
     // an orphan that nothing imported and nothing could run.
@@ -685,7 +693,7 @@ describe('runGenerateCommand', () => {
   });
 
   it('prints no migration hint for other schematics or dry runs', async () => {
-    const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin', 'common') });
     expect(await h.run(['service', 'billing'])).toBe(0);
     expect(await h.run(['migration', 'orders', '--dry-run'])).toBe(0);
     expect(h.out.text()).not.toContain('readiness:');
