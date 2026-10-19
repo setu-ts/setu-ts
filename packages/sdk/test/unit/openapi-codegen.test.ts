@@ -65,7 +65,75 @@ function genDoc(schema: SdkOpenApiSchema): SdkOpenApiDocument {
   });
 }
 
+describe('per-operation request options and generated local names', () => {
+  it('appends options to every interface and factory signature and forwards only defined fields', () => {
+    const out = generateOpenApiClient(usersDocument);
+    expect(out).toContain(
+      "import type { ClientResponse, IHttpClient, OperationRequestOptions } from '@setu-ts/sdk';",
+    );
+    expect(out.match(/request\?: OperationRequestOptions/g)).toHaveLength(4);
+    expect(out).toContain('opts?: ListUsersArgs,\n    request?: OperationRequestOptions,');
+    expect(out).toContain('id: string,\n    request?: OperationRequestOptions,');
+    for (const field of ['idempotencyKey', 'signal']) {
+      expect(
+        out.split(`...(request?.${field} === undefined ? {} : { ${field}: request.${field} }),`),
+      ).toHaveLength(3);
+    }
+    expect(out).not.toContain('...request,');
+    const required = generateOpenApiClient(
+      makeDoc({
+        '/orders': { post: makeOp('placeOrder', { requestBody: makeBody({ type: 'string' }) }) },
+      }),
+    );
+    expect(required).toContain('opts: PlaceOrderArgs,\n    request?: OperationRequestOptions,');
+  });
+
+  for (const name of ['client', 'opts', 'request', '_client']) {
+    it(`renames path parameter ${name} consistently without changing query fields`, () => {
+      const out = generateOpenApiClient(
+        makeDoc({
+          [`/items/{${name}}`]: {
+            get: makeOp('readItem', {
+              parameters: [makeParam(name, 'path'), makeParam('opts', 'query')],
+            }),
+          },
+        }),
+      );
+      const expected = name === '_client' ? '_client' : `_${name}`;
+      expect(out.match(new RegExp(`${expected}: string`, 'g'))).toHaveLength(2);
+      expect(out).toContain(`encodeURIComponent(${expected})`);
+      expect(out).toContain("'opts': opts.opts");
+    });
+  }
+
+  it('renames only the client operation name and keeps the other local operation names', () => {
+    for (const name of ['client', 'opts', 'request']) {
+      const out = generateOpenApiClient(makeDoc({ '/x': { get: makeOp(name) } }));
+      const expected = name === 'client' ? '_client' : name;
+      expect(out.replace(/\s+/g, ' ')).toContain(
+        `function ${expected}( request?: OperationRequestOptions, )`,
+      );
+      expect(out).toContain(`  ${expected}(request?: OperationRequestOptions)`);
+    }
+  });
+
+  it('still refuses duplicate placeholders after local-name escaping', () => {
+    expect(() =>
+      generateOpenApiClient(
+        makeDoc({
+          '/x/{client}/{_client}': {
+            get: makeOp('x', { parameters: [makeParam('client', 'path')] }),
+          },
+        }),
+      ),
+    ).toThrow(/two placeholders deriving onto one argument '_client'/);
+  });
+});
+
 describe('sanitizeIdentifier', () => {
+  it('drops a leading underscore before a generated local name is escaped', () => {
+    expect(sanitizeIdentifier('_client')).toBe('client');
+  });
   it('lower-camel-joins parts split on non-alphanumeric runs', () => {
     expect(sanitizeIdentifier('get-user-by-id')).toBe('getUserById');
   });
@@ -471,7 +539,9 @@ describe('generated method signatures', () => {
       }),
     );
     // Interior camelCase survives derivation: `getUser`, not `getuser`.
-    expect(out).toContain('getUser(id: string):');
+    expect(out).toContain(
+      'getUser(\n    id: string,\n    request?: OperationRequestOptions,\n  ):',
+    );
   });
 
   it('generates method with query params but no path params', () => {
@@ -991,7 +1061,12 @@ describe('review findings (PR #181)', () => {
   });
 
   it('reserves the identifiers the emitted import lines bind', () => {
-    for (const name of ['ClientResponse', 'IHttpClient', 'HttpClientError']) {
+    for (const name of [
+      'ClientResponse',
+      'IHttpClient',
+      'HttpClientError',
+      'OperationRequestOptions',
+    ]) {
       const doc = {
         openapi: '3.1.0',
         components: { schemas: { [name]: { type: 'object', properties: {} } } },
@@ -1187,7 +1262,9 @@ describe('compile regression', () => {
   });
 
   it('defaults a schemaless path parameter to string', () => {
-    expect(generated).toContain('function getUserById(id: string)');
+    expect(generated).toContain(
+      'function getUserById(\n    id: string,\n    request?: OperationRequestOptions,\n  )',
+    );
   });
 
   it('defaults schemaless query and header parameters to string', () => {
@@ -1219,7 +1296,9 @@ describe('compile regression', () => {
   });
 
   it('makes opts required when a query parameter or the body is required', () => {
-    expect(generated).toContain('function createReport(opts: CreateReportArgs)');
+    expect(generated).toContain(
+      'function createReport(\n    opts: CreateReportArgs,\n    request?: OperationRequestOptions,\n  )',
+    );
     expect(generated).toContain('\n  body: User;');
     // Required fields are read without an optional chain.
     expect(generated).toContain("query: { 'format': opts.format },");
@@ -1227,7 +1306,9 @@ describe('compile regression', () => {
   });
 
   it('keeps opts optional when every field is optional', () => {
-    expect(generated).toContain('function updateNote(opts?: UpdateNoteArgs)');
+    expect(generated).toContain(
+      'function updateNote(\n    opts?: UpdateNoteArgs,\n    request?: OperationRequestOptions,\n  )',
+    );
     expect(generated).toContain('\n  body?: Record<string, unknown>;');
     expect(generated).toContain('json: opts?.body,');
   });
@@ -1384,7 +1465,9 @@ describe('path template / parameter agreement', () => {
         '/a/{user-id}': { get: makeOp('op', { parameters: [makeParam('user-id', 'path')] }) },
       }),
     );
-    expect(out).toContain('function op(userId: string)');
+    expect(out).toContain(
+      'function op(\n    userId: string,\n    request?: OperationRequestOptions,\n  )',
+    );
     expect(out).toContain('path: `a/${encodeURIComponent(userId)}`,');
   });
 });
@@ -1415,8 +1498,12 @@ describe('path-item level operations and parameters', () => {
         },
       }),
     );
-    expect(out).toContain('function sharedGet(tid: string)');
-    expect(out).toContain('function sharedDelete(tid: string)');
+    expect(out).toContain(
+      'function sharedGet(\n    tid: string,\n    request?: OperationRequestOptions,\n  )',
+    );
+    expect(out).toContain(
+      'function sharedDelete(\n    tid: string,\n    request?: OperationRequestOptions,\n  )',
+    );
     expect(out).toContain('path: `tenants/${encodeURIComponent(tid)}/x`,');
   });
 
@@ -1432,7 +1519,9 @@ describe('path-item level operations and parameters', () => {
       }),
     );
     // The operation's `integer` schema wins over the shared `string`.
-    expect(out).toContain('function ovr(id: number)');
+    expect(out).toContain(
+      'function ovr(\n    id: number,\n    request?: OperationRequestOptions,\n  )',
+    );
   });
 
   it('keeps a shared parameter that the operation does not redeclare', () => {
@@ -1465,7 +1554,9 @@ describe('Api interface and explicit return type (X11-4)', () => {
     const out = generateOpenApiClient(doc);
 
     expect(out).toContain('export interface Api {');
-    expect(out).toContain('  listUsers(): Promise<ClientResponse<void>>;');
+    expect(out).toContain(
+      '  listUsers(request?: OperationRequestOptions): Promise<ClientResponse<void>>;',
+    );
     expect(out).toContain('export function createApi(client: IHttpClient): Api {');
   });
 
@@ -1736,7 +1827,9 @@ describe('typed error responses (X11-7)', () => {
     );
 
     expect(out).toContain("import { HttpClientError } from '@setu-ts/sdk';");
-    expect(out).toContain("import type { ClientResponse, IHttpClient } from '@setu-ts/sdk';");
+    expect(out).toContain(
+      "import type { ClientResponse, IHttpClient, OperationRequestOptions } from '@setu-ts/sdk';",
+    );
   });
 });
 

@@ -545,7 +545,8 @@ function collectOperations(doc: SdkOpenApiDocument): OpEntry[] {
           method,
         );
       }
-      const safeName = sanitizeIdentifier(op.operationId);
+      const operationName = sanitizeIdentifier(op.operationId);
+      const safeName = operationName === 'client' ? '_client' : operationName;
       const existing = used.get(safeName);
       if (existing) {
         throw new OpenApiCodegenError(
@@ -801,6 +802,12 @@ function getErrorArms(
   return arms.sort((a, b) => a.status - b.status);
 }
 
+/** Keep positional path arguments clear of the generated factory and method locals. */
+function pathArgumentName(raw: string): string {
+  const name = sanitizeIdentifier(raw);
+  return name === 'client' || name === 'opts' || name === 'request' ? `_${name}` : name;
+}
+
 /** Every `{placeholder}` name in a path template, in order of appearance. */
 function pathPlaceholders(path: string): string[] {
   return [...path.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]!);
@@ -829,11 +836,11 @@ function assertPathParamsMatchTemplate(
   // placeholder, so `user-id` in the template is satisfied by a `user-id`
   // parameter, and two placeholders deriving onto one identifier are a
   // duplicate-argument defect of their own.
-  const derivedDeclared = new Set(pathParams.map((p) => sanitizeIdentifier(p.name)));
+  const derivedDeclared = new Set(pathParams.map((p) => pathArgumentName(p.name)));
   const seen = new Set<string>();
 
   for (const raw of placeholders) {
-    const derived = sanitizeIdentifier(raw);
+    const derived = pathArgumentName(raw);
     if (!derivedDeclared.has(derived)) {
       throw new OpenApiCodegenError(
         `Path template '${path}' declares placeholder '{${raw}}' with no matching ` +
@@ -853,7 +860,7 @@ function assertPathParamsMatchTemplate(
   }
 
   for (const p of pathParams) {
-    if (!seen.has(sanitizeIdentifier(p.name))) {
+    if (!seen.has(pathArgumentName(p.name))) {
       throw new OpenApiCodegenError(
         `Parameter '${p.name}' is declared 'in: path' but does not appear in the path ` +
           `template '${path}'; its value would be silently dropped`,
@@ -872,7 +879,7 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const aliases: HoistedAlias[] = [];
 
   const render = (p: SdkOpenApiParameter, forcedRequired?: boolean): RenderedParam => ({
-    name: sanitizeIdentifier(p.name),
+    name: p.in === 'path' ? pathArgumentName(p.name) : sanitizeIdentifier(p.name),
     wireName: p.name,
     // A parameter with no `schema` is treated as a string: that is the only
     // shape that can be serialized into a URL or a header without guessing.
@@ -1025,7 +1032,7 @@ function buildPathLiteral(path: string, indent: string, prefix: string): string[
     if (m.index > cursor) {
       parts.push({ literal: true, text: normalized.slice(cursor, m.index) });
     }
-    parts.push({ literal: false, text: sanitizeIdentifier(m[1]!) });
+    parts.push({ literal: false, text: pathArgumentName(m[1]!) });
     cursor = m.index + m[0].length;
   }
 
@@ -1099,7 +1106,12 @@ export function generateOpenApiClient(
   // conditional: the guard names that force it are claimed during shape
   // building, below, so whether it is needed is not yet known here — and the
   // name belongs to the SDK either way.
-  for (const imported of ['ClientResponse', 'IHttpClient', 'HttpClientError']) {
+  for (const imported of [
+    'ClientResponse',
+    'IHttpClient',
+    'HttpClientError',
+    'OperationRequestOptions',
+  ]) {
     types.claim(imported, 'an identifier imported from @setu-ts/sdk');
   }
   const apiTypeName = types.claim(sanitizeTypeName(opts.apiTypeName), 'the `apiTypeName` option');
@@ -1137,7 +1149,9 @@ export function generateOpenApiClient(
   }
   L(' */');
   L('');
-  L(`import type { ClientResponse, IHttpClient } from '${opts.sdkImport}';`);
+  L(
+    `import type { ClientResponse, IHttpClient, OperationRequestOptions } from '${opts.sdkImport}';`,
+  );
   if (anyErrors) {
     // A VALUE import, not a type-only one: the generated guards narrow with
     // `instanceof`.
@@ -1274,6 +1288,7 @@ export function generateOpenApiClient(
     if (shape.hasArgs) {
       params.push(`opts${shape.argsRequired ? '' : '?'}: ${shape.argsTypeName}`);
     }
+    params.push('request?: OperationRequestOptions');
     for (const line of renderSignature(
       INDENT,
       shape.entry.safeName,
@@ -1305,6 +1320,7 @@ export function generateOpenApiClient(
       paramList.push(`opts${shape.argsRequired ? '' : '?'}: ${shape.argsTypeName}`);
     }
 
+    paramList.push('request?: OperationRequestOptions');
     for (const line of renderSignature(
       i1,
       `function ${entry.safeName}`,
@@ -1348,6 +1364,9 @@ export function generateOpenApiClient(
       L(`${i3}json: ${optsRef}.body,`);
     }
 
+    for (const field of ['idempotencyKey', 'signal']) {
+      L(`${i3}...(request?.${field} === undefined ? {} : { ${field}: request.${field} }),`);
+    }
     L(`${i2}});`);
     L(`${i1}}`);
   }

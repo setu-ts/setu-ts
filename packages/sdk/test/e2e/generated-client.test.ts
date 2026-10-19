@@ -26,6 +26,72 @@ function makeFetch(handler: (req: Request) => Response | Promise<Response>) {
 }
 
 describe('generated-client e2e', () => {
+  it('keeps the per-call key in the configured header across a 503 retry', async () => {
+    const keys: (string | null)[] = [];
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      idempotency: { header: 'X-Operation-Key' },
+      retry: { limit: 2, delay: 0, backoff: 'fixed' },
+      fetch: makeFetch((req) => {
+        keys.push(req.headers.get('X-Operation-Key'));
+        return keys.length === 1
+          ? new Response('busy', { status: 503 })
+          : Response.json({ id: '1', name: 'Ada' });
+      }),
+    });
+    const response = await createApi(client).getUserById('1', { idempotencyKey: 'order-123' });
+    expect(response.data).toEqual({ id: '1', name: 'Ada' });
+    expect(keys).toEqual(['order-123', 'order-123']);
+  });
+
+  it('passes the per-call signal to fetch and aborts an in-flight request', async () => {
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | null | undefined;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          observedSignal = init?.signal;
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+            once: true,
+          });
+          controller.abort(new DOMException('cancelled', 'AbortError'));
+        }),
+    });
+    await expect(
+      createApi(client).getUserById('1', { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it('sends no key when the per-call options are omitted', async () => {
+    const keys: (string | null)[] = [];
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      idempotency: {},
+      fetch: makeFetch((req) => {
+        keys.push(req.headers.get('Idempotency-Key'));
+        return Response.json([]);
+      }),
+    });
+    await createApi(client).listUsers();
+    expect(keys).toEqual([null]);
+  });
+
+  it('does not forward extra JavaScript caller properties from per-call options', async () => {
+    const methods: string[] = [];
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch((req) => {
+        methods.push(req.method);
+        return Response.json([]);
+      }),
+    });
+    const request = { idempotencyKey: 'safe-key', method: 'DELETE' };
+    await createApi(client).listUsers(undefined, request);
+    expect(methods).toEqual(['GET']);
+  });
+
   it('follows a real 303 and exposes only the target response', async () => {
     const port = await nodeUnusedPort();
 

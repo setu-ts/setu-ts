@@ -69,6 +69,22 @@ export interface ClientRequest<TBody = unknown> {
 }
 
 /**
+ * Per-call options for a generated API operation, forwarded to {@linkcode ClientRequest}.
+ *
+ * @since 0.10.0
+ */
+export interface OperationRequestOptions {
+  /**
+   * The caller's idempotency key, validated before any network call as in
+   * {@linkcode ClientRequest.idempotencyKey}; enables retries on any method and on `409`.
+   */
+  readonly idempotencyKey?: string;
+
+  /** Abort signal that cancels fetches and queued waits, as in {@linkcode ClientRequest.signal}. */
+  readonly signal?: AbortSignal;
+}
+
+/**
  * A successful parsed response returned by {@linkcode IHttpClient.request}.
  *
  * @typeParam T - The deserialized response type.
