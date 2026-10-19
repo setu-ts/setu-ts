@@ -861,9 +861,9 @@ describe('runAdoptCommand', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
-  // Stopping part-way is safe BECAUSE of the copy-verify-delete order, and the
-  // message has to say so — every file moved so far exists in both places.
-  it('stops and says nothing is lost when a move fails', async () => {
+  // A failure after the first move must undo it: the transaction rolls back a
+  // throw, so the command reports the refusal instead of returning one.
+  it('stops and rolls the failed conversion back when a move fails', async () => {
     const fs = createFakeFs(PROJECT);
     const err = createRecorder();
     const failing = {
@@ -881,13 +881,77 @@ describe('runAdoptCommand', () => {
     });
     expect(code).toBe(1);
     expect(err.text()).toContain('disk full');
-    expect(err.text()).toContain('nothing is lost');
+    expect(err.text()).toContain('Nothing was changed: every move was undone.');
+    expect(err.text()).not.toContain('Stopped part-way');
+    // The files that moved before the refusing one are back where they started.
+    expect(failing.has('/work/svc/deno.json')).toBe(true);
+    expect(failing.has('/work/svc/main.ts')).toBe(true);
+    expect(failing.has('/work/svc/apps/svc/deno.json')).toBe(false);
+    expect(failing.has('/work/svc/apps/svc/main.ts')).toBe(false);
   });
 
   // The guard exists for a file that appears AFTER the plan was made — an editor
   // writing into `src/` mid-run. An adopted directory is walked wholesale, so
   // nothing present at plan time is ever left behind; what must never happen is a
   // recursive delete of something this command did not move.
+  // The reported failure used to happen AFTER every move, with no rollback: the
+  // project's `.env` stayed under apps/ and could be staged. A root target that
+  // refuses its write must leave the starting tree in place.
+  it('restores every moved file when a root target cannot be written', async () => {
+    const fs = createFakeFs(PROJECT);
+    const err = createRecorder();
+    const failing = {
+      ...fs,
+      writeFile: (path: string, data: Uint8Array) =>
+        path === '/work/svc/.dockerignore'
+          ? Promise.reject(new Error('read-only root'))
+          : fs.writeFile(path, data),
+    };
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs: failing,
+      cwd: '/work/svc',
+      log: createRecorder().sink,
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('read-only root');
+    expect(err.text()).toContain('Nothing was changed: every move was undone.');
+    expect(err.text()).not.toContain('Stopped part-way');
+    // Every source path is back, and the member tree is gone.
+    for (const path of Object.keys(PROJECT)) {
+      expect(failing.has(path)).toBe(true);
+    }
+    expect(failing.has('/work/svc/apps/svc/deno.json')).toBe(false);
+    expect(failing.has('/work/svc/apps/svc/main.ts')).toBe(false);
+    expect(failing.has('/work/svc/setu.workspace.json')).toBe(false);
+  });
+
+  it('undoes a completed move when the next one fails', async () => {
+    const fs = createFakeFs(PROJECT);
+    const err = createRecorder();
+    const failing = {
+      ...fs,
+      writeFile: (path: string, data: Uint8Array) =>
+        // The second move is `main.ts`: its source is still at the root.
+        path === '/work/svc/apps/svc/main.ts' && fs.has('/work/svc/main.ts')
+          ? Promise.reject(new Error('disk full'))
+          : fs.writeFile(path, data),
+    };
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs: failing,
+      cwd: '/work/svc',
+      log: createRecorder().sink,
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('disk full');
+    expect(err.text()).toContain('Nothing was changed: every move was undone.');
+    // The first move, `deno.json`, is back at the root.
+    expect(failing.read('/work/svc/deno.json')).toBe(PROJECT['/work/svc/deno.json']);
+    expect(failing.has('/work/svc/apps/svc/deno.json')).toBe(false);
+    expect(failing.has('/work/svc/main.ts')).toBe(true);
+  });
+
   it('keeps and reports a directory that gained a file after the plan', async () => {
     const fs = createFakeFs(PROJECT);
     const out = createRecorder();

@@ -407,7 +407,8 @@ All notable changes to this project are documented here. The format follows
   custom name the generic `.env`/`.env.*` rules do not cover (for example `local.env`) prints one
   line naming it and the `.dockerignore` line to add. The workspace `.gitignore` gains `.env`,
   `.env.*` and `!.env.example`; the `.dockerignore` gains `**/.env`, `**/.env.*` and
-  `!**/.env.example`, and its comment states that a custom `--env-file` name is not covered.
+  `!**/.env.example`, and its comment states that a custom `--env-file` name is not covered. A
+  conversion that fails part-way is now rolled back, so no moved file is left under the member.
 - **A Workers full-stack scaffold type-checks and builds first (V9-9, M113h, 0.10.0,
   `@setu-ts/cli`).** The Workers `tsconfig.json` names `node` beside `@cloudflare/workers-types` and
   the manifest adds `@types/node`, so the emitted `vite.config.ts` no longer fails its own check.

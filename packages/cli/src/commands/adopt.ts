@@ -65,6 +65,28 @@ import { workspaceRootFiles } from '../workspace/root-files.ts';
 import { detectProjectRuntime, workspaceProfile } from '../workspace/runtime-profile.ts';
 import { DEFAULT_TRANSPORT, transportSpec } from '../workspace/transport.ts';
 
+/**
+ * Raised inside the conversion transaction when the conversion cannot finish.
+ *
+ * A return value would let the transaction commit its already-applied moves, so
+ * the refusal is thrown instead: `withFileTransaction` rolls back on a throw and
+ * only on a throw. The messages the command would have printed are carried out
+ * to the call site, which prints them once the rollback has finished.
+ */
+class AdoptAbortedError extends Error {
+  /** The lines to print, in order. */
+  readonly messages: readonly string[];
+
+  /**
+   * @param messages - The lines to print, in order
+   */
+  constructor(messages: readonly string[]) {
+    super(messages.join(' '));
+    this.name = 'AdoptAbortedError';
+    this.messages = messages;
+  }
+}
+
 /** Everything `runAdoptCommand` reaches the outside world through. */
 export interface AdoptDependencies {
   /** The filesystem to read the project through and write the workspace with. */
@@ -271,12 +293,7 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
       const moved = await moveFile(deps.fs, project, file);
       throwIfInterrupted(deps.interrupt);
       if (!moved.ok) {
-        deps.error(moved.message);
-        deps.error(
-          'Stopped part-way. Every file moved so far exists in both places, so nothing is lost — ' +
-            'finish or undo the move by hand.',
-        );
-        return EXIT_ERROR;
+        throw new AdoptAbortedError([moved.message]);
       }
       deps.log(`moved ${escapeName(file.from)} -> ${escapeName(file.to)}`);
     }
@@ -302,10 +319,9 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
       if (interrupted !== undefined) {
         throw cause;
       }
-      deps.error(
+      throw new AdoptAbortedError([
         `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
-      );
-      return EXIT_ERROR;
+      ]);
     }
     for (const file of planned) deps.log(`created ${escapeName(file.path)}`);
 
@@ -319,12 +335,11 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
       rewritten = rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER);
     } catch (cause) {
       if (!isMissingPath(cause)) {
-        deps.error(
+        throw new AdoptAbortedError([
           `Failed to read ${escapeName(entryPath)}: ${escapeName(
             cause instanceof Error ? cause.message : String(cause),
           )}`,
-        );
-        return EXIT_ERROR;
+        ]);
       }
       // A Workers project has src/index.ts and no main.ts to rewrite.
     }
@@ -347,15 +362,11 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
         if (interrupted !== undefined) {
           throw cause;
         }
-        deps.error(
+        throw new AdoptAbortedError([
           `Failed to rewrite ${escapeName(entryPath)}: ${escapeName(
             cause instanceof Error ? cause.message : String(cause),
           )}`,
-        );
-        deps.error(
-          'Workspace files and moved project files remain in place; repair the entry before starting it.',
-        );
-        return EXIT_ERROR;
+        ]);
       }
     }
 
@@ -437,10 +448,21 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     return await withFileTransaction(deps.fs, perform, deps.interrupt);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    // The transaction has already undone every move and write by the time this
+    // runs: a throw is what asked it to. Reporting "part-way" here would describe
+    // a tree that no longer exists.
+    if (cause instanceof AdoptAbortedError) {
+      for (const message of cause.messages) deps.error(message);
+      deps.error('Nothing was changed: every move was undone.');
+      return EXIT_ERROR;
+    }
     deps.error(
-      interrupted ??
-        `Failed to adopt: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      `Failed to adopt: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
-    return interrupted === undefined ? EXIT_ERROR : EXIT_INTERRUPTED;
+    return EXIT_ERROR;
   }
 }

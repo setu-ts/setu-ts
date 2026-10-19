@@ -274,6 +274,17 @@ export async function planAdoption(
     }
   }
 
+  // A member's own generated file can land on a path a repository committed as a
+  // link — `apps/<member>/.gitignore` is the one that happens. Refused here,
+  // before either a dry run prints a plan or the transaction moves the first file.
+  for (const file of creates) {
+    try {
+      await assertInsideProject(fs, project, joinPath(project, file.path));
+    } catch (cause) {
+      return { ok: false, message: cause instanceof Error ? cause.message : String(cause) };
+    }
+  }
+
   return {
     ok: true,
     files,

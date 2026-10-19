@@ -31,6 +31,39 @@ console.log('__PROBE_RESULT__' + JSON.stringify({ status: response.status }));
 await app.stop();
 `;
 
+/** One path in a project tree: its kind, and its bytes or link target. */
+type TreeEntry =
+  | { readonly kind: 'dir' }
+  | { readonly kind: 'file'; readonly contents: string }
+  | { readonly kind: 'link'; readonly target: string };
+
+/**
+ * Snapshots a tree without following links, so a refusal cannot hide a mutated
+ * file behind a link that readFile would resolve.
+ */
+async function snapshotTree(root: string): Promise<Record<string, TreeEntry>> {
+  const entries: Record<string, TreeEntry> = {};
+  async function visit(relative: string): Promise<void> {
+    const directory = relative === '' ? root : `${root}/${relative}`;
+    for (const entry of await nodeFs.readdir(directory, { withFileTypes: true })) {
+      const path = relative === '' ? entry.name : `${relative}/${entry.name}`;
+      if (entry.isSymbolicLink()) {
+        entries[path] = { kind: 'link', target: await nodeFs.readlink(`${root}/${path}`) };
+      } else if (entry.isDirectory()) {
+        entries[path] = { kind: 'dir' };
+        await visit(path);
+      } else {
+        entries[path] = {
+          kind: 'file',
+          contents: (await nodeFs.readFile(`${root}/${path}`)).toString('base64'),
+        };
+      }
+    }
+  }
+  await visit('');
+  return entries;
+}
+
 describe('setu adopt on a real scaffold', () => {
   let root: string;
   const out: string[] = [];
@@ -133,5 +166,51 @@ describe('setu adopt on a real scaffold', () => {
     ).not.toBe(0);
 
     expect(await nodeFs.readFile(`${member}/.gitignore`, 'utf8')).toContain('/.env');
+  });
+
+  // The member `.gitignore` is generated output, so a refusal at plan time is the
+  // only thing standing between a committed link and a write through it. It must
+  // refuse a dry run too: a clean plan for a conversion the real run refuses is
+  // the defect this covers.
+  it('refuses a linked member .gitignore before a dry run or a conversion writes', async () => {
+    expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
+
+    const project = `${root}/svc`;
+    const outside = `${root}/outside-gitignore`;
+    await nodeFs.writeFile(outside, 'outside\n');
+    await nodeFs.mkdir(`${project}/apps/svc`, { recursive: true });
+    await nodeFs.symlink(outside, `${project}/apps/svc/.gitignore`);
+    const before = await snapshotTree(project);
+
+    out.length = 0;
+    err.length = 0;
+    expect(await run(['adopt', '--dir', project, '--dry-run'])).toBe(1);
+    expect(err.join('\n')).toContain('symbolic link');
+    expect(out.join('\n')).not.toContain('would move');
+    expect(await snapshotTree(project)).toEqual(before);
+
+    out.length = 0;
+    err.length = 0;
+    expect(await run(['adopt', '--dir', project])).toBe(1);
+    expect(err.join('\n')).toContain('symbolic link');
+    expect(await snapshotTree(project)).toEqual(before);
+  });
+
+  // The write batch refuses a dangling link before writing through it, but the
+  // moves have already happened by then: without the rollback the project's
+  // `.env` is left under apps/ and would be staged by a root `/.env` rule.
+  it('rolls every move back when a root target is a dangling link', async () => {
+    expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
+
+    const project = `${root}/svc`;
+    await nodeFs.symlink(`${root}/missing-dockerignore`, `${project}/.dockerignore`);
+    const before = await snapshotTree(project);
+
+    out.length = 0;
+    err.length = 0;
+    expect(await run(['adopt', '--dir', project])).toBe(1);
+    expect(err.join('\n')).toContain('link to something that does not exist');
+    expect(err.join('\n')).toContain('Nothing was changed: every move was undone.');
+    expect(await snapshotTree(project)).toEqual(before);
   });
 });
