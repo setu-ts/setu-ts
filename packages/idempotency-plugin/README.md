@@ -130,9 +130,14 @@ Send the key per call through the generated operation's trailing `request` param
 `ClientOptions.idempotency` (`ClientIdempotencyOptions`) generates a key by default for `POST` and
 `PATCH`; `ClientOptions.headers` carrying the key header is refused while it is configured, so the
 per-call `idempotencyKey` is the way to reuse one key across SDK client instances acting for the
-same principal (a retry after a page reload, say). The key never crosses principals: the server
-scopes every record by the authenticated identity, so another principal's request with the same key
-runs its own work rather than replaying yours.
+same principal (a retry after a page reload, say). Records are scoped by the authenticated identity,
+so on a route with `principal: 'required'` (the default) another principal's request with the same
+key runs its own work rather than replaying yours. That isolation holds only for authenticated
+callers and a correctly built scope: on a `principal: 'optional'` route every anonymous caller
+shares one scope, so a caller who guesses another anonymous caller's key is served that caller's
+stored result (see [the HTTP check order](#the-http-check-order)). Generate keys with enough entropy
+to be unguessable, and pair such a route with `response: 'status'` unless its response is safe to
+show any anonymous caller.
 
 A custom key header is renamed in three places: the route's `key: { header }`,
 `ClientIdempotencyOptions.header` on the SDK side, and the CORS `allowedHeaders` entry (the
