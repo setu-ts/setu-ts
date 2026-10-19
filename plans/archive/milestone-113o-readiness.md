@@ -277,3 +277,59 @@ pnpm run release:verify 0.9.0
 - A portable migration lock — no milestone owns it yet; nothing has asked.
 - `setu db:migrate` — needs CLI command registration from a plugin, which does not exist.
 - Rewriting `setu.config.ts` to add the readiness option — the opt-in stays a printed line.
+
+## 10. Design security review (recorded after implementation)
+
+Recorded before the committed-tree audit, after implementation (the M101a / M113a / M113n
+precedent); it is not presented as having guided the design.
+
+**Flows reviewed.** (a) The `database` health indicator reading the ledger through the repository
+surface on every `/health` and `/ready` poll, and publishing a `migrations` member in its `data`.
+(b) `DatabasePlugin({ readiness })` option validation at construction. (c) The generated `run.ts`:
+it imports the project's `setu.config.ts`, starts the whole application with no port, resolves the
+default database, runs project-authored migrations and writes ledger rows. (d) The service-discovery
+indicator's warm-cache mapping. (e) The documented ledger DDL and per-backend entity mappings.
+
+**Assets.** Readiness correctness — a replica that cannot serve must leave rotation, and a fleet
+that can serve must not be drained by one shared fault; database availability under health polling;
+the minimization of `/health` data (M113f: status only unless `details: true`); ledger integrity,
+which decides what a runner applies.
+
+**Attackers.** An unauthenticated client polling `/health` or `/ready` as fast as it likes. Whoever
+can write the ledger table (a database principal — able to mark a replica ready or force a migration
+to re-run). An operator supplying option values from configuration. A hostile or corrupted ledger
+(oversized, non-string ids). A shared discovery-backend outage.
+
+**Obligations.**
+
+1. Health polling cannot amplify database load: the ledger read is cached 5 s per connection,
+   concurrent polls coalesce, and each read is bounded at 2 s, all on the runtime's monotonic clock
+   and timers.
+2. Health data carries counts and a state only — never migration names, the entity name, a driver
+   error or a row value — and is still hidden unless `HealthPlugin({ details: true })`.
+3. The read is bounded before cost: an `id` projection with `limit: 10_001`, more than 10 000 rows
+   reported `unreadable` rather than truncated, and a rejected, timed-out or throwing read fails
+   closed to `down`.
+4. Invalid `readiness` options throw at construction without echoing the value; expected names are
+   unique, non-empty and at most 10 000.
+5. A connection that closes while the ledger read is in flight reports `down`, never a revived `up`.
+6. Absent `readiness`, the indicator's status and data are byte-identical to before.
+7. A discovery backend that has never resolved and is unreachable stays `down`; only a warm cache
+   reports `up`, with `degraded` and `reachable` kept in `data` so the shared fault stays alertable.
+8. The generated runner writes a ledger row only after its migration succeeds, and a ledger write
+   failure is reported as such rather than as a failed migration.
+
+**Residual, accepted (documented).** Ledger integrity rests on the database principal: anyone able
+to write `setu_migrations` can mark a replica ready or make a migration re-run, which is the same
+trust that principal already holds over the schema. The runner boots the whole application, so
+plugins with start-up effects (queue processors, scheduled jobs, broker subscriptions) start for the
+runner's lifetime — the M34b plugin-command precedent; the runner header says it boots the app. Two
+runners at once can apply one migration twice; the second `record` fails visibly and the docs say to
+run one migration job. A memory-adapter ledger is process-local. A warm cache may be served stale
+for the length of a backend outage.
+
+**Findings.**
+
+| #   | Finding                                                                                                          | Severity | Disposition                                                       |
+| --- | ---------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| R1  | Review: the runner reported a migration that ran as "failed" when only its ledger write failed (a racing runner) | Low      | Fixed: separate error naming the ledger write; test discriminates |
