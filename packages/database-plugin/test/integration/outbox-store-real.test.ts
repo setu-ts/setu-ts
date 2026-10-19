@@ -5,7 +5,7 @@
  *   committed DDL fixture is applied to a throwaway schema, the `IOutboxStore`
  *   contract runs against it, a business row and an outbox row commit or roll
  *   back together, and `verify()` refuses a schema without the table.
- * - **MongoDB standalone** (`MONGODB_URI` — a standalone `mongo:8` in CI):
+ * - **MongoDB standalone** (`MONGODB_URI` — a standalone `mongo:7` in CI):
  *   `verify()` refuses with the REPLICA-SET reason specifically. The variable
  *   must name a standalone server; against a replica set this test fails, which
  *   is the signal that it does not.
