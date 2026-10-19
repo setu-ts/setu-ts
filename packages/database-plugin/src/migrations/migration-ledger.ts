@@ -53,10 +53,32 @@ class MigrationLedger implements IMigrationLedger {
 }
 
 /**
+ * The `readiness.ledgerEntity` a `DatabasePlugin` was configured with, per
+ * registered connection. Internal — not exported from the barrel. It is what lets
+ * the CLI-owned `run.ts`, which calls `createMigrationLedger(database)` with no
+ * entity, write to the same entity the readiness check reads (PR #475 review).
+ */
+const configuredEntities = new WeakMap<IDatabaseService, string>();
+
+/**
+ * Records the readiness ledger entity of a registered connection.
+ *
+ * @param database - The connection's registered service
+ * @param entity - Its validated `readiness.ledgerEntity`
+ * @internal
+ */
+export function bindLedgerEntity(database: IDatabaseService, entity: string): void {
+  configuredEntities.set(database, entity);
+}
+
+/**
  * Creates a ledger over an application-owned entity; never creates its schema.
+ * Without `options.entity` it uses the connection's configured
+ * `readiness.ledgerEntity`, else {@linkcode MIGRATION_LEDGER_ENTITY}, so the
+ * generated runner and the readiness check always agree.
  * Run one migration job: duplicate records propagate the adapter's create error.
  * @param database - Connection used by migrations and readiness
- * @param options - Entity override; match readiness.ledgerEntity when overriding
+ * @param options - Entity override; defaults to the connection's readiness entity
  * @returns Persistent history (process-local on memory)
  * @throws {TypeError} When entity is empty
  * @example
@@ -70,7 +92,12 @@ export function createMigrationLedger(
   database: IDatabaseService,
   options?: MigrationLedgerOptions,
 ): IMigrationLedger {
-  const entity = options?.entity === undefined ? MIGRATION_LEDGER_ENTITY : options.entity;
+  // An explicit `entity` (even an invalid one, refused below) wins; only an
+  // ABSENT one falls back, so `null` is refused rather than defaulted.
+  const entity =
+    options?.entity === undefined
+      ? (configuredEntities.get(database) ?? MIGRATION_LEDGER_ENTITY)
+      : options.entity;
   if (typeof entity !== 'string' || entity.trim() === '') {
     throw new TypeError('MigrationLedgerOptions.entity must be a non-empty string');
   }

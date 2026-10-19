@@ -18,7 +18,9 @@ All notable changes to this project are documented here. The format follows
   `runMigrations('up', { database, ledger: createMigrationLedger(database) })`; migrations may
   accept `{ database }`. Socket entry points boot and stop the app; Workers emit only the callable
   runner. Because the runner imports `@setu-ts/common`, `setu generate migration` now also requires
-  that package to be declared (every scaffold declares it), and `setu add common` adds it.
+  that package to be declared (every scaffold declares it), and `setu add common` adds it. A ledger
+  created without an explicit entity uses its connection's `readiness.ledgerEntity`, so the
+  generated runner and the readiness check agree.
 - **Discovery warm-cache readiness (M113o, 0.10.0, `@setu-ts/service-discovery-plugin`).** A serving
   warm cache now reports `up` during backend outages instead of `degraded`, keeping replicas in
   rotation. `data.degraded`, `reachable`, and `everResolved` remain visible; never-resolved and

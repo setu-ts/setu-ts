@@ -104,6 +104,24 @@ describe('migration readiness through a running application', () => {
     }
   });
 
+  // PR #475 review: the generated run.ts calls createMigrationLedger(database)
+  // with no entity, so a configured readiness.ledgerEntity must reach it.
+  it('writes a runner-style ledger into the configured ledgerEntity readiness reads', async () => {
+    const { app, advance } = await boot({ migrations: ['one'], ledgerEntity: 'history' });
+    try {
+      const database = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      // An explicit entity still wins, so this row is NOT where readiness reads.
+      await createMigrationLedger(database, { entity: 'elsewhere' }).record('one', 'now');
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(503);
+      await createMigrationLedger(database).record('one', 'now');
+      advance();
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+      expect(await database.getRepository('history').count()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('absent readiness preserves the exact database health data', async () => {
     const { app } = await boot();
     try {

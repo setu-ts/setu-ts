@@ -358,10 +358,13 @@ cannot prove that someone has not independently dropped a business table.
 
 `createMigrationLedger(database, { entity? })` returns `IMigrationLedger`: `applied()` reads names,
 `record(name, appliedAt)` inserts caller-supplied ISO-8601 time, and `remove(name)` resolves even if
-absent. `MigrationLedgerOptions.entity` and `DatabaseReadinessOptions.ledgerEntity` both default to
-`MIGRATION_LEDGER_ENTITY` (`'setu_migrations'`); override both together. `applied()` requests only
-`id`, with a limit of 10,001, and rejects above 10,000 rows with `MigrationLedgerError`, whose
-`reason` is `'oversized'`. The framework reads no clock for ledger writes and never creates schema.
+absent. `DatabaseReadinessOptions.ledgerEntity` defaults to `MIGRATION_LEDGER_ENTITY`
+(`'setu_migrations'`). A ledger created without `MigrationLedgerOptions.entity` — which is how the
+generated `run.ts` creates it — uses the `ledgerEntity` its connection was registered with, so
+setting it once on `DatabasePlugin` is enough; an explicit `entity` overrides it. `applied()`
+requests only `id`, with a limit of 10,001, and rejects above 10,000 rows with
+`MigrationLedgerError`, whose `reason` is `'oversized'`. The framework reads no clock for ledger
+writes and never creates schema.
 
 Create this PostgreSQL table (also shipped in `test/fixtures/migration-ledger-postgres.sql`):
 

@@ -54,6 +54,7 @@ import {
   createMigrationReadiness,
   validateMigrationReadiness,
 } from '../migrations/migration-readiness.ts';
+import { bindLedgerEntity } from '../migrations/migration-ledger.ts';
 
 /** Default adapter when none is specified. */
 const DEFAULT_ADAPTER: DatabaseAdapterType = 'memory';
@@ -163,6 +164,11 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
       // Register the database service.
       ctx.services.register<IDatabaseService>(token, service);
+      // A ledger created for this connection without an explicit entity — the
+      // generated run.ts — writes where readiness reads (PR #475 review).
+      if (readinessOptions?.ledgerEntity !== undefined) {
+        bindLedgerEntity(service, readinessOptions.ledgerEntity);
+      }
 
       // Register health indicator. M90b: the LIFECYCLE gate is uncached, so
       // a closed service reads down immediately — never from an outcome

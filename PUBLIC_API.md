@@ -1170,13 +1170,14 @@ Entity options must be non-empty strings.
 
 Every `DatabaseConnectionOptions` arm accepts `readiness?: DatabaseReadinessOptions`:
 `{ readonly migrations: readonly string[]; readonly ledgerEntity?: string }`. Expected names must be
-unique non-empty strings, at most 10,000; `ledgerEntity` defaults to `MIGRATION_LEDGER_ENTITY` and
-must match any ledger entity override. Invalid readiness options throw `TypeError` at plugin
-construction, naming the option without echoing values. Absent readiness preserves the indicator's
-status and data. Otherwise, after a non-down result, a separate 5-second cached, 2-second bounded
-ledger read adds `data.migrations`: unreadable/rejected/timed-out/oversized → `down` with
-`{ state: 'unreadable' }`; missing expected names → `degraded` with
-`{ state: 'pending', pending: count }`; current → unchanged status with
+unique non-empty strings, at most 10,000; `ledgerEntity` defaults to `MIGRATION_LEDGER_ENTITY`, and
+`createMigrationLedger(database)` without an explicit `entity` uses the `ledgerEntity` that
+connection was registered with, so the generated runner writes where readiness reads. Invalid
+readiness options throw `TypeError` at plugin construction, naming the option without echoing
+values. Absent readiness preserves the indicator's status and data. Otherwise, after a non-down
+result, a separate 5-second cached, 2-second bounded ledger read adds `data.migrations`:
+unreadable/rejected/timed-out/oversized → `down` with `{ state: 'unreadable' }`; missing expected
+names → `degraded` with `{ state: 'pending', pending: count }`; current → unchanged status with
 `{ state: 'current', applied: count }`, adding `unknown: count` for names this build does not list.
 Unknown names preserve rolling-deploy readiness. Already-down results bypass the ledger. Only
 counts, never names, appear in data. See the database-plugin README for application-owned SQL DDL,
