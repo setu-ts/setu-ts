@@ -6509,7 +6509,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   audit (design review recorded as plan §10) failed round 1 on four Lows: discovery `up` is
   process-wide while the docs promised a warm cache serves every name, readiness options were
   re-read after validation (now a frozen copy), the Deno runner header said `-A` for a runner that
-  boots the whole app, and two §10 residuals were not stated in the docs — complete (PR pending)
+  boots the whole app, and two §10 residuals were not stated in the docs. The fixes were not
+  re-audited, at the maintainer's direction — complete (PR #475)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
