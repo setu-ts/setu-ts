@@ -197,7 +197,7 @@ describe('real-backend CI wiring', () => {
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
       const workflowText = await readFile(workflow, 'utf8');
       expect(workflowText).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
-      expect(workflowText).toContain('image: mongo:8');
+      expect(workflowText).toContain('image: mongo:7');
       expect(workflowText).toContain('- 27017:27017');
     }
     const config = await readJson<{
@@ -685,7 +685,7 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain('POSTGRES_PASSWORD: postgres');
       expect(text).toContain('- 127.0.0.1:5433:5432');
       expect(text).toContain('--health-cmd "pg_isready -U postgres"');
-      expect(text).toContain('docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:8');
+      expect(text).toContain('docker run -d --name mongo-rs -p 127.0.0.1:27018:27018 mongo:7');
       expect(text).toContain('--replSet rs0 --port 27018 --bind_ip_all');
       expect(text).toContain(
         "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: '127.0.0.1:27018' }] })",
