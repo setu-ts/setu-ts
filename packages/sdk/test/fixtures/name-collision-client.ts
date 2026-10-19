@@ -23,6 +23,10 @@ export interface Api {
     opts?: OptsArgs,
     request?: OperationRequestOptions,
   ): Promise<ClientResponse<void>>;
+  _encodeURIComponent(
+    _encodeURIComponent: string,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<void>>;
   request(_request: string, request?: OperationRequestOptions): Promise<ClientResponse<void>>;
   getItems(request?: OperationRequestOptions): Promise<ClientResponse<GetItemsResponse200Body>>;
 }
@@ -56,6 +60,19 @@ export function createApi(client: IHttpClient): Api {
     });
   }
 
+  /** encodeURIComponent */
+  function _encodeURIComponent(
+    _encodeURIComponent: string,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<void>> {
+    return client.request<void>({
+      method: 'GET',
+      path: `encoded/${encodeURIComponent(_encodeURIComponent)}`,
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
+    });
+  }
+
   /** request */
   function request(
     _request: string,
@@ -84,6 +101,7 @@ export function createApi(client: IHttpClient): Api {
   return {
     _client,
     opts,
+    _encodeURIComponent,
     request,
     getItems,
   };

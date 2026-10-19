@@ -443,12 +443,14 @@ publish or format it has nowhere to go.
   `request?: OperationRequestOptions`, after the path parameters and after `opts` — whose
   `idempotencyKey` and `signal` fields carry the same meaning as the same-named fields of
   `ClientRequest`; the generated code forwards only those two fields, and existing calls are
-  unaffected. The rename touches only documents that today generate source that does not compile: a
-  path parameter whose identifier is `client`, `opts` or `request` is emitted as `_client`, `_opts`
-  or `_request` (path parameters are positional, so callers are unaffected), and an operation whose
-  method name is `client` is emitted as `_client`. A document component named
-  `OperationRequestOptions` is refused like `ClientResponse`, rather than shadowing the import the
-  generated file claims from `sdkImport`.
+  unaffected. A path parameter whose identifier is `client`, `opts`, `request` or
+  `encodeURIComponent` is emitted with a `_` prefix, so it cannot shadow the factory's `client`, the
+  method's locals or the global its path expression calls; path parameters are positional, so no
+  caller changes. An operation whose method name is `client` or `encodeURIComponent` is emitted as
+  `_client` or `_encodeURIComponent` — a renamed method, but before, `client` never compiled and
+  `encodeURIComponent` broke every generated path that encodes a parameter. A document component
+  named `OperationRequestOptions` is refused like `ClientResponse`, rather than shadowing the import
+  the generated file claims from `sdkImport`.
 - **`opts` is required when any of its fields is required.** A required query parameter or a
   `requestBody` marked `required` makes the `opts` parameter itself required, so a caller cannot
   omit it and silently skip a mandatory value.

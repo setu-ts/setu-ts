@@ -39,6 +39,13 @@ export const nameCollisionDocument: SdkOpenApiDocument = {
         responses: { '200': { description: 'ok' } },
       },
     },
+    '/encoded/{encodeURIComponent}': {
+      get: {
+        operationId: 'encodeURIComponent',
+        parameters: [{ name: 'encodeURIComponent', in: 'path', required: true }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
     '/requests/{request}': {
       get: {
         operationId: 'request',

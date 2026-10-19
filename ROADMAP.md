@@ -14363,12 +14363,13 @@ CORS example refuses `idempotency-key` and nothing says to expose `idempotent-re
 
 **Shipped.** Every generated SDK operation takes an optional trailing
 `request?: OperationRequestOptions` (`idempotencyKey`, `signal`), forwarded field by field to the
-client, so a keyed call needs no interceptor. A path parameter named `client`, `opts` or `request`,
-or an operation named `client`, previously generated source that did not compile; each is now
-renamed with a `_` prefix through one helper shared by the parameter list and the path template. The
-CORS example allows `idempotency-key` and exposes `idempotent-replayed`, pinned by a test that runs
-it; the tier-C table schema is in the database-plugin README, pinned to the real-backend SQL
-fixtures; and the idempotency README's stale claims, `ttlMs` range and `ioredis` step are corrected.
+client, so a keyed call needs no interceptor. A path parameter named `client`, `opts`, `request` or
+`encodeURIComponent`, or an operation named `client` or `encodeURIComponent`, could shadow a binding
+the generated code uses; each is now renamed with a `_` prefix through one helper shared by the
+parameter list and the path template. The CORS example allows `idempotency-key` and exposes
+`idempotent-replayed`, pinned by a test that runs it; the tier-C table schema is in the
+database-plugin README, pinned to the real-backend SQL fixtures; and the idempotency README's stale
+claims, `ttlMs` range and `ioredis` step are corrected.
 
 ### Milestone 113l: Documentation That Does Not Match the Code, or Is Missing
 

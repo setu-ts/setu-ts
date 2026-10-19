@@ -88,7 +88,7 @@ describe('per-operation request options and generated local names', () => {
     expect(required).toContain('opts: PlaceOrderArgs,\n    request?: OperationRequestOptions,');
   });
 
-  for (const name of ['client', 'opts', 'request', '_client']) {
+  for (const name of ['client', 'opts', 'request', 'encodeURIComponent', '_client']) {
     it(`renames path parameter ${name} consistently without changing query fields`, () => {
       const out = generateOpenApiClient(
         makeDoc({
@@ -106,14 +106,16 @@ describe('per-operation request options and generated local names', () => {
     });
   }
 
-  it('renames only the client operation name and keeps the other local operation names', () => {
-    for (const name of ['client', 'opts', 'request']) {
+  it('renames the operation names that shadow a factory binding and keeps the others', () => {
+    for (const name of ['client', 'encodeURIComponent', 'opts', 'request']) {
       const out = generateOpenApiClient(makeDoc({ '/x': { get: makeOp(name) } }));
-      const expected = name === 'client' ? '_client' : name;
-      expect(out.replace(/\s+/g, ' ')).toContain(
-        `function ${expected}( request?: OperationRequestOptions, )`,
+      const expected = name === 'client' || name === 'encodeURIComponent' ? `_${name}` : name;
+      // Once in the `Api` interface and once as the factory function, wrapped or not.
+      const signature = new RegExp(
+        `(?:^|[\\s(])${expected}\\(\\s*request\\?: OperationRequestOptions,?\\s*\\)`,
+        'gm',
       );
-      expect(out).toContain(`  ${expected}(request?: OperationRequestOptions)`);
+      expect(out.match(signature)).toHaveLength(2);
     }
   });
 

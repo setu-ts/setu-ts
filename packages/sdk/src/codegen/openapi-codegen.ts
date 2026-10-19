@@ -546,7 +546,9 @@ function collectOperations(doc: SdkOpenApiDocument): OpEntry[] {
         );
       }
       const operationName = sanitizeIdentifier(op.operationId);
-      const safeName = operationName === 'client' ? '_client' : operationName;
+      const safeName = SHADOWING_OPERATION_NAMES.has(operationName)
+        ? `_${operationName}`
+        : operationName;
       const existing = used.get(safeName);
       if (existing) {
         throw new OpenApiCodegenError(
@@ -802,10 +804,28 @@ function getErrorArms(
   return arms.sort((a, b) => a.status - b.status);
 }
 
+/**
+ * Names an emitted operation function may not take: inside the factory, a function named `client`
+ * redeclares the factory parameter (TS2300), and one named `encodeURIComponent` shadows the global
+ * every generated path calls.
+ */
+const SHADOWING_OPERATION_NAMES: ReadonlySet<string> = new Set(['client', 'encodeURIComponent']);
+
+/**
+ * Names a positional path argument may not take: the factory's `client`, the method locals `opts`
+ * and `request`, and the global `encodeURIComponent` its own path expression calls.
+ */
+const SHADOWING_PATH_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
+  'client',
+  'opts',
+  'request',
+  'encodeURIComponent',
+]);
+
 /** Keep positional path arguments clear of the generated factory and method locals. */
 function pathArgumentName(raw: string): string {
   const name = sanitizeIdentifier(raw);
-  return name === 'client' || name === 'opts' || name === 'request' ? `_${name}` : name;
+  return SHADOWING_PATH_ARGUMENT_NAMES.has(name) ? `_${name}` : name;
 }
 
 /** Every `{placeholder}` name in a path template, in order of appearance. */

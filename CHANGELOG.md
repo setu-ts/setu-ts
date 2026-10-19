@@ -404,12 +404,14 @@ All notable changes to this project are documented here. The format follows
   First-party tokens are refused at and after `exp`, closing the window of up to one second after
   expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and
   after `exp + clockToleranceSec`.
-- **The SDK generator no longer emits source that does not compile for colliding local identifiers
-  (M113k, 0.10.0, `@setu-ts/sdk`).** A path parameter whose identifier is `client`, `opts` or
-  `request` is emitted as `_client`, `_opts` or `_request`, and an operation whose method name is
-  `client` is emitted as `_client`; before, such a document generated a duplicate parameter or a
-  duplicate identifier in the factory. Path parameters are positional, so no working caller changes.
-  A document component named `OperationRequestOptions` is refused like `ClientResponse` rather than
+- **The SDK generator no longer emits source that shadows its own bindings (M113k, 0.10.0,
+  `@setu-ts/sdk`).** A path parameter whose identifier is `client`, `opts`, `request` or
+  `encodeURIComponent` is emitted with a `_` prefix; before, `client` made the method call
+  `.request` on a string and `opts` beside a query parameter emitted a duplicate parameter. Path
+  parameters are positional, so no caller changes. An operation whose method name is `client` or
+  `encodeURIComponent` is emitted as `_client` or `_encodeURIComponent`; before, `client` was a
+  duplicate identifier and `encodeURIComponent` shadowed the global every generated path calls. A
+  document component named `OperationRequestOptions` is refused like `ClientResponse` rather than
   shadowing the generated file's import.
 - **Idempotency documentation corrected and completed (V9-14, V9-16, M113k, 0.10.0,
   `@setu-ts/idempotency-plugin`, `@setu-ts/http-security-plugin`, `@setu-ts/database-plugin`,

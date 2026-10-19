@@ -122,7 +122,8 @@ would add a third.
 - **Operation names.** An operation whose `safeName` is `client` becomes `_client`, through the same
   check at the one site that derives `safeName` (`openapi-codegen.ts:548`). This renames a public
   method, acceptable only because such a document generates source that does not compile today.
-  `request` and `opts` are not renamed as operation names (§1 probe).
+  (Audit O3 later added `encodeURIComponent` to both sets — §10, F2.) `request` and `opts` are not
+  renamed as operation names (§1 probe).
 - Query and header parameters are fields of `opts` and need nothing.
 
 ### 3.3 CORS documentation and its test (V9-16)
@@ -285,8 +286,10 @@ observed or guessed.
    bypass.
 4. A document component cannot shadow an SDK import: `OperationRequestOptions` is claimed like
    `ClientResponse`, `IHttpClient` and `HttpClientError`.
-5. A rename cannot collide: `sanitizeIdentifier` never yields a leading `_`, so no document can
-   supply `_client`, and the existing duplicate-name refusals apply to the renamed set.
+5. A rename cannot collide: `sanitizeIdentifier` drops literal underscores and yields a leading `_`
+   only for a reserved word (`class` → `_class`), none of which is a shadowed name, so no document
+   can supply `_client`; the existing duplicate-name refusals apply to the renamed set (corrected by
+   audit O1).
 6. The documented CORS widening is the minimum the feature needs: one named request header and one
    named response header, under an explicit origin with credentials; no wildcard origin is shown. An
    origin outside the allowlist gains nothing.
@@ -307,7 +310,10 @@ receives.
 
 **Findings.**
 
-| #   | Finding                                                                                                                      | Severity | Disposition                                                                                                            |
-| --- | ---------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| R1  | Review: "the per-call `idempotencyKey` is the way to share one key across clients" can be read as sharing a key across users | Low      | Fixed: reworded to client instances acting for one principal, and states that a key never crosses principals           |
-| R2  | Review: obligation 3 had no test driving a malformed key through a generated operation; the e2e covered only valid keys      | Low      | Fixed: an e2e case sends CRLF, `"` and empty keys through `getUserById` and asserts `RangeError` with zero fetch calls |
+| #   | Finding                                                                                                                                                       | Severity | Disposition                                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| R1  | Review: "the per-call `idempotencyKey` is the way to share one key across clients" can be read as sharing a key across users                                  | Low      | Fixed: reworded to client instances acting for one principal, and states that a key never crosses principals                  |
+| R2  | Review: obligation 3 had no test driving a malformed key through a generated operation; the e2e covered only valid keys                                       | Low      | Fixed: an e2e case sends CRLF, `"` and empty keys through `getUserById` and asserts `RangeError` with zero fetch calls        |
+| F1  | Audit round 1 (O2): the docs said the renames touch only documents that do not compile today; `request`, and `opts` with no other arguments, already compiled | Low      | Fixed: the SDK README, PUBLIC_API and CHANGELOG state which names are renamed and why, without the false scope claim          |
+| F2  | Audit round 1 (O3, pre-existing): a path parameter or operation named `encodeURIComponent` shadowed the global every generated path calls (TS2559/TS2349)     | Low      | Fixed: added to both shadowing sets; unit cases and the name-collision fixture cover it, and both fail with the entry removed |
+| F3  | Audit round 1 (O1): obligation 5's premise was wrong — `sanitizeIdentifier` does yield a leading `_` for reserved words — though the conclusion holds         | Info     | Fixed: obligation 5 reworded                                                                                                  |

@@ -6525,7 +6525,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and Drizzle mapping are in the database-plugin README, pinned to the SQL fixtures; the idempotency
   README gains "From a browser", the `ttlMs` range, the `ioredis` step and corrected guarantee-2 and
   purge-race text. Implemented by Codex (no plan contradiction; six negative controls failed as
-  intended), docs by opencode on the local model in a separate worktree — complete (PR pending)
+  intended), docs by opencode on the local model in a separate worktree. The design security review
+  is plan §10. The fresh-context committed-tree audit passed round 1 on `c859bbef` with no security
+  finding; its observations were fixed afterwards: the docs' claim that every rename only touched
+  non-compiling documents was false for `request` and `opts`, and a path parameter or operation
+  named `encodeURIComponent` (pre-existing) shadowed the global every generated path calls, so it
+  joins both rename sets — complete (PR pending)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
