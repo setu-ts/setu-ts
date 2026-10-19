@@ -248,3 +248,66 @@ Per-file 90% branch/function/line for every changed `src` file.
 - The purge race closure with `deleteWhere` (§0).
 - `setu add idempotency` and an idempotent-route schematic — unowned (§0).
 - Server-side automatic CORS for the idempotency header — the plugin does not own CORS.
+
+## 10. Design security review (recorded after implementation)
+
+Recorded before the committed-tree audit, after implementation (the M101a / M113a / M113n / M113o
+precedent); it is not presented as having guided the design.
+
+**Flows reviewed.** (a) The OpenAPI generator turning a document into TypeScript source: the new
+trailing parameter, the forwarding spreads, the claimed import name, and the local-identifier
+renames. (b) A caller's per-call `OperationRequestOptions` object reaching `IHttpClient.request`
+through a generated operation. (c) The documented CORS configuration for keyed browser calls — which
+request header a cross-origin page may send and which response header it may read. (d) The
+documented key-reuse guidance. (e) The documented tier-C table schema and the `ioredis` install
+step.
+
+**Assets.** The integrity of generated source (a document must not inject code); the request a
+generated operation sends (method, path, headers, body); the idempotency key's confidentiality and
+its scoping to one principal; the CORS boundary of an application that follows the docs; stored
+idempotency results, which may hold personal data.
+
+**Attackers.** A hostile or careless OpenAPI document author (the generator's input is untrusted). A
+JavaScript caller passing an arbitrary object as `request`. A cross-origin page, both one the
+application's CORS allowlist admits and one it does not. Another principal reusing a key it has
+observed or guessed.
+
+**Obligations.**
+
+1. No document-derived text newly reaches emitted source: the parameter name `request`, the type
+   name `OperationRequestOptions` and both spreads are constants, and a rename only prefixes `_` to
+   an identifier `sanitizeIdentifier` already produced.
+2. Only `idempotencyKey` and `signal` from a caller's `request` object reach `client.request`, so a
+   caller-supplied `method`, `path`, `headers`, `query` or `json` cannot change the request.
+3. A per-call key gets exactly the client's existing validation — `RangeError` before any network
+   I/O for anything outside 1–255 characters of `0x21`–`0x7E` without `"` — so no header injection;
+   the key-plus-header refusal is unchanged. The generated path adds neither a second check nor a
+   bypass.
+4. A document component cannot shadow an SDK import: `OperationRequestOptions` is claimed like
+   `ClientResponse`, `IHttpClient` and `HttpClientError`.
+5. A rename cannot collide: `sanitizeIdentifier` never yields a leading `_`, so no document can
+   supply `_client`, and the existing duplicate-name refusals apply to the renamed set.
+6. The documented CORS widening is the minimum the feature needs: one named request header and one
+   named response header, under an explicit origin with credentials; no wildcard origin is shown. An
+   origin outside the allowlist gains nothing.
+7. The docs never advise scoping a record by anything but authenticated identity, and state that a
+   reused key never crosses principals.
+8. The schema docs add no secret: the table holds hashed key ids, a fingerprint hash and the encoded
+   result, whose retention is already documented.
+
+**Residual, accepted (documented).** A keyed request is retried on any method and on `409`, so a
+per-call key on a `DELETE` or a `POST` against a server that does not de-duplicate can execute twice
+— the SDK README states that keyed retries are safe only behind `idempotent()` or `within`. With
+`principal: 'optional'` every anonymous caller shares one scope, so a guessed key replays another
+anonymous caller's result (pre-existing, documented in the idempotency README's check-order list).
+An exposed `Idempotent-Replayed` header tells an allowed origin a response was a replay, which is
+its purpose. The generated spreads read each field of the caller's own object twice; a getter that
+changes between reads affects only that caller's own request, and the client validates the value it
+receives.
+
+**Findings.**
+
+| #   | Finding                                                                                                                      | Severity | Disposition                                                                                                            |
+| --- | ---------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| R1  | Review: "the per-call `idempotencyKey` is the way to share one key across clients" can be read as sharing a key across users | Low      | Fixed: reworded to client instances acting for one principal, and states that a key never crosses principals           |
+| R2  | Review: obligation 3 had no test driving a malformed key through a generated operation; the e2e covered only valid keys      | Low      | Fixed: an e2e case sends CRLF, `"` and empty keys through `getUserById` and asserts `RangeError` with zero fetch calls |

@@ -44,6 +44,24 @@ describe('generated-client e2e', () => {
     expect(keys).toEqual(['order-123', 'order-123']);
   });
 
+  it('refuses a malformed per-call key before any network call', async () => {
+    let calls = 0;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch(() => {
+        calls++;
+        return Response.json({ id: '1', name: 'Ada' });
+      }),
+    });
+    const api = createApi(client);
+    for (const key of ['bad\r\nX-Injected: 1', 'quote"', '']) {
+      await expect(api.getUserById('1', { idempotencyKey: key })).rejects.toBeInstanceOf(
+        RangeError,
+      );
+    }
+    expect(calls).toBe(0);
+  });
+
   it('passes the per-call signal to fetch and aborts an in-flight request', async () => {
     const controller = new AbortController();
     let observedSignal: AbortSignal | null | undefined;
