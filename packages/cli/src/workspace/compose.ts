@@ -223,7 +223,7 @@ function dockerignore(): string {
     // Dotenv files never reach an image, wherever a member keeps them.
     '# Dotenv files whose names are .env or .env.*, except .env.example, which is',
     '# kept for the image. A custom --env-file name such as local.env is NOT',
-    '# covered by these rules; add it to this file by hand.',
+    '# covered by these rules; add its path from here (apps/<member>/local.env).',
     '**/.env',
     '**/.env.*',
     '!**/.env.example',

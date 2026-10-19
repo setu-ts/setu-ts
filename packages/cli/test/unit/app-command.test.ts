@@ -706,7 +706,7 @@ describe('runAppCommand', () => {
         await custom.run(['app', 'billing', '--template', 'rest', '--env-file', 'local.env']),
       ).toBe(0);
       expect(custom.out.text()).toContain(
-        'Add local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
+        'Add apps/billing/local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
           'so this file would be copied into the image.',
       );
 

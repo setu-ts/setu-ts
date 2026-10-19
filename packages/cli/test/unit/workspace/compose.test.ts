@@ -202,7 +202,7 @@ describe('workspaceContainerFiles', () => {
       // and a custom --env-file name must be added by hand (F2).
       expect(contents).toContain('Dotenv files whose names are .env or .env.*');
       expect(contents).toContain('A custom --env-file name such as local.env is NOT');
-      expect(contents).toContain('add it to this file by hand');
+      expect(contents).toContain('add its path from here (apps/<member>/local.env)');
     });
   });
 

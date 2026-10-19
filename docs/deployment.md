@@ -111,8 +111,10 @@ which is what you want during a version bump, when the pinned version is not on 
 The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
 `!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
 cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
-match those patterns is **not** covered. `setu generate app` prints one line naming such a file and
-the `.dockerignore` line to add by hand, because the CLI cannot edit a file you own for you.
+match those patterns is **not** covered. `setu generate app` and `setu adopt` print one line naming
+such a file by its path from the workspace root (for example `apps/billing/local.env`), which is the
+form to add to `.dockerignore`: that file sits at the workspace root, and a pattern without a slash
+matches only there. The CLI cannot edit a file you own for you.
 
 `setu adopt` moves a configured single-segment dotenv pair into the member, where the member's
 `envFilePath` reads it, and writes `apps/<member>/.gitignore` with `/<name>` for the moved dotenv

@@ -781,13 +781,21 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
 
   // The generated .dockerignore covers only .env and .env.* names, so a custom
   // name would travel into the image. Nothing here can add the rule for the
-  // developer without guessing at a file they own, so it is named once.
+  // developer without guessing at a file they own, so it is named once. Named by
+  // its workspace-relative path: `.dockerignore` sits at the workspace root, and
+  // a pattern without a slash matches only there, so the bare name would exclude
+  // nothing under the member.
   const envFilePath = readEnvFilePath(args.flags);
   const envFileName = envFilePath.ok ? envFilePath.path?.split('/').at(-1) : undefined;
-  if (envFileName !== undefined && !isCoveredDotenvName(envFileName)) {
+  if (
+    envFilePath.ok &&
+    envFilePath.path !== undefined &&
+    envFileName !== undefined &&
+    !isCoveredDotenvName(envFileName)
+  ) {
     deps.log(
-      `Add ${escapeName(envFileName)} to .dockerignore: the generated rules cover only .env and ` +
-        `.env.* names, so this file would be copied into the image.`,
+      `Add ${escapeName(joinPath(MEMBERS_DIR, name, envFilePath.path))} to .dockerignore: the ` +
+        `generated rules cover only .env and .env.* names, so this file would be copied into the image.`,
     );
   }
 

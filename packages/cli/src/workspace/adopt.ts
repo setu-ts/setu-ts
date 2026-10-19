@@ -266,9 +266,11 @@ export async function planAdoption(
           if (!gitignore.ok) return { ok: false, message: gitignore.message };
           creates.push(gitignore.file);
           if (!isCoveredDotenvName(name)) {
+            // The workspace-relative path, not the bare name: `.dockerignore` sits at
+            // the workspace root, where a pattern without a slash matches only there.
             notes.push(
-              `Add ${escapeName(name)} to .dockerignore: the generated rules cover only .env and ` +
-                `.env.* names, so this file would be copied into the image.`,
+              `Add ${escapeName(joinPath(memberRoot, name))} to .dockerignore: the generated ` +
+                `rules cover only .env and .env.* names, so this file would be copied into the image.`,
             );
           }
         }

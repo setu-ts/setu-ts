@@ -425,12 +425,12 @@ describe('runAdoptCommand', () => {
     it('prints the .dockerignore step only for a name the generic rules miss', async () => {
       const covered = withEnv('.env', { '/work/svc/.env': 'SECRET=1\n' });
       expect(await covered.run([])).toBe(0);
-      expect(covered.out.text()).not.toContain('Add .env to .dockerignore');
+      expect(covered.out.text()).not.toContain('to .dockerignore');
 
       const custom = withEnv('local.env', { '/work/svc/local.env': 'SECRET=1\n' });
       expect(await custom.run([])).toBe(0);
       expect(custom.out.text()).toContain(
-        'Add local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
+        'Add apps/svc/local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
           'so this file would be copied into the image.',
       );
     });
