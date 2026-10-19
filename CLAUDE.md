@@ -6530,7 +6530,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   finding; its observations were fixed afterwards: the docs' claim that every rename only touched
   non-compiling documents was false for `request` and `opts`, and a path parameter or operation
   named `encodeURIComponent` (pre-existing) shadowed the global every generated path calls, so it
-  joins both rename sets — complete (PR pending)
+  joins both rename sets — complete (PR #476)
 - **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
   separately.
 
