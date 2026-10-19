@@ -14662,6 +14662,148 @@ since the run is meant to judge them.
 
 ---
 
+## Milestone 116: Agent Briefs — `setu agents` and Per-Package Cards
+
+**Package(s):** `packages/cli` (the `setu agents` command and its `--check` mode), every published
+plugin package (one shipped card each), and `scripts/` (the card gate). No `common`, kernel or
+plugin `src/` change: a card is documentation that ships in the tarball.
+
+**Source:** the agent-brief pilot (2026-10-18/19; its harness, briefs, cards and per-run results are
+local, at `~/.cache/setu-agents-pilot/`). This section records the method and the numbers it relies
+on, since the pilot directory is not in the repository.
+
+**The problem.** A coding agent building an application on Setu-TS has no training data for it, so
+it either guesses from NestJS, Express and Hono, or reinvents what a plugin already provides.
+Framework contributors have `AGENTS.md`, `CLAUDE.md` and `PUBLIC_API.md`; an application has
+nothing. A scaffold emits no agent brief, and `PUBLIC_API.md` (1.35 MB, about 340–385k tokens) is
+larger than a local 27B model's whole 262k context, so pointing an agent at it does not work either.
+
+**The pilot.** opencode driving a local Qwen 27B (MXFP4) on a fresh `0.9.0` `rest` scaffold, with
+task text that never names the framework, scored by type-check, the agent's own tests and a hidden
+acceptance test that requires the framework's capability (it reads back through it, publishes on its
+bus, or checks the registered service's identity), not just passing tests. 126 runs across three
+batches. The variants:
+
+| Variant | What the agent was given                                                                                                                  |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| A       | nothing                                                                                                                                   |
+| B       | an `AGENTS.md` (~7 KB: rules, commands, project map, installed packages) pointing at READMEs and `.d.ts`                                  |
+| C       | the same `AGENTS.md`, pointing instead at one short card per package (0.4–2.2 KB), each card appearing only once its package is installed |
+| D       | B, plus C's sentence that a card "appears once `setu add` and install have run"                                                           |
+| E       | B, plus each not-installed package's one-line npm description                                                                             |
+| F       | C, plus the same descriptions (~8.5 KB brief)                                                                                             |
+
+Results on the three tasks every variant ran (T7 events, T8 background job, T9 response cache; 3
+repetitions, so 9 runs per variant; the T7 and T8 hidden tests were each corrected once and every
+run rescored, with the original results retained):
+
+| Variant | Hidden test | Uses the framework package | Avg time  | Input tokens/run |
+| ------- | ----------- | -------------------------- | --------- | ---------------- |
+| A       | 4/9         | 4/9                        | 440 s     | 3.27 M           |
+| B       | 7/9         | 7/9                        | 372 s     | 2.24 M           |
+| C       | 9/9         | 9/9                        | 295 s     | 1.54 M           |
+| D       | 8/9         | 8/9                        | 310 s     | 2.24 M           |
+| E       | 9/9         | 9/9                        | 380 s     | 2.49 M           |
+| **F**   | **9/9**     | **9/9**                    | **255 s** | **1.28 M**       |
+
+What the pilot showed, in order of confidence:
+
+1. **The failure mode is reinvention, not invented APIs.** No run in any variant called a Setu-TS
+   API that does not exist. Without a brief the agent hand-rolled validation, JWT handling, a cache
+   and a queue instead of installing the plugin, and its own tests passed. A metric that only runs
+   the agent's tests cannot see this.
+2. **Cards beat README pointers on every measure, in every batch.** Batch 2 (six tasks, 18 runs per
+   variant): hidden test A 9/18, B 16/18, C 18/18; input tokens 3.3 M, 3.2 M, 2.0 M. Batch 1 (five
+   easier tasks): every variant passed, but C took about half the time of A (161 s against 308 s).
+   The advantage is compactness: a card is the whole relevant surface in one read.
+3. **Descriptions of the packages not yet installed help a little and cost nothing.** F was the
+   fastest and cheapest variant; E reached 9/9 but used nearly twice F's tokens. D (the install
+   sentence alone) changed little.
+4. **One model, small samples.** Every run used one local 27B model, and the D/E/F differences rest
+   on 9 runs each. The maintainer's decision (2026-10-19) is that a brief that works for a small
+   model will work for a larger one, so no confirmation batch on another model is run before
+   building.
+
+**Design (from the pilot's variant F, and the 2026-10-12 `setu agents` decisions).**
+
+- **`setu agents` writes the brief; `setu new` does not, by default.** The command is run inside a
+  project and reads its real state — manifests, installed `@setu-ts/*` packages, style, template,
+  generator seams — so it is re-run after `setu add` or an upgrade. `setu new --agents` may call it.
+  `setu agents --check` reports a stale brief and exits nonzero, for CI.
+- **The file has a framework-owned section and a developer-owned one.** The framework section is
+  delimited and marked as overwritten on every run; anything outside it is never touched.
+- **Content follows variant F:** a not-in-your-training-data warning; Rule 0 (read the card before
+  using any symbol not already in the file or the code, and treat anything undocumented as
+  nonexistent); the project's commands; numbered rules, most important first; the project map; the
+  installed packages with their capability tokens; and the not-installed packages, each with its npm
+  description and the `setu add` name. Everything in the brief is specific to this project's
+  template, style and runtime, and the framework section has a byte budget the command enforces (the
+  pilot's was about 8.5 KB).
+- **Workspaces get one file per level** (agreed 2026-10-12): the root covers layout, members, the
+  dev runner, ports and transport; each member covers itself. Each file points to the other
+  explicitly, because an agent started inside a member never sees the root otherwise.
+- **Each published plugin package ships a card** in its npm tarball. A card is hand-written, in the
+  pilot's shape: one heading, how to add it, the one or two snippets that cover its common use, and
+  its options and pitfalls as bullets. It is NOT generated from `PUBLIC_API.md` or the README: the
+  pilot's evidence is that compactness is what helps, and a generated card would be a shortened copy
+  of documents that already exist.
+- **A card is in the project exactly when its package is installed.** The brief points at
+  `node_modules/@setu-ts/<package>/`, so a plain `npm install` delivers the card with no Setu
+  command — the property the pilot's file watcher simulated.
+
+**Gates.** Hand-written cards drift, so each is checked:
+
+- every fence in a card compiles against that package (the package README fence compiler, extended
+  to cards);
+- every backticked `@setu-ts` symbol a card names is exported by the package it names;
+- every card is within a byte budget (the pilot's largest was 2.2 KB);
+- `release:verify` refuses a published plugin package whose tarball carries no card.
+
+The not-installed descriptions come from `scripts/jsr-metadata.ts`'s `PACKAGE_METADATA`, which is
+repository-only. The CLI therefore carries its own copy for packages it can add, and a gate refuses
+drift between the two.
+
+**Open questions the plan must settle.**
+
+1. **Do agents read `node_modules`, and does it exist?** It exists for every project the CLI
+   generates: npm and pnpm create it, `bun install` (1.4.2) creates `node_modules/@setu-ts/<pkg>/`
+   with the README and sources in it, a Workers project is developed against an npm install (only
+   the deployed bundle has none), and generated Deno projects set `nodeModulesDir: "auto"`. It does
+   NOT exist under Yarn Plug'n'Play or a Deno project without `nodeModulesDir`. Several agent tools
+   also skip git-ignored paths when searching, though a direct read works; the pilot's brief pointed
+   at `node_modules/.../*.d.ts` and the model followed it. The plan must confirm the card path is
+   read, and decide the fallback for the projects without `node_modules`: copying cards into the
+   project (the pilot used `.setu/docs/`) on `setu add`, with `setu agents` filling in cards for
+   packages installed some other way.
+2. **The card file's name and location in the tarball**, and whether a non-plugin package (`kernel`,
+   `common`, `runtime`, `testing`) gets one. The pilot gave `common`, `runtime` and `testing` cards
+   from the start.
+3. **The byte budgets** for the brief and for a card, set from the pilot's sizes rather than
+   guessed.
+4. **The rule set per template and style**: the pilot wrote rules for the functional `rest` template
+   and the class-based form only, while `full-stack`, `microservice` and Workers differ.
+5. **How the result is measured.** The pilot harness can be kept out of the repository and re-run
+   per release, since it needs a local model and no CI runner has one. The plan decides whether that
+   run is a release step or an occasional check, and which tasks it uses.
+
+**Not in this milestone:** an MCP server, `llms.txt`/`llms-full.txt`, `setu explain`/`setu example`
+lookups and `setu check` for applications. Each was discussed on 2026-10-12 and is a candidate
+follow-on; the pilot did not test any of them.
+
+**Deliverables**
+
+- [ ] `plans/milestone-116-agent-briefs.md`, settling the open questions above
+- [ ] `setu agents` and `setu agents --check`, with standalone and workspace output
+- [ ] A card in every published plugin package, and the four card gates
+- [ ] The CLI's not-installed description table and its drift gate
+- [ ] A scaffold e2e: scaffold, `setu add` a plugin, install, run `setu agents`, and assert the
+      brief names the installed and not-installed sets correctly and the card is reachable from the
+      path the brief gives
+- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `116`
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -14931,3 +15073,4 @@ patch by construction and gains nothing new here.
 | 113o      | ⬜     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness                                                                                                                                                                                                 |
 | 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
+| 116       | ⬜     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
