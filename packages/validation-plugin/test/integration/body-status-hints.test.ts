@@ -19,7 +19,7 @@ describe('body validation preserves runtime status hints', () => {
         priority: 0,
         name: 'error-handler',
       });
-      const body = validateBody(z.object({ name: z.string() }));
+      const body = validateBody(z.object({ name: z.string() }), { forms: true });
       let calls = 0;
       app.router.post('/body', {
         middleware: [body],

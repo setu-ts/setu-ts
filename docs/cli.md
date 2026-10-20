@@ -457,18 +457,25 @@ so a new project's first files are exactly what `g module` produces.
 
 ### Form bodies validate with the same schema
 
+The first-party validation service requires `application/json` or an `application/*+json` media
+type, ignoring case and parameters. An absent header or unsupported type (including `text/plain`)
+answers `415` before any body read. Send `Content-Type: application/json` on JSON requests,
+including empty body-validated requests. Routes reading `ctx.request.json()` directly are unchanged;
+replacement `IValidationService` implementations own their media-type handling. Cookie-authenticated
+routes still need `csrfMiddleware` or `csrfFormMiddleware`.
+
 `validateBody(Schema, { forms: true })` (or `@ValidateBody(Schema, { forms: true })`) also validates
 `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema it
 validates JSON with. Off by default: a cross-site HTML `<form>` reaches a route that accepts forms
 with no CORS preflight, so pair an opted-in route with form CSRF protection (`csrfFormMiddleware`
-from `@setu-ts/session-plugin`). Without the option a form body answers `400` "Invalid JSON in
-request body", as before. Generated modules do not opt in. With the option, a server-rendered form
-post validates against the module's `<P>Body` like a JSON client does. The limits to know: a field
-sent once is a single value and a repeated field becomes an array in wire order, with a name ending
-`[]` always an array (kept under the name as written); values are strings or the framework's
-`FormFile` (not a web `File`, so `z.instanceof(File)` refuses it), and numbers arrive as strings —
-use `z.coerce`; the generated OpenAPI document still describes a validated body as JSON; a `_csrf`
-field from the session plugin reaches the schema, where a Zod object strips it by default and
+from `@setu-ts/session-plugin`). Without the option a form body answers `415` "Unsupported Media
+Type". Generated modules do not opt in. With the option, a server-rendered form post validates
+against the module's `<P>Body` like a JSON client does. The limits to know: a field sent once is a
+single value and a repeated field becomes an array in wire order, with a name ending `[]` always an
+array (kept under the name as written); values are strings or the framework's `FormFile` (not a web
+`File`, so `z.instanceof(File)` refuses it), and numbers arrive as strings — use `z.coerce`; the
+generated OpenAPI document still describes a validated body as JSON; a `_csrf` field from the
+session plugin reaches the schema, where a Zod object strips it by default and
 `forbidNonWhitelisted` refuses it; and an over-limit body answers 413 when
 `RuntimePlugin({ maxBodyBytes })` is set. The full behaviour is documented in the
 [`@setu-ts/validation-plugin` README](../packages/validation-plugin/README.md).

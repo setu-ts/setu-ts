@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Validated body media types (M114, `@setu-ts/validation-plugin`, `@setu-ts/decorator-plugin`,
+  `@setu-ts/common`).** The first-party validation service requires `application/json` or any
+  `application/*+json` media type, ignoring case and parameters; `{ forms: true }` also accepts
+  recognised form types. Unsupported types, including `text/plain` and an absent header, now answer
+  `415 Unsupported Media Type` before reading the body, through the application's error responder.
+  **Migration:** send `Content-Type: application/json` when posting JSON; a string-body `fetch`
+  without headers sends `text/plain` and is now refused, and an empty body-validated request without
+  the header answers 415 instead of 400. Direct `ctx.request.json()` reads are unchanged;
+  replacement validation services own their media-type handling. Cookie-authenticated routes still
+  need `csrfMiddleware` or `csrfFormMiddleware`.
 - **Generated output: the functional module layout (M114, `@setu-ts/cli`).**
   `setu generate module <name>` in the functional style now writes the whole feature into
   `src/modules/<name>/` — `<name>.routes.ts`, `<name>.service.ts`, `<name>.schemas.ts` (with
@@ -448,15 +458,15 @@ All notable changes to this project are documented here. The format follows
   validate a JSON body with. Off by default: a cross-site HTML `<form>` reaches a route that accepts
   forms with no CORS preflight, so pair an opted-in route with form CSRF protection
   (`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers
-  `400` "Invalid JSON in request body", as before. `IValidationService.middleware` gains the
-  matching optional third parameter, `ValidationMiddlewareOptions` in `@setu-ts/common`. The form
-  converts to a record: a field sent once is a single value, a repeated field becomes an array in
-  wire order, a name ending `[]` is always an array (kept under the name as written); values are
-  strings or the framework's `FormFile` (not a web `File`, so `z.instanceof(File)` refuses it —
-  check the `FormFile` shape instead), and numbers and booleans arrive as strings, so schemas use
-  `z.coerce`. A `_csrf` field from the session plugin reaches the schema, where a Zod object strips
-  it by default and `forbidNonWhitelisted` refuses it. The generated OpenAPI document still
-  describes a validated body as `application/json`.
+  `415` "Unsupported Media Type". `IValidationService.middleware` gains the matching optional third
+  parameter, `ValidationMiddlewareOptions` in `@setu-ts/common`. The form converts to a record: a
+  field sent once is a single value, a repeated field becomes an array in wire order, a name ending
+  `[]` is always an array (kept under the name as written); values are strings or the framework's
+  `FormFile` (not a web `File`, so `z.instanceof(File)` refuses it — check the `FormFile` shape
+  instead), and numbers and booleans arrive as strings, so schemas use `z.coerce`. A `_csrf` field
+  from the session plugin reaches the schema, where a Zod object strips it by default and
+  `forbidNonWhitelisted` refuses it. The generated OpenAPI document still describes a validated body
+  as `application/json`.
 - **Reverse-proxy origin support (M113n, #473, `@setu-ts/common`, `@setu-ts/http-security-plugin`,
   `@setu-ts/session-plugin`, `@setu-ts/kernel`).** `REQUEST_ORIGIN_STATE_KEY`, `RequestOrigin`,
   `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` share the trusted public origin;

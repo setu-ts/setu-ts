@@ -370,7 +370,9 @@ export async function runGenerateCommand(
   const mode = generatorMode(installed);
   const moduleScan = await scanModules(deps.fs, dir, mode);
   const modules = moduleScan.names;
-  const legacyModules = mode === 'class-based' ? moduleScan.skipped.map((skip) => skip.name) : [];
+  const legacyModules = moduleScan.skipped
+    .filter((skip) => skip.kind === 'legacy')
+    .map((skip) => skip.name);
   if (module !== undefined) {
     if (!modules.includes(module)) {
       deps.error(
@@ -400,7 +402,7 @@ export async function runGenerateCommand(
     deps.error(
       `  Add ${escapeName(
         String(skip.missing),
-      )}${mode === 'class-based' ? ' with @Module(...)' : ' as an export'} or delete and regenerate the module.`,
+      )}${skip.kind === 'legacy' ? ' with @Module(...)' : ' as an export'} or delete and regenerate the module.`,
     );
   }
   // Same reasoning as `modules`: the migration runner lists every migration in
@@ -420,6 +422,12 @@ export async function runGenerateCommand(
   // developer is told to regenerate it — rather than getting a barrel that will not
   // compile, or one that quietly omits their work.
   for (const skip of scan.skipped) {
+    if (skip.invalidName === true) {
+      deps.error(
+        `Skipped ${escapeName(skip.path)}: its name is not a kebab-case identifier, so it cannot be listed in the barrel. Rename the file.`,
+      );
+      continue;
+    }
     deps.error(
       `Skipped ${escapeName(skip.path)}: it does not export ${escapeName(
         skip.missing.join(', '),

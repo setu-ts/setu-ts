@@ -72,9 +72,17 @@ the route's chain, or a later validator for the same target overwrote it — a p
 `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they
 validate a JSON body with. Off by default: a cross-site HTML `<form>` reaches a route that accepts
 forms with no CORS preflight, so pair an opted-in route with form CSRF protection
-(`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers `400`
-"Invalid JSON in request body", as before. With the option, a server-rendered `<form>` post
-validates against the schema a JSON client passes, and reads back through `value(ctx)`.
+(`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers `415`
+"Unsupported Media Type". With the option, a server-rendered `<form>` post validates against the
+schema a JSON client passes, and reads back through `value(ctx)`.
+
+The first-party validation service accepts `application/json` and any `application/*+json` media
+type (case-insensitive, parameters ignored). Unsupported types, including `text/plain` and an absent
+`Content-Type`, answer `415` before any body read, in the application's configured error format.
+Send `Content-Type: application/json` when posting JSON; this also applies to an empty request on a
+body-validated route. Routes that call `ctx.request.json()` themselves are unchanged, and
+replacement `IValidationService` implementations own their media-type handling. Cookie-authenticated
+routes still need `csrfMiddleware` or `csrfFormMiddleware`.
 
 The form is converted to a record before validation:
 

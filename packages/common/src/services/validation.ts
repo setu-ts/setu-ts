@@ -105,10 +105,12 @@ export interface IValidationService {
 export interface ValidationMiddlewareOptions {
   /**
    * Validate `application/x-www-form-urlencoded` and `multipart/form-data`
-   * bodies with the same schema. Off by default: a browser sends a
-   * cross-site HTML form with no CORS preflight, so accepting forms widens
-   * which origins can reach a cookie-authenticated route. Pair an opted-in
-   * route with form CSRF protection. Read only for the `body` target.
+   * bodies with the same schema. The first-party service otherwise requires
+   * `application/json` or `application/*+json`; an unsupported or absent type
+   * answers 415 before any body read. Replacement services own their media-type
+   * handling. Cookie-authenticated routes still need `csrfMiddleware` or
+   * `csrfFormMiddleware`; pair opted-in forms with the latter. Read only for
+   * the `body` target.
    */
   readonly forms?: boolean;
 }

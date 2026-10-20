@@ -1105,11 +1105,19 @@ app.router.post('/users', (ctx, next) => {
 `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they
 validate a JSON body with. Off by default: a cross-site HTML `<form>` reaches a route that accepts
 forms with no CORS preflight, so pair an opted-in route with form CSRF protection
-(`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers `400`
-"Invalid JSON in request body", as before. The option is `ValidationMiddlewareOptions` in
-`@setu-ts/common`, the optional third parameter of `IValidationService.middleware`, and has no
-effect on any target but `body`. With it, a server-rendered `<form>` post validates against the
-schema a JSON client passes and reads back through `value(ctx)`.
+(`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers `415`
+"Unsupported Media Type". The option is `ValidationMiddlewareOptions` in `@setu-ts/common`, the
+optional third parameter of `IValidationService.middleware`, and has no effect on any target but
+`body`. With it, a server-rendered `<form>` post validates against the schema a JSON client passes
+and reads back through `value(ctx)`.
+
+The first-party validation service requires `application/json` or any `application/*+json` media
+type, ignoring case and parameters, or a recognised form type when forms are enabled. Unsupported
+types, including `text/plain` and an absent header, answer `415` before any body read, through the
+application's error responder. Clients must send `Content-Type: application/json` for JSON,
+including on an empty body-validated request. Routes reading `ctx.request.json()` directly are
+unchanged; replacement `IValidationService` implementations own their media-type handling.
+Cookie-authenticated routes still need `csrfMiddleware` or `csrfFormMiddleware`.
 
 The form is converted to a record before validation: a field sent once is a single value, a repeated
 field becomes an array of its values in wire order, and a name ending `[]` is always an array (kept

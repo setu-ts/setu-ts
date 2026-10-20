@@ -26,9 +26,11 @@ import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
  * `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not
  * `false`; otherwise it remains description-only. See the module documentation.
  *
- * Only JSON bodies are validated unless `options.forms` is `true`; accepting
- * forms lets a cross-site HTML `<form>` reach the route without a CORS
- * preflight, so pair an opted-in route with form CSRF protection.
+ * The first-party validation service requires `application/json` or an
+ * `application/*+json` media type; `options.forms: true` also accepts form types.
+ * An unsupported or absent type answers 415 before any body read. A replacement
+ * service owns its own media-type handling. Cookie-authenticated routes still
+ * need `csrfMiddleware` or `csrfFormMiddleware`; pair opted-in forms with the latter.
  *
  * @param schema - Validation schema (Zod schema by convention)
  * @param options - `forms: true` also validates urlencoded and multipart bodies

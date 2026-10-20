@@ -14,7 +14,8 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
 import { registerModuleSymbol } from '../seams/modules.ts';
-import { deriveNames, isIdentifierSafe } from './names.ts';
+import { deriveNames, isKebabIdentifier } from './names.ts';
+import { isMissingPath } from './filesystem-errors.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
 import type { GeneratorMode } from './generator-mode.ts';
 import { FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM } from '../seams/http.ts';
@@ -25,6 +26,8 @@ export const MODULES_DIR = 'src/modules';
 
 /** A feature directory missing the declaration or registrar needed for activation. */
 export interface SkippedModule {
+  /** A migratable legacy declaration or a file that cannot supply its export. */
+  readonly kind: 'legacy' | 'missing-export';
   /** The legacy module directory name. */
   readonly name: string;
   /** The directory relative to the project root. */
@@ -48,10 +51,24 @@ export interface ModuleScan {
   readonly rejected: readonly string[];
 }
 
-/** Whether a directory name can be interpolated into generated source as-is. */
-function isModuleName(entry: string): boolean {
-  const names = deriveNames(entry);
-  return names.kebab === entry && isIdentifierSafe(names);
+/** Evidence about a file the activation barrel would import. */
+type ExportStatus = 'exported' | 'missing' | 'missing-export';
+
+/** Read only regular files under the cap, distinguishing absence from bad evidence. */
+async function exportStatus(fs: IFileSystem, path: string, symbol: string): Promise<ExportStatus> {
+  let stat;
+  try {
+    stat = await fs.stat(path);
+  } catch (cause) {
+    return isMissingPath(cause) ? 'missing' : 'missing-export';
+  }
+  if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES) return 'missing-export';
+  try {
+    const source = new TextDecoder().decode(await fs.readFile(path));
+    return exportsSymbol(source, symbol) ? 'exported' : 'missing-export';
+  } catch {
+    return 'missing-export';
+  }
 }
 
 /**
@@ -123,35 +140,56 @@ export async function scanModules(
     const base = joinPath(root, entry, entry);
     if (mode === 'functional') {
       if (!(await isFile(fs, `${base}.routes.ts`))) continue;
-      if (!isModuleName(entry)) {
+      if (!isKebabIdentifier(entry)) {
         rejected.push(`${MODULES_DIR}/${entry}`);
         continue;
       }
       const symbol = registerModuleSymbol(deriveNames(entry));
-      let source = '';
-      try {
-        const index = joinPath(root, entry, 'index.ts');
-        const stat = await fs.stat(index);
-        if (stat.isFile && stat.size <= MAX_EXISTING_FILE_BYTES) {
-          source = new TextDecoder().decode(await fs.readFile(index));
-        }
-      } catch {
-        /* An unreadable index cannot activate the module. */
-      }
-      if (exportsSymbol(source, symbol)) names.push(entry);
-      else skipped.push({ name: entry, path: `${MODULES_DIR}/${entry}`, missing: symbol });
+      if ((await exportStatus(fs, joinPath(root, entry, 'index.ts'), symbol)) === 'exported')
+        names.push(entry);
+      else
+        skipped.push({
+          kind: 'missing-export',
+          name: entry,
+          path: `${MODULES_DIR}/${entry}`,
+          missing: symbol,
+        });
       continue;
     }
-    const controller = await isFile(fs, `${base}.controller.ts`);
-    const service = await isFile(fs, `${base}.service.ts`);
-    const module = await isFile(fs, `${base}.module.ts`);
-    if (controller && service && !isModuleName(entry)) {
-      rejected.push(`${MODULES_DIR}/${entry}`);
-    } else if (controller && service && module) {
-      names.push(entry);
-    } else if (controller && service) {
-      skipped.push({ name: entry, path: `${MODULES_DIR}/${entry}`, missing: `${entry}.module.ts` });
+    if (!isKebabIdentifier(entry)) {
+      if ((await isFile(fs, `${base}.controller.ts`)) && (await isFile(fs, `${base}.service.ts`))) {
+        rejected.push(`${MODULES_DIR}/${entry}`);
+      }
+      continue;
     }
+    const pascal = deriveNames(entry).pascal;
+    const controller = await exportStatus(fs, `${base}.controller.ts`, `${pascal}Controller`);
+    const service = await exportStatus(fs, `${base}.service.ts`, `${pascal}Service`);
+    if (controller === 'missing' || service === 'missing') continue;
+    const module = await exportStatus(fs, `${base}.module.ts`, `${pascal}Module`);
+    const missing =
+      controller === 'missing-export'
+        ? `${pascal}Controller`
+        : service === 'missing-export'
+          ? `${pascal}Service`
+          : module === 'missing-export'
+            ? `${pascal}Module`
+            : undefined;
+    if (missing !== undefined)
+      skipped.push({
+        kind: 'missing-export',
+        name: entry,
+        path: `${MODULES_DIR}/${entry}`,
+        missing,
+      });
+    else if (module === 'missing')
+      skipped.push({
+        kind: 'legacy',
+        name: entry,
+        path: `${MODULES_DIR}/${entry}`,
+        missing: `${entry}.module.ts`,
+      });
+    else names.push(entry);
   }
 
   return {

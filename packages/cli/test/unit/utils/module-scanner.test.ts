@@ -14,6 +14,7 @@ import {
 } from '../../../src/utils/module-scanner.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import { MAX_EXISTING_FILE_BYTES } from '../../../src/utils/file-writer.ts';
+import { deriveNames } from '../../../src/utils/names.ts';
 
 /** A directory stat, shaped as the real runtime adapters report one. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
@@ -48,7 +49,15 @@ function fsWith(
       // shape of a well-formed module the CLI generated.
       return Promise.resolve(key.includes('/') ? FILE_STAT : DIR_STAT);
     },
-    readFile: () => Promise.reject(new Error('unused')),
+    readFile: (path) => {
+      const file = path.slice(path.lastIndexOf('/') + 1);
+      const [name, kind] = file.split('.');
+      const suffix =
+        kind === 'controller' ? 'Controller' : kind === 'service' ? 'Service' : 'Module';
+      return Promise.resolve(
+        new TextEncoder().encode(`export class ${deriveNames(name ?? '').pascal}${suffix} {}`),
+      );
+    },
     writeFile: () => Promise.reject(new Error('unused')),
     mkdir: () => Promise.reject(new Error('unused')),
     rm: () => Promise.reject(new Error('unused')),
@@ -56,7 +65,7 @@ function fsWith(
 }
 
 /** A stat rejection shaped like a real runtime's missing-path error. */
-const MISSING = new Error('NotFound');
+const MISSING = Object.assign(new Error('NotFound'), { name: 'NotFound' });
 
 describe('functional module scanning', () => {
   it('reports an index that is not a regular file without reading it', async () => {
@@ -68,7 +77,14 @@ describe('functional module scanning', () => {
     };
     expect(await scanModules(probe, '/app', 'functional')).toEqual({
       names: [],
-      skipped: [{ name: 'billing', path: 'src/modules/billing', missing: 'registerBillingModule' }],
+      skipped: [
+        {
+          kind: 'missing-export',
+          name: 'billing',
+          path: 'src/modules/billing',
+          missing: 'registerBillingModule',
+        },
+      ],
       rejected: [],
     });
   });
@@ -97,6 +113,7 @@ describe('functional module scanning', () => {
         oversized
           ? [
               {
+                kind: 'missing-export',
                 name: 'billing',
                 path: 'src/modules/billing',
                 missing: 'registerBillingModule',
@@ -142,6 +159,75 @@ describe('functional module scanning', () => {
     expect(scan.skipped).toEqual([
       { path: 'src/modules/invoices/broken.routes.ts', missing: ['registerBrokenRoutes'] },
     ]);
+  });
+});
+
+describe('class-based module exports', () => {
+  for (const kind of ['controller', 'service', 'module'] as const) {
+    for (const failure of [
+      'missing-export',
+      'oversized',
+      'non-regular',
+      'unreadable',
+      'stat-error',
+    ] as const) {
+      it(`reports a ${failure} ${kind} and never calls it legacy`, async () => {
+        const files = {
+          '/app/src/modules/orders/orders.controller.ts': 'export class OrdersController {}',
+          '/app/src/modules/orders/orders.service.ts': 'export class OrdersService {}',
+          '/app/src/modules/orders/orders.module.ts': 'export class OrdersModule {}',
+        };
+        const base = createFakeFs(files);
+        const path = `/app/src/modules/orders/orders.${kind}.ts`;
+        const fs: IFileSystem = {
+          ...base,
+          stat: (file) =>
+            file !== path
+              ? base.stat(file)
+              : failure === 'stat-error'
+                ? Promise.reject(new Error('EACCES'))
+                : failure === 'oversized'
+                  ? Promise.resolve({ ...FILE_STAT, size: MAX_EXISTING_FILE_BYTES + 1 })
+                  : failure === 'non-regular'
+                    ? Promise.resolve({ isFile: false, isDirectory: false, size: 0 })
+                    : base.stat(file),
+          readFile: (file) =>
+            file !== path
+              ? base.readFile(file)
+              : failure === 'unreadable'
+                ? Promise.reject(new Error('EIO'))
+                : failure === 'missing-export'
+                  ? Promise.resolve(new TextEncoder().encode('// no exports'))
+                  : Promise.reject(new Error('must not read rejected file')),
+        };
+        const symbol = `Orders${kind[0].toUpperCase()}${kind.slice(1)}`;
+        expect(await scanModules(fs, '/app', 'class-based')).toEqual({
+          names: [],
+          rejected: [],
+          skipped: [
+            { kind: 'missing-export', name: 'orders', path: 'src/modules/orders', missing: symbol },
+          ],
+        });
+      });
+    }
+  }
+  it('keeps only an absent declaration as legacy, after checking the other exports', async () => {
+    const fs = createFakeFs({
+      '/app/src/modules/orders/orders.controller.ts': 'export class OrdersController {}',
+      '/app/src/modules/orders/orders.service.ts': 'export class OrdersService {}',
+    });
+    expect(await scanModules(fs, '/app')).toEqual({
+      names: [],
+      rejected: [],
+      skipped: [
+        {
+          kind: 'legacy',
+          name: 'orders',
+          path: 'src/modules/orders',
+          missing: 'orders.module.ts',
+        },
+      ],
+    });
   });
 });
 
@@ -227,7 +313,7 @@ describe('readModuleNames', () => {
 
     expect(scan.names).toEqual([]);
     expect(scan.skipped).toEqual([
-      { name: 'legacy', path: 'src/modules/legacy', missing: 'legacy.module.ts' },
+      { kind: 'legacy', name: 'legacy', path: 'src/modules/legacy', missing: 'legacy.module.ts' },
     ]);
   });
 

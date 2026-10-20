@@ -1,7 +1,7 @@
 /**
  * Validation middleware — extracts data from the HTTP request, validates it
  * against a schema, and either continues the pipeline or short-circuits with
- * a 400 response.
+ * a 400 validation response or a 415 media-type refusal.
  *
  * Exports both the core factory {@linkcode createValidationMiddleware} and
  * convenience helpers {@linkcode validateBody}, {@linkcode validateQuery},
@@ -22,6 +22,7 @@ import {
   CAPABILITIES,
   formEncodingOf,
   httpStatusHintOf,
+  respondWithError,
   validatedStateKey,
   withValidationMetadata,
 } from '@setu-ts/common';
@@ -56,6 +57,9 @@ const PROBLEM_JSON = 'application/problem+json';
 /** Private sentinel for malformed or unsupported bodies — never leaks outside this module. */
 class BodyParseError extends Error {}
 
+/** A response already written by the body media-type check. */
+const BODY_REFUSED = Symbol('body-refused');
+
 /**
  * Extract raw data from the request based on the target.
  *
@@ -72,6 +76,7 @@ async function extractTarget(
   switch (target) {
     case 'body': {
       const contentType = ctx.request.headers.get('content-type');
+      const mediaType = contentType?.split(';', 1)[0]?.trim();
       if (
         forms &&
         /^\s*(?:multipart\/|application\/x-www-form-urlencoded)/i.test(contentType ?? '') &&
@@ -86,6 +91,16 @@ async function extractTarget(
           if (hint !== undefined && hint.status !== 400) throw error;
           throw new BodyParseError('Unsupported form body');
         }
+      }
+      if (!/^application\/(?:json|[^\s/;]+\+json)$/i.test(mediaType ?? '')) {
+        respondWithError(ctx, {
+          status: 415,
+          title: 'Unsupported Media Type',
+          detail: forms
+            ? 'Expected a JSON or form request body.'
+            : 'Expected a JSON request body (application/json).',
+        });
+        return BODY_REFUSED;
       }
       try {
         return await ctx.request.json();
@@ -212,6 +227,8 @@ export function buildValidationMiddleware<S>(
           throw e;
         }
 
+        if (rawData === BODY_REFUSED) return;
+
         const result = service.validate(schema, rawData);
 
         if (result.success) {
@@ -265,9 +282,11 @@ function respond(
  * Delegates to the configured {@linkcode IValidationService} so the error
  * format matches the plugin registration (e.g. `'rfc9457'`).
  *
- * Only JSON bodies are validated unless `options.forms` is `true`. Accepting
- * forms lets a cross-site HTML `<form>` reach the route without a CORS
- * preflight, so pair an opted-in route with form CSRF protection.
+ * The first-party service requires a JSON media type (`application/json` or
+ * `application/*+json`), or a form media type when `options.forms` is `true`.
+ * Unsupported or absent types answer 415 before the body is read. A replacement
+ * service owns its own media-type handling. Cookie-authenticated routes still
+ * need `csrfMiddleware` or `csrfFormMiddleware`, including opted-in form routes.
  *
  * @param schema - The schema (must expose `safeParse`)
  * @param options - `forms: true` also validates urlencoded and multipart bodies

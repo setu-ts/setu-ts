@@ -67,7 +67,11 @@ describe('validator reader through the real kernel', () => {
     try {
       await app.start();
       const response = await app.fetch(
-        new Request('http://localhost/', { method: 'POST', body: '{"extra":true}' }),
+        new Request('http://localhost/', {
+          method: 'POST',
+          body: '{"extra":true}',
+          headers: { 'content-type': 'application/json' },
+        }),
       );
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ count: 1 });

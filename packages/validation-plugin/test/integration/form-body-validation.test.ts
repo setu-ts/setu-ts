@@ -85,8 +85,7 @@ describe('form validation through the real kernel', () => {
         }
       }
       expect(calls).toBe(3);
-      // Without the opt-in a form post is not a form: the released JSON path
-      // refuses it, which is what keeps a cross-site <form> off these routes.
+      // JSON-only validators refuse form media types before reading the body.
       for (const route of ['/helper-json', '/decorated-json']) {
         for (const requestBody of [
           new URLSearchParams('name=Ada'),
@@ -99,8 +98,8 @@ describe('form validation through the real kernel', () => {
           const refused = await app.fetch(
             new Request(`http://localhost${route}`, { method: 'POST', body: requestBody }),
           );
-          expect(refused.status, route).toBe(400);
-          expect(await refused.text()).toContain('Invalid JSON in request body');
+          expect(refused.status, route).toBe(415);
+          expect(await refused.text()).toContain('Unsupported Media Type');
         }
         const json = await app.fetch(
           new Request(`http://localhost${route}`, {

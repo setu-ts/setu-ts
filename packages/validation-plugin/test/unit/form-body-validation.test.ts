@@ -161,19 +161,20 @@ describe('form body validation', () => {
         { forms: true },
       );
       await reader(fake.ctx, async () => {});
-      expect(reader.value(fake.ctx)).toEqual({ count: 3 });
+      if (header === 'application/json') expect(reader.value(fake.ctx)).toEqual({ count: 3 });
+      else expect(fake.responseSnapshot().status).toBe(415);
       if (header === 'application/json') expect(spy).not.toHaveBeenCalled();
     }
   });
 
-  it('keeps a validator without forms: true on the JSON path for a form body', async () => {
+  it('refuses a form media type without forms: true before any read', async () => {
     const fake = createFakeContext({
       request: { headers: { 'content-type': 'application/x-www-form-urlencoded' } },
     });
     const formData = vi.fn(() =>
       Promise.resolve(parseFormBody(encode('count=3'), 'application/x-www-form-urlencoded')),
     );
-    vi.spyOn(fake.ctx.request, 'json').mockRejectedValue(new SyntaxError('not JSON'));
+    const json = vi.spyOn(fake.ctx.request, 'json');
     const ctx = { ...fake.ctx, request: { ...fake.ctx.request, formData } };
     const next = vi.fn();
     for (const options of [undefined, { forms: false }]) {
@@ -184,10 +185,11 @@ describe('form body validation', () => {
         defaultFormatter,
         options,
       )(ctx, next);
-      expect(fake.responseSnapshot().status).toBe(400);
-      expect(fake.responseSnapshot().body).toContain('Invalid JSON in request body');
+      expect(fake.responseSnapshot().status).toBe(415);
+      expect(fake.responseSnapshot().body).toContain('Unsupported Media Type');
     }
     expect(formData).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
   it('ignores forms: true for every target but body', async () => {

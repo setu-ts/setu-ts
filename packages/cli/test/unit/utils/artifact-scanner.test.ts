@@ -11,6 +11,8 @@ import { listSeamSpecs } from '../../../src/seams/registry.ts';
 import type { SeamSpec } from '../../../src/seams/seam-spec.ts';
 import { seamSpecFor } from '../schematics/_shared.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
+import { scanModuleArtifacts } from '../../../src/utils/module-scanner.ts';
+import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 /** A file stat, shaped as the real runtime adapters report one. */
 const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
@@ -82,6 +84,27 @@ function fsWith(
 }
 
 describe('readArtifactNames', () => {
+  it('refuses hostile artifact names in flat and module families, never importing them', async () => {
+    const hostile = ["q'y", 'Bad_Name', '9lives', 'x\nforged', 'x\u001b[31m'];
+    for (const name of hostile) {
+      const flat = await readArtifactNames(fsWith([`${name}.routes.ts`]), '/app', ROUTES);
+      expect(flat.names).toEqual([]);
+      expect(flat.skipped.map((skip) => skip.path)).toEqual([`${ROUTES.dir}/${name}.routes.ts`]);
+      expect(flat.adopted).toEqual([]);
+    }
+    const fs = createFakeFs(
+      Object.fromEntries(
+        hostile.map((name) => [
+          `/app/src/modules/orders/${name}.routes.ts`,
+          wellFormed(ROUTES, name),
+        ]),
+      ),
+    );
+    const scoped = await scanModuleArtifacts(fs, '/app', 'orders');
+    expect(scoped.artifacts['route']).toEqual([]);
+    expect(scoped.skipped).toHaveLength(hostile.length);
+    expect(ROUTES.renderBarrel(scoped.artifacts)).not.toContain("q'y");
+  });
   // A CLI-owned path is predictable, so a repository can commit a link or a special
   // file there; a link to `/dev/zero` read forever. Neither the barrel nor an
   // artifact is opened unless stat reports a regular file under the cap.

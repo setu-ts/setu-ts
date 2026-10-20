@@ -12,9 +12,22 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Declare JSON media types on validated bodies (M114, 0.10.0)
+
+Send `Content-Type: application/json` on JSON requests to `validateBody` or `@ValidateBody` routes
+using the first-party validation service. It also accepts any `application/*+json` type, ignoring
+case and parameters. An unsupported type, including `text/plain` or an absent header, now answers
+`415 Unsupported Media Type` before reading the body. In particular, `fetch` with a string body and
+no headers sends `text/plain` and is refused instead of validated; an empty body-validated request
+without the header answers 415 instead of 400. A form type on a JSON-only route now answers 415
+instead of 400; `{ forms: true }` still opts that validator into form bodies. Routes reading
+`ctx.request.json()` directly are unchanged. Replacement `IValidationService` implementations own
+their media-type handling. Cookie-authenticated routes still need `csrfMiddleware` or
+`csrfFormMiddleware`.
+
 ### Refresh generated output for M114 (0.10.0, `@setu-ts/cli`, `@setu-ts/validation-plugin`)
 
-**Nothing is required.** An existing project keeps working: its `src/controllers/<name>.routes.ts`
+**Existing generated modules need no layout changes.** Their `src/controllers/<name>.routes.ts`
 files are still wired by the controllers barrel, and only newly generated modules use the new
 layout. A project scaffolded before this milestone does not call `registerModules`;
 `setu generate module` prints the import line and the `registerModules(app.router, app.services);`
@@ -38,13 +51,13 @@ call to add.
   replaces `<name>.service.test.ts` (it drives the module in-process through
   `createTestApp({ app: await createApp() })`), and a module on Cloudflare Workers no longer emits a
   test.
-- **Validation:** nothing is required. To accept form posts on a route, pass `{ forms: true }` to
-  `validateBody` or `@ValidateBody` and add `csrfFormMiddleware`; that route then validates
-  `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema —
-  numbers and booleans arrive as strings (use `z.coerce`), a file part is the framework's `FormFile`
-  (not a web `File`), a repeated field becomes an array in wire order, and a name ending `[]` is
-  always an array. An over-limit body on a validated route answers `413` instead of `400` when
-  `RuntimePlugin({ maxBodyBytes })` is set. `zod` is declared by every template that installs
+- **Validation:** send the JSON media-type header described above. To accept form posts, pass
+  `{ forms: true }` to `validateBody` or `@ValidateBody` and add `csrfFormMiddleware`; that route
+  then validates `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same
+  schema — numbers and booleans arrive as strings (use `z.coerce`), a file part is the framework's
+  `FormFile` (not a web `File`), a repeated field becomes an array in wire order, and a name ending
+  `[]` is always an array. An over-limit body on a validated route answers `413` instead of `400`
+  when `RuntimePlugin({ maxBodyBytes })` is set. `zod` is declared by every template that installs
   `validation-plugin` and added by `setu add validation` on every runtime; `setu g module` and
   `setu g schema` print the runtime's install command in a project that lacks it.
 
