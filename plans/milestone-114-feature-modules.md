@@ -353,6 +353,119 @@ task.
   validated by one `validateBody(schema)`, read back through `.value(ctx)`, plus the same schema
   through `@ValidateBody` on a decorated route).
 
+### 3.12b A validated body must declare its media type (maintainer decision 2026-10-21, audit round 2 F1)
+
+- **Defect:** keeping forms off did not keep a cross-site form out. `extractTarget` read the body
+  with `ctx.request.json()` whatever its `Content-Type`, and `parseJsonBody` (`common/src/http.ts`)
+  does not check it. A `<form enctype="text/plain">` whose field name is `{"name":"Ada","p":"` and
+  value `x"}` sends `{"name":"Ada","p":"=x"}`: valid JSON, sent with no preflight and with the
+  browser's cookies. The audit drove it to `200` with the handler run on both `validateBody` and
+  `@ValidateBody` routes.
+- **Rule (one implementation, in `extractTarget`'s body branch, before any read):** classify the
+  request's `Content-Type`, case-insensitively and ignoring parameters.
+  - `application/json` or any `application/*+json` → the JSON path, unchanged.
+  - A form type (`formEncodingOf` recognises it) → the form path when `forms === true`; otherwise
+    refused as below. (Today a form type on a JSON-only route answers `400` "Invalid JSON"; it now
+    answers `415`, which says what is wrong.)
+  - Anything else, **including an absent header** → refused, and the body is not read. Absent is
+    refused on purpose: `fetch` with a `Blob` or `ArrayBuffer` body and no type sends no
+    `Content-Type`, which is also a no-preflight request.
+- **Refusal:** `415 Unsupported Media Type`, written through `respondWithError` from `common`, so it
+  answers in the application's configured error format. The detail is a fixed sentence naming the
+  accepted types: "Expected a JSON request body (application/json)." on a JSON-only route, and
+  "Expected a JSON or form request body." on a `forms: true` route. Never the received value. The
+  validation formatters are NOT used: their bodies hardcode `400`, so a formatted `415` would carry
+  a body that disagrees with its status line.
+- **Scope:** the body target only. Query, params, headers and cookies have no media type. A route
+  that reads `ctx.request.json()` itself, without a validator, is unchanged; the docs say that
+  media-type enforcement belongs to validated routes, and that cookie-authenticated routes still
+  want `csrfMiddleware` or `csrfFormMiddleware`.
+- **Breaking (CHANGELOG `Changed` + `docs/upgrading.md`):** a client that posts JSON to a validated
+  route without `Content-Type: application/json` (for example `fetch` with a string body and no
+  headers, which sends `text/plain`) now gets `415` instead of a validated response. A
+  body-validated route hit with no body and no `Content-Type` answers `415`, not `400`. The remedy
+  is to send the header.
+- **Who enforces it:** the first-party `ValidationService` (`buildValidationMiddleware`), so both
+  the helpers and `@ValidateBody` get it. A third-party `IValidationService` reached through the
+  helper fallback owns its own media-type handling; the docs say so.
+- **Test doubles:** `createFakeContext` (`packages/validation-plugin/test/fixtures/fake-runtime.ts`)
+  sets no `Content-Type` even when it carries a body, which no real JSON client sends to a JSON
+  route. When a body is given and the caller set no `content-type`, the fixture defaults it to
+  `application/json` — the default `inject()` already applies to an object or string body
+  (`kernel/src/application/inject-body.ts`). Tests that exercise the refusal set the header
+  explicitly.
+- **Docs (correct the round-1 overclaim at every site):** `validation-middleware.ts:269-270`,
+  `decorator-plugin/src/decorators/validation.ts:30-31`,
+  `common/src/services/validation.ts:107-110`, the validation-plugin README, `PUBLIC_API.md`,
+  `docs/cli.md`, the CHANGELOG entry and the upgrade guide.
+- **Test home:** `packages/validation-plugin/test/unit/body-media-type.test.ts` (the classification
+  table: JSON, `+json`, parameters and case, form types with and without `forms`, `text/plain`,
+  absent, and no body read on refusal) and `test/integration/body-media-type.test.ts`. The
+  integration file drives a real kernel app with `errorHandler({ format: 'rfc9457' })`: the audit's
+  exact text/plain payload answers `415` with `application/problem+json` and the handler not run, on
+  both a `validateBody` route and an `@ValidateBody` route; `application/json` and
+  `application/vnd.api+json` still answer `200`. **Negative control:** remove the check and the
+  text/plain case must answer `200` again.
+
+### 3.12c Artifact file names are refused like module names (audit round 2 F2)
+
+- **Defect:** `scanModuleArtifacts` (new in M114) feeds `artifact-scanner.ts`, which admits any file
+  matching the family suffix. `src/modules/orders/q'y.routes.ts` exporting `registerQ'yRoutes` was
+  "adopted", and the generated `index.ts` gained an import that does not parse. The top-level
+  barrels have the same pre-existing behaviour.
+- **Rule:** `artifact-scanner.ts` admits a candidate only when its base name passes the L2 rule —
+  `deriveNames(name).kebab === name` and `isIdentifierSafe(deriveNames(name))`. The rule lives in
+  ONE shared predicate, used by both `module-scanner.ts` and `artifact-scanner.ts`. A refused file
+  is reported, escaped, as "not a kebab-case identifier, so it cannot be listed in the barrel.
+  Rename the file." It is never imported. This covers the top-level barrels too.
+- **Test home:** `packages/cli/test/unit/utils/artifact-scanner.test.ts` (hostile names in a flat
+  family and in a module: rejected and reported, never imported) and the command-level report test
+  in `generate-module-command.test.ts`. **Negative control:** disable the predicate in
+  `artifact-scanner.ts` and the hostile name must reach the barrel again.
+
+### 3.12d Class-based module scan checks exports (audit round 2 observation, folded in by the maintainer)
+
+- **Defect:** in class-based mode `scanModules` admits a directory once `<name>.controller.ts`,
+  `<name>.service.ts` and `<name>.module.ts` exist (`module-scanner.ts:143-153`), without reading
+  them. `renderModuleBarrel` (`schematics/module-barrel.ts`) imports `<Pascal>Controller`,
+  `<Pascal>Service` and, for a full module, `<Pascal>Module` from each. A file that does not export
+  its symbol (after a rename, say) produces a barrel that does not compile, from a command that
+  reported success.
+- **Second defect behind it:** `generate.ts:373` passes EVERY class-based skip as a legacy module,
+  and the barrel still imports a legacy module's controller and service. So skipping a module for a
+  missing export is not enough on its own; it would still be imported.
+- **Rule:** read each of the files the barrel imports from — only when the file is a regular file of
+  at most `MAX_EXISTING_FILE_BYTES`, the bound the functional branch already applies — and require
+  it to export its symbol (the existing `exportsSymbol`).
+  - All three present and exporting: admitted, as today.
+  - Controller and service exporting, no `<name>.module.ts`: a legacy module, as today.
+  - Any required file present but not exporting its symbol, or unreadable: skipped with the missing
+    symbol named, and NOT passed as legacy, so the barrel never imports it.
+- **Shape:** `SkippedModule` (internal; not barrel-exported) gains
+  `kind: 'legacy' | 'missing-export'`. `generate.ts` passes only `kind === 'legacy'` entries as
+  `legacyModules`, and its report names the missing symbol for the other kind.
+- **Test home:** `packages/cli/test/unit/utils/module-scanner.test.ts` (each export missing in turn;
+  an over-size and a non-regular file; a legacy module still admitted as legacy) and
+  `generate-module-command.test.ts` (the regenerated barrel never imports a module missing an
+  export, and the report names the symbol). **Negative control:** drop the export check and the
+  barrel imports the broken module again.
+
+### 3.12e Oversized `FormData` uploads in in-process tests (audit round 2 observation, folded in)
+
+- **Finding:** a Node 24 / undici bug, reproduced with no framework code. Cancelling the body of a
+  `Request` built from a `FormData` that holds a file throws an uncaught
+  `ERR_INVALID_STATE: ReadableStream is already closed` inside undici. `Blob` and `ReadableStream`
+  bodies are unaffected. `readBounded` (`runtime/src/adapters/shared/fetch-mapping.ts`) cancels an
+  over-cap body on purpose, so `app.fetch(new Request(…, { body: formData }))` with a file over
+  `maxBodyBytes` crashes an in-process test. Over a real socket the server survives, and the
+  kernel's `inject()` never builds a `FormData` request.
+- **No code change:** the exception is raised inside undici's own task, where nothing can catch it,
+  and draining instead of cancelling would undo the M90a bound.
+- **Docs:** a short note in the runtime README's "Bounding the request body" section and in the
+  testing README's `inject` section, telling readers to build an oversized upload from a `Blob`, or
+  to use `inject()`, and why. Filing the upstream issue is outward-facing and stays the maintainer's
+  decision.
+
 ### 3.13 Unwired activation barrel in an existing project
 
 - **Decision:** `reportUnwiredDecoratorSeams` is extended (and renamed `reportUnwiredSeams`) to
