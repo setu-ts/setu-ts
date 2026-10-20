@@ -308,18 +308,20 @@ export function renderSeamImports(
  * it, while a false positive would put an unresolvable import in the developer's barrel
  * — so the heuristic errs toward the outcome that still compiles.
  *
- * The symbol is interpolated into a pattern unescaped, which is safe because every
- * caller passes an identifier derived by `deriveNames` — letters and digits only, never
- * a regular-expression metacharacter.
+ * The symbol is escaped before it enters a pattern. Every caller passes an identifier
+ * derived by `deriveNames`, so the escape changes nothing today; it keeps a future caller
+ * that skips name validation from building an invalid pattern or matching a different
+ * name.
  *
  * @param source - The module's source text
  * @param symbol - The identifier to look for
  * @returns True when the module appears to export it
  */
 export function exportsSymbol(source: string, symbol: string): boolean {
+  const pattern = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const declaration = new RegExp(
     `export\\s+(?:declare\\s+)?(?:abstract\\s+)?(?:async\\s+)?` +
-      `(?:const|let|var|function|class|type|interface|enum)\\s+${symbol}\\b`,
+      `(?:const|let|var|function|class|type|interface|enum)\\s+${pattern}\\b`,
   );
   if (declaration.test(source)) return true;
 
@@ -329,7 +331,7 @@ export function exportsSymbol(source: string, symbol: string): boolean {
   // unreachable, so it would sit permanently uncovered. Including the `export {` and `}`
   // in the tested text is harmless, because a symbol is always a derived identifier and
   // never the reserved word itself.
-  const word = new RegExp(`\\b${symbol}\\b`);
+  const word = new RegExp(`\\b${pattern}\\b`);
   for (const clause of source.matchAll(/export\s*\{[^}]*\}/g)) {
     if (word.test(clause[0])) return true;
   }

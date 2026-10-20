@@ -1117,7 +1117,10 @@ types, including `text/plain` and an absent header, answer `415` before any body
 application's error responder. Clients must send `Content-Type: application/json` for JSON,
 including on an empty body-validated request. Routes reading `ctx.request.json()` directly are
 unchanged; replacement `IValidationService` implementations own their media-type handling.
-Cookie-authenticated routes still need `csrfMiddleware` or `csrfFormMiddleware`.
+Cookie-authenticated routes still need `csrfMiddleware` or `csrfFormMiddleware`. The 415 takes the
+error responder's format, while a `400` validation failure takes
+`ValidationPlugin({ errorFormat })`, so set both to the same format; the CLI templates set both to
+`'rfc9457'`.
 
 The form is converted to a record before validation: a field sent once is a single value, a repeated
 field becomes an array of its values in wire order, and a name ending `[]` is always an array (kept

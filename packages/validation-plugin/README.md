@@ -82,7 +82,9 @@ type (case-insensitive, parameters ignored). Unsupported types, including `text/
 Send `Content-Type: application/json` when posting JSON; this also applies to an empty request on a
 body-validated route. Routes that call `ctx.request.json()` themselves are unchanged, and
 replacement `IValidationService` implementations own their media-type handling. Cookie-authenticated
-routes still need `csrfMiddleware` or `csrfFormMiddleware`.
+routes still need `csrfMiddleware` or `csrfFormMiddleware`. The 415 takes the error responder's
+format, while a `400` validation failure takes `ValidationPlugin({ errorFormat })`, so set both to
+the same format; the CLI templates set both to `'rfc9457'`.
 
 The form is converted to a record before validation:
 

@@ -309,6 +309,12 @@ describe('exportsSymbol', () => {
     expect(exportsSymbol('export const ORDERS_TOTAL = 1;', 'ORDERS_TOTAL')).toBe(true);
   });
 
+  it('escapes the symbol, so a metacharacter neither throws nor matches another name', () => {
+    expect(exportsSymbol('export const axb = 1;', 'a.b')).toBe(false);
+    expect(exportsSymbol('export { axb };', 'a.b')).toBe(false);
+    expect(() => exportsSymbol('export const x = 1;', "q'y(")).not.toThrow();
+  });
+
   it('puts the command on its own header line, so a long one cannot overflow', () => {
     const header = seamHeader('setu generate command-handler / query-handler', ['X()']);
     for (const line of header.split('\n')) {
