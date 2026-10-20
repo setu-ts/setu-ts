@@ -50,7 +50,7 @@ task.
 | `StartOptions`, ephemeral port                           | `packages/common/src/plugin.ts:421`, `kernel/src/application/application.ts:2223`                                                                                                       | `start({ port: 0 })` binds an ephemeral port but no API exposes the bound port — a generated e2e must pick a free port itself                                                                                                                                                                                                                                                     |
 | `validatedStateKey`                                      | `packages/common/src/services/validation.ts:37`                                                                                                                                         | Key `validation-plugin:validated-<target>`; value is the parsed output; read by `decorator-plugin`'s `Body()`/`Query()`/`Params()` resolvers                                                                                                                                                                                                                                      |
 | `createValidationMiddleware`, `bindHelper`               | `packages/validation-plugin/src/middleware/validation-middleware.ts:129,290`                                                                                                            | Body extraction is `ctx.request.json()` only; on success `ctx.state.set(validatedStateKey(target), value)`; helpers resolve the service per request and call `service.middleware(schema, target)`                                                                                                                                                                                 |
-| `ValidationService.middleware`                           | `packages/validation-plugin/src/services/validation-service.ts:124`                                                                                                                     | Wraps the caller's schema in `applySchemaPolicy(...)` BEFORE building the middleware — the effective schema is NOT the caller's object, so identity must be recorded from the pre-policy value                                                                                                                                                                                    |
+| `ValidationService.middleware`                           | `packages/validation-plugin/src/services/validation-service.ts:124`                                                                                                                     | Wraps the caller's schema in `applySchemaPolicy(...)` BEFORE building the middleware, and each helper calls it once PER REQUEST (`bindHelper`) — so neither the schema object nor the inner middleware is a stable identity; §3.9 keys `.value(ctx)` on the OUTER helper's instance token instead                                                                                 |
 | `RouteDefinition`, `RouteSchema.response`                | `packages/common/src/http.ts:1005,467`                                                                                                                                                  | Imperative routes accept `{ handler, middleware?, schema? }`; `schema.response` is `Record<number, unknown>`; `openapi-generator.ts:746,808` reads it and derives the request body from the validation brand (M70m)                                                                                                                                                               |
 | `IRequest.formData?`                                     | `packages/common/src/http.ts:160`                                                                                                                                                       | Optional form accessor exists (M94b); `validateBody` never calls it (§3.12)                                                                                                                                                                                                                                                                                                       |
 | `ApiResponse`, `ValidateBody/Query/Params`               | `packages/decorator-plugin/src/decorators/openapi.ts:34,92`, `validation.ts:32,54,76`                                                                                                   | `ApiResponse({ status, description?, schema? })`; `Validate*` record `meta.schema.<target>` which E1 enforces through the validation service                                                                                                                                                                                                                                      |
@@ -159,11 +159,16 @@ task.
     `Add X to @Module({ providers | controllers }) in src/modules/m/m.module.ts` and edits nothing
     (C2). `route --module` in class-based mode is refused naming top-level `g route`.
   - `schema x --module m` → §3.8. Module-scoped artifacts are namespaced by the module (path prefix,
-    DI token prefix) so they never collide with a top-level artifact of the same name; within one
-    module the conflict check refuses a `route` and a `controller` of one name (both export
-    `register<P>Routes` into one index — `TS2300`). The schematic receives the target as a new
-    optional `SchematicOptions.module?: string` (optional for the published-interface reason the
-    other scan fields give) plus `SchematicOptions.moduleArtifacts?` (the §3.4 per-module scan).
+    DI token prefix) so they never collide with a top-level artifact of the same name. With
+    `--module`, the GLOBAL HTTP-path and DI-token groups of `findNameConflict` are skipped and
+    replaced by an in-module check that refuses a `route` and a `controller` of one name (both
+    export `register<P>Routes` into one index — `TS2300`). A module-scoped static path (`/m/x`) and
+    the module's own `GET /m/:id` coexist — the kernel ranks a static segment over a param (M70g) —
+    so an `id` equal to `x` is unreachable through `/:id`; `docs/cli.md` states it. The schematic
+    receives the target as a new optional `SchematicOptions.targetModule?: string` (optional for the
+    published-interface reason the other scan fields give; not `module`, which would read as one
+    entry of the existing `modules` list) plus `SchematicOptions.moduleArtifacts?` (the §3.4
+    per-module scan).
 - **Why:** mirrors `nest g service users/pricing` (verified, §1) without editing a declaration the
   developer owns.
 - **Test home:** `test/unit/generate-module-placement.test.ts`,
@@ -196,6 +201,12 @@ task.
   `validation-plugin`) gains `zod: ^4` in `npmDependencies` and `npm:zod@^4` in `denoImports`; `zod`
   joins `CLIENT_RANGES`; `setu add validation` adds it on every runtime through the existing `peers`
   mechanism (`runtimes: ['deno','node','bun','cloudflare-workers']`).
+- **A project without `zod`:** a project scaffolded before M114 installs `validation-plugin` but
+  declares no `zod` (`detectPlugins` reads only `@setu-ts/*` names, so the gate cannot see it).
+  `g module` and `g schema` therefore read the manifest for `zod`; when it is absent they still
+  write the files and print the exact install command for the detected runtime (`npm install zod@^4`
+  / `bun add zod@^4` / `deno add npm:zod@^4`), the M113h `ws` precedent — they never edit the
+  manifest, and never report success silently over an import that cannot resolve.
 - **Why:** M104 declared every schema inline and cast every validated value; OpenAPI and the SDK
   client now describe the module from its first commit.
 - **Test home:** `test/unit/schematics/module.test.ts`, `test/unit/commands/add.test.ts`,
@@ -264,7 +275,10 @@ task.
     `test/support/server.ts` (managed, byte-identical) so a pre-M114 project gains it.
   - `<n>.test.ts` replaces `<n>.service.test.ts`: in-process via
     `createTestApp({ app: await createApp() })` + `inject`, asserting `GET /<n>` answers 200 with an
-    `items` array and a POST → GET round trip. No assertion names the stub's contents.
+    `items` array and a POST → GET round trip. No assertion names the stub's contents. It boots the
+    WHOLE composition in-process (no socket), so a plugin needing a live backend makes it need one
+    too; `docs/cli.md` says so and points at `createTestApp`'s `overrides`/`without` (M91) for
+    substituting it.
   - Tasks: `test` excludes `*.e2e.test.ts`, `test:e2e` runs only them — Deno
     `deno test -A --ignore='**/*.e2e.test.ts'` / `deno test -A '**/*.e2e.test.ts'`; Bun
     `bun test --path-ignore-patterns='**/*.e2e.test.ts'` / `bun test .e2e.test`; Node
@@ -282,7 +296,10 @@ task.
   service (`greet(name)`), so a new project's first files are exactly what `g module` produces.
   Routes stay `/greetings` and `/greetings/:name` (the documented `GREETING_ROUTES`), so the
   module's route file is the showcase's own source, not the CRUD template; the seeded artifacts move
-  from `controller`/`service` to `modules: ['greeting']`. The class-based showcase is unchanged.
+  from `controller`/`service` to `modules: ['greeting']`. Its `greeting.test.ts` and
+  `greeting.e2e.test.ts` are showcase-specific (`GET /greetings` → `Hello, world!`,
+  `GET /greetings/ada` → `Hello, ada!`), never the CRUD round trip, and it emits no schemas file (no
+  request body to validate). The class-based showcase is unchanged.
 - **Why:** ROADMAP item 5.
 - **Test home:** `test/unit/templates.test.ts`, baseline fixture, `scaffold-runs-e2e`.
 
@@ -302,12 +319,14 @@ task.
   it answers `400 Invalid JSON in request body` against the same schema a JSON client passes.
 - **Stated limits (docs, not code):** the generated OpenAPI document still describes a validated
   body as `application/json`; numeric and boolean form fields arrive as strings, so schemas use
-  `z.coerce`; a form that carries the session plugin's `_csrf` field reaches the schema, which
-  strips or refuses it according to the plugin's `whitelist`/strict policy.
+  `z.coerce`; a file field arrives as the framework's `FormFile` (common), NOT a web `File`, so
+  `z.instanceof(File)` refuses it and a schema checks the `FormFile` shape instead; a form that
+  carries the session plugin's `_csrf` field reaches the schema, where a Zod object strips the
+  unknown key by default and `forbidNonWhitelisted` (or the schema's own `.strict()`) refuses it.
 - **Test home:** `packages/validation-plugin/test/unit/form-body-validation.test.ts` (conversion
   table: single, repeated, `[]`, file, `__proto__` key, absent `formData`, JSON unchanged) and
   `test/integration/form-body-validation.test.ts` (a real kernel app: urlencoded and multipart posts
-  validated by one `validateBody(schema)`, read back through `validated(...)`, plus the same schema
+  validated by one `validateBody(schema)`, read back through `.value(ctx)`, plus the same schema
   through `@ValidateBody` on a decorated route).
 
 ### 3.13 Unwired activation barrel in an existing project
@@ -365,7 +384,7 @@ minor `0.10.0` with CHANGELOG migration text; existing projects keep working unc
 | ------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ValidatorMiddleware<T>` (`@setu-ts/validation-plugin`) | type  | return type of `validateBody/Query/Params/Headers/Cookies` and `createValidationMiddleware`; every generated functional route reads `.value(ctx)` on it |
 | `ValidatedOutput<S>` (`@setu-ts/validation-plugin`)     | type  | the inferred `T` of `ValidatorMiddleware`; applications annotate helpers with it                                                                        |
-| `SchematicOptions.module?` (`@setu-ts/cli`)             | field | the `service`/`route`/`controller`/`schema` schematics (placement); set by `runGenerateCommand`                                                         |
+| `SchematicOptions.targetModule?` (`@setu-ts/cli`)       | field | the `service`/`route`/`controller`/`schema` schematics (placement); set by `runGenerateCommand`                                                         |
 | `SchematicOptions.moduleArtifacts?` (`@setu-ts/cli`)    | field | the per-module index renderer inside `route`/`controller --module`; set by `runGenerateCommand` from `scanModuleArtifacts`                              |
 
 No `@setu-ts/common` change. `cli` internals (`seams/modules.ts`, `scanModuleArtifacts`,
@@ -373,10 +392,10 @@ No `@setu-ts/common` change. `cli` internals (`seams/modules.ts`, `scanModuleArt
 
 ### 4.1 Options — every option names its consumer
 
-| Option                       | Consumer                                         | Behavior (per implementation)                                                                                                  |
-| ---------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `setu generate --module <m>` | `runGenerateCommand` → `SchematicOptions.module` | functional: placement + module index regeneration; class-based: placement + printed `@Module` line; refused for app-wide kinds |
-| `setu generate schema`       | `schematics/schema.ts`                           | writes `src/shared/schemas/<n>.schemas.ts` or `src/modules/<m>/<n>.schemas.ts`; gated on `validation-plugin`                   |
+| Option                       | Consumer                                               | Behavior (per implementation)                                                                                                  |
+| ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `setu generate --module <m>` | `runGenerateCommand` → `SchematicOptions.targetModule` | functional: placement + module index regeneration; class-based: placement + printed `@Module` line; refused for app-wide kinds |
+| `setu generate schema`       | `schematics/schema.ts`                                 | writes `src/shared/schemas/<n>.schemas.ts` or `src/modules/<m>/<n>.schemas.ts`; gated on `validation-plugin`                   |
 
 ## 5. Implementation files
 
@@ -392,7 +411,7 @@ No `@setu-ts/common` change. `cli` internals (`seams/modules.ts`, `scanModuleArt
 | `packages/cli/src/schematics/module-files.ts`                                       | module body renderers split out of `module.ts` (service, routes, schemas, tests) — reused by the showcase (§3.11) |
 | `packages/cli/src/schematics/schema.ts`                                             | `schema` schematic (§3.8)                                                                                         |
 | `packages/cli/src/schematics/service.ts`, `route.ts`, `controller.ts`               | `--module` placement (§3.5)                                                                                       |
-| `packages/cli/src/schematics/registry.ts`                                           | `schema` entry; `module?`/`moduleArtifacts?` fields                                                               |
+| `packages/cli/src/schematics/registry.ts`                                           | `schema` entry; `targetModule?`/`moduleArtifacts?` fields                                                         |
 | `packages/cli/src/schematics/test-harness.ts`                                       | e2e and unit-test bodies per runtime                                                                              |
 | `packages/cli/src/utils/module-scanner.ts`                                          | mode-aware `scanModules`, `scanModuleArtifacts` (§3.4)                                                            |
 | `packages/cli/src/utils/name-conflicts.ts`                                          | functional modules in the HTTP group; in-module route/controller clash (§3.5)                                     |
@@ -424,6 +443,8 @@ No `@setu-ts/common` change. `cli` internals (`seams/modules.ts`, `scanModuleArt
 | `cli/test/unit/templates.test.ts`, `templates/project-files.test.ts`, `template-baseline.json`                         | templates                                       | every functional host scaffolds the activation barrel and calls it; `test`/`test:e2e` per runtime; `server.ts`/`app.e2e.test.ts` on socket targets only; showcase in `src/modules/greeting/`                                                                                                                                                                                                     |
 | `cli/test/e2e/feature-module-e2e.test.ts` (new)                                                                        | end to end                                      | Deno, Node, Bun: scaffold `rest` → `g module invoices` → `g service pricing --module invoices` → `g route summary --module invoices` → implement the service with real logic (rewrite the file) → run `test` AND `test:e2e` green → assert `/openapi.json` lists `/invoices` with component schemas → delete `src/modules/invoices/` → regenerate the barrel (`g module other`) → boot again 200 |
 | `scaffold-runs-e2e`, `template-e2e`, `seam-probe`, `workspace-e2e`, `workspace-mesh-e2e`, `node-scaffold-e2e` (update) | —                                               | request module routes at their new location; run `test:e2e` where the suite already boots a template                                                                                                                                                                                                                                                                                             |
+| `workers-bundle-e2e` (update)                                                                                          | —                                               | a Workers scaffold with a generated module (no tests emitted) still bundles and type-checks; the activation barrel call is present                                                                                                                                                                                                                                                               |
+| `cli/test/unit/generate-module-zod.test.ts`                                                                            | `generate.ts`                                   | a project manifest without `zod`: files written AND the runtime's exact install command printed; with `zod`: nothing printed                                                                                                                                                                                                                                                                     |
 
 **Negative controls (each observed failing, then reverted):** (1) drop the functional names from
 `findNameConflict`'s `modules` → the duplicate-route test fails; (2) render the activation barrel
@@ -431,10 +452,13 @@ without the setup call in `setu.config.ts` → feature-module e2e answers 404; (
 stub-asserting test → the e2e's "implement the service" step fails `test`; (4) restore a
 `ctx.state.get(...) as` cast in the generated routes → the module schematic test's no-cast grep
 fails; (5) record the token from the INNER per-request middleware instead of the outer helper →
-`.value(ctx)` throws through every helper and the integration test fails; (7) drop the `[]`/repeat
-handling → the form conversion table fails; (8) call `formEncodingOf` unconditionally → the
-`parseContentType` spy test fails; (6) drop the `--ignore`/`--path-ignore-patterns`/glob from the
-unit task → `test` runs the e2e and the project-files assertion fails.
+`.value(ctx)` throws through every helper and the integration test fails; (6) drop the
+`--ignore`/`--path-ignore-patterns`/glob from the unit task → `test` runs the e2e and the
+project-files assertion fails; (7) drop the `[]`/repeat handling → the form conversion table fails;
+(8) call `formEncodingOf` unconditionally → the `parseContentType` spy test fails; (9) build the
+form record on an ordinary object with `record[key] = value` → the `__proto__` row fails; (10) run
+the global HTTP-path conflict check for a `--module` placement → `g route x --module m` beside a
+top-level route `x` is refused and the placement test fails.
 
 ## 7. Verification gates
 
@@ -459,6 +483,10 @@ pnpm run release:verify 0.9.0
   the probe-and-bind up to 3 times on `EADDRINUSE` and reports the last error.
 - `**/!(*.e2e).test.ts` depends on Node's `fs.glob` extglob support (measured on Node 24.18) → the
   generated `engines` already require Node ≥ 24; `node-scaffold-e2e` runs the task.
+- The glob arguments in the generated `test`/`test:e2e` tasks were measured from an interactive
+  shell; a `deno task` runs its own shell and `npm run` runs `sh`, whose quoting could differ → the
+  feature-module e2e runs the GENERATED tasks through their own runners on all three runtimes, which
+  is the measurement that counts.
 - Template baseline churn hides an unintended change → regenerate the fixture once, review its diff
   file by file in the PR.
 - A pre-M114 functional module and a new one coexist; their routes come from two barrels → the
@@ -480,13 +508,13 @@ Form-body validation (§3.12) turns untrusted urlencoded and multipart input int
 an application schema, so this milestone crosses a trust boundary and is audited per
 `.roo/skills/security-audit/SKILL.md` before merge, by a fresh Claude agent (never Codex).
 
-| Threat                                                                              | Control                                                                                                                                                                                                                                                                       | Probe the audit runs                                                                                                       |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Prototype pollution through a field named `__proto__`, `constructor` or `prototype` | null-prototype record built with own-property definition, never `obj[key] = v` on an ordinary object                                                                                                                                                                          | post `__proto__[x]=1`, `__proto__=1`, `constructor.prototype.x=1`; assert `({}).x === undefined` and the record's own keys |
-| Memory growth from many repeated keys or many parts                                 | `formData()` reads through the same `bytes()` a JSON body does (`fetch-mapping.ts:208`), so it is capped exactly when `RuntimePlugin({ maxBodyBytes })` is set and as unbounded as JSON is when it is not — no new exposure; the record adds at most one array entry per part | a body at the cap with 100 000 repeated keys answers within the existing bound                                             |
-| A file part reaching a schema expecting text                                        | values keep their `string`/`FormFile` type; a `z.string()` schema refuses a `FormFile` with a 400, never a coercion                                                                                                                                                           | multipart with a file under a string field → 400                                                                           |
-| Content-type confusion (a JSON body labelled as a form, or the reverse)             | the encoding comes only from the header via `formEncodingOf`; a mislabelled body fails its parse and answers 400                                                                                                                                                              | both mislabels → 400, no handler run                                                                                       |
-| `.value(ctx)` reading another validator's value                                     | instance token check (§3.9)                                                                                                                                                                                                                                                   | two validators for one target; the first reader throws                                                                     |
+| Threat                                                                              | Control                                                                                                                                                                                                                                                                                                                       | Probe the audit runs                                                                                                       |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Prototype pollution through a field named `__proto__`, `constructor` or `prototype` | null-prototype record built with own-property definition, never `obj[key] = v` on an ordinary object                                                                                                                                                                                                                          | post `__proto__[x]=1`, `__proto__=1`, `constructor.prototype.x=1`; assert `({}).x === undefined` and the record's own keys |
+| Memory growth from many repeated keys or many parts                                 | `formData()` reads through the same `bytes()` a JSON body does (`fetch-mapping.ts:208`), so it is capped exactly when `RuntimePlugin({ maxBodyBytes })` is set and as unbounded as JSON is when it is not — no new exposure; the record adds at most one array entry per part                                                 | a body at the cap with 100 000 repeated keys answers within the existing bound                                             |
+| A file part reaching a schema expecting text                                        | values keep their `string`/`FormFile` type; a `z.string()` schema refuses a `FormFile` with a 400, never a coercion                                                                                                                                                                                                           | multipart with a file under a string field → 400                                                                           |
+| Content-type confusion (a JSON body labelled as a form, or the reverse)             | the encoding comes only from the header via `formEncodingOf`. A JSON body labelled urlencoded does NOT fail its parse — `URLSearchParams` turns it into odd keys — and a broken multipart body yields an empty form (M94b); in both cases the SCHEMA is what refuses it, so the handler runs only on input the schema accepts | both mislabels against a schema with a required field → 400, handler not run                                               |
+| `.value(ctx)` reading another validator's value                                     | instance token check (§3.9)                                                                                                                                                                                                                                                                                                   | two validators for one target; the first reader throws                                                                     |
 
 ## 11. Measurements (filled during verification)
 
