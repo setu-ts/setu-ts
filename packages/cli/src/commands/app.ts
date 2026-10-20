@@ -36,7 +36,12 @@ import {
   withDevtool,
 } from '../devtool/planner.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
+import {
+  cliInvocation,
+  projectFiles,
+  resolveHost,
+  withEnvFile,
+} from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
@@ -249,10 +254,10 @@ function planMember(
       const advice =
         transport.messagingArgs !== undefined
           ? `Add it to a workspace on --transport http or memory, or scaffold a broker-connected ` +
-            `service with \`${PROGRAM_NAME} new <name> --template microservice --broker ` +
+            `service with \`${cliInvocation(profile.runtime)} new <name> --template microservice --broker ` +
             `${transport.name}\`.`
           : `Add it to a workspace on --transport http or memory, or scaffold it standalone with ` +
-            `\`${PROGRAM_NAME} new <name> --template ${choice.template.name}\`.`;
+            `\`${cliInvocation(profile.runtime)} new <name> --template ${choice.template.name}\`.`;
       return {
         ok: false,
         message:
@@ -454,7 +459,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     const suggested = isTargetRuntime(runtimeFlag) ? runtimeFlag : `<${TARGET_RUNTIMES.join('|')}>`;
     deps.error(
       `Create a separate workspace for it: ` +
-        `\`${PROGRAM_NAME} new <name> --workspace --runtime ${suggested}\`.`,
+        `\`${cliInvocation(read.manifest.runtime)} new <name> --workspace --runtime ${suggested}\`.`,
     );
     return EXIT_USAGE;
   }

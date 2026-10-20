@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
+import { VERSION } from '../../src/version.ts';
 import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
@@ -1270,7 +1271,9 @@ describe('--workspace', () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--runtime', 'cloudflare-workers'])).toBe(2);
       expect(h.err.text()).toContain('own deploy unit');
-      expect(h.err.text()).toContain('setu new acme --runtime cloudflare-workers');
+      expect(h.err.text()).toContain(
+        `npx @setu-ts/cli@${VERSION} new acme --runtime cloudflare-workers`,
+      );
       expect(h.fs.writes).toEqual([]);
     });
 

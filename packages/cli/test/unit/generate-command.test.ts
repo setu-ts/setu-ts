@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
+import { VERSION } from '../../src/version.ts';
 import type { GeneratedFile } from '../../src/utils/file-writer.ts';
 
 const DENO_MANIFEST = (...packages: readonly string[]) =>
@@ -76,7 +77,7 @@ describe('runGenerateCommand', () => {
   it('refuses a class-based job without queue before writing and marks help unavailable', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
     expect(await h.run(['job', 'nightly'])).toBe(1);
-    expect(h.err.text()).toContain('setu add queue');
+    expect(h.err.text()).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} add queue`);
     expect(h.fs.writes).toEqual([]);
     expect(await h.run(['--help'])).toBe(0);
     expect(h.out.text()).toContain('job  (unavailable — run `setu add queue`)');

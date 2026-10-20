@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { devEntryPort, devEntryVariants, renderDevEntry } from '../../src/devtool/dev-entry.ts';
+import { VERSION } from '../../src/version.ts';
 
 describe('renderDevEntry', () => {
   it('recognises ports only in complete current and previous CLI renderings', () => {
@@ -14,6 +15,10 @@ describe('renderDevEntry', () => {
       expect(devEntryPort(renderDevEntry({ devtoolPort: port }))).toBeUndefined();
     }
     expect(devEntryPort('handwritten entry')).toBeUndefined();
+    const variants = devEntryVariants(4920);
+    expect(variants[0]).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable`);
+    expect(variants[1]).toContain('Re-run `setu devtool enable`');
+    expect(variants[2]).not.toContain('Re-run');
   });
   it('checks plugin registration and diagnostics after starting and stops on discarded composition', () => {
     const entry = renderDevEntry({ devtoolPort: 4919 });

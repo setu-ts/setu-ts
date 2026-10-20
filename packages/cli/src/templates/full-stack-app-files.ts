@@ -420,7 +420,8 @@ import { currentUserContext, sessionContext } from '~/lib/context-keys.server.ts
  *
  * This project has two middleware layers, and this is the second one:
  *
- * - **Kernel middleware** (\`setu generate middleware <name>\`, in \`src/middleware/\`)
+ * - **Kernel middleware** (\`{{cliInvocation}} generate middleware <name>\`,
+ *   in \`src/middleware/\`)
  *   runs for EVERY request the application serves — health probes, API routes,
  *   static files and SSR pages alike — and works on the kernel request context.
  *   Use it for cross-cutting concerns: headers, auditing, rate limits.

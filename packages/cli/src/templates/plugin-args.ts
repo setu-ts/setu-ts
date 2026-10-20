@@ -30,9 +30,24 @@ const ARGS_BUDGET = 60;
  */
 export function mergeObjectArgs(a: string, b: string): string {
   const bodies = [a, b].map((args) => {
-    const match = /^\{([^{}]*)\}$/.exec(args.trim());
+    const match = /^\{([\s\S]*)\}$/.exec(args.trim());
     if (match === null) throw new Error('Expected a CLI-authored single-level object literal');
-    return match[1]!.trim().replace(/,\s*$/, '');
+    const body = match[1]!.trim();
+    let quote: string | undefined;
+    let escaped = false;
+    for (const char of body) {
+      if (quote !== undefined) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === quote) quote = undefined;
+      } else if (char === "'" || char === '"' || char === '`') {
+        quote = char;
+      } else if (char === '{' || char === '}') {
+        throw new Error('Expected a CLI-authored single-level object literal');
+      }
+    }
+    if (quote !== undefined) throw new Error('Expected a CLI-authored single-level object literal');
+    return body.replace(/,\s*$/, '');
   });
   const body = bodies.filter((value) => value !== '').join(', ');
   return body === '' ? '{}' : `{ ${body} }`;
@@ -63,14 +78,17 @@ export function wrapPluginArgs(args: string): string {
   let depth = 0;
   let current = '';
   let quote: string | undefined;
+  let escaped = false;
 
   for (const char of body) {
     if (quote !== undefined) {
       current += char;
-      if (char === quote) quote = undefined;
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = undefined;
       continue;
     }
-    if (char === "'" || char === '"') {
+    if (char === "'" || char === '"' || char === '`') {
       quote = char;
       current += char;
       continue;

@@ -6578,12 +6578,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `src/jobs/index.ts` barrel to `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` when
   `queue-plugin` is installed (a class-based `g job` is refused without it), the seam is not scanned
   without `queue-plugin` so standalone `src/jobs/*.job.ts` files get no skip report, and the stale
-  registry premise that `QueuePluginOptions` has no `processors` option is rewritten. Every command
-  a generated file or the CLI's own output tells the reader to run now renders the pinned
-  `npx @setu-ts/cli@<VERSION>` / `bunx @setu-ts/cli@<VERSION>` /
-  `deno run -A npm:@setu-ts/cli@<VERSION>` form. The CLI docs and the schematic tables in
-  `packages/cli/README.md`, `docs/cli.md` and `PUBLIC_API.md` state that rollback covers SIGINT
-  (Ctrl+C) and a caught error only, and match the source — complete (PR pending)
+  registry premise that `QueuePluginOptions` has no `processors` option is rewritten. Generated
+  files, `Next:` lines and messages for a project whose runtime the command has already resolved
+  render the pinned `npx @setu-ts/cli@<VERSION>` / `bunx @setu-ts/cli@<VERSION>` /
+  `deno run -A npm:@setu-ts/cli@<VERSION>` form for that runtime. Usage, help and remedies without a
+  resolved runtime retain `setu` (`PROGRAM_NAME`); Deno-only devtool guidance uses the pinned Deno
+  invocation. The CLI docs and the schematic tables in `packages/cli/README.md`, `docs/cli.md` and
+  `PUBLIC_API.md` state that rollback covers SIGINT (Ctrl+C) and a caught error only, and match the
+  source — complete (PR pending)
 - **Next milestone** — M113l (documentation that does not match the code, or is missing).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

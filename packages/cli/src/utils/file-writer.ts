@@ -409,10 +409,12 @@ export async function reportDryRunPlan(
   files: readonly GeneratedFile[],
 ): Promise<number> {
   const existing = await findExisting(deps.fs, files);
-  const outcomes = await classifyFiles(deps.fs, files);
   const collisions = new Set(existing);
+  const outcomes = await classifyFiles(
+    deps.fs,
+    files.filter((file) => !collisions.has(file.path)),
+  );
   for (const outcome of outcomes) {
-    if (collisions.has(outcome.path)) continue;
     deps.log(
       outcome.outcome === 'unchanged'
         ? `unchanged ${escapeName(outcome.path)}`

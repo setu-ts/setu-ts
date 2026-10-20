@@ -66,6 +66,8 @@ import { workspaceRootFiles } from '../workspace/root-files.ts';
 import { detectProjectRuntime, workspaceProfile } from '../workspace/runtime-profile.ts';
 import { DEFAULT_TRANSPORT, transportSpec } from '../workspace/transport.ts';
 
+import { cliInvocation } from '../templates/project-files.ts';
+
 /**
  * Raised inside the conversion transaction when the conversion cannot finish.
  *
@@ -147,7 +149,9 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     deps.error(
       `${escapeName(joinPath(project, WORKSPACE_MANIFEST))} already exists: this IS a workspace.`,
     );
-    deps.error(`Add a service to it with \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`.`);
+    deps.error(
+      `Add a service to it with \`${cliInvocation(existing.manifest.runtime)} generate ${APP_VERB} <name>\`.`,
+    );
     return EXIT_ERROR;
   }
 
@@ -460,7 +464,9 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     }
     deps.log('');
     deps.log('Next:');
-    deps.log(`  ${PROGRAM_NAME} generate ${APP_VERB} <name>   # add a second service`);
+    deps.log(
+      `  ${cliInvocation(profile.runtime)} generate ${APP_VERB} <name>   # add a second service`,
+    );
     // From the profile, which is the project's own detected toolchain: a converted
     // Node project has no `deno task`.
     deps.log(`  ${profile.runScript('dev')}   # run every member`);

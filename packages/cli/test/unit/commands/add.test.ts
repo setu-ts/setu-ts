@@ -115,7 +115,7 @@ describe('resolveAddablePackage', () => {
       const h = harness({ '/app/deno.json': DENO_MANIFEST });
       expect(await h.run([name])).toBe(2);
       expect(h.err.join('\n')).toContain(
-        '`@setu-ts/diagnostics-plugin` is installed and wired by `setu devtool enable`.',
+        `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable\`.`,
       );
       expect(h.fs.writes).toEqual([]);
     });

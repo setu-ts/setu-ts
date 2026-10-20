@@ -31,12 +31,18 @@ function contentsOf(path: string): string {
 
 describe('workspaceRootFiles', () => {
   it('wraps port-repair guidance around the pinned command on every workspace runtime', () => {
-    for (const runtime of ['deno', 'node', 'bun'] as const) {
+    for (const [runtime, invocation] of [
+      ['deno', `deno run -A npm:@setu-ts/cli@${VERSION}`],
+      ['node', `npx @setu-ts/cli@${VERSION}`],
+      ['bun', `bunx @setu-ts/cli@${VERSION}`],
+    ] as const) {
       const readme = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime)).find(
         (file) => file.path === 'README.md',
       )!.contents;
       const paragraph = readme.split('## Ports\n')[1]!.split('\n\n')[1]!;
-      expect(paragraph).toContain('workspace ports --reallocate');
+      expect(paragraph.replaceAll('\n', ' ')).toContain(
+        `\`${invocation} workspace ports --reallocate\``,
+      );
       for (const line of paragraph.split('\n')) expect(line.length).toBeLessThanOrEqual(100);
     }
   });

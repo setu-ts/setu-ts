@@ -363,16 +363,18 @@ All notable changes to this project are documented here. The format follows
   so two kinds of the same name no longer collide. Every other symbol inside the file keeps its
   plain name, so the emitted addresses do not change, and existing `src/ingress/<name>.ingress.ts`
   files keep scanning as `<Pascal>Ingress` and stay registered.
-- **@setu-ts/cli** generated text names a CLI invocation that resolves (V9-12, M113i, 0.10.0). Every
-  command a generated file or the CLI's own output tells the reader to run now renders the CLI as
-  the pinned package for the target: npm-family (Node, Cloudflare Workers)
-  `npx @setu-ts/cli@<VERSION>`, Bun `bunx @setu-ts/cli@<VERSION>` and Deno
+- **@setu-ts/cli** generated text names a CLI invocation that resolves (V9-12, M113i, 0.10.0).
+  Generated files, `Next:` lines and messages for a project whose runtime the command has already
+  resolved render the CLI as the pinned package for that runtime: npm-family (Node, Cloudflare
+  Workers) `npx @setu-ts/cli@<VERSION>`, Bun `bunx @setu-ts/cli@<VERSION>` and Deno
   `deno run -A npm:@setu-ts/cli@<VERSION>`, where `<VERSION>` is the CLI's own version; before, the
-  bare `setu` named the unrelated npm package `setu`. The sites are the project README "Generate
-  code" fence, the Workers `wrangler.toml` comment, the workspace root README fences and the
-  `ports --reallocate` instruction, the full-stack architecture table cell, and the `Next:` line
-  `setu new --workspace` prints. A provenance comment that names what wrote a file is unchanged, and
-  no scaffold gains a dependency.
+  bare `setu` named the unrelated npm package `setu`. Usage, help and remedies without a resolved
+  runtime retain `setu` (`PROGRAM_NAME`); Deno-only devtool guidance uses the pinned Deno
+  invocation. The generated sites include the project README "Generate code" fence, the Workers
+  `wrangler.toml` comment, the workspace root README fences and the `ports --reallocate`
+  instruction, the full-stack architecture table cell, and the `Next:` line `setu new --workspace`
+  prints. A provenance comment that names what wrote a file is unchanged, and no scaffold gains a
+  dependency.
 
 ### Added
 

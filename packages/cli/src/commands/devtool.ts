@@ -77,6 +77,8 @@ import {
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../workspace/runtime-profile.ts';
 
+import { cliInvocation } from '../templates/project-files.ts';
+
 /** The import-map key the development entry resolves the plugin through. */
 const DEVTOOL_DEPENDENCY = '@setu-ts/diagnostics-plugin';
 
@@ -334,7 +336,7 @@ async function planSourceWrites(
 /** Prints the command's usage. */
 function printUsage(log: (message: string) => void): void {
   log(
-    `Usage: ${PROGRAM_NAME} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`,
+    `Usage: ${cliInvocation('deno')} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`,
   );
   log('');
   log('Enables the local diagnostics connector on a project that already exists:');
@@ -354,7 +356,7 @@ function printUsage(log: (message: string) => void): void {
 }
 
 /** The usage line shared by every subcommand refusal. */
-const USAGE = `Usage: ${PROGRAM_NAME} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`;
+const USAGE = `Usage: ${cliInvocation('deno')} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`;
 
 /**
  * Runs `setu devtool enable`.
@@ -438,7 +440,7 @@ async function enableInWorkspace(
 
   if (memberName === undefined) {
     deps.error(
-      `A member name is required inside a workspace: \`${PROGRAM_NAME} devtool enable <member>\`.` +
+      `A member name is required inside a workspace: \`${cliInvocation(manifest.runtime)} devtool enable <member>\`.` +
         ` Members: ${
           manifest.members.map((member) => escapeName(member.name)).join(', ') || 'none'
         }.`,

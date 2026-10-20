@@ -2198,7 +2198,11 @@ ${host.wranglerToml}`,
   // Template source files last. Any path colliding with the fixed set above is
   // reported by the caller's overwrite check rather than silently winning.
   for (const extra of host.files) {
-    files.push({ path: extra.path, contents: extra.contents });
+    // Static template files can name a runnable CLI command for the target.
+    files.push({
+      path: extra.path,
+      contents: extra.contents.replaceAll('{{cliInvocation}}', cliInvocation(runtime)),
+    });
   }
 
   return files;

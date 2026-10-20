@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { createFakeApp, type FakeApp, type FakeCommand } from '../fixtures/fake-app.ts';
 import { parseArgs } from '../../src/args.ts';
+import { VERSION } from '../../src/version.ts';
 import { dispatchPluginCommand, runCommandsListing } from '../../src/commands/plugin-commands.ts';
 
 const CONFIG = '/app/setu.config.ts';
@@ -58,8 +59,8 @@ describe('runCommandsListing', () => {
       ]),
     );
     expect(await h.list()).toBe(0);
-    expect(h.out.text()).toContain('setu cache:clear');
-    expect(h.out.text()).toContain('setu db:migrate');
+    expect(h.out.text()).toContain(`npx @setu-ts/cli@${VERSION} cache:clear`);
+    expect(h.out.text()).toContain(`npx @setu-ts/cli@${VERSION} db:migrate`);
   });
 
   it('sorts the listing so output is stable', async () => {

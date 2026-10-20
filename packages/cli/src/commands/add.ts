@@ -29,6 +29,7 @@ import {
 } from '../constants.ts';
 import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import { stringFlag } from '../args.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
@@ -715,11 +716,8 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
-  if (requested === 'diagnostics' || requested === '@setu-ts/diagnostics-plugin') {
-    deps.error('`@setu-ts/diagnostics-plugin` is installed and wired by `setu devtool enable`.');
-    return EXIT_USAGE;
-  }
-  const bare = resolveAddablePackage(requested);
+  const diagnostics = requested === 'diagnostics' || requested === '@setu-ts/diagnostics-plugin';
+  const bare = diagnostics ? 'diagnostics-plugin' : resolveAddablePackage(requested);
   if (bare === undefined) {
     deps.error(`"${escapeName(requested)}" is not a Setu-TS package this command can add.`);
     deps.error(`  Available: ${addableNames().join(', ')}`);
@@ -749,6 +747,12 @@ export async function runAddCommand(
     if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
     deps.error(cause.message);
     return EXIT_ERROR;
+  }
+  if (diagnostics) {
+    deps.error(
+      `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`.`,
+    );
+    return EXIT_USAGE;
   }
   const restriction = RUNTIME_RESTRICTIONS.get(bare);
   if (restriction !== undefined && !restriction.runtimes.includes(runtime)) {

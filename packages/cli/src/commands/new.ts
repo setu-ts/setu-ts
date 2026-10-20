@@ -145,7 +145,7 @@ function planWorkspace(
         `--runtime ${runtime} cannot host a workspace: each Worker is its own deploy ` +
         `unit with its own wrangler.toml, so several of them are several deployments rather ` +
         `than members of one. Workspaces target ${WORKSPACE_RUNTIMES.join(', ')}; scaffold a ` +
-        `standalone project instead with \`${PROGRAM_NAME} new ${name} --runtime ${runtime}\`.`,
+        `standalone project instead with \`${cliInvocation(runtime)} new ${name} --runtime ${runtime}\`.`,
     };
   }
 
@@ -160,7 +160,7 @@ function planWorkspace(
       message:
         `A workspace root registers no plugins, so --template ${escapeName(templateFlag)} ` +
         `has nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template ${suggested}\`.`,
+        `\`${cliInvocation(runtime)} generate ${APP_VERB} <name> --template ${suggested}\`.`,
     };
   }
 
@@ -180,7 +180,7 @@ function planWorkspace(
       message:
         `A workspace root registers no plugins, so --style ${escapeName(styleFlag)} has ` +
         `nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
+        `\`${cliInvocation(runtime)} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
     };
   }
 
@@ -214,7 +214,7 @@ function planWorkspace(
       message:
         `A workspace root registers no plugins, so there is nothing for the devtool to` +
         ` enable. Create the workspace, add a member, then run` +
-        ` \`${PROGRAM_NAME} devtool enable <member>\`.`,
+        ` \`${cliInvocation(runtime)} devtool enable <member>\`.`,
     };
   }
 
