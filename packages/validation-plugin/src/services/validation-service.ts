@@ -15,6 +15,7 @@ import type {
   IValidationService,
   MiddlewareFunction,
   ValidationIssue,
+  ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
 
@@ -83,8 +84,8 @@ export class ValidationService implements IValidationService {
     private readonly schemaPolicy: SchemaPolicy = {},
   ) {
     if (this.middleware === ValidationService.prototype.middleware) {
-      registerServiceMiddleware(this, (schema, target, token) =>
-        this.buildMiddleware(schema, target, token),
+      registerServiceMiddleware(this, (schema, target, token, options) =>
+        this.buildMiddleware(schema, target, token, options),
       );
     }
   }
@@ -126,10 +127,15 @@ export class ValidationService implements IValidationService {
    *
    * @param schema - The schema (Zod schema by default)
    * @param target - Which request part to validate
+   * @param options - Per-validator options; `forms: true` also validates form bodies
    * @returns The validation middleware
    */
-  middleware(schema: unknown, target: ValidationTarget): MiddlewareFunction {
-    return this.buildMiddleware(schema, target);
+  middleware(
+    schema: unknown,
+    target: ValidationTarget,
+    options?: ValidationMiddlewareOptions,
+  ): MiddlewareFunction {
+    return this.buildMiddleware(schema, target, {}, options);
   }
 
   /** Applies policy once per middleware construction for the service and helper paths. */
@@ -137,6 +143,7 @@ export class ValidationService implements IValidationService {
     schema: unknown,
     target: ValidationTarget,
     token: object = {},
+    options?: ValidationMiddlewareOptions,
   ): MiddlewareFunction {
     return buildValidationMiddleware(
       applySchemaPolicy(schema, this.schemaPolicy),
@@ -144,6 +151,7 @@ export class ValidationService implements IValidationService {
       this,
       this.formatter,
       token,
+      options,
     );
   }
 }

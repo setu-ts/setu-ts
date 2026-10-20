@@ -15,6 +15,7 @@ import type {
   IRequestContext,
   IValidationService,
   ValidationIssue,
+  ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
 import {
@@ -32,7 +33,7 @@ import type {
 import { rfc9457Formatter } from '../formatters/rfc9457-formatter.ts';
 import { formRecord } from './form-record.ts';
 import type { ValidatedOutput, ValidatorMiddleware } from './validator-reader.ts';
-import { bindValidatorReader, serviceMiddleware, validatedByKey } from './validator-reader.ts';
+import { bindValidatorReader, recordValidated, serviceMiddleware } from './validator-reader.ts';
 
 /**
  * The formatters whose bodies are Problem Details and therefore require the
@@ -63,11 +64,16 @@ class BodyParseError extends Error {}
  * @returns The extracted data
  * @throws {BodyParseError} When the body cannot be read
  */
-async function extractTarget(ctx: IRequestContext, target: ValidationTarget): Promise<unknown> {
+async function extractTarget(
+  ctx: IRequestContext,
+  target: ValidationTarget,
+  forms: boolean,
+): Promise<unknown> {
   switch (target) {
     case 'body': {
       const contentType = ctx.request.headers.get('content-type');
       if (
+        forms &&
         /^\s*(?:multipart\/|application\/x-www-form-urlencoded)/i.test(contentType ?? '') &&
         formEncodingOf(contentType) !== undefined
       ) {
@@ -149,6 +155,8 @@ async function extractTarget(ctx: IRequestContext, target: ValidationTarget): Pr
  * @param target - Which request part to validate (`'body'`, `'query'`, etc.)
  * @param service - The validation service to use
  * @param formatter - Error formatter (resolved once at registration time)
+ * @param options - Per-validator options; `forms: true` also validates
+ *   urlencoded and multipart bodies (body target only, off by default)
  * @returns A middleware function
  */
 export function createValidationMiddleware<S>(
@@ -156,8 +164,9 @@ export function createValidationMiddleware<S>(
   target: ValidationTarget,
   service: IValidationService,
   formatter: ValidationErrorFormatter,
+  options?: ValidationMiddlewareOptions,
 ): ValidatorMiddleware<ValidatedOutput<S>> {
-  return buildValidationMiddleware(schema, target, service, formatter);
+  return buildValidationMiddleware(schema, target, service, formatter, {}, options);
 }
 
 /** Internal builder shared by the service, direct factory and helper. */
@@ -167,7 +176,9 @@ export function buildValidationMiddleware<S>(
   service: IValidationService,
   formatter: ValidationErrorFormatter,
   token: object = {},
+  options?: ValidationMiddlewareOptions,
 ): ValidatorMiddleware<ValidatedOutput<S>> {
+  const forms = target === 'body' && options?.forms === true;
   // Resolved once at registration time: a Problem Details body must be served
   // as `application/problem+json` (RFC 9457 §3), not the `application/json`
   // that `response.json()` sets. Keyed off the RESOLVED formatter rather than
@@ -192,7 +203,7 @@ export function buildValidationMiddleware<S>(
       async (ctx, next) => {
         let rawData: unknown;
         try {
-          rawData = await extractTarget(ctx, target);
+          rawData = await extractTarget(ctx, target, forms);
         } catch (e) {
           if (e instanceof BodyParseError) {
             const issues: readonly ValidationIssue[] = [{ path: '', message: e.message }];
@@ -205,7 +216,7 @@ export function buildValidationMiddleware<S>(
 
         if (result.success) {
           ctx.state.set(validatedStateKey(target), result.value);
-          ctx.state.set(validatedByKey(target), token);
+          recordValidated(ctx, target, token, result.value);
           await next();
           return;
         }
@@ -254,11 +265,19 @@ function respond(
  * Delegates to the configured {@linkcode IValidationService} so the error
  * format matches the plugin registration (e.g. `'rfc9457'`).
  *
+ * Only JSON bodies are validated unless `options.forms` is `true`. Accepting
+ * forms lets a cross-site HTML `<form>` reach the route without a CORS
+ * preflight, so pair an opted-in route with form CSRF protection.
+ *
  * @param schema - The schema (must expose `safeParse`)
+ * @param options - `forms: true` also validates urlencoded and multipart bodies
  * @returns A middleware function
  */
-export function validateBody<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
-  return bindHelper('body', schema);
+export function validateBody<S>(
+  schema: S,
+  options?: ValidationMiddlewareOptions,
+): ValidatorMiddleware<ValidatedOutput<S>> {
+  return bindHelper('body', schema, options);
 }
 
 /**
@@ -324,11 +343,13 @@ export function validateCookies<S>(schema: S): ValidatorMiddleware<ValidatedOutp
  *
  * @param target - The validation target
  * @param schema - The schema to validate against
+ * @param options - Per-validator options, forwarded to the service
  * @returns A middleware function
  */
 function bindHelper<S>(
   target: ValidationTarget,
   schema: S,
+  options?: ValidationMiddlewareOptions,
 ): ValidatorMiddleware<ValidatedOutput<S>> {
   const token = {};
   // Branded here as well as in `createValidationMiddleware`: this closure is
@@ -338,7 +359,7 @@ function bindHelper<S>(
     withValidationMetadata(
       async (ctx, next) => {
         const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
-        await serviceMiddleware(service, schema, target, token)(ctx, next);
+        await serviceMiddleware(service, schema, target, token, options)(ctx, next);
       },
       { target, schema },
     ),

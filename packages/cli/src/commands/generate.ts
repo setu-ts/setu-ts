@@ -374,7 +374,9 @@ export async function runGenerateCommand(
   if (module !== undefined) {
     if (!modules.includes(module)) {
       deps.error(
-        `Unknown module "${module}". Admitted modules: ${modules.join(', ') || '(none)'}.`,
+        `Unknown module "${escapeName(module)}". Admitted modules: ${
+          modules.map(escapeName).join(', ') || '(none)'
+        }.`,
       );
       return EXIT_ERROR;
     }
@@ -382,6 +384,12 @@ export async function runGenerateCommand(
       deps.error('route --module is functional-only; use top-level g route instead.');
       return EXIT_USAGE;
     }
+  }
+  for (const path of moduleScan.rejected) {
+    deps.error(
+      `Skipped ${escapeName(path)}: its name is not a kebab-case identifier, so it cannot be ` +
+        'listed in the activation barrel. Rename the directory.',
+    );
   }
   for (const skip of moduleScan.skipped) {
     deps.error(

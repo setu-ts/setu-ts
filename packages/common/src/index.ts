@@ -234,6 +234,7 @@ export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';
 export type {
   IValidationService,
+  ValidationMiddlewareOptions,
   ValidationIssue,
   ValidationTarget,
 } from './services/validation.ts';

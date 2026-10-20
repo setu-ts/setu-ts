@@ -81,7 +81,34 @@ export interface IValidationService {
    *
    * @param schema - The schema (Zod schema by default)
    * @param target - Which request part to validate
+   * @param options - Per-validator options. Optional, so a two-parameter
+   *   implementation remains assignable; omitted means JSON-only bodies.
    * @returns The validation middleware
    */
-  middleware(schema: unknown, target: ValidationTarget): MiddlewareFunction;
+  middleware(
+    schema: unknown,
+    target: ValidationTarget,
+    options?: ValidationMiddlewareOptions,
+  ): MiddlewareFunction;
+}
+
+/**
+ * Per-validator options for {@linkcode IValidationService.middleware}.
+ *
+ * @example
+ * ```typescript
+ * // Accept a server-rendered <form> post as well as JSON on this route only.
+ * const middleware = validation.middleware(ContactSchema, 'body', { forms: true });
+ * ```
+ * @since 0.10.0
+ */
+export interface ValidationMiddlewareOptions {
+  /**
+   * Validate `application/x-www-form-urlencoded` and `multipart/form-data`
+   * bodies with the same schema. Off by default: a browser sends a
+   * cross-site HTML form with no CORS preflight, so accepting forms widens
+   * which origins can reach a cookie-authenticated route. Pair an opted-in
+   * route with form CSRF protection. Read only for the `body` target.
+   */
+  readonly forms?: boolean;
 }

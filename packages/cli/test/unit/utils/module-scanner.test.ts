@@ -69,6 +69,7 @@ describe('functional module scanning', () => {
     expect(await scanModules(probe, '/app', 'functional')).toEqual({
       names: [],
       skipped: [{ name: 'billing', path: 'src/modules/billing', missing: 'registerBillingModule' }],
+      rejected: [],
     });
   });
   for (const oversized of [false, true]) {
@@ -268,4 +269,38 @@ it('sorts multiple skipped legacy modules independently of filesystem enumeratio
     '/app',
   );
   expect(result.skipped.map((entry) => entry.name)).toEqual(['alpha', 'zeta']);
+});
+
+describe('module directory names', () => {
+  // A directory name is spliced into an import specifier and an identifier in the
+  // CLI-owned activation barrel, so a name that does not round-trip through
+  // `deriveNames` is rejected rather than written into generated source.
+  const hostile = ['Bad_Name', '9lives', 'a"b', 'x\u001b[31m'];
+  it('rejects a functional module whose name is not a kebab-case identifier', async () => {
+    const files: Record<string, string> = {
+      '/app/src/modules/billing/billing.routes.ts': '',
+      '/app/src/modules/billing/index.ts': 'export function registerBillingModule() {}',
+    };
+    for (const name of hostile) {
+      files[`/app/src/modules/${name}/${name}.routes.ts`] = '';
+      files[`/app/src/modules/${name}/index.ts`] = 'export function registerX() {}';
+    }
+    const scan = await scanModules(createFakeFs(files), '/app', 'functional');
+    expect(scan.names).toEqual(['billing']);
+    expect(scan.skipped).toEqual([]);
+    expect(scan.rejected).toEqual(hostile.map((name) => `${MODULES_DIR}/${name}`).sort());
+  });
+  it('rejects a class-based module whose name is not a kebab-case identifier', async () => {
+    const scan = await scanModules(fsWith(['orders', ...hostile]), '/app', 'class-based');
+    expect(scan.names).toEqual(['orders']);
+    expect(scan.rejected).toEqual(hostile.map((name) => `${MODULES_DIR}/${name}`).sort());
+  });
+  it('does not reject a hostile directory that is not a module at all', async () => {
+    const scan = await scanModules(
+      createFakeFs({ '/app/src/modules/Bad_Name/helper.ts': '' }),
+      '/app',
+      'functional',
+    );
+    expect(scan.rejected).toEqual([]);
+  });
 });

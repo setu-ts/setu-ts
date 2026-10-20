@@ -14,7 +14,7 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
 import { registerModuleSymbol } from '../seams/modules.ts';
-import { deriveNames } from './names.ts';
+import { deriveNames, isIdentifierSafe } from './names.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
 import type { GeneratorMode } from './generator-mode.ts';
 import { FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM } from '../seams/http.ts';
@@ -39,6 +39,19 @@ export interface ModuleScan {
   readonly names: readonly string[];
   /** Candidate modules missing their declaration or exported registrar. */
   readonly skipped: readonly SkippedModule[];
+  /**
+   * Module-shaped directories whose name is not a kebab-case identifier, as
+   * `src/modules/<name>` paths. They are never admitted: the barrel interpolates
+   * the name into an import binding and a path, so `q'y` would emit source that
+   * does not compile and a name carrying a line feed would forge output lines.
+   */
+  readonly rejected: readonly string[];
+}
+
+/** Whether a directory name can be interpolated into generated source as-is. */
+function isModuleName(entry: string): boolean {
+  const names = deriveNames(entry);
+  return names.kebab === entry && isIdentifierSafe(names);
 }
 
 /**
@@ -90,11 +103,12 @@ export async function scanModules(
     entries = await fs.readdir(root);
   } catch {
     // No `src/modules/` yet, or it is unreadable: there are no modules to list.
-    return { names: [], skipped: [] };
+    return { names: [], skipped: [], rejected: [] };
   }
 
   const names: string[] = [];
   const skipped: SkippedModule[] = [];
+  const rejected: string[] = [];
   for (const entry of entries) {
     let stat;
     try {
@@ -109,6 +123,10 @@ export async function scanModules(
     const base = joinPath(root, entry, entry);
     if (mode === 'functional') {
       if (!(await isFile(fs, `${base}.routes.ts`))) continue;
+      if (!isModuleName(entry)) {
+        rejected.push(`${MODULES_DIR}/${entry}`);
+        continue;
+      }
       const symbol = registerModuleSymbol(deriveNames(entry));
       let source = '';
       try {
@@ -127,14 +145,20 @@ export async function scanModules(
     const controller = await isFile(fs, `${base}.controller.ts`);
     const service = await isFile(fs, `${base}.service.ts`);
     const module = await isFile(fs, `${base}.module.ts`);
-    if (controller && service && module) {
+    if (controller && service && !isModuleName(entry)) {
+      rejected.push(`${MODULES_DIR}/${entry}`);
+    } else if (controller && service && module) {
       names.push(entry);
     } else if (controller && service) {
       skipped.push({ name: entry, path: `${MODULES_DIR}/${entry}`, missing: `${entry}.module.ts` });
     }
   }
 
-  return { names: names.sort(), skipped: skipped.sort((a, b) => a.path.localeCompare(b.path)) };
+  return {
+    names: names.sort(),
+    skipped: skipped.sort((a, b) => a.path.localeCompare(b.path)),
+    rejected: rejected.sort(),
+  };
 }
 
 /** Scans the two imperative registrar families inside one admitted feature. */

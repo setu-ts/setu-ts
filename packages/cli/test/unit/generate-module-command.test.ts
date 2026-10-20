@@ -115,6 +115,26 @@ describe('setu generate module', () => {
     expect(h.err.text()).toContain('MODULES activation barrel');
   });
 
+  it('reports a module directory whose name cannot enter the barrel, escaped', async () => {
+    const hostile = 'Bad\u001b[31m';
+    const h = harness({
+      ...CLASS_BASED,
+      [`/app/src/modules/${hostile}/${hostile}.controller.ts`]: 'export class X {}',
+      [`/app/src/modules/${hostile}/${hostile}.service.ts`]: 'export class Y {}',
+    });
+
+    expect(await h.run(['module', 'orders'])).toBe(0);
+
+    const barrel = h.fs.read('/app/src/modules/index.ts');
+    expect(barrel).toContain('OrdersModule');
+    expect(barrel).not.toContain('Bad');
+    const report = h.err.text();
+    expect(report).toContain('its name is not a kebab-case identifier');
+    // The control character is escaped, never written to the terminal raw.
+    expect(report).not.toContain('\u001b');
+    expect(report).toContain('src/modules/Bad');
+  });
+
   it('refuses to regenerate a module over its own files', async () => {
     // The barrel is exempt from the overwrite check; the module's own files are
     // not, so a repeat must still refuse rather than silently rewriting work.

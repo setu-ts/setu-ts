@@ -52,7 +52,14 @@ export function moduleService(
     ? `List${p}Query`
     : '{ readonly limit?: number; readonly offset?: number }';
   return cleanSource(`${validation ? `${schemaImport(names, [`Create${p}Body`, `Update${p}Body`, `List${p}Query`, `${p}Response`], true)}\n` : ''}${classBased ? "import { Injectable } from '@setu-ts/decorator-plugin';\n" : ''}
-/** Replace this in-memory store with a repository for persistent records. */
+/**
+ * Sample storage: replace it with a repository before deploying.
+ *
+ * This \`Map\` lives in process memory with no size limit, and the generated
+ * routes that write to it are public — anyone who can reach the application can
+ * fill it until the process restarts. Add authentication to the routes and a
+ * real store before the module serves real traffic.
+ */
 const records = new Map<string, ${record}>();
 
 /** Lists records with pagination. */

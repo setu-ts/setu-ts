@@ -14,6 +14,7 @@
  * @module
  */
 import '../metadata/symbol-metadata.ts';
+import type { ValidationMiddlewareOptions } from '@setu-ts/common';
 
 import { methodDecorator } from '../metadata/context-bridge.ts';
 import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
@@ -25,17 +26,28 @@ import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
  * `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not
  * `false`; otherwise it remains description-only. See the module documentation.
  *
+ * Only JSON bodies are validated unless `options.forms` is `true`; accepting
+ * forms lets a cross-site HTML `<form>` reach the route without a CORS
+ * preflight, so pair an opted-in route with form CSRF protection.
+ *
  * @param schema - Validation schema (Zod schema by convention)
+ * @param options - `forms: true` also validates urlencoded and multipart bodies
  * @returns A method decorator
  * @since 0.1.0
  */
-export function ValidateBody(schema: unknown): SetuMethodDecorator {
+export function ValidateBody(
+  schema: unknown,
+  options?: ValidationMiddlewareOptions,
+): SetuMethodDecorator {
   return methodDecorator((store, target, handler) => {
     store.mutateMethod(target, handler, (meta) => {
       if (meta.schema === undefined) {
         meta.schema = {};
       }
       meta.schema.body = schema;
+      if (options?.forms === true) {
+        meta.schema.bodyForms = true;
+      }
     });
   });
 }

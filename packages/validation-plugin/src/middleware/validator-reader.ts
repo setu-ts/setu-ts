@@ -3,6 +3,7 @@ import type {
   IRequestContext,
   IValidationService,
   MiddlewareFunction,
+  ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
 import { validatedStateKey } from '@setu-ts/common';
@@ -57,6 +58,33 @@ export function validatedByKey(target: ValidationTarget): string {
   return `validation-plugin:validated-by-${target}`;
 }
 
+/** What a validator records under its private key: who wrote the value, and which value. */
+interface ValidatedRecord {
+  readonly token: object;
+  readonly value: unknown;
+}
+
+/**
+ * Records that the validator owning `token` produced `value` for `target`.
+ *
+ * The value is kept beside the token so a reader can tell when something else
+ * — a conformant third-party `IValidationService`, or any middleware — later
+ * rewrote the common `validatedStateKey(target)` without touching this key.
+ */
+export function recordValidated(
+  ctx: IRequestContext,
+  target: ValidationTarget,
+  token: object,
+  value: unknown,
+): void {
+  const record: ValidatedRecord = { token, value };
+  ctx.state.set(validatedByKey(target), record);
+}
+
+function isValidatedRecord(value: unknown): value is ValidatedRecord {
+  return typeof value === 'object' && value !== null && 'token' in value && 'value' in value;
+}
+
 /** Attach an instance-bound reader without changing middleware identity or branding. */
 export function bindValidatorReader<T>(
   middleware: MiddlewareFunction,
@@ -65,10 +93,17 @@ export function bindValidatorReader<T>(
 ): ValidatorMiddleware<T> {
   return Object.assign(middleware, {
     value(ctx: IRequestContext): T {
-      if (ctx.state.get(validatedByKey(target)) !== token) {
+      const record: unknown = ctx.state.get(validatedByKey(target));
+      // `Object.is`, not `===`: a schema may legitimately produce `NaN`, which
+      // `===` would report as overwritten on every read.
+      if (
+        !isValidatedRecord(record) ||
+        record.token !== token ||
+        !Object.is(ctx.state.get(validatedStateKey(target)), record.value)
+      ) {
         throw new TypeError(`Validator for ${target} did not run or was overwritten`);
       }
-      return ctx.state.get(validatedStateKey(target)) as T;
+      return record.value as T;
     },
   });
 }
@@ -77,6 +112,7 @@ type ServiceBuilder = (
   schema: unknown,
   target: ValidationTarget,
   token: object,
+  options: ValidationMiddlewareOptions | undefined,
 ) => MiddlewareFunction;
 const builders = new WeakMap<
   IValidationService,
@@ -97,13 +133,18 @@ export function serviceMiddleware(
   schema: unknown,
   target: ValidationTarget,
   token: object,
+  options?: ValidationMiddlewareOptions,
 ): MiddlewareFunction {
   const builder = builders.get(service);
   if (builder !== undefined && builder.method === service.middleware)
-    return builder.build(schema, target, token);
+    return builder.build(schema, target, token, options);
   return (ctx, next) =>
-    service.middleware(schema, target)(ctx, async () => {
-      ctx.state.set(validatedByKey(target), token);
+    service.middleware(
+      schema,
+      target,
+      options,
+    )(ctx, async () => {
+      recordValidated(ctx, target, token, ctx.state.get(validatedStateKey(target)));
       await next();
     });
 }

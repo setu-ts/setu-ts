@@ -31,6 +31,7 @@ describe('form body validation', () => {
           'body',
           new ValidationService(defaultFormatter),
           defaultFormatter,
+          { forms: true },
         )(ctx, next);
         if (status === 400) {
           await result;
@@ -112,6 +113,7 @@ describe('form body validation', () => {
         'body',
         new ValidationService(defaultFormatter),
         defaultFormatter,
+        { forms: true },
       );
       await reader(ctx, async () => {});
       expect(reader.value(ctx)).toEqual({ count: 3 });
@@ -133,6 +135,7 @@ describe('form body validation', () => {
         'body',
         new ValidationService(defaultFormatter),
         defaultFormatter,
+        { forms: true },
       )(ctx, next);
       expect(fake.responseSnapshot().status).toBe(400);
       expect(fake.responseSnapshot().body).toContain('Unsupported form body');
@@ -155,10 +158,54 @@ describe('form body validation', () => {
         'body',
         new ValidationService(defaultFormatter),
         defaultFormatter,
+        { forms: true },
       );
       await reader(fake.ctx, async () => {});
       expect(reader.value(fake.ctx)).toEqual({ count: 3 });
       if (header === 'application/json') expect(spy).not.toHaveBeenCalled();
     }
+  });
+
+  it('keeps a validator without forms: true on the JSON path for a form body', async () => {
+    const fake = createFakeContext({
+      request: { headers: { 'content-type': 'application/x-www-form-urlencoded' } },
+    });
+    const formData = vi.fn(() =>
+      Promise.resolve(parseFormBody(encode('count=3'), 'application/x-www-form-urlencoded')),
+    );
+    vi.spyOn(fake.ctx.request, 'json').mockRejectedValue(new SyntaxError('not JSON'));
+    const ctx = { ...fake.ctx, request: { ...fake.ctx.request, formData } };
+    const next = vi.fn();
+    for (const options of [undefined, { forms: false }]) {
+      await createValidationMiddleware(
+        z.object({ count: z.coerce.number() }),
+        'body',
+        new ValidationService(defaultFormatter),
+        defaultFormatter,
+        options,
+      )(ctx, next);
+      expect(fake.responseSnapshot().status).toBe(400);
+      expect(fake.responseSnapshot().body).toContain('Invalid JSON in request body');
+    }
+    expect(formData).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+  it('ignores forms: true for every target but body', async () => {
+    const fake = createFakeContext({
+      query: { count: '3' },
+      request: { headers: { 'content-type': 'application/x-www-form-urlencoded' } },
+    });
+    const formData = vi.fn();
+    const ctx = { ...fake.ctx, request: { ...fake.ctx.request, formData } };
+    const reader = createValidationMiddleware(
+      z.object({ count: z.coerce.number() }),
+      'query',
+      new ValidationService(defaultFormatter),
+      defaultFormatter,
+      { forms: true },
+    );
+    await reader(ctx, async () => {});
+    expect(reader.value(ctx)).toEqual({ count: 3 });
+    expect(formData).not.toHaveBeenCalled();
   });
 });
