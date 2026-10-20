@@ -394,3 +394,94 @@ describe('assertInsideProject (M101f re-audit N9/N10)', () => {
     expect(fs.writes).toEqual([]);
   });
 });
+
+describe('bounded read of an existing file (L1 audit)', () => {
+  // The jobs barrel is a CLI-owned path a schematic regenerates. The fake's
+  // `stat` reports the planted path's kind and size, standing in for a
+  // committed link to `/dev/zero` or a planted special file.
+  const barrel = '/p/src/jobs/index.ts';
+
+  /** Reports one planted path's metadata instead of the fake's regular file. */
+  function planted(
+    fs: ReturnType<typeof createFakeFs>,
+    metadata: { readonly isFile: boolean; readonly size: number },
+  ): IFileSystem {
+    return {
+      ...fs,
+      stat: (path) =>
+        path === barrel
+          ? Promise.resolve({ isFile: metadata.isFile, isDirectory: false, size: metadata.size })
+          : fs.stat(path),
+    };
+  }
+
+  it('refuses a dry run when a managed path is not a regular file, writing nothing', async () => {
+    const fs = createFakeFs({ [barrel]: 'old' });
+    await expect(
+      reportDryRunPlan(
+        { fs: planted(fs, { isFile: false, size: 0 }), log: () => {}, error: () => {} },
+        [{ path: barrel, contents: 'new', managed: true }],
+      ),
+    ).rejects.toThrow('is not a regular file');
+    expect(fs.writes).toEqual([]);
+    expect(fs.read(barrel)).toBe('old');
+  });
+
+  it('refuses a write when a managed path is not a regular file, leaving no partial files', async () => {
+    const fs = createFakeFs({ [barrel]: 'old' });
+    await expect(
+      writeFiles(
+        planted(fs, { isFile: false, size: 0 }),
+        [
+          { path: barrel, contents: 'new', managed: true },
+          { path: '/p/src/jobs/nightly.ts', contents: 'job' },
+        ],
+        { root: '/p' },
+      ),
+    ).rejects.toThrow('is not a regular file');
+    expect(fs.writes).toEqual([]);
+    expect(fs.has('/p/src/jobs/nightly.ts')).toBe(false);
+    expect(fs.read(barrel)).toBe('old');
+  });
+
+  it('refuses a dry run and a write when a managed path exceeds 1 MiB', async () => {
+    const fs = createFakeFs({ [barrel]: 'old' });
+    const oversized = planted(fs, { isFile: true, size: 2 * 1024 * 1024 });
+    await expect(
+      reportDryRunPlan({ fs: oversized, log: () => {}, error: () => {} }, [
+        { path: barrel, contents: 'new', managed: true },
+      ]),
+    ).rejects.toThrow('is 2097152 bytes, larger than the 1 MiB');
+    expect(fs.writes).toEqual([]);
+    await expect(
+      writeFiles(oversized, [{ path: barrel, contents: 'new', managed: true }], { root: '/p' }),
+    ).rejects.toThrow('is 2097152 bytes, larger than the 1 MiB');
+    expect(fs.writes).toEqual([]);
+    expect(fs.read(barrel)).toBe('old');
+  });
+
+  it('still classifies and rewrites an ordinary managed file under the cap', async () => {
+    const fs = createFakeFs({ [barrel]: 'old barrel', '/p/src/jobs/same.ts': 'same' });
+    const log: string[] = [];
+    const code = await reportDryRunPlan({ fs, log: (line) => log.push(line), error: () => {} }, [
+      { path: barrel, contents: 'new barrel', managed: true },
+      { path: '/p/src/jobs/same.ts', contents: 'same', managed: true },
+    ]);
+    expect(code).toBe(0);
+    expect(log).toEqual(['would update /p/src/jobs/index.ts', 'unchanged /p/src/jobs/same.ts']);
+    const outcomes = await writeFiles(
+      fs,
+      [
+        { path: barrel, contents: 'new barrel', managed: true },
+        { path: '/p/src/jobs/same.ts', contents: 'same', managed: true },
+      ],
+      { root: '/p' },
+    );
+    expect(outcomes).toEqual([
+      { path: barrel, outcome: 'updated' },
+      { path: '/p/src/jobs/same.ts', outcome: 'unchanged' },
+    ]);
+    expect(fs.read(barrel)).toBe('new barrel');
+    expect(fs.read('/p/src/jobs/same.ts')).toBe('same');
+  });
+});

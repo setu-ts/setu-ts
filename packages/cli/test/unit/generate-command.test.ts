@@ -885,3 +885,99 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     expect(dry.fs.has('/app/src/controllers/index.ts')).toBe(false);
   });
 });
+
+// L1 audit: a CLI-owned managed file (a schematic's regenerated barrel) that is
+// a committed link or special file used to be read without bound — a link to
+// `/dev/zero` hung `setu g job x --dry-run` and `setu g job x` forever. The
+// fake's `stat` reports the planted path's kind and size instead of touching
+// the special file.
+describe('bounded read of a managed file (L1 audit)', () => {
+  const barrel = '/app/src/jobs/index.ts';
+
+  // A schematic that regenerates the jobs barrel and one job module, the
+  // shape of `setu g job x`.
+  const load = () =>
+    Promise.resolve({
+      schematic: (): readonly GeneratedFile[] => [
+        {
+          path: 'src/jobs/index.ts',
+          contents: 'export const JOB_NAMES = ["nightly"];\n',
+          managed: true,
+        },
+        { path: 'src/jobs/nightly.ts', contents: 'export const nightly = true;\n' },
+      ],
+    });
+
+  /** A project whose planted barrel's `stat` reports the given kind and size. */
+  function plantedHarness(metadata: { readonly isFile: boolean; readonly size: number }): Harness {
+    const fs = createFakeFs({ '/app/deno.json': '{}', [barrel]: 'old' });
+    const out = createRecorder();
+    const err = createRecorder();
+    return {
+      fs,
+      out,
+      err,
+      run: (argv, load) =>
+        runGenerateCommand(parseArgs(argv), {
+          fs: {
+            ...fs,
+            stat: (path) =>
+              path === barrel
+                ? Promise.resolve({
+                    isFile: metadata.isFile,
+                    isDirectory: false,
+                    size: metadata.size,
+                  })
+                : fs.stat(path),
+          },
+          cwd: '/app',
+          now: () => 0,
+          log: out.sink,
+          error: err.sink,
+          ...(load === undefined ? {} : { load }),
+        }),
+    };
+  }
+
+  it('refuses a dry run with exit 1 when a managed file is not a regular file', async () => {
+    const h = plantedHarness({ isFile: false, size: 0 });
+    expect(await h.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
+    expect(h.err.text()).toContain('Failed to write:');
+    expect(h.err.text()).toContain(
+      `${barrel} is not a regular file; the CLI will not read or replace it.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a write with exit 1, leaving no partial files, when a managed file is not a regular file', async () => {
+    const h = plantedHarness({ isFile: false, size: 0 });
+    expect(await h.run(['custom', 'jobs', 'nightly'], load)).toBe(1);
+    expect(h.err.text()).toContain(
+      `${barrel} is not a regular file; the CLI will not read or replace it.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
+    expect(h.fs.read(barrel)).toBe('old');
+  });
+
+  it('refuses a dry run and a write with exit 1 when a managed file exceeds 1 MiB', async () => {
+    const dry = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
+    expect(await dry.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
+    expect(dry.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
+    expect(dry.fs.writes).toEqual([]);
+
+    const real = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
+    expect(await real.run(['custom', 'jobs', 'nightly'], load)).toBe(1);
+    expect(real.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
+    expect(real.fs.writes).toEqual([]);
+    expect(real.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
+    expect(real.fs.read(barrel)).toBe('old');
+  });
+
+  it('still rewrites an ordinary managed file under the cap', async () => {
+    const h = harness({ [barrel]: 'old' });
+    expect(await h.run(['custom', 'jobs', 'nightly'], load)).toBe(0);
+    expect(h.fs.read(barrel)).toBe('export const JOB_NAMES = ["nightly"];\n');
+    expect(h.fs.has('/app/src/jobs/nightly.ts')).toBe(true);
+  });
+});

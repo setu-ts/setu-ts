@@ -22,6 +22,9 @@ const ARGS_BUDGET = 60;
 
 /**
  * Joins CLI-authored object arguments; expressions and nested object literals are refused.
+ * Braces inside a quoted string, including a template literal's `${…}`, are not inspected;
+ * the CLI never renders a template literal into these arguments (`stringLiteral` emits only
+ * single- or double-quoted strings).
  *
  * @param a - The existing single-level object literal
  * @param b - The additional single-level object literal
