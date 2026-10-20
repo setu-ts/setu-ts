@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Declare JSON media types on validated bodies (M114, 0.10.0)
+### Declare JSON media types on validated bodies (M114, 0.10.0, `@setu-ts/validation-plugin`)
 
 Send `Content-Type: application/json` on JSON requests to `validateBody` or `@ValidateBody` routes
 using the first-party validation service. It also accepts any `application/*+json` type, ignoring

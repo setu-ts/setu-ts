@@ -2497,9 +2497,18 @@ importers:
         specifier: workspace:^
         version: link:../common
     devDependencies:
+      '@setu-ts/decorator-plugin':
+        specifier: workspace:^
+        version: link:../decorator-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../exceptions
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel
+      '@setu-ts/runtime':
+        specifier: workspace:^
+        version: link:../runtime
       '@types/node':
         specifier: ^24
         version: 24.19.2

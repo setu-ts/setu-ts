@@ -81,12 +81,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // One more shell/tree fence than before M65: the domain-module section now
     // shows the functional file set beside the class-based one. One more than
     // that since M72: the broker-selection section carries one shell fence.
-    total: 13,
+    // One more since M114: the `--module` placement section shows a shell fence.
+    total: 14,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 12,
+    skipped: 13,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -235,12 +236,12 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 278 once docs/how-it-fits-together.md joins the corpus (+4, all compiling).
   // 282 in M110a: docs/authorization.md joins the corpus (+4, all compiling).
   // 286 in M110b: its Scoped Roles section (+4, all compiling).
-  total: 286,
+  total: 287,
   ts: 224,
   compile: 191,
   external: 33,
   pseudocode: 0,
-  skipped: 62,
+  skipped: 63,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {
