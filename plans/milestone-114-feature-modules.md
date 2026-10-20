@@ -1,4 +1,4 @@
-# Milestone 114 — Self-Contained Feature Modules (`@setu-ts/cli`, `@setu-ts/validation-plugin`)
+# Milestone 114 — Self-Contained Feature Modules (`@setu-ts/cli`, `@setu-ts/validation-plugin`, `@setu-ts/common`, `@setu-ts/decorator-plugin`)
 
 > **Status:** Planning. Branch: `feat/m114-feature-modules`. `develop` and `main` are protected —
 > all work (implementation + fixes) stays on this one branch until it merges via a single PR.
@@ -303,6 +303,30 @@ task.
 - **Why:** ROADMAP item 5.
 - **Test home:** `test/unit/templates.test.ts`, baseline fixture, `scaffold-runs-e2e`.
 
+### 3.12a Form bodies are OPT-IN per validator (maintainer decision 2026-10-21, after the security audit)
+
+- **Decision (supersedes the default-on reading of §3.12 below):** the committed-tree audit (L3b)
+  measured that default-on form acceptance lets a cross-site HTML `<form>` — which a browser sends
+  with no CORS preflight — reach every cookie-authenticated validated route that used to refuse it
+  with 400. So `validateBody(S)` stays JSON-only exactly as released, and a validator opts in:
+  `validateBody(S, { forms: true })`,
+  `createValidationMiddleware(S, 'body', service, formatter, { forms: true })`, and
+  `@ValidateBody(S, { forms: true })`. Without the option a form-encoded body takes the JSON path
+  and answers the released `400 Invalid JSON in request body`. The option has no effect on any
+  target but `body`. The conversion rules of §3.12 apply unchanged to an opted-in validator.
+  Generated CRUD routes do NOT opt in (they are JSON APIs); docs pair any form route with
+  `csrfFormMiddleware`.
+- **The decorator path needs a contract change:** `DecoratorPlugin` enforces `@ValidateBody` by
+  calling `IValidationService.middleware(schema, target)` (`decorator-plugin.ts:789`), which has no
+  room for an option. `common` gains `ValidationMiddlewareOptions { readonly forms?: boolean }` and
+  `IValidationService.middleware(schema, target, options?)` — an OPTIONAL third parameter, so every
+  caller and every existing two-parameter implementation stays source-compatible. The decorator
+  records the flag on its internal `RouteSchemaMetadata` (`bodyForms`) and passes `{ forms: true }`
+  only for a route that set it.
+- **Test home:** `form-body-validation` unit and integration tests: a form posted to a plain
+  `validateBody(S)` answers 400; the same post to `validateBody(S, { forms: true })` validates; the
+  decorator route with and without the option; the third parameter reaches a custom service.
+
 ### 3.12 Form bodies validate with the same schema (folded in, maintainer decision 2026-10-20)
 
 - **Decision:** `extractTarget('body')` in `validation-middleware.ts` reads the request's form when
@@ -380,14 +404,18 @@ task.
 barrel content, test task globs, removed `export *` in a module index, renamed module test) ship in
 minor `0.10.0` with CHANGELOG migration text; existing projects keep working unchanged.
 
-| Exported symbol                                         | Kind  | Consumer / real code path that READS it                                                                                                                 |
-| ------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ValidatorMiddleware<T>` (`@setu-ts/validation-plugin`) | type  | return type of `validateBody/Query/Params/Headers/Cookies` and `createValidationMiddleware`; every generated functional route reads `.value(ctx)` on it |
-| `ValidatedOutput<S>` (`@setu-ts/validation-plugin`)     | type  | the inferred `T` of `ValidatorMiddleware`; applications annotate helpers with it                                                                        |
-| `SchematicOptions.targetModule?` (`@setu-ts/cli`)       | field | the `service`/`route`/`controller`/`schema` schematics (placement); set by `runGenerateCommand`                                                         |
-| `SchematicOptions.moduleArtifacts?` (`@setu-ts/cli`)    | field | the per-module index renderer inside `route`/`controller --module`; set by `runGenerateCommand` from `scanModuleArtifacts`                              |
+| Exported symbol                                                | Kind            | Consumer / real code path that READS it                                                                                                                                      |
+| -------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ValidatorMiddleware<T>` (`@setu-ts/validation-plugin`)        | type            | return type of `validateBody/Query/Params/Headers/Cookies` and `createValidationMiddleware`; every generated functional route reads `.value(ctx)` on it                      |
+| `ValidatedOutput<S>` (`@setu-ts/validation-plugin`)            | type            | the inferred `T` of `ValidatorMiddleware`; applications annotate helpers with it                                                                                             |
+| `ValidationMiddlewareOptions` (`@setu-ts/common`)              | type            | third parameter of `IValidationService.middleware`; read by `ValidationService.middleware`, `validateBody`, `createValidationMiddleware` and `DecoratorPlugin`'s enforcement |
+| `ValidateBody(schema, options?)` (`@setu-ts/decorator-plugin`) | decorator param | `DecoratorPlugin` passes `{ forms: true }` to `IValidationService.middleware` for that route                                                                                 |
+| `SchematicOptions.targetModule?` (`@setu-ts/cli`)              | field           | the `service`/`route`/`controller`/`schema` schematics (placement); set by `runGenerateCommand`                                                                              |
+| `SchematicOptions.moduleArtifacts?` (`@setu-ts/cli`)           | field           | the per-module index renderer inside `route`/`controller --module`; set by `runGenerateCommand` from `scanModuleArtifacts`                                                   |
 
-No `@setu-ts/common` change. `cli` internals (`seams/modules.ts`, `scanModuleArtifacts`,
+`@setu-ts/common` gains `ValidationMiddlewareOptions` and the optional third parameter of
+`IValidationService.middleware` (§3.12a); `@setu-ts/decorator-plugin`'s `ValidateBody` gains an
+optional second parameter. `cli` internals (`seams/modules.ts`, `scanModuleArtifacts`,
 `registerModuleSymbol`, `REGISTER_MODULES_EXPORT`) are NOT barrel-exported.
 
 ### 4.1 Options — every option names its consumer
@@ -504,6 +532,22 @@ pnpm run release:verify 0.9.0
 - A kernel API exposing the bound port — not needed (§3.10).
 
 ## 10. Security design review (the committed-tree audit is REQUIRED)
+
+**Round-1 audit (commit `2cbeb39a`) found four Lows; dispositions:** L1 (a reader returned another
+validator's value when a validator or middleware wrote only the common key) — fixed: the private
+record stores `{ token, value }` and `value(ctx)` also requires the common key to still hold that
+exact value. L2 (the functional scanner admitted non-identifier directory names, breaking the barrel
+and forging a stderr line through LF) — fixed: such entries are skipped and reported through
+`escapeName`, and the admitted list is escaped. L3a (generated sample store unbounded, routes
+public) — fixed: the generated service and routes say so. L3b (forms default-on widened CSRF reach)
+— fixed by §3.12a. L4 (this review omitted the CLI half) — the rows below are added.
+
+| Threat (CLI and generated code)                                          | Control                                                                                                 | Probe                                                               |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `--module` value escaping `src/modules/<m>/`                             | refuses `/`, `\` and non-identifier names; must name an admitted module                                 | `../x`, `..`, `a/b`, `.`, NUL → exit 2, no write                    |
+| A directory name under `src/modules/` injecting source or terminal lines | non-identifier-safe or non-kebab entries are skipped and reported escaped                               | `q'y` and a name with LF → skipped, barrel compiles, no forged line |
+| An oversized or device-linked `index.ts` hanging or exhausting the scan  | `stat.isFile` and `size <= MAX_EXISTING_FILE_BYTES`                                                     | over-limit index skipped, never read                                |
+| Generated code a developer copies being unsafe by default                | JSON-only validators; documented public/unbounded sample store; generated test server binds `127.0.0.1` | read the generated output                                           |
 
 Form-body validation (§3.12) turns untrusted urlencoded and multipart input into an object handed to
 an application schema, so this milestone crosses a trust boundary and is audited per
