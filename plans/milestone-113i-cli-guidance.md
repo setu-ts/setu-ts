@@ -327,3 +327,50 @@ pnpm run release:verify 0.9.0
 - Making the CLI a scaffold dependency — rejected by the maintainer in favour of §3.7.
 - Rolling back on SIGTERM — the CLI registers SIGINT only (`main.ts:46`); adding a second signal is
   a behaviour change, not a V9 row. Unowned; §3.8 documents the limit instead.
+
+## 10. Design security review (recorded after implementation)
+
+Written after implementation, at the maintainer's direction, because the plan shipped without one;
+it describes the flows this milestone changes, not a threat model reverse-engineered for the audit.
+
+**Reviewed flows.** (F1) `mergeObjectArgs` joining a CLI-rendered transport arm, which carries a
+`--transport-url` or a workspace-manifest URL, with the jobs seam's arguments. (F2) `setu add`
+inserting `XPlugin()` into a `setu.config.ts` the developer owns. (F3) `reportDryRunPlan` reading
+the project's existing files to classify a dry run. (F4) the jobs seam scanner reading
+`src/jobs/*.job.ts`. (F5) generated text and CLI output naming a CLI invocation. (F6) paths and
+names printed in `WOULD REFUSE`, `would create` and refusal messages.
+
+**Assets.** The integrity of generated source (no CLI argument or project file content becomes code
+outside a string literal); files outside the target project (never written); the developer's
+terminal (no control sequence reaches it from a path or name); the package a printed instruction
+runs.
+
+**Attackers.** (A1) a value the developer pastes into a CLI flag (`--transport-url`, a schematic
+name) from untrusted documentation; (A2) the contents of a repository the developer clones and then
+runs `setu` in — hand-edited `setu.config.ts`, a workspace manifest, symbolic links and special
+files at planned paths; (A3) the npm namespace, for any bare command a reader is told to run.
+
+**Obligations for the implementation audit.**
+
+1. F1: a URL holding `'`, `"`, `\`, `` ` ``, `${`, braces, commas, CR/LF or NUL renders as one
+   string literal that evaluates to exactly the URL, through both `g app` and `new --workspace`; a
+   genuine nested object literal is still refused; the scanner is linear in its input.
+2. F2: insertion only through the existing anchor; a configuration the classifier cannot decide
+   falls back to printed guidance; a second `add` inserts nothing; printed guidance echoes no
+   control character from the project.
+3. F3: a dry run never reads a path it will refuse; it writes nothing; a planned path that is a
+   directory or a link to a special file produces a refusal or a bounded failure, never a hang.
+4. F4: the scanner admits only regular files under `src/jobs/` that export the processor factory,
+   and never reads outside the project.
+5. F5: every pinned invocation names `@setu-ts/cli` at the exact running version; no runnable
+   instruction names a bare `setu` in a generated file; the runtime it names comes from the project
+   manifest, not from an argument.
+6. F6: every path and name printed by the changed code passes through `escapeName`.
+
+| Threat                                    | Resolution                                                  |
+| ----------------------------------------- | ----------------------------------------------------------- |
+| URL breaks out of its literal into code   | `stringLiteral` escaping; quote-aware merge refuses nesting |
+| `add` corrupts a hand-edited config       | anchor-only insertion, fail-closed classifier (M101g)       |
+| Dry run reads or follows a hostile path   | collisions excluded before any read                         |
+| Printed path forges terminal output       | `escapeName` on every printed path                          |
+| README tells the reader to run `npx setu` | pinned `@setu-ts/cli@<VERSION>` invocation                  |
