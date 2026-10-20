@@ -12,6 +12,42 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Refresh generated output for M114 (0.10.0, `@setu-ts/cli`, `@setu-ts/validation-plugin`)
+
+**Nothing is required.** An existing project keeps working: its `src/controllers/<name>.routes.ts`
+files are still wired by the controllers barrel, and only newly generated modules use the new
+layout. A project scaffolded before this milestone does not call `registerModules`;
+`setu generate module` prints the import line and the `registerModules(app.router, app.services);`
+call to add.
+
+- **To adopt the new module layout for a pre-M114 functional module:** move
+  `src/controllers/<name>.routes.ts` into `src/modules/<name>/`, change its service import to
+  `./<name>.service.ts`, then run any `setu generate … --module <name>` command (or add the two
+  lines the command prints) so the module index and activation barrel are regenerated. The module's
+  `index.ts` no longer re-exports the service — import it from `./<name>.service.ts` directly.
+- **To stop casting validated values:** switch the
+  `ctx.state.get(validatedStateKey('body')) as z.infer<typeof Schema>` read to the validator itself
+  — declare `const body = validateBody(Schema);`, list it in the route's `middleware`, and read
+  `body.value(ctx)` in the handler. `value(ctx)` throws a `TypeError` naming the target when that
+  validator did not run on the request or a later validator for the same target overwrote it. The
+  state-key read still works and is unchanged if you keep it.
+- **Generated tests and tasks:** new scaffolds split `test` (every `*.test.ts` except
+  `*.e2e.test.ts`) and `test:e2e` (only `*.e2e.test.ts`, over real HTTP through the CLI-owned
+  `test/support/server.ts`); `setu new` emits `test/e2e/app.e2e.test.ts` on socket targets, and
+  `setu g module` adds a per-module `<name>.e2e.test.ts` beside the module. `<name>.test.ts`
+  replaces `<name>.service.test.ts` (it drives the module in-process through
+  `createTestApp({ app: await createApp() })`), and a module on Cloudflare Workers no longer emits a
+  test.
+- **Validation:** nothing is required. To accept form posts on a route, pass `{ forms: true }` to
+  `validateBody` or `@ValidateBody` and add `csrfFormMiddleware`; that route then validates
+  `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema —
+  numbers and booleans arrive as strings (use `z.coerce`), a file part is the framework's `FormFile`
+  (not a web `File`), a repeated field becomes an array in wire order, and a name ending `[]` is
+  always an array. An over-limit body on a validated route answers `413` instead of `400` when
+  `RuntimePlugin({ maxBodyBytes })` is set. `zod` is declared by every template that installs
+  `validation-plugin` and added by `setu add validation` on every runtime; `setu g module` and
+  `setu g schema` print the runtime's install command in a project that lacks it.
+
 ### Refresh generated output for M113h (0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`, `@setu-ts/kernel`)
 
 New scaffolds emit the corrected output; an existing project keeps working, and these steps are what

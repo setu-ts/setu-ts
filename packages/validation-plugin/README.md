@@ -36,6 +36,61 @@ app.router.post('/users', {
 });
 ```
 
+## Reading the validated value
+
+The five `validateXxx` helpers and `createValidationMiddleware` return
+`ValidatorMiddleware<ValidatedOutput<S>>` — a `MiddlewareFunction` (so every existing call site
+type-checks unchanged) with one added member, `value(ctx)`:
+
+```typescript
+import { z } from 'zod';
+import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
+
+const CreateUser = z.object({ email: z.string().email(), age: z.number().int() });
+const createBody = validateBody(CreateUser);
+
+app.register(ValidationPlugin());
+
+app.router.post('/users', {
+  middleware: [createBody],
+  handler: (ctx) => ctx.response.json(createBody.value(ctx)), // typed ValidatedOutput<typeof CreateUser>
+});
+```
+
+`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — for Zod
+3 and 4 alike, and it is inferred from the schema you pass, so the type follows the schema instead
+of being restated in the handler. `value(ctx)` returns the stored value only when that validator ran
+on the request; it throws a `TypeError` naming the target otherwise — when the validator is not in
+the route's chain, or a later validator for the same target overwrote it — a programming error that
+`errorHandler` masks to a 500. The old read still works and is unchanged:
+`ctx.state.get(validatedStateKey('body'))` keeps carrying the parsed value, and the
+`@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it.
+
+## Form bodies
+
+`validateBody(schema, { forms: true })` and `@ValidateBody(schema, { forms: true })` also validate
+`application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they
+validate a JSON body with. Off by default: a cross-site HTML `<form>` reaches a route that accepts
+forms with no CORS preflight, so pair an opted-in route with form CSRF protection
+(`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers `400`
+"Invalid JSON in request body", as before. With the option, a server-rendered `<form>` post
+validates against the schema a JSON client passes, and reads back through `value(ctx)`.
+
+The form is converted to a record before validation:
+
+- a field sent once is a single value; a repeated field becomes an array of its values in wire
+  order;
+- a name ending `[]` is always an array, kept under the name as written;
+- values are strings or the framework's `FormFile` — NOT a web `File`, so `z.instanceof(File)`
+  refuses a file part and a schema checks the `FormFile` shape instead;
+- numbers and booleans arrive as strings — use `z.coerce` in the schema for them.
+
+Stated limits: the generated OpenAPI document still describes a validated body as
+`application/json`; the session plugin's `_csrf` field reaches the schema, where a Zod object strips
+the unknown key by default and `forbidNonWhitelisted` (or the schema's own `.strict()`) refuses it;
+and an over-limit body answers `413` when `RuntimePlugin({ maxBodyBytes })` is set — previously such
+a body answered `400` on a validated route.
+
 ## Options
 
 | Option                 | Type                                               | Default     | Description                                                     |

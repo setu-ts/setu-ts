@@ -31,17 +31,27 @@ describe('documented schematic tables', () => {
         const emitted = new Set<string>();
         for (const mode of ['functional', 'class-based']) {
           const installed = mode === 'class-based' ? [...plugins, 'decorator-plugin'] : plugins;
-          for (const file of getSchematic(schematic.name)!.factory(
-            deriveNames('widget'),
+          // A row may document the `--module` placement as `src/modules/<module>/…`, so the
+          // table is checked against both placements.
+          for (const placed of [
             options(installed),
-          )) {
-            emitted.add(file.path);
+            { ...options(installed), targetModule: 'billing' },
+          ]) {
+            for (const file of getSchematic(schematic.name)!.factory(
+              deriveNames('widget'),
+              placed,
+            )) {
+              emitted.add(file.path);
+            }
           }
         }
         const paths = [...cells[emittedColumn]!.matchAll(/`(src\/[^`]+)`/g)];
         expect(paths.length, schematic.name).toBeGreaterThan(0);
         for (const [, pattern] of paths) {
-          const path = pattern!.replaceAll('<name>', 'widget').replaceAll('<kind>', schematic.name);
+          const path = pattern!
+            .replaceAll('<name>', 'widget')
+            .replaceAll('<kind>', schematic.name)
+            .replaceAll('<module>', 'billing');
           const expression = new RegExp(
             `^${path.replaceAll('.', '\\.').replace(/<(timestamp|stamp)>/, '[0-9]{14}')}${path.endsWith('/') ? '.+' : ''}$`,
           );

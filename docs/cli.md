@@ -217,16 +217,17 @@ setu g service billing --dry-run  # print the plan, write nothing
 Any casing of the name produces identical output: `setu g controller user-profile` and
 `setu g controller UserProfile` emit the same file.
 
-There are sixteen built-in schematics. Every one except `guard`, `migration` and — in a functional
-project — `service` and `job` lands in a barrel the generated `setu.config.ts` already imports, so a
-generated artifact reaches its registration site with **no edit to a file you own**:
+There are seventeen built-in schematics. Every one except `guard`, `migration`, `schema` and — in a
+functional project — `service` and `job` lands in a barrel the generated `setu.config.ts` already
+imports, so a generated artifact reaches its registration site with **no edit to a file you own**:
 
 | Schematic          | Requires                    | Emits into                                                                                         | Reaches                                                                                                                                         |
 | ------------------ | --------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `module`           | —                           | `src/modules/`                                                                                     | `DecoratorPlugin({ modules })` (class mode), or a `register…Routes(router)` call                                                                |
+| `module`           | —                           | `src/modules/<name>/` (no file in the controllers folder)                                          | `DecoratorPlugin({ modules })` (class mode), or `registerModules(app.router, app.services)` from `src/modules/index.ts` (functional mode)       |
 | `controller`       | —                           | `src/controllers/`                                                                                 | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call                                                            |
 | `service`          | —                           | `src/services/`                                                                                    | `DecoratorPlugin({ services })`, when installed                                                                                                 |
-| `route`            | —                           | `src/controllers/`                                                                                 | A `register…Routes(router)` call in `createApp()`                                                                                               |
+| `route`            | —                           | `src/controllers/`; `src/modules/<module>/` with `--module`                                        | A `register…Routes(router)` call in `createApp()`, or the module's `index.ts` (functional mode)                                                 |
+| `schema`           | `validation-plugin`         | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/` with `--module`                    | Nothing — the feature that uses it imports it                                                                                                   |
 | `middleware`       | —                           | `src/middleware/`                                                                                  | The global middleware pipeline                                                                                                                  |
 | `plugin`           | —                           | `src/plugins/`                                                                                     | The `plugins: [...]` array                                                                                                                      |
 | `health-indicator` | `health-plugin`             | `src/health/`                                                                                      | `HealthPlugin({ indicators })` → `GET /health`                                                                                                  |
@@ -240,15 +241,24 @@ generated artifact reaches its registration site with **no edit to a file you ow
 | `ws-route`         | `websocket-plugin`          | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`              | The `plugins: [...]` array, or `DecoratorPlugin({ ingress })` in class mode                                                                     |
 | `sse`              | `sse-plugin`                | `src/controllers/`                                                                                 | A `register…Routes(router)` call, or `DecoratorPlugin({ controllers })` in class mode                                                           |
 
-`guard` and `migration` are unwired deliberately, not by omission. A `guard` answers `401` when
-`ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and `/` —
-turning a generated file into an outage; its positions are per route (`@UseGuards`, a route's
+`guard`, `migration` and `schema` are unwired deliberately, not by omission. A `guard` answers `401`
+when `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and
+`/` — turning a generated file into an outage; its positions are per route (`@UseGuards`, a route's
 `middleware` list). With `QueuePlugin` installed, a functional `job` exports a processor factory
 through `src/jobs/index.ts`, consumed by `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`.
 Without queue it remains a standalone function. Class-based jobs require queue and use the ingress
 barrel. Nothing in the framework reads migration files at all. A functional `service` is a plain
 exported function, which has no registration site; `src/services/index.ts` re-exports it for
-convenience and registers nothing.
+convenience and registers nothing. A `schema` file has no registration site either: it is the shapes
+file a feature imports — [Domain modules](#domain-modules) says where shapes live and what
+`--module` does with them.
+
+`--module <name>` is the feature-scoped form of the four schematics a feature owns — `service`,
+`route`, `controller` and `schema`: it places the file inside the named module rather than the
+top-level folder, and every other schematic refuses the flag because it is app-wide. The module's
+CLI-owned `index.ts` is regenerated to register it (functional mode), and a class-based module is
+extended by a printed `@Module` line rather than an edited one. See
+[Domain modules — `--module`](#--module-place-a-file-inside-a-feature).
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
 and names the `setu add` command that installs it:
@@ -316,40 +326,152 @@ schematics that render a barrel — the `modules` and `artifacts` already presen
 setu g module orders
 ```
 
-In a **functional** project it writes a plain service, its test, a module barrel, and a route module
-the managed routes barrel already registers — so the module serves requests with no edit to
-`setu.config.ts`:
+In a **functional** project (the default style) the whole feature lives in one folder, and nothing
+is written under `src/controllers/` any more:
 
 ```
 src/modules/orders/
-├── index.ts                      # the module's own barrel
-├── orders.service.ts             # export function listOrders()
-└── orders.service.test.ts        # describe/it + expect
-src/controllers/
-├── index.ts                      # managed: registerGeneratedRoutes(app.router, app.services)
-└── orders.routes.ts              # registerOrdersRoutes — GET /orders and POST /orders (201)
+├── index.ts                      # CLI-owned, regenerated; exports registerOrdersModule(router, services?)
+├── orders.routes.ts              # registerOrdersRoutes — GET /orders, GET /orders/:id, POST /orders (201), PATCH /orders/:id
+├── orders.service.ts             # an in-memory Map keyed by id; the JSDoc says to replace it with a repository
+├── orders.schemas.ts             # only when @setu-ts/validation-plugin is installed
+├── orders.test.ts                # in-process contract test
+└── orders.e2e.test.ts            # real-HTTP contract test (socket targets only)
+src/modules/index.ts              # CLI-owned; exports registerModules(router, services?)
 ```
 
-In a **class-based** project it writes the decorated aggregate and rewrites the module barrel, whose
-`MODULES` array the scaffolded `setu.config.ts` already passes to `DecoratorPlugin({ modules })`:
+The module's `index.ts` is CLI-owned and regenerated by every `setu generate … --module orders`; it
+exports exactly one symbol, `registerOrdersModule(router, services?)`, which calls every registrar
+in the folder — it re-exports nothing, not even the service. `src/modules/index.ts` is the
+activation barrel: it exports `registerModules(router, services?)`, and every functional scaffold's
+`setu.config.ts` calls `registerModules(app.router, app.services);` right after
+`registerGeneratedRoutes(...)`, so the module serves requests with no edit to `setu.config.ts`. In a
+project scaffolded before that call existed, `setu g module` prints the import line and the call to
+add. The generated service is an in-memory `Map` that the developer replaces with a repository, and
+a request for a missing id answers `404`.
+
+In a **class-based** project the module keeps its decorated shape and gains the schemas file and the
+two tests, while `src/modules/index.ts` stays the `MODULES` barrel the scaffolded `setu.config.ts`
+passes to `DecoratorPlugin({ modules })`:
 
 ```
 src/modules/
 ├── index.ts                      # managed: MODULES (the active @Module classes)
 └── orders/
-    ├── index.ts                  # the module's own barrel
+    ├── index.ts
     ├── orders.module.ts          # @Module({ controllers, providers }) — yours; never rewritten
     ├── orders.controller.ts      # @Controller, injecting the service by token
     ├── orders.service.ts         # @Injectable
-    └── orders.service.test.ts    # describe/it + expect
+    ├── orders.schemas.ts         # only when @setu-ts/validation-plugin is installed
+    ├── orders.test.ts
+    └── orders.e2e.test.ts        # socket targets only
 ```
 
 The managed barrel also exports `MODULE_CONTROLLERS` and `MODULE_SERVICES`, deprecated, so a config
 written before `@Module` declarations keeps working.
 
+Tests are emitted on the socket targets (Node, Deno, Bun) only; a Cloudflare Workers module carries
+none, and a Workers project's `test` task permits an empty suite.
+
 The schematic is **ungated**: it works in every project shape, including one scaffolded with no
 template at all. Which of the two shapes you get is decided by whether `@setu-ts/decorator-plugin`
 is installed.
+
+### `--module`: place a file inside a feature
+
+```bash
+setu g service pricing --module invoices
+setu g route summary --module invoices
+```
+
+`--module <name>` accepts `service`, `route`, `controller` and `schema` only, and `<name>` must be a
+module the project already has; every other schematic is app-wide and refuses the flag, naming its
+top-level folder.
+
+- **Functional:** the file is written into `src/modules/<module>/` and the module's CLI-owned
+  `index.ts` is regenerated to call it. A module-scoped route or controller mounts at
+  `/<module>/<name>` — a static path such as `GET /invoices/summary` outranks `GET /invoices/:id`,
+  so an `id` equal to `summary` is unreachable through `/:id`.
+- **Class-based:** the file is written and the CLI prints the line to add to
+  `@Module({ providers | controllers })` in `src/modules/<module>/<module>.module.ts`; it never
+  edits the module declaration. A module-scoped service is registered under the token
+  `<module>-<name>-service`.
+- `route --module` is **functional-only**: a class-based module has no imperative registration
+  point, and the refusal names top-level `g route` instead.
+
+### `src/shared/` and the one rule
+
+One rule covers the whole layout: **a file that belongs to one feature goes in the feature; an
+app-wide file goes in its top-level folder.** The app-wide kinds — `middleware`, `plugin`,
+`health-indicator`, `metric`, `migration`, `guard`, `command-handler`, `query-handler`,
+`event-handler`, `job`, `ws-route`, `sse` — stay top-level, which is why they refuse `--module`.
+
+`src/shared/` is the home for code several modules use — helpers, request-scoped dependency access,
+shared types, and `src/shared/schemas/` for shared shapes. It needs no wiring (no barrel lists it)
+and is not scaffolded as an empty folder; the module scanner leaves a directory that is not an
+admitted module alone, in both styles.
+
+### Where request and response shapes live
+
+| Shape                                                                              | Home                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a feature's request/response shapes                                                | `src/modules/<name>/<name>.schemas.ts` — one export per shape named by purpose (`Create<P>Body`, `Update<P>Body`, `List<P>Query`, `<P>Params`, `<P>Response`, `<P>ListResponse`), each a Zod value plus a same-named `z.infer` type; routes import it directly |
+| shapes several modules use (pagination query, `:id` params, money, page envelopes) | `src/shared/schemas/`                                                                                                                                                                                                                                          |
+| shapes several services share (integration events, cross-service contracts)        | a workspace library, `setu generate library contracts`                                                                                                                                                                                                         |
+| database rows                                                                      | stay with the database schema — **a row type is never an API shape**: response schemas define what may leave the service                                                                                                                                       |
+| a consumer's view of the API                                                       | the generated SDK client, never the server's schemas                                                                                                                                                                                                           |
+
+`setu generate schema <name>` (which requires `validation-plugin`) writes
+`src/shared/schemas/<name>.schemas.ts`, or `src/modules/<module>/<name>.schemas.ts` with `--module`,
+for a shape a feature needs that the module schematic did not emit. It never edits an existing file:
+a second run is the ordinary overwrite refusal, and `g schema invoices --module invoices` is refused
+because `g module invoices` already wrote `invoices.schemas.ts`.
+
+`zod` is declared by every template that installs `validation-plugin`, and `setu add validation`
+adds it on every runtime. In a project scaffolded earlier that has no `zod`, `g module` and
+`g schema` still write the files and print the install command for the detected runtime —
+`npm install zod@^4`, `bun add zod@^4` or `deno add npm:zod@^4` — rather than reporting success over
+an import that cannot resolve.
+
+### Generated tests
+
+`setu new` emits `test/support/server.ts` (CLI-owned; boots the real `createApp()` on a free
+loopback port) and `test/e2e/app.e2e.test.ts` on every socket target; a Cloudflare Workers scaffold
+emits neither. `setu g module` adds `<name>.test.ts` and `<name>.e2e.test.ts` beside the module (and
+re-emits `test/support/server.ts`, so a project scaffolded earlier gains it).
+
+- **`<name>.test.ts`** (in-process) drives the module through
+  `createTestApp({ app: await createApp() })` and `inject`, asserting a contract the generated code
+  and your code both keep: `GET /<name>` answers 200 with an `items` array, and a `POST` then `GET`
+  reads the created record back. It boots the **whole** composition in-process, so a plugin that
+  needs a live backend needs one in the test too; substitute it with `createTestApp`'s `overrides`
+  or `without`.
+- **`<name>.e2e.test.ts`** (socket targets only) drives the module over real HTTP through
+  `startTestServer()`: a valid `POST` answers 201, the created record reads back, an invalid body
+  answers 400 (only with schemas), and `/openapi.json` lists the module (only when `openapi-plugin`
+  is installed).
+
+The tasks split the two: `test` runs every `*.test.ts` except `*.e2e.test.ts`; `test:e2e` runs only
+`*.e2e.test.ts` over real HTTP. The `rest` template's sample now lives at `src/modules/greeting/`,
+so a new project's first files are exactly what `g module` produces.
+
+### Form bodies validate with the same schema
+
+`validateBody(Schema, { forms: true })` (or `@ValidateBody(Schema, { forms: true })`) also validates
+`application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema it
+validates JSON with. Off by default: a cross-site HTML `<form>` reaches a route that accepts forms
+with no CORS preflight, so pair an opted-in route with form CSRF protection (`csrfFormMiddleware`
+from `@setu-ts/session-plugin`). Without the option a form body answers `400` "Invalid JSON in
+request body", as before. Generated modules do not opt in. With the option, a server-rendered form
+post validates against the module's `<P>Body` like a JSON client does. The limits to know: a field
+sent once is a single value and a repeated field becomes an array in wire order, with a name ending
+`[]` always an array (kept under the name as written); values are strings or the framework's
+`FormFile` (not a web `File`, so `z.instanceof(File)` refuses it), and numbers arrive as strings —
+use `z.coerce`; the generated OpenAPI document still describes a validated body as JSON; a `_csrf`
+field from the session plugin reaches the schema, where a Zod object strips it by default and
+`forbidNonWhitelisted` refuses it; and an over-limit body answers 413 when
+`RuntimePlugin({ maxBodyBytes })` is set. The full behaviour is documented in the
+[`@setu-ts/validation-plugin` README](../packages/validation-plugin/README.md).
 
 **A decorated handler receives only its decorated parameters.** The plugin builds the argument list
 from parameter metadata alone and never passes the request context positionally, so a bare `ctx`

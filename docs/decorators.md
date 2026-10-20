@@ -946,13 +946,17 @@ const app = createApplication({
     DiPlugin(),
     DecoratorPlugin({
       autoDiscover: true,
-      controllersPath: './src/controllers',
+      controllersPath: './src',
     }),
   ],
 });
 
 await app.start({ port: 3000 });
 ```
+
+Discovery scans recursively from that root (skipping dot-directories and `node_modules`), so `./src`
+also reaches the `@Controller` classes inside `src/modules/<name>/` — pointing it at
+`./src/controllers` alone would miss every module controller.
 
 ## Limitations
 

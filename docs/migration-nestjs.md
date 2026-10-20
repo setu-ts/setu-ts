@@ -465,13 +465,14 @@ async create(@Body() createDto: CreateCatDto) {
 
 ```typescript
 import { validateBody } from '@setu-ts/validation-plugin';
-import { validatedStateKey } from '@setu-ts/common';
+
+const createBody = validateBody(CreateUserDto);
 
 app.router.post('/users', {
-  middleware: [validateBody(CreateUserDto)],
+  middleware: [createBody],
   handler: async (ctx) => {
-    const dto = ctx.state.get(validatedStateKey('body'));
-    // dto is the value validated and parsed by the middleware
+    const dto = createBody.value(ctx);
+    // dto is the value validated and parsed by the middleware, typed by the schema
     return ctx.response.json({ created: dto });
   },
 });
@@ -685,6 +686,15 @@ app.router.post('/users', async (ctx) => {
   return ctx.response.status(201).json({ created: dto });
 });
 ```
+
+Where the DTOs live follows the same rule the `setu` CLI uses: a `dto/` folder of one class per file
+becomes one `<name>.schemas.ts` per module — a Zod value per shape named by purpose
+(`Create<P>Body`, `Update<P>Body`, `List<P>Query`, `<P>Params`, `<P>Response`, `<P>ListResponse`),
+each paired with its `z.infer` type, and `PartialType` / `PickType` map to Zod's `.partial()` /
+`.pick()` / `.extend()`. Feature-scoped placement is the counterpart of
+`nest g service users/pricing`: `setu generate service pricing --module users` writes the service
+into `src/modules/users/` and regenerates the module's `index.ts` to register it (in a class-based
+project it instead prints the `@Module` line to add, without editing the declaration).
 
 ## Views
 

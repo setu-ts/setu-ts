@@ -8,6 +8,36 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Generated output: the functional module layout (M114, `@setu-ts/cli`).**
+  `setu generate module <name>` in the functional style now writes the whole feature into
+  `src/modules/<name>/` — `<name>.routes.ts`, `<name>.service.ts`, `<name>.schemas.ts` (with
+  `validation-plugin`), `<name>.test.ts`, `<name>.e2e.test.ts` (socket targets only) and a CLI-owned
+  `index.ts` — and writes nothing under `src/controllers/` any more; the module registers through
+  `registerModules(app.router, app.services)` from the CLI-owned `src/modules/index.ts`, which a
+  functional scaffold calls right after `registerGeneratedRoutes(...)`. **Existing projects keep
+  working:** their `src/controllers/<name>.routes.ts` files are still wired by the controllers
+  barrel, and only newly generated modules use the new layout. To adopt the layout for a pre-M114
+  functional module, move `src/controllers/<name>.routes.ts` into `src/modules/<name>/`, change its
+  service import to `./<name>.service.ts`, then run any `setu generate … --module <name>` command
+  (or add the import line and the `registerModules(app.router, app.services);` call, which
+  `setu generate module` prints for a project whose `setu.config.ts` does not call it yet) so the
+  module index and activation barrel are regenerated.
+- **Generated output: `rest` sample and generated tests (M114, `@setu-ts/cli`).** The `rest`
+  template's sample is now emitted as a generated module at `src/modules/greeting/` (routes stay
+  `/greetings` and `/greetings/:name`), so a new project's first files are exactly what `g module`
+  produces. `<name>.test.ts` replaces `<name>.service.test.ts`: instead of asserting a stub, it
+  drives the module in-process through `createTestApp({ app: await createApp() })` and asserts a
+  contract the generated code and the developer's code both keep. `setu new` emits
+  `test/support/server.ts` (boots `createApp()` on a free loopback port) and
+  `test/e2e/app.e2e.test.ts` on every socket target, and `g module` adds a per-module
+  `<name>.e2e.test.ts` over real HTTP. The `test` task now runs every `*.test.ts` except
+  `*.e2e.test.ts`; a new `test:e2e` task runs only `*.e2e.test.ts` over real HTTP. A module
+  generated on Cloudflare Workers emits no test (a Workers project's `test` task permits an empty
+  suite).
+- **Generated output: a functional module's `index.ts` no longer re-exports the service (M114,
+  `@setu-ts/cli`).** The CLI-owned `src/modules/<name>/index.ts` exports exactly one symbol,
+  `register<Pascal>Module(router, services?)`; the pre-M114 `export * from './<name>.service.ts'` is
+  gone. Import the service from `./<name>.service.ts` directly.
 - **Generated output corrections (M113h, #477, 0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`,
   `@setu-ts/kernel`).** New scaffolds opt into request logging with `/live`, `/ready`, `/health` and
   `/metrics` excluded, and a booted application logs one `Server listening` record when a logger is
@@ -378,6 +408,55 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Self-contained feature modules, `--module` and `g schema` (M114, `@setu-ts/cli`).**
+  `setu generate module <name>` makes a functional module self-contained: the whole feature lives in
+  `src/modules/<name>/` (routes, service, schemas, tests, module index) and registers through
+  `registerModules(app.router, app.services)` from `src/modules/index.ts`; a class-based module
+  keeps its controller/service/`@Module` shape and gains `<name>.schemas.ts` and the two tests. A
+  new `--module <name>` flag places a `service`, `route` (functional only), `controller` or `schema`
+  inside an existing module: functional mode writes the file into the module folder and regenerates
+  the module's `index.ts`, mounting a module-scoped route or controller at `/<module>/<name>`;
+  class-based mode writes the file and prints the `@Module({ providers | controllers })` line to add
+  — it never edits the declaration — registering a module-scoped service under the token
+  `<module>-<name>-service`. Every other schematic is app-wide and refuses the flag. A new `schema`
+  schematic (requires `validation-plugin`) writes `src/shared/schemas/<name>.schemas.ts` — or
+  `src/modules/<module>/<name>.schemas.ts` with `--module` — and never edits an existing file; a
+  second run is the ordinary overwrite refusal. `SchematicOptions` gains the optional
+  `targetModule?` and `moduleArtifacts?` fields for custom schematics. `zod` is declared by every
+  template that installs `validation-plugin`, `setu add validation` adds it on every runtime, and
+  `g module`/`g schema` print the runtime's install command (`npm install zod@^4`, `bun add zod@^4`,
+  `deno add npm:zod@^4`) in a project that lacks it.
+- **Generated e2e tests and the `test:e2e` task (M114, `@setu-ts/cli`).** `setu new` emits
+  `test/support/server.ts` (CLI-owned; boots the real `createApp()` on a free loopback port) and
+  `test/e2e/app.e2e.test.ts` on every socket target; `setu g module` adds
+  `src/modules/<name>/<name>.e2e.test.ts`, which drives the module's routes over real HTTP (and
+  re-emits `test/support/server.ts`, so a project scaffolded earlier gains it). A new `test:e2e`
+  task runs only `*.e2e.test.ts` over real HTTP; the `test` task keeps running the in-process unit
+  tests without a socket.
+- **`ValidatorMiddleware`/`ValidatedOutput` and `value(ctx)` (M114, `@setu-ts/validation-plugin`).**
+  `validateBody`/`validateQuery`/`validateParams`/ `validateHeaders`/`validateCookies` and
+  `createValidationMiddleware` now return `ValidatorMiddleware<ValidatedOutput<S>>` — a
+  `MiddlewareFunction` (so every existing call site type-checks unchanged) with one added member,
+  `value(ctx)`. `ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults
+  included — for Zod 3 and 4 alike, inferred from the schema, so the handler reads a typed value
+  with `validateBody(S).value(ctx)` and no cast. `value(ctx)` throws a `TypeError` naming the target
+  when that validator did not run on the request or a later validator for the same target overwrote
+  it. The `ctx.state.get(validatedStateKey(...))` read still works and is unchanged.
+- **Form-body validation (M114, `@setu-ts/validation-plugin`).**
+  `validateBody(schema, { forms: true })` and `@ValidateBody(schema, { forms: true })` also validate
+  `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they
+  validate a JSON body with. Off by default: a cross-site HTML `<form>` reaches a route that accepts
+  forms with no CORS preflight, so pair an opted-in route with form CSRF protection
+  (`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers
+  `400` "Invalid JSON in request body", as before. `IValidationService.middleware` gains the
+  matching optional third parameter, `ValidationMiddlewareOptions` in `@setu-ts/common`. The form
+  converts to a record: a field sent once is a single value, a repeated field becomes an array in
+  wire order, a name ending `[]` is always an array (kept under the name as written); values are
+  strings or the framework's `FormFile` (not a web `File`, so `z.instanceof(File)` refuses it —
+  check the `FormFile` shape instead), and numbers and booleans arrive as strings, so schemas use
+  `z.coerce`. A `_csrf` field from the session plugin reaches the schema, where a Zod object strips
+  it by default and `forbidNonWhitelisted` refuses it. The generated OpenAPI document still
+  describes a validated body as `application/json`.
 - **Reverse-proxy origin support (M113n, #473, `@setu-ts/common`, `@setu-ts/http-security-plugin`,
   `@setu-ts/session-plugin`, `@setu-ts/kernel`).** `REQUEST_ORIGIN_STATE_KEY`, `RequestOrigin`,
   `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` share the trusted public origin;
@@ -433,6 +512,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **An over-limit body on a validated route answers `413` (M114, `@setu-ts/validation-plugin`).** A
+  body the runtime refuses for size (`RuntimePlugin({ maxBodyBytes })` set) now keeps its `413` on a
+  route carrying `validateBody` — previously the validation middleware's own body read masked the
+  refusal and the route answered `400`. The `413` applies to JSON, `urlencoded` and `multipart`
+  bodies alike.
 - **A decorator barrel the config does not consume is reported (V9-8, M113h, #477, 0.10.0,
   `@setu-ts/cli`).** Service and controller comments and the decorator barrel headers name the
   inline `DecoratorPlugin` form and a starter's `decorators` arm. After writing a barrel,
