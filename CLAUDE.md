@@ -6592,7 +6592,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the maintainer's direction (not independent; design review recorded after implementation as plan
   §10), found a CLI-owned file linked to `/dev/zero` hanging `g job` and its dry run — read by both
   the writer and the artifact scanner, the latter since M70g — fixed by reading only regular files
-  under 1 MiB; re-audit passed — complete (PR pending)
+  under 1 MiB; re-audit passed — complete (PR #479)
 - **Next milestone** — M113l (documentation that does not match the code, or is missing).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
