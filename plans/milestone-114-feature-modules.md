@@ -458,7 +458,8 @@ project-files assertion fails; (7) drop the `[]`/repeat handling → the form co
 (8) call `formEncodingOf` unconditionally → the `parseContentType` spy test fails; (9) build the
 form record on an ordinary object with `record[key] = value` → the `__proto__` row fails; (10) run
 the global HTTP-path conflict check for a `--module` placement → `g route x --module m` beside a
-top-level route `x` is refused and the placement test fails.
+top-level CONTROLLER `x` is refused and the placement test fails (the global check never compares a
+schematic with itself, `name-conflicts.ts:185`, so a top-level route `x` would not discriminate).
 
 ## 7. Verification gates
 
