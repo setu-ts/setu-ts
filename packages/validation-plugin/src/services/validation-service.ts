@@ -19,7 +19,8 @@ import type {
 } from '@setu-ts/common';
 
 import type { ValidationErrorFormatter } from '../formatters/error-formatter.ts';
-import { createValidationMiddleware } from '../middleware/validation-middleware.ts';
+import { registerServiceMiddleware } from '../middleware/validator-reader.ts';
+import { buildValidationMiddleware } from '../middleware/validation-middleware.ts';
 
 /**
  * Minimal structural interface matching a subset of Zod's schema API.
@@ -80,7 +81,13 @@ export class ValidationService implements IValidationService {
   constructor(
     private readonly formatter: ValidationErrorFormatter,
     private readonly schemaPolicy: SchemaPolicy = {},
-  ) {}
+  ) {
+    if (this.middleware === ValidationService.prototype.middleware) {
+      registerServiceMiddleware(this, (schema, target, token) =>
+        this.buildMiddleware(schema, target, token),
+      );
+    }
+  }
 
   /**
    * Validate `data` against the given schema.
@@ -122,14 +129,21 @@ export class ValidationService implements IValidationService {
    * @returns The validation middleware
    */
   middleware(schema: unknown, target: ValidationTarget): MiddlewareFunction {
-    // Applied once here, at middleware-construction (registration) time, so
-    // both entry points — `service.middleware(...)` and the `validateBody(...)`
-    // family, which delegate to it — honor the configured policy identically.
-    return createValidationMiddleware(
+    return this.buildMiddleware(schema, target);
+  }
+
+  /** Applies policy once per middleware construction for the service and helper paths. */
+  private buildMiddleware(
+    schema: unknown,
+    target: ValidationTarget,
+    token: object = {},
+  ): MiddlewareFunction {
+    return buildValidationMiddleware(
       applySchemaPolicy(schema, this.schemaPolicy),
       target,
       this,
       this.formatter,
+      token,
     );
   }
 }

@@ -50,7 +50,7 @@ function harness(seed: Readonly<Record<string, string>> = CLASS_BASED): Harness 
 }
 
 describe('setu generate module', () => {
-  it('writes six files and reads the generated module declaration back', async () => {
+  it('writes eight files and reads the generated module declaration back', async () => {
     const h = harness();
 
     expect(await h.run(['module', 'user'])).toBe(0);
@@ -59,9 +59,11 @@ describe('setu generate module', () => {
       '/app/src/modules/user/user.service.ts',
       '/app/src/modules/user/user.controller.ts',
       '/app/src/modules/user/user.module.ts',
-      '/app/src/modules/user/user.service.test.ts',
       '/app/src/modules/user/index.ts',
       '/app/src/modules/index.ts',
+      '/app/src/modules/user/user.test.ts',
+      '/app/src/modules/user/user.e2e.test.ts',
+      '/app/test/support/server.ts',
     ]);
     expect(h.fs.read('/app/src/modules/user/user.controller.ts')).toContain(
       'export class UserController',
@@ -75,8 +77,8 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'user'])).toBe(0);
 
-    expect(h.fs.writes).toContain('/app/src/controllers/user.routes.ts');
-    expect(h.fs.read('/app/src/controllers/user.routes.ts')).toContain('status(201)');
+    expect(h.fs.writes).toContain('/app/src/modules/user/user.routes.ts');
+    expect(h.fs.read('/app/src/modules/user/user.routes.ts')).toContain('status(201)');
   });
 
   it('lists a previously generated module alongside the new one', async () => {
@@ -110,7 +112,7 @@ describe('setu generate module', () => {
     expect(barrel).toContain('UsersService');
     expect(barrel).toContain('OrdersController');
     expect(barrel).toContain('OrdersService');
-    expect(h.err.text()).toContain('MODULES activation barrel used by migrated configs');
+    expect(h.err.text()).toContain('MODULES activation barrel');
   });
 
   it('refuses to regenerate a module over its own files', async () => {
@@ -129,7 +131,7 @@ describe('setu generate module', () => {
     expect(h.err.text()).not.toContain('/app/src/modules/index.ts');
   });
 
-  it('prints all six planned paths under --dry-run and writes nothing', async () => {
+  it('prints all eight planned paths under --dry-run and writes nothing', async () => {
     const h = harness();
 
     expect(await h.run(['module', 'user', '--dry-run'])).toBe(0);
@@ -137,7 +139,7 @@ describe('setu generate module', () => {
     expect(h.fs.writes).toEqual([]);
     expect(h.fs.mkdirs).toEqual([]);
     const printed = h.out.lines.filter((l) => l.startsWith('would create'));
-    expect(printed.length).toBe(6);
+    expect(printed.length).toBe(8);
     expect(h.out.text()).toContain('would create /app/src/modules/index.ts');
   });
 

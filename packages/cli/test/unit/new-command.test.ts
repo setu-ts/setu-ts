@@ -847,7 +847,11 @@ describe('runNewCommand', () => {
         const pkg = JSON.parse(h.fs.read('/work/app/package.json'));
         expect(pkg.devDependencies?.['@std/expect']).toBeUndefined();
         expect(pkg.devDependencies?.['@std/testing']).toBeUndefined();
-        expect(pkg.scripts.test).toBe(runtime === 'bun' ? 'bun test' : 'tsx --test');
+        expect(pkg.scripts.test).toBe(
+          runtime === 'bun'
+            ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
+            : "tsx --test '**/!(*.e2e).test.ts'",
+        );
         expect(pkg.scripts.build).toBeUndefined();
         expect(pkg.scripts.start).toBeDefined();
       });

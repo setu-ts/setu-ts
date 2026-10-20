@@ -14,17 +14,24 @@ import type {
   HandlerResult,
   IRequestContext,
   IValidationService,
-  MiddlewareFunction,
   ValidationIssue,
   ValidationTarget,
 } from '@setu-ts/common';
-import { CAPABILITIES, validatedStateKey, withValidationMetadata } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  formEncodingOf,
+  validatedStateKey,
+  withValidationMetadata,
+} from '@setu-ts/common';
 
 import type {
   FormatValidationErrors,
   ValidationErrorFormatter,
 } from '../formatters/error-formatter.ts';
 import { rfc9457Formatter } from '../formatters/rfc9457-formatter.ts';
+import { formRecord } from './form-record.ts';
+import type { ValidatedOutput, ValidatorMiddleware } from './validator-reader.ts';
+import { bindValidatorReader, serviceMiddleware, validatedByKey } from './validator-reader.ts';
 
 /**
  * The formatters whose bodies are Problem Details and therefore require the
@@ -44,8 +51,8 @@ const PROBLEM_JSON = 'application/problem+json';
 // Target extraction
 // ---------------------------------------------------------------------------
 
-/** Private sentinel for JSON parse failures — never leaks outside this module. */
-class JsonParseError extends Error {}
+/** Private sentinel for malformed or unsupported bodies — never leaks outside this module. */
+class BodyParseError extends Error {}
 
 /**
  * Extract raw data from the request based on the target.
@@ -53,15 +60,28 @@ class JsonParseError extends Error {}
  * @param ctx - The request context
  * @param target - Which request part to extract
  * @returns The extracted data
- * @throws {JsonParseError} When body JSON is invalid
+ * @throws {BodyParseError} When the body cannot be read
  */
 async function extractTarget(ctx: IRequestContext, target: ValidationTarget): Promise<unknown> {
   switch (target) {
     case 'body': {
+      const contentType = ctx.request.headers.get('content-type');
+      if (
+        /^\s*(?:multipart\/|application\/x-www-form-urlencoded)/i.test(contentType ?? '') &&
+        formEncodingOf(contentType) !== undefined
+      ) {
+        try {
+          const form = await ctx.request.formData?.();
+          if (form === undefined) throw new BodyParseError('Unsupported form body');
+          return formRecord(form);
+        } catch {
+          throw new BodyParseError('Unsupported form body');
+        }
+      }
       try {
         return await ctx.request.json();
       } catch {
-        throw new JsonParseError();
+        throw new BodyParseError('Invalid JSON in request body');
       }
     }
 
@@ -126,12 +146,23 @@ async function extractTarget(ctx: IRequestContext, target: ValidationTarget): Pr
  * @param formatter - Error formatter (resolved once at registration time)
  * @returns A middleware function
  */
-export function createValidationMiddleware(
-  schema: unknown,
+export function createValidationMiddleware<S>(
+  schema: S,
   target: ValidationTarget,
   service: IValidationService,
   formatter: ValidationErrorFormatter,
-): MiddlewareFunction {
+): ValidatorMiddleware<ValidatedOutput<S>> {
+  return buildValidationMiddleware(schema, target, service, formatter);
+}
+
+/** Internal builder shared by the service, direct factory and helper. */
+export function buildValidationMiddleware<S>(
+  schema: S,
+  target: ValidationTarget,
+  service: IValidationService,
+  formatter: ValidationErrorFormatter,
+  token: object = {},
+): ValidatorMiddleware<ValidatedOutput<S>> {
   // Resolved once at registration time: a Problem Details body must be served
   // as `application/problem+json` (RFC 9457 §3), not the `application/json`
   // that `response.json()` sets. Keyed off the RESOLVED formatter rather than
@@ -151,32 +182,35 @@ export function createValidationMiddleware(
   // because a helper resolves the service at REQUEST time inside its own
   // closure — so the closure a route actually carries is the helper's, not this
   // one.
-  return withValidationMetadata(
-    async (ctx, next) => {
-      let rawData: unknown;
-      try {
-        rawData = await extractTarget(ctx, target);
-      } catch (e) {
-        if (e instanceof JsonParseError) {
-          const issues: readonly ValidationIssue[] = [
-            { path: '', message: 'Invalid JSON in request body' },
-          ];
-          return respond(ctx, formatter(issues, ctx), isProblemJson);
+  return bindValidatorReader(
+    withValidationMetadata(
+      async (ctx, next) => {
+        let rawData: unknown;
+        try {
+          rawData = await extractTarget(ctx, target);
+        } catch (e) {
+          if (e instanceof BodyParseError) {
+            const issues: readonly ValidationIssue[] = [{ path: '', message: e.message }];
+            return respond(ctx, formatter(issues, ctx), isProblemJson);
+          }
+          throw e;
         }
-        throw e;
-      }
 
-      const result = service.validate(schema, rawData);
+        const result = service.validate(schema, rawData);
 
-      if (result.success) {
-        ctx.state.set(validatedStateKey(target), result.value);
-        await next();
-        return;
-      }
+        if (result.success) {
+          ctx.state.set(validatedStateKey(target), result.value);
+          ctx.state.set(validatedByKey(target), token);
+          await next();
+          return;
+        }
 
-      return respond(ctx, formatter(result.error, ctx), isProblemJson);
-    },
-    { target, schema },
+        return respond(ctx, formatter(result.error, ctx), isProblemJson);
+      },
+      { target, schema },
+    ),
+    target,
+    token,
   );
 }
 
@@ -218,7 +252,7 @@ function respond(
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateBody(schema: unknown): MiddlewareFunction {
+export function validateBody<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('body', schema);
 }
 
@@ -231,7 +265,7 @@ export function validateBody(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateQuery(schema: unknown): MiddlewareFunction {
+export function validateQuery<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('query', schema);
 }
 
@@ -244,7 +278,7 @@ export function validateQuery(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateParams(schema: unknown): MiddlewareFunction {
+export function validateParams<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('params', schema);
 }
 
@@ -257,7 +291,7 @@ export function validateParams(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateHeaders(schema: unknown): MiddlewareFunction {
+export function validateHeaders<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('headers', schema);
 }
 
@@ -270,7 +304,7 @@ export function validateHeaders(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateCookies(schema: unknown): MiddlewareFunction {
+export function validateCookies<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('cookies', schema);
 }
 
@@ -287,15 +321,23 @@ export function validateCookies(schema: unknown): MiddlewareFunction {
  * @param schema - The schema to validate against
  * @returns A middleware function
  */
-function bindHelper(target: ValidationTarget, schema: unknown): MiddlewareFunction {
+function bindHelper<S>(
+  target: ValidationTarget,
+  schema: S,
+): ValidatorMiddleware<ValidatedOutput<S>> {
+  const token = {};
   // Branded here as well as in `createValidationMiddleware`: this closure is
   // the one a route's `middleware` array holds, and the inner middleware it
   // delegates to does not exist until the request runs.
-  return withValidationMetadata(
-    async (ctx, next) => {
-      const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
-      await service.middleware(schema, target)(ctx, next);
-    },
-    { target, schema },
+  return bindValidatorReader(
+    withValidationMetadata(
+      async (ctx, next) => {
+        const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
+        await serviceMiddleware(service, schema, target, token)(ctx, next);
+      },
+      { target, schema },
+    ),
+    target,
+    token,
   );
 }

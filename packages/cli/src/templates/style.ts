@@ -65,6 +65,8 @@ export const DECORATOR_WIRING: Wiring = { pkg: DECORATOR_PACKAGE, symbol: 'Decor
 export interface Showcase {
   /** The example source files, project-relative. */
   readonly files: readonly GeneratedFile[];
+  /** The same showcase with the selected runtime's test harness. */
+  readonly filesForRuntime?: (runtime: TargetRuntime) => readonly GeneratedFile[];
   /** Artifact names the host itself emits, by schematic name, seeded into barrels. */
   readonly seeded: SeamArtifacts;
   /** Routes the showcase serves, listed in the generated README. */
@@ -139,6 +141,9 @@ export function composeHost(recipe: TemplateRecipe, style: TemplateStyle): Templ
     seams,
     seamArtifacts: showcase?.seeded ?? {},
     files: showcase?.files ?? [],
+    ...(showcase?.filesForRuntime === undefined
+      ? {}
+      : { filesForRuntime: showcase.filesForRuntime }),
     manifest: { ...recipe.manifest, envFilePath: '.env' },
     ...(showcase?.routes === undefined ? {} : { routes: showcase.routes }),
     ...(recipe.runtimeSwaps === undefined ? {} : { runtimeSwaps: recipe.runtimeSwaps }),

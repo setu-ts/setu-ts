@@ -99,7 +99,9 @@ identity and behaviour are unchanged, and removing it would change nothing this 
 | `SanitizationRules`          | interface |
 | `ValidationPluginOptions`    | interface |
 | `ErrorFormat`                | type      |
+| `ValidatedOutput`            | type      |
 | `ValidationErrorFormatter`   | type      |
+| `ValidatorMiddleware`        | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

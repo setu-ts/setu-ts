@@ -39,7 +39,7 @@ import { generatorMode } from '../utils/generator-mode.ts';
  * @param names - Naming forms derived from the user's input
  * @returns The file contents
  */
-function renderFunctionalService(names: DerivedNames): string {
+function renderFunctionalService(names: DerivedNames, module?: string): string {
   return `/**
  * ${names.pascal} domain service.
  *
@@ -48,8 +48,7 @@ function renderFunctionalService(names: DerivedNames): string {
  * context as its explicit capability injector rather than constructor injection.
  *
  * Nothing registers this for you — a plain function has no framework registration
- * site. \`src/services/index.ts\` re-exports it as a convenience, so a consumer can
- * import from one path rather than from each module.
+ * site. ${module === undefined ? '`src/services/index.ts` re-exports it as a convenience.' : `Import it from './${names.kebab}.service.ts' in a sibling route.`}
  *
  * @returns A placeholder value
  */
@@ -69,7 +68,20 @@ export function ${functionalServiceSymbol(names)}(): string {
  * @param names - Naming forms derived from the user's input
  * @returns The file contents
  */
-function renderInjectableService(names: DerivedNames): string {
+function renderInjectableService(names: DerivedNames, module?: string): string {
+  if (module !== undefined) {
+    return `import { Injectable } from '@setu-ts/decorator-plugin';
+
+/** Add this provider to ${module}.module.ts and inject '${module}-${names.kebab}-service'. */
+@Injectable({ token: '${module}-${names.kebab}-service' })
+export class ${names.pascal}Service {
+  /** Replace with the service's real behavior. */
+  describe(): string {
+    return '${names.kebab}';
+  }
+}
+`;
+  }
   return `import { Injectable } from '@setu-ts/decorator-plugin';
 
 /**
@@ -124,9 +136,12 @@ export function generateService(
 ): readonly GeneratedFile[] {
   const classBased = generatorMode(options.plugins) === 'class-based';
   const service: GeneratedFile = {
-    path: `src/services/${names.kebab}.service.ts`,
-    contents: classBased ? renderInjectableService(names) : renderFunctionalService(names),
+    path: `${options.targetModule === undefined ? 'src/services' : `src/modules/${options.targetModule}`}/${names.kebab}.service.ts`,
+    contents: classBased
+      ? renderInjectableService(names, options.targetModule)
+      : renderFunctionalService(names, options.targetModule),
   };
+  if (options.targetModule !== undefined) return [service];
 
   // Both modes emit the barrel, but they are not the same barrel. The class one is a
   // REGISTRATION for `DecoratorPlugin({ services })` or a starter's `decorators` arm —

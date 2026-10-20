@@ -34,7 +34,11 @@ export type HttpModuleKind = 'controller' | 'routes';
  * @param kind - Which imperative kind this module is
  * @returns The module contents
  */
-export function renderHttpModule(names: DerivedNames, kind: HttpModuleKind): string {
+export function renderHttpModule(
+  names: DerivedNames,
+  kind: HttpModuleKind,
+  module?: string,
+): string {
   const framing =
     kind === 'controller'
       ? ` * This project has no \`decorator-plugin\`, so a controller is a function that\n` +
@@ -50,7 +54,7 @@ export function renderHttpModule(names: DerivedNames, kind: HttpModuleKind): str
  * Registers the ${names.kebab} routes.
  *
 ${framing} *
- * Called for you by \`registerGeneratedRoutes\` in \`src/controllers/index.ts\`,
+ * Called for you by the managed index in \`${module === undefined ? 'src/controllers' : `src/modules/${module}`}/index.ts\`,
  * which \`setu.config.ts\` invokes with \`app.router\` and \`app.services\` — so this module needs no
  * further wiring. Call it directly with \`ctx.router\` to register these routes
  * from inside a plugin instead.
@@ -63,7 +67,7 @@ export function ${routeRegistrarSymbol(names)}(
   services?: IServiceRegistry,
 ): void {
   void services;
-  router.group('/${names.kebab}', (routes) => {
+  router.group('/${module === undefined ? '' : `${module}/`}${names.kebab}', (routes) => {
     routes.get('/', (ctx) => ctx.response.json({ items: [] }));
 
     routes.get('/:id', (ctx) => ctx.response.json({ id: ctx.params['id'] }));

@@ -178,7 +178,7 @@ describe('a scaffolded npm project runs its own scripts', () => {
 
         // A socket target carries a composition-root smoke test (M101g); a Workers
         // project serves no socket and carries none.
-        const scripts = ['check', 'lint', 'format:check', ...(boots ? ['test'] : [])];
+        const scripts = ['check', 'lint', 'format:check', ...(boots ? ['test', 'test:e2e'] : [])];
         const manifest = JSON.parse(await nodeFs.readFile(`${project}/package.json`, 'utf8')) as {
           scripts?: Record<string, string>;
         };
@@ -235,7 +235,7 @@ describe('a scaffolded npm project runs its own scripts', () => {
         }
         const install = await npmInstall(project, overlay);
         expect(install.code, install.output).toBe(0);
-        for (const script of ['check', 'lint', 'format:check', 'test']) {
+        for (const script of ['check', 'lint', 'format:check', 'test', 'test:e2e']) {
           const result = await npmRun(project, script);
           expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
         }

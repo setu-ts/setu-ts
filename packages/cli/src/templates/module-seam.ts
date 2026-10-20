@@ -26,7 +26,7 @@ const BARREL_SPECIFIER = `./${MODULES_DIR}/index.ts`;
  *
  * The test dependencies come from {@linkcode TEST_DEPENDENCY_MANIFEST}, which
  * every host carries now that `setu generate module` is ungated. What is added
- * here is the REST baseline's health permission; the decorator compiler setting
+ * here is the REST baseline's health permission and Zod schema dependency; the decorator compiler setting
  * is restricted to the class-based opt-in below.
  */
 export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
@@ -35,7 +35,8 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
   denoPermissions: ['--allow-sys', '--allow-read'],
-  npmDependencies: { 'swagger-ui-dist': '^5' },
+  npmDependencies: { 'swagger-ui-dist': '^5', zod: '^4' },
+  denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, zod: 'npm:zod@^4' },
 };
 
 /** Manifest additions unique to the class-based module composition. */

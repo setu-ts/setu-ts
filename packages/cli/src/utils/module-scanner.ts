@@ -13,11 +13,17 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath } from './file-writer.ts';
+import { registerModuleSymbol } from '../seams/modules.ts';
+import { deriveNames } from './names.ts';
+import { exportsSymbol } from '../seams/seam-spec.ts';
+import type { GeneratorMode } from './generator-mode.ts';
+import { FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM } from '../seams/http.ts';
+import { scanArtifacts, type ArtifactScanAll } from './artifact-scanner.ts';
 
 /** Where `setu generate module` places domain modules, relative to the project root. */
 export const MODULES_DIR = 'src/modules';
 
-/** A legacy domain directory the new activation barrel cannot import yet. */
+/** A feature directory missing the declaration or registrar needed for activation. */
 export interface SkippedModule {
   /** The legacy module directory name. */
   readonly name: string;
@@ -31,7 +37,7 @@ export interface SkippedModule {
 export interface ModuleScan {
   /** Valid module directory names, sorted. */
   readonly names: readonly string[];
-  /** Old module directories that have controller/service files but lack a declaration. */
+  /** Candidate modules missing their declaration or exported registrar. */
   readonly skipped: readonly SkippedModule[];
 }
 
@@ -53,17 +59,11 @@ async function isFile(fs: IFileSystem, path: string): Promise<boolean> {
 /**
  * Lists the domain modules under `src/modules/`.
  *
- * A directory counts as a module only when it holds BOTH `<name>.controller.ts`
- * and `<name>.service.ts` — the two files the aggregate barrel imports. That is
- * the barrel's precondition, and checking it is what keeps an unrelated
- * directory out: a `shared/` helper folder is a natural thing to put here, and
- * admitting it would make the regenerated barrel import
- * `./shared/shared.controller.ts`, which does not exist. The developer's project
- * would then fail to compile, naming files they never created, from a command
- * that reported success.
- *
- * A directory whose canonical paths exist but are themselves directories is
- * rejected too, since neither can be imported.
+ * Class-based modules require their controller, service and declaration files.
+ * Functional modules require their canonical routes file and an index exporting
+ * the registrar named by registerModuleSymbol. Pre-M114 service-only modules
+ * remain under the old HTTP barrel and are neither admitted nor reported here.
+ * Unrelated directories such as shared helpers are ignored in both modes.
  *
  * Sorted, because `readdir` enumeration order is filesystem-defined: without a
  * sort the regenerated barrel could differ byte-for-byte between two machines
@@ -75,9 +75,14 @@ async function isFile(fs: IFileSystem, path: string): Promise<boolean> {
  *
  * @param fs - The filesystem to read through
  * @param dir - The project's root directory (absolute)
+ * @param mode - The project's generator style
  * @returns Valid module directory names and legacy generated module diagnostics
  */
-export async function scanModules(fs: IFileSystem, dir: string): Promise<ModuleScan> {
+export async function scanModules(
+  fs: IFileSystem,
+  dir: string,
+  mode: GeneratorMode = 'class-based',
+): Promise<ModuleScan> {
   const root = joinPath(dir, MODULES_DIR);
 
   let entries: readonly string[];
@@ -102,6 +107,21 @@ export async function scanModules(fs: IFileSystem, dir: string): Promise<ModuleS
     if (!stat.isDirectory) continue;
 
     const base = joinPath(root, entry, entry);
+    if (mode === 'functional') {
+      if (!(await isFile(fs, `${base}.routes.ts`))) continue;
+      const symbol = registerModuleSymbol(deriveNames(entry));
+      let source = '';
+      try {
+        if (await isFile(fs, joinPath(root, entry, 'index.ts'))) {
+          source = new TextDecoder().decode(await fs.readFile(joinPath(root, entry, 'index.ts')));
+        }
+      } catch {
+        /* An unreadable index cannot activate the module. */
+      }
+      if (exportsSymbol(source, symbol)) names.push(entry);
+      else skipped.push({ name: entry, path: `${MODULES_DIR}/${entry}`, missing: symbol });
+      continue;
+    }
     const controller = await isFile(fs, `${base}.controller.ts`);
     const service = await isFile(fs, `${base}.service.ts`);
     const module = await isFile(fs, `${base}.module.ts`);
@@ -113,6 +133,24 @@ export async function scanModules(fs: IFileSystem, dir: string): Promise<ModuleS
   }
 
   return { names: names.sort(), skipped: skipped.sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+/** Scans the two imperative registrar families inside one admitted feature. */
+export function scanModuleArtifacts(
+  fs: IFileSystem,
+  dir: string,
+  module: string,
+): Promise<ArtifactScanAll> {
+  const moduleDir = `${MODULES_DIR}/${module}`;
+  return scanArtifacts(
+    fs,
+    dir,
+    [FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM].map((spec) => ({
+      ...spec,
+      dir: moduleDir,
+      barrel: `${moduleDir}/index.ts`,
+    })),
+  );
 }
 
 /**

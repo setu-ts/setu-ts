@@ -29,6 +29,7 @@ import { generateMigration } from './migration.ts';
 import { generateModule } from './module.ts';
 import { generateWsRoute } from './ws-route.ts';
 import { generateSse } from './sse.ts';
+import { generateSchema } from './schema.ts';
 
 export type { GeneratedFile } from '../utils/file-writer.ts';
 export type { DerivedNames } from '../utils/names.ts';
@@ -37,6 +38,10 @@ export type { DerivedNames } from '../utils/names.ts';
  * Options handed to every schematic.
  */
 export interface SchematicOptions {
+  /** Admitted feature module receiving a service, controller, route or schema. */
+  readonly targetModule?: string;
+  /** Admitted registrars inside the selected functional module. */
+  readonly moduleArtifacts?: Readonly<Record<string, readonly string[]>>;
   /** The project's runtime target, so a schematic can shape platform-specific output. */
   readonly runtime: TargetRuntime;
   /** The `@setu-ts` packages detected in the target project. */
@@ -147,6 +152,7 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
   ['controller', { factory: generateController }],
   ['service', { factory: generateService }],
   ['route', { factory: generateRoute }],
+  ['schema', { factory: generateSchema, requiresPlugin: 'validation-plugin' }],
   ['middleware', { factory: generateMiddleware }],
   ['guard', { factory: generateGuard, requiresPlugin: 'auth-plugin' }],
   ['health-indicator', { factory: generateHealthIndicator, requiresPlugin: 'health-plugin' }],

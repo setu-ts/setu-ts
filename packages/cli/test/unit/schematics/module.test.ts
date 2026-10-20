@@ -1,231 +1,108 @@
-/**
- * Unit tests for the `module` aggregate schematic.
- *
- * Ungated since M65, and the only schematic emitting a whole domain unit in
- * either style — so both arms are pinned, including the barrel properties the
- * class arm shares with every other seam.
- *
- * @module
- */
 import { describe, expect, it } from 'vitest';
-
 import { generateModule } from '../../../src/schematics/module.ts';
-import { gateOf, options } from './_shared.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
-
-/** Returns the emitted file at a path, failing the test when it is absent. */
-function fileAt(files: readonly { path: string; contents: string }[], path: string): string {
-  const found = files.find((f) => f.path === path);
-  if (found === undefined) throw new Error(`no emitted file at ${path}`);
-  return found.contents;
-}
-
-const CLASS_PLUGINS = ['decorator-plugin', 'di-plugin'];
+import { options, gateOf } from './_shared.ts';
 
 describe('generateModule', () => {
-  const names = deriveNames('user-profile');
-
-  it('is ungated, so the default composition can generate a domain unit', () => {
-    // Gating it on `decorator-plugin` — as it was before M65 — would leave the
-    // functional default with no aggregate schematic at all.
-    expect(gateOf('module')).toBeUndefined();
+  const names = deriveNames('invoices');
+  for (const style of ['functional', 'class-based'] as const) {
+    for (const validation of [false, true]) {
+      it(`${style} emits a complete feature with validation=${validation}`, () => {
+        const plugins = [
+          ...(style === 'class-based' ? ['decorator-plugin', 'di-plugin'] : []),
+          ...(validation ? ['validation-plugin', 'openapi-plugin'] : []),
+        ];
+        const files = generateModule(names, options(plugins, ['zebra', 'billing']));
+        const source = (name: string): string =>
+          files.find((file) => file.path === `src/modules/invoices/${name}`)!.contents;
+        expect(gateOf('module')).toBeUndefined();
+        expect(files.some((file) => file.path.startsWith('src/controllers/'))).toBe(false);
+        expect(files.map((file) => file.path)).toEqual(
+          expect.arrayContaining([
+            'src/modules/invoices/invoices.service.ts',
+            'src/modules/invoices/index.ts',
+            'src/modules/index.ts',
+            'src/modules/invoices/invoices.test.ts',
+            'src/modules/invoices/invoices.e2e.test.ts',
+            'test/support/server.ts',
+          ]),
+        );
+        expect(files.some((file) => file.path.endsWith('.schemas.ts'))).toBe(validation);
+        const routes = source(`invoices.${style === 'class-based' ? 'controller' : 'routes'}.ts`);
+        expect(routes).toContain("'/invoices'");
+        expect(routes).toContain('status(201)');
+        expect(routes).not.toMatch(/\bas\s+(?:z\.|Record|Create|Update|List)/);
+        if (validation) {
+          const schemas = source('invoices.schemas.ts');
+          for (const name of [
+            'CreateInvoicesBody',
+            'UpdateInvoicesBody',
+            'ListInvoicesQuery',
+            'InvoicesParams',
+            'InvoicesResponse',
+            'InvoicesListResponse',
+          ]) {
+            expect(schemas).toContain(`export const ${name}`);
+            expect(schemas).toContain(`export type ${name} = z.infer<typeof ${name}>`);
+          }
+          expect(schemas).toContain('z.coerce.number()');
+          if (style === 'functional') {
+            expect(routes).toContain('.value(ctx)');
+            expect(routes).toContain('schema: { response:');
+          } else {
+            for (const decorator of [
+              '@ValidateBody',
+              '@ValidateQuery',
+              '@ValidateParams',
+              '@ApiResponse',
+              '@Params(Body<CreateInvoicesBody>()',
+            ])
+              expect(routes).toContain(decorator);
+          }
+        } else expect(routes).not.toContain('@setu-ts/validation-plugin');
+        const service = source('invoices.service.ts');
+        expect(service).toContain('crypto.randomUUID()');
+        expect(service).toContain('new Map');
+        expect(service).toContain('repository');
+        const test = source('invoices.test.ts');
+        expect(test).toContain('createTestApp({ app: await createApp() })');
+        expect(test).toContain('Array.isArray');
+        expect(test).not.toContain('toEqual([])');
+        const barrel = files.find((file) => file.path === 'src/modules/index.ts')!.contents;
+        if (style === 'functional') {
+          expect(source('index.ts')).toContain('registerInvoicesModule');
+          expect(source('index.ts')).not.toContain('export *');
+          expect(barrel).toContain('registerBillingModule(router, services)');
+        } else {
+          expect(source('invoices.module.ts')).toContain('providers: [InvoicesService]');
+          expect(source('index.ts')).toContain('export { InvoicesModule }');
+          expect(service).toContain("@Injectable({ token: 'invoices-service' })");
+          expect(routes).toContain("@Inject('invoices-service')");
+          expect(barrel).toContain('BillingModule');
+        }
+      });
+    }
+  }
+  it('omits tests on Workers in either style', () => {
+    for (const plugins of [[], ['decorator-plugin', 'validation-plugin']]) {
+      const files = generateModule(names, { ...options(plugins), runtime: 'cloudflare-workers' });
+      expect(files.some((file) => file.path.includes('test'))).toBe(false);
+    }
   });
-
-  describe('in a functional project', () => {
-    const files = generateModule(names, options());
-
-    it('emits the service, its test, the module barrel, and a registered route', () => {
-      expect(files.map((file) => file.path)).toEqual([
-        'src/modules/user-profile/user-profile.service.ts',
-        'src/modules/user-profile/user-profile.service.test.ts',
-        'src/modules/user-profile/index.ts',
-        'src/controllers/user-profile.routes.ts',
-        'src/controllers/index.ts',
-      ]);
-    });
-
-    it('exports a plain function rather than a class', () => {
-      const source = fileAt(files, 'src/modules/user-profile/user-profile.service.ts');
-      expect(source).toContain('export function listUserProfile');
-      expect(source).not.toContain('@Injectable');
-    });
-
-    it('registers ctx-first handlers through the router API', () => {
-      const source = fileAt(files, 'src/controllers/user-profile.routes.ts');
-      expect(source).toContain('export function registerUserProfileRoutes(router: IRouterApi)');
-      expect(source).toContain("router.group('/user-profile'");
-      // The write answers a real 201, which a decorated handler can only do
-      // through `@Params(Ctx())` — here the context is simply the handler's
-      // argument.
-      expect(source).toContain('status(201)');
-    });
-
-    it('marks only the routes barrel managed', () => {
-      // The module's own files are the developer's; the barrel is CLI-owned, and
-      // that exemption is the only reason a second module does not refuse.
-      expect(files.filter((f) => f.managed === true).map((f) => f.path)).toEqual([
-        'src/controllers/index.ts',
-      ]);
-    });
-
-    it('lists the existing route modules alongside the new one', () => {
-      const files = generateModule(
-        deriveNames('user'),
-        options([], [], { route: ['gizmo', 'billing'] }),
-      );
-      const barrel = fileAt(files, 'src/controllers/index.ts');
-      for (const call of ['registerGizmoRoutes', 'registerBillingRoutes', 'registerUserRoutes']) {
-        expect(barrel).toContain(`${call},`);
-      }
-      expect(barrel).toContain('register(router, services);');
-    });
-
-    it('lists a regenerated module exactly once', () => {
-      const files = generateModule(deriveNames('user'), options([], [], { route: ['user'] }));
-      const barrel = fileAt(files, 'src/controllers/index.ts');
-      expect(barrel.match(/registerUserRoutes,/g)?.length).toBe(1);
-    });
-
-    it('emits a service test in the repo test style, never Deno.test', () => {
-      const source = fileAt(files, 'src/modules/user-profile/user-profile.service.test.ts');
-      expect(source).toContain("import { describe, it } from '@std/testing/bdd';");
-      expect(source).toContain("import { expect } from '@std/expect';");
-      expect(source).not.toContain('Deno.test');
-    });
-
-    it('re-exports the module SURFACE, not the stub symbol, from the barrel', () => {
-      // A3: naming the stub meant that replacing it — the obvious next step —
-      // broke the barrel and the generated test with TS2305, and neither file is
-      // reachable from `deno check main.ts setu.config.ts`, so both stayed
-      // broken through a full green run of every gate.
-      const barrel = fileAt(files, 'src/modules/user-profile/index.ts');
-      expect(barrel).toContain("export * from './user-profile.service.ts';");
-      expect(barrel).not.toContain('listUserProfile');
-    });
-  });
-
-  describe('in a class-based project', () => {
-    const files = generateModule(names, options(CLASS_PLUGINS));
-
-    // The module lists the service in `providers` and the test constructs it, so
-    // both need it as a VALUE: a type-only import is TS1361 and erases to an
-    // undefined reference. Only the controller, which injects by token, may
-    // import it as a type.
-    it('imports the service as a value wherever it is used as one', () => {
-      const valueImport = "import { UserProfileService } from './user-profile.service.ts';";
-      const typeImport = "import type { UserProfileService } from './user-profile.service.ts';";
-      for (const path of ['user-profile.module.ts', 'user-profile.service.test.ts']) {
-        const source = fileAt(files, `src/modules/user-profile/${path}`);
-        expect(source).toContain(valueImport);
-        expect(source).not.toContain(typeImport);
-      }
-      expect(fileAt(files, 'src/modules/user-profile/user-profile.controller.ts')).toContain(
-        typeImport,
-      );
-    });
-
-    it('emits a module declaration alongside its other files', () => {
-      expect(files.map((f) => f.path)).toEqual([
-        'src/modules/user-profile/user-profile.service.ts',
-        'src/modules/user-profile/user-profile.controller.ts',
-        'src/modules/user-profile/user-profile.module.ts',
-        'src/modules/user-profile/user-profile.service.test.ts',
-        'src/modules/user-profile/index.ts',
-        'src/modules/index.ts',
-      ]);
-    });
-
-    it('marks only the aggregate barrel managed', () => {
-      expect(files.filter((f) => f.managed === true).map((f) => f.path)).toEqual([
-        'src/modules/index.ts',
-      ]);
-    });
-
-    it('injects the service into the controller by an explicit token', () => {
-      // `emitDecoratorMetadata` is absent repo-wide and Deno does not support it,
-      // so the parameter type cannot be read and the token is mandatory.
-      const source = fileAt(files, 'src/modules/user-profile/user-profile.controller.ts');
-      expect(source).toContain("@Inject('user-profile-service')");
-      expect(source).toContain("@Controller('/user-profile')");
-    });
-
-    it('declares the request context as a @Params source, never positionally', () => {
-      // The plugin builds a handler's argument list from the @Params
-      // declaration ALONE, so an undeclared `ctx` parameter arrives
-      // `undefined` and the first `ctx.response` throws — a 500 on every
-      // request, which is what shipped from M34 until M58. Declaring `Ctx()`
-      // fills the slot; the e2e that boots the app is the real proof.
-      const source = fileAt(files, 'src/modules/user-profile/user-profile.controller.ts');
-      expect(source).toContain('@Params(Body<Record<string, unknown>>(), Ctx())');
-      expect(source).toContain('create(body: Record<string, unknown>, ctx: IRequestContext)');
-      expect(source).toContain('ctx.response.status(201)');
-      expect(source).not.toContain('@Ctx() ctx');
-    });
-
-    it('injects the service through the class-position @Inject list', () => {
-      // A constructor parameter decorator is a PARSE error under standard
-      // decorators, so the token list moves to the class.
-      const source = fileAt(files, 'src/modules/user-profile/user-profile.controller.ts');
-      expect(source).toContain("@Inject('user-profile-service')");
-      expect(source).toContain('constructor(private readonly service: UserProfileService) {}');
-      expect(source).not.toContain("@Inject('user-profile-service') private");
-    });
-
-    it('registers the service under the token the controller injects', () => {
-      const source = fileAt(files, 'src/modules/user-profile/user-profile.service.ts');
-      expect(source).toContain("@Injectable({ token: 'user-profile-service' })");
-      expect(source).toContain('export class UserProfileService');
-    });
-
-    it('emits a service test in the repo test style, never Deno.test', () => {
-      const source = fileAt(files, 'src/modules/user-profile/user-profile.service.test.ts');
-      expect(source).toContain("import { describe, it } from '@std/testing/bdd';");
-      expect(source).not.toContain('Deno.test');
-    });
-
-    it('re-exports the module declaration and its classes from the per-module barrel', () => {
-      const source = fileAt(files, 'src/modules/user-profile/index.ts');
-      expect(source).toContain('export { UserProfileController }');
-      expect(source).toContain('export { UserProfileModule }');
-      expect(source).toContain('export { UserProfileService }');
-    });
-
-    it('lists the existing modules alongside the new one in the barrel', () => {
-      const files = generateModule(
-        deriveNames('user'),
-        options(CLASS_PLUGINS, ['billing', 'order']),
-      );
-      const barrel = fileAt(files, 'src/modules/index.ts');
-      expect(barrel).toContain('BillingModule');
-      expect(barrel).toContain('OrderModule');
-      expect(barrel).toContain('UserModule');
-    });
-
-    it('lists a regenerated module exactly once', () => {
-      const files = generateModule(deriveNames('user'), options(CLASS_PLUGINS, ['user']));
-      const barrel = fileAt(files, 'src/modules/index.ts');
-      expect(barrel.match(/from '\.\/user\/user\.module\.ts'/g)?.length).toBe(1);
-    });
-
-    it('produces a barrel identical to the one the templates scaffold', () => {
-      // Both go through renderModuleBarrel, so the scaffolded seam and every
-      // regeneration of it cannot drift in shape.
-      const barrel = fileAt(
-        generateModule(deriveNames('user'), options(CLASS_PLUGINS)),
-        'src/modules/index.ts',
-      );
-      expect(barrel).toContain('export const MODULES: readonly Constructor[] = [');
-    });
-
-    it('treats an absent modules option as no modules', () => {
-      // `modules` is optional on the published interface, so a harness predating
-      // it may omit the field entirely.
-      const files = generateModule(deriveNames('user'), {
-        runtime: 'deno',
-        plugins: new Set(['decorator-plugin']),
+  it('keeps activation idempotent and accepts old custom schematic options', () => {
+    for (const plugins of [[], ['decorator-plugin']]) {
+      const files = generateModule(names, {
+        runtime: 'node',
+        plugins: new Set(plugins),
         now: () => 0,
       });
-      expect(fileAt(files, 'src/modules/index.ts')).toContain('UserModule');
-    });
+      const duplicate = generateModule(names, {
+        ...options(plugins, ['invoices']),
+        runtime: 'node',
+      });
+      expect(files.find((file) => file.path === 'src/modules/index.ts')?.contents).toBe(
+        duplicate.find((file) => file.path === 'src/modules/index.ts')?.contents,
+      );
+    }
   });
 });

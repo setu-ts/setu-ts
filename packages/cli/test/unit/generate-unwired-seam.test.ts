@@ -47,6 +47,30 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
 
 const CLASS_BASED = manifest('decorator-plugin');
 
+describe('functional module activation guidance', () => {
+  for (const config of [
+    'export const plugins = [];',
+    '// registerModules\nexport const plugins = [];',
+    'const text = "registerModules";',
+    'export const broken = /unclassifiable/;',
+  ]) {
+    it(`prints the exact activation lines for an unwired config: ${config}`, async () => {
+      const h = harness({ '/app/deno.json': manifest(), '/app/setu.config.ts': config });
+      expect(await h.run(['module', 'invoices'])).toBe(0);
+      expect(h.err.text()).toContain("import { registerModules } from './src/modules/index.ts';");
+      expect(h.err.text()).toContain('registerModules(app.router, app.services);');
+    });
+  }
+  it('does not report a wired functional activation barrel', async () => {
+    const h = harness({
+      '/app/deno.json': manifest(),
+      '/app/setu.config.ts': 'registerModules(app.router, app.services);',
+    });
+    expect(await h.run(['module', 'invoices'])).toBe(0);
+    expect(h.err.text()).not.toContain('does not reference registerModules');
+  });
+});
+
 describe('setu generate — an unwired decorator barrel is reported', () => {
   it('reports an unconsumed jobs barrel and its import', async () => {
     const h = harness({

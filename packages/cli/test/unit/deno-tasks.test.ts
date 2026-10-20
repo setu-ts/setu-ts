@@ -13,7 +13,7 @@ describe('the generated Deno task set', () => {
     // `dev` and `check` are the devtool opt-in's tasks; without the flag a
     // project emits exactly what it always emitted. REST adds --allow-read and
     // --allow-sys of its own; the base grant leads, as always.
-    expect(Object.keys(manifest.tasks)).toEqual(['start', 'test']);
+    expect(Object.keys(manifest.tasks)).toEqual(['start', 'test', 'test:e2e']);
     expect(manifest.tasks['start']).toMatch(/^deno run --allow-net --allow-env .* main\.ts$/);
     expect(manifest.tasks['check']).toBeUndefined();
   });

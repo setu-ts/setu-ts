@@ -6,7 +6,13 @@
 import { describe, expect, it } from 'vitest';
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 
-import { MODULES_DIR, readModuleNames, scanModules } from '../../../src/utils/module-scanner.ts';
+import {
+  MODULES_DIR,
+  readModuleNames,
+  scanModules,
+  scanModuleArtifacts,
+} from '../../../src/utils/module-scanner.ts';
+import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 /** A directory stat, shaped as the real runtime adapters report one. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
@@ -50,6 +56,45 @@ function fsWith(
 
 /** A stat rejection shaped like a real runtime's missing-path error. */
 const MISSING = new Error('NotFound');
+
+describe('functional module scanning', () => {
+  it('admits exported registrars, reports missing exports and ignores old modules and shared folders', async () => {
+    const fs = createFakeFs({
+      '/app/src/modules/zebra/zebra.routes.ts': '',
+      '/app/src/modules/zebra/index.ts': 'export function registerZebraModule() {}',
+      '/app/src/modules/billing/billing.routes.ts': '',
+      '/app/src/modules/billing/index.ts': 'export { registerBillingModule } from "./register.ts";',
+      '/app/src/modules/broken/broken.routes.ts': '',
+      '/app/src/modules/broken/index.ts': '// registerBrokenModule',
+      '/app/src/modules/missing/missing.routes.ts': '',
+      '/app/src/modules/legacy/legacy.service.ts': '',
+      '/app/src/modules/legacy/index.ts': 'export * from "./legacy.service.ts";',
+      '/app/src/modules/shared/helper.ts': '',
+    });
+    const scan = await scanModules(fs, '/app', 'functional');
+    expect(scan.names).toEqual(['billing', 'zebra']);
+    expect(scan.skipped.map((skip) => skip.name)).toEqual(['broken', 'missing']);
+    expect(scan.skipped[0]?.missing).toBe('registerBrokenModule');
+    expect((await scanModules(fs, '/app', 'class-based')).names).toEqual([]);
+    const unreadable = { ...fs, readFile: () => Promise.reject(new Error('unreadable')) };
+    expect((await scanModules(unreadable, '/app', 'functional')).names).toEqual([]);
+  });
+  it('scans sibling routes and controllers by the symbols their index imports', async () => {
+    const fs = createFakeFs({
+      '/app/src/modules/invoices/invoices.routes.ts': 'export function registerInvoicesRoutes() {}',
+      '/app/src/modules/invoices/summary.routes.ts': 'export function registerSummaryRoutes() {}',
+      '/app/src/modules/invoices/billing.controller.ts':
+        'export function registerBillingRoutes() {}',
+      '/app/src/modules/invoices/broken.routes.ts': 'export const broken = 1;',
+      '/app/src/modules/invoices/pricing.service.ts': '',
+    });
+    const scan = await scanModuleArtifacts(fs, '/app', 'invoices');
+    expect(scan.artifacts).toEqual({ route: ['invoices', 'summary'], controller: ['billing'] });
+    expect(scan.skipped).toEqual([
+      { path: 'src/modules/invoices/broken.routes.ts', missing: ['registerBrokenRoutes'] },
+    ]);
+  });
+});
 
 describe('readModuleNames', () => {
   it('returns directory names sorted', () => {

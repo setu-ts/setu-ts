@@ -131,14 +131,16 @@ export function seamNames(
  * result is a no-op rather than a rewrite.
  *
  * @param symbols - The names to import
- * @param module - The module specifier, already relative
+ * @param module - The module specifier
+ * @param typeOnly - Whether the whole import is used only for types
  * @returns The import statement
  */
-function renderImport(symbols: readonly string[], module: string): string {
+export function renderImport(symbols: readonly string[], module: string, typeOnly = false): string {
   const sorted = fmtSortSpecifiers(symbols);
-  const inline = `import { ${sorted.join(', ')} } from '${module}';`;
+  const keyword = typeOnly ? 'import type' : 'import';
+  const inline = `${keyword} { ${sorted.join(', ')} } from '${module}';`;
   if (inline.length <= GENERATED_LINE_WIDTH) return inline;
-  return `import {\n  ${sorted.join(',\n  ')},\n} from '${module}';`;
+  return `${keyword} {\n  ${sorted.join(',\n  ')},\n} from '${module}';`;
 }
 
 /**

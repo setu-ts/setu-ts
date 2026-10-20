@@ -11,6 +11,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import * as nodeFs from 'node:fs/promises';
+import { run as runProcess, tempDir } from '../../../../../test/node-helpers.ts';
+import { renderTestServer } from '../../../src/schematics/test-harness.ts';
 
 import { renderEquals, testHarnessFor } from '../../../src/schematics/test-harness.ts';
 import { TARGET_RUNTIMES } from '../../../src/constants.ts';
@@ -90,4 +93,72 @@ describe('renderEquals', () => {
       expect(testHarnessFor(runtime).imports.includes('node:assert'), runtime).toBe(usesAssert);
     }
   });
+});
+
+describe('generated socket test server', () => {
+  for (const [kind, failures, expectedAttempts, ok] of [
+    ['code', 1, 2, true],
+    ['message', 1, 2, true],
+    ['code', 5, 3, false],
+    ['other', 5, 1, false],
+  ] as const) {
+    it(`handles ${kind} startup failures (${failures}) and closes every app`, async () => {
+      const root = await tempDir({ prefix: 'setu-test-server-' });
+      try {
+        await nodeFs.mkdir(`${root}/test/support`, { recursive: true });
+        await nodeFs.writeFile(`${root}/test/support/server.ts`, renderTestServer());
+        await nodeFs.writeFile(
+          `${root}/setu.config.ts`,
+          `
+let attempts = 0;
+let stops = 0;
+export function createApp() {
+  return {
+    async start(options: { port: number; hostname: string }): Promise<void> {
+      attempts++;
+      if (options.port <= 0 || options.hostname !== '127.0.0.1') throw new Error('bad listen options');
+      if (attempts <= ${failures}) {
+        const error = new Error(${JSON.stringify(kind === 'message' ? 'Address already in use' : 'startup failed')});
+        ${kind === 'code' ? "Object.assign(error, { code: 'EADDRINUSE' });" : ''}
+        throw error;
+      }
+    },
+    async stop(): Promise<void> { stops++; },
+  };
+}
+export function counts() { return { attempts, stops }; }
+`,
+        );
+        await nodeFs.writeFile(
+          `${root}/probe.ts`,
+          `
+import { startTestServer } from './test/support/server.ts';
+import { counts } from './setu.config.ts';
+let ok = false;
+let message = '';
+try {
+  const server = await startTestServer();
+  ok = server.baseUrl.startsWith('http://127.0.0.1:');
+  await server.stop();
+} catch (error) { message = error instanceof Error ? error.message : String(error); }
+console.log(JSON.stringify({ ok, message, ...counts() }));
+`,
+        );
+        const result = await runProcess(process.execPath, {
+          args: [`${root}/probe.ts`],
+          stdout: 'piped',
+          stderr: 'piped',
+        });
+        expect(result.code, new TextDecoder().decode(result.stderr)).toBe(0);
+        expect(JSON.parse(new TextDecoder().decode(result.stdout))).toEqual({
+          ok,
+          message: ok ? '' : 'startup failed',
+          attempts: expectedAttempts,
+          stops: expectedAttempts,
+        });
+      } finally {
+        await nodeFs.rm(root, { recursive: true, force: true });
+      }
+    });
+  }
 });
