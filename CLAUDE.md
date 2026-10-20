@@ -6585,7 +6585,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   resolved runtime retain `setu` (`PROGRAM_NAME`); Deno-only devtool guidance uses the pinned Deno
   invocation. The CLI docs and the schematic tables in `packages/cli/README.md`, `docs/cli.md` and
   `PUBLIC_API.md` state that rollback covers SIGINT (Ctrl+C) and a caught error only, and match the
-  source — complete (PR pending)
+  source. Implemented by Codex, which stopped twice on gaps in the plan (a shared refusal sentence
+  that said "scaffolded", and seams surviving the Workers swap that removes `QueuePlugin`); a Codex
+  review then found a brace in a broker URL crashing `g app`, a dry run reading paths it would
+  refuse, and two missed unpinned instructions. The security audit, run by the planning session at
+  the maintainer's direction (not independent; design review recorded after implementation as plan
+  §10), found a CLI-owned file linked to `/dev/zero` hanging `g job` and its dry run — read by both
+  the writer and the artifact scanner, the latter since M70g — fixed by reading only regular files
+  under 1 MiB; re-audit passed — complete (PR pending)
 - **Next milestone** — M113l (documentation that does not match the code, or is missing).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

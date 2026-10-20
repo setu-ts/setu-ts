@@ -629,6 +629,10 @@ All notable changes to this project are documented here. The format follows
   because the devtool composition is `setu devtool enable`'s job and the bare package would produce
   a project that cannot start the connector. A refusal for any other `@setu-ts/<name>` specifier
   names that the package is not one this command installs and lists the catalogue, as before.
+- **@setu-ts/cli** a CLI-owned file that is a link or a special file no longer hangs `setu generate`
+  (M113i, 0.10.0). A barrel such as `src/jobs/index.ts` committed as a link to `/dev/zero` made
+  `g job` and its `--dry-run` read forever. The CLI now reads an existing file it generates only
+  when it is a regular file under 1 MiB, and refuses the path by name otherwise.
 - **@setu-ts/cli** the schematic tables match the source (V9-62, M113i, 0.10.0). The
   `packages/cli/README.md` table now lists `plugin` as `src/plugins/<name>.plugin.ts` (it said
   `src/plugins/<name>.ts`), its `controller` row no longer says `decorator-plugin` is required and
