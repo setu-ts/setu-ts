@@ -21,6 +21,24 @@ import type { ResolvedHost } from './project-files.ts';
 const ARGS_BUDGET = 60;
 
 /**
+ * Joins CLI-authored object arguments; expressions and nested object literals are refused.
+ *
+ * @param a - The existing single-level object literal
+ * @param b - The additional single-level object literal
+ * @returns One object literal containing both sets of properties
+ * @throws {Error} When either input is not a single-level object literal
+ */
+export function mergeObjectArgs(a: string, b: string): string {
+  const bodies = [a, b].map((args) => {
+    const match = /^\{([^{}]*)\}$/.exec(args.trim());
+    if (match === null) throw new Error('Expected a CLI-authored single-level object literal');
+    return match[1]!.trim().replace(/,\s*$/, '');
+  });
+  const body = bodies.filter((value) => value !== '').join(', ');
+  return body === '' ? '{}' : `{ ${body} }`;
+}
+
+/**
  * Wraps a rendered argument literal that would overflow the emitted line width.
  *
  * A broker connection read is long — `Deno.env.get('RABBITMQ_URL') ??
@@ -98,7 +116,16 @@ export function rewritePluginArgs(
   return {
     ...host,
     plugins: host.plugins.map((wiring) =>
-      wiring.pkg === pkg ? { ...wiring, args: wrapPluginArgs(render(connection)) } : wiring,
+      wiring.pkg === pkg
+        ? {
+            ...wiring,
+            args: wrapPluginArgs(
+              pkg === 'queue-plugin'
+                ? mergeObjectArgs(wiring.args ?? '{}', render(connection))
+                : render(connection),
+            ),
+          }
+        : wiring,
     ),
   };
 }

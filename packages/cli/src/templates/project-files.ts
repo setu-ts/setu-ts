@@ -11,7 +11,7 @@
  * @module
  */
 
-import { CONFIG_EXPORT, CONFIG_MODULE, PROGRAM_NAME, type TargetRuntime } from '../constants.ts';
+import { CONFIG_EXPORT, CONFIG_MODULE, VERSION, type TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
 import type {
@@ -40,6 +40,24 @@ import {
   NPM_TOOLING_SCRIPTS,
   npmToolingFiles,
 } from './npm-tooling.ts';
+import {
+  seamFiles,
+  seamLocalImports,
+  seamPluginSpreads,
+  seamSetupCalls,
+  withPluginOptionSeams,
+} from './seam.ts';
+
+/**
+ * The version-pinned package runner for a generated project's target runtime.
+ *
+ * @param runtime - The generated project's runtime
+ * @returns A command prefix that resolves this CLI's version
+ */
+export function cliInvocation(runtime: TargetRuntime): string {
+  const runner = runtime === 'deno' ? 'deno run -A npm:' : runtime === 'bun' ? 'bunx ' : 'npx ';
+  return `${runner}@setu-ts/cli@${VERSION}`;
+}
 
 /**
  * The devtool composition parameter every generated factory accepts as its
@@ -164,16 +182,18 @@ export interface ResolvedHost {
 /**
  * Fills in a host's optional members and applies its runtime swap.
  *
- * Every host in the registry happens to declare `localImports` and `files`, so
- * those two fallbacks are unreachable through `runNewCommand` today; they are
- * not dead, because {@linkcode TemplateHost} declares both optional and a
- * future host may omit either.
+ * Showcase files and explicit host contributions stay separate from seams.
+ * Seam files, imports and plugin arguments are derived only after the swap
+ * removes incompatible plugins.
  *
  * @param host - The selected template, or the no-template host
  * @returns The host with every member present
  */
 export function resolveHost(host: TemplateHost, runtime: TargetRuntime): ResolvedHost {
   const swap = host.runtimeSwaps?.[runtime];
+  const seams = (host.seams ?? []).filter(
+    (s) => s.requiresPlugin === undefined || !swap?.removePackages.includes(s.requiresPlugin),
+  );
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
   // Workers receive configuration exclusively through their request bindings.
   // Leaving an env-file path in the manifest would make ConfigPlugin require a
@@ -186,16 +206,20 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
       : host.manifest;
 
   return {
-    plugins: swapped,
+    plugins: withPluginOptionSeams(swapped, seams),
     workerExports: swap?.workerExports ?? [],
     entryReExports: swap?.entryReExports ?? [],
     wranglerToml: swap?.wranglerToml ?? '',
     middleware: host.middleware,
-    localImports: host.localImports ?? [],
+    localImports: [...(host.localImports ?? []), ...seamLocalImports(seams)],
     packageImports: host.packageImports ?? [],
-    files: [...(host.files ?? []), ...(swap?.files ?? [])],
-    pluginSpreads: host.pluginSpreads ?? [],
-    setupCalls: host.setupCalls ?? [],
+    files: [
+      ...(host.files ?? []),
+      ...seamFiles(seams, host.seamArtifacts ?? {}),
+      ...(swap?.files ?? []),
+    ],
+    pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
+    setupCalls: [...(host.setupCalls ?? []), ...seamSetupCalls(seams)],
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     extraDependencies: {},
@@ -1862,10 +1886,10 @@ ${
   }## Generate code
 
 \`\`\`bash
-${PROGRAM_NAME} generate service billing
-${PROGRAM_NAME} generate --help
+${cliInvocation(runtime)} generate service billing
+${cliInvocation(runtime)} generate --help
 \`\`\`
-${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
+${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime))}`}`;
 
   // A Deno frontend build creates node_modules too; other Deno projects do not.
   const gitignore = `${
@@ -2108,7 +2132,7 @@ compatibility_flags = ["nodejs_compat"]
 # \`fetch\` handler, which \`src/index.ts\` threads into \`${CONFIG_EXPORT}()\`.
 # Register \`CloudflarePlugin\` from @setu-ts/cloudflare-plugin to serve the
 # cache, storage, database, queue, messaging and realtime capabilities from the
-# bindings below. Add a package with \`${PROGRAM_NAME} add cloudflare\`.
+# bindings below. Add a package with \`${cliInvocation(runtime)} add cloudflare\`.
 #
 # The binding types most projects reach for are listed. Uncomment what you use — a
 # binding declared here but absent from the plugin's options is inert, and one

@@ -133,9 +133,10 @@ describe('full-stack template | the React Router middleware example', () => {
   });
 
   it('explains both layers in the README section it contributes', () => {
-    const section = FULL_STACK_TEMPLATE.manifest?.readmeSection ?? '';
+    const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
+    const section = typeof render === 'string' ? render : render('npx @setu-ts/cli@0.9.0');
     expect(section.startsWith('## Middleware\n')).toBe(true);
-    expect(section).toContain('`setu generate middleware <name>`');
+    expect(section).toContain('`npx @setu-ts/cli@0.9.0 generate middleware <name>`');
     expect(section).toContain('`export const middleware = [...]`');
     expect(section).toContain('`app/middleware/require-user.server.ts`');
   });
@@ -416,7 +417,10 @@ describe('full-stack template | manifest contributions', () => {
     expect(vite).toContain("new URL('../../libs/', import.meta.url)");
     expect(vite).toContain("for (const file of ['deno.json', 'deno.jsonc'])");
     expect(vite).toContain('workspaceLibraries.push(manifest.name)');
-    expect(FULL_STACK_TEMPLATE.manifest?.readmeSection).toContain('Client modules cannot import');
+    const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
+    expect(typeof render === 'string' ? render : render('cli')).toContain(
+      'Client modules cannot import',
+    );
   });
 });
 

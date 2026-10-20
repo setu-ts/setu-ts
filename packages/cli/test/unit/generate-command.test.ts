@@ -11,6 +11,16 @@ const DENO_MANIFEST = (...packages: readonly string[]) =>
     ),
   });
 
+it('dry-run collision refuses without writing', async () => {
+  const h = harness({ '/app/src/services/widget.service.ts': 'mine' });
+  expect(await h.run(['service', 'widget', '--dry-run'])).toBe(1);
+  expect(h.err.text()).toContain(
+    'WOULD REFUSE: /app/src/services/widget.service.ts already exists',
+  );
+  expect(h.fs.writes).toEqual([]);
+  expect(h.fs.read('/app/src/services/widget.service.ts')).toBe('mine');
+});
+
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;

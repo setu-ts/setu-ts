@@ -6555,8 +6555,36 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the dry-run preflight) was NOT re-audited, at the maintainer's direction. Trap recorded: an
   `opencode run` session kept editing through opencode's background service after its client had
   exited — complete (PR #477)
-- **Next milestone** — M104 (the `v0.9.0` client-brief run). The `v0.9.0` smoke run proceeds
-  separately.
+- **Milestone 113i** (`cli` — CLI commands whose refusals and guidance mislead; V9-5, V9-12, V9-13,
+  V9-30, V9-40, V9-60, V9-61, V9-62, V9-75, on one `fix/` branch): the devtool runtime refusal takes
+  a required `context` of `'scaffold'` or `'enable'`, so its remedy names the situation it is in —
+  the shared first sentence now ends "could never start its diagnostics connector," the scaffold
+  remedy keeps "Scaffold without --devtool, or create the project with --runtime deno.", and the
+  enable remedy says the devtool can only be enabled on a Deno project, with no "scaffold" wording.
+  The addable catalogue gains `view`, `localization` and `idempotency` (their `…-plugin` packages),
+  so the help line "The full specifier works too" is true of the published framework packages, while
+  `setu add diagnostics` refuses with "`@setu-ts/diagnostics-plugin` is installed and wired by
+  `setu devtool enable`." and exits 2. `setu add` inserts the bare plugin call into `setu.config.ts`
+  for the eight zero-configuration packages — `worker-pool-plugin`, `secrets-plugin`,
+  `storage-plugin`, `audit-plugin`, `mail-plugin`, `resilience-plugin`, `view-plugin`,
+  `idempotency-plugin` — exactly as it does for `cache`, and prints the exact wiring line for the
+  two that need a user choice (telemetry, localization) instead of inserting. The `--dry-run` of
+  `generate`, `new`, `library` and `generate app` classifies the files first and prints
+  `WOULD REFUSE: <path> already exists`, exiting 1 on a collision, the `adopt` wording and exit
+  code. The five class-based ingress schematics write `src/ingress/<kebab>-<kind>.ingress.ts` with
+  `<Pascal><Kind>Ingress`, every other symbol keeps its plain name, and existing
+  `src/ingress/<name>.ingress.ts` files keep scanning and stay registered. A jobs seam makes a
+  functional `g job` wire its exported `create<Pascal>JobProcessor` through the managed
+  `src/jobs/index.ts` barrel to `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` when
+  `queue-plugin` is installed (a class-based `g job` is refused without it), the seam is not scanned
+  without `queue-plugin` so standalone `src/jobs/*.job.ts` files get no skip report, and the stale
+  registry premise that `QueuePluginOptions` has no `processors` option is rewritten. Every command
+  a generated file or the CLI's own output tells the reader to run now renders the pinned
+  `npx @setu-ts/cli@<VERSION>` / `bunx @setu-ts/cli@<VERSION>` /
+  `deno run -A npm:@setu-ts/cli@<VERSION>` form. The CLI docs and the schematic tables in
+  `packages/cli/README.md`, `docs/cli.md` and `PUBLIC_API.md` state that rollback covers SIGINT
+  (Ctrl+C) and a caught error only, and match the source — complete (PR pending)
+- **Next milestone** — M113l (documentation that does not match the code, or is missing).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

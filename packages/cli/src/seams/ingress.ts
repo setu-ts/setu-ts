@@ -22,6 +22,17 @@ import type { DerivedNames } from '../utils/names.ts';
 /** Barrel export consumed by `DecoratorPlugin({ ingress })`. */
 export const INGRESS_HANDLERS_EXPORT = 'INGRESS_HANDLERS';
 
+/**
+ * Derives only the ingress file stem and class name; message addresses keep the plain name.
+ *
+ * @param names - The artifact's unqualified name
+ * @param kind - The ingress schematic's name
+ * @returns Names qualified by the ingress kind
+ */
+export function ingressNames(names: DerivedNames, kind: string): DerivedNames {
+  return deriveNames(`${names.kebab}-${kind}`);
+}
+
 function importSymbols(names: DerivedNames): readonly string[] {
   return [`${names.pascal}Ingress`];
 }

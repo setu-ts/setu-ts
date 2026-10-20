@@ -1,3 +1,4 @@
+import { VERSION } from '../../../src/constants.ts';
 import { describe, expect, it } from 'vitest';
 import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
@@ -29,6 +30,17 @@ function contentsOf(path: string): string {
 }
 
 describe('workspaceRootFiles', () => {
+  it('wraps port-repair guidance around the pinned command on every workspace runtime', () => {
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      const readme = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime)).find(
+        (file) => file.path === 'README.md',
+      )!.contents;
+      const paragraph = readme.split('## Ports\n')[1]!.split('\n\n')[1]!;
+      expect(paragraph).toContain('workspace ports --reallocate');
+      for (const line of paragraph.split('\n')) expect(line.length).toBeLessThanOrEqual(100);
+    }
+  });
+
   it('emits the root files and its development runner', () => {
     expect(
       workspaceRootFiles('acme', 3000, HTTP, DENO)
@@ -111,7 +123,7 @@ describe('workspaceRootFiles', () => {
   it('names the workspace and the add-a-service command in its README', () => {
     const readme = contentsOf('README.md');
     expect(readme).toContain('# acme');
-    expect(readme).toContain('setu generate app orders');
+    expect(readme).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} generate app orders`);
     expect(readme).toContain(WORKSPACE_MANIFEST);
   });
 });

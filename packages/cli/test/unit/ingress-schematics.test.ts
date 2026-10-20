@@ -13,42 +13,49 @@ describe('class-based ingress schematic arms', () => {
   const cases = [
     {
       generate: generateJob,
+      kind: 'job',
       decorator: '@Processor(ORDER_ITEM_JOB)',
       plugin: 'queue-plugin',
     },
     {
       generate: generateEventHandler,
+      kind: 'event-handler',
       decorator: '@OnEvent(ORDER_ITEM_EVENT)',
       plugin: 'events-plugin',
     },
     {
       generate: generateWsRoute,
+      kind: 'ws-route',
       decorator: "@Gateway('/ws/order-item')",
       plugin: 'websocket-plugin',
     },
     {
       generate: generateCommandHandler,
+      kind: 'command-handler',
       decorator: '@CommandHandler(ORDER_ITEM_COMMAND)',
       plugin: 'cqrs-plugin',
     },
     {
       generate: generateQueryHandler,
+      kind: 'query-handler',
       decorator: '@QueryHandler(ORDER_ITEM_QUERY)',
       plugin: 'cqrs-plugin',
     },
   ] as const;
 
-  for (const { generate, decorator, plugin } of cases) {
+  for (const { generate, decorator, plugin, kind } of cases) {
     it(`emits ${decorator} into the ingress seam`, () => {
       const files = generate(deriveNames('order-item'), options(['decorator-plugin', plugin]));
       expect(files.map((file) => file.path)).toEqual([
-        'src/ingress/order-item.ingress.ts',
+        `src/ingress/order-item-${kind}.ingress.ts`,
         INGRESS_SEAM.barrel,
       ]);
       expect(files[0]?.contents).toContain(decorator);
-      expect(files[0]?.contents).toContain('export class OrderItemIngress');
+      expect(files[0]?.contents).toContain(
+        `export class ${deriveNames('order-item-' + kind).pascal}Ingress`,
+      );
       expect(files[1]?.managed).toBe(true);
-      expect(files[1]?.contents).toContain('OrderItemIngress');
+      expect(files[1]?.contents).toContain(`${deriveNames('order-item-' + kind).pascal}Ingress`);
     });
   }
 

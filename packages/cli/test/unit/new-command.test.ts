@@ -36,6 +36,13 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
 // The guard itself is unit-tested in `file-writer.test.ts`, where it lives.
 // This is the invariant it protects, driven through the real command.
 describe('the duplicate-path guard', () => {
+  it('dry-run collision refuses without writing', async () => {
+    const h = harness({ '/work/app/main.ts': 'mine' });
+    expect(await h.run(['app', '--dry-run'])).toBe(1);
+    expect(h.err.text()).toContain('WOULD REFUSE: /work/app/main.ts already exists');
+    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.read('/work/app/main.ts')).toBe('mine');
+  });
   it('reports no duplicate for any built-in template on any runtime', async () => {
     // The invariant the guard protects: a template's own files must never
     // collide with the fixed project files, for any target.
@@ -709,12 +716,8 @@ describe('runNewCommand', () => {
       for (const symbol of ['ConfigPlugin', 'OpenApiPlugin', 'errorHandler']) {
         expect(microConfig).toContain(symbol);
       }
-      for (const symbol of [
-        'MessagingPlugin',
-        'QueuePlugin',
-        'ResiliencePlugin',
-        'TelemetryPlugin',
-      ]) {
+      expect(microConfig).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
+      for (const symbol of ['MessagingPlugin', 'ResiliencePlugin', 'TelemetryPlugin']) {
         expect(microConfig).toContain(`${symbol}()`);
         expect(rest.fs.read('/work/app/setu.config.ts')).not.toContain(symbol);
       }

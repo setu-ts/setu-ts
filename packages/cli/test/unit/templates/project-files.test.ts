@@ -8,6 +8,59 @@ import {
 import type { TargetRuntime } from '../../../src/constants.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
+import { VERSION } from '../../../src/version.ts';
+import { withQueueArgs } from '../../../src/templates/broker.ts';
+import { getTransport } from '../../../src/workspace/transport.ts';
+import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
+import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
+import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
+
+describe('guidance and queue seam composition', () => {
+  for (const [runtime, invocation] of [
+    ['node', 'npx @setu-ts/cli@'],
+    ['cloudflare-workers', 'npx @setu-ts/cli@'],
+    ['bun', 'bunx @setu-ts/cli@'],
+    ['deno', 'deno run -A npm:@setu-ts/cli@'],
+  ] as const) {
+    it(`README command resolves through the pinned CLI on ${runtime}`, () => {
+      const readme = contentsOf(
+        [...projectFiles('svc', runtime, resolveHost(MINIMAL_HOST, runtime))],
+        'README.md',
+      );
+      expect(readme).toContain(`${invocation}${VERSION} generate service billing`);
+      expect(readme).toContain(`${invocation}${VERSION} generate --help`);
+    });
+  }
+  it('Workers microservice resolves seams after removing queue-plugin', () => {
+    const host = resolveHost(getTemplate('microservice')!, 'cloudflare-workers');
+    const files = [...projectFiles('svc', 'cloudflare-workers', host)];
+    expect(files.map((file) => file.path)).not.toContain('src/jobs/index.ts');
+    const config = contentsOf(files, 'setu.config.ts');
+    expect(config).not.toContain('QUEUE_PROCESSORS');
+    expect(config).not.toContain('QueuePlugin');
+    expect(config).toContain('CloudflarePlugin');
+  });
+  it('microservice queue seam preserves redis transport in either composition order', () => {
+    const host = resolveHost(getTemplate('microservice')!, 'deno');
+    const config = contentsOf([...projectFiles('svc', 'deno', host)], 'setu.config.ts');
+    expect(config).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
+    const redis = withQueueArgs(host, getTransport('redis')!, workspaceProfile('deno'));
+    const transportFirst = withQueueArgs(
+      { ...host, plugins: getTemplate('microservice')!.plugins },
+      getTransport('redis')!,
+      workspaceProfile('deno'),
+    );
+    for (const plugins of [
+      redis.plugins,
+      withPluginOptionSeams(transportFirst.plugins, [JOBS_SEAM]),
+    ]) {
+      const queue = plugins.find((wiring) => wiring.pkg === 'queue-plugin')!.args!;
+      expect(queue).toContain("adapter: 'redis'");
+      expect(queue).toContain('processors: [...QUEUE_PROCESSORS]');
+      expect(queue).toContain('REDIS_URL');
+    }
+  });
+});
 
 /**
  * Reads one planned file's contents.
@@ -23,11 +76,8 @@ function contentsOf(files: readonly { path: string; contents: string }[], path: 
 }
 
 describe('resolveHost', () => {
-  // Every host in the registry declares `localImports` and `files`, so these
-  // fallbacks are unreachable through `runNewCommand`. They are not dead —
-  // `TemplateHost` declares both optional — so they are driven here directly
-  // rather than left as an untested path behind a template that happens not to
-  // exercise them.
+  // A bare host also exercises defaults for contributions that no current
+  // template omits, keeping the optional host contract independent of the registry.
   it('fills in every optional member of a bare host', () => {
     const resolved = resolveHost(
       { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },

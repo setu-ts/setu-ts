@@ -433,7 +433,7 @@ async function enableInWorkspace(
   args: ParsedArgs,
   deps: DevtoolCommandDependencies,
 ): Promise<number> {
-  const runtimeRefusal = devtoolRuntimeRefusal(manifest.runtime);
+  const runtimeRefusal = devtoolRuntimeRefusal(manifest.runtime, 'enable');
   if (runtimeRefusal !== undefined) return reportInapplicable(deps, runtimeRefusal);
 
   if (memberName === undefined) {
@@ -753,7 +753,7 @@ async function enableStandalone(
       if (await isPresent(deps.fs, joinPath(dir, 'package.json'))) {
         // Never Deno without a Deno manifest, so this always refuses.
         const runtime = await detectTargetRuntime(deps.fs, dir);
-        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime)!);
+        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime, 'enable')!);
       }
     } catch (cause) {
       return reportInapplicable(deps, escapeName(describeCause(cause)));
@@ -764,7 +764,7 @@ async function enableStandalone(
     );
   }
   try {
-    const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir));
+    const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir), 'enable');
     if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } catch (cause) {
     return reportInapplicable(deps, escapeName(describeCause(cause)));

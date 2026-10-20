@@ -31,6 +31,7 @@ import {
 } from '../utils/names.ts';
 import {
   findExisting,
+  reportDryRunPlan,
   firstDuplicatePath,
   type GeneratedFile,
   joinPath,
@@ -201,8 +202,8 @@ export async function runLibraryCommand(
   const planned = files.map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of planned) deps.log(`would create ${escapeName(file.path)}`);
-    return EXIT_OK;
+    const code = await reportDryRunPlan(deps, planned);
+    return code;
   }
 
   const existing = await findExisting(deps.fs, planned);

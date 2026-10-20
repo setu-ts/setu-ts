@@ -5,6 +5,7 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
+import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { isMissingPath } from './filesystem-errors.ts';
 import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 import { escapeName } from './names.ts';
@@ -390,6 +391,36 @@ export async function classifyFiles(
     );
   }
   return outcomes;
+}
+
+/**
+ * Reports the same collisions and managed-file outcomes as a real write, without writing.
+ *
+ * @param deps - The filesystem and output sinks
+ * @param files - The planned files
+ * @returns The error exit code for collisions, otherwise the success exit code
+ */
+export async function reportDryRunPlan(
+  deps: {
+    readonly fs: IFileSystem;
+    readonly log: (line: string) => void;
+    readonly error: (line: string) => void;
+  },
+  files: readonly GeneratedFile[],
+): Promise<number> {
+  const existing = await findExisting(deps.fs, files);
+  const outcomes = await classifyFiles(deps.fs, files);
+  const collisions = new Set(existing);
+  for (const outcome of outcomes) {
+    if (collisions.has(outcome.path)) continue;
+    deps.log(
+      outcome.outcome === 'unchanged'
+        ? `unchanged ${escapeName(outcome.path)}`
+        : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${escapeName(outcome.path)}`,
+    );
+  }
+  for (const path of existing) deps.error(`WOULD REFUSE: ${escapeName(path)} already exists`);
+  return existing.length > 0 ? EXIT_ERROR : EXIT_OK;
 }
 
 /** Restores even a write that rejected after truncating its target. */

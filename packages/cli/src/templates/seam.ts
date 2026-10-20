@@ -25,6 +25,8 @@ import { GENERATED_MIDDLEWARE_EXPORT } from '../seams/middleware.ts';
 import { GENERATED_PLUGINS_EXPORT } from '../seams/plugins.ts';
 import { HEALTH_INDICATORS_EXPORT } from '../seams/health.ts';
 import { CUSTOM_METRICS_EXPORT } from '../seams/metrics.ts';
+import { QUEUE_PROCESSORS_EXPORT } from '../seams/jobs.ts';
+import { mergeObjectArgs, wrapPluginArgs } from './plugin-args.ts';
 import type { LocalImport, Wiring } from './registry.ts';
 
 /**
@@ -168,7 +170,7 @@ export function seamPluginRegistrations(seams: readonly SeamSpec[]): readonly st
  *
  * @param wirings - The template's plugin wirings
  * @param seams - The host's consumable seams
- * @returns The list with each seam-consuming plugin's `args` replaced
+ * @returns Rewritten wirings, preserving existing queue options alongside its processors
  */
 export function withPluginOptionSeams(
   wirings: readonly Wiring[],
@@ -176,6 +178,9 @@ export function withPluginOptionSeams(
 ): readonly Wiring[] {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   const args = new Map<string, string>();
+  if (schematics.has('job')) {
+    args.set('queue-plugin', `{ processors: [...${QUEUE_PROCESSORS_EXPORT}] }`);
+  }
 
   if (schematics.has('health-indicator')) {
     args.set('health-plugin', `{ indicators: [...${HEALTH_INDICATORS_EXPORT}] }`);
@@ -195,7 +200,15 @@ export function withPluginOptionSeams(
 
   return wirings.map((wiring) => {
     const replacement = args.get(wiring.pkg);
-    return replacement === undefined ? wiring : { ...wiring, args: replacement };
+    return replacement === undefined
+      ? wiring
+      : {
+          ...wiring,
+          args:
+            wiring.pkg === 'queue-plugin'
+              ? wrapPluginArgs(mergeObjectArgs(wiring.args ?? '{}', replacement))
+              : replacement,
+        };
   });
 }
 

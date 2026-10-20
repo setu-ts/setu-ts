@@ -42,7 +42,7 @@ import {
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
-import { npmInstall, startOverlay, withNodeServer } from '../fixtures/node-project.ts';
+import { npmInstall, runIn, startOverlay, withNodeServer } from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -388,6 +388,17 @@ try {
     try {
       const installed = await npmInstall(project, overlay);
       expect(installed.code, installed.output).toBe(0);
+      const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
+      const command = readme
+        .split('\n')
+        .find((line) => /^npx @setu-ts\/cli@\S+ generate service billing$/.test(line));
+      expect(command).toBeDefined();
+      const [executable, ...args] = command!.split(' ');
+      const generated = await runIn(project, executable!, args, overlay);
+      expect(generated.code, generated.output).toBe(0);
+      expect(await nodeFs.readFile(`${project}/src/services/billing.service.ts`, 'utf8')).toContain(
+        'billing',
+      );
       const booted = await withNodeServer(project, async (origin) => {
         const statuses: number[] = [];
         // `/health` is requested too, so the log assertions below can prove the

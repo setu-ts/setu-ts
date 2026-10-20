@@ -5,6 +5,7 @@ import {
   assertInsideProject,
   dirName,
   findExisting,
+  reportDryRunPlan,
   firstDuplicatePath,
   interruptedRunRetryHint,
   joinPath,
@@ -14,6 +15,28 @@ import {
 } from '../../src/utils/file-writer.ts';
 
 describe('firstDuplicatePath', () => {
+  it('reports dry-run create, managed update, unchanged and collision without writes', async () => {
+    const fs = createFakeFs({ '/update': 'old', '/same': 'same', '/collision': 'mine' });
+    const out: string[] = [];
+    const err: string[] = [];
+    const deps = {
+      fs,
+      log: (line: string) => out.push(line),
+      error: (line: string) => err.push(line),
+    };
+    const files = [
+      { path: '/new', contents: 'new' },
+      { path: '/update', contents: 'next', managed: true },
+      { path: '/same', contents: 'same', managed: true },
+    ];
+    expect(await reportDryRunPlan(deps, files)).toBe(0);
+    expect(out).toEqual(['would create /new', 'would update /update', 'unchanged /same']);
+    expect(await reportDryRunPlan(deps, [{ path: '/collision', contents: 'next' }])).toBe(1);
+    expect(err).toEqual(['WOULD REFUSE: /collision already exists']);
+    expect(out).toEqual(['would create /new', 'would update /update', 'unchanged /same']);
+    expect(fs.writes).toEqual([]);
+    expect(fs.read('/collision')).toBe('mine');
+  });
   // The overwrite check probes the filesystem, so it cannot see a path planned
   // twice within one plan — both would be written and the last would win.
   it('finds a path planned twice', () => {

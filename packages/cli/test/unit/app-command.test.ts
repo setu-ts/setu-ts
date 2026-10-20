@@ -109,6 +109,14 @@ function harness(
 }
 
 describe('runAppCommand', () => {
+  it('dry-run collision refuses without writing', async () => {
+    const h = harness([]);
+    await h.fs.writeFile('/ws/apps/widget/main.ts', new TextEncoder().encode('mine'));
+    const writes = [...h.fs.writes];
+    expect(await h.run(['app', 'widget', '--dry-run'])).toBe(1);
+    expect(h.err.text()).toContain('WOULD REFUSE: /ws/apps/widget/main.ts already exists');
+    expect(h.fs.writes).toEqual(writes);
+  });
   describe('usage', () => {
     it('prints its own usage under --help and exits 0', async () => {
       const h = harness([]);

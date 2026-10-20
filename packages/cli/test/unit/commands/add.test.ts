@@ -104,6 +104,61 @@ export function createApp() {
 `;
 
 describe('resolveAddablePackage', () => {
+  for (const name of ['view', '@setu-ts/view-plugin', 'localization', 'idempotency']) {
+    it(`add ${name} succeeds`, async () => {
+      const h = harness({ '/app/deno.json': DENO_MANIFEST });
+      expect(await h.run([name])).toBe(0);
+    });
+  }
+  for (const name of ['diagnostics', '@setu-ts/diagnostics-plugin']) {
+    it(`refuses ${name} with devtool enable guidance`, async () => {
+      const h = harness({ '/app/deno.json': DENO_MANIFEST });
+      expect(await h.run([name])).toBe(2);
+      expect(h.err.join('\n')).toContain(
+        '`@setu-ts/diagnostics-plugin` is installed and wired by `setu devtool enable`.',
+      );
+      expect(h.fs.writes).toEqual([]);
+    });
+  }
+  const inserted = [
+    ['worker-pool', 'WorkerPoolPlugin'],
+    ['secrets', 'SecretsPlugin'],
+    ['storage', 'StoragePlugin'],
+    ['audit', 'AuditPlugin'],
+    ['mail', 'MailPlugin'],
+    ['resilience', 'ResiliencePlugin'],
+    ['view', 'ViewPlugin'],
+    ['idempotency', 'IdempotencyPlugin'],
+  ] as const;
+  for (const [name, symbol] of inserted) {
+    it(`inserts ${symbol} once and a second add is idempotent`, async () => {
+      const h = harness({
+        '/app/deno.json': DENO_MANIFEST,
+        '/app/setu.config.ts': FUNCTIONAL_CONFIG,
+      });
+      expect(await h.run([name])).toBe(0);
+      const config = h.read('/app/setu.config.ts');
+      expect(config.split(`${symbol}()`).length - 1).toBe(1);
+      expect(await h.run([name])).toBe(0);
+      expect(h.read('/app/setu.config.ts')).toBe(config);
+    });
+  }
+  for (const [name, line] of [
+    ['telemetry', "TelemetryPlugin({ serviceName: '<service-name>', exporter: 'console' })"],
+    ['localization', "LocalizationPlugin({ supportedLocales: ['en'], catalogues: { en: {} } })"],
+  ]) {
+    it(`prints the ${name} choice and preserves config bytes`, async () => {
+      const h = harness({
+        '/app/deno.json': DENO_MANIFEST,
+        '/app/setu.config.ts': FUNCTIONAL_CONFIG,
+      });
+      expect(await h.run([name])).toBe(0);
+      expect(h.out.join('\n')).toContain(line);
+      expect(h.read('/app/setu.config.ts')).toBe(FUNCTIONAL_CONFIG);
+      expect(await h.run([name])).toBe(0);
+      expect(h.read('/app/setu.config.ts')).toBe(FUNCTIONAL_CONFIG);
+    });
+  }
   it('accepts the testing package by short and full name', () => {
     expect(resolveAddablePackage('testing')).toBe('testing');
     expect(resolveAddablePackage('@setu-ts/testing')).toBe('testing');
@@ -1367,7 +1422,7 @@ export function createApp() {
   });
 
   it('resolves no seam for a provider that consumes none', () => {
-    expect(addSeam('queue-plugin', new Set(['queue-plugin']))).toBeUndefined();
+    expect(addSeam('queue-plugin', new Set(['queue-plugin']))?.args).toContain('QUEUE_PROCESSORS');
     expect(addSeam('auth-plugin', new Set(['auth-plugin']))).toBeUndefined();
   });
 

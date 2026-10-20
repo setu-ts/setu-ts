@@ -115,7 +115,7 @@ describe('MINIMAL_HOST plugins', () => {
 
 describe('rest template', () => {
   it('registers the documented plugin set in order, runtime first', () => {
-    expect(symbols(REST_TEMPLATE.plugins)).toEqual([
+    expect(symbols(resolveHost(REST_TEMPLATE, 'deno').plugins)).toEqual([
       'RuntimePlugin',
       'ConfigPlugin',
       'LoggerPlugin',
@@ -130,12 +130,14 @@ describe('rest template', () => {
   it('adds errorHandler as MIDDLEWARE, never as a plugin', () => {
     // `@setu-ts/exceptions` ships a MiddlewareFunction, not an IPlugin.
     expect(symbols(REST_TEMPLATE.middleware)).toEqual(['errorHandler']);
-    expect(symbols(REST_TEMPLATE.plugins)).not.toContain('errorHandler');
-    expect(REST_TEMPLATE.plugins.every((w) => w.pkg !== 'exceptions')).toBe(true);
+    expect(symbols(resolveHost(REST_TEMPLATE, 'deno').plugins)).not.toContain('errorHandler');
+    expect(resolveHost(REST_TEMPLATE, 'deno').plugins.every((w) => w.pkg !== 'exceptions')).toBe(
+      true,
+    );
   });
 
   it('excludes plugins that need credentials before they do anything', () => {
-    const packages = REST_TEMPLATE.plugins.map((w) => w.pkg);
+    const packages = resolveHost(REST_TEMPLATE, 'deno').plugins.map((w) => w.pkg);
     expect(packages).not.toContain('database-plugin');
     expect(packages).not.toContain('auth-plugin');
   });
@@ -144,15 +146,17 @@ describe('rest template', () => {
 describe('microservice template', () => {
   it('is a strict superset of rest', () => {
     for (const wiring of REST_PLUGINS) {
-      expect(symbols(MICROSERVICE_TEMPLATE.plugins)).toContain(wiring.symbol);
+      expect(symbols(resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins)).toContain(wiring.symbol);
     }
-    expect(MICROSERVICE_TEMPLATE.plugins.length).toBeGreaterThan(REST_PLUGINS.length);
+    expect(resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins.length).toBeGreaterThan(
+      REST_PLUGINS.length,
+    );
   });
 
   it('preserves rest ordering, so runtime still registers first', () => {
-    expect(symbols(MICROSERVICE_TEMPLATE.plugins).slice(0, REST_PLUGINS.length)).toEqual(
-      symbols(REST_PLUGINS),
-    );
+    expect(
+      symbols(resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins).slice(0, REST_PLUGINS.length),
+    ).toEqual(symbols(REST_PLUGINS));
   });
 
   // `CqrsPlugin` and `EventsPlugin` are here because this is the only template that can
@@ -161,7 +165,9 @@ describe('microservice template', () => {
   // project. Both are in-memory and zero-configuration, so they satisfy the tier's rule
   // that a scaffolded plugin must construct with no credentials.
   it('adds exactly the service-to-service plugins', () => {
-    expect(symbols(MICROSERVICE_TEMPLATE.plugins).slice(REST_PLUGINS.length)).toEqual([
+    expect(
+      symbols(resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins).slice(REST_PLUGINS.length),
+    ).toEqual([
       'MessagingPlugin',
       'QueuePlugin',
       'ResiliencePlugin',
@@ -173,13 +179,17 @@ describe('microservice template', () => {
   });
 
   it('is the only template hosting the cqrs and events seams', () => {
-    const cqrs = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'CqrsPlugin');
-    const events = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'EventsPlugin');
+    const cqrs = resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins.find(
+      (p) => p.symbol === 'CqrsPlugin',
+    );
+    const events = resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins.find(
+      (p) => p.symbol === 'EventsPlugin',
+    );
     expect(cqrs?.args).toBe('{ commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }');
     expect(events?.args).toBe('{ handlers: EVENT_HANDLERS }');
     // And the barrels they read are emitted from scaffold time, so a fresh project is
     // wired before anything is generated.
-    const paths = (MICROSERVICE_TEMPLATE.files ?? []).map((f) => f.path);
+    const paths = (resolveHost(MICROSERVICE_TEMPLATE, 'deno').files ?? []).map((f) => f.path);
     expect(paths).toContain('src/cqrs/index.ts');
     expect(paths).toContain('src/events/index.ts');
   });
@@ -201,7 +211,9 @@ describe('microservice template', () => {
     // MUST carry args — a bare call does not type-check. The e2e drift gate is
     // what proves the string itself compiles against the real union; this pins
     // which arm was chosen and that the map is empty.
-    const wiring = MICROSERVICE_TEMPLATE.plugins.find((p) => p.symbol === 'ServiceDiscoveryPlugin');
+    const wiring = resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins.find(
+      (p) => p.symbol === 'ServiceDiscoveryPlugin',
+    );
 
     expect(wiring?.pkg).toBe('service-discovery-plugin');
     expect(wiring?.args).toBe("{ provider: 'static', services: {} }");
@@ -315,7 +327,10 @@ describe('packagesOf', () => {
   });
 
   it('covers every package the rest template references', () => {
-    const packages = packagesOf(REST_TEMPLATE.plugins, REST_TEMPLATE.middleware);
+    const packages = packagesOf(
+      resolveHost(REST_TEMPLATE, 'deno').plugins,
+      REST_TEMPLATE.middleware,
+    );
     expect(packages).toContain('runtime');
     expect(packages).toContain('exceptions');
     expect(packages).toContain('openapi-plugin');
@@ -324,7 +339,7 @@ describe('packagesOf', () => {
 
 describe('class-based template', () => {
   it('is the functional REST set plus decorators and DI', () => {
-    expect(symbols(CLASS_BASED_TEMPLATE.plugins)).toEqual([
+    expect(symbols(resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins)).toEqual([
       ...symbols(REST_PLUGINS),
       'DecoratorPlugin',
       'DiPlugin',
@@ -341,7 +356,9 @@ describe('class-based template', () => {
     // them and a second literal entry would register each one twice. Order is
     // still load-bearing — the standalone barrels come before the module one, so
     // `setu g controller` and `setu g module` both ADD to this registration.
-    const decorator = CLASS_BASED_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
+    const decorator = resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins.find(
+      (w) => w.pkg === 'decorator-plugin',
+    );
     expect(decorator?.args).toBe(
       '{\n' +
         '        controllers: [...APP_CONTROLLERS],\n' +
@@ -375,7 +392,7 @@ describe('class-based template', () => {
       // carries that argument.
       'logger-plugin',
     ]);
-    for (const wiring of CLASS_BASED_TEMPLATE.plugins) {
+    for (const wiring of resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins) {
       if (withArgs.has(wiring.pkg)) {
         expect(wiring.args).toBeDefined();
         continue;
@@ -387,7 +404,7 @@ describe('class-based template', () => {
   it('emits DiPlugin({ autoRegister: true }), not a bare call (E3)', () => {
     // Without `autoRegister` every `@Inject(CAPABILITIES.X)` throws at startup.
     // It is the default since 0.9.0; the composition still states it.
-    const di = CLASS_BASED_TEMPLATE.plugins.find((w) => w.pkg === 'di-plugin');
+    const di = resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins.find((w) => w.pkg === 'di-plugin');
     expect(di?.args).toBe('{ autoRegister: true }');
   });
 
@@ -398,14 +415,19 @@ describe('class-based template', () => {
     expect(REST_PLUGINS.some((w) => w.pkg === 'decorator-plugin')).toBe(false);
 
     // The other templates must not have picked up the class-based showcase.
-    for (const plugins of [REST_TEMPLATE.plugins, MICROSERVICE_TEMPLATE.plugins]) {
+    for (const plugins of [
+      resolveHost(REST_TEMPLATE, 'deno').plugins,
+      resolveHost(MICROSERVICE_TEMPLATE, 'deno').plugins,
+    ]) {
       const decorator = plugins.find((w) => w.pkg === 'decorator-plugin');
       expect(decorator).toBeUndefined();
     }
   });
 
   it('imports every identifier its args string names', () => {
-    const imported = (CLASS_BASED_TEMPLATE.localImports ?? []).flatMap((l) => l.symbols);
+    const imported = (resolveHost(CLASS_BASED_TEMPLATE, 'deno').localImports ?? []).flatMap(
+      (l) => l.symbols,
+    );
     expect(imported).toContain('APP_CONTROLLERS');
     expect(imported).toContain('APP_SERVICES');
     expect(imported).toContain('INGRESS_HANDLERS');
@@ -416,7 +438,7 @@ describe('class-based template', () => {
     // E4: the config used to import the two classes by path, which is the
     // signal a developer copies — and it pointed at `src/` root rather than the
     // directories `setu generate` writes to.
-    const froms = (CLASS_BASED_TEMPLATE.localImports ?? []).map((l) => l.from);
+    const froms = (resolveHost(CLASS_BASED_TEMPLATE, 'deno').localImports ?? []).map((l) => l.from);
     expect(froms).not.toContain('./src/greeting-service.ts');
     expect(froms).not.toContain('./src/greeting-controller.ts');
     expect(froms).toContain('./src/services/index.ts');
@@ -427,7 +449,7 @@ describe('class-based template', () => {
   it('seeds the showcase into the SCAFFOLDED barrels, before anything is generated', () => {
     // Without the seed the showcase would sit in a seam directory registered by
     // nothing until the first `setu generate` regenerated the barrel around it.
-    const files = CLASS_BASED_TEMPLATE.files ?? [];
+    const files = resolveHost(CLASS_BASED_TEMPLATE, 'deno').files ?? [];
     const controllers = files.find((f) => f.path === 'src/controllers/index.ts');
     const services = files.find((f) => f.path === 'src/services/index.ts');
     expect(controllers?.contents).toContain('GreetingController');
@@ -435,14 +457,16 @@ describe('class-based template', () => {
   });
 
   it('emits a source file for each locally imported module', () => {
-    const emitted = (CLASS_BASED_TEMPLATE.files ?? []).map((f) => `./${f.path}`);
-    for (const local of CLASS_BASED_TEMPLATE.localImports ?? []) {
+    const emitted = (resolveHost(CLASS_BASED_TEMPLATE, 'deno').files ?? []).map(
+      (f) => `./${f.path}`,
+    );
+    for (const local of resolveHost(CLASS_BASED_TEMPLATE, 'deno').localImports ?? []) {
       expect(emitted).toContain(local.from);
     }
   });
 
   it('emits the controller, the service, and every seam barrel it can consume', () => {
-    expect((CLASS_BASED_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
+    expect((resolveHost(CLASS_BASED_TEMPLATE, 'deno').files ?? []).map((f) => f.path)).toEqual([
       // In the seam directories, under the seam naming convention (E4).
       'src/services/greeting.service.ts',
       'src/controllers/greeting.controller.ts',
@@ -464,13 +488,20 @@ describe('class-based template', () => {
         .map((f) => f.path)
         .filter((p) => p.endsWith('/index.ts'))
         .sort();
-    expect(seamPaths(CLASS_BASED_TEMPLATE.files ?? [])).not.toContain('src/cqrs/index.ts');
-    expect(seamPaths(REST_TEMPLATE.files ?? [])).not.toContain('src/events/index.ts');
+    expect(seamPaths(resolveHost(CLASS_BASED_TEMPLATE, 'deno').files ?? [])).not.toContain(
+      'src/cqrs/index.ts',
+    );
+    expect(seamPaths(resolveHost(REST_TEMPLATE, 'deno').files ?? [])).not.toContain(
+      'src/events/index.ts',
+    );
   });
 
   it('declares di-plugin in the packages a manifest must pin', () => {
-    expect(packagesOf(CLASS_BASED_TEMPLATE.plugins, CLASS_BASED_TEMPLATE.middleware)).toContain(
-      'di-plugin',
-    );
+    expect(
+      packagesOf(
+        resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins,
+        CLASS_BASED_TEMPLATE.middleware,
+      ),
+    ).toContain('di-plugin');
   });
 });

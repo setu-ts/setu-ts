@@ -35,6 +35,7 @@ import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runt
 import { detectProject } from '../utils/project-detector.ts';
 import {
   findExisting,
+  reportDryRunPlan,
   type GeneratedFile,
   joinPath,
   resolveDir,
@@ -499,9 +500,9 @@ export async function runGenerateCommand(
     customName === undefined ? scan.adopted.filter((claim) => planned.has(claim.barrel)) : [];
 
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
+    const code = await reportDryRunPlan(deps, files);
     reportAdoptions(adoptions, 'Would adopt', deps.error);
-    return EXIT_OK;
+    return code;
   }
 
   const existing = await findExisting(deps.fs, files);
@@ -551,7 +552,7 @@ export async function runGenerateCommand(
 }
 
 /**
- * Reports each generated decorator barrel `setu.config.ts` does not reference.
+ * Reports each generated decorator or jobs barrel `setu.config.ts` does not reference.
  *
  * The command owns the barrel but not the config, and M101g limits what it may
  * edit there to text it can classify. A starter-composed config owns
@@ -580,10 +581,14 @@ async function reportUnwiredDecoratorSeams(
   const written = new Set(generated.map((file) => file.path));
   const seams = new Map<
     string,
-    { readonly key: 'controllers' | 'services' | 'ingress'; readonly symbol: string }
+    { readonly key: 'controllers' | 'services' | 'ingress' | 'processors'; readonly symbol: string }
   >();
   for (const spec of scanSeamSpecs(installed)) {
     if (!written.has(spec.barrel) || seams.has(spec.barrel)) continue;
+    if (spec.barrel === 'src/jobs/index.ts') {
+      seams.set(spec.barrel, { key: 'processors', symbol: 'QUEUE_PROCESSORS' });
+      continue;
+    }
     const key = decoratorKeyFor(spec);
     const symbol = decoratorExportFor(spec);
     if (key === undefined || symbol === undefined) continue;
@@ -599,7 +604,9 @@ async function reportUnwiredDecoratorSeams(
   for (const [barrel, { key, symbol }] of seams) {
     // Unclassifiable (`undefined`) fails toward reporting.
     if (code !== undefined && new RegExp(`\\b${symbol}\\b`).test(code)) continue;
-    if (starter !== undefined) {
+    if (key === 'processors') {
+      error(`Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...${symbol}] })`);
+    } else if (starter !== undefined) {
       error(`${starter.symbol} owns DecoratorPlugin; merge the barrel into its decorators arm:`);
       error(`  decorators: { ${key}: [...${symbol}] }`);
     } else {

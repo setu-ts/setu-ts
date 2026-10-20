@@ -42,8 +42,8 @@ import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
-  classifyFiles,
   findExisting,
+  reportDryRunPlan,
   firstDuplicatePath,
   type GeneratedFile,
   interruptedRunRetryHint,
@@ -564,7 +564,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   // planned, and created when it is simply absent.
   let devtoolRunnerFile: GeneratedFile | undefined;
   if (devtoolRequested) {
-    const runtimeRefusal = devtoolRuntimeRefusal(read.manifest.runtime);
+    const runtimeRefusal = devtoolRuntimeRefusal(read.manifest.runtime, 'scaffold');
     if (runtimeRefusal !== undefined) {
       deps.error(runtimeRefusal);
       return EXIT_USAGE;
@@ -737,16 +737,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
-    for (const outcome of await classifyFiles(deps.fs, files)) {
-      deps.log(
-        outcome.outcome === 'unchanged'
-          ? `unchanged ${escapeName(outcome.path)}`
-          : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${escapeName(
-              outcome.path,
-            )}`,
-      );
-    }
-    return EXIT_OK;
+    return reportDryRunPlan(deps, files);
   }
 
   const existing = await findExisting(deps.fs, files);

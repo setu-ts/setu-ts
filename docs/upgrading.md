@@ -37,6 +37,22 @@ adopts the fixes.
   record stays "unknown", so its Kubernetes probes stay `tcpSocket` and its Prometheus annotations
   stay off until you set the fields.
 
+### Add a `create<Pascal>JobProcessor` export to existing job modules, and expect `--dry-run` to exit 1 on a collision (M113i, 0.10.0, `@setu-ts/cli`)
+
+**Standalone job modules in a functional project with `queue-plugin`.** `setu generate job` now
+emits the module's exported `create<Pascal>JobProcessor` factory and the managed `src/jobs/index.ts`
+barrel beside it. An existing standalone `src/jobs/<name>.job.ts` that exports no processor factory
+is skipped and reported by `setu generate`: add the `create<Pascal>JobProcessor` export to the
+module, or delete the file and regenerate it. A functional project without `queue-plugin` is
+unchanged: the standalone function is emitted and scanned as before, with no skip report.
+
+**`--dry-run` exit codes.** The `--dry-run` of `setu generate`, `setu new`, `setu library` and
+`setu generate app` now reports `WOULD REFUSE: <path> already exists` for every file a real run
+would refuse to overwrite and exits 1 when any exists, matching `setu adopt`; before, it printed
+`would create` for every file and exited 0 before the existing-file check ran. A script or CI step
+that ran a dry run over files that already exist and expected exit 0 must handle the new exit 1. A
+clean dry run still exits 0, printing the `would create` / `would update` / `unchanged` lines.
+
 ### Pass the database and ledger to `runMigrations` (M113o, 0.10.0)
 
 Regenerate managed `src/migrations/run.ts` and `index.ts` with `setu generate migration`. Replace

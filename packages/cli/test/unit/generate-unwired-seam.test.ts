@@ -48,6 +48,25 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
 const CLASS_BASED = manifest('decorator-plugin');
 
 describe('setu generate — an unwired decorator barrel is reported', () => {
+  it('reports an unconsumed jobs barrel and its import', async () => {
+    const h = harness({
+      '/app/deno.json': manifest('queue-plugin'),
+      '/app/setu.config.ts': 'export const plugins = [];\n',
+    });
+    expect(await h.run(['job', 'widget'])).toBe(0);
+    expect(h.err.text()).toContain(
+      'Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...QUEUE_PROCESSORS] })',
+    );
+    expect(h.err.text()).toContain("import { QUEUE_PROCESSORS } from './src/jobs/index.ts';");
+  });
+  it('does not report a consumed jobs barrel', async () => {
+    const h = harness({
+      '/app/deno.json': manifest('queue-plugin'),
+      '/app/setu.config.ts': 'export const processors = QUEUE_PROCESSORS;\n',
+    });
+    expect(await h.run(['job', 'widget'])).toBe(0);
+    expect(h.err.text()).not.toContain('Pass the barrel');
+  });
   it('prints the starter decorators arm when a starter owns DecoratorPlugin', async () => {
     const h = harness({
       '/app/deno.json': manifest('decorator-plugin', 'full-stack-starter'),

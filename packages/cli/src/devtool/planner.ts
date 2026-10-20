@@ -249,15 +249,21 @@ export function withDevtool(
  * point, before anything is written.
  *
  * @param runtime - The target runtime
+ * @param context - Whether scaffolding or enabling an existing project was requested
  * @returns The refusal message, or `undefined` for Deno
  */
-export function devtoolRuntimeRefusal(runtime: TargetRuntime): string | undefined {
+export function devtoolRuntimeRefusal(
+  runtime: TargetRuntime,
+  context: 'scaffold' | 'enable',
+): string | undefined {
   if (runtime === 'deno') return undefined;
   return (
     `The devtool requires the Deno runtime: the diagnostics listener refuses every` +
     ` non-Deno \`listen\` before it binds, so a ${runtime} project could never start` +
-    ` the connector it was scaffolded with. Scaffold without --devtool, or create` +
-    ` the project with --runtime deno.`
+    ` its diagnostics connector. ` +
+    (context === 'scaffold'
+      ? 'Scaffold without --devtool, or create the project with --runtime deno.'
+      : `This project targets ${runtime}; the devtool can only be enabled on a Deno project.`)
   );
 }
 

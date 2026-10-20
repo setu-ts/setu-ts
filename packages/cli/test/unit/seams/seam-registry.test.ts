@@ -35,6 +35,7 @@ describe('seam registry', () => {
       'event-handler',
       'health-indicator',
       'ingress',
+      'job',
       'metric',
       'middleware',
       'plugin',

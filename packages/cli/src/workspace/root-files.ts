@@ -8,7 +8,7 @@
  * @module
  */
 
-import { PROGRAM_NAME } from '../constants.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import {
   MEMBERS_DIR,
@@ -118,7 +118,7 @@ A [Setu-TS](https://github.com/setu-ts/setu-ts) workspace: one repository, many 
 ## Add a service
 
 \`\`\`bash
-${PROGRAM_NAME} generate app orders --template microservice
+${cliInvocation(profile.runtime)} generate app orders --template microservice
 \`\`\`
 
 Each service lives in \`${MEMBERS_DIR}/<name>/\`, binds a port the CLI allocates, and is registered in every
@@ -135,7 +135,7 @@ ${profile.runScript('dev')}
 When a service needs another one during startup, declare it as it is added:
 
 \`\`\`bash
-${PROGRAM_NAME} generate app billing --template microservice --depends-on orders
+${cliInvocation(profile.runtime)} generate app billing --template microservice --depends-on orders
 \`\`\`
 
 The generated dev runner starts prerequisites first and waits for each prerequisite's \`/ready\`
@@ -146,12 +146,12 @@ where a service is, not whether this service must wait for it at startup.
 
 \`${WORKSPACE_MANIFEST}\` records the port each service binds. It is the source the generated
 \`src/discovery/services.ts\` modules are rendered from; change a port there and the next
-\`${PROGRAM_NAME} generate app\` rewrites them all.
+\`${cliInvocation(profile.runtime)} generate app\` rewrites them all.
 
-If a local process occupies a port, the CLI skips it during allocation. To repair existing
-assignments, stop the services and run \`${PROGRAM_NAME} workspace ports --reallocate\`; it rewrites the
+${wrapProse(`If a local process occupies a port, the CLI skips it during allocation. To repair existing
+assignments, stop the services and run \`${cliInvocation(profile.runtime)} workspace ports --reallocate\`; it rewrites the
 manifest, maps, and deployment artifacts together. It assigns from the base port upward, so a
-service still running holds its own port and is moved off it.
+service still running holds its own port and is moved off it.`)}
 
 ## Transport
 

@@ -131,6 +131,10 @@ dotenv pair when its path is a single segment; and rewrites `main.ts` to bind th
 allocated it. A multi-segment `envFilePath` is left in place and the step to move it by hand is
 printed.
 
+Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill -9`) and power loss
+end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
+`generate` can leave the files it wrote, which the next run lists in its overwrite refusal.
+
 ## Generating code
 
 ```bash
@@ -138,23 +142,24 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                                                                                         | Requires                               |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                                      |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin`                     |
-| `service`          | `src/services/<name>.service.ts`                                                                              | —                                      |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                                      |
-| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`                           |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin`                     |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                                      |
-| `job`              | `src/jobs/<name>.job.ts`; class-based: ingress processor                                                      | `queue-plugin` in class-based projects |
-| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                               | `auth-plugin`                          |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`                        |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`                       |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`                          |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`                          |
-| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`                        |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`, `common`            |
+| Schematic          | Emits                                                                                                                                     | Requires                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                            | —                                      |
+| `module`           | `src/modules/<name>/index.ts`, plus a service and its test; functional HTTP registrar or class-based controller and module                | —                                      |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                                                    | — (functional or class-based)          |
+| `service`          | `src/services/<name>.service.ts`                                                                                                          | —                                      |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                                                        | —                                      |
+| `sse`              | `src/controllers/<name>.controller.ts`, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`                           |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                                     | `websocket-plugin`                     |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                                     | —                                      |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`; functional + queue wires `QueuePlugin({ processors })`        | `queue-plugin` in class-based projects |
+| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                                                           | `auth-plugin`                          |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                          | `health-plugin`                        |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                            | `metrics-plugin`                       |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                        | `cqrs-plugin`                          |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                            | `cqrs-plugin`                          |
+| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                          | `events-plugin`                        |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                                                    | `database-plugin`, `common`            |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.

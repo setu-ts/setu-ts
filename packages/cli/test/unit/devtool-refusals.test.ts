@@ -14,7 +14,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
-import { devtoolDevRunner } from '../../src/devtool/planner.ts';
+import { devtoolDevRunner, devtoolRuntimeRefusal } from '../../src/devtool/planner.ts';
 import {
   DEVTOOL_ENV_NAMES,
   LEGACY_DENO_RUN_ALL,
@@ -112,6 +112,30 @@ function workspaceSeed(
 }
 
 describe('devtool enable refuses by name and writes nothing', () => {
+  for (const runtime of ['node', 'bun', 'cloudflare-workers'] as const) {
+    it(`uses enable context for ${runtime}`, () => {
+      const message = devtoolRuntimeRefusal(runtime, 'enable')!;
+      expect(message).toContain(
+        `This project targets ${runtime}; the devtool can only be enabled on a Deno project.`,
+      );
+      expect(message).toContain('could never start its diagnostics connector');
+      expect(message.toLowerCase()).not.toContain('scaffold');
+      expect(devtoolRuntimeRefusal(runtime, 'scaffold')).toContain('Scaffold without --devtool');
+    });
+  }
+  it('permits Deno in both contexts', () => {
+    expect(devtoolRuntimeRefusal('deno', 'enable')).toBeUndefined();
+    expect(devtoolRuntimeRefusal('deno', 'scaffold')).toBeUndefined();
+  });
+  it('uses enable wording through the Node project command', async () => {
+    const h = workspaceHarness({
+      '/ws/package.json': JSON.stringify({ scripts: { start: 'tsx main.ts' } }),
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('This project targets node');
+    expect(h.err.text().toLowerCase()).not.toContain('scaffold');
+    expect(h.fs.writes).toEqual([]);
+  });
   it('refuses a non-Deno workspace runtime — the listener refuses every non-Deno listen', async () => {
     const h = workspaceHarness({
       [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({

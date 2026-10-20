@@ -10007,6 +10007,10 @@ manifest cannot be parsed, `2` for an unknown package name, a missing argument, 
 | `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
 | `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                                                                   |
 
+Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill -9`) and power loss
+end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
+`generate` can leave the files it wrote, which the next run lists in its overwrite refusal.
+
 For plugin commands, an already-aborted `CliDependencies.interrupt` prevents boot. Aborting during a
 handler stops awaiting its result and awaits `app.stop()` before returning `130`. The CLI cannot
 cancel arbitrary handler code or undo external side effects; the application's shutdown hooks must
@@ -10360,29 +10364,29 @@ The managed files are the CLI-owned **seam barrels** — one `index.ts` per gene
 
 Every artifact below reaches its registration site with **no edit to a file you own**. A wired
 schematic emits its artifact plus its family's seam barrel; the barrel is regenerated from a scan of
-its directory, and the scaffolded `setu.config.ts` already imports it. Three artifacts have no
+its directory, and the scaffolded `setu.config.ts` already imports it. Some artifacts have no
 registration site, and the reason is recorded rather than left to discovery.
 
-| Schematic          | Emitted at                                                                                                                          | Registration site                                                    |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `module`           | `src/modules/<name>/`                                                                                                               | `DecoratorPlugin({ controllers, services })` via `MODULE_*`          |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                                              | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS`             |
-| `service`          | `src/services/<name>.service.ts`                                                                                                    | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below       |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                                                  | `registerGeneratedRoutes(app.router, app.services)` in `createApp()` |
-| `sse`              | `src/controllers/<name>.controller.ts`, plus `src/hooks/use-<name>.ts` ONLY when `react-router-plugin` and `sdk` are both installed | HTTP registrar; the hook, when emitted, remains application-local    |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`           |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                               | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                |
-| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`           |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                    | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`               |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                      | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`              |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                                                | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`                  |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                                                  | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`                      |
-| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                                                | `EventsPlugin({ handlers: EVENT_HANDLERS })`                         |
-| `guard`            | `src/guards/<name>.guard.ts`                                                                                                        | **None** — per route, by design (see below)                          |
-| `job`              | `src/jobs/<name>.job.ts`                                                                                                            | **None** — the transport is your choice (see below)                  |
-| `migration`        | `src/migrations/<stamp>-<name>.ts`                                                                                                  | **None** — the framework ships no migration runner                   |
+| Schematic          | Emitted at                                                                                                                          | Registration site                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `module`           | `src/modules/<name>/`                                                                                                               | `DecoratorPlugin({ controllers, services })` via `MODULE_*`                                                                                     |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                                              | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS`                                                                                        |
+| `service`          | `src/services/<name>.service.ts`                                                                                                    | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below                                                                                  |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                                                  | `registerGeneratedRoutes(app.router, app.services)` in `createApp()`                                                                            |
+| `sse`              | `src/controllers/<name>.controller.ts`, plus `src/hooks/use-<name>.ts` ONLY when `react-router-plugin` and `sdk` are both installed | HTTP registrar; the hook, when emitted, remains application-local                                                                               |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                               | `...GENERATED_PLUGINS` in `createApplication({ plugins })`; class-based: `DecoratorPlugin({ ingress })`                                         |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                               | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                                                                                           |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`                                                                                      |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                    | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`                                                                                          |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                      | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`                                                                                         |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                  | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                      | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                    |
+| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                    | `EventsPlugin({ handlers: EVENT_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                       |
+| `guard`            | `src/guards/<name>.guard.ts`                                                                                                        | **None** — per route, by design (see below)                                                                                                     |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                                                          | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })` |
+| `migration`        | `src/migrations/<stamp>-<name>.ts`                                                                                                  | **None** — the framework ships no migration runner                                                                                              |
 
-Notes on the three that are not wired, and one that is conditional:
+Registration details for artifacts with conditional or per-route wiring:
 
 - **`guard` is applied per route**, with
   `app.router.get(path, { handler, middleware: [requireX()] })` or `@UseGuards(requireX())` on a
@@ -10391,13 +10395,12 @@ Notes on the three that are not wired, and one that is conditional:
   route. The emitted guard delegates to `requirePermission('<name>')`, enforcing the installed
   authorization provider for anonymous and insufficient-permission requests. A wiring that must not
   be applied is not a wiring.
-- **`job` is transport-agnostic in functional projects.** Class-based projects require queue and
-  emit a decorated processor through the ingress seam; without queue the command refuses before
-  writing and names `setu add queue`. In functional projects, registering it as a queue processor
-  would start a worker loop polling for a job name nothing enqueues; scheduling it needs a cron
-  expression the artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue
-  registration, but cannot infer which transport or scheduling details this artifact needs. The
-  emitted JSDoc shows both calls; pick one.
+- **`job` uses the installed queue.** Functional projects with `queue-plugin` emit a processor
+  factory and the managed `src/jobs/index.ts` barrel for
+  `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`. Without queue they emit a standalone
+  function. Class-based projects require queue and emit a decorated processor through the ingress
+  seam; without queue the command refuses before writing and names `setu add queue`. Each processor
+  polls only its own job name; producers enqueue that name explicitly.
 - **`migration` has no consumer.** No plugin registers a CLI command, so there is no
   `setu db:migrate` and nothing reads migration files. Apply them from your own script or your ORM's
   tooling.

@@ -31,6 +31,30 @@ const WIRED = {
   ),
 };
 
+it('both ingress kinds coexist and preserve the legacy ingress', async () => {
+  const h = harness({
+    '/app/deno.json': manifest('decorator-plugin', 'events-plugin', 'queue-plugin'),
+    '/app/src/ingress/widget.ingress.ts': 'export class WidgetIngress {}\n',
+  });
+  expect(await h.run(['event-handler', 'widget'])).toBe(0);
+  expect(await h.run(['job', 'widget'])).toBe(0);
+  const barrel = h.fs.read('/app/src/ingress/index.ts');
+  for (const symbol of ['WidgetIngress', 'WidgetEventHandlerIngress', 'WidgetJobIngress']) {
+    expect(barrel).toContain(symbol);
+  }
+  expect(h.fs.has('/app/src/ingress/widget-event-handler.ingress.ts')).toBe(true);
+  expect(h.fs.has('/app/src/ingress/widget-job.ingress.ts')).toBe(true);
+});
+
+it('a queue-less functional project never scans its standalone job on g route', async () => {
+  const h = harness({ '/app/deno.json': '{}' });
+  expect(await h.run(['job', 'widget'])).toBe(0);
+  expect(h.fs.read('/app/src/jobs/widget.job.ts')).toContain('runWidgetJob');
+  expect(await h.run(['route', 'next'])).toBe(0);
+  expect(h.err.text()).not.toContain('Skipped');
+  expect(h.fs.has('/app/src/jobs/index.ts')).toBe(false);
+});
+
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;

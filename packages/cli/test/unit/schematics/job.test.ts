@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateJob } from '../../../src/schematics/job.ts';
-import { gateOf, options } from './_shared.ts';
+import { assertSeamContract, gateOf, options } from './_shared.ts';
 
 describe('job schematic', () => {
+  it('emits a functional queue processor factory and managed barrel with queue installed', () => {
+    const files = generateJob(deriveNames('widget'), options(['queue-plugin']));
+    expect(files.map((file) => file.path)).toEqual(['src/jobs/widget.job.ts', 'src/jobs/index.ts']);
+    expect(files[0]!.contents).toContain(
+      'createWidgetJobProcessor(\n  services: IServiceRegistry,\n): QueueProcessorDefinition<WidgetJobData>',
+    );
+    expect(files[0]!.contents).toContain("WIDGET_JOB = 'widget'");
+    expect(files[0]!.contents).toContain('async processor(job)');
+    expect(files[1]!.contents).toContain('createWidgetJobProcessor');
+    expect(files[1]!.managed).toBe(true);
+    assertSeamContract('job', 'widget', ['zebra', 'alpha'], { plugins: ['queue-plugin'] });
+  });
   const files = generateJob(deriveNames('order-item'), options());
   const [file] = files;
 

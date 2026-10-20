@@ -770,14 +770,17 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
  * interchangeable, and the generic README said nothing about either. Formatted as
  * `deno fmt` formats it, since the scaffold must pass its own `fmt --check`.
  */
-export const FULL_STACK_README_SECTION = `## Middleware
+export const FULL_STACK_README_SECTION = (invocation: string): string => {
+  const command = `\`${invocation} generate middleware <name>\` (\`src/middleware/\`)`;
+  const width = command.length;
+  return `## Middleware
 
 This project has two middleware layers. Pick by what the code needs to see.
 
-| Layer              | Runs for                                                          | Sees                                          | Add it with                                           |
-| ------------------ | ----------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------- |
-| Kernel             | every request: health probes, API routes, static files, SSR pages | the kernel request context (\`ctx\`)            | \`setu generate middleware <name>\` (\`src/middleware/\`) |
-| React Router route | only the SSR routes it is attached to                             | React Router's context, including the session | \`export const middleware = [...]\` in a route module   |
+| Layer              | Runs for                                                          | Sees                                          | ${'Add it with'.padEnd(width)} |
+| ------------------ | ----------------------------------------------------------------- | --------------------------------------------- | ${'-'.repeat(width)} |
+| Kernel             | every request: health probes, API routes, static files, SSR pages | the kernel request context (\`ctx\`)            | ${command} |
+| React Router route | only the SSR routes it is attached to                             | React Router's context, including the session | ${'`export const middleware = [...]` in a route module'.padEnd(width)} |
 
 Use kernel middleware for cross-cutting concerns such as headers, auditing and rate limits. Use
 route middleware for page-level rules: \`app/middleware/require-user.server.ts\` redirects a visitor
@@ -801,3 +804,4 @@ Everything in \`build/client\` is served by the platform before the Worker runs,
 skip the application's middleware: no security headers and no authentication apply to them. Put only
 public files in \`public/\`.
 `;
+};
