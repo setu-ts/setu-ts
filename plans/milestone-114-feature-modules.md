@@ -110,8 +110,12 @@ task.
   host, `full-stack`, and workspace members — scaffolds `src/modules/index.ts` (empty
   `registerModules`) and its `setu.config.ts` calls `registerModules(app.router, app.services);`
   immediately after `registerGeneratedRoutes(...)`, through the same setup-call path
-  (`templates/seam.ts` `seamSetupCalls`) and local-import path the HTTP seam uses. Workers hosts get
-  it too (the call is runtime-neutral). Class-based hosts are unchanged (`MODULES` via
+  (`templates/seam.ts` `seamSetupCalls`) and local-import path the HTTP seam uses. It is NOT a
+  `SeamSpec` (a module is a directory, not a suffixed file, so `readArtifactNames` cannot scan it):
+  `templates/project-files.ts` adds the barrel file, the local import and the setup call for every
+  functional host it resolves (`project-files.ts:222` assembles host setup calls, so standalone
+  projects, workspace members, `minimal` and `full-stack` all pass through it). Workers hosts get it
+  too (the call is runtime-neutral). Class-based hosts are unchanged (`MODULES` via
   `DecoratorPlugin({ modules })`).
 - **Why:** a project that gains the seam only on first `g module` would need its config edited then
   — the write the managed-barrel design exists to avoid (`module-seam.ts` module JSDoc).
@@ -238,8 +242,8 @@ task.
     boots `await createApp()` with `app.start({ port, hostname: '127.0.0.1' })`, and `stop()` calls
     `app.stop()`. `node:net` was chosen because it runs unchanged on all three runtimes; a kernel
     API exposing the bound port would be a `common` widening for test convenience. The app e2e
-    requests `/health` and `/ready` (when the host installs `health-plugin`) and the sample module's
-    routes over `fetch`, never `inject()`.
+    requests `/health` and `/ready` when the host installs `health-plugin` (otherwise `/`), plus the
+    `greeting` module's routes when the host emits that showcase, over `fetch`, never `inject()`.
   - `g module` adds `src/modules/<n>/<n>.e2e.test.ts` (socket targets) — POST a valid body → 201,
     GET `/<n>/<id>` → the created record, POST an invalid body → 400 (only with schemas), GET
     `/openapi.json` contains `/<n>` (only when `openapi-plugin` is installed) — and re-emits
