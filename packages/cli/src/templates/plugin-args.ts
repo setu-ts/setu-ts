@@ -21,6 +21,42 @@ import type { ResolvedHost } from './project-files.ts';
 const ARGS_BUDGET = 60;
 
 /**
+ * Joins CLI-authored object arguments; expressions and nested object literals are refused.
+ * Braces inside a quoted string, including a template literal's `${…}`, are not inspected;
+ * the CLI never renders a template literal into these arguments (`stringLiteral` emits only
+ * single- or double-quoted strings).
+ *
+ * @param a - The existing single-level object literal
+ * @param b - The additional single-level object literal
+ * @returns One object literal containing both sets of properties
+ * @throws {Error} When either input is not a single-level object literal
+ */
+export function mergeObjectArgs(a: string, b: string): string {
+  const bodies = [a, b].map((args) => {
+    const match = /^\{([\s\S]*)\}$/.exec(args.trim());
+    if (match === null) throw new Error('Expected a CLI-authored single-level object literal');
+    const body = match[1]!.trim();
+    let quote: string | undefined;
+    let escaped = false;
+    for (const char of body) {
+      if (quote !== undefined) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === quote) quote = undefined;
+      } else if (char === "'" || char === '"' || char === '`') {
+        quote = char;
+      } else if (char === '{' || char === '}') {
+        throw new Error('Expected a CLI-authored single-level object literal');
+      }
+    }
+    if (quote !== undefined) throw new Error('Expected a CLI-authored single-level object literal');
+    return body.replace(/,\s*$/, '');
+  });
+  const body = bodies.filter((value) => value !== '').join(', ');
+  return body === '' ? '{}' : `{ ${body} }`;
+}
+
+/**
  * Wraps a rendered argument literal that would overflow the emitted line width.
  *
  * A broker connection read is long — `Deno.env.get('RABBITMQ_URL') ??
@@ -45,14 +81,17 @@ export function wrapPluginArgs(args: string): string {
   let depth = 0;
   let current = '';
   let quote: string | undefined;
+  let escaped = false;
 
   for (const char of body) {
     if (quote !== undefined) {
       current += char;
-      if (char === quote) quote = undefined;
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = undefined;
       continue;
     }
-    if (char === "'" || char === '"') {
+    if (char === "'" || char === '"' || char === '`') {
       quote = char;
       current += char;
       continue;
@@ -98,7 +137,16 @@ export function rewritePluginArgs(
   return {
     ...host,
     plugins: host.plugins.map((wiring) =>
-      wiring.pkg === pkg ? { ...wiring, args: wrapPluginArgs(render(connection)) } : wiring,
+      wiring.pkg === pkg
+        ? {
+            ...wiring,
+            args: wrapPluginArgs(
+              pkg === 'queue-plugin'
+                ? mergeObjectArgs(wiring.args ?? '{}', render(connection))
+                : render(connection),
+            ),
+          }
+        : wiring,
     ),
   };
 }

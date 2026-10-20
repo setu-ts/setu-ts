@@ -61,6 +61,14 @@ function harness(root?: string, workspace = true, runtime: TargetRuntime = 'deno
 }
 
 describe('runLibraryCommand', () => {
+  it('dry-run collision refuses without writing', async () => {
+    const h = harness();
+    await h.fs.writeFile('/acme/libs/widget/src/index.ts', new TextEncoder().encode('mine'));
+    const writes = [...h.fs.writes];
+    expect(await h.run(['library', 'widget', '--dry-run'])).toBe(1);
+    expect(h.err.text()).toContain('WOULD REFUSE: /acme/libs/widget/src/index.ts already exists');
+    expect(h.fs.writes).toEqual(writes);
+  });
   it('prints its usage under --help and exits 0', async () => {
     const h = harness();
     expect(await h.run(['library', '--help'])).toBe(0);

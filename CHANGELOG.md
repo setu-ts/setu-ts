@@ -337,6 +337,45 @@ All notable changes to this project are documented here. The format follows
   `localization-plugin` refusal of an invalid `exposeCatalogues.cacheControl`. Messages are
   unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
 
+- **@setu-ts/cli** `setu add` registers the zero-configuration plugins it installs (V9-30, M113i,
+  0.10.0). For `worker-pool-plugin`, `secrets-plugin`, `storage-plugin`, `audit-plugin`,
+  `mail-plugin`, `resilience-plugin`, `view-plugin` and `idempotency-plugin`, `setu add` now inserts
+  the bare plugin call into `setu.config.ts` exactly as it does for `cache`, and a second `add` is a
+  no-op. The two packages that need a user choice print the exact wiring line instead and leave the
+  config byte-identical: telemetry
+  `TelemetryPlugin({ serviceName: '<service-name>', exporter: 'console' })` (inserting it adds span
+  middleware to every request with no exporter) and localization
+  `LocalizationPlugin({ supportedLocales: ['en'], catalogues: { en: {} } })`. Starter-composed
+  projects keep the existing starter-arm guidance path; on a Workers project the inserted calls are
+  runtime-portable except `WorkerPoolPlugin`, which registers and reports itself unavailable
+  (documented M45 behaviour), so no new runtime restriction is added.
+- **@setu-ts/cli** `--dry-run` reports the refusal the real run makes (V9-61, M113i, 0.10.0). The
+  `--dry-run` of `generate`, `new`, `library` and `generate app` now classifies the files first and
+  prints `would create <path>`, `would update <path>` for managed files that exist, or
+  `unchanged <path>`, then `WOULD REFUSE: <path> already exists` for each collision, exiting 1 when
+  any collision exists and 0 otherwise — `setu adopt`'s wording and exit code; before, a dry run
+  printed `would create` for every file and returned 0 before the existing-file check ran.
+  `setu adopt` keeps its own branch because it also prints moves.
+- **@setu-ts/cli** class-based ingress files carry their kind in the name (V9-60, M113i, 0.10.0).
+  The five class-based ingress schematics — `job`, `event-handler`, `command-handler`,
+  `query-handler` and `ws-route` — now write `src/ingress/<kebab>-<kind>.ingress.ts` with the class
+  `<Pascal><Kind>Ingress` (for example `src/ingress/<kebab>-job.ingress.ts` / `<Pascal>JobIngress`),
+  so two kinds of the same name no longer collide. Every other symbol inside the file keeps its
+  plain name, so the emitted addresses do not change, and existing `src/ingress/<name>.ingress.ts`
+  files keep scanning as `<Pascal>Ingress` and stay registered.
+- **@setu-ts/cli** generated text names a CLI invocation that resolves (V9-12, M113i, 0.10.0).
+  Generated files, `Next:` lines and messages for a project whose runtime the command has already
+  resolved render the CLI as the pinned package for that runtime: npm-family (Node, Cloudflare
+  Workers) `npx @setu-ts/cli@<VERSION>`, Bun `bunx @setu-ts/cli@<VERSION>` and Deno
+  `deno run -A npm:@setu-ts/cli@<VERSION>`, where `<VERSION>` is the CLI's own version; before, the
+  bare `setu` named the unrelated npm package `setu`. Usage, help and remedies without a resolved
+  runtime retain `setu` (`PROGRAM_NAME`); Deno-only devtool guidance uses the pinned Deno
+  invocation. The generated sites include the project README "Generate code" fence, the Workers
+  `wrangler.toml` comment, the workspace root README fences and the `ports --reallocate`
+  instruction, the full-stack architecture table cell, and the `Next:` line `setu new --workspace`
+  prints. A provenance comment that names what wrote a file is unchanged, and no scaffold gains a
+  dependency.
+
 ### Added
 
 - **Reverse-proxy origin support (M113n, #473, `@setu-ts/common`, `@setu-ts/http-security-plugin`,
@@ -569,6 +608,55 @@ All notable changes to this project are documented here. The format follows
 
 - **npm installation pointers (M111f).** Auth, queue and GraphQL README Deno install commands now
   select npm explicitly. The website install commands resolve the npm packages.
+- **@setu-ts/cli** the devtool runtime refusal names the situation it is in (V9-5, M113i, 0.10.0).
+  The refusal takes a required `context` of `'scaffold'` or `'enable'`, so no call site can keep the
+  old wording by omission. The shared first sentence (why the devtool needs Deno) stays, but its
+  last clause now reads "could never start its diagnostics connector" so it is correct in both
+  contexts: the scaffold remedy keeps "Scaffold without --devtool, or create the project with
+  --runtime deno.", and the enable remedy says "This project targets <runtime>; the devtool can only
+  be enabled on a Deno project." with no "scaffold" wording.
+- **@setu-ts/cli** the CLI documentation states what rollback actually covers (V9-13, M113i,
+  0.10.0). `docs/cli.md`, `packages/cli/README.md` and `PUBLIC_API.md` now state that a write is
+  rolled back on SIGINT (Ctrl+C) and a caught error only — SIGTERM, SIGKILL (`kill -9`) and power
+  loss all end the command with no rollback — and that re-running `setu adopt` converges while an
+  interrupted `new` or `generate` leaves the files it wrote, which the next run's refusal lists.
+- **@setu-ts/cli** `setu add` accepts the published packages its help promises (V9-40, M113i,
+  0.10.0). The addable catalogue gains `view` → `view-plugin`, `localization` →
+  `localization-plugin` and `idempotency` → `idempotency-plugin` (the full specifier works too), so
+  the help line "The full specifier works too" is now true for the published framework packages.
+  `setu add diagnostics` — and `add @setu-ts/diagnostics-plugin` — refuses with
+  "`@setu-ts/diagnostics-plugin` is installed and wired by `setu devtool enable`." and exits 2,
+  because the devtool composition is `setu devtool enable`'s job and the bare package would produce
+  a project that cannot start the connector. A refusal for any other `@setu-ts/<name>` specifier
+  names that the package is not one this command installs and lists the catalogue, as before.
+- **@setu-ts/cli** a CLI-owned file that is a link or a special file no longer hangs `setu generate`
+  (M113i, 0.10.0). A barrel such as `src/jobs/index.ts` committed as a link to `/dev/zero` made
+  `g job` and its `--dry-run` read forever. The CLI now reads an existing file it generates only
+  when it is a regular file under 1 MiB, and refuses the path by name otherwise.
+- **@setu-ts/cli** the schematic tables match the source (V9-62, M113i, 0.10.0). The
+  `packages/cli/README.md` table now lists `plugin` as `src/plugins/<name>.plugin.ts` (it said
+  `src/plugins/<name>.ts`), its `controller` row no longer says `decorator-plugin` is required and
+  names the functional and class-based shapes instead, and the class-based
+  `src/ingress/<name>-<kind>.ingress.ts` outputs of `ws-route`, `job`, `command-handler`,
+  `query-handler` and `event-handler` are listed, with the functional `job` row naming the
+  `QueuePlugin` wiring. The `docs/cli.md` and `PUBLIC_API.md` tables receive the same corrections.
+- **@setu-ts/cli** a functional `setu generate job` is wired when `QueuePlugin` is installed (V9-75,
+  M113i, 0.10.0). In a functional project with `queue-plugin`, `g job` now emits the module with its
+  existing `<SCREAMING>_JOB` and `<Pascal>JobData` plus an exported
+  `create<Pascal>JobProcessor(services): QueueProcessorDefinition<<Pascal>JobData>` factory and the
+  managed `src/jobs/index.ts` barrel exporting `QUEUE_PROCESSORS`, and the wiring renders
+  `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` —
+  `QueuePlugin({ adapter: 'redis', url: …, processors: [...QUEUE_PROCESSORS] })` for a
+  `--queue redis` microservice — so a job is no longer written and registered nowhere. After a
+  write, `setu generate` reports an unconsumed jobs barrel with
+  `Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` and the
+  import line. Without `queue-plugin` the standalone function is emitted unchanged and the jobs seam
+  is not scanned, so a project holding standalone `src/jobs/*.job.ts` files gets no skip report on
+  `setu generate`; a class-based `g job` is refused without `queue-plugin` and, with it, writes the
+  ingress seam, so a class-based project never holds a jobs barrel. On a Cloudflare Workers
+  microservice the runtime swap removes `queue-plugin`, so the jobs seam contributes nothing there.
+  The stale registry premise that `QueuePluginOptions` has no `processors` option is rewritten: a
+  processor polls only its own job name, the same trade the class-based arm already makes.
 
 ## [0.9.0] — 2026-10-12
 

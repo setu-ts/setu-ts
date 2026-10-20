@@ -259,6 +259,9 @@ describe('a suggested command never carries an unvalidated value', () => {
       ['generate', 'app', 'orders', '--dir', '/work/acme', '--runtime', 'node'],
     );
     expect(code).toBe(2);
-    expect(text).toContain('`setu new <name> --workspace --runtime node`');
+    expect(text).toContain(
+      `\`deno run -A npm:@setu-ts/cli@${VERSION} new <name> --workspace --runtime node\``,
+    );
   });
 });
+import { VERSION } from '../../src/version.ts';

@@ -82,6 +82,29 @@ function fsWith(
 }
 
 describe('readArtifactNames', () => {
+  // A CLI-owned path is predictable, so a repository can commit a link or a special
+  // file there; a link to `/dev/zero` read forever. Neither the barrel nor an
+  // artifact is opened unless stat reports a regular file under the cap.
+  it('never opens a barrel or artifact that is not a regular file under the cap', async () => {
+    const base = fsWith(['user.routes.ts', 'huge.routes.ts'], {
+      stats: {
+        'index.ts': { isFile: false, isDirectory: false, size: 0 },
+        'huge.routes.ts': { isFile: true, isDirectory: false, size: 1024 * 1024 + 1 },
+      },
+    });
+    const opened: string[] = [];
+    const fs: IFileSystem = {
+      ...base,
+      readFile: (path: string) => {
+        opened.push(path.slice(path.lastIndexOf('/') + 1));
+        return base.readFile(path);
+      },
+    };
+    const scan = await readArtifactNames(fs, '/app', ROUTES);
+    expect(scan.names).toEqual(['user']);
+    expect(opened).toEqual(['user.routes.ts']);
+  });
+
   it('returns names sorted, with the suffix stripped', async () => {
     // Enumeration order is filesystem-defined; the sort is what makes the regenerated
     // barrel byte-identical between two machines holding the same artifacts.

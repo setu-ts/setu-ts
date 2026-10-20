@@ -1,9 +1,9 @@
 /**
  * Job schematic — a job processor usable by the queue or scheduler plugin.
  *
- * Functional projects keep the transport-agnostic function: the CLI cannot choose a
- * queue consumer or schedule. Class-based projects instead emit a decorated queue
- * processor and place it in the ingress seam consumed by `DecoratorPlugin`.
+ * Functional projects with queue-plugin emit a processor factory and jobs barrel.
+ * Without queue-plugin the transport-agnostic function remains standalone.
+ * Class-based projects emit a decorated processor through the ingress seam.
  *
  * Class-based projects require queue-plugin; the command refuses before writing
  * when that provider is absent. Functional projects keep the standalone function.
@@ -12,7 +12,8 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
-import { INGRESS_SEAM } from '../seams/ingress.ts';
+import { ingressNames, INGRESS_SEAM } from '../seams/ingress.ts';
+import { JOBS_SEAM } from '../seams/jobs.ts';
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 
@@ -28,9 +29,10 @@ export function generateJob(
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
   if (generatorMode(options.plugins) === 'class-based' && options.plugins.has('queue-plugin')) {
+    const ingress = ingressNames(names, 'job');
     return [
       {
-        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        path: `${INGRESS_SEAM.dir}/${ingress.kebab}${INGRESS_SEAM.suffix}`,
         contents: `import type { IJob } from '@setu-ts/common';
 import { Processor } from '@setu-ts/decorator-plugin';
 
@@ -43,7 +45,7 @@ export interface ${names.pascal}JobData {
 }
 
 /** Decorated queue processor, registered through the ingress barrel. */
-export class ${names.pascal}Ingress {
+export class ${ingress.pascal}Ingress {
   @Processor(${names.screaming}_JOB)
   async process(job: IJob<${names.pascal}JobData>): Promise<void> {
     await Promise.resolve(job.data.id);
@@ -54,8 +56,46 @@ export class ${names.pascal}Ingress {
       {
         path: INGRESS_SEAM.barrel,
         contents: INGRESS_SEAM.renderBarrel({
-          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+          ingress: seamNames(options.artifacts, 'ingress', ingress.kebab),
         }),
+        managed: true,
+      },
+    ];
+  }
+  if (options.plugins.has('queue-plugin')) {
+    return [
+      {
+        path: `${JOBS_SEAM.dir}/${names.kebab}${JOBS_SEAM.suffix}`,
+        contents: `import type { IServiceRegistry } from '@setu-ts/common';
+import type { QueueProcessorDefinition } from '@setu-ts/queue-plugin';
+
+/** Name the queue address this job consumes. */
+export const ${names.screaming}_JOB = '${names.kebab}';
+
+/** Payload accepted by the ${names.kebab} job. */
+export interface ${names.pascal}JobData {
+  readonly id: string;
+}
+
+/** Builds the processor at onInit, after every plugin has registered its services. */
+export function create${names.pascal}JobProcessor(
+  services: IServiceRegistry,
+): QueueProcessorDefinition<${names.pascal}JobData> {
+  // Resolve dependencies from services here, before processing begins.
+  void services;
+  return {
+    name: ${names.screaming}_JOB,
+    async processor(job): Promise<void> {
+      // Replace with the job's real work.
+      await Promise.resolve(job.data.id);
+    },
+  };
+}
+`,
+      },
+      {
+        path: JOBS_SEAM.barrel,
+        contents: JOBS_SEAM.renderBarrel({ job: seamNames(options.artifacts, 'job', names.kebab) }),
         managed: true,
       },
     ];

@@ -10,6 +10,7 @@
  */
 
 import type { TargetRuntime, TemplateName } from '../constants.ts';
+import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { FULL_STACK_TEMPLATE } from './full-stack.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
@@ -229,7 +230,7 @@ export interface TemplateManifest {
    * Must already be formatted exactly as `deno fmt` would format it, since the
    * scaffold is gated on passing its own `fmt --check`.
    */
-  readonly readmeSection?: string;
+  readonly readmeSection?: string | ((invocation: string) => string);
   /**
    * npm packages the running application needs, merged into `dependencies`
    * on npm targets and into the Deno target's import map.
@@ -362,6 +363,10 @@ export interface TemplateManifest {
  * templates that exist and `--template minimal` is still an unknown value.
  */
 export interface TemplateHost {
+  /** Seams resolved after the target runtime removes incompatible plugins. */
+  readonly seams?: readonly SeamSpec[];
+  /** Showcase artifacts seeded into the resolved seam barrels. */
+  readonly seamArtifacts?: SeamArtifacts;
   /**
    * Plugins passed to `createApplication({ plugins: [...] })`, in registration
    * order, starting with the runtime provider.
@@ -608,8 +613,8 @@ export interface TemplateDefinition extends TemplateHost {
    * Its absence is what drives the `--style class-based` refusal on
    * `full-stack` and suppresses the style question in the interactive prompt.
    *
-   * Precomputed rather than derived at resolution time: transforming a finished
-   * host would have to un-derive its already-baked seams and plugin `args`.
+   * Precomputed from the recipe so style selects its own showcase, decorator
+   * wiring and seam shapes before the runtime swap resolves their contributions.
    */
   readonly classBased?: TemplateHost;
   /**

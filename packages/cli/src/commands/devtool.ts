@@ -47,7 +47,7 @@ import {
   renderDevtoolSources,
   withDevtoolSourceWiring,
 } from '../devtool/sources.ts';
-import { devEntryPort, devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
+import { devEntryPort, isDevEntry, renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
   deriveDevTask,
@@ -76,6 +76,8 @@ import {
 } from '../workspace/manifest.ts';
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../workspace/runtime-profile.ts';
+
+import { cliInvocation } from '../templates/project-files.ts';
 
 /** The import-map key the development entry resolves the plugin through. */
 const DEVTOOL_DEPENDENCY = '@setu-ts/diagnostics-plugin';
@@ -334,7 +336,7 @@ async function planSourceWrites(
 /** Prints the command's usage. */
 function printUsage(log: (message: string) => void): void {
   log(
-    `Usage: ${PROGRAM_NAME} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`,
+    `Usage: ${cliInvocation('deno')} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`,
   );
   log('');
   log('Enables the local diagnostics connector on a project that already exists:');
@@ -354,7 +356,7 @@ function printUsage(log: (message: string) => void): void {
 }
 
 /** The usage line shared by every subcommand refusal. */
-const USAGE = `Usage: ${PROGRAM_NAME} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`;
+const USAGE = `Usage: ${cliInvocation('deno')} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`;
 
 /**
  * Runs `setu devtool enable`.
@@ -433,12 +435,12 @@ async function enableInWorkspace(
   args: ParsedArgs,
   deps: DevtoolCommandDependencies,
 ): Promise<number> {
-  const runtimeRefusal = devtoolRuntimeRefusal(manifest.runtime);
+  const runtimeRefusal = devtoolRuntimeRefusal(manifest.runtime, 'enable');
   if (runtimeRefusal !== undefined) return reportInapplicable(deps, runtimeRefusal);
 
   if (memberName === undefined) {
     deps.error(
-      `A member name is required inside a workspace: \`${PROGRAM_NAME} devtool enable <member>\`.` +
+      `A member name is required inside a workspace: \`${cliInvocation(manifest.runtime)} devtool enable <member>\`.` +
         ` Members: ${
           manifest.members.map((member) => escapeName(member.name)).join(', ') || 'none'
         }.`,
@@ -618,7 +620,7 @@ async function enableInWorkspace(
   } catch {
     existingEntry = undefined;
   }
-  if (existingEntry !== undefined && !devEntryVariants(devtoolPort).includes(existingEntry)) {
+  if (existingEntry !== undefined && !isDevEntry(existingEntry, devtoolPort)) {
     return reportInapplicable(
       deps,
       `Refusing to overwrite ${escapeName(
@@ -753,7 +755,7 @@ async function enableStandalone(
       if (await isPresent(deps.fs, joinPath(dir, 'package.json'))) {
         // Never Deno without a Deno manifest, so this always refuses.
         const runtime = await detectTargetRuntime(deps.fs, dir);
-        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime)!);
+        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime, 'enable')!);
       }
     } catch (cause) {
       return reportInapplicable(deps, escapeName(describeCause(cause)));
@@ -764,7 +766,7 @@ async function enableStandalone(
     );
   }
   try {
-    const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir));
+    const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir), 'enable');
     if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } catch (cause) {
     return reportInapplicable(deps, escapeName(describeCause(cause)));
@@ -844,10 +846,7 @@ async function enableStandalone(
     );
   }
   const entry = renderDevEntry({ devtoolPort });
-  if (
-    existingEntry !== undefined &&
-    !devEntryVariants(devtoolPort, false).includes(existingEntry)
-  ) {
+  if (existingEntry !== undefined && !isDevEntry(existingEntry, devtoolPort, false)) {
     return reportInapplicable(
       deps,
       `Refusing to overwrite ${DEVTOOL_ENTRY_MODULE}: it exists with different contents.` +

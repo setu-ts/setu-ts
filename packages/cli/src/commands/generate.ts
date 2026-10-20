@@ -35,6 +35,7 @@ import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runt
 import { detectProject } from '../utils/project-detector.ts';
 import {
   findExisting,
+  reportDryRunPlan,
   type GeneratedFile,
   joinPath,
   resolveDir,
@@ -68,6 +69,8 @@ import {
   readLegacyHttpFiles,
 } from '../utils/legacy-layout.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+
+import { cliInvocation } from '../templates/project-files.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -290,6 +293,19 @@ export async function runGenerateCommand(
   const installed = await detectPlugins(deps.fs, dir);
   requiredPlugin ??= getSchematic(schematicName)?.requiresPluginWhen?.(installed);
 
+  // Detected from the project rather than defaulted, because the project already
+  // knows: `setu new svc --runtime bun` records the choice once and nobody
+  // repeats it on every `generate`. An explicit flag still wins, so a custom
+  // schematic can be driven for another target deliberately.
+  let runtime: TargetRuntime;
+  try {
+    runtime = runtimeFlag ?? (await detectTargetRuntime(deps.fs, dir));
+  } catch (cause) {
+    if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
+    deps.error(cause.message);
+    return EXIT_ERROR;
+  }
+
   // Resolve project-owned code and plugin gates only after the target has been
   // established as a readable project. Otherwise a missing plugin or custom
   // module can mask the more fundamental wrong-directory refusal.
@@ -306,7 +322,7 @@ export async function runGenerateCommand(
         `which is not installed in ${escapeName(dir)}.`,
     );
     deps.error(
-      `Run \`${PROGRAM_NAME} add ${requiredPlugin.replace(
+      `Run \`${cliInvocation(runtime)} add ${requiredPlugin.replace(
         /-plugin$/,
         '',
       )}\`, then this command again.`,
@@ -318,19 +334,6 @@ export async function runGenerateCommand(
     deps.error(`Could not resolve schematic: ${escapeName(schematicName)}`);
     return EXIT_ERROR;
   }
-  // Detected from the project rather than defaulted, because the project already
-  // knows: `setu new svc --runtime bun` records the choice once and nobody
-  // repeats it on every `generate`. An explicit flag still wins, so a custom
-  // schematic can be driven for another target deliberately.
-  let runtime: TargetRuntime;
-  try {
-    runtime = runtimeFlag ?? (await detectTargetRuntime(deps.fs, dir));
-  } catch (cause) {
-    if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
-    deps.error(cause.message);
-    return EXIT_ERROR;
-  }
-
   // Read unconditionally, like `detectPlugins` above: the `module` schematic
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
@@ -498,21 +501,23 @@ export async function runGenerateCommand(
   const adoptions =
     customName === undefined ? scan.adopted.filter((claim) => planned.has(claim.barrel)) : [];
 
-  if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
-    reportAdoptions(adoptions, 'Would adopt', deps.error);
-    return EXIT_OK;
-  }
-
-  const existing = await findExisting(deps.fs, files);
-  if (existing.length > 0) {
-    deps.error('Refusing to overwrite existing files:');
-    for (const path of existing) deps.error(`  ${escapeName(path)}`);
-    return EXIT_ERROR;
+  const dryRun = args.flags['dry-run'] === true;
+  if (!dryRun) {
+    const existing = await findExisting(deps.fs, files);
+    if (existing.length > 0) {
+      deps.error('Refusing to overwrite existing files:');
+      for (const path of existing) deps.error(`  ${escapeName(path)}`);
+      return EXIT_ERROR;
+    }
   }
 
   try {
     const formatted = await formatForTarget(files, runtime, dir, deps.error);
+    if (dryRun) {
+      const code = await reportDryRunPlan(deps, formatted);
+      reportAdoptions(adoptions, 'Would adopt', deps.error);
+      return code;
+    }
     const outcomes = await writeFiles(
       deps.fs,
       formatted,
@@ -542,7 +547,7 @@ export async function runGenerateCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      `${dryRun ? 'Cannot plan' : 'Failed to write'}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
     return EXIT_ERROR;
   }
@@ -551,7 +556,7 @@ export async function runGenerateCommand(
 }
 
 /**
- * Reports each generated decorator barrel `setu.config.ts` does not reference.
+ * Reports each generated decorator or jobs barrel `setu.config.ts` does not reference.
  *
  * The command owns the barrel but not the config, and M101g limits what it may
  * edit there to text it can classify. A starter-composed config owns
@@ -580,10 +585,14 @@ async function reportUnwiredDecoratorSeams(
   const written = new Set(generated.map((file) => file.path));
   const seams = new Map<
     string,
-    { readonly key: 'controllers' | 'services' | 'ingress'; readonly symbol: string }
+    { readonly key: 'controllers' | 'services' | 'ingress' | 'processors'; readonly symbol: string }
   >();
   for (const spec of scanSeamSpecs(installed)) {
     if (!written.has(spec.barrel) || seams.has(spec.barrel)) continue;
+    if (spec.barrel === 'src/jobs/index.ts') {
+      seams.set(spec.barrel, { key: 'processors', symbol: 'QUEUE_PROCESSORS' });
+      continue;
+    }
     const key = decoratorKeyFor(spec);
     const symbol = decoratorExportFor(spec);
     if (key === undefined || symbol === undefined) continue;
@@ -599,7 +608,9 @@ async function reportUnwiredDecoratorSeams(
   for (const [barrel, { key, symbol }] of seams) {
     // Unclassifiable (`undefined`) fails toward reporting.
     if (code !== undefined && new RegExp(`\\b${symbol}\\b`).test(code)) continue;
-    if (starter !== undefined) {
+    if (key === 'processors') {
+      error(`Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...${symbol}] })`);
+    } else if (starter !== undefined) {
       error(`${starter.symbol} owns DecoratorPlugin; merge the barrel into its decorators arm:`);
       error(`  decorators: { ${key}: [...${symbol}] }`);
     } else {

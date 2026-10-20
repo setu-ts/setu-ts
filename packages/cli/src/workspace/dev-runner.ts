@@ -1,6 +1,7 @@
 /** Renders the dependency-aware development runner owned by a workspace root. */
 
 import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 
 /** The generated runner filename, relative to the workspace root. */
 export const DEV_RUNNER = 'scripts/dev';
@@ -70,7 +71,7 @@ if (devtoolSelectedName !== undefined && devtoolSelectedName !== '') {
   if (named.devtoolPort === undefined) {
     throw new Error(
       \`SETU_DEVTOOL_MEMBER names "\${devtoolSelectedName}", but that member carries no \` +
-        \`devtoolPort. Run setu devtool enable \${devtoolSelectedName} first.\`,
+        \`devtoolPort. Run ${cliInvocation('deno')} devtool enable \${devtoolSelectedName} first.\`,
     );
   }
   devtoolSelected = named;

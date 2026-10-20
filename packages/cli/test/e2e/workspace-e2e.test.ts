@@ -454,6 +454,19 @@ describe('workspace scaffolding — end to end', () => {
     ).toBe(0);
     for (const member of ['orders', 'billing']) await useWorkspacePackages(`${ws}/apps/${member}`);
 
+    // Initialize npm dependencies before timing service ordering. A cold local
+    // node_modules tree can otherwise exhaust the readiness window before boot.
+    const installed = await runProcess(denoBinary(), {
+      args: ['install'],
+      cwd: ws,
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    expect(
+      installed.code,
+      new TextDecoder().decode(installed.stdout) + new TextDecoder().decode(installed.stderr),
+    ).toBe(0);
+
     const ordersMain = `${ws}/apps/orders/main.ts`;
     const original = await nodeFs.readFile(ordersMain, 'utf8');
     await nodeFs.writeFile(

@@ -331,7 +331,7 @@ describe('template scaffolding — end to end', () => {
     for (const name of ['a', 'b']) {
       const config = await nodeFs.readFile(`${root}/${name}/setu.config.ts`, 'utf8');
       expect(config).toContain('MessagingPlugin()');
-      expect(config).toContain('QueuePlugin()');
+      expect(config).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
       expect(config).not.toContain('CloudflarePlugin');
     }
 

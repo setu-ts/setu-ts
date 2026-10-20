@@ -1,7 +1,7 @@
 /** Workspace maintenance commands. */
 
 import { formatForTarget } from '../utils/prettier-format.ts';
-import { devEntryVariants, DEVTOOL_ENTRY_MODULE, renderDevEntry } from '../devtool/dev-entry.ts';
+import { DEVTOOL_ENTRY_MODULE, isDevEntry, renderDevEntry } from '../devtool/dev-entry.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -30,6 +30,7 @@ import {
 } from '../workspace/manifest.ts';
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import { transportSpec } from '../workspace/transport.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 
@@ -157,17 +158,17 @@ export async function runWorkspaceCommand(
       deps.error(
         `${escapeName(
           path,
-        )}: the member records devtool port ${member.devtoolPort} but this entry is missing, so the launcher has nothing to start; recreate it with setu devtool enable ${escapeName(
+        )}: the member records devtool port ${member.devtoolPort} but this entry is missing, so the launcher has nothing to start; recreate it with ${cliInvocation(read.manifest.runtime)} devtool enable ${escapeName(
           member.name,
         )}, then run this again.`,
       );
       return EXIT_ERROR;
     }
-    if (!devEntryVariants(member.devtoolPort).includes(source)) {
+    if (!isDevEntry(source, member.devtoolPort)) {
       deps.error(
         `${escapeName(
           path,
-        )}: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run setu devtool enable ${escapeName(
+        )}: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run ${cliInvocation(read.manifest.runtime)} devtool enable ${escapeName(
           member.name,
         )}) or move the port literal yourself.`,
       );

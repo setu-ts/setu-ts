@@ -221,34 +221,34 @@ There are sixteen built-in schematics. Every one except `guard`, `migration` and
 project — `service` and `job` lands in a barrel the generated `setu.config.ts` already imports, so a
 generated artifact reaches its registration site with **no edit to a file you own**:
 
-| Schematic          | Requires                    | Emits into                       | Reaches                                                                               |
-| ------------------ | --------------------------- | -------------------------------- | ------------------------------------------------------------------------------------- |
-| `module`           | —                           | `src/modules/`                   | `DecoratorPlugin({ modules })` (class mode), or a `register…Routes(router)` call      |
-| `controller`       | —                           | `src/controllers/`               | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call  |
-| `service`          | —                           | `src/services/`                  | `DecoratorPlugin({ services })`, when installed                                       |
-| `route`            | —                           | `src/controllers/`               | A `register…Routes(router)` call in `createApp()`                                     |
-| `middleware`       | —                           | `src/middleware/`                | The global middleware pipeline                                                        |
-| `plugin`           | —                           | `src/plugins/`                   | The `plugins: [...]` array                                                            |
-| `health-indicator` | `health-plugin`             | `src/health/`                    | `HealthPlugin({ indicators })` → `GET /health`                                        |
-| `metric`           | `metrics-plugin`            | `src/metrics/`                   | `MetricsPlugin({ customMetrics })` → `/metrics`                                       |
-| `command-handler`  | `cqrs-plugin`               | `src/cqrs/` or `src/ingress/`    | `CqrsPlugin({ commandHandlers })`, or `DecoratorPlugin({ ingress })` in class mode    |
-| `query-handler`    | `cqrs-plugin`               | `src/cqrs/` or `src/ingress/`    | `CqrsPlugin({ queryHandlers })`, or `DecoratorPlugin({ ingress })` in class mode      |
-| `event-handler`    | `events-plugin`             | `src/events/` or `src/ingress/`  | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode         |
-| `guard`            | `auth-plugin`               | `src/guards/`                    | Nothing — attach it per route                                                         |
-| `job`              | `queue-plugin` (class mode) | `src/jobs/` or `src/ingress/`    | Transport-agnostic function, or `DecoratorPlugin({ ingress })` in class mode          |
-| `migration`        | `database-plugin`, `common` | `src/migrations/`                | Nothing — no framework code reads migrations                                          |
-| `ws-route`         | `websocket-plugin`          | `src/plugins/` or `src/ingress/` | The `plugins: [...]` array, or `DecoratorPlugin({ ingress })` in class mode           |
-| `sse`              | `sse-plugin`                | `src/controllers/`               | A `register…Routes(router)` call, or `DecoratorPlugin({ controllers })` in class mode |
+| Schematic          | Requires                    | Emits into                                                                                         | Reaches                                                                                                                                         |
+| ------------------ | --------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `module`           | —                           | `src/modules/`                                                                                     | `DecoratorPlugin({ modules })` (class mode), or a `register…Routes(router)` call                                                                |
+| `controller`       | —                           | `src/controllers/`                                                                                 | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call                                                            |
+| `service`          | —                           | `src/services/`                                                                                    | `DecoratorPlugin({ services })`, when installed                                                                                                 |
+| `route`            | —                           | `src/controllers/`                                                                                 | A `register…Routes(router)` call in `createApp()`                                                                                               |
+| `middleware`       | —                           | `src/middleware/`                                                                                  | The global middleware pipeline                                                                                                                  |
+| `plugin`           | —                           | `src/plugins/`                                                                                     | The `plugins: [...]` array                                                                                                                      |
+| `health-indicator` | `health-plugin`             | `src/health/`                                                                                      | `HealthPlugin({ indicators })` → `GET /health`                                                                                                  |
+| `metric`           | `metrics-plugin`            | `src/metrics/`                                                                                     | `MetricsPlugin({ customMetrics })` → `/metrics`                                                                                                 |
+| `command-handler`  | `cqrs-plugin`               | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts` | `CqrsPlugin({ commandHandlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                              |
+| `query-handler`    | `cqrs-plugin`               | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`     | `CqrsPlugin({ queryHandlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                                |
+| `event-handler`    | `events-plugin`             | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`   | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                                   |
+| `guard`            | `auth-plugin`               | `src/guards/`                                                                                      | Nothing — attach it per route                                                                                                                   |
+| `job`              | `queue-plugin` (class mode) | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                         | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })` |
+| `migration`        | `database-plugin`, `common` | `src/migrations/`                                                                                  | Nothing — no framework code reads migrations                                                                                                    |
+| `ws-route`         | `websocket-plugin`          | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`              | The `plugins: [...]` array, or `DecoratorPlugin({ ingress })` in class mode                                                                     |
+| `sse`              | `sse-plugin`                | `src/controllers/`                                                                                 | A `register…Routes(router)` call, or `DecoratorPlugin({ controllers })` in class mode                                                           |
 
 `guard` and `migration` are unwired deliberately, not by omission. A `guard` answers `401` when
 `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and `/` —
 turning a generated file into an outage; its positions are per route (`@UseGuards`, a route's
-`middleware` list). In a functional project a `job` remains transport-agnostic: registering it as a
-queue processor would start a worker loop polling for a name nothing enqueues, and scheduling it
-needs a cron expression the artifact does not carry. In class mode with `QueuePlugin` installed it
-becomes a decorated queue processor in the ingress barrel. Nothing in the framework reads migration
-files at all. A functional `service` is a plain exported function, which has no registration site;
-`src/services/index.ts` re-exports it for convenience and registers nothing.
+`middleware` list). With `QueuePlugin` installed, a functional `job` exports a processor factory
+through `src/jobs/index.ts`, consumed by `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`.
+Without queue it remains a standalone function. Class-based jobs require queue and use the ingress
+barrel. Nothing in the framework reads migration files at all. A functional `service` is a plain
+exported function, which has no registration site; `src/services/index.ts` re-exports it for
+convenience and registers nothing.
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
 and names the `setu add` command that installs it:
@@ -466,6 +466,10 @@ refused rather than resolved by load order.
 | `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, or a handler threw.                                                             |
 | `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
 | `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                           |
+
+Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill -9`) and power loss
+end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
+`generate` can leave the files it wrote, which the next run lists in its overwrite refusal.
 
 SIGINT before a plugin command boots prevents it from running. During a handler, the CLI stops
 awaiting it and runs the application's shutdown hooks before exiting. Handlers must release their

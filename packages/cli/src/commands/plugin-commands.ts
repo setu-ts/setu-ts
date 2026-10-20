@@ -35,6 +35,9 @@ import {
   loadApp,
 } from '../app-loader.ts';
 
+import { detectTargetRuntime } from '../utils/runtime-detector.ts';
+import { cliInvocation } from '../templates/project-files.ts';
+
 /**
  * The registration shape the kernel stores under `CAPABILITIES.CLI_COMMAND`.
  *
@@ -207,6 +210,7 @@ export async function runCommandsListing(
   }
 
   try {
+    const runtime = await detectTargetRuntime(deps.fs, dir);
     return await withPluginCommands(deps, dir, config, (commands) => {
       if (commands.length === 0) {
         deps.log('No plugin commands are registered by this application.');
@@ -216,7 +220,7 @@ export async function runCommandsListing(
 
       deps.log(`Commands provided by this application's plugins:`);
       for (const command of [...commands].sort((a, b) => a.name.localeCompare(b.name))) {
-        deps.log(`  ${PROGRAM_NAME} ${command.name}`);
+        deps.log(`  ${cliInvocation(runtime)} ${command.name}`);
       }
       return EXIT_OK;
     });

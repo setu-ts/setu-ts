@@ -29,6 +29,7 @@ import {
 } from '../constants.ts';
 import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import { stringFlag } from '../args.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
@@ -116,6 +117,8 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['grpc', { pkg: 'grpc-plugin' }],
   ['health', { pkg: 'health-plugin' }],
   ['http-security', { pkg: 'http-security-plugin' }],
+  ['idempotency', { pkg: 'idempotency-plugin' }],
+  ['localization', { pkg: 'localization-plugin' }],
   ['logger', { pkg: 'logger-plugin' }],
   ['mail', { pkg: 'mail-plugin' }],
   ['messaging', { pkg: 'messaging-plugin' }],
@@ -138,6 +141,7 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['testing', { pkg: 'testing', section: 'dev' }],
   ['telemetry', { pkg: 'telemetry-plugin' }],
   ['validation', { pkg: 'validation-plugin' }],
+  ['view', { pkg: 'view-plugin' }],
   ['websocket', { pkg: 'websocket-plugin', peers: { runtimes: ['node'], packages: ['ws'] } }],
   ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
@@ -177,6 +181,14 @@ interface IPluginWiring {
  * manifest-only like every other `setu add` package.
  */
 const ZERO_CONFIG_WIRINGS: ReadonlyMap<string, IPluginWiring> = new Map([
+  ['worker-pool-plugin', { symbol: 'WorkerPoolPlugin' }],
+  ['secrets-plugin', { symbol: 'SecretsPlugin' }],
+  ['storage-plugin', { symbol: 'StoragePlugin' }],
+  ['audit-plugin', { symbol: 'AuditPlugin' }],
+  ['mail-plugin', { symbol: 'MailPlugin' }],
+  ['resilience-plugin', { symbol: 'ResiliencePlugin' }],
+  ['view-plugin', { symbol: 'ViewPlugin' }],
+  ['idempotency-plugin', { symbol: 'IdempotencyPlugin' }],
   ['cqrs-plugin', { symbol: 'CqrsPlugin' }],
   ['events-plugin', { symbol: 'EventsPlugin' }],
   ['messaging-plugin', { symbol: 'MessagingPlugin' }],
@@ -240,6 +252,12 @@ function registrationLine(bare: string): string | undefined {
     return "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })";
   }
   if (bare === 'session-plugin') return "SessionPlugin({ secret: '<your-secret>' })";
+  if (bare === 'telemetry-plugin') {
+    return "TelemetryPlugin({ serviceName: '<service-name>', exporter: 'console' })";
+  }
+  if (bare === 'localization-plugin') {
+    return "LocalizationPlugin({ supportedLocales: ['en'], catalogues: { en: {} } })";
+  }
   if (bare === 'grpc-plugin') return 'GrpcPlugin({ services: [] })';
   if (bare === 'database-plugin') return "DatabasePlugin({ type: 'memory' })";
   if (bare === 'feature-flags-plugin') return "FeatureFlagsPlugin({ provider: 'memory' })";
@@ -698,7 +716,8 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
-  const bare = resolveAddablePackage(requested);
+  const diagnostics = requested === 'diagnostics' || requested === '@setu-ts/diagnostics-plugin';
+  const bare = diagnostics ? 'diagnostics-plugin' : resolveAddablePackage(requested);
   if (bare === undefined) {
     deps.error(`"${escapeName(requested)}" is not a Setu-TS package this command can add.`);
     deps.error(`  Available: ${addableNames().join(', ')}`);
@@ -728,6 +747,12 @@ export async function runAddCommand(
     if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
     deps.error(cause.message);
     return EXIT_ERROR;
+  }
+  if (diagnostics) {
+    deps.error(
+      `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`.`,
+    );
+    return EXIT_USAGE;
   }
   const restriction = RUNTIME_RESTRICTIONS.get(bare);
   if (restriction !== undefined && !restriction.runtimes.includes(runtime)) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
+import { VERSION } from '../../src/version.ts';
 import type { GeneratedFile } from '../../src/utils/file-writer.ts';
 
 const DENO_MANIFEST = (...packages: readonly string[]) =>
@@ -10,6 +11,16 @@ const DENO_MANIFEST = (...packages: readonly string[]) =>
       packages.map((p) => [`@setu-ts/${p}`, `jsr:@setu-ts/${p}@^0.1.0-alpha.1`]),
     ),
   });
+
+it('dry-run collision refuses without writing', async () => {
+  const h = harness({ '/app/src/services/widget.service.ts': 'mine' });
+  expect(await h.run(['service', 'widget', '--dry-run'])).toBe(1);
+  expect(h.err.text()).toContain(
+    'WOULD REFUSE: /app/src/services/widget.service.ts already exists',
+  );
+  expect(h.fs.writes).toEqual([]);
+  expect(h.fs.read('/app/src/services/widget.service.ts')).toBe('mine');
+});
 
 interface Harness {
   readonly fs: FakeFs;
@@ -66,7 +77,7 @@ describe('runGenerateCommand', () => {
   it('refuses a class-based job without queue before writing and marks help unavailable', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
     expect(await h.run(['job', 'nightly'])).toBe(1);
-    expect(h.err.text()).toContain('setu add queue');
+    expect(h.err.text()).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} add queue`);
     expect(h.fs.writes).toEqual([]);
     expect(await h.run(['--help'])).toBe(0);
     expect(h.out.text()).toContain('job  (unavailable — run `setu add queue`)');
@@ -872,5 +883,102 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
       'Would adopt src/controllers/admin.routes.ts into src/controllers/index.ts',
     );
     expect(dry.fs.has('/app/src/controllers/index.ts')).toBe(false);
+  });
+});
+
+// L1 audit: a CLI-owned managed file (a schematic's regenerated barrel) that is
+// a committed link or special file used to be read without bound — a link to
+// `/dev/zero` hung `setu g job x --dry-run` and `setu g job x` forever. The
+// fake's `stat` reports the planted path's kind and size instead of touching
+// the special file.
+describe('bounded read of a managed file (L1 audit)', () => {
+  const barrel = '/app/src/jobs/index.ts';
+
+  // A schematic that regenerates the jobs barrel and one job module, the
+  // shape of `setu g job x`.
+  const load = () =>
+    Promise.resolve({
+      schematic: (): readonly GeneratedFile[] => [
+        {
+          path: 'src/jobs/index.ts',
+          contents: 'export const JOB_NAMES = ["nightly"];\n',
+          managed: true,
+        },
+        { path: 'src/jobs/nightly.ts', contents: 'export const nightly = true;\n' },
+      ],
+    });
+
+  /** A project whose planted barrel's `stat` reports the given kind and size. */
+  function plantedHarness(metadata: { readonly isFile: boolean; readonly size: number }): Harness {
+    const fs = createFakeFs({ '/app/deno.json': '{}', [barrel]: 'old' });
+    const out = createRecorder();
+    const err = createRecorder();
+    return {
+      fs,
+      out,
+      err,
+      run: (argv, load) =>
+        runGenerateCommand(parseArgs(argv), {
+          fs: {
+            ...fs,
+            stat: (path) =>
+              path === barrel
+                ? Promise.resolve({
+                    isFile: metadata.isFile,
+                    isDirectory: false,
+                    size: metadata.size,
+                  })
+                : fs.stat(path),
+          },
+          cwd: '/app',
+          now: () => 0,
+          log: out.sink,
+          error: err.sink,
+          ...(load === undefined ? {} : { load }),
+        }),
+    };
+  }
+
+  it('refuses a dry run with exit 1 when a managed file is not a regular file', async () => {
+    const h = plantedHarness({ isFile: false, size: 0 });
+    expect(await h.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
+    expect(h.err.text()).toContain('Cannot plan:');
+    expect(h.err.text()).not.toContain('Failed to write');
+    expect(h.err.text()).toContain(
+      `${barrel} is not a regular file; the CLI will not read or replace it.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a write with exit 1, leaving no partial files, when a managed file is not a regular file', async () => {
+    const h = plantedHarness({ isFile: false, size: 0 });
+    expect(await h.run(['custom', 'jobs', 'nightly'], load)).toBe(1);
+    expect(h.err.text()).toContain(
+      `${barrel} is not a regular file; the CLI will not read or replace it.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
+    expect(h.fs.read(barrel)).toBe('old');
+  });
+
+  it('refuses a dry run and a write with exit 1 when a managed file exceeds 1 MiB', async () => {
+    const dry = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
+    expect(await dry.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
+    expect(dry.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
+    expect(dry.fs.writes).toEqual([]);
+
+    const real = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
+    expect(await real.run(['custom', 'jobs', 'nightly'], load)).toBe(1);
+    expect(real.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
+    expect(real.fs.writes).toEqual([]);
+    expect(real.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
+    expect(real.fs.read(barrel)).toBe('old');
+  });
+
+  it('still rewrites an ordinary managed file under the cap', async () => {
+    const h = harness({ [barrel]: 'old' });
+    expect(await h.run(['custom', 'jobs', 'nightly'], load)).toBe(0);
+    expect(h.fs.read(barrel)).toBe('export const JOB_NAMES = ["nightly"];\n');
+    expect(h.fs.has('/app/src/jobs/nightly.ts')).toBe(true);
   });
 });

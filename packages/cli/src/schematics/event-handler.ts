@@ -6,7 +6,7 @@
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { EVENT_HANDLERS_EXPORT, EVENTS_SEAM } from '../seams/events.ts';
-import { INGRESS_SEAM } from '../seams/ingress.ts';
+import { ingressNames, INGRESS_SEAM } from '../seams/ingress.ts';
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import {
@@ -28,9 +28,10 @@ export function generateEventHandler(
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
   if (generatorMode(options.plugins) === 'class-based') {
+    const ingress = ingressNames(names, 'event-handler');
     return [
       {
-        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        path: `${INGRESS_SEAM.dir}/${ingress.kebab}${INGRESS_SEAM.suffix}`,
         contents: `import type { IDomainEvent } from '@setu-ts/common';
 import { OnEvent } from '@setu-ts/decorator-plugin';
 
@@ -43,7 +44,7 @@ export interface ${names.pascal}Payload {
 }
 
 /** Decorated event subscriber, registered through the ingress barrel. */
-export class ${names.pascal}Ingress {
+export class ${ingress.pascal}Ingress {
   @OnEvent(${names.screaming}_EVENT)
   async handle(event: IDomainEvent<${names.pascal}Payload>): Promise<void> {
     await Promise.resolve(event.data.id);
@@ -54,7 +55,7 @@ export class ${names.pascal}Ingress {
       {
         path: INGRESS_SEAM.barrel,
         contents: INGRESS_SEAM.renderBarrel({
-          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+          ingress: seamNames(options.artifacts, 'ingress', ingress.kebab),
         }),
         managed: true,
       },

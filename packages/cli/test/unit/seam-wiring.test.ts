@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { getTemplate, listTemplates, packagesOf } from '../../src/templates/registry.ts';
-import type { TemplateDefinition } from '../../src/templates/registry.ts';
+import type { TemplateHost } from '../../src/templates/registry.ts';
 import {
   decoratorSeamExtras,
   seamFiles,
@@ -17,6 +17,7 @@ import {
   seamsFor,
   withPluginOptionSeams,
 } from '../../src/templates/seam.ts';
+import { resolveHost } from '../../src/templates/project-files.ts';
 import { listSeamSpecs } from '../../src/seams/registry.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { seamSpecFor } from './schematics/_shared.ts';
@@ -30,9 +31,9 @@ const HOSTS = ['rest', 'microservice', 'class-based'] as const;
  * @param template - The template to inspect
  * @returns The `index.ts` paths under `src/`
  */
-function barrels(template: TemplateDefinition): readonly string[] {
-  return (template.files ?? [])
-    .map((f) => f.path)
+function barrels(template: TemplateHost): readonly string[] {
+  return resolveHost(template, 'node')
+    .files.map((f) => f.path)
     .filter((p) => p.endsWith('/index.ts'))
     .sort();
 }
@@ -201,12 +202,12 @@ describe('seam selection', () => {
 
 describe('seam hosts', () => {
   for (const name of HOSTS) {
-    const template = getTemplate(name)!;
+    const template = resolveHost(getTemplate(name)!, 'node');
 
     it(`${name} emits an import for every barrel it emits`, () => {
       // The invariant that keeps a barrel from existing without the config import that
       // reads it — the M58 failure mode a pre-seam project has.
-      const emitted = new Set(barrels(template));
+      const emitted = new Set(barrels(getTemplate(name)!));
       const imported = new Set(
         (template.localImports ?? []).map((l) => l.from.replace(/^\.\//, '')),
       );

@@ -4,7 +4,8 @@
  * @module
  */
 
-import type { IFileSystem } from '@setu-ts/common';
+import type { IFileSystem, StatResult } from '@setu-ts/common';
+import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { isMissingPath } from './filesystem-errors.ts';
 import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 import { escapeName } from './names.ts';
@@ -367,8 +368,41 @@ async function ensureDirectory(
   known.add(path);
 }
 
-/** Captures bytes at the write boundary, never interpreting unreadability as absence. */
+/**
+ * The largest existing file the CLI reads before classifying or overwriting a
+ * file it generates; generated files are far smaller.
+ */
+export const MAX_EXISTING_FILE_BYTES: number = 1024 * 1024;
+
+/**
+ * Captures bytes at the write boundary, never interpreting unreadability as
+ * absence.
+ *
+ * Checked before it is read: a CLI-owned path is predictable, so a repository
+ * can commit a link or a special file there — a link to `/dev/zero` reads
+ * forever and a FIFO never returns. `stat` (which follows links) runs first,
+ * and only a regular file under {@linkcode MAX_EXISTING_FILE_BYTES} is opened
+ * at all. A missing path still means "not there yet".
+ */
 async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array | undefined> {
+  let stat: StatResult;
+  try {
+    stat = await fs.stat(path);
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+  if (!stat.isFile) {
+    throw new Error(
+      `${escapeName(path)} is not a regular file; the CLI will not read or replace it.`,
+    );
+  }
+  if (stat.size > MAX_EXISTING_FILE_BYTES) {
+    throw new Error(
+      `${escapeName(path)} is ${stat.size} bytes, larger than the 1 MiB the CLI will read ` +
+        'for a file it generates.',
+    );
+  }
   try {
     return (await fs.readFile(path)).slice();
   } catch (cause) {
@@ -390,6 +424,38 @@ export async function classifyFiles(
     );
   }
   return outcomes;
+}
+
+/**
+ * Reports the same collisions and managed-file outcomes as a real write, without writing.
+ *
+ * @param deps - The filesystem and output sinks
+ * @param files - The planned files
+ * @returns The error exit code for collisions, otherwise the success exit code
+ */
+export async function reportDryRunPlan(
+  deps: {
+    readonly fs: IFileSystem;
+    readonly log: (line: string) => void;
+    readonly error: (line: string) => void;
+  },
+  files: readonly GeneratedFile[],
+): Promise<number> {
+  const existing = await findExisting(deps.fs, files);
+  const collisions = new Set(existing);
+  const outcomes = await classifyFiles(
+    deps.fs,
+    files.filter((file) => !collisions.has(file.path)),
+  );
+  for (const outcome of outcomes) {
+    deps.log(
+      outcome.outcome === 'unchanged'
+        ? `unchanged ${escapeName(outcome.path)}`
+        : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${escapeName(outcome.path)}`,
+    );
+  }
+  for (const path of existing) deps.error(`WOULD REFUSE: ${escapeName(path)} already exists`);
+  return existing.length > 0 ? EXIT_ERROR : EXIT_OK;
 }
 
 /** Restores even a write that rejected after truncating its target. */

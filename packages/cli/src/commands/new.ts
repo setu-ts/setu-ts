@@ -44,7 +44,12 @@ import {
 import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
+import {
+  cliInvocation,
+  projectFiles,
+  resolveHost,
+  withEnvFile,
+} from '../templates/project-files.ts';
 import { readEnvFilePath } from '../templates/env-file.ts';
 import { DEFAULT_BASE_PORT, readPortFlag } from '../workspace/manifest.ts';
 import {
@@ -67,6 +72,7 @@ import type { PortProbe } from '../workspace/port-probe.ts';
 import { deriveNames, escapeName, isPathSegmentSafe, PROJECT_NAME_RULE } from '../utils/names.ts';
 import {
   findExisting,
+  reportDryRunPlan,
   firstDuplicatePath,
   type GeneratedFile,
   interruptedRunRetryHint,
@@ -139,7 +145,7 @@ function planWorkspace(
         `--runtime ${runtime} cannot host a workspace: each Worker is its own deploy ` +
         `unit with its own wrangler.toml, so several of them are several deployments rather ` +
         `than members of one. Workspaces target ${WORKSPACE_RUNTIMES.join(', ')}; scaffold a ` +
-        `standalone project instead with \`${PROGRAM_NAME} new ${name} --runtime ${runtime}\`.`,
+        `standalone project instead with \`${cliInvocation(runtime)} new ${name} --runtime ${runtime}\`.`,
     };
   }
 
@@ -154,7 +160,7 @@ function planWorkspace(
       message:
         `A workspace root registers no plugins, so --template ${escapeName(templateFlag)} ` +
         `has nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template ${suggested}\`.`,
+        `\`${cliInvocation(runtime)} generate ${APP_VERB} <name> --template ${suggested}\`.`,
     };
   }
 
@@ -174,7 +180,7 @@ function planWorkspace(
       message:
         `A workspace root registers no plugins, so --style ${escapeName(styleFlag)} has ` +
         `nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
+        `\`${cliInvocation(runtime)} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
     };
   }
 
@@ -208,7 +214,7 @@ function planWorkspace(
       message:
         `A workspace root registers no plugins, so there is nothing for the devtool to` +
         ` enable. Create the workspace, add a member, then run` +
-        ` \`${PROGRAM_NAME} devtool enable <member>\`.`,
+        ` \`${cliInvocation(runtime)} devtool enable <member>\`.`,
     };
   }
 
@@ -550,7 +556,7 @@ async function planProject(
     // Refused before anything is resolved: the listener refuses every
     // non-Deno `listen`, so a devtool-enabled non-Deno project would fail at
     // startup rather than degrade.
-    const runtimeRefusal = devtoolRuntimeRefusal(runtime);
+    const runtimeRefusal = devtoolRuntimeRefusal(runtime, 'scaffold');
     if (runtimeRefusal !== undefined) return { ok: false, message: runtimeRefusal };
     // A starter factory owns its construction, and kernel diagnostics reach
     // the constructor only — refused where it can be named, not at run.
@@ -764,8 +770,8 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
-    return EXIT_OK;
+    const code = await reportDryRunPlan(deps, files);
+    return code;
   }
 
   const existing = await findExisting(deps.fs, files);
@@ -801,7 +807,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   if (workspace) {
     deps.log(`Created workspace ${projectName}. Next:`);
     deps.log(`  cd ${projectName}`);
-    deps.log(`  ${PROGRAM_NAME} generate ${APP_VERB} orders --template microservice`);
+    deps.log(`  ${cliInvocation(runtime)} generate ${APP_VERB} orders --template microservice`);
     return EXIT_OK;
   }
 

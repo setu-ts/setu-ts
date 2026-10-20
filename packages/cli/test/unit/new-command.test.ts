@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
+import { VERSION } from '../../src/version.ts';
 import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
@@ -36,6 +37,13 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
 // The guard itself is unit-tested in `file-writer.test.ts`, where it lives.
 // This is the invariant it protects, driven through the real command.
 describe('the duplicate-path guard', () => {
+  it('dry-run collision refuses without writing', async () => {
+    const h = harness({ '/work/app/main.ts': 'mine' });
+    expect(await h.run(['app', '--dry-run'])).toBe(1);
+    expect(h.err.text()).toContain('WOULD REFUSE: /work/app/main.ts already exists');
+    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.read('/work/app/main.ts')).toBe('mine');
+  });
   it('reports no duplicate for any built-in template on any runtime', async () => {
     // The invariant the guard protects: a template's own files must never
     // collide with the fixed project files, for any target.
@@ -709,12 +717,8 @@ describe('runNewCommand', () => {
       for (const symbol of ['ConfigPlugin', 'OpenApiPlugin', 'errorHandler']) {
         expect(microConfig).toContain(symbol);
       }
-      for (const symbol of [
-        'MessagingPlugin',
-        'QueuePlugin',
-        'ResiliencePlugin',
-        'TelemetryPlugin',
-      ]) {
+      expect(microConfig).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
+      for (const symbol of ['MessagingPlugin', 'ResiliencePlugin', 'TelemetryPlugin']) {
         expect(microConfig).toContain(`${symbol}()`);
         expect(rest.fs.read('/work/app/setu.config.ts')).not.toContain(symbol);
       }
@@ -1267,7 +1271,9 @@ describe('--workspace', () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--runtime', 'cloudflare-workers'])).toBe(2);
       expect(h.err.text()).toContain('own deploy unit');
-      expect(h.err.text()).toContain('setu new acme --runtime cloudflare-workers');
+      expect(h.err.text()).toContain(
+        `npx @setu-ts/cli@${VERSION} new acme --runtime cloudflare-workers`,
+      );
       expect(h.fs.writes).toEqual([]);
     });
 
