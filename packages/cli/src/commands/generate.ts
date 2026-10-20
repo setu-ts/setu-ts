@@ -58,6 +58,7 @@ import {
 import { scanModules, scanModuleArtifacts } from '../utils/module-scanner.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import { REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
+import { serviceSeamToken } from '../seams/services.ts';
 import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
@@ -613,6 +614,9 @@ export async function runGenerateCommand(
       deps.log(
         `Add ${names.pascal}${schematicName === 'service' ? 'Service' : 'Controller'} to @Module({ ${schematicName === 'service' ? 'providers' : 'controllers'} }) in src/modules/${module}/${module}.module.ts`,
       );
+      if (schematicName === 'service') {
+        deps.log(`Inject it with @Inject('${serviceSeamToken(`${module}.${names.kebab}`)}').`);
+      }
     }
   } catch (cause) {
     const interrupted = interruptionMessage(cause);

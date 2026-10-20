@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod-v4';
-import { parseFormBody } from '@setu-ts/common';
+import { parseFormBody, withHttpStatusHint } from '@setu-ts/common';
 import * as contentType from '../../../common/src/form/content-type.ts';
 import { formRecord } from '../../src/middleware/form-record.ts';
 import { createValidationMiddleware } from '../../src/index.ts';
@@ -11,6 +11,40 @@ import { createFakeContext } from '../fixtures/fake-runtime.ts';
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 afterEach(() => vi.restoreAllMocks());
 describe('form body validation', () => {
+  for (const encoding of ['application/json', 'application/x-www-form-urlencoded']) {
+    for (const status of [400, 503]) {
+      it(`${encoding} ${status === 400 ? 'converts a 400 parse hint' : 'preserves a non-400 failure by identity'}`, async () => {
+        const error = withHttpStatusHint(new Error('parser failed'), {
+          status,
+          title: 'Parser failed',
+          detail: 'parser failed',
+        });
+        const fake = createFakeContext({ request: { headers: { 'content-type': encoding } } });
+        vi.spyOn(fake.ctx.request, 'json').mockRejectedValue(error);
+        const ctx = {
+          ...fake.ctx,
+          request: { ...fake.ctx.request, formData: () => Promise.reject(error) },
+        };
+        const next = vi.fn();
+        const result = createValidationMiddleware(
+          z.object({}),
+          'body',
+          new ValidationService(defaultFormatter),
+          defaultFormatter,
+        )(ctx, next);
+        if (status === 400) {
+          await result;
+          expect(fake.responseSnapshot().status).toBe(400);
+          expect(fake.responseSnapshot().body).toContain(
+            encoding === 'application/json'
+              ? 'Invalid JSON in request body'
+              : 'Unsupported form body',
+          );
+        } else await expect(result).rejects.toBe(error);
+        expect(next).not.toHaveBeenCalled();
+      });
+    }
+  }
   for (const [body, expected] of [
     ['name=Ada', { name: 'Ada' }],
     ['tag=a&tag=b&tag=c', { tag: ['a', 'b', 'c'] }],

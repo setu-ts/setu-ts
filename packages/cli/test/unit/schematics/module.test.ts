@@ -6,11 +6,17 @@ import { options, gateOf } from './_shared.ts';
 describe('generateModule', () => {
   const names = deriveNames('invoices');
   for (const style of ['functional', 'class-based'] as const) {
-    for (const validation of [false, true]) {
-      it(`${style} emits a complete feature with validation=${validation}`, () => {
+    for (const [validation, exceptions] of [
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const) {
+      it(`${style} emits a complete feature with validation=${validation} exceptions=${exceptions}`, () => {
         const plugins = [
           ...(style === 'class-based' ? ['decorator-plugin', 'di-plugin'] : []),
           ...(validation ? ['validation-plugin', 'openapi-plugin'] : []),
+          ...(exceptions ? ['exceptions'] : []),
         ];
         const files = generateModule(names, options(plugins, ['zebra', 'billing']));
         const source = (name: string): string =>
@@ -31,6 +37,22 @@ describe('generateModule', () => {
         const routes = source(`invoices.${style === 'class-based' ? 'controller' : 'routes'}.ts`);
         expect(routes).toContain("'/invoices'");
         expect(routes).toContain('status(201)');
+        // A missing record answers in the application's error format: thrown
+        // through `errorHandler` when `exceptions` is installed, otherwise the
+        // kernel's own `{ error, detail }` shape — never a hand-rolled body.
+        const missing = 'Invoices ${id} was not found.';
+        if (exceptions) {
+          expect(routes).toContain("import { notFound } from '@setu-ts/exceptions';");
+          expect(
+            routes.match(/throw notFound\(`Invoices \$\{id\} was not found\.`\);/g),
+          ).toHaveLength(2);
+        } else {
+          expect(routes).not.toContain('@setu-ts/exceptions');
+          expect(
+            routes.split(`.status(404).json({ error: 'Not Found', detail: \`${missing}\` })`),
+          ).toHaveLength(3);
+        }
+        expect(routes).not.toContain("json({ message: 'Not found' })");
         expect(routes).not.toMatch(/\bas\s+(?:z\.|Record|Create|Update|List)/);
         if (validation) {
           const schemas = source('invoices.schemas.ts');

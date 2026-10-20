@@ -109,6 +109,26 @@ describe('feature module generated tasks', () => {
           ];
           expect(refs.length).toBeGreaterThan(0);
           for (const ref of refs) expect(document.components?.schemas?.[ref[1]!]).toBeDefined();
+          for (const method of ['GET', 'PATCH']) {
+            const missing = await fetch(`${origin}/invoices/missing`, {
+              method,
+              ...(method === 'PATCH'
+                ? {
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ name: 'Updated' }),
+                  }
+                : {}),
+            });
+            expect(missing.status, method).toBe(404);
+            expect(missing.headers.get('content-type'), method).toContain(
+              'application/problem+json',
+            );
+            expect(await missing.json(), method).toMatchObject({
+              status: 404,
+              title: 'Not Found',
+              detail: 'Invoices missing was not found.',
+            });
+          }
           const summary = await fetch(`${origin}/invoices/summary`);
           expect(summary.status).toBe(200);
           expect(await summary.json()).toEqual({ items: [] });

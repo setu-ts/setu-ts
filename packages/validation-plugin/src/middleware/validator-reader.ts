@@ -7,12 +7,48 @@ import type {
 } from '@setu-ts/common';
 import { validatedStateKey } from '@setu-ts/common';
 
-/** The parsed output of a Zod-compatible schema, including defaults and coercions. */
+/**
+ * The parsed output of a Zod-compatible schema, including defaults and coercions.
+ * Schemas without an output type resolve to `unknown`.
+ *
+ * @typeParam S - The schema whose parsed output is inferred
+ * @example
+ * ```ts
+ * const body = validateBody(Schema);
+ * const handler = (ctx: IRequestContext): void => {
+ *   const value: ValidatedOutput<typeof Schema> = body.value(ctx);
+ *   ctx.response.json(value);
+ * };
+ * ```
+ * @since 0.10.0
+ */
 export type ValidatedOutput<S> = S extends { readonly _output: infer O } ? O : unknown;
 
-/** Validation middleware whose reader accepts only its own successful run. */
+/**
+ * Validation middleware with a reader bound to this middleware instance.
+ * The reader returns the parsed value only after this instance validates the
+ * request successfully and before another validator overwrites that target.
+ *
+ * @typeParam T - The parsed value produced by this validator
+ * @example
+ * ```ts
+ * const body = validateBody(Schema);
+ * router.post('/items', {
+ *   middleware: [body],
+ *   handler: (ctx) => ctx.response.json(body.value(ctx)),
+ * });
+ * ```
+ * @since 0.10.0
+ */
 export type ValidatorMiddleware<T> = MiddlewareFunction & {
-  /** Read this validator's output; throws if absent or overwritten by another validator. */
+  /**
+   * Read the parsed output produced by this validator for the current request.
+   *
+   * @param ctx - The request context validated by this middleware instance
+   * @returns This instance's successfully validated output
+   * @throws {TypeError} If this validator has not run successfully or another
+   * validator has overwritten the same request target
+   */
   value(ctx: IRequestContext): T;
 };
 

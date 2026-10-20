@@ -112,8 +112,28 @@ export class ${p}Service {
 }`);
 }
 
+/**
+ * The statement a generated handler runs when a record is missing.
+ *
+ * With `@setu-ts/exceptions` installed the handler throws `notFound(...)`, so
+ * the application's `errorHandler` answers in its configured format (RFC 9457
+ * in every REST-based template). Without it a thrown error would reach the
+ * kernel as an unhandled 500, so the handler answers the kernel's own default
+ * error shape, `{ error, detail }`, directly.
+ */
+function notFoundStatement(pascal: string, exceptions: boolean): string {
+  const detail = `\`${pascal} \${id} was not found.\``;
+  return exceptions
+    ? `throw notFound(${detail});`
+    : `return ctx.response.status(404).json({ error: 'Not Found', detail: ${detail} });`;
+}
+
 /** Functional CRUD routes with sibling service and schema imports. */
-export function moduleRoutes(names: DerivedNames, validation: boolean): string {
+export function moduleRoutes(
+  names: DerivedNames,
+  validation: boolean,
+  exceptions: boolean,
+): string {
   const p = names.pascal;
   const schemas = [
     `Create${p}Body`,
@@ -128,7 +148,7 @@ export function moduleRoutes(names: DerivedNames, validation: boolean): string {
       ? `middleware: [${validator}],\n      schema: { response: { ${status}: ${response} } },`
       : '';
   return cleanSource(`import type { IRouterApi, IServiceRegistry } from '@setu-ts/common';
-${validation ? `import { validateBody, validateParams, validateQuery } from '@setu-ts/validation-plugin';\n${schemaImport(names, schemas)}\n` : ''}
+${exceptions ? "import { notFound } from '@setu-ts/exceptions';\n" : ''}${validation ? `import { validateBody, validateParams, validateQuery } from '@setu-ts/validation-plugin';\n${schemaImport(names, schemas)}\n` : ''}
 ${renderSeamImports(
   [names.kebab],
   () => [`list${p}`, `get${p}`, `create${p}`, `update${p}`],
@@ -152,9 +172,8 @@ export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IS
       handler: (ctx) => {
         const id = ${validation ? 'params.value(ctx).id' : "ctx.params['id'] ?? ''"};
         const record = get${p}(id);
-        return record === undefined
-          ? ctx.response.status(404).json({ message: 'Not found' })
-          : ctx.response.json(record);
+        if (record === undefined) ${notFoundStatement(p, exceptions)}
+        return ctx.response.json(record);
       },
     });
     routes.post('/', {
@@ -169,9 +188,8 @@ export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IS
       handler: ${validation ? '' : 'async '}(ctx) => {
         const id = ${validation ? 'params.value(ctx).id' : "ctx.params['id'] ?? ''"};
         const record = update${p}(id, ${validation ? 'updateBody.value(ctx)' : 'await ctx.request.json<Record<string, unknown>>()'});
-        return record === undefined
-          ? ctx.response.status(404).json({ message: 'Not found' })
-          : ctx.response.json(record);
+        if (record === undefined) ${notFoundStatement(p, exceptions)}
+        return ctx.response.json(record);
       },
     });
   });
@@ -180,7 +198,11 @@ export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IS
 }
 
 /** Decorated CRUD controller reading the same schema-backed values. */
-export function moduleController(names: DerivedNames, validation: boolean): string {
+export function moduleController(
+  names: DerivedNames,
+  validation: boolean,
+  exceptions: boolean,
+): string {
   const p = names.pascal;
   const responseDecorator = p === 'Api' ? 'apiResponse' : 'ApiResponse';
   const record = validation ? `${p}Response` : 'Record<string, unknown>';
@@ -210,7 +232,7 @@ export function moduleController(names: DerivedNames, validation: boolean): stri
     ],
     () => '@setu-ts/decorator-plugin',
   )}
-import type { IRequestContext } from '@setu-ts/common';
+${exceptions ? "import { notFound } from '@setu-ts/exceptions';\n" : ''}import type { IRequestContext } from '@setu-ts/common';
 import type { ${p}Service } from './${names.kebab}.service.ts';
 ${validation ? schemaImport(names, [`Create${p}Body`, `Update${p}Body`, `List${p}Query`, `${p}Params`, `${p}Response`, `${p}ListResponse`]) : ''}
 
@@ -231,9 +253,8 @@ export class ${p}Controller {
   @Params(Param('id'), Ctx())
   get(id: string, ctx: IRequestContext): unknown {
     const record = this.service.get(id);
-    return record === undefined
-      ? ctx.response.status(404).json({ message: 'Not found' })
-      : ctx.response.json(record);
+    if (record === undefined) ${notFoundStatement(p, exceptions)}
+    return ctx.response.json(record);
   }
 
   @Post('/')
@@ -248,9 +269,8 @@ export class ${p}Controller {
   @Params(Param('id'), Body<${update}>(), Ctx())
   update(id: string, body: ${update}, ctx: IRequestContext): unknown {
     const record = this.service.update(id, body);
-    return record === undefined
-      ? ctx.response.status(404).json({ message: 'Not found' })
-      : ctx.response.json(record);
+    if (record === undefined) ${notFoundStatement(p, exceptions)}
+    return ctx.response.json(record);
   }
 }
 `);

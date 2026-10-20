@@ -72,8 +72,8 @@ function renderInjectableService(names: DerivedNames, module?: string): string {
   if (module !== undefined) {
     return `import { Injectable } from '@setu-ts/decorator-plugin';
 
-/** Add this provider to ${module}.module.ts and inject '${module}-${names.kebab}-service'. */
-@Injectable({ token: '${module}-${names.kebab}-service' })
+/** Add this provider to ${module}.module.ts and inject '${serviceSeamToken(`${module}.${names.kebab}`)}'. */
+@Injectable({ token: '${serviceSeamToken(`${module}.${names.kebab}`)}' })
 export class ${names.pascal}Service {
   /** Replace with the service's real behavior. */
   describe(): string {

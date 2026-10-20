@@ -121,7 +121,11 @@ export async function startTestServer(): Promise<
         },
       };
     } catch (error) {
-      await app.stop();
+      try {
+        await app.stop();
+      } catch {
+        // Cleanup must not replace the start error or prevent a bind retry.
+      }
       if (
         attempt >= 2 || !(error instanceof Error) ||
         !(('code' in error && error.code === 'EADDRINUSE') ||

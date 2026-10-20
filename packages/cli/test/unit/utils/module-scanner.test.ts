@@ -13,6 +13,7 @@ import {
   scanModuleArtifacts,
 } from '../../../src/utils/module-scanner.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
+import { MAX_EXISTING_FILE_BYTES } from '../../../src/utils/file-writer.ts';
 
 /** A directory stat, shaped as the real runtime adapters report one. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
@@ -58,6 +59,53 @@ function fsWith(
 const MISSING = new Error('NotFound');
 
 describe('functional module scanning', () => {
+  it('reports an index that is not a regular file without reading it', async () => {
+    const fs = createFakeFs({ '/app/src/modules/billing/billing.routes.ts': '' });
+    const probe: IFileSystem = {
+      ...fs,
+      stat: (path) => (path.endsWith('/index.ts') ? Promise.resolve(DIR_STAT) : fs.stat(path)),
+      readFile: () => Promise.reject(new Error('must not read')),
+    };
+    expect(await scanModules(probe, '/app', 'functional')).toEqual({
+      names: [],
+      skipped: [{ name: 'billing', path: 'src/modules/billing', missing: 'registerBillingModule' }],
+    });
+  });
+  for (const oversized of [false, true]) {
+    it(`${oversized ? 'skips and reports' : 'admits'} an index ${oversized ? 'over' : 'at'} the read limit`, async () => {
+      const index = '/app/src/modules/billing/index.ts';
+      const fs = createFakeFs({
+        '/app/src/modules/billing/billing.routes.ts': '',
+        [index]: 'export function registerBillingModule() {}',
+      });
+      const reads: string[] = [];
+      const probe: IFileSystem = {
+        ...fs,
+        stat: async (path) => ({
+          ...(await fs.stat(path)),
+          ...(path === index ? { size: MAX_EXISTING_FILE_BYTES + Number(oversized) } : {}),
+        }),
+        readFile: (path) => {
+          reads.push(path);
+          return fs.readFile(path);
+        },
+      };
+      const scan = await scanModules(probe, '/app', 'functional');
+      expect(scan.names).toEqual(oversized ? [] : ['billing']);
+      expect(scan.skipped).toEqual(
+        oversized
+          ? [
+              {
+                name: 'billing',
+                path: 'src/modules/billing',
+                missing: 'registerBillingModule',
+              },
+            ]
+          : [],
+      );
+      expect(reads).toEqual(oversized ? [] : [index]);
+    });
+  }
   it('admits exported registrars, reports missing exports and ignores old modules and shared folders', async () => {
     const fs = createFakeFs({
       '/app/src/modules/zebra/zebra.routes.ts': '',

@@ -45,6 +45,7 @@ export function generateModule(
   const dir = `${MODULES_DIR}/${names.kebab}`;
   const classBased = generatorMode(options.plugins) === 'class-based';
   const validation = options.plugins.has('validation-plugin');
+  const exceptions = options.plugins.has('exceptions');
   const files: GeneratedFile[] = [
     {
       path: `${dir}/${names.kebab}.service.ts`,
@@ -52,7 +53,9 @@ export function generateModule(
     },
     {
       path: `${dir}/${names.kebab}.${classBased ? 'controller' : 'routes'}.ts`,
-      contents: classBased ? moduleController(names, validation) : moduleRoutes(names, validation),
+      contents: classBased
+        ? moduleController(names, validation, exceptions)
+        : moduleRoutes(names, validation, exceptions),
     },
     ...(classBased
       ? [{ path: `${dir}/${names.kebab}.module.ts`, contents: classModule(names) }]

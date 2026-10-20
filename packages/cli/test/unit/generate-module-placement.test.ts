@@ -129,7 +129,7 @@ describe('feature-scoped generation', () => {
     }
     expect(h.fs.read('/app/src/modules/invoices/invoices.module.ts')).toBe(declaration);
     expect(h.fs.read('/app/src/modules/invoices/pricing.service.ts')).toContain(
-      "token: 'invoices-pricing-service'",
+      "token: 'invoices.pricing-service'",
     );
     expect(h.fs.read('/app/src/modules/invoices/pricing.controller.ts')).toContain(
       "@Controller('/invoices/pricing')",
@@ -142,5 +142,21 @@ describe('feature-scoped generation', () => {
     );
     expect(await h.run(['route', 'pricing', '--module', 'invoices'])).toBe(2);
     expect(h.err.text()).toContain('top-level g route');
+  });
+  it('namespaces scoped DI tokens separately from hyphenated top-level services', async () => {
+    const h = harness(true);
+    expect(await h.run(['module', 'billing'])).toBe(0);
+    expect(await h.run(['service', 'invoice', '--module', 'billing'])).toBe(0);
+    expect(await h.run(['service', 'billing-invoice'])).toBe(0);
+    const scoped = h.fs.read('/app/src/modules/billing/invoice.service.ts');
+    const topLevel = h.fs.read('/app/src/services/billing-invoice.service.ts');
+    expect(scoped).toContain("token: 'billing.invoice-service'");
+    expect(topLevel).toContain("token: 'billing-invoice-service'");
+    expect(scoped).not.toContain("token: 'billing-invoice-service'");
+    expect(scoped).toContain("inject 'billing.invoice-service'");
+    expect(h.out.text()).toContain("@Inject('billing.invoice-service')");
+    const writes = h.fs.writes.length;
+    expect(await h.run(['service', 'billing.invoice'])).toBe(2);
+    expect(h.fs.writes.length).toBe(writes);
   });
 });

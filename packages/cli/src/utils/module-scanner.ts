@@ -12,7 +12,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 
-import { joinPath } from './file-writer.ts';
+import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
 import { registerModuleSymbol } from '../seams/modules.ts';
 import { deriveNames } from './names.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
@@ -112,8 +112,10 @@ export async function scanModules(
       const symbol = registerModuleSymbol(deriveNames(entry));
       let source = '';
       try {
-        if (await isFile(fs, joinPath(root, entry, 'index.ts'))) {
-          source = new TextDecoder().decode(await fs.readFile(joinPath(root, entry, 'index.ts')));
+        const index = joinPath(root, entry, 'index.ts');
+        const stat = await fs.stat(index);
+        if (stat.isFile && stat.size <= MAX_EXISTING_FILE_BYTES) {
+          source = new TextDecoder().decode(await fs.readFile(index));
         }
       } catch {
         /* An unreadable index cannot activate the module. */

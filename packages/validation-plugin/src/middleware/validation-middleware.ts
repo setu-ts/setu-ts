@@ -20,6 +20,7 @@ import type {
 import {
   CAPABILITIES,
   formEncodingOf,
+  httpStatusHintOf,
   validatedStateKey,
   withValidationMetadata,
 } from '@setu-ts/common';
@@ -74,13 +75,17 @@ async function extractTarget(ctx: IRequestContext, target: ValidationTarget): Pr
           const form = await ctx.request.formData?.();
           if (form === undefined) throw new BodyParseError('Unsupported form body');
           return formRecord(form);
-        } catch {
+        } catch (error) {
+          const hint = httpStatusHintOf(error);
+          if (hint !== undefined && hint.status !== 400) throw error;
           throw new BodyParseError('Unsupported form body');
         }
       }
       try {
         return await ctx.request.json();
-      } catch {
+      } catch (error) {
+        const hint = httpStatusHintOf(error);
+        if (hint !== undefined && hint.status !== 400) throw error;
         throw new BodyParseError('Invalid JSON in request body');
       }
     }

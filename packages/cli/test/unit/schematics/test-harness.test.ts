@@ -96,13 +96,17 @@ describe('renderEquals', () => {
 });
 
 describe('generated socket test server', () => {
-  for (const [kind, failures, expectedAttempts, ok] of [
-    ['code', 1, 2, true],
-    ['message', 1, 2, true],
-    ['code', 5, 3, false],
-    ['other', 5, 1, false],
+  for (const [kind, failures, expectedAttempts, ok, stopFails] of [
+    ['code', 1, 2, true, false],
+    ['message', 1, 2, true, false],
+    ['code', 5, 3, false, false],
+    ['other', 5, 1, false, false],
+    ['code', 1, 2, true, true],
+    ['message', 1, 2, true, true],
+    ['code', 5, 3, false, true],
+    ['other', 5, 1, false, true],
   ] as const) {
-    it(`handles ${kind} startup failures (${failures}) and closes every app`, async () => {
+    it(`handles ${kind} startup failures (${failures}) and closes every app${stopFails ? ' with failing cleanup' : ''}`, async () => {
       const root = await tempDir({ prefix: 'setu-test-server-' });
       try {
         await nodeFs.mkdir(`${root}/test/support`, { recursive: true });
@@ -123,7 +127,10 @@ export function createApp() {
         throw error;
       }
     },
-    async stop(): Promise<void> { stops++; },
+    async stop(): Promise<void> {
+      stops++;
+      ${stopFails ? `if (attempts <= ${failures}) throw new Error('cleanup failed');` : ''}
+    },
   };
 }
 export function counts() { return { attempts, stops }; }
