@@ -62,12 +62,13 @@ export.
 ### 3.1 V9-5 — the devtool runtime refusal names the situation it is in
 
 - **Decision:** `devtoolRuntimeRefusal(runtime, context)` takes `context: 'scaffold' | 'enable'`.
-  The shared first sentence (why the devtool needs Deno) is unchanged. The remedy differs:
-  `'scaffold'` keeps "Scaffold without --devtool, or create the project with --runtime deno.";
-  `'enable'` says "This project targets <runtime>; the devtool can only be enabled on a Deno
-  project." with no "scaffold" wording. `new.ts:553` and `app.ts:567` pass `'scaffold'`;
-  `devtool.ts:436`, `:756`, `:767` pass `'enable'`. Required parameter, so no call site can keep the
-  old wording by omission.
+  The shared first sentence (why the devtool needs Deno) stays, but its last clause "could never
+  start the connector it was scaffolded with" becomes "could never start its diagnostics connector"
+  so it reads correctly in both contexts. The remedy differs: `'scaffold'` keeps "Scaffold without
+  --devtool, or create the project with --runtime deno."; `'enable'` says "This project targets
+  <runtime>; the devtool can only be enabled on a Deno project." with no "scaffold" wording.
+  `new.ts:553` and `app.ts:567` pass `'scaffold'`; `devtool.ts:436`, `:756`, `:767` pass `'enable'`.
+  Required parameter, so no call site can keep the old wording by omission.
 - **Why:** the refusal is correct; only its remedy names the wrong command.
 - **Test home:** `test/unit/devtool-refusals.test.ts` — both contexts, every runtime; asserts the
   enable message contains neither "Scaffold" nor "scaffolded".
