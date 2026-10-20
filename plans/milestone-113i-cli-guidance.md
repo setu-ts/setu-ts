@@ -170,11 +170,21 @@ export.
   its own job name, which is the same trade the class-based arm already makes (V8-33).
 - **Why:** the class-based arm already wires a queue processor; the functional arm had no seam
   because of a stale premise.
+- **Runtime swaps:** seams are resolved against the plugin set AFTER the target's runtime swap. The
+  Workers microservice swap removes `queue-plugin` (Cloudflare serves `CAPABILITIES.QUEUE` with no
+  `processors` option), so on that target the jobs seam contributes nothing — no
+  `src/jobs/index.ts`, no `QUEUE_PROCESSORS` import, no args rewrite — and `g job` there behaves as
+  in any project without `queue-plugin` (job file only, no skip report). Mechanism: the host keeps
+  its seam list apart from showcase files, imports, spreads and setup calls, and `resolveHost`
+  derives the seam contributions from
+  `seams.filter(s => s.requiresPlugin === undefined || !swap.removePackages.includes(s.requiresPlugin))`.
+  No existing gated seam (`decorator-plugin`, `metrics-plugin`) names a swapped package, so every
+  other template's bytes are unchanged, which `template-baseline.json` pins.
 - **Test home:** `test/unit/schematics/job.test.ts` (both functional shapes), `test/unit/seams/`
   (barrel render), `generate-unwired-seam.test.ts` (the report), `test/unit/templates/`
-  (microservice scaffold with and without `--queue redis`), and `seam-probe.test.ts` booting the
-  functional microservice host, enqueueing a generated job through `CAPABILITIES.QUEUE`, and
-  observing the processor run.
+  (microservice scaffold with and without `--queue redis`, and on `cloudflare-workers` with no jobs
+  seam), and `seam-probe.test.ts` booting the functional microservice host, enqueueing a generated
+  job through `CAPABILITIES.QUEUE`, and observing the processor run.
 
 ### 3.7 V9-12 — a generated README names a command that resolves
 
@@ -277,7 +287,8 @@ kind from `ingressNames` → the both-kinds test fails on the existing file; (6)
 replace instead of merge → the `--queue redis` template test loses `adapter: 'redis'`; (7) render
 `setu` instead of `cliInvocation` → the README test fails; (8) drop the `queue-plugin` condition
 from `scanSeamSpecs` → a functional project without a queue holding a standalone job reports a skip
-on the next `g route`.
+on the next `g route`. (9) derive seam contributions before the runtime swap → the Workers
+microservice scaffold test finds `src/jobs/index.ts`.
 
 ## 7. Verification gates
 
