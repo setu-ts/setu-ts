@@ -547,7 +547,7 @@ export async function runGenerateCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      `${dryRun ? 'Cannot plan' : 'Failed to write'}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
     return EXIT_ERROR;
   }

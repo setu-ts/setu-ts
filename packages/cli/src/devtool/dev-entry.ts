@@ -20,6 +20,7 @@ import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery
 import { isUsablePort } from '../workspace/manifest.ts';
 import type { EntryPort } from '../templates/project-files.ts';
 import { cliInvocation, DEVTOOL_ENTRY_MODULE, shutdownBlock } from '../templates/project-files.ts';
+import { VERSION } from '../version.ts';
 
 /**
  * The session-ID variable the generated entry reads.
@@ -185,9 +186,31 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
   return [current, previous, renderEntry(input, false)];
 }
 
+/**
+ * Whether a source is a complete, unedited CLI-owned entry at this port.
+ *
+ * The current rendering names the pinned CLI (`npm:@setu-ts/cli@<VERSION>`), so an
+ * entry written by an earlier release differs only in that version. It is normalized
+ * to the running version before the comparison; otherwise every release would make
+ * every existing entry read as hand-edited.
+ *
+ * @param source - The entry file's text
+ * @param devtoolPort - The connector port the entry must bind
+ * @param member - Whether the entry belongs to a workspace member
+ * @returns `true` when the source is one of the CLI's renderings
+ */
+export function isDevEntry(source: string, devtoolPort: number, member = true): boolean {
+  const normalized = source.replace(PINNED_CLI, `npm:@setu-ts/cli@${VERSION}`);
+  return devEntryVariants(devtoolPort, member).includes(normalized);
+}
+
+/** A pinned CLI specifier as the entry renders it: a semver version, nothing else. */
+const PINNED_CLI =
+  /npm:@setu-ts\/cli@[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?/g;
+
 /** Reads the port only from a complete, unedited CLI-owned entry. */
 export function devEntryPort(source: string, member = false): number | undefined {
   const match = /\n {2}port: ([0-9]+), \/\/ IPv4 loopback only;/.exec(source);
   const port = Number(match?.[1]);
-  return isUsablePort(port) && devEntryVariants(port, member).includes(source) ? port : undefined;
+  return isUsablePort(port) && isDevEntry(source, port, member) ? port : undefined;
 }

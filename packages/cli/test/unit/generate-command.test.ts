@@ -942,7 +942,8 @@ describe('bounded read of a managed file (L1 audit)', () => {
   it('refuses a dry run with exit 1 when a managed file is not a regular file', async () => {
     const h = plantedHarness({ isFile: false, size: 0 });
     expect(await h.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
-    expect(h.err.text()).toContain('Failed to write:');
+    expect(h.err.text()).toContain('Cannot plan:');
+    expect(h.err.text()).not.toContain('Failed to write');
     expect(h.err.text()).toContain(
       `${barrel} is not a regular file; the CLI will not read or replace it.`,
     );

@@ -47,7 +47,7 @@ import {
   renderDevtoolSources,
   withDevtoolSourceWiring,
 } from '../devtool/sources.ts';
-import { devEntryPort, devEntryVariants, renderDevEntry } from '../devtool/dev-entry.ts';
+import { devEntryPort, isDevEntry, renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
   deriveDevTask,
@@ -620,7 +620,7 @@ async function enableInWorkspace(
   } catch {
     existingEntry = undefined;
   }
-  if (existingEntry !== undefined && !devEntryVariants(devtoolPort).includes(existingEntry)) {
+  if (existingEntry !== undefined && !isDevEntry(existingEntry, devtoolPort)) {
     return reportInapplicable(
       deps,
       `Refusing to overwrite ${escapeName(
@@ -846,10 +846,7 @@ async function enableStandalone(
     );
   }
   const entry = renderDevEntry({ devtoolPort });
-  if (
-    existingEntry !== undefined &&
-    !devEntryVariants(devtoolPort, false).includes(existingEntry)
-  ) {
+  if (existingEntry !== undefined && !isDevEntry(existingEntry, devtoolPort, false)) {
     return reportInapplicable(
       deps,
       `Refusing to overwrite ${DEVTOOL_ENTRY_MODULE}: it exists with different contents.` +

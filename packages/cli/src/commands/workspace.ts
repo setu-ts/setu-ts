@@ -1,7 +1,7 @@
 /** Workspace maintenance commands. */
 
 import { formatForTarget } from '../utils/prettier-format.ts';
-import { devEntryVariants, DEVTOOL_ENTRY_MODULE, renderDevEntry } from '../devtool/dev-entry.ts';
+import { DEVTOOL_ENTRY_MODULE, isDevEntry, renderDevEntry } from '../devtool/dev-entry.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -164,7 +164,7 @@ export async function runWorkspaceCommand(
       );
       return EXIT_ERROR;
     }
-    if (!devEntryVariants(member.devtoolPort).includes(source)) {
+    if (!isDevEntry(source, member.devtoolPort)) {
       deps.error(
         `${escapeName(
           path,
