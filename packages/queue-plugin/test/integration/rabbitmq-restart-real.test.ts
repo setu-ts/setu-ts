@@ -34,7 +34,11 @@ describe('RabbitMQ automatic recovery', { skip: process.env['RABBITMQ_URL'] === 
       // Restarts the container publishing RABBITMQ_URL's port, the convention
       // the outage-real suites follow; the run must own that broker.
       const port = new URL(url).port || '5672';
-      const { stdout } = await run('docker', ['ps', '-q', '--filter', `publish=${port}`]);
+      const shard = process.env['SETU_CI_SHARD'];
+      const filters = shard
+        ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+        : ['--filter', `publish=${port}`];
+      const { stdout } = await run('docker', ['ps', '-q', ...filters]);
       const containerId = stdout.trim().split('\n')[0];
       if (containerId === undefined || containerId === '')
         throw new Error(`no container publishing port ${port}`);

@@ -2,6 +2,50 @@ import { describe, expect, it } from 'vitest';
 import { isNotFound, killGroup, run } from '../../scripts/lib/run.ts';
 
 describe('repository subprocess helper', () => {
+  it('captures the complete forced-exit burst with consumption delayed until close', async () => {
+    // TypeDoc's CLI logs its summary then process.exit()s. A pipe's write queue
+    // can be discarded at exit if the reader is late. Regular files must retain
+    // every byte, even though run() reads neither file until AFTER child close.
+    const bytes = 4 * 1024 * 1024;
+    const result = await run(
+      process.execPath,
+      [
+        '-e',
+        `process.stdout.write('o'.repeat(${bytes})); process.stderr.write('e'.repeat(${bytes}) + '\\n[warning] Found 0 errors and 554 warnings\\n'); process.exit(0);`,
+      ],
+      { capture: 'file' },
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout.length).toBe(bytes);
+    expect(result.stdout).toBe('o'.repeat(bytes));
+    expect(result.stderr.length).toBe(
+      bytes + '\n[warning] Found 0 errors and 554 warnings\n'.length,
+    );
+    expect(result.stderr).toBe('e'.repeat(bytes) + '\n[warning] Found 0 errors and 554 warnings\n');
+  });
+
+  it('cleans file captures after spawn failure and captures nonzero exits and signals', async () => {
+    await expect(run('/missing-setu-binary', [], { capture: 'file' })).rejects.toSatisfy(
+      isNotFound,
+    );
+    expect(
+      await run(process.execPath, ['-e', 'process.stderr.write("bad"); process.exit(3)'], {
+        capture: 'file',
+      }),
+    ).toEqual({ code: 3, stdout: '', stderr: 'bad' });
+    expect(
+      (
+        await run(process.execPath, ['-e', 'process.kill(process.pid,"SIGTERM")'], {
+          capture: 'file',
+        })
+      ).code,
+    ).toBe(1);
+    expect(await run(process.execPath, ['-e', ''], { capture: 'file', inherit: true })).toEqual({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    });
+  });
   it('captures both streams and a nonzero status', async () => {
     expect(
       await run(process.execPath, [

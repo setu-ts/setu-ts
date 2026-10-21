@@ -41,7 +41,11 @@ describe('M113a REAL Pub/Sub probe outage', { skip: !emulatorHost }, () => {
       return new TextDecoder().decode(result.stdout).trim();
     };
     const port = Number(new URL(`http://${emulatorHost}`).port || 8085);
-    const container = (await docker(['ps', '-q', '--filter', `publish=${port}`])).split('\n')[0]!;
+    const shard = process.env['SETU_CI_SHARD'];
+    const filters = shard
+      ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+      : ['--filter', `publish=${port}`];
+    const container = (await docker(['ps', '-q', ...filters])).split('\n')[0]!;
     if (!container) throw new Error(`No emulator container publishing ${port}`);
     const { PubSub } = await import('@google-cloud/pubsub');
     const admin = new PubSub({ projectId });

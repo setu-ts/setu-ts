@@ -925,7 +925,12 @@ export async function runApiDocsMain(
     mkdir,
   };
 
-  const cmd = { run: (command: string[]) => runProcess(command[0]!, command.slice(1)) };
+  // TypeDoc 0.28.20's dist/cli.js calls process.exit() immediately after logging
+  // its summary. Pipes can discard queued writes when the reader is descheduled.
+  // Regular-file stdio makes Node's writes synchronous; read only after close.
+  const cmd = {
+    run: (command: string[]) => runProcess(command[0]!, command.slice(1), { capture: 'file' }),
+  };
 
   const { code } = await runApiDocs(mode, outputDir, fs, cmd);
 
