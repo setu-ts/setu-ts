@@ -23,6 +23,7 @@ import {
   preflight,
   runnerMemory,
   scheduleShards,
+  SHARD_BUDGET_BYTES,
   shardCommands,
 } from './lib/local-ci-plan.ts';
 import type { IBackend, Shard } from './lib/local-ci-plan.ts';
@@ -61,7 +62,7 @@ async function main(): Promise<void> {
   }
   const parallel = chooseParallelism(host.freeMemory, host.threads, options.parallel);
   console.log(
-    `Parallelism: ${parallel} (${options.parallel === undefined ? 'automatic: 7 GiB and 2 threads per shard, maximum 5' : 'requested by --parallel'}; ${(host.freeMemory / 1024 ** 3).toFixed(2)} GiB available; ${host.threads} threads). CPU set: ${options.cpus ?? 'unrestricted'}.`,
+    `Parallelism: ${parallel} (${options.parallel === undefined ? `automatic: ${SHARD_BUDGET_BYTES / 1024 ** 3} GiB and 2 threads per shard, maximum 5` : 'requested by --parallel'}; ${(host.freeMemory / 1024 ** 3).toFixed(2)} GiB available; ${host.threads} threads). CPU set: ${options.cpus ?? 'unrestricted'}.`,
   );
   const source = await readFile(resolve(root, '.github/workflows/ci.yml'), 'utf8');
   let interrupted = false;
