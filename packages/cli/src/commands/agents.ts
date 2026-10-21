@@ -18,6 +18,7 @@ import {
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
+import { memberPath } from '../utils/member-path.ts';
 import {
   readWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -80,14 +81,13 @@ export async function runAgentsCommand(
     let root = dir;
     let workspaceRoot: string | undefined;
     let workspace: WorkspaceManifest | undefined;
-    const slashes = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
     for (let current = dir; ; current = dirName(current)) {
       const candidate = await agentWorkspace(deps.fs, current);
       if (
         candidate !== undefined &&
         (current === dir ||
           candidate.members.some(
-            (member) => slashes(joinPath(current, MEMBERS_DIR, member.name)) === slashes(dir),
+            (member) => memberPath(joinPath(current, MEMBERS_DIR, member.name)) === memberPath(dir),
           ))
       ) {
         workspaceRoot = current;

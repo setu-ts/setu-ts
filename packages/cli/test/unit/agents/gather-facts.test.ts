@@ -63,8 +63,8 @@ describe('read-only project facts', () => {
     const base = createFakeFs({ '/app/package.json': '{}' });
     const fs: IFileSystem = {
       ...base,
-      readFile: (path) =>
-        path.endsWith('wrangler.jsonc') ? Promise.reject(new Error('denied')) : base.readFile(path),
+      stat: (path) =>
+        path.endsWith('wrangler.jsonc') ? Promise.reject(new Error('denied')) : base.stat(path),
     };
     await expect(gatherFacts(fs, '/app')).rejects.toThrow('wrangler.jsonc');
     await expect(

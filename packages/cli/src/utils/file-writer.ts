@@ -10,6 +10,12 @@ import { isMissingPath } from './filesystem-errors.ts';
 import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 import { escapeName } from './names.ts';
 
+/** Optional CLI-only bounded read, supplied by the executable's process boundary. */
+export interface ICliFileSystem extends IFileSystem {
+  /** Opens non-blocking, checks the opened handle is regular, and reads at most maxBytes + 1. */
+  readRegularFile?(path: string, maxBytes: number): Promise<Uint8Array>;
+}
+
 /**
  * One file a schematic asks the command layer to create.
  */
@@ -412,10 +418,9 @@ async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array 
 }
 
 /**
- * Reads a developer-owned text file the CLI only inspects, with the same guard
- * as {@linkcode previousBytes}: `stat` first, and only a regular file under
- * {@linkcode MAX_EXISTING_FILE_BYTES} is opened, so a committed link to
- * `/dev/zero` or a FIFO cannot hang the command.
+ * Reads a developer-owned text file the CLI only inspects. The executable checks
+ * the opened handle and bounds the read; filesystems without that optional CLI
+ * capability retain the stat-then-read fallback.
  *
  * @param fs - The filesystem to read through
  * @param path - The file to read
@@ -423,7 +428,20 @@ async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array 
  * @throws {Error} When the path is not a regular file, is larger than 1 MiB, or
  *   is not valid UTF-8
  */
-export async function readExistingText(fs: IFileSystem, path: string): Promise<string | undefined> {
+export async function readExistingText(
+  fs: ICliFileSystem,
+  path: string,
+): Promise<string | undefined> {
+  if (fs.readRegularFile !== undefined) {
+    try {
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+        await fs.readRegularFile(path, MAX_EXISTING_FILE_BYTES),
+      );
+    } catch (cause) {
+      if (!isMissingPath(cause)) throw cause;
+      return undefined;
+    }
+  }
   let stat: StatResult;
   try {
     stat = await fs.stat(path);

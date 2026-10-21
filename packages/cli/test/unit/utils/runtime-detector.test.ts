@@ -72,14 +72,14 @@ describe('detectTargetRuntime', () => {
       const fs = createFakeFs(files);
       return {
         ...fs,
-        readFile: (path: string) =>
+        stat: (path: string) =>
           path === denied
             ? Promise.reject(
                 Object.assign(new Error('EACCES: permission denied'), {
                   code: 'EACCES',
                 }),
               )
-            : fs.readFile(path),
+            : fs.stat(path),
       };
     }
 
@@ -117,7 +117,7 @@ describe('detectTargetRuntime', () => {
     it('stringifies a non-Error failure', async () => {
       const fs = createFakeFs({ '/app/wrangler.toml': '' });
       const failure = await detectTargetRuntime(
-        { ...fs, readFile: () => Promise.reject('disk gone') },
+        { ...fs, stat: () => Promise.reject('disk gone') },
         '/app',
       ).catch((cause) => cause);
       expect(failure.reason).toBe('disk gone');

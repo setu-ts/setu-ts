@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **CLI file reads and member paths:** manifest reads now refuse non-regular files, files over 1 MiB
+  and files that are not valid UTF-8; runtime-marker checks use metadata without opening content. A
+  POSIX path containing `\` is no longer read as a workspace member path.
+
 ### Changed
 
 - **`agents` is a built-in CLI command (M116, `@setu-ts/cli`).** Built-in verbs are matched before

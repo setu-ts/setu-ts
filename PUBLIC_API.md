@@ -10078,8 +10078,8 @@ written. Card presence is not part of the check, so a CI checkout can run it bef
 `--dir` selects the project or workspace, a relative path resolved against the working directory.
 `--dry-run` prints `would write <path>` per file and is refused together with `--check`. A real
 write prints one line per file: `created`, `updated` or `unchanged`, then the path. Outside a
-Setu-TS project the command exits `2`; a manifest or runtime marker it cannot read exits `1` naming
-the file.
+Setu-TS project the command exits `2`; an unreadable manifest or a runtime marker whose metadata
+cannot be inspected exits `1` naming the file.
 
 In a workspace it may be run from the root or any member directory: it writes the root `AGENTS.md`
 and every member's `apps/<name>/AGENTS.md`, and `--check` checks all of them. The root brief covers

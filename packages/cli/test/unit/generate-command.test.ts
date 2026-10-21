@@ -528,10 +528,8 @@ describe('runGenerateCommand', () => {
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
       fs: {
         ...fs,
-        readFile: (path: string) =>
-          path === '/app/bun.lock'
-            ? Promise.reject(new Error('EIO: i/o error'))
-            : fs.readFile(path),
+        stat: (path: string) =>
+          path === '/app/bun.lock' ? Promise.reject(new Error('EIO: i/o error')) : fs.stat(path),
       },
       cwd: '/app',
       now: () => 0,

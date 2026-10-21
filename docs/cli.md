@@ -629,9 +629,12 @@ A path that is not a regular file, or is over 1 MiB, is refused the same way.
 A write prints one line per file — `created`, `updated` or `unchanged`, followed by the path. The
 command takes no positionals, and an extra one is a usage error (exit `2`). Outside a Setu-TS
 project it exits `2` with
-`<dir> holds no Setu-TS project manifest; run inside a project or pass --dir.`; a manifest or
-runtime marker it cannot read exits `1` naming the file, because a brief built on a guessed runtime
-would name the wrong commands.
+`<dir> holds no Setu-TS project manifest; run inside a project or pass --dir.`; an unreadable
+manifest or a runtime marker whose metadata it cannot inspect exits `1` naming the file, because a
+brief built on a guessed runtime would name the wrong commands. Manifest content must be a regular
+file at most 1 MiB; the Node executable checks the opened handle and bounds the read. Runtime-marker
+presence uses metadata only: even a FIFO or device marker counts as present and is never opened for
+content.
 
 ### Workspaces
 

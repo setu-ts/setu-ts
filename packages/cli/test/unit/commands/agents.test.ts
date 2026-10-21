@@ -28,6 +28,26 @@ function harness(
 }
 
 describe('setu agents', () => {
+  it.skipIf(process.platform === 'win32')(
+    'R2-3 does not adopt apps\\x as the listed apps/x member',
+    async () => {
+      const h = harness({
+        '/work/setu.workspace.json': JSON.stringify({
+          version: 1,
+          basePort: 3000,
+          runtime: 'node',
+          transport: 'http',
+          members: [{ name: 'x', port: 3000 }],
+        }),
+        '/work/apps/x/package.json': '{}',
+        '/work/apps\\x/package.json': '{}',
+      });
+      expect(await h.run(['agents', '--dir', 'apps\\x', '--dry-run'])).toBe(0);
+      expect(h.out.lines).toEqual(['would write /work/apps\\x/AGENTS.md']);
+      expect(h.fs.has('/work/AGENTS.md')).toBe(false);
+      expect(h.fs.has('/work/apps/x/AGENTS.md')).toBe(false);
+    },
+  );
   const workspaceText = JSON.stringify({
     version: 1,
     basePort: 3000,
@@ -181,8 +201,8 @@ describe('setu agents', () => {
     }
     const denied = harness(undefined, (fs) => ({
       ...fs,
-      readFile: (p) =>
-        p.endsWith('wrangler.jsonc') ? Promise.reject(new Error('denied')) : fs.readFile(p),
+      stat: (p) =>
+        p.endsWith('wrangler.jsonc') ? Promise.reject(new Error('denied')) : fs.stat(p),
     }));
     expect(await denied.run(['agents'])).toBe(1);
     expect(denied.err.text()).toContain('wrangler.jsonc');

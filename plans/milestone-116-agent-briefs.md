@@ -449,14 +449,29 @@ Decisions:
 - **F2 (O4):** every terminal line the command prints from project data goes through `escapeName`,
   and card warnings name only admitted package names (F1).
 - **F3 (O5, O7):** the walk follows `installSearchDirs` (`app-loader.ts`): an ancestor is a
-  workspace only when it holds a regular `setu.workspace.json` (stat-checked, at most 1 MiB) that
-  parses and lists the project as `apps/<member>`; the directory itself counts when it is that root.
-  A project that is not a listed member is standalone. Only `setu.workspace.json` is read in
-  ancestors — never their `package.json`/`deno.json` — and an ancestor whose marker is unreadable (a
-  non-missing stat error, a non-regular file, oversize, unparsable) is treated as not a workspace
+  workspace only when it holds a regular `setu.workspace.json` (opened-handle checked, at most 1
+  MiB) that parses and lists the project as `apps/<member>`; the directory itself counts when it is
+  that root. A project that is not a listed member is standalone. Only `setu.workspace.json` is read
+  in ancestors — never their `package.json`/`deno.json` — and an ancestor whose marker is unreadable
+  (a non-missing stat error, a non-regular file, oversize, unparsable) is treated as not a workspace
   and the walk continues, so a planted file can neither hang nor misroute the command.
 - **F4 (O7):** the `.yarnrc.yml` `nodeLinker` read is linear: lines are scanned one by one with an
   anchored, non-multiline pattern.
 - **F5 (O9):** card snippets use visibly placeholder secrets (`replace-with-…`) that still satisfy
   the length checks, matching the READMEs.
+- **R2-1 (O7):** the stat/read race in ancestor markers is closed by a CLI-internal optional
+  `readRegularFile` capability, installed by the Node executable. It opens read-only with
+  non-blocking/no-controlling-terminal flags where available, checks the opened handle with `fstat`,
+  refuses non-regular files, reads at most 1 MiB + 1 bytes and refuses overflow, and always closes
+  the handle. `readExistingText` uses it without a preceding path stat; test filesystems lacking it
+  retain the existing stat-then-read fallback. No common interface or public export changes.
+- **R2-2 (O7):** project manifests use that same bounded text reader; non-regular, oversize or
+  unreadable content maps to `unreadable`, and ENOENT stays `missing`. Runtime marker presence uses
+  only `stat`: any existing file type counts as present, including a FIFO or device, and no content
+  is opened. Other stat errors retain `RuntimeMarkerUnreadableError`.
+- **R2-3 (O5):** agents workspace adoption and `installSearchDirs` share one internal comparison
+  helper. Backslashes become separators only for drive-rooted or UNC paths; a POSIX `apps\x`
+  directory never matches the listed `apps/x` member. Trailing slashes are stripped.
+- **R2-4 (O9):** the secrets and mail cards' two credential literals were replaced by configuration
+  reads in commit `57ede20d`. This repair does not change cards.
 - **Re-audit:** after F1–F5 land, a fresh-context audit re-runs O4, O5, O7 and O9.
