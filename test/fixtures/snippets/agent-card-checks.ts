@@ -134,3 +134,23 @@ export async function checkFences(label: string, source: string, scratch: string
   }
   return count;
 }
+
+/**
+ * Fences that resolve a capability from an application before starting it.
+ *
+ * Plugins register during `start()`, so `app.services.get(...)` straight after
+ * `createApplication(...)` compiles and throws at run time — the M70i documented
+ * crash. Batch 2 of the M116 cards shipped it three times; the compiler cannot see it.
+ * Reads inside a handler use `ctx.services` and are not affected.
+ */
+export function prematureResolutions(source: string): readonly number[] {
+  const fences = [...source.matchAll(/^```(?:ts|typescript)\n([\s\S]*?)^```\s*$/gm)].map(
+    (m) => m[1],
+  );
+  return fences.flatMap((code, index) => {
+    const get = code.indexOf('app.services.get');
+    if (get === -1) return [];
+    const start = code.indexOf('app.start(');
+    return start !== -1 && start < get ? [] : [index];
+  });
+}

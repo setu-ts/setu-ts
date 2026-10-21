@@ -6,38 +6,29 @@ import {
   checkFences,
   exportedIdentifiers,
   identifierProblems,
+  prematureResolutions,
 } from './fixtures/snippets/agent-card-checks.ts';
 
 /** Temporary handoff inventory: remove each entry when its card lands. */
 const PENDING_CARDS: readonly string[] = [
   'packages/audit-plugin',
-  'packages/auth-plugin',
-  'packages/cache-plugin',
   'packages/cloudflare-plugin',
-  'packages/cqrs-plugin',
-  'packages/database-plugin',
-  'packages/di-plugin',
   'packages/diagnostics-plugin',
-  'packages/events-plugin',
   'packages/feature-flags-plugin',
   'packages/graphql-plugin',
   'packages/grpc-plugin',
-  'packages/health-plugin',
   'packages/idempotency-plugin',
   'packages/localization-plugin',
   'packages/mail-plugin',
   'packages/messaging-plugin',
-  'packages/metrics-plugin',
   'packages/multi-tenancy-plugin',
   'packages/notification-plugin',
-  'packages/openapi-plugin',
   'packages/react-router-plugin',
   'packages/realtime-backplane-plugin',
   'packages/resilience-plugin',
   'packages/scheduler-plugin',
   'packages/secrets-plugin',
   'packages/service-discovery-plugin',
-  'packages/session-plugin',
   'packages/sse-plugin',
   'packages/static-plugin',
   'packages/storage-plugin',
@@ -62,6 +53,16 @@ const FENCE_COUNTS: Readonly<Record<string, number>> = {
   'packages/common': 2,
   'packages/queue-plugin': 2,
   'packages/decorator-plugin': 1,
+  'packages/health-plugin': 2,
+  'packages/metrics-plugin': 2,
+  'packages/openapi-plugin': 2,
+  'packages/auth-plugin': 1,
+  'packages/session-plugin': 1,
+  'packages/cache-plugin': 2,
+  'packages/database-plugin': 2,
+  'packages/events-plugin': 2,
+  'packages/cqrs-plugin': 2,
+  'packages/di-plugin': 2,
 };
 const libraries = PUBLISHED_PACKAGES.filter((p) => p !== 'packages/cli' && p !== 'packages/create');
 const ready = libraries.filter((p) => !PENDING_CARDS.includes(p));
@@ -113,6 +114,23 @@ describe('export-shaped inline identifiers', () => {
   });
 });
 
+describe('capabilities resolved before start()', () => {
+  const fence = (body: string): string => '```ts\n' + body + '\n```\n';
+  it('flags app.services.get with no earlier app.start()', () => {
+    expect(prematureResolutions(fence('const db = app.services.get(T);'))).toEqual([0]);
+    expect(prematureResolutions(fence('app.services.get(T);\nawait app.start();'))).toEqual([0]);
+  });
+  it('accepts a resolution after start, a handler read, and a fence without one', () => {
+    expect(prematureResolutions(fence('await app.start();\napp.services.get(T);'))).toEqual([]);
+    expect(prematureResolutions(fence('(ctx) => ctx.services.get(T)'))).toEqual([]);
+    expect(
+      prematureResolutions(
+        fence('const x = 1;') + fence('await app.start();\napp.services.get(T);'),
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('published agent cards', () => {
   it('accounts for every library, with pending entries absent so the list can only shrink', async () => {
     expect(new Set(PENDING_CARDS).size).toBe(PENDING_CARDS.length);
@@ -136,6 +154,12 @@ describe('published agent cards', () => {
       const source = await readFile(path, 'utf8');
       const allowed = allowedCardIdentifiers(source, pkg, inventory);
       expect(identifierProblems(source, allowed), path).toEqual([]);
+    }
+  });
+  it('starts the application before resolving a capability from it', async () => {
+    for (const pkg of ready) {
+      const path = `${pkg}/AGENT_CARD.md`;
+      expect(prematureResolutions(await readFile(path, 'utf8')), path).toEqual([]);
     }
   });
   it('compiles every fence and pins the compilable count', async () => {
