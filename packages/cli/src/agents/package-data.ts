@@ -7,6 +7,13 @@ export interface IPackageData {
   readonly tokens: readonly (keyof typeof CAPABILITIES)[];
 }
 
+/**
+ * Published packages that are run rather than imported, and so ship no card: a
+ * project may depend on the CLI (for `npx setu`), but it is a tool, not a
+ * library the brief should point an agent at.
+ */
+export const TOOLING_PACKAGES: ReadonlySet<string> = new Set(['cli', 'create']);
+
 /** Bare package names, including non-addable starters and diagnostics. */
 export const PACKAGE_DATA: ReadonlyMap<string, IPackageData> = new Map<string, IPackageData>([
   [

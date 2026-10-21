@@ -36,6 +36,13 @@ describe('project brief rendering', () => {
     expect(absent).not.toContain('`cloudflare`');
     expect(absent).toContain('`scheduler`');
   });
+  it('lists no tooling package as an installed library: cli and create ship no card', () => {
+    const text = renderBrief(agentFacts({ installed: new Set(['common', 'cli', 'create']) }));
+    const installed = text.split('## Installed')[1]!.split('## Not installed')[0]!;
+    expect(installed).toContain('@setu-ts/common');
+    expect(installed).not.toContain('@setu-ts/cli');
+    expect(installed).not.toContain('@setu-ts/create');
+  });
   it('selects the runtime command runner and Workers entry and addable restrictions', () => {
     for (const [runtime, command] of [
       ['deno', 'deno task'],

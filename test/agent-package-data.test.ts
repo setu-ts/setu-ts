@@ -2,7 +2,7 @@ import { glob, readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 import { CAPABILITIES } from '@setu-ts/common';
-import { PACKAGE_DATA } from '../packages/cli/src/agents/package-data.ts';
+import { PACKAGE_DATA, TOOLING_PACKAGES } from '../packages/cli/src/agents/package-data.ts';
 import { PACKAGE_METADATA } from '../scripts/jsr-metadata.ts';
 import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
 
@@ -56,9 +56,10 @@ describe('the shipped agent package catalogue', () => {
   });
 
   it('covers exactly the published library members with their npm descriptions', () => {
-    const names = PUBLISHED_PACKAGES.filter(
-      (p) => p !== 'packages/cli' && p !== 'packages/create',
-    ).map((p) => p.split('/').pop()!);
+    const all = PUBLISHED_PACKAGES.map((p) => p.split('/').pop()!);
+    const names = all.filter((name) => !TOOLING_PACKAGES.has(name));
+    expect([...TOOLING_PACKAGES].every((name) => all.includes(name))).toBe(true);
+    expect([...TOOLING_PACKAGES].sort()).toEqual(['cli', 'create']);
     expect([...PACKAGE_DATA.keys()].sort()).toEqual(names.sort());
     for (const [pkg, data] of PACKAGE_DATA)
       expect(data.description, pkg).toBe(PACKAGE_METADATA[pkg].description);

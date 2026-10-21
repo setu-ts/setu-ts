@@ -3,6 +3,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { joinPath, MAX_EXISTING_FILE_BYTES, readExistingText } from '../utils/file-writer.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
+import { TOOLING_PACKAGES } from './package-data.ts';
 
 /**
  * A special or overlarge file is treated as absent (the CLI will not open it),
@@ -70,6 +71,7 @@ export async function cardWarnings(
   }
   const warnings: string[] = [];
   for (const pkg of [...installed].sort()) {
+    if (TOOLING_PACKAGES.has(pkg)) continue;
     const path = `node_modules/@setu-ts/${pkg}/AGENT_CARD.md`;
     let found = false;
     for (const location of locations) {

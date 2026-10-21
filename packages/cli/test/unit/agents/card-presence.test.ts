@@ -176,4 +176,8 @@ describe('advisory card checks', () => {
       'card not found: node_modules/@setu-ts/common/AGENT_CARD.md — run install',
     ]);
   });
+  it('expects no card from a tooling package', async () => {
+    const fs = createFakeFs({ '/app/node_modules/@setu-ts/common/AGENT_CARD.md': '# Common' });
+    expect(await cardWarnings(fs, '/app', new Set(['common', 'cli', 'create']))).toEqual([]);
+  });
 });

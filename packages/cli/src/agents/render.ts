@@ -3,7 +3,7 @@ import type { ProjectFacts } from './facts.ts';
 import type { WorkspaceManifest } from '../workspace/manifest.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import { ADDABLE, RUNTIME_RESTRICTIONS } from '../commands/add.ts';
-import { PACKAGE_DATA } from './package-data.ts';
+import { PACKAGE_DATA, TOOLING_PACKAGES } from './package-data.ts';
 import { RULE_BLOCKS } from './rules.ts';
 import { BRIEF_BEGIN, BRIEF_END } from './brief-file.ts';
 import { getTransport } from '../workspace/transport.ts';
@@ -49,6 +49,7 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
     '| --- | --- | --- | --- |',
   );
   for (const pkg of [...facts.installed].sort()) {
+    if (TOOLING_PACKAGES.has(pkg)) continue;
     const data = PACKAGE_DATA.get(pkg);
     sections.push(
       `| @setu-ts/${pkg} | ${data?.tokens.join(', ') || '—'} | ${data?.description ?? 'Read the installed package documentation'} | ${modules}/@setu-ts/${pkg}/AGENT_CARD.md |`,
