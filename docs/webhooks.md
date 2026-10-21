@@ -18,17 +18,34 @@ HMAC-SHA256. It carries a hex signature in `webhook-signature` and the timestamp
 route. Import a verification-only HMAC key at startup using the secret from your secret manager and
 `runtime.subtle.importKey`.
 
+Bound the body read with `RuntimePlugin({ maxBodyBytes })`; the example uses 1 MiB and also refuses
+an oversized declared `Content-Length` before `bytes()`. The runtime bound is still required when
+the header is absent or understates the body size.
+
+If global CSRF protection is enabled, exclude only `/webhooks/provider` from both session-plugin
+form CSRF (`csrf.exclude: ['/webhooks/provider']`) and http-security's
+`csrfMiddleware({ exclude: ['/webhooks/provider'] })`. The verified signature is this route's CSRF
+defence. Keep CSRF enabled for the rest of the application; never disable it wholesale.
+
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IIdempotencyService, IRuntimeServices } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import type { IUnitOfWork } from '@setu-ts/database-plugin';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 interface Delivery { id: string; type: string; }
+
+const maxBodyBytes = 1024 * 1024;
+export const webhookRuntime = RuntimePlugin({ maxBodyBytes });
 
 export function registerWebhook(app: IKernelApplication, key: CryptoKey): void {
   app.router.post('/webhooks/provider', async (ctx) => {
     const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    const declaredLength = ctx.request.headers.get('content-length');
+    if (declaredLength !== null && Number(declaredLength) > maxBodyBytes) {
+      return ctx.response.status(413).json({ error: 'Delivery too large' });
+    }
     const stamp = ctx.request.headers.get('webhook-timestamp') ?? '';
     const signature = ctx.request.headers.get('webhook-signature') ?? '';
     const signedAt = Number(stamp) * 1000;
@@ -61,7 +78,7 @@ export function registerWebhook(app: IKernelApplication, key: CryptoKey): void {
       key: event.id,
       namespace: 'webhooks.receive',
       scope: 'webhook:provider',
-      fingerprint: parsed,
+      fingerprint: { id: event.id, type: event.type },
     }, async (uow) => {
       // Apply this event's business changes through this same unit of work.
       await uow.getRepository<Delivery>('WebhookReceipt').create(event);
@@ -72,7 +89,7 @@ export function registerWebhook(app: IKernelApplication, key: CryptoKey): void {
 }
 ```
 
-Register `RuntimePlugin`, `DatabasePlugin`, `SchedulerPlugin` and
+Register the bounded `webhookRuntime` above, `DatabasePlugin`, `SchedulerPlugin` and
 `IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } })`, then start the
 application and call `registerWebhook` with the verification key. The
 [tier-C README example](../packages/idempotency-plugin/README.md#tier-c-the-work-and-its-record-commit-together)
@@ -89,6 +106,16 @@ deliberately shares the verified provider's events across deliveries. Use a dist
 provider/account whose event-id space is independent, and derive it from trusted endpoint
 configuration rather than an unsigned request field. A concurrent duplicate can reject with a
 retryable `409` before the winner commits; the provider should retry that non-2xx response.
+
+Keep `within`'s `ttlMs` greater than twice the timestamp tolerance plus the allowed clock skew: the
+same signed timestamp can be accepted both before and after its stated time. With this five-minute
+tolerance, retain records for more than ten minutes plus skew. The default 86,400,000 ms (24 hours)
+is sufficient here; the supported minimum of 60,000 ms is not.
+
+Fingerprint stable semantic fields, here `{ id, type }`, rather than the entire parsed body. Retry
+metadata can change without changing the event. A changed fingerprint under the same key is refused
+with `422 fingerprint-mismatch`; repeatedly retrying that changed request will not fix the mismatch.
+Include every field that determines your own business operation in its fingerprint.
 
 Tier B's `idempotent()` can answer a concurrent pair `[200, 409]` and does not commit the business
 write with the idempotency record. Tier C commits both together; a committed duplicate returns the
@@ -127,7 +154,9 @@ export async function acceptAndPublish(
 The M107 outbox targets integration events, not `IQueue`. For a queue job, enqueue **after** commit
 on **every accepted delivery, including a replay**: a crash after commit but before enqueue must be
 recoverable by the provider's retry. Make the job itself idempotent with `idempotentIngress`. Use
-the event id as its explicit key because separate enqueues get separate job ids:
+the event id in `ctx.payload.data.id` as its explicit key: `ctx.payload` is the whole `IJob`, and
+its top-level `id` changes on every enqueue. The built-in `'auto'` and `'job-id'` key sources also
+read that job id, so this recipe requires a custom key reading the event data:
 
 ```typescript
 import type { IIdempotencyService, IQueue } from '@setu-ts/common';
@@ -139,9 +168,11 @@ export const queuePlugin = QueuePlugin({
   behaviors: [idempotentIngress({
     jobNames: ['process-webhook'],
     key: (ctx) => {
-      const payload = ctx.payload;
-      return typeof payload === 'object' && payload !== null && 'id' in payload &&
-        typeof payload.id === 'string' ? payload.id: undefined;
+      const job = ctx.payload;
+      if (typeof job !== 'object' || job === null || !('data' in job)) return undefined;
+      const data = job.data;
+      return typeof data === 'object' && data !== null && 'id' in data &&
+        typeof data.id === 'string' ? data.id : undefined;
     },
   })],
 });

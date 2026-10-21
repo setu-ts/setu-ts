@@ -55,8 +55,11 @@ const exists = await secrets.has('database/password');
 `database/password` with prefix `APP_` reads `APP_DATABASE_PASSWORD`. `ConfigPlugin` loads `.env`
 into its config snapshot only; a secret present only there is invisible to `EnvProvider`.
 
-Load the process environment before constructing the runtime. Use the following command for your
-runtime:
+Dotenv files are for local development only. In production, inject variables through the
+orchestrator or secret store; see
+[Dotenv files never reach an image](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#dotenv-files-never-reach-an-image).
+For local development, load the process environment before constructing the runtime with the command
+for your runtime:
 
 ```bash
 # Node: tsx passes these Node flags through.

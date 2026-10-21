@@ -752,3 +752,100 @@ deleted-line check also found no pre-existing source citations removed. The untr
 was checked separately and contains no source/internal-plan citations. Committed, staged and
 unstaged package-source diff checks were all empty. Review scratch files were removed after
 recording this evidence.
+
+### Security-review fixes: webhook ingress and local dotenv guidance
+
+The review changes only `docs/webhooks.md`, `packages/secrets-plugin/README.md`,
+`test/webhooks-guide.test.ts`, and this evidence record. No package source changes are needed.
+Published documentation contains neither repository-source citations nor references to this plan.
+The guide still has three TypeScript fences; the secrets README has no new fence.
+
+| Finding | Source checked and resulting change                                                                                                                                                                                                                                                                                                                                                                           | Test evidence                                                                                                                                                                                                                                                                                                                                                                             |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | `packages/queue-plugin/src/processors/job-processor.ts:322-328` places the entire `IJob` in ingress payload. `packages/idempotency-plugin/src/ingress/ingress-behavior.ts:22-61` reads its top-level job id for both `auto` and `job-id`. The guide's custom key now narrows `payload.data` as an object and reads its event id without `any`.                                                                | The third, actual guide fence is bundled and executed with real kernel, queue, database and idempotency plugins. Two calls to `acceptAndEnqueue` return different enqueue ids, both jobs drain with zero dead jobs, the processor runs once, and the database receipt is read back once.                                                                                                  |
+| 2       | `packages/runtime/src/plugin/runtime-plugin.ts:78-117,156-170` declares and validates `maxBodyBytes`; `src/adapters/shared/fetch-mapping.ts:234-240,269-291` bounds streamed reads. The first fence exports the configured 1 MiB runtime plugin and refuses an oversized declared Content-Length before reading bytes. The runtime cap remains required for omitted or understated headers.                   | The HTTP test uses that exported runtime and asserts a declared over-limit request answers 413 without another `within` call. Existing `packages/runtime/test/integration/max-body-bytes.test.ts:67-105` asserts an over-cap chunked request gets 413, an under-cap request succeeds, and omitting the cap serves the same oversized request; cited rather than duplicated or rerun here. |
+| 3       | `packages/session-plugin/src/options.ts:60-79,172-176`, `src/csrf/verify.ts:54-60`, and `src/csrf/exclude.ts:28-42` confirm `csrf.exclude`. `packages/http-security-plugin/src/middleware/csrf-middleware.ts:44-57,80-87` confirms `exclude`. Guidance exempts only the signed webhook route and retains CSRF elsewhere.                                                                                      | Existing `packages/session-plugin/test/unit/csrf/csrf.test.ts:336-368` covers inline exclusion and the real pipeline; `packages/http-security-plugin/test/unit/csrf-middleware.test.ts:355-443` covers exact/regex exclusions and unchanged protection on other paths. These existing package tests are cited, not rerun as extra suites.                                                 |
+| 4       | `packages/common/src/services/idempotency.ts:373-374` specifies the 86,400,000 ms default and 60,000 ms minimum. `packages/idempotency-plugin/src/constants.ts:27,99` and `src/within/transactional-runtime.ts:74-80` confirm the implementation. Guidance requires retention greater than twice the five-minute tolerance plus clock skew; the one-minute supported minimum is insufficient for this recipe. | Configuration/source evidence; no new timing guarantee or source change.                                                                                                                                                                                                                                                                                                                  |
+| 5       | `packages/common/src/services/idempotency.ts:368-374`, `packages/idempotency-plugin/src/within/within.ts:124-134`, and `src/errors.ts:126-129` confirm differing fingerprints refuse with status hint 422. The recipe fingerprints only its business fields `{ id, type }` and explains permanent mismatch on repeatedly retrying changed semantic data.                                                      | The signed retry changes non-semantic `retry` metadata and still replays 200; a changed event type answers 422 through the real outer error handler, with the persisted receipt unchanged.                                                                                                                                                                                                |
+| 6       | Dotenv instructions are explicitly local-development-only; production uses orchestrator/secret-store injection and links the deployment section. Existing generated exclusions are verified in `packages/cli/src/workspace/compose.ts:224-229` and `src/workspace/root-files.ts:210-217`; `docs/deployment.md:109-125` already explains image exclusion and custom filenames.                                 | Prose/link correction; environment-loading commands and their prior measurements remain unchanged.                                                                                                                                                                                                                                                                                        |
+| 7       | Queue payload fingerprinting already selects `{ name, data }`, excluding per-enqueue metadata: `packages/idempotency-plugin/src/core/fingerprint.ts:146-168,182-188`. The regression test waits for real queue health to report ready/processing/dead all zero, so a count sampled before the second dispatch cannot pass.                                                                                    | Restoring the old top-level key makes the processor run twice; the test fails at the one-run assertion.                                                                                                                                                                                                                                                                                   |
+| 8       | The actual first guide fence retains the absolute timestamp window, signature-format guard, and MAC verification before parsing. Tests add a correctly signed +301-second timestamp, malformed signature, and invalid signature over non-JSON bytes.                                                                                                                                                          | All answer 401 with no `within` call or receipt. Future/malformed inputs never call crypto verification; the non-JSON case calls verification once. Each control removal fails as recorded below.                                                                                                                                                                                         |
+
+Negative-control command prefix:
+`env SETU_TEST_MEMBER=tooling pnpm exec vitest run test/webhooks-guide.test.ts -t '<selector>'`.
+`pnpm exec vitest --help` confirmed `-t, --testNamePattern <pattern>`; the repository's
+`package.json` supplies the tooling-member environment variable in its test script. Each mutation
+was applied only to the guide, run separately, and restored in a `finally` block. All six runs
+exited 1 at the intended assertion, with four unrelated tests skipped per run:
+
+| Mutation                                                                   | Selector                                     | Observed failure                                                    |
+| -------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| Restore old `ctx.payload.id` key                                           | `drains two separately`                      | Expected processor call count 1, got 2.                             |
+| Replace absolute timestamp delta with one-sided `runtime.now() - signedAt` | `refuses future timestamp`                   | Expected 401, got 200.                                              |
+| Remove the signature-format regexp condition                               | `refuses malformed signature`                | Expected crypto `verify` call count 0, got 1.                       |
+| Remove the HMAC verification/refusal block                                 | `refuses invalid signature on non-JSON body` | Expected 401, got JSON-parse refusal 400.                           |
+| Restore whole-body `fingerprint: parsed`                                   | `handles a verified event once`              | Changed retry metadata produced 422 instead of expected replay 200. |
+| Remove the declared-length refusal block                                   | `handles a verified event once`              | Expected early 413, got authentication refusal 401.                 |
+
+The earlier review's subprocess-capture limitation no longer reproduces in this environment.
+Measurement command:
+
+```bash
+node -e "const r=require('node:child_process').spawnSync(process.execPath,['-e','console.log(42)'],{encoding:'utf8'}); console.log(JSON.stringify({status:r.status,error:r.error?.code,stdout:r.stdout,stderr:r.stderr}));"
+```
+
+Observed output: `{"status":0,"stdout":"42\n","stderr":""}` (exit 0).
+
+The new timestamp cases pin `runtime.now()` to an exact whole-second test clock, so the future case
+is exactly +301 seconds even under scheduling delays. All six negative controls were repeated after
+this refinement and failed at the same assertions above. The restored webhook file then passed all
+five tests again.
+
+The first full tooling run exited 1 (1,372 passed, two failed, 80 files) because the runner's
+absolute `TMPDIR` under this deeply nested worktree changed two existing tests' environment:
+
+- `test/unit/sandbox.test.ts:103-108` expects a temporary directory without a Git repository; under
+  `.tmp`, Git instead discovered this worktree and the expected rejection became `[]`.
+- `test/apps-gate.test.ts:1085-1105` launches a real tsx process; its IPC socket under the long
+  absolute temporary path was rejected with `listen EINVAL` before the app could start.
+
+These were corrected in the throwaway runner environment, with no repository tooling or source
+edits. A relative `TMPDIR` keeps scratch inside the worktree while avoiding the long socket
+pathname; `GIT_CEILING_DIRECTORIES` at the worktree's `.tmp` prevents parent-repository discovery
+from scratch directories while allowing temporary repositories initialized below it.
+
+Measurements and focused confirmation:
+
+```bash
+git -C .tmp/m113l-security/nonrepo-probe rev-parse --show-toplevel
+env GIT_CEILING_DIRECTORIES="$PWD/.tmp" git -C .tmp/m113l-security/nonrepo-probe rev-parse --show-toplevel
+env TMPDIR=.tmp/t node -p "require('node:os').tmpdir()"
+env TMPDIR=.tmp/t GIT_CEILING_DIRECTORIES="$PWD/.tmp" SETU_TEST_MEMBER=tooling pnpm exec vitest run test/unit/sandbox.test.ts test/apps-gate.test.ts
+```
+
+The first command exited 0 and printed this worktree root. The second exited 128 with
+`fatal: not a git repository (or any of the parent directories): .git`. The third printed `.tmp/t`
+(exit 0). The focused test run exited 0: both files and all 59 tests passed. Final test commands use
+`TMPDIR=.tmp/m113l-security/temp` and the same Git discovery ceiling; all generated scratch remains
+in this worktree's `.tmp`.
+
+Final security-review verification (test suites ran sequentially):
+
+| Command                                                                         | Exit | Observed result                                                                                                                                         |
+| ------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm run fmt`                                                                  | 0    | Repository and native fixture formatting passed.                                                                                                        |
+| `pnpm run fmt:check`                                                            | 0    | Formatting passed.                                                                                                                                      |
+| `pnpm run lint`                                                                 | 0    | ESLint passed.                                                                                                                                          |
+| `pnpm run check`                                                                | 0    | TypeScript source/test checking passed.                                                                                                                 |
+| `pnpm run check:docs`                                                           | 0    | 108 Markdown files, zero findings; view behavior, 1,973 registry-verified since tags, 52-package changelog coverage and API-doc baseline checks passed. |
+| `env SETU_TEST_MEMBER=tooling pnpm exec vitest run test/webhooks-guide.test.ts` | 0    | All five tests passed after restoring the six final negative controls.                                                                                  |
+| `pnpm run test:tooling`                                                         | 0    | All 80 files and 1,374 tests passed in 288.17 seconds, including README and guide fence compilers.                                                      |
+
+The final tooling result uses the relative scratch directory and Git discovery ceiling described
+above. Both fence inventories remain unchanged; the webhook guide's three fences compile. Final
+formatting, lint and type checks are repeated after recording these results. Package-source diffs
+against `origin/develop...HEAD`, staged changes and unstaged changes are empty; the added-line
+published-doc citation check and `git diff --check` are empty. The new test contains none of
+`as any`, `@ts-ignore`, `new Function` or `eval(`. Only the four review files listed above changed;
+no commit or push was made. Scratch probes, mutations, test projects and logs are removed after
+recording this evidence.
