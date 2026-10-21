@@ -14,7 +14,7 @@ export function createSecuredApp() {
     plugins: [
       RuntimePlugin(),
       AuthPlugin({
-        jwt: { secret: 'a-secret-at-least-32-characters-long' },
+        jwt: { secret: 'replace-with-a-32-plus-character-secret' },
         rbac: { roles: { user: { permissions: ['orders:read'] } } },
       }),
     ],

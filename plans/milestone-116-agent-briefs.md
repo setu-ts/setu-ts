@@ -407,3 +407,54 @@ measurement.
 - Copying cards into the project for Yarn PnP or Deno without `nodeModulesDir` — declined (§3.4).
 - A `CLAUDE.md` writer — the docs tell the developer to add `@AGENTS.md` (§3.1).
 - Running the measurement in CI — needs a local model (§3.12).
+
+## 10. Design security review (recorded after implementation)
+
+**Recorded after the committed-tree audit failed it as missing (F0)**, the M101a/M101b precedent.
+The flow, assets, attackers and obligations below are the audit's reconstruction, adopted here as
+the review; the decisions are this plan's answers to the audit's findings F1–F5.
+
+- **Flow:** `setu agents [--check|--dry-run] [--dir]` → find the workspace the project belongs to →
+  read `setu.workspace.json` and the project and member manifests (`package.json`,
+  `deno.json[c]`, `.yarnrc.yml`, `.pnp.cjs`, the existing `AGENTS.md`) → render a Markdown section
+  → splice it into `AGENTS.md` through `writeFiles`, or compare it (`--check`). `setu new --agents`
+  runs the same writer; `setu add` reads `AGENTS.md` for its hint. Release: every library tarball
+  carries its card, refused at pack and at `release:verify` otherwise.
+- **Assets:** the developer's bytes outside the CLI-owned section; files outside the project; the
+  generated section's trustworthiness as agent instructions; terminal output; `--check` as a CI
+  gate; the command's availability; release integrity; the guidance in cards, which agents copy.
+- **Attackers:** (A1) a repository contributor who controls committed manifests, `.yarnrc.yml` or
+  links in the tree; (A2) another local user who can plant files in a shared ancestor such as
+  `/tmp`; (A3) an agent or developer copying a card snippet verbatim.
+- **Obligations:** O1 writes stay inside the project and never go through links; O2 special and
+  oversize files neither hang nor are read past 1 MiB, and bytes outside the markers survive; O3
+  ambiguous marker arrangements are refused with nothing written; O4 manifest content cannot
+  change the structure of the generated section or forge terminal lines; O5 the walk writes only
+  the requested project or the workspace that lists it; O6 `--check` writes nothing and exits 0
+  only when every file it owns is fresh; O7 every reachable read is bounded in time; O8 no library
+  tarball publishes without its card; O9 card snippets do not lead a copier to an insecure
+  deployment.
+
+Decisions:
+
+- **F1 (O4):** every manifest-derived string that reaches the section is admitted only if it is
+  safe there; nothing is escaped into a different value. A dependency key is rendered (and
+  card-checked) only when its bare name matches the npm package-name grammar
+  `^[a-z0-9][a-z0-9._-]*$` and is not `.` or `..`; any other key is omitted. A member name, port,
+  `dependsOn` entry or `transportUrl` is rendered only when it contains no control character and
+  none of `` ` ``, `|`, `<`, `>`; otherwise it renders as `(not shown)`. A rendered section that
+  would contain the begin or end marker more than once is refused rather than written.
+- **F2 (O4):** every terminal line the command prints from project data goes through
+  `escapeName`, and card warnings name only admitted package names (F1).
+- **F3 (O5, O7):** the walk follows `installSearchDirs` (`app-loader.ts`): an ancestor is a
+  workspace only when it holds a regular `setu.workspace.json` (stat-checked, at most 1 MiB) that
+  parses and lists the project as `apps/<member>`; the directory itself counts when it is that
+  root. A project that is not a listed member is standalone. Only `setu.workspace.json` is read in
+  ancestors — never their `package.json`/`deno.json` — and an ancestor whose marker is unreadable
+  (a non-missing stat error, a non-regular file, oversize, unparsable) is treated as not a
+  workspace and the walk continues, so a planted file can neither hang nor misroute the command.
+- **F4 (O7):** the `.yarnrc.yml` `nodeLinker` read is linear: lines are scanned one by one with an
+  anchored, non-multiline pattern.
+- **F5 (O9):** card snippets use visibly placeholder secrets (`replace-with-…`) that still satisfy
+  the length checks, matching the READMEs.
+- **Re-audit:** after F1–F5 land, a fresh-context audit re-runs O4, O5, O7 and O9.

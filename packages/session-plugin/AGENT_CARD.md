@@ -10,7 +10,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 export function createSessionApp() {
   const app = createApplication({
-    plugins: [RuntimePlugin(), SessionPlugin({ secret: 'a-session-secret-at-least-32-chars' })],
+    plugins: [RuntimePlugin(), SessionPlugin({ secret: 'replace-with-a-32-plus-character-secret' })],
   });
   app.router.post('/login', (ctx) => {
     const session = getSession(ctx);
