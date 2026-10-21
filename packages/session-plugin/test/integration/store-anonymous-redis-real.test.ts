@@ -25,9 +25,11 @@ async function docker(...args: string[]): Promise<string> {
 
 async function keysUnder(url: string, prefix: string): Promise<number> {
   const port = new URL(url).port || '6379';
-  const ids = (await docker('ps', '-q', '--filter', `publish=${port}`))
-    .split('\n')
-    .filter((id) => id !== '');
+  const shard = process.env['SETU_CI_SHARD'];
+  const filters = shard
+    ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+    : ['--filter', `publish=${port}`];
+  const ids = (await docker('ps', '-q', ...filters)).split('\n').filter((id) => id !== '');
   if (ids.length !== 1) {
     throw new Error(`Expected one container publishing port ${port}, found ${ids.length}`);
   }

@@ -527,6 +527,7 @@ export function renderRootPackageJson(): string {
       type: 'module',
       scripts: {
         check: 'tsc -p tsconfig.check.json --noEmit',
+        'ci:local': 'node scripts/local-ci.ts',
         'check:apps': 'node scripts/check-apps.ts',
         'check:browser': 'node apps/full-stack/browser/harness.ts',
         'check:docs':

@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc -p tsconfig.check.json --noEmit",
+    "ci:local": "node scripts/local-ci.ts",
     "check:apps": "node scripts/check-apps.ts",
     "check:browser": "node apps/full-stack/browser/harness.ts",
     "check:docs": "node scripts/check-docs.ts && node scripts/check-prose-assertions.ts && node scripts/check-example-behaviour.ts && node scripts/check-since-tags.ts && node scripts/check-changelog-coverage.ts && node scripts/generate-api-docs.ts --check",

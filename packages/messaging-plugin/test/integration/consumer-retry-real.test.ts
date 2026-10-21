@@ -83,9 +83,11 @@ async function docker(args: string[]): Promise<string> {
 }
 async function restartTarget(url: string): Promise<string> {
   const port = new URL(url).port || '5672';
-  const ids = (await docker(['ps', '-q', '--filter', `publish=${port}`]))
-    .split('\n')
-    .filter(Boolean);
+  const shard = process.env['SETU_CI_SHARD'];
+  const filters = shard
+    ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+    : ['--filter', `publish=${port}`];
+  const ids = (await docker(['ps', '-q', ...filters])).split('\n').filter(Boolean);
   if (ids.length !== 1) throw Error('Expected exactly one RabbitMQ container');
   const name = await docker(['inspect', '--format', '{{.Name}}', ids[0]!]);
   if (name.startsWith('/smoke-')) throw Error('Refusing to restart a smoke-* container');

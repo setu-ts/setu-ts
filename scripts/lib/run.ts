@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { mkdir, mkdtemp, open, readFile, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 /** Captured subprocess streams; inherited streams are empty. */
 export interface RunResult {
@@ -14,13 +16,16 @@ export interface RunOptions {
   readonly stdin?: string | Uint8Array;
   readonly timeoutMs?: number;
   readonly inherit?: boolean;
+  /** Regular files make Node child writes synchronous, surviving process.exit()
+   * even if the parent cannot consume output until the child has closed. */
+  readonly capture?: 'file';
 }
 
 /** Largest deadline a Node timer honours. */
 export const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
 /** Run one command; a deadline kills its whole process group and returns code 124. */
-export function run(
+export async function run(
   command: string,
   args: readonly string[],
   options: RunOptions = {},
@@ -30,8 +35,40 @@ export function run(
   // child at once; NaN, zero and negatives are caller mistakes. Fractions are fine: callers derive
   // a remaining budget from the monotonic clock, and the timer truncates.
   if (timeoutMs !== undefined && !(timeoutMs > 0 && timeoutMs <= MAX_TIMEOUT_MS)) {
-    return Promise.reject(new RangeError(`timeoutMs must be in (0, ${MAX_TIMEOUT_MS}]`));
+    throw new RangeError(`timeoutMs must be in (0, ${MAX_TIMEOUT_MS}]`);
   }
+  if (options.capture !== 'file' || options.inherit) return execute(command, args, options);
+  const scratch = resolve(import.meta.dirname, '../../.tmp');
+  await mkdir(scratch, { recursive: true });
+  const directory = await mkdtemp(resolve(scratch, 'capture-'));
+  try {
+    const stdout = await open(resolve(directory, 'stdout'), 'w');
+    try {
+      const stderr = await open(resolve(directory, 'stderr'), 'w');
+      try {
+        const result = await execute(command, args, options, [stdout.fd, stderr.fd]);
+        return {
+          ...result,
+          stdout: await readFile(resolve(directory, 'stdout'), 'utf8'),
+          stderr: await readFile(resolve(directory, 'stderr'), 'utf8'),
+        };
+      } finally {
+        await stderr.close();
+      }
+    } finally {
+      await stdout.close();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+function execute(
+  command: string,
+  args: readonly string[],
+  options: RunOptions,
+  files?: readonly [number, number],
+): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
@@ -41,8 +78,8 @@ export function run(
       detached: options.timeoutMs !== undefined,
       stdio: [
         options.stdin === undefined ? (options.inherit ? 'inherit' : 'ignore') : 'pipe',
-        options.inherit ? 'inherit' : 'pipe',
-        options.inherit ? 'inherit' : 'pipe',
+        files?.[0] ?? (options.inherit ? 'inherit' : 'pipe'),
+        files?.[1] ?? (options.inherit ? 'inherit' : 'pipe'),
       ],
     });
     let stdout = '';

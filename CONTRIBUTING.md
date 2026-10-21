@@ -75,6 +75,9 @@ failed targeted run is authoritative. Select members with `pnpm test:coverage cl
 `pnpm run test:coverage:pkg cli runtime`; use the member basename or its workspace path. Running
 without selections measures every member.
 
+The [optional local accelerator](docs/local-ci.md) requires Linux + Docker; CI and the standard
+gates above remain the source of truth.
+
 Changes to a published package also require its documented coverage and publish checks. See
 [AI_GUIDELINES.md](AI_GUIDELINES.md) for the complete engineering requirements that apply once a
 maintainer has accepted implementation work.
