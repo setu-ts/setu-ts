@@ -10,17 +10,7 @@ import {
 } from './fixtures/snippets/agent-card-checks.ts';
 
 /** Temporary handoff inventory: remove each entry when its card lands. */
-const PENDING_CARDS: readonly string[] = [
-  'packages/cloudflare-plugin',
-  'packages/diagnostics-plugin',
-  'packages/graphql-plugin',
-  'packages/grpc-plugin',
-  'packages/react-router-plugin',
-  'packages/worker-pool-plugin',
-  'packages/starters/rest-starter',
-  'packages/starters/microservice-starter',
-  'packages/starters/full-stack-starter',
-];
+const PENDING_CARDS: readonly string[] = [];
 const FENCE_COUNTS: Readonly<Record<string, number>> = {
   'packages/kernel': 1,
   'packages/runtime': 1,
@@ -63,6 +53,15 @@ const FENCE_COUNTS: Readonly<Record<string, number>> = {
   'packages/static-plugin': 1,
   'packages/telemetry-plugin': 2,
   'packages/view-plugin': 2,
+  'packages/graphql-plugin': 2,
+  'packages/grpc-plugin': 2,
+  'packages/react-router-plugin': 2,
+  'packages/cloudflare-plugin': 2,
+  'packages/worker-pool-plugin': 2,
+  'packages/diagnostics-plugin': 1,
+  'packages/starters/rest-starter': 2,
+  'packages/starters/microservice-starter': 2,
+  'packages/starters/full-stack-starter': 2,
 };
 const libraries = PUBLISHED_PACKAGES.filter((p) => p !== 'packages/cli' && p !== 'packages/create');
 const ready = libraries.filter((p) => !PENDING_CARDS.includes(p));
