@@ -1,6 +1,6 @@
 # Milestone 114 — Self-Contained Feature Modules (`@setu-ts/cli`, `@setu-ts/validation-plugin`, `@setu-ts/common`, `@setu-ts/decorator-plugin`)
 
-> **Status:** Planning. Branch: `feat/m114-feature-modules`. `develop` and `main` are protected —
+> **Status:** Complete. Branch: `feat/m114-feature-modules`. `develop` and `main` are protected —
 > all work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope

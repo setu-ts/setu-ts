@@ -14626,25 +14626,25 @@ follow if users ask; the second is the parked "project layout" proposal.
 
 **Deliverables**
 
-- [ ] `plans/milestone-114-feature-modules.md`, linted with `check:plan`
-- [ ] Functional `generate module` self-contained; `src/modules/index.ts` on the functional host
-- [ ] `--module <name>` for `service`, `route`, `controller` and `schemas`
-- [ ] Functional-module scanning in the name-conflict and barrel paths, with a test that fails
+- [x] `plans/milestone-114-feature-modules.md`, linted with `check:plan`
+- [x] Functional `generate module` self-contained; `src/modules/index.ts` on the functional host
+- [x] `--module <name>` for `service`, `route`, `controller` and `schemas`
+- [x] Functional-module scanning in the name-conflict and barrel paths, with a test that fails
       without it (the duplicate-route trap above)
-- [ ] `rest` sample moved to `src/modules/greeting/`; `src/shared/` documented
-- [ ] A booting e2e: scaffold, `g module`, `g service --module`, request the routes, delete the
+- [x] `rest` sample moved to `src/modules/greeting/`; `src/shared/` documented
+- [x] A booting e2e: scaffold, `g module`, `g service --module`, request the routes, delete the
       module folder and its barrel line, boot again
-- [ ] Generated `test/e2e/app.e2e.test.ts` + `test:e2e` on `setu new`, and a per-module
+- [x] Generated `test/e2e/app.e2e.test.ts` + `test:e2e` on `setu new`, and a per-module
       `<name>.e2e.test.ts` from `g module`; a CLI e2e that scaffolds, generates a module, implements
       its service with real logic, and runs BOTH generated suites green (the M104 stub-breakage
       regression), on Node, Deno and Bun
-- [ ] `<name>.schemas.ts` from `g module` with the generated routes validating and documenting
+- [x] `<name>.schemas.ts` from `g module` with the generated routes validating and documenting
       through it; `g schema`; the typed validated-value accessor with a test that fails if the cast
       comes back; an e2e asserting the module's routes appear in `/openapi.json` with their schemas
-- [ ] `docs/cli.md` (including "Where request and response shapes live" and the row-type rule),
+- [x] `docs/cli.md` (including "Where request and response shapes live" and the row-type rule),
       `docs/migration-nestjs.md` (`dto/` → `<name>.schemas.ts`), `docs/decorators.md`, CLI README,
       CHANGELOG migration note
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `114`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `114`
 
 ---
 
@@ -15109,6 +15109,6 @@ patch by construction and gains nothing new here.
 | 113m      | ✅     | scheduler-plugin + auth-plugin — time the framework does not honour; PR #471                                                                                                                                                                                                              |
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |
-| 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
+| 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ⬜     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
