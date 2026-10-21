@@ -11,20 +11,11 @@ import {
 
 /** Temporary handoff inventory: remove each entry when its card lands. */
 const PENDING_CARDS: readonly string[] = [
-  'packages/audit-plugin',
   'packages/cloudflare-plugin',
   'packages/diagnostics-plugin',
-  'packages/feature-flags-plugin',
   'packages/graphql-plugin',
   'packages/grpc-plugin',
-  'packages/idempotency-plugin',
-  'packages/localization-plugin',
-  'packages/multi-tenancy-plugin',
   'packages/react-router-plugin',
-  'packages/secrets-plugin',
-  'packages/static-plugin',
-  'packages/telemetry-plugin',
-  'packages/view-plugin',
   'packages/worker-pool-plugin',
   'packages/starters/rest-starter',
   'packages/starters/microservice-starter',
@@ -63,6 +54,15 @@ const FENCE_COUNTS: Readonly<Record<string, number>> = {
   'packages/realtime-backplane-plugin': 1,
   'packages/resilience-plugin': 1,
   'packages/service-discovery-plugin': 1,
+  'packages/audit-plugin': 2,
+  'packages/feature-flags-plugin': 2,
+  'packages/idempotency-plugin': 2,
+  'packages/localization-plugin': 2,
+  'packages/multi-tenancy-plugin': 2,
+  'packages/secrets-plugin': 2,
+  'packages/static-plugin': 1,
+  'packages/telemetry-plugin': 2,
+  'packages/view-plugin': 2,
 };
 const libraries = PUBLISHED_PACKAGES.filter((p) => p !== 'packages/cli' && p !== 'packages/create');
 const ready = libraries.filter((p) => !PENDING_CARDS.includes(p));
