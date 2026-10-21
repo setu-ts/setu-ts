@@ -743,3 +743,53 @@ an application schema, so this milestone crosses a trust boundary and is audited
 ## 11. Measurements (filled during verification)
 
 The §3.14 table lands here, with the raw sorted per-pass values, the spread, and the machine load.
+
+Method: the §3.14 harness (`bombardier -c 64`, server pinned to cores 8–15, load to 16–31, paired
+alternating passes, two-sided sign test). Baseline is the merge base `9abbbd3a`; machine idle
+between runs (load average 0.36 after the last run). Values are requests per second, sorted.
+
+**Before §3.14a (implementation build against baseline, n = 15).** `/v` −9.8% (ratio 0.894, 1/15, p
+= 0.001); `/vh` −8.3% (ratio 0.920, 1/15, p = 0.001). An A/A run of the baseline against itself gave
+ratio 0.999, 5/11, p = 1.0. `/vh` raw values:
+
+- base: 57403 57479 58656 58827 60016 60351 61104 61118 61184 62376 62770 63082 63526 63610 64374
+- cand: 53941 54656 54784 55684 55723 55807 55932 56018 56452 56494 57055 57164 59515 60150 60858
+
+**Final build against baseline (n = 15).**
+
+| Route   | Base median | Final median | Median change | Paired ratio | Final wins | p     | Budget       |
+| ------- | ----------- | ------------ | ------------- | ------------ | ---------- | ----- | ------------ |
+| `/json` | 95093       | 93794        | −1.4%         | 1.049        | 9/15       | 0.607 | none         |
+| `/v`    | 66063       | 56803        | −14.0%        | 0.850        | 1/15       | 0.001 | not budgeted |
+| `/vh`   | 56485       | 53624        | −5.1%         | 0.953        | 4/15       | 0.118 | ≤ 2%         |
+
+- `/json` base: 80987 85733 86205 87452 89797 94060 94189 95093 95105 95752 95843 96167 106268
+  106986 125185
+- `/json` final: 87733 88022 88798 89376 89560 91743 93219 93794 95851 104156 110067 111870 115102
+  118056 124706
+- `/v` base: 59548 61023 61819 62171 63749 64546 65350 66063 67820 68751 68990 69848 69938 69948
+  70039
+- `/v` final: 52171 52572 52815 53321 53392 54811 56354 56803 56968 57098 58421 58457 59845 60265
+  60517
+- `/vh` base: 50987 51677 52930 53091 55689 55964 56389 56485 56798 56800 57523 57549 58514 58763
+  58839
+- `/vh` final: 49821 50313 50356 50709 52223 52404 53004 53624 53744 54831 54844 54889 55268 57197
+  57454
+
+**Isolating the fix (final build against the same build with the cache removed, n = 11).** The
+cached build wins or ties on both routes, as §3.14a requires.
+
+| Route | Uncached median | Cached median | Median change | Paired ratio | Cached wins | p     |
+| ----- | --------------- | ------------- | ------------- | ------------ | ----------- | ----- |
+| `/v`  | 58858           | 57612         | −2.1%         | 0.995        | 5/11        | 1.000 |
+| `/vh` | 52748           | 56853         | +7.8%         | 1.080        | 7/11        | 0.549 |
+
+- `/v` uncached: 52758 52841 54769 57967 58219 58858 61552 62653 62670 63003 64045
+- `/v` cached: 53874 54970 55113 55760 56361 57612 59447 59725 63718 64553 66761
+- `/vh` uncached: 49086 49303 50569 50760 52464 52748 52757 53644 55672 56255 56443
+- `/vh` cached: 50473 51539 51895 52628 52995 56853 56931 57151 57212 57384 57694
+
+**Decision (maintainer, 2026-10-21): accepted.** `/vh` misses the ≤ 2% budget on its median (−5.1%),
+but the difference is not significant (p = 0.118), down from −8.3% at p = 0.001 before the cache,
+and the isolating run shows the cache itself helping. The budget miss is accepted rather than
+pursued further; `/v` stays reported without a budget, per §3.14a.

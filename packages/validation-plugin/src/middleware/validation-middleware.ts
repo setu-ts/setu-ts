@@ -14,6 +14,7 @@ import type {
   HandlerResult,
   IRequestContext,
   IValidationService,
+  MiddlewareFunction,
   ValidationIssue,
   ValidationMiddlewareOptions,
   ValidationTarget,
@@ -371,14 +372,26 @@ function bindHelper<S>(
   options?: ValidationMiddlewareOptions,
 ): ValidatorMiddleware<ValidatedOutput<S>> {
   const token = {};
+  const cache = new WeakMap<
+    IValidationService,
+    { method: IValidationService['middleware']; built: MiddlewareFunction }
+  >();
   // Branded here as well as in `createValidationMiddleware`: this closure is
   // the one a route's `middleware` array holds, and the inner middleware it
-  // delegates to does not exist until the request runs.
+  // delegates to is cached per resolved service and middleware method.
   return bindValidatorReader(
     withValidationMetadata(
       async (ctx, next) => {
         const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
-        await serviceMiddleware(service, schema, target, token, options)(ctx, next);
+        let entry = cache.get(service);
+        if (entry === undefined || entry.method !== service.middleware) {
+          entry = {
+            method: service.middleware,
+            built: serviceMiddleware(service, schema, target, token, options),
+          };
+          cache.set(service, entry);
+        }
+        await entry.built(ctx, next);
       },
       { target, schema },
     ),
