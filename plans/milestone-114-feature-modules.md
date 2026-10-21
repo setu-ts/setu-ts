@@ -480,12 +480,13 @@ task.
 
 - **What changes per request, by route kind (read from the design, then measured):**
 
-  | Route kind                                      | Added per-request work                                                                                                        | Budget (paired, see method)               |
-  | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-  | no validator                                    | none — the validation middleware is not in its chain; `registerModules` runs once at startup                                  | within noise (±1% median, sign test n.s.) |
-  | `validateBody` with a JSON body                 | one extra `ctx.state.set` (the instance token, §3.9) and a content-type pre-check before `json()` (§3.12)                     | ≤ 2% median throughput loss               |
-  | `validateBody` reader read in the handler       | one `ctx.state.get` + identity compare in `value(ctx)`                                                                        | included in the row above                 |
-  | `validateBody` with a urlencoded/multipart body | new path: `formData()` + record conversion — previously a 400 with no handler run, so there is no baseline to regress against | report absolute rps and p50/p99 only      |
+  | Route kind                                                                   | Added per-request work                                                                                                        | Budget (paired, see method)                             |
+  | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+  | no validator                                                                 | none — the validation middleware is not in its chain; `registerModules` runs once at startup                                  | within noise (±1% median, sign test n.s.)               |
+  | `validateBody` with a JSON body, header read earlier in the pipeline (`/vh`) | one extra `ctx.state.set` (the instance token, §3.9), the content-type pre-check (§3.12b), one cached-build lookup (§3.14a)   | ≤ 2% median throughput loss                             |
+  | `validateBody` with a JSON body, no header read anywhere (`/v`)              | as above, plus the request's first header read on Node (§3.14a)                                                               | reported, not budgeted (maintainer decision 2026-10-21) |
+  | `validateBody` reader read in the handler                                    | one `ctx.state.get` + identity compare in `value(ctx)`                                                                        | included in both JSON rows above                        |
+  | `validateBody` with a urlencoded/multipart body                              | new path: `formData()` + record conversion — previously a 400 with no handler run, so there is no baseline to regress against | report absolute rps and p50/p99 only                    |
 
 - **Decision (JSON path):** the form check must not parse a JSON request's content type. Before
   calling `formEncodingOf`, `extractTarget('body')` tests the raw header with one case-insensitive
@@ -509,6 +510,71 @@ task.
   (not by the implementing agent). A budget miss is fixed, or brought to the maintainer with the
   numbers — never waived silently (the M98a/M98m precedent).
 - **Test home:** the spy test above; the measurement table goes in this plan's §11 and the PR body.
+
+### 3.14a Helpers build their inner validator once per service (budget miss, maintainer decision 2026-10-21)
+
+- **The measured miss:** the §3.14 run put a JSON `validateBody` route at **−9.8%** median
+  throughput (paired ratio 0.894, 1/15 wins, p = 0.001), and the same route behind a middleware that
+  reads a header first at **−8.3%** (ratio 0.920, 1/15, p = 0.001), against a ≤ 2% budget. An A/A
+  run of the baseline against itself through the same harness gave ratio 0.999, 5/11, p = 1.0, so
+  the harness is not biased. Raw values are in §11.
+- **Cause (read from the source, confirmed by CPU profiles):** `bindHelper`
+  (`validation-middleware.ts`) resolves the service and calls `serviceMiddleware(...)` on EVERY
+  request, which runs `buildValidationMiddleware` → `withValidationMetadata` →
+  `bindValidatorReader`. The per-request rebuild predates M114, but M114 made each rebuild dearer:
+  `bindValidatorReader` attaches a fresh `value` closure to a fresh function with `Object.assign` (a
+  hidden-class transition per request), plus a `WeakMap` lookup. The cost is allocation and shape
+  churn spread across the request, which is why no single function owns it in the profile.
+- **Decision:** each helper keeps a `WeakMap<IValidationService, { method, built }>` and builds its
+  inner middleware ONCE per resolved service object. Per request it does the service lookup, one
+  `WeakMap` get, and one identity compare of `service.middleware` against the stored `method`; a
+  mismatch rebuilds and replaces the entry. The build inputs are the service, the schema, the
+  target, the helper's instance token and its options, and every one except the service is fixed per
+  helper, so the service object is a complete cache key.
+- **Why it stays correct:**
+  - A request-scoped child registry (M71) or an `override` that hands back a different service
+    object gets its own entry; nothing built for one service is ever run for another.
+  - The `WeakMap` holds no service alive after its registry drops it.
+  - The stored `method` keeps `serviceMiddleware`'s existing rule — a third-party service whose
+    `middleware` is not the registered first-party method takes the delegating arm — true even when
+    the method is replaced after the first request.
+  - The delegating arm's closure still calls the third-party `service.middleware(...)` on every
+    request, so a third-party service sees exactly the calls it saw before; only the first-party
+    build is reused.
+  - The built inner middleware keeps no per-request state in its closure (every per-request value
+    lives on `ctx`), so reusing it across concurrent requests is safe.
+  - Two requests that first meet a new service concurrently may both build and both `set`; the
+    second entry replaces the first. That is harmless: the builds are equivalent and stateless, so
+    whichever entry survives answers every later request identically.
+- **Budget scope (maintainer decision 2026-10-21):** the ≤ 2% budget is judged on `/vh` — a JSON
+  `validateBody` route behind a middleware that reads `Authorization`, as real routes behind auth,
+  logging, CORS or tenancy do. `/v` (no header read anywhere) is reported in §11 without a budget:
+  on Node the 415 check's `Content-Type` read is that route's first header read and pays for
+  materializing the headers object, a cost a route reading any header already carries.
+- **Not changed:** `IValidationService.middleware()` called directly (it already builds once, at
+  route construction), the reader, the 415 media-type check, and every response shape. No export
+  changes.
+- **Tests (`validation-plugin/test/unit/helper-cache.test.ts`):**
+  - one helper driven through N requests against one service builds its inner middleware exactly
+    once (spy on the registered builder);
+  - two different service objects each get their own build: a middleware placed before the validator
+    calls
+    `ctx.services.register(CAPABILITIES.VALIDATION, new ValidationService(rfc9457Formatter), { override: true })`
+    on the request's child registry when the request carries `x-alt-service: 1`, while the plugin's
+    service uses the `'default'` format. Interleaved requests with and without the header each
+    answer a failing body in their own service's format, and the build spy records one build per
+    service object;
+  - replacing `service.middleware` after the first request takes the delegating arm on the next
+    request;
+  - a third-party service's `middleware` is still invoked once per request.
+  - **Negative control:** with the cache removed, the build-once test fails (N builds).
+- **Re-measure:** the §3.14 method, routes `/json`, `/v` and `/vh`, n ≥ 15 alternating passes,
+  baseline against the final build; the results and the raw sorted values go in §11. If `/vh` misses
+  ≤ 2%, the numbers go back to the maintainer before anything is waived.
+- **Isolating the fix:** a second paired run of the final build against the same build with the
+  cache removed (each helper calling `serviceMiddleware` per request, as before §3.14a), on `/v` and
+  `/vh`, n ≥ 11 alternating passes. The cached build must win or tie on both (no significant sign
+  test against it); any loss goes back to the maintainer.
 
 ## 4. Exported surface — every symbol names its consumer
 
