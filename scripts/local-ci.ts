@@ -15,6 +15,7 @@ import {
   ciEnvironment,
   containerArgs,
   containerName,
+  shardLabel,
   chooseParallelism,
   memoryBytes,
   parseOptions,
@@ -74,7 +75,7 @@ async function main(): Promise<void> {
       '-aq',
       '--filter',
       `label=setu.ci.run=${id}`,
-      ...(shard === undefined ? [] : ['--filter', `label=setu.ci.shard=${shard}`]),
+      ...(shard === undefined ? [] : ['--filter', `label=setu.ci.shard=${shardLabel(id, shard)}`]),
     ]);
     if (result.code !== 0) throw new Error(result.stderr);
     return result.stdout.trim().split(/\s+/).filter(Boolean);
@@ -204,7 +205,7 @@ async function main(): Promise<void> {
       const socket = await stat('/var/run/docker.sock');
       const env = {
         ...ciEnvironment(source, shard),
-        SETU_CI_SHARD: shard,
+        SETU_CI_SHARD: shardLabel(id, shard),
         CI: 'true',
         NODE_OPTIONS: '--max-old-space-size=4096',
         GITHUB_WORKSPACE: root,

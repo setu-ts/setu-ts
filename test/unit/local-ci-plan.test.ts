@@ -9,6 +9,7 @@ import {
   ciEnvironment,
   containerArgs,
   containerName,
+  shardLabel,
   chooseParallelism,
   memoryBytes,
   parseOptions,
@@ -242,6 +243,8 @@ describe('local CI plan', () => {
 
   it('labels every served port, joins only its own namespace, and publishes nothing', () => {
     expect(containerName('one', 'cli', 'net')).toBe('setu-ci-one-cli-net');
+    expect(shardLabel('one', 'cli')).toBe('one-cli');
+    expect(shardLabel('two', 'cli')).not.toBe(shardLabel('one', 'cli'));
     expect(containerArgs('one', 'cli', 'runner', '6g')).toEqual([
       'run',
       '-d',
@@ -250,7 +253,7 @@ describe('local CI plan', () => {
       '--label',
       'setu.ci.run=one',
       '--label',
-      'setu.ci.shard=cli',
+      'setu.ci.shard=one-cli',
       '--label',
       'setu.ci.role=runner',
       '--memory',

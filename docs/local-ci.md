@@ -55,8 +55,10 @@ ESLint exhaust a roughly 2 GiB heap even when physical memory is available.
 
 The Docker socket is mounted in the test runners because real outage suites stop and restart their
 own backends. These suites discover containers by `setu.ci.shard` and `setu.ci.port.<port>` labels
-when `SETU_CI_SHARD` is set. Without it, the existing published-port discovery is used. Run trusted
-repository code only: access to the Docker socket grants control over the host daemon.
+when `SETU_CI_SHARD` is set. The runner sets it to `<run id>-<shard>`, so a lookup never matches a
+concurrent invocation's backends or containers left by a killed run. Without it, the existing
+published-port discovery is used. Run trusted repository code only: access to the Docker socket
+grants control over the host daemon.
 
 ```sh
 pnpm run ci:local --shard messaging

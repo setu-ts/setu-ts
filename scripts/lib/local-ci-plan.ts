@@ -339,6 +339,15 @@ export function containerName(run: string, shard: Shard, role: string): string {
   return `setu-ci-${run}-${shard}-${role}`;
 }
 
+/**
+ * The `setu.ci.shard` label value and the `SETU_CI_SHARD` the runner exports. It carries the
+ * invocation id so an outage suite's lookup cannot match another invocation's backend, whether
+ * from a concurrent run in another worktree or from a run killed before its cleanup.
+ */
+export function shardLabel(run: string, shard: Shard): string {
+  return `${run}-${shard}`;
+}
+
 /** Shared resource limits and ownership labels; nothing publishes a host port. */
 export function containerArgs(
   run: string,
@@ -355,7 +364,7 @@ export function containerArgs(
     '--label',
     `setu.ci.run=${run}`,
     '--label',
-    `setu.ci.shard=${shard}`,
+    `setu.ci.shard=${shardLabel(run, shard)}`,
     '--label',
     `setu.ci.role=${role}`,
     '--memory',
