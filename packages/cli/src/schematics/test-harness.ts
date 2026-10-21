@@ -22,6 +22,8 @@
  */
 
 import type { TargetRuntime } from '../constants.ts';
+import type { DerivedNames } from '../utils/names.ts';
+import { stringLiteral } from '../workspace/runtime-profile.ts';
 
 /** How a generated test reaches `describe`, `it` and `expect` on one runtime. */
 export interface TestHarness {
@@ -81,4 +83,151 @@ export function testHarnessFor(runtime: TargetRuntime): TestHarness {
 export function renderEquals(runtime: TargetRuntime, actual: string, expected: string): string {
   if (runtime === 'node') return `assert.deepStrictEqual(${actual}, ${expected});`;
   return `expect(${actual}).toEqual(${expected});`;
+}
+
+/** Portable socket test support shared by scaffolded and generated tests. */
+export function renderTestServer(): string {
+  return `import { createServer } from 'node:net';
+import { createApp } from '../../setu.config.ts';
+
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('No TCP port');
+  const port = address.port;
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => error ? reject(error) : resolve())
+  );
+  return port;
+}
+
+/** Boots the real application on a free loopback port. */
+export async function startTestServer(): Promise<
+  { readonly baseUrl: string; readonly stop: () => Promise<void> }
+> {
+  for (let attempt = 0;; attempt++) {
+    const port = await freePort();
+    const app = await createApp();
+    try {
+      await app.start({ port, hostname: '127.0.0.1' });
+      return {
+        baseUrl: \`http://127.0.0.1:\${port}\`,
+        stop: async () => {
+          await app.stop();
+        },
+      };
+    } catch (error) {
+      try {
+        await app.stop();
+      } catch {
+        // Cleanup must not replace the start error or prevent a bind retry.
+      }
+      if (
+        attempt >= 2 || !(error instanceof Error) ||
+        !(('code' in error && error.code === 'EADDRINUSE') ||
+          /EADDRINUSE|address already in use/i.test(error.message))
+      ) throw error;
+    }
+  }
+}
+`;
+}
+
+/** In-process module contract that survives replacing the in-memory store. */
+export function renderModuleTest(names: DerivedNames, runtime: TargetRuntime): string {
+  const eq = (actual: string, expected: string): string => renderEquals(runtime, actual, expected);
+  return `${testHarnessFor(runtime).imports}
+import { createTestApp } from '@setu-ts/testing';
+import { createApp } from '../../../setu.config.ts';
+
+describe('${names.kebab} module', () => {
+  it('lists records and reads a created record back', async () => {
+    const app = await createTestApp({ app: await createApp() });
+    try {
+      const list = await app.inject({ method: 'GET', url: '/${names.kebab}' });
+      ${eq('list.statusCode', '200')}
+      ${eq('Array.isArray(list.json<{ items: unknown[] }>().items)', 'true')}
+      const created = await app.inject({
+        method: 'POST',
+        url: '/${names.kebab}',
+        body: { name: 'Example' },
+      });
+      ${eq('created.statusCode', '201')}
+      const record = created.json<{ id: string; name: string }>();
+      ${eq('record.name', "'Example'")}
+      const read = await app.inject({ method: 'GET', url: \`/${names.kebab}/\${record.id}\` });
+      ${eq('read.statusCode', '200')}
+      ${eq('read.json()', 'record')}
+    } finally {
+      await app.stop();
+    }
+  });
+});
+`;
+}
+
+/** Real-socket module contract, including validation and OpenAPI when installed. */
+export function renderModuleE2e(
+  names: DerivedNames,
+  runtime: TargetRuntime,
+  validation: boolean,
+  openapi: boolean,
+): string {
+  const eq = (actual: string, expected: string): string => renderEquals(runtime, actual, expected);
+  return `${testHarnessFor(runtime).imports}
+import { startTestServer } from '../../../test/support/server.ts';
+
+describe('${names.kebab} e2e', () => {
+  it('creates and reads a record over HTTP', async () => {
+    const server = await startTestServer();
+    try {
+      const created = await fetch(server.baseUrl + '/${names.kebab}', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Example' }),
+      });
+      ${eq('created.status', '201')}
+      const record: { id: string; name: string } = await created.json();
+      ${eq('record.name', "'Example'")}
+      const read = await fetch(server.baseUrl + '/${names.kebab}/' + record.id);
+      ${eq('read.status', '200')}
+      ${eq('await read.json()', 'record')}
+      ${validation ? `const invalid = await fetch(server.baseUrl + '/${names.kebab}', {\n        method: 'POST',\n        headers: { 'content-type': 'application/json' },\n        body: '{}',\n      });\n      ${eq('invalid.status', '400')}\n      await invalid.text();` : ''}
+      ${openapi ? `const spec = await fetch(server.baseUrl + '/openapi.json');\n      const document: { paths: Record<string, unknown> } = await spec.json();\n      ${eq(`Object.hasOwn(document.paths, '/${names.kebab}')`, 'true')}` : ''}
+    } finally {
+      await server.stop();
+    }
+  });
+});
+`.replace(/^[ \t]+\n/gm, '');
+}
+
+/** App-level socket smoke test requesting each advertised probe. */
+export function renderAppE2e(
+  runtime: TargetRuntime,
+  paths: readonly string[],
+  support = '../support/server.ts',
+): string {
+  return `${testHarnessFor(runtime).imports}
+import { startTestServer } from '${support}';
+
+describe('application e2e', () => {
+  it('serves its public endpoints over HTTP', async () => {
+    const server = await startTestServer();
+    try {
+      for (const path of [${paths.map(stringLiteral).join(', ')}]) {
+        const response = await fetch(server.baseUrl + path);
+        ${renderEquals(runtime, 'response.status', '200')}
+        await response.text();
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+});
+`;
 }

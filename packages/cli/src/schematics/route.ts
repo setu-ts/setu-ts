@@ -14,6 +14,8 @@ import { FUNCTIONAL_ROUTES_SEAM, HTTP_SEAM_DIR, ROUTES_SEAM } from '../seams/htt
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import { renderHttpModule } from './http-module.ts';
+import { renderFunctionalModuleIndex } from '../seams/modules.ts';
+import { deriveNames } from '../utils/names.ts';
 
 /**
  * Generates a route module and regenerates the shared HTTP barrel.
@@ -27,6 +29,23 @@ export function generateRoute(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
+  if (options.targetModule !== undefined) {
+    const dir = `src/modules/${options.targetModule}`;
+    return [
+      {
+        path: `${dir}/${names.kebab}.routes.ts`,
+        contents: renderHttpModule(names, 'routes', options.targetModule),
+      },
+      {
+        path: `${dir}/index.ts`,
+        managed: true,
+        contents: renderFunctionalModuleIndex(deriveNames(options.targetModule), {
+          controller: seamNames(options.moduleArtifacts, 'controller'),
+          route: seamNames(options.moduleArtifacts, 'route', names.kebab),
+        }),
+      },
+    ];
+  }
   const seam =
     generatorMode(options.plugins) === 'class-based' ? ROUTES_SEAM : FUNCTIONAL_ROUTES_SEAM;
 

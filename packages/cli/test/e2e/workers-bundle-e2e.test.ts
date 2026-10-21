@@ -344,6 +344,23 @@ async function assertRestServesAndCaches(project: string): Promise<void> {
 }
 
 describe("the CLI's Workers templates build and boot on workerd", () => {
+  it(
+    'generated feature module bundles and type-checks without emitting tests',
+    { timeout: CASE_TIMEOUT_MS, skip },
+    async () => {
+      const project = await scaffold('rest');
+      expect(await run(['generate', 'module', 'invoices'], project)).toBe(0);
+      const files = await nodeFs.readdir(`${project}/src/modules/invoices`);
+      expect(files.some((file) => file.endsWith('.test.ts'))).toBe(false);
+      expect(await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8')).toContain(
+        'registerModules(app.router, app.services)',
+      );
+      const checked = await runIn(project, 'npm', ['run', 'check'], overlay);
+      expect(checked.code, checked.output).toBe(0);
+      await wranglerDryRun(project);
+    },
+  );
+
   for (const template of ['microservice', 'class-based'] as const) {
     it(
       `wrangler deploy --dry-run bundles --template ${template}`,

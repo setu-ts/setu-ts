@@ -72,7 +72,7 @@ const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
  * scaffolded project failed. A gate that skips the generated file it is least
  * sure about is a gate written around the bug.
  */
-const MODULE_FILES_PER_NAME = 5;
+const MODULE_FILES_PER_NAME = 7;
 
 /**
  * Families that can share one name, grouped so no group contains a collision.
@@ -604,7 +604,7 @@ describe('template scaffolding — end to end', () => {
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, sources);
       expect(stderr).not.toContain('SyntaxError');
-      expect(code).toBe(0);
+      expect(code, stderr).toBe(0);
     });
   }
 });
@@ -732,7 +732,7 @@ describe('setu generate module, end to end', () => {
   // The module schematic is UNGATED since M65, so it emits a runnable test into
   // every host — including the two that declared none of what that test
   // imports. Both scaffolded cleanly, generated cleanly, reported `created
-  // …/widget.service.test.ts`, and then failed the developer's first `deno
+  // …/widget.test.ts`, and then failed the developer's first `deno
   // test` with `Import "@std/testing/bdd" not a dependency and not in import
   // map`: the M58 defect, reintroduced by ungating.
   //
@@ -751,7 +751,7 @@ describe('setu generate module, end to end', () => {
 
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, [
-        `${project}/src/modules/widget/widget.service.test.ts`,
+        `${project}/src/modules/widget/widget.test.ts`,
       ]);
       expect(stderr).not.toContain('not in import map');
       expect(code).toBe(0);
@@ -828,7 +828,7 @@ const p = await app.inject({
   method: 'POST',
   url: '/orders',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ sku: 'ABC-1' }),
+  body: JSON.stringify({ name: 'ABC-1' }),
 });
 out['POST /orders'] = { status: p.statusCode, body: p.body };
 console.log('__PROBE_RESULT__' + JSON.stringify(out));

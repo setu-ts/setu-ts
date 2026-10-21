@@ -598,6 +598,7 @@ package fits the plugin architecture.
 | `TransactionalIdempotencyRecord`      | interface |
 | `TransactionOptions`                  | interface |
 | `ValidationIssue`                     | interface |
+| `ValidationMiddlewareOptions`         | interface |
 | `ValueProvider`                       | interface |
 | `WebSocketCloseEvent`                 | interface |
 | `WebSocketConnectionContext`          | interface |

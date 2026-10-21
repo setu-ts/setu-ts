@@ -470,6 +470,7 @@ await app.stop();
       'controllers',
       'jobs',
       'middleware',
+      'modules',
       'plugins',
       'services',
     ]);

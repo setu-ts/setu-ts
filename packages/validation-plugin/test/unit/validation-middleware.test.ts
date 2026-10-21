@@ -158,7 +158,7 @@ describe('createValidationMiddleware — JSON parse error', () => {
   it('returns 400 with formatted issue when body JSON is invalid', async () => {
     const schema = createFakeSchema({ success: true });
     const { ctx, responseSnapshot } = createFakeContext({
-      request: { bodyError: true },
+      request: { bodyError: true, headers: { 'content-type': 'application/json' } },
     });
     const nextFn = createNextFn();
     const middleware = createValidationMiddleware(schema, 'body', SERVICE, defaultFormatter);

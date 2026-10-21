@@ -50,3 +50,8 @@ describe('validation-plugin barrel exports', () => {
     expect(api.rfc7807Formatter).toBe(api.rfc9457Formatter);
   });
 });
+
+// Compile-time consumers of the public reader types.
+const reader: api.ValidatorMiddleware<api.ValidatedOutput<{ readonly _output: number }>> =
+  api.validateQuery({} as { readonly _output: number });
+void reader;

@@ -6593,6 +6593,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   §10), found a CLI-owned file linked to `/dev/zero` hanging `g job` and its dry run — read by both
   the writer and the artifact scanner, the latter since M70g — fixed by reading only regular files
   under 1 MiB; re-audit passed — complete (PR #479)
+- **Milestone 114** (`packages/cli` + `packages/validation-plugin` + `packages/common` +
+  `packages/decorator-plugin` — self-contained feature modules; V9-79): a functional
+  `setu generate module` writes one folder (service, routes, `<name>.schemas.ts`, a unit test and a
+  real-socket e2e) registered through `src/modules/index.ts`; `--module` places a service, route,
+  controller or schema inside a module; functional modules are scanned for name conflicts and barrel
+  wiring; the `rest` sample moves to `src/modules/greeting/`; every socket target gets
+  `test/e2e/app.e2e.test.ts` and a separate `test:e2e` task. In `validation-plugin` the validator is
+  its own typed reader (`validateBody(S).value(ctx)`), `{ forms: true }` validates urlencoded and
+  multipart bodies with the same schema, and a body-validated route answers `415` for a non-JSON
+  media type before reading the body (breaking, CHANGELOG'd). The helpers' per-request validator
+  rebuild was replaced by a per-service cache after the performance budget missed: `/vh` went from
+  −8.3% (p = 0.001) to −5.1% (p = 0.118), accepted by the maintainer. Security audit round 3 passed
+  on `c3c57069`; a scoped round 4 on `13edb024` (the cache and the `exportsSymbol` regex escape)
+  passed with no findings — complete (PR #480)
 - **Next milestone** — M113l (documentation that does not match the code, or is missing).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

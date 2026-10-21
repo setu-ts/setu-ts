@@ -472,7 +472,9 @@ try {
       // any install, since for `full-stack` this task now runs `deno install`.
       const tested = await denoRunRetry(project, ['task', 'test']);
       expect(tested.code, tested.output).toBe(0);
-      expect(tested.output).toContain('1 passed');
+      expect(tested.output).toMatch(/\b[1-9]\d* passed/);
+      const e2e = await denoRunRetry(project, ['task', 'test:e2e']);
+      expect(e2e.code, e2e.output).toBe(0);
 
       // Every path the README's "What it serves" section lists must answer,
       // so the section cannot advertise a route the project does not serve.

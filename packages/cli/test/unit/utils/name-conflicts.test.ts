@@ -173,6 +173,12 @@ describe('findNameConflict', () => {
   });
 
   describe('what it must NOT refuse (continued)', () => {
+    it('reports the actual HTTP path for a route/controller collision inside a feature', () => {
+      expect(
+        findNameConflict('controller', 'summary', new Set(), { route: ['summary'] }, [], 'invoices')
+          ?.resource,
+      ).toBe('the HTTP path /invoices/summary');
+    });
     it('allows a family whose scan reported nothing', () => {
       expect(findNameConflict('route', 'widget', WITH_DECORATORS, {}, [])).toBeUndefined();
     });

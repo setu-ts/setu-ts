@@ -15,6 +15,89 @@ import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
 
+describe('functional module hosts and generated test tasks', () => {
+  for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    for (const name of ['minimal', 'rest', 'microservice', 'full-stack']) {
+      it(`wires modules and splits unit/e2e tasks for ${name} on ${target}`, () => {
+        const host = resolveHost(name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!, target);
+        const files = [...projectFiles('svc', target, host)];
+        const config = contentsOf(files, 'setu.config.ts');
+        expect(config).toContain("import { registerModules } from './src/modules/index.ts'");
+        expect(config).toMatch(
+          /registerGeneratedRoutes\(app.router, app.services\);\s+registerModules\(app.router, app.services\);/,
+        );
+        expect(contentsOf(files, 'src/modules/index.ts')).toContain(
+          'export function registerModules',
+        );
+        const socket = target !== 'cloudflare-workers';
+        expect(files.some((file) => file.path === 'test/support/server.ts')).toBe(socket);
+        expect(files.some((file) => file.path === 'test/e2e/app.e2e.test.ts')).toBe(socket);
+        const manifest = JSON.parse(
+          contentsOf(
+            files,
+            target === 'deno' || target === 'cloudflare-workers' ? 'deno.json' : 'package.json',
+          ),
+        ) as { scripts?: Record<string, string>; tasks?: Record<string, string> };
+        const tasks = manifest.tasks ?? manifest.scripts!;
+        if (name === 'full-stack' || name === 'rest' || name === 'microservice') {
+          const dependencies = JSON.parse(
+            contentsOf(
+              files,
+              target === 'deno' || target === 'cloudflare-workers' ? 'deno.json' : 'package.json',
+            ),
+          ) as { imports?: Record<string, string>; dependencies?: Record<string, string> };
+          expect(dependencies.imports?.['zod'] ?? dependencies.dependencies?.['zod']).toBe(
+            target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4' : '^4',
+          );
+        }
+        if (!socket) {
+          expect(tasks['test:e2e']).toBeUndefined();
+          return;
+        }
+        const unit =
+          target === 'deno'
+            ? "deno test -A --ignore='**/*.e2e.test.ts'"
+            : target === 'bun'
+              ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
+              : "tsx --test '**/!(*.e2e).test.ts'";
+        const e2e =
+          target === 'deno'
+            ? "deno test -A '**/*.e2e.test.ts'"
+            : target === 'bun'
+              ? 'bun test .e2e.test'
+              : "tsx --test '**/*.e2e.test.ts'";
+        const prefix =
+          name !== 'full-stack'
+            ? ''
+            : target === 'deno'
+              ? 'deno task build && '
+              : target === 'bun'
+                ? 'bun run build && '
+                : 'npm run build && ';
+        expect(tasks['test']).toBe(prefix + unit);
+        expect(tasks['test:e2e']).toBe(prefix + e2e);
+        const test = contentsOf(files, 'test/e2e/app.e2e.test.ts');
+        expect(test).toContain('fetch(server.baseUrl + path)');
+        expect(test).not.toContain('inject');
+        if (name === 'rest') {
+          expect(test).toContain('/greetings');
+          expect(contentsOf(files, 'src/modules/index.ts')).toContain('registerGreetingModule');
+          expect(contentsOf(files, 'src/modules/greeting/greeting.routes.ts')).toContain(
+            "from './greeting.service.ts'",
+          );
+          expect(files.some((file) => file.path.endsWith('greeting.schemas.ts'))).toBe(false);
+          for (const suffix of ['test.ts', 'e2e.test.ts']) {
+            const greetingTest = contentsOf(files, `src/modules/greeting/greeting.${suffix}`);
+            expect(greetingTest).toContain('Hello, world!');
+            expect(greetingTest).toContain('Hello, ada!');
+            expect(greetingTest).not.toContain("method: 'POST'");
+          }
+        }
+      });
+    }
+  }
+});
+
 describe('guidance and queue seam composition', () => {
   for (const [runtime, invocation] of [
     ['node', 'npx @setu-ts/cli@'],
@@ -83,11 +166,13 @@ describe('resolveHost', () => {
       { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
       'deno',
     );
-    expect(resolved.localImports).toEqual([]);
+    expect(resolved.localImports).toEqual([
+      { symbols: ['registerModules'], from: './src/modules/index.ts' },
+    ]);
     expect(resolved.packageImports).toEqual([]);
-    expect(resolved.files).toEqual([]);
+    expect(resolved.files.map((file) => file.path)).toEqual(['src/modules/index.ts']);
     expect(resolved.pluginSpreads).toEqual([]);
-    expect(resolved.setupCalls).toEqual([]);
+    expect(resolved.setupCalls).toEqual(['registerModules(app.router, app.services);']);
     expect(resolved.appFactory).toBeUndefined();
     expect(resolved.manifest).toBeUndefined();
   });
@@ -409,7 +494,7 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(manifest.tasks['install']).toBeUndefined();
     // But it DOES get a `test` task: `setu generate module` emits a
     // `*.service.test.ts` into every host, and no template ran it (A3).
-    expect(manifest.tasks['test']).toBe('deno test -A');
+    expect(manifest.tasks['test']).toBe("deno test -A --ignore='**/*.e2e.test.ts'");
     // Every Deno project links node_modules since 0.9, so the Node-hosted CLI
     // can import its config; that is the only one of the three it gains.
     expect(manifest.nodeModulesDir).toBe('auto');

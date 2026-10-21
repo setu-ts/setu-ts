@@ -8,8 +8,8 @@ import { deriveNames } from '../../../src/utils/names.ts';
 import { options } from './_shared.ts';
 
 describe('schematic registry', () => {
-  it('registers exactly sixteen built-in schematics', () => {
-    expect(listSchematics()).toHaveLength(16);
+  it('registers exactly seventeen built-in schematics', () => {
+    expect(listSchematics()).toHaveLength(17);
   });
 
   it('names the custom pseudo-schematic', () => {
@@ -43,6 +43,7 @@ describe('schematic registry', () => {
       'metric',
       'migration',
       'query-handler',
+      'schema',
       'sse',
       'ws-route',
     ]);
@@ -78,7 +79,7 @@ describe('schematic registry', () => {
         .map((f) => f.path),
     );
     expect(new Set(paths).size).toBeLessThan(paths.length);
-    expect(paths.filter((path) => path === 'src/controllers/order-item.routes.ts')).toHaveLength(2);
+    expect(paths.filter((path) => path === 'src/controllers/order-item.routes.ts')).toHaveLength(1);
   });
 
   it('shares seam barrels only where the generated artifacts share a family', () => {
@@ -94,7 +95,7 @@ describe('schematic registry', () => {
     // barrel, three kinds sharing it.
     expect(shared.map(([path, owners]) => [path, owners.sort()])).toEqual([
       ['src/plugins/index.ts', ['plugin', 'ws-route']],
-      ['src/controllers/index.ts', ['controller', 'module', 'route', 'sse']],
+      ['src/controllers/index.ts', ['controller', 'route', 'sse']],
       ['src/cqrs/index.ts', ['command-handler', 'query-handler']],
     ]);
   });
@@ -102,7 +103,7 @@ describe('schematic registry', () => {
   it('every registered factory emits TypeScript under src/', () => {
     for (const { name } of listSchematics()) {
       for (const file of getSchematic(name)!.factory(deriveNames('order-item'), options())) {
-        expect(file.path.startsWith('src/')).toBe(true);
+        expect(file.path.startsWith('src/') || file.path === 'test/support/server.ts').toBe(true);
         expect(file.path.endsWith('.ts')).toBe(true);
       }
     }

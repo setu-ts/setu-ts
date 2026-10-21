@@ -102,6 +102,14 @@ the one way to say unbounded. A value that is not a non-negative integer throws 
 `RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
 silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
 
+For in-process oversized-upload tests on Node 24 or Node 26 (up to 26.12.0), build the multipart
+request body from a `Blob` or use `inject()` instead of
+`app.fetch(new Request(..., { body: formData }))` with a file. Those releases bundle undici
+7.20.0–8.11.2, whose `FormData` request body throws an uncaught `ERR_INVALID_STATE` when the runtime
+cancels it after the cap is exceeded; undici 8.12.0 fixes it, and no released Node bundles that yet.
+Node 22, Bun and Deno are unaffected, as are real-socket uploads and `inject()`. The runtime still
+cancels oversized bodies to enforce the read bound.
+
 ### Reporting a failed WebSocket handshake
 
 `HttpAdapterOptions` accepts `reportError?: (record: Readonly<Record<string, unknown>>) => void`

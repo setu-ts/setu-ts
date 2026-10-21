@@ -211,7 +211,10 @@ describe('seam hosts', () => {
       const imported = new Set(
         (template.localImports ?? []).map((l) => l.from.replace(/^\.\//, '')),
       );
-      for (const path of emitted) expect(imported.has(path)).toBe(true);
+      for (const path of emitted) {
+        if (/src\/modules\/[^/]+\/index\.ts$/.test(path)) continue;
+        expect(imported.has(path)).toBe(true);
+      }
     });
 
     it(`${name} brings every setupCalls identifier into scope`, () => {
@@ -275,6 +278,7 @@ describe('seam hosts', () => {
     expect(barrels(fullStack)).toEqual([
       'src/controllers/index.ts',
       'src/middleware/index.ts',
+      'src/modules/index.ts',
       'src/plugins/index.ts',
     ]);
     expect(fullStack.setupCalls ?? []).toContain(

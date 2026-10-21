@@ -450,10 +450,16 @@ describe('a three-service workspace — end to end', () => {
         expect((await nodeFs.stat(`${dir}/${file}`)).isFile()).toBe(true);
       }
       // Functional members have only the seams their composition can consume.
-      for (const seam of ['controllers', 'middleware', 'plugins']) {
+      for (const seam of ['controllers', 'middleware', 'plugins', 'modules']) {
         expect((await nodeFs.stat(`${dir}/src/${seam}/index.ts`)).isFile()).toBe(true);
       }
       expect((await nodeFs.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile()).toBe(true);
+      expect(await nodeFs.readFile(`${dir}/setu.config.ts`, 'utf8')).toContain(
+        'registerModules(app.router, app.services)',
+      );
+      for (const file of ['test/support/server.ts', 'test/e2e/app.e2e.test.ts']) {
+        expect((await nodeFs.stat(`${dir}/${file}`)).isFile()).toBe(true);
+      }
     }
   });
 

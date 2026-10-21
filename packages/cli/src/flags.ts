@@ -145,7 +145,7 @@ const NEW: ICommandFlagSpec = spec(
 );
 
 /** `setu generate` for a schematic: the schematic word plus one name. */
-const GENERATE: ICommandFlagSpec = spec('generate', ['dir', 'dry-run', 'runtime'], [], {
+const GENERATE: ICommandFlagSpec = spec('generate', ['dir', 'dry-run', 'runtime', 'module'], [], {
   fixed: 2,
   taken: 1,
   noun: 'one name',

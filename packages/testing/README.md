@@ -257,6 +257,13 @@ const res3 = await inject(app, req);
 > injected twice or injected and then handed to `app.fetch()` — the second call throws and names the
 > cause rather than quietly sending no body. Build a separate `Request` per call.
 
+For an oversized multipart upload in an in-process test on Node 24 or Node 26 (up to 26.12.0), use
+`inject()` with an encoded body (or build the multipart body from a `Blob`) instead of passing
+file-bearing `FormData` to `app.fetch(new Request(...))`. The undici those releases bundle
+(7.20.0–8.11.2) throws an uncaught `ERR_INVALID_STATE` when the runtime cancels that stream at
+`maxBodyBytes`; undici 8.12.0 fixes it. Node 22, Bun, Deno, real-socket uploads and `inject()` do
+not take that path.
+
 ### createMockPlugin
 
 Creates an `IPlugin` that registers a mock service under a capability token.

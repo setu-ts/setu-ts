@@ -79,8 +79,9 @@ interface IAddablePackage {
   readonly section?: 'dev';
   /**
    * Optional peer packages a package manager will not install for the
-   * consumer. Written into `package.json` `dependencies` only on the runtimes
-   * listed here, at their {@linkcode CLIENT_RANGES} range.
+   * consumer. Written on the runtimes listed here, at their
+   * {@linkcode CLIENT_RANGES} range: into `package.json` `dependencies`, or
+   * into a `deno.json`/`deno.jsonc` import map as `npm:<name>@<range>`.
    */
   readonly peers?: {
     readonly runtimes: readonly TargetRuntime[];
@@ -140,7 +141,13 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['storage', { pkg: 'storage-plugin' }],
   ['testing', { pkg: 'testing', section: 'dev' }],
   ['telemetry', { pkg: 'telemetry-plugin' }],
-  ['validation', { pkg: 'validation-plugin' }],
+  [
+    'validation',
+    {
+      pkg: 'validation-plugin',
+      peers: { runtimes: ['deno', 'node', 'bun', 'cloudflare-workers'], packages: ['zod'] },
+    },
+  ],
   ['view', { pkg: 'view-plugin' }],
   ['websocket', { pkg: 'websocket-plugin', peers: { runtimes: ['node'], packages: ['ws'] } }],
   ['worker-pool', { pkg: 'worker-pool-plugin' }],
@@ -541,10 +548,11 @@ function peerPackagesFor(
 function withPeerDependencies(
   source: string,
   peers: readonly { readonly name: string; readonly range: string }[],
+  section: 'dependencies' | 'imports',
 ): { readonly contents: string; readonly added: readonly string[] } {
   if (peers.length === 0) return { contents: source, added: [] };
   const parsed = JSON.parse(source) as Record<string, unknown>;
-  const existing = parsed['dependencies'];
+  const existing = parsed[section];
   const dependencies =
     existing !== null && typeof existing === 'object'
       ? { ...(existing as Record<string, string>) }
@@ -552,12 +560,12 @@ function withPeerDependencies(
   const added: string[] = [];
   for (const peer of peers) {
     if (peer.name in dependencies) continue;
-    dependencies[peer.name] = peer.range;
+    dependencies[peer.name] = section === 'imports' ? `npm:${peer.name}@${peer.range}` : peer.range;
     added.push(peer.name);
   }
   if (added.length === 0) return { contents: source, added: [] };
   return {
-    contents: `${JSON.stringify({ ...parsed, dependencies }, null, 2)}\n`,
+    contents: `${JSON.stringify({ ...parsed, [section]: dependencies }, null, 2)}\n`,
     added,
   };
 }
@@ -824,10 +832,15 @@ export async function runAddCommand(
 
     // Optional peers ride the SAME manifest rewrite — a second edit for one path
     // fails as a duplicate — and are applied even when the framework package is
-    // already pinned, so re-running `setu add websocket` is how an affected
-    // project recovers.
-    if (target.file === 'package.json') {
-      const merged = withPeerDependencies(updated ?? source, peerPackages);
+    // already pinned, so re-running `setu add <name>` is how a project missing
+    // a peer recovers (for example `ws` after `setu add websocket`, or `zod`
+    // after `setu add validation`).
+    {
+      const merged = withPeerDependencies(
+        updated ?? source,
+        peerPackages,
+        target.file === 'package.json' ? 'dependencies' : 'imports',
+      );
       if (merged.added.length > 0) {
         updated = merged.contents;
         addedPeers.push(...merged.added);

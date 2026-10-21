@@ -14,7 +14,7 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
-import { deriveNames } from './names.ts';
+import { deriveNames, isKebabIdentifier } from './names.ts';
 import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
 
 /**
@@ -85,6 +85,8 @@ export interface SkippedArtifact {
   readonly path: string;
   /** The symbols the barrel would have imported but the module does not export. */
   readonly missing: readonly string[];
+  /** The base name cannot safely enter an import or identifier. */
+  readonly invalidName?: true;
 }
 
 /** One family's scan result. */
@@ -232,6 +234,10 @@ export async function readArtifactNames(
     if (!entry.endsWith(spec.suffix)) continue;
     const name = entry.slice(0, -spec.suffix.length);
     if (name === '') continue;
+    if (!isKebabIdentifier(name)) {
+      skipped.push({ path: joinPath(spec.dir, entry), missing: [], invalidName: true });
+      continue;
+    }
 
     const path = joinPath(root, entry);
     let source: string;

@@ -108,7 +108,7 @@ const READMES: Readonly<Record<string, number>> = {
   // the view-rendering path, the React Router loader recipe, and both halves
   // of the browser recipe (the exposing plugin and the `/format` client).
   'packages/localization-plugin/README.md': 6,
-  'packages/validation-plugin/README.md': 2,
+  'packages/validation-plugin/README.md': 3,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 10,
   'packages/realtime-backplane-plugin/README.md': 3,

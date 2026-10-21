@@ -32,6 +32,7 @@ import {
 } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
+import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { detectProject } from '../utils/project-detector.ts';
 import {
   findExisting,
@@ -54,7 +55,10 @@ import {
   loadCustomSchematic,
   type ModuleLoader,
 } from '../schematics/custom.ts';
-import { scanModules } from '../utils/module-scanner.ts';
+import { scanModules, scanModuleArtifacts } from '../utils/module-scanner.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
+import { REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
+import { serviceSeamToken } from '../seams/services.ts';
 import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
@@ -130,6 +134,7 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log(
     `  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (detected from the project by default)`,
   );
+  log('  --module <name>     Place a service, route, controller or schema inside a feature module');
 }
 
 /**
@@ -207,6 +212,17 @@ export async function runGenerateCommand(
     return EXIT_USAGE;
   }
   const runtimeFlag = runtimeValue;
+  const moduleFlag = args.flags['module'];
+  if (
+    moduleFlag !== undefined &&
+    (typeof moduleFlag !== 'string' ||
+      moduleFlag.includes('/') ||
+      moduleFlag.includes('\\') ||
+      !isIdentifierSafe(deriveNames(moduleFlag)))
+  ) {
+    deps.error('Option --module requires a valid module name.');
+    return EXIT_USAGE;
+  }
 
   const schematicName = args.positionals[0];
   if (schematicName === undefined) {
@@ -305,6 +321,20 @@ export async function runGenerateCommand(
     deps.error(cause.message);
     return EXIT_ERROR;
   }
+  const module = typeof moduleFlag === 'string' ? deriveNames(moduleFlag).kebab : undefined;
+  if (
+    module !== undefined &&
+    !['service', 'route', 'controller', 'schema'].includes(schematicName)
+  ) {
+    const artifact = getSchematic(schematicName)
+      ?.factory(names, { runtime, plugins: installed, now: deps.now })
+      .find((file) => file.managed !== true)?.path;
+    const directory = artifact === undefined ? 'src' : artifact.slice(0, artifact.lastIndexOf('/'));
+    deps.error(
+      `--module places a feature file; ${schematicName} is app-wide and lives in ${directory}.`,
+    );
+    return EXIT_USAGE;
+  }
 
   // Resolve project-owned code and plugin gates only after the target has been
   // established as a readable project. Otherwise a missing plugin or custom
@@ -337,19 +367,42 @@ export async function runGenerateCommand(
   // Read unconditionally, like `detectPlugins` above: the `module` schematic
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
-  const moduleScan = await scanModules(deps.fs, dir);
+  const mode = generatorMode(installed);
+  const moduleScan = await scanModules(deps.fs, dir, mode);
   const modules = moduleScan.names;
-  const legacyModules = moduleScan.skipped.map((skip) => skip.name);
+  const legacyModules = moduleScan.skipped
+    .filter((skip) => skip.kind === 'legacy')
+    .map((skip) => skip.name);
+  if (module !== undefined) {
+    if (!modules.includes(module)) {
+      deps.error(
+        `Unknown module "${escapeName(module)}". Admitted modules: ${
+          modules.map(escapeName).join(', ') || '(none)'
+        }.`,
+      );
+      return EXIT_ERROR;
+    }
+    if (mode === 'class-based' && schematicName === 'route') {
+      deps.error('route --module is functional-only; use top-level g route instead.');
+      return EXIT_USAGE;
+    }
+  }
+  for (const path of moduleScan.rejected) {
+    deps.error(
+      `Skipped ${escapeName(path)}: its name is not a kebab-case identifier, so it cannot be ` +
+        'listed in the activation barrel. Rename the directory.',
+    );
+  }
   for (const skip of moduleScan.skipped) {
     deps.error(
       `Skipped ${escapeName(skip.path)}: it is missing ${escapeName(
         String(skip.missing),
-      )}, so it cannot be listed in ` + 'the MODULES activation barrel used by migrated configs.',
+      )}, so it cannot be listed in the ${mode === 'class-based' ? 'MODULES' : 'registerModules'} activation barrel.`,
     );
     deps.error(
       `  Add ${escapeName(
         String(skip.missing),
-      )} with @Module(...) or delete and regenerate the module.`,
+      )}${skip.kind === 'legacy' ? ' with @Module(...)' : ' as an export'} or delete and regenerate the module.`,
     );
   }
   // Same reasoning as `modules`: the migration runner lists every migration in
@@ -358,7 +411,10 @@ export async function runGenerateCommand(
   // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
   // per family against paths that usually do not exist; a custom schematic reads it
   // too, so it cannot be gated on a built-in name.
-  const scan = await scanArtifacts(deps.fs, dir, scanSeamSpecs(installed));
+  const scan =
+    module === undefined || mode === 'class-based'
+      ? await scanArtifacts(deps.fs, dir, scanSeamSpecs(installed))
+      : await scanModuleArtifacts(deps.fs, dir, module);
 
   // A candidate the scan rejected is reported, never silently dropped. This is the path
   // an artifact generated before its family gained a second export takes: the barrel
@@ -366,6 +422,12 @@ export async function runGenerateCommand(
   // developer is told to regenerate it — rather than getting a barrel that will not
   // compile, or one that quietly omits their work.
   for (const skip of scan.skipped) {
+    if (skip.invalidName === true) {
+      deps.error(
+        `Skipped ${escapeName(skip.path)}: its name is not a kebab-case identifier, so it cannot be listed in the barrel. Rename the file.`,
+      );
+      continue;
+    }
     deps.error(
       `Skipped ${escapeName(skip.path)}: it does not export ${escapeName(
         skip.missing.join(', '),
@@ -427,7 +489,14 @@ export async function runGenerateCommand(
   // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
   // output cannot work is not a plan worth printing. Both collisions this catches were
   // observed as real failures against a booted application — see `name-conflicts.ts`.
-  const conflict = findNameConflict(schematicName, names.kebab, installed, scan.artifacts, modules);
+  const conflict = findNameConflict(
+    schematicName,
+    names.kebab,
+    installed,
+    module !== undefined && mode === 'class-based' ? {} : scan.artifacts,
+    module === undefined ? modules : [],
+    module,
+  );
   if (conflict !== undefined) {
     deps.error(
       `Cannot generate ${escapeName(schematicName)} "${names.kebab}": ${escapeName(
@@ -447,6 +516,7 @@ export async function runGenerateCommand(
     legacyModules,
     migrations,
     artifacts: scan.artifacts,
+    ...(module === undefined ? {} : { targetModule: module, moduleArtifacts: scan.artifacts }),
   };
 
   let generated: readonly GeneratedFile[];
@@ -529,6 +599,22 @@ export async function runGenerateCommand(
         'Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: https://github.com/setu-ts/setu-ts/tree/develop/packages/database-plugin#migrations-and-readiness',
       );
     }
+    if (installed.has('validation-plugin') && ['module', 'schema'].includes(schematicName)) {
+      let hasZod = false;
+      for (const manifest of project.manifests) {
+        const read = await readJsonManifest(deps.fs, manifest.path);
+        if (read.kind !== 'ok' || typeof read.value !== 'object' || read.value === null) continue;
+        for (const field of ['imports', 'dependencies', 'devDependencies']) {
+          const entries = (read.value as Record<string, unknown>)[field];
+          if (typeof entries === 'object' && entries !== null && Object.hasOwn(entries, 'zod'))
+            hasZod = true;
+        }
+      }
+      if (!hasZod)
+        deps.log(
+          `Install Zod: ${runtime === 'deno' ? 'deno add npm:zod@^4' : runtime === 'bun' ? 'bun add zod@^4' : 'npm install zod@^4'}`,
+        );
+    }
     // After the write, so a refused or failed run never reports a claim it did not
     // make. Reported once — the next scan finds the file in the barrel — because the
     // alternative, a provenance marker in the artifact, would un-wire every artifact
@@ -539,7 +625,15 @@ export async function runGenerateCommand(
     // existed, or a starter-composed one whose decorators arm was never filled in.
     // The CLI cannot edit that config (M101g), so it prints the exact line instead
     // of letting the file appear wired when nothing registers it.
-    await reportUnwiredDecoratorSeams(deps.fs, dir, generated, installed, deps.error);
+    await reportUnwiredSeams(deps.fs, dir, generated, installed, deps.error);
+    if (module !== undefined && mode === 'class-based' && schematicName !== 'schema') {
+      deps.log(
+        `Add ${names.pascal}${schematicName === 'service' ? 'Service' : 'Controller'} to @Module({ ${schematicName === 'service' ? 'providers' : 'controllers'} }) in src/modules/${module}/${module}.module.ts`,
+      );
+      if (schematicName === 'service') {
+        deps.log(`Inject it with @Inject('${serviceSeamToken(`${module}.${names.kebab}`)}').`);
+      }
+    }
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
@@ -575,7 +669,7 @@ export async function runGenerateCommand(
  * @param installed - The `@setu-ts` packages detected in the project
  * @param error - The command's error channel
  */
-async function reportUnwiredDecoratorSeams(
+async function reportUnwiredSeams(
   fs: IFileSystem,
   dir: string,
   generated: readonly GeneratedFile[],
@@ -598,12 +692,22 @@ async function reportUnwiredDecoratorSeams(
     if (key === undefined || symbol === undefined) continue;
     seams.set(spec.barrel, { key, symbol });
   }
-  if (seams.size === 0) return;
+  const functionalModules =
+    !installed.has('decorator-plugin') && written.has('src/modules/index.ts');
+  if (seams.size === 0 && !functionalModules) return;
 
   const config = await readConfigModule(fs, dir);
   if (config === '') return;
   const code = maskSourceCode(config);
   const starter = composingStarter(config);
+  if (
+    functionalModules &&
+    (code === undefined || !new RegExp(`\\b${REGISTER_MODULES_EXPORT}\\b`).test(code))
+  ) {
+    error(`setu.config.ts does not reference ${REGISTER_MODULES_EXPORT}; add:`);
+    error(`  import { ${REGISTER_MODULES_EXPORT} } from './src/modules/index.ts';`);
+    error(`  ${REGISTER_MODULES_EXPORT}(app.router, app.services);`);
+  }
 
   for (const [barrel, { key, symbol }] of seams) {
     // Unclassifiable (`undefined`) fails toward reporting.

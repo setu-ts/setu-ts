@@ -1448,6 +1448,38 @@ export async function createApp() {
   });
 });
 
+describe('setu add validation — Zod dependency', () => {
+  for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    it(`declares zod on ${target}`, async () => {
+      const deno = target === 'deno' || target === 'cloudflare-workers';
+      const h = harness(
+        deno
+          ? {
+              '/app/deno.json': DENO_MANIFEST,
+              ...(target === 'cloudflare-workers'
+                ? { '/app/wrangler.toml': 'name = "edge"\n' }
+                : {}),
+            }
+          : {
+              '/app/package.json': JSON.stringify({
+                name: 'svc',
+                scripts: { start: target === 'bun' ? 'bun run main.ts' : 'tsx main.ts' },
+                dependencies: {},
+              }),
+            },
+      );
+      expect(await h.run(['validation'])).toBe(0);
+      const updated = JSON.parse(h.read(deno ? '/app/deno.json' : '/app/package.json')) as {
+        imports?: Record<string, string>;
+        dependencies?: Record<string, string>;
+      };
+      expect(deno ? updated.imports?.['zod'] : updated.dependencies?.['zod']).toBe(
+        deno ? 'npm:zod@^4.4.0' : '^4.4.0',
+      );
+    });
+  }
+});
+
 describe('setu add — the Node ws peer (M113h §3.8a)', () => {
   /** A Node project manifest, as `detectTargetRuntime` recognizes one. */
   function nodeManifest(dependencies: Readonly<Record<string, string>> = {}): string {

@@ -29,6 +29,7 @@ import type {
   RouteDefinition,
   RouteHandler,
   RouteSchema,
+  ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, withResponseMetadata } from '@setu-ts/common';
@@ -639,6 +640,8 @@ const DECORATOR_SCHEMA_TARGETS = ['body', 'query', 'params'] as const;
 interface SchemaTarget {
   readonly target: ValidationTarget;
   readonly schema: unknown;
+  /** Present only for a body validator opted into form bodies. */
+  readonly options?: ValidationMiddlewareOptions;
 }
 
 /**
@@ -654,7 +657,11 @@ function enforcedTargets(route: RouteMetadata): SchemaTarget[] {
   for (const target of DECORATOR_SCHEMA_TARGETS) {
     const s = schema[target];
     if (s !== undefined) {
-      out.push({ target, schema: s });
+      out.push(
+        target === 'body' && schema.bodyForms === true
+          ? { target, schema: s, options: { forms: true } }
+          : { target, schema: s },
+      );
     }
   }
   return out;
@@ -785,8 +792,14 @@ function appendValidationMiddleware(
     warnUnenforcedSchemas(ctx, controller, route, targets);
     return;
   }
-  for (const { target, schema } of targets) {
-    middleware.push(validation.middleware(schema, target));
+  for (const { target, schema, options } of targets) {
+    // The third argument is passed only when set, so a provider implementing the
+    // two-parameter form of the contract sees exactly the call it always did.
+    middleware.push(
+      options === undefined
+        ? validation.middleware(schema, target)
+        : validation.middleware(schema, target, options),
+    );
   }
 }
 

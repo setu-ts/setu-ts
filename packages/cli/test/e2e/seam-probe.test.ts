@@ -515,6 +515,14 @@ try {
         );
       }
 
+      if (!classBased) {
+        expect(
+          await nodeFs.readFile(`${project}/src/modules/widget-mod/widget-mod.routes.ts`, 'utf8'),
+        ).toContain('registerWidgetModRoutes');
+        expect(await nodeFs.readFile(`${project}/src/modules/index.ts`, 'utf8')).toContain(
+          'registerWidgetModModule',
+        );
+      }
       await useWorkspacePackages(project);
       const probe = PROBE.replace('__CLASS__', classBased ? CLASS_PROBE : '').replace(
         '__CQRS__',

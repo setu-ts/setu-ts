@@ -8,6 +8,55 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Validated body media types (M114, `@setu-ts/validation-plugin`, `@setu-ts/decorator-plugin`,
+  `@setu-ts/common`).** The first-party validation service requires `application/json` or any
+  `application/*+json` media type, ignoring case and parameters; `{ forms: true }` also accepts
+  recognised form types. Unsupported types, including `text/plain` and an absent header, now answer
+  `415 Unsupported Media Type` before reading the body, through the application's error responder.
+  **Migration:** send `Content-Type: application/json` when posting JSON; a string-body `fetch`
+  without headers sends `text/plain` and is now refused, and an empty body-validated request without
+  the header answers 415 instead of 400. Direct `ctx.request.json()` reads are unchanged;
+  replacement validation services own their media-type handling. Cookie-authenticated routes still
+  need `csrfMiddleware` or `csrfFormMiddleware`.
+- **Generated output: the functional module layout (M114, `@setu-ts/cli`).**
+  `setu generate module <name>` in the functional style now writes the whole feature into
+  `src/modules/<name>/` — `<name>.routes.ts`, `<name>.service.ts`, `<name>.schemas.ts` (with
+  `validation-plugin`), `<name>.test.ts`, `<name>.e2e.test.ts` (socket targets only) and a CLI-owned
+  `index.ts` — and writes nothing under `src/controllers/` any more; the module registers through
+  `registerModules(app.router, app.services)` from the CLI-owned `src/modules/index.ts`, which a
+  functional scaffold calls right after `registerGeneratedRoutes(...)`. **Existing projects keep
+  working:** their `src/controllers/<name>.routes.ts` files are still wired by the controllers
+  barrel, and only newly generated modules use the new layout. To adopt the layout for a pre-M114
+  functional module, move `src/controllers/<name>.routes.ts` into `src/modules/<name>/`, change its
+  service import to `./<name>.service.ts`, widen its registrar to
+  `register<Pascal>Routes(router: IRouterApi, services?: IServiceRegistry)` (importing the type from
+  `@setu-ts/common`; the regenerated index passes both), replace `src/modules/<name>/index.ts` with
+  the registrar the CLI now generates — it imports `register<Pascal>Routes` from
+  `./<name>.routes.ts` and exports
+  `register<Pascal>Module(router: IRouterApi, services?: IServiceRegistry)`, which calls
+  `register<Pascal>Routes(router, services)` — in the same change. The module scan admits a
+  functional module only when its `index.ts` exports `register<Pascal>Module`, and the moved routes
+  file no longer reaches the controllers barrel, so until the index is replaced the routes are not
+  registered and every `--module <name>` command refuses the module. Then run any
+  `setu generate … --module <name>` command (or add the import line and the
+  `registerModules(app.router, app.services);` call, which `setu generate module` prints for a
+  project whose `setu.config.ts` does not call it yet) so the activation barrel is regenerated.
+- **Generated output: `rest` sample and generated tests (M114, `@setu-ts/cli`).** The `rest`
+  template's sample is now emitted as a generated module at `src/modules/greeting/` (routes stay
+  `/greetings` and `/greetings/:name`), so a new project's first files are exactly what `g module`
+  produces. `<name>.test.ts` replaces `<name>.service.test.ts`: instead of asserting a stub, it
+  drives the module in-process through `createTestApp({ app: await createApp() })` and asserts a
+  contract the generated code and the developer's code both keep. `setu new` emits
+  `test/support/server.ts` (boots `createApp()` on a free loopback port) and
+  `test/e2e/app.e2e.test.ts` on every socket target, and `g module` adds a per-module
+  `<name>.e2e.test.ts` over real HTTP. The `test` task now runs every `*.test.ts` except
+  `*.e2e.test.ts`; a new `test:e2e` task runs only `*.e2e.test.ts` over real HTTP. A module
+  generated on Cloudflare Workers emits no test (a Workers project's `test` task permits an empty
+  suite).
+- **Generated output: a functional module's `index.ts` no longer re-exports the service (M114,
+  `@setu-ts/cli`).** The CLI-owned `src/modules/<name>/index.ts` exports exactly one symbol,
+  `register<Pascal>Module(router, services?)`; the pre-M114 `export * from './<name>.service.ts'` is
+  gone. Import the service from `./<name>.service.ts` directly.
 - **Generated output corrections (M113h, #477, 0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`,
   `@setu-ts/kernel`).** New scaffolds opt into request logging with `/live`, `/ready`, `/health` and
   `/metrics` excluded, and a booted application logs one `Server listening` record when a logger is
@@ -338,7 +387,7 @@ All notable changes to this project are documented here. The format follows
   unchanged. Found when ESLint's `preserve-caught-error` replaced `deno lint`.
 
 - **@setu-ts/cli** `setu add` registers the zero-configuration plugins it installs (V9-30, M113i,
-  0.10.0). For `worker-pool-plugin`, `secrets-plugin`, `storage-plugin`, `audit-plugin`,
+  #479, 0.10.0). For `worker-pool-plugin`, `secrets-plugin`, `storage-plugin`, `audit-plugin`,
   `mail-plugin`, `resilience-plugin`, `view-plugin` and `idempotency-plugin`, `setu add` now inserts
   the bare plugin call into `setu.config.ts` exactly as it does for `cache`, and a second `add` is a
   no-op. The two packages that need a user choice print the exact wiring line instead and leave the
@@ -349,21 +398,21 @@ All notable changes to this project are documented here. The format follows
   projects keep the existing starter-arm guidance path; on a Workers project the inserted calls are
   runtime-portable except `WorkerPoolPlugin`, which registers and reports itself unavailable
   (documented M45 behaviour), so no new runtime restriction is added.
-- **@setu-ts/cli** `--dry-run` reports the refusal the real run makes (V9-61, M113i, 0.10.0). The
-  `--dry-run` of `generate`, `new`, `library` and `generate app` now classifies the files first and
-  prints `would create <path>`, `would update <path>` for managed files that exist, or
+- **@setu-ts/cli** `--dry-run` reports the refusal the real run makes (V9-61, M113i, #479, 0.10.0).
+  The `--dry-run` of `generate`, `new`, `library` and `generate app` now classifies the files first
+  and prints `would create <path>`, `would update <path>` for managed files that exist, or
   `unchanged <path>`, then `WOULD REFUSE: <path> already exists` for each collision, exiting 1 when
   any collision exists and 0 otherwise — `setu adopt`'s wording and exit code; before, a dry run
   printed `would create` for every file and returned 0 before the existing-file check ran.
   `setu adopt` keeps its own branch because it also prints moves.
-- **@setu-ts/cli** class-based ingress files carry their kind in the name (V9-60, M113i, 0.10.0).
-  The five class-based ingress schematics — `job`, `event-handler`, `command-handler`,
+- **@setu-ts/cli** class-based ingress files carry their kind in the name (V9-60, M113i, #479,
+  0.10.0). The five class-based ingress schematics — `job`, `event-handler`, `command-handler`,
   `query-handler` and `ws-route` — now write `src/ingress/<kebab>-<kind>.ingress.ts` with the class
   `<Pascal><Kind>Ingress` (for example `src/ingress/<kebab>-job.ingress.ts` / `<Pascal>JobIngress`),
   so two kinds of the same name no longer collide. Every other symbol inside the file keeps its
   plain name, so the emitted addresses do not change, and existing `src/ingress/<name>.ingress.ts`
   files keep scanning as `<Pascal>Ingress` and stay registered.
-- **@setu-ts/cli** generated text names a CLI invocation that resolves (V9-12, M113i, 0.10.0).
+- **@setu-ts/cli** generated text names a CLI invocation that resolves (V9-12, M113i, #479, 0.10.0).
   Generated files, `Next:` lines and messages for a project whose runtime the command has already
   resolved render the CLI as the pinned package for that runtime: npm-family (Node, Cloudflare
   Workers) `npx @setu-ts/cli@<VERSION>`, Bun `bunx @setu-ts/cli@<VERSION>` and Deno
@@ -378,6 +427,55 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Self-contained feature modules, `--module` and `g schema` (M114, `@setu-ts/cli`).**
+  `setu generate module <name>` makes a functional module self-contained: the whole feature lives in
+  `src/modules/<name>/` (routes, service, schemas, tests, module index) and registers through
+  `registerModules(app.router, app.services)` from `src/modules/index.ts`; a class-based module
+  keeps its controller/service/`@Module` shape and gains `<name>.schemas.ts` and the two tests. A
+  new `--module <name>` flag places a `service`, `route` (functional only), `controller` or `schema`
+  inside an existing module: functional mode writes the file into the module folder and regenerates
+  the module's `index.ts`, mounting a module-scoped route or controller at `/<module>/<name>`;
+  class-based mode writes the file and prints the `@Module({ providers | controllers })` line to add
+  — it never edits the declaration — registering a module-scoped service under the token
+  `<module>-<name>-service`. Every other schematic is app-wide and refuses the flag. A new `schema`
+  schematic (requires `validation-plugin`) writes `src/shared/schemas/<name>.schemas.ts` — or
+  `src/modules/<module>/<name>.schemas.ts` with `--module` — and never edits an existing file; a
+  second run is the ordinary overwrite refusal. `SchematicOptions` gains the optional
+  `targetModule?` and `moduleArtifacts?` fields for custom schematics. `zod` is declared by every
+  template that installs `validation-plugin`, `setu add validation` adds it on every runtime, and
+  `g module`/`g schema` print the runtime's install command (`npm install zod@^4`, `bun add zod@^4`,
+  `deno add npm:zod@^4`) in a project that lacks it.
+- **Generated e2e tests and the `test:e2e` task (M114, `@setu-ts/cli`).** `setu new` emits
+  `test/support/server.ts` (CLI-owned; boots the real `createApp()` on a free loopback port) and
+  `test/e2e/app.e2e.test.ts` on every socket target; `setu g module` adds
+  `src/modules/<name>/<name>.e2e.test.ts`, which drives the module's routes over real HTTP (and
+  re-emits `test/support/server.ts`, so a project scaffolded earlier gains it). A new `test:e2e`
+  task runs only `*.e2e.test.ts` over real HTTP; the `test` task keeps running the in-process unit
+  tests without a socket.
+- **`ValidatorMiddleware`/`ValidatedOutput` and `value(ctx)` (M114, `@setu-ts/validation-plugin`).**
+  `validateBody`/`validateQuery`/`validateParams`/ `validateHeaders`/`validateCookies` and
+  `createValidationMiddleware` now return `ValidatorMiddleware<ValidatedOutput<S>>` — a
+  `MiddlewareFunction` (so every existing call site type-checks unchanged) with one added member,
+  `value(ctx)`. `ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults
+  included — for Zod 3 and 4 alike, inferred from the schema, so the handler reads a typed value
+  with `validateBody(S).value(ctx)` and no cast. `value(ctx)` throws a `TypeError` naming the target
+  when that validator did not run on the request or a later validator for the same target overwrote
+  it. The `ctx.state.get(validatedStateKey(...))` read still works and is unchanged.
+- **Form-body validation (M114, `@setu-ts/validation-plugin`).**
+  `validateBody(schema, { forms: true })` and `@ValidateBody(schema, { forms: true })` also validate
+  `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they
+  validate a JSON body with. Off by default: a cross-site HTML `<form>` reaches a route that accepts
+  forms with no CORS preflight, so pair an opted-in route with form CSRF protection
+  (`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers
+  `415` "Unsupported Media Type". `IValidationService.middleware` gains the matching optional third
+  parameter, `ValidationMiddlewareOptions` in `@setu-ts/common`. The form converts to a record: a
+  field sent once is a single value, a repeated field becomes an array in wire order, a name ending
+  `[]` is always an array (kept under the name as written); values are strings or the framework's
+  `FormFile` (not a web `File`, so `z.instanceof(File)` refuses it — check the `FormFile` shape
+  instead), and numbers and booleans arrive as strings, so schemas use `z.coerce`. A `_csrf` field
+  from the session plugin reaches the schema, where a Zod object strips it by default and
+  `forbidNonWhitelisted` refuses it. The generated OpenAPI document still describes a validated body
+  as `application/json`.
 - **Reverse-proxy origin support (M113n, #473, `@setu-ts/common`, `@setu-ts/http-security-plugin`,
   `@setu-ts/session-plugin`, `@setu-ts/kernel`).** `REQUEST_ORIGIN_STATE_KEY`, `RequestOrigin`,
   `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` share the trusted public origin;
@@ -433,6 +531,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **An over-limit body on a validated route answers `413` (M114, `@setu-ts/validation-plugin`).** A
+  body the runtime refuses for size (`RuntimePlugin({ maxBodyBytes })` set) now keeps its `413` on a
+  route carrying `validateBody` — previously the validation middleware's own body read masked the
+  refusal and the route answered `400`. The `413` applies to JSON, `urlencoded` and `multipart`
+  bodies alike.
 - **A decorator barrel the config does not consume is reported (V9-8, M113h, #477, 0.10.0,
   `@setu-ts/cli`).** Service and controller comments and the decorator barrel headers name the
   inline `DecoratorPlugin` form and a starter's `decorators` arm. After writing a barrel,
@@ -608,19 +711,19 @@ All notable changes to this project are documented here. The format follows
 
 - **npm installation pointers (M111f).** Auth, queue and GraphQL README Deno install commands now
   select npm explicitly. The website install commands resolve the npm packages.
-- **@setu-ts/cli** the devtool runtime refusal names the situation it is in (V9-5, M113i, 0.10.0).
-  The refusal takes a required `context` of `'scaffold'` or `'enable'`, so no call site can keep the
-  old wording by omission. The shared first sentence (why the devtool needs Deno) stays, but its
-  last clause now reads "could never start its diagnostics connector" so it is correct in both
-  contexts: the scaffold remedy keeps "Scaffold without --devtool, or create the project with
+- **@setu-ts/cli** the devtool runtime refusal names the situation it is in (V9-5, M113i, #479,
+  0.10.0). The refusal takes a required `context` of `'scaffold'` or `'enable'`, so no call site can
+  keep the old wording by omission. The shared first sentence (why the devtool needs Deno) stays,
+  but its last clause now reads "could never start its diagnostics connector" so it is correct in
+  both contexts: the scaffold remedy keeps "Scaffold without --devtool, or create the project with
   --runtime deno.", and the enable remedy says "This project targets <runtime>; the devtool can only
   be enabled on a Deno project." with no "scaffold" wording.
-- **@setu-ts/cli** the CLI documentation states what rollback actually covers (V9-13, M113i,
+- **@setu-ts/cli** the CLI documentation states what rollback actually covers (V9-13, M113i, #479,
   0.10.0). `docs/cli.md`, `packages/cli/README.md` and `PUBLIC_API.md` now state that a write is
   rolled back on SIGINT (Ctrl+C) and a caught error only — SIGTERM, SIGKILL (`kill -9`) and power
   loss all end the command with no rollback — and that re-running `setu adopt` converges while an
   interrupted `new` or `generate` leaves the files it wrote, which the next run's refusal lists.
-- **@setu-ts/cli** `setu add` accepts the published packages its help promises (V9-40, M113i,
+- **@setu-ts/cli** `setu add` accepts the published packages its help promises (V9-40, M113i, #479,
   0.10.0). The addable catalogue gains `view` → `view-plugin`, `localization` →
   `localization-plugin` and `idempotency` → `idempotency-plugin` (the full specifier works too), so
   the help line "The full specifier works too" is now true for the published framework packages.
@@ -630,10 +733,10 @@ All notable changes to this project are documented here. The format follows
   a project that cannot start the connector. A refusal for any other `@setu-ts/<name>` specifier
   names that the package is not one this command installs and lists the catalogue, as before.
 - **@setu-ts/cli** a CLI-owned file that is a link or a special file no longer hangs `setu generate`
-  (M113i, 0.10.0). A barrel such as `src/jobs/index.ts` committed as a link to `/dev/zero` made
-  `g job` and its `--dry-run` read forever. The CLI now reads an existing file it generates only
-  when it is a regular file under 1 MiB, and refuses the path by name otherwise.
-- **@setu-ts/cli** the schematic tables match the source (V9-62, M113i, 0.10.0). The
+  (M113i, #479, 0.10.0). A barrel such as `src/jobs/index.ts` committed as a link to `/dev/zero`
+  made `g job` and its `--dry-run` read forever. The CLI now reads an existing file it generates
+  only when it is a regular file under 1 MiB, and refuses the path by name otherwise.
+- **@setu-ts/cli** the schematic tables match the source (V9-62, M113i, #479, 0.10.0). The
   `packages/cli/README.md` table now lists `plugin` as `src/plugins/<name>.plugin.ts` (it said
   `src/plugins/<name>.ts`), its `controller` row no longer says `decorator-plugin` is required and
   names the functional and class-based shapes instead, and the class-based
@@ -641,8 +744,8 @@ All notable changes to this project are documented here. The format follows
   `query-handler` and `event-handler` are listed, with the functional `job` row naming the
   `QueuePlugin` wiring. The `docs/cli.md` and `PUBLIC_API.md` tables receive the same corrections.
 - **@setu-ts/cli** a functional `setu generate job` is wired when `QueuePlugin` is installed (V9-75,
-  M113i, 0.10.0). In a functional project with `queue-plugin`, `g job` now emits the module with its
-  existing `<SCREAMING>_JOB` and `<Pascal>JobData` plus an exported
+  M113i, #479, 0.10.0). In a functional project with `queue-plugin`, `g job` now emits the module
+  with its existing `<SCREAMING>_JOB` and `<Pascal>JobData` plus an exported
   `create<Pascal>JobProcessor(services): QueueProcessorDefinition<<Pascal>JobData>` factory and the
   managed `src/jobs/index.ts` barrel exporting `QUEUE_PROCESSORS`, and the wiring renders
   `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` —

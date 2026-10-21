@@ -425,6 +425,8 @@ export interface TemplateHost {
    * silently winning.
    */
   readonly files?: readonly GeneratedFile[];
+  /** Runtime-specific showcase files, replacing the static showcase file list. */
+  readonly filesForRuntime?: (runtime: TargetRuntime) => readonly GeneratedFile[];
   /**
    * Tasks merged into the generated `deno.json` beyond `start`.
    *

@@ -14525,7 +14525,10 @@ point, and a feature is deleted by deleting its folder.
    `dto/`). The module's own `index.ts` aggregates them; the app-level barrels do not change. This
    mirrors NestJS, whose CLI places `nest g service users/pricing` in the feature folder and
    registers it in the nearest module (the plan verifies the exact NestJS behaviour before citing
-   it).
+   it). In a class-based project the file is written and the CLI prints the
+   `@Module({ providers | controllers })` line to add — it never edits the developer-owned
+   declaration — and `route --module` is functional-only, because a class-based module has no
+   imperative registration point.
 3. **App-wide kinds stay top-level only:** `middleware`, `plugin`, `health-indicator`, `metric`,
    `migration`, the ingress kinds. One rule, stated in `docs/cli.md`: a file that belongs to one
    feature goes in the feature; an app-wide file goes in its top-level folder.
@@ -14547,10 +14550,12 @@ point, and a feature is deleted by deleting its folder.
    - **`setu generate module <name>` adds `src/modules/<name>/<name>.e2e.test.ts`,** which drives
      that module's own routes over HTTP, inside the module folder so deleting the feature deletes
      its test — per feature, which NestJS does not do.
-   - **The per-module unit test exercises behaviour, not a stub:** it imports the module through its
-     `index.ts` and asserts a contract the generated code and the developer's code both keep (a
-     route answers, a service function exists with its declared signature), so implementing the
-     service does not break it.
+   - **The per-module unit test exercises behaviour, not a stub:** it drives the module's routes
+     in-process through `createTestApp({ app: await createApp() })` — the module index is the
+     registrar the app calls, so the test exercises it by construction without importing a symbol
+     the developer may rename — and asserts a contract the generated code and the developer's code
+     both keep (a route answers, a create-then-read round trip), so implementing the service does
+     not break it.
    - The `test` and `test:e2e` scripts are separate, so the fast unit run does not need a socket.
    - **Optional follow-on, not this milestone:** a browser e2e scaffold (Playwright config plus one
      page test) for `full-stack`, behind `setu add testing --browser`.
@@ -14576,15 +14581,21 @@ point, and a feature is deleted by deleting its folder.
    - **`setu generate module <name>` emits `<name>.schemas.ts`** (create/update bodies, list query,
      `:id` params, a response shape) and its generated routes use them — the validation middleware
      (or decorators, class-based) and `schema.response` — so OpenAPI documents the module from its
-     first commit. `setu generate schema <name> --module <module>` adds another shape to a module's
-     file (or to `src/shared/schemas/` without `--module`).
-   - **A typed accessor for the validated value**, removing the cast: e.g. `validated(ctx, Schema)`
-     returning `z.infer<typeof Schema>`, or a route option that hands the handler typed
-     `{ body, query, params }`. One implementation behind both styles; the plan decides the shape
-     and which package owns it (public API, so PUBLIC_API.md in the same PR).
-   - **The plan verifies** whether `validateBody` accepts a urlencoded or multipart form body
-     (M94b's `FormBody`), so a server-rendered form validates with the same schema; if not, that is
-     a scoped follow-on, not a silent gap.
+     first commit. `setu generate schema <name> --module <module>` writes a NEW
+     `src/modules/<module>/<name>.schemas.ts` (or `src/shared/schemas/<name>.schemas.ts` without
+     `--module`); it never appends to or edits an existing file.
+   - **A typed accessor for the validated value**, removing the cast: the validator itself is the
+     reader — `const createBody = validateBody(CreateBody)` is still the middleware, and
+     `createBody.value(ctx)` returns the schema's parsed output. It throws when that validator did
+     not run on the request or its value was overwritten. Public API in `validation-plugin`, so
+     PUBLIC_API.md in the same PR.
+   - **Form bodies are folded into this milestone, opt-in per validator:**
+     `validateBody(S, { forms: true })` / `@ValidateBody(S, { forms: true })` also validates
+     urlencoded and multipart bodies (M94b's `FormBody`) with the same schema. Off by default,
+     because a form post needs no CORS preflight; an opted-in route pairs with form CSRF.
+   - **Later candidate, not this milestone:** route-schema typing — `schema: { body }` handing the
+     handler typed `{ body }`, the Fastify/Hono shape — needs `IRouterApi` generics in
+     `common`/`kernel`.
 
 **Compatibility.** Existing projects keep working unchanged: their
 `src/controllers/<name>.routes.ts` files are still scanned and wired by the controllers barrel. Only
@@ -14615,25 +14626,25 @@ follow if users ask; the second is the parked "project layout" proposal.
 
 **Deliverables**
 
-- [ ] `plans/milestone-114-feature-modules.md`, linted with `check:plan`
-- [ ] Functional `generate module` self-contained; `src/modules/index.ts` on the functional host
-- [ ] `--module <name>` for `service`, `route`, `controller` and `schemas`
-- [ ] Functional-module scanning in the name-conflict and barrel paths, with a test that fails
+- [x] `plans/milestone-114-feature-modules.md`, linted with `check:plan`
+- [x] Functional `generate module` self-contained; `src/modules/index.ts` on the functional host
+- [x] `--module <name>` for `service`, `route`, `controller` and `schemas`
+- [x] Functional-module scanning in the name-conflict and barrel paths, with a test that fails
       without it (the duplicate-route trap above)
-- [ ] `rest` sample moved to `src/modules/greeting/`; `src/shared/` documented
-- [ ] A booting e2e: scaffold, `g module`, `g service --module`, request the routes, delete the
+- [x] `rest` sample moved to `src/modules/greeting/`; `src/shared/` documented
+- [x] A booting e2e: scaffold, `g module`, `g service --module`, request the routes, delete the
       module folder and its barrel line, boot again
-- [ ] Generated `test/e2e/app.e2e.test.ts` + `test:e2e` on `setu new`, and a per-module
+- [x] Generated `test/e2e/app.e2e.test.ts` + `test:e2e` on `setu new`, and a per-module
       `<name>.e2e.test.ts` from `g module`; a CLI e2e that scaffolds, generates a module, implements
       its service with real logic, and runs BOTH generated suites green (the M104 stub-breakage
       regression), on Node, Deno and Bun
-- [ ] `<name>.schemas.ts` from `g module` with the generated routes validating and documenting
+- [x] `<name>.schemas.ts` from `g module` with the generated routes validating and documenting
       through it; `g schema`; the typed validated-value accessor with a test that fails if the cast
       comes back; an e2e asserting the module's routes appear in `/openapi.json` with their schemas
-- [ ] `docs/cli.md` (including "Where request and response shapes live" and the row-type rule),
+- [x] `docs/cli.md` (including "Where request and response shapes live" and the row-type rule),
       `docs/migration-nestjs.md` (`dto/` → `<name>.schemas.ts`), `docs/decorators.md`, CLI README,
       CHANGELOG migration note
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `114`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `114`
 
 ---
 
@@ -15098,6 +15109,6 @@ patch by construction and gains nothing new here.
 | 113m      | ✅     | scheduler-plugin + auth-plugin — time the framework does not honour; PR #471                                                                                                                                                                                                              |
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |
-| 114       | ⬜     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
+| 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ⬜     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |

@@ -279,7 +279,9 @@ describe('runGenerateCommand', () => {
     it('allows a functional module when decorators are absent', async () => {
       const h = harness();
       expect(await h.run(['module', 'widget'])).toBe(0);
-      expect(h.fs.read('/app/src/controllers/widget.routes.ts')).toContain('registerWidgetRoutes');
+      expect(h.fs.read('/app/src/modules/widget/widget.routes.ts')).toContain(
+        'registerWidgetRoutes',
+      );
     });
 
     // A schematic with no honest alternative must print nothing extra —

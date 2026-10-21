@@ -1040,12 +1040,13 @@ app.router.post('/users', {
 
 ### Validation Middleware Helpers
 
-The helpers resolve `IValidationService` from the request context automatically. Validated values
-are stored in `ctx.state` under `validatedStateKey(target)`.
+The helpers resolve `IValidationService` from the request context automatically. The five
+`validateXxx` helpers and `createValidationMiddleware` return
+`ValidatorMiddleware<ValidatedOutput<S>>` — a `MiddlewareFunction` (so every existing call site
+type-checks unchanged) with one added member, `value(ctx)`:
 
 ```typescript
 import { z } from 'zod';
-import { validatedStateKey } from '@setu-ts/common';
 import {
   validateBody,
   validateCookies,
@@ -1054,23 +1055,35 @@ import {
   validateQuery,
 } from '@setu-ts/validation-plugin';
 
+const listQuery = validateQuery(ListUsersQuerySchema);
+const userIdParams = validateParams(z.object({ id: z.string().uuid() }));
+const updateBody = validateBody(UpdateUserSchema);
+
 app.router.get('/users', {
-  middleware: [validateQuery(ListUsersQuerySchema)],
+  middleware: [listQuery],
   handler: async (ctx) => {
-    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>(validatedStateKey('query'));
-    // query is validated
+    const query = listQuery.value(ctx); // ValidatedOutput<typeof ListUsersQuerySchema>
   },
 });
 
 app.router.put('/users/:id', {
-  middleware: [validateParams(z.object({ id: z.string().uuid() })), validateBody(UpdateUserSchema)],
+  middleware: [userIdParams, updateBody],
   handler: async (ctx) => {
-    const params = ctx.state.get(validatedStateKey('params'));
-    const body = ctx.state.get(validatedStateKey('body'));
-    // both are validated
+    const params = userIdParams.value(ctx);
+    const body = updateBody.value(ctx);
+    // both are validated and typed by their schemas
   },
 });
 ```
+
+`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — for Zod
+3 and 4 alike, inferred from the schema you pass, so the type follows the schema instead of being
+restated (or cast) in the handler. `value(ctx)` returns the stored value only when that validator
+ran on the request; it throws a `TypeError` naming the target otherwise — when the validator is not
+in the route's chain, or a later validator for the same target overwrote it. Validated values are
+still stored in `ctx.state` under `validatedStateKey(target)` — the wire format is unchanged, and
+the `@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it — so the old
+`ctx.state.get(validatedStateKey('body'))` read still works.
 
 ### Using the Service's middleware() Method
 
@@ -1085,6 +1098,40 @@ app.router.post('/users', (ctx, next) => {
   return validation.middleware(CreateUserSchema, 'body')(ctx, next);
 });
 ```
+
+### Form body validation
+
+`validateBody(schema, { forms: true })` and `@ValidateBody(schema, { forms: true })` also validate
+`application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they
+validate a JSON body with. Off by default: a cross-site HTML `<form>` reaches a route that accepts
+forms with no CORS preflight, so pair an opted-in route with form CSRF protection
+(`csrfFormMiddleware` from `@setu-ts/session-plugin`). Without the option a form body answers `415`
+"Unsupported Media Type". The option is `ValidationMiddlewareOptions` in `@setu-ts/common`, the
+optional third parameter of `IValidationService.middleware`, and has no effect on any target but
+`body`. With it, a server-rendered `<form>` post validates against the schema a JSON client passes
+and reads back through `value(ctx)`.
+
+The first-party validation service requires `application/json` or any `application/*+json` media
+type, ignoring case and parameters, or a recognised form type when forms are enabled. Unsupported
+types, including `text/plain` and an absent header, answer `415` before any body read, through the
+application's error responder. Clients must send `Content-Type: application/json` for JSON,
+including on an empty body-validated request. Routes reading `ctx.request.json()` directly are
+unchanged; replacement `IValidationService` implementations own their media-type handling.
+Cookie-authenticated routes still need `csrfMiddleware` or `csrfFormMiddleware`. The 415 takes the
+error responder's format, while a `400` validation failure takes
+`ValidationPlugin({ errorFormat })`, so set both to the same format; the CLI templates set both to
+`'rfc9457'`.
+
+The form is converted to a record before validation: a field sent once is a single value, a repeated
+field becomes an array of its values in wire order, and a name ending `[]` is always an array (kept
+under the name as written). Values are strings or the framework's `FormFile` — NOT a web `File`, so
+`z.instanceof(File)` refuses a file part and a schema checks the `FormFile` shape instead; numbers
+and booleans arrive as strings, so schemas use `z.coerce` for them. A form that carries the session
+plugin's `_csrf` field reaches the schema, where a Zod object strips the unknown key by default and
+`forbidNonWhitelisted` (or the schema's own `.strict()`) refuses it. A body the runtime refuses for
+size (`RuntimePlugin({ maxBodyBytes })`) answers `413` — on a validated route it used to answer
+`400` — and a form body that cannot be parsed answers the same `400` a malformed body does. The
+generated OpenAPI document still describes a validated body as `application/json`.
 
 ### Sanitization
 
@@ -9885,6 +9932,8 @@ setu db:migrate up 3                           # runs a plugin-registered comman
 
 # Generate code
 setu generate module orders                    # functional by default; class output with decorator-plugin
+setu generate schema create-user               # requires @setu-ts/validation-plugin
+setu generate service pricing --module users   # place a feature file inside an existing module
 setu generate plugin my-plugin
 setu generate controller user-profile
 setu generate service user-profile
@@ -9922,6 +9971,7 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--port <n>`                                    | `new --workspace`, `generate app`, `adopt`  | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--env-file <path>`                             | `new`, `generate app`                       | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a development value in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                   |
 | `--depends-on <member>`                         | `generate app`                              | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`. Duplicate or missing names are usage errors, as is using it anywhere but `generate app`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `--module <name>`                               | `generate`                                  | Place a `service`, `route`, `controller` or `schema` inside the named feature module, instead of the top-level folder. The name must be a module already admitted by the project's style, else the refusal lists the admitted modules. Functional: the file lands in `src/modules/<name>/` and the module's CLI-owned `index.ts` is regenerated to register it; a module-scoped route or controller mounts at `/<module>/<name>`. Class-based: the file is written and the `@Module({ providers \| controllers })` line to add is printed — the developer-owned declaration is never edited — and a module-scoped service registers under the token `<module>-<name>-service`. `route --module` is functional-only (a class-based module has no imperative registration point); every other schematic is app-wide and refuses the flag.                                                                                                                                                                                                   |
 | `--devtool`                                     | `new`, `generate app`                       | Opts the project (or member) into the local diagnostics connector: emits a `main.dev.ts` development entry the production graph never imports, adds `dev` and `check` tasks, and — for a workspace member — records a `devtoolPort`. Refused by name on a non-Deno runtime, on a starter-composed template (kernel diagnostics must be enabled at construction), and, for `--devtool-port`, when the port is already used. The generated entry reads `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` from the environment and refuses to start without a valid pair; it never generates, writes or prints one. In a workspace the launcher also sets `SETU_DEVTOOL_MEMBER` to the member it is inspecting, and the generated `scripts/dev.ts` forwards all three to that member's child alone, blanking them for every sibling. **All three names are published CLI surface**: renaming one is a breaking change to every scaffolded project, and the root workspace `dev` task's `--allow-env` grant is scoped to exactly them. |
 | `--devtool-port <n>`                            | `new`, `generate app`, `devtool enable`     | The IPv4 loopback port the connector binds. Range-checked like `--port`; refused when it equals any member's application or devtool port. Absent, it is allocated in a workspace and probes 4919 through 5019 standalone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `--transport <name>`                            | `new --workspace`                           | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -10357,8 +10407,10 @@ hand-written work.
 
 The managed files are the CLI-owned **seam barrels** — one `index.ts` per generated family
 (`src/modules/`, `src/controllers/`, `src/services/`, `src/middleware/`, `src/plugins/`,
-`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). The development-only source policy
-`src/devtool/diagnostics.ts` is also CLI-managed. No flag can make an arbitrary path managed.
+`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`) — and each functional module's own
+`src/modules/<name>/index.ts`, which `setu generate module` and `setu generate … --module <name>`
+regenerate. The development-only source policy `src/devtool/diagnostics.ts` is also CLI-managed. No
+flag can make an arbitrary path managed.
 
 ### Generated code is wired
 
@@ -10367,24 +10419,25 @@ schematic emits its artifact plus its family's seam barrel; the barrel is regene
 its directory, and the scaffolded `setu.config.ts` already imports it. Some artifacts have no
 registration site, and the reason is recorded rather than left to discovery.
 
-| Schematic          | Emitted at                                                                                                                          | Registration site                                                                                                                               |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `module`           | `src/modules/<name>/`                                                                                                               | `DecoratorPlugin({ controllers, services })` via `MODULE_*`                                                                                     |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                                              | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS`                                                                                        |
-| `service`          | `src/services/<name>.service.ts`                                                                                                    | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below                                                                                  |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                                                  | `registerGeneratedRoutes(app.router, app.services)` in `createApp()`                                                                            |
-| `sse`              | `src/controllers/<name>.controller.ts`, plus `src/hooks/use-<name>.ts` ONLY when `react-router-plugin` and `sdk` are both installed | HTTP registrar; the hook, when emitted, remains application-local                                                                               |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                               | `...GENERATED_PLUGINS` in `createApplication({ plugins })`; class-based: `DecoratorPlugin({ ingress })`                                         |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                               | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                                                                                           |
-| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`                                                                                      |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                    | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`                                                                                          |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                      | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`                                                                                         |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                  | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                      | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                    |
-| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                    | `EventsPlugin({ handlers: EVENT_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                       |
-| `guard`            | `src/guards/<name>.guard.ts`                                                                                                        | **None** — per route, by design (see below)                                                                                                     |
-| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                                                          | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })` |
-| `migration`        | `src/migrations/<stamp>-<name>.ts`                                                                                                  | **None** — the framework ships no migration runner                                                                                              |
+| Schematic          | Emitted at                                                                                                                          | Registration site                                                                                                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `module`           | `src/modules/<name>/` (no file in the controllers folder)                                                                           | `DecoratorPlugin({ modules })` via `MODULES` (class mode); `registerModules(app.router, app.services)` from `src/modules/index.ts` (functional mode) |
+| `controller`       | `src/controllers/<name>.controller.ts`; `src/modules/<module>/` with `--module`                                                     | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS` (class mode); the module's `index.ts` (functional mode)                                     |
+| `service`          | `src/services/<name>.service.ts`; `src/modules/<module>/` with `--module`                                                           | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below                                                                                       |
+| `route`            | `src/controllers/<name>.routes.ts`; `src/modules/<module>/` with `--module` (functional mode)                                       | `registerGeneratedRoutes(app.router, app.services)` in `createApp()`, or the module's `index.ts` (functional mode)                                   |
+| `schema`           | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/<name>.schemas.ts` with `--module`                                    | Nothing — the feature that uses it imports it                                                                                                        |
+| `sse`              | `src/controllers/<name>.controller.ts`, plus `src/hooks/use-<name>.ts` ONLY when `react-router-plugin` and `sdk` are both installed | HTTP registrar; the hook, when emitted, remains application-local                                                                                    |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                               | `...GENERATED_PLUGINS` in `createApplication({ plugins })`; class-based: `DecoratorPlugin({ ingress })`                                              |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                               | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                                                                                                |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`                                                                                           |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                    | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`                                                                                               |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                      | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`                                                                                              |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                  | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                     |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                      | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                         |
+| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                    | `EventsPlugin({ handlers: EVENT_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                            |
+| `guard`            | `src/guards/<name>.guard.ts`                                                                                                        | **None** — per route, by design (see below)                                                                                                          |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                                                          | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })`      |
+| `migration`        | `src/migrations/<stamp>-<name>.ts`                                                                                                  | **None** — the framework ships no migration runner                                                                                                   |
 
 Registration details for artifacts with conditional or per-route wiring:
 
@@ -10418,8 +10471,11 @@ broken:
 - **`service` and `module`** both register `@Injectable({ token: '<name>-service' })`. The decorator
   plugin keeps the first class registered under a token, so the wrong service would be injected.
 
-Both checks apply only when `decorator-plugin` is installed, since neither collision can exist
-without it. A repeat generate of the _same_ schematic is the ordinary overwrite refusal instead.
+The first check runs in every style — functional modules are scanned in the name-conflict path, so a
+`route` beside a module of the same name is refused in a functional project too, where the two files
+no longer share a path. The second applies only when `decorator-plugin` is installed, since that
+token collision cannot exist without it. A repeat generate of the _same_ schematic is the ordinary
+overwrite refusal instead.
 
 A project scaffolded before a seam existed has no import of its barrel. Each barrel's header states
 the exact lines to add to `setu.config.ts`; add them once and every later generate is wired. The
@@ -10465,25 +10521,34 @@ by whether `@setu-ts/decorator-plugin` is installed.
 Functional (the default composition):
 
 ```
-src/modules/<name>/<name>.service.ts        export function list<Name>()
-src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
-src/modules/<name>/index.ts                 the module's own re-exports
-src/controllers/<name>.routes.ts            register<Name>Routes — GET / and POST / (201)
-src/controllers/index.ts                    the HTTP barrel       (managed — regenerated)
+src/modules/<name>/<name>.service.ts        in-memory `Map` store — replace with a repository
+src/modules/<name>/<name>.routes.ts         register<Name>Routes — GET /, GET /:id, POST / (201), PATCH /:id
+src/modules/<name>/<name>.schemas.ts        one Zod value and a `z.infer` type per shape (with `validation-plugin`)
+src/modules/<name>/index.ts                 CLI-owned, regenerated — exports `register<Name>Module(router, services?)` and nothing else
+src/modules/<name>/<name>.test.ts           in-process contract test (socket targets only)
+src/modules/<name>/<name>.e2e.test.ts       real-HTTP contract test (socket targets only)
+src/modules/index.ts                        the activation barrel (managed — regenerated)
 ```
 
-The route module registers through the same seam `setu generate route` uses, so the module answers
-`GET /<name>` and `POST /<name>` with no edit to `setu.config.ts`. Because both write
-`src/controllers/<name>.routes.ts`, a `route` and a `module` sharing one name is refused by the
-ordinary overwrite check.
+The module registers through `registerModules(app.router, app.services)` in `setu.config.ts` — wired
+from scaffold time on every functional host, and printed to add (import line and call) on a project
+scaffolded before the call existed — so the module answers `GET /<name>`, `GET /<name>/:id`,
+`POST /<name>` and `PATCH /<name>/:id` with no edit to `setu.config.ts`. `setu generate module`
+writes nothing under `src/controllers/` any more, and a `route` and a `module` sharing one name is
+refused before anything is written, because functional modules are scanned in the name-conflict
+path. A pre-M114 functional module (service and index, no `<name>.routes.ts`) is neither admitted
+nor reported by the module scan: its routes stay wired through the `src/controllers/index.ts`
+barrel.
 
 Class-based (`--template class-based`, or any project holding `decorator-plugin`):
 
 ```
 src/modules/<name>/<name>.service.ts        @Injectable, token '<name>-service'
 src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), class-level @Inject, @Params(…, Ctx())
-src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
-src/modules/<name>/index.ts                 the module's own re-exports
+src/modules/<name>/<name>.module.ts         @Module({ controllers, providers }) — application-owned; never rewritten
+src/modules/<name>/<name>.schemas.ts        one Zod value and a `z.infer` type per shape (with `validation-plugin`)
+src/modules/<name>/<name>.test.ts           in-process contract test (socket targets only)
+src/modules/<name>/<name>.e2e.test.ts       real-HTTP contract test (socket targets only)
 src/modules/index.ts                        the aggregate barrel  (managed — regenerated)
 ```
 
@@ -10500,17 +10565,27 @@ DecoratorPlugin({ controllers: [...MODULE_CONTROLLERS], services: [...MODULE_SER
 So generating a module changes only files the CLI owns. Regenerating over an existing module still
 refuses on that module's own files; the barrel is rewritten either way and lists each module once.
 
-A project scaffolded before this schematic existed has no barrel import — add the two lines above to
-its `setu.config.ts` once, and every later `setu g module` is wired automatically.
+A project scaffolded before this schematic existed has no barrel import: in class mode, add the two
+lines above to `setu.config.ts` once; in functional mode, `setu g module` prints the
+`registerModules` import and call to add. Every later `setu g module` is then wired automatically.
 `--template full-stack` is deliberately not a host: its layering is `routes → features → services`
 and it has no `src/modules/` concept.
+
+`--module <name>` places a `service`, `route` (functional only), `controller` or `schema` inside an
+admitted module: in functional mode the file lands in `src/modules/<name>/` and the module's
+CLI-owned `index.ts` is regenerated to register it, with a module-scoped route or controller
+mounting at `/<module>/<name>`; in class-based mode the file is written and the
+`@Module({ providers | controllers })` line to add is printed — the declaration is never edited —
+and a module-scoped service registers under the token `<module>-<name>-service`.
 
 A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
 setup — as a `deno.json` import on Deno and Cloudflare Workers. Node and Bun declare neither: their
 emitted test uses the built-in `node:test` and `bun:test`, because `@std/testing/bdd` calls
-`Deno.test`. Only a directory holding both `<name>.controller.ts` and `<name>.service.ts` is treated
-as a module, so unrelated folders under `src/modules/` (a shared-helpers directory, say) are left
-out of the barrel rather than breaking it.
+`Deno.test`. A directory is admitted as a module only in the project's style — class-based: it holds
+`<name>.controller.ts`, `<name>.service.ts` and `<name>.module.ts`; functional: it holds
+`<name>.routes.ts` and an `index.ts` exporting `register<Name>Module` — so unrelated folders under
+`src/modules/` (a shared-helpers directory, say) are left out of the barrel rather than breaking it,
+and an admitted-shape directory missing its registrar is skipped and reported.
 
 The emitted controller's handlers take **only the arguments their `@Params(...)` names** and return
 plain values, which the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a
@@ -10714,31 +10789,37 @@ export function schematic(
 `DerivedNames` carries `raw`, `kebab`, `camel`, `pascal`, and `screaming`. `SchematicOptions`
 carries the target `runtime`, the detected `plugins` set, `now()` — an injected clock, so
 timestamped output stays deterministic — and `modules?`, the domain modules already present under
-`src/modules/`. Schematics perform no I/O; the command layer gathers the project state they need and
-writes what they return, which is what makes `--dry-run` exact.
+`src/modules/`. With `--module`, it also carries `targetModule?` — the admitted feature module
+receiving a `service`, `controller`, `route` or `schema` — and `moduleArtifacts?`, the registrars
+already present inside that module (the per-module counterpart of `artifacts?`), which the `route`
+and `controller` schematics read to regenerate the module's `index.ts`. Schematics perform no I/O;
+the command layer gathers the project state they need and writes what they return, which is what
+makes `--dry-run` exact.
 
 `modules` is optional so that a harness written before it existed still compiles; `setu generate`
-always supplies it. `GeneratedFile` carries an optional `managed` flag — see "Overwrite protection".
+always supplies it. `targetModule` and `moduleArtifacts` are optional for the same
+published-interface reason, and are supplied only when `--module` names an admitted module.
+`GeneratedFile` carries an optional `managed` flag — see "Overwrite protection".
 
 ### Programmatic API
 
-| Export             | Kind      | Purpose                                                                               |
-| ------------------ | --------- | ------------------------------------------------------------------------------------- |
-| `runCli`           | function  | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                       |
-| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting and interruption. |
-| `deriveNames`      | function  | Produces the five naming forms every schematic uses.                                  |
-| `DerivedNames`     | type      | The result of `deriveNames`.                                                          |
-| `GeneratedFile`    | type      | `{ path, contents, managed? }` — one file a schematic asks to create.                 |
-| `Schematic`        | type      | `(names, options) => readonly GeneratedFile[]`.                                       |
-| `SchematicOptions` | type      | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`).       |
-| `PROGRAM_NAME`     | const     | `'setu'` — interpolated into every usage string.                                      |
-| `TemplateName`     | type      | The `--template` value union, for callers building argv programmatically.             |
-| `ModuleLoader`     | type      | The seam a custom schematic module is loaded through.                                 |
-| `AppLoader`        | type      | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).              |
-| `PromptChoice`     | interface | One value and label offered by a `Prompter`.                                          |
-| `Prompter`         | interface | Programmatic interactive-question seam.                                               |
-| `PromptSelection`  | type      | Answer, unavailable input, or user cancellation.                                      |
-| `detectPlugins`    | function  | Reads a project manifest and returns the installed `@setu-ts` names.                  |
+| Export             | Kind      | Purpose                                                                                                                                                  |
+| ------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runCli`           | function  | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                                                                                          |
+| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting and interruption.                                                                    |
+| `deriveNames`      | function  | Produces the five naming forms every schematic uses.                                                                                                     |
+| `DerivedNames`     | type      | The result of `deriveNames`.                                                                                                                             |
+| `GeneratedFile`    | type      | `{ path, contents, managed? }` — one file a schematic asks to create.                                                                                    |
+| `Schematic`        | type      | `(names, options) => readonly GeneratedFile[]`.                                                                                                          |
+| `SchematicOptions` | type      | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`, and with `--module` the optional `targetModule?` and `moduleArtifacts?`). |
+| `PROGRAM_NAME`     | const     | `'setu'` — interpolated into every usage string.                                                                                                         |
+| `TemplateName`     | type      | The `--template` value union, for callers building argv programmatically.                                                                                |
+| `ModuleLoader`     | type      | The seam a custom schematic module is loaded through.                                                                                                    |
+| `AppLoader`        | type      | The seam `setu.config.ts` is loaded through (`CliDependencies.loadApp`).                                                                                 |
+| `PromptChoice`     | interface | One value and label offered by a `Prompter`.                                                                                                             |
+| `Prompter`         | interface | Programmatic interactive-question seam.                                                                                                                  |
+| `PromptSelection`  | type      | Answer, unavailable input, or user cancellation.                                                                                                         |
+| `detectPlugins`    | function  | Reads a project manifest and returns the installed `@setu-ts` names.                                                                                     |
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
 `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is

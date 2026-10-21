@@ -70,6 +70,7 @@ export type TemplateName = (typeof TEMPLATES)[number];
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'dir',
   'runtime',
+  'module',
   'template',
   'style',
   'config',

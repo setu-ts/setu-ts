@@ -68,6 +68,11 @@ export interface RouteSchemaMetadata {
   query?: unknown;
   /** Path parameter schema. */
   params?: unknown;
+  /**
+   * `true` when `@ValidateBody(schema, { forms: true })` opted the body
+   * validator into urlencoded and multipart bodies; absent otherwise.
+   */
+  bodyForms?: boolean;
 }
 
 /**

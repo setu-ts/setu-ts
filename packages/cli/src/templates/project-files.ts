@@ -33,7 +33,13 @@ import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
-import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
+import {
+  renderEquals,
+  testHarnessFor,
+  renderTestServer,
+  renderAppE2e,
+} from '../schematics/test-harness.ts';
+import { renderFunctionalModuleBarrel, REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
 import { frameworkSpecifier } from './framework-specifier.ts';
 import {
   NPM_TOOLING_DEV_DEPENDENCIES,
@@ -195,6 +201,16 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
     (s) => s.requiresPlugin === undefined || !swap?.removePackages.includes(s.requiresPlugin),
   );
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
+  const functional = !swapped.some((plugin) => plugin.pkg === 'decorator-plugin');
+  const setupCalls = [...(host.setupCalls ?? []), ...seamSetupCalls(seams)];
+  if (functional) {
+    const afterRoutes = setupCalls.findIndex((call) => call.startsWith('registerGeneratedRoutes('));
+    setupCalls.splice(
+      afterRoutes < 0 ? setupCalls.length : afterRoutes + 1,
+      0,
+      `${REGISTER_MODULES_EXPORT}(app.router, app.services);`,
+    );
+  }
   // Workers receive configuration exclusively through their request bindings.
   // Leaving an env-file path in the manifest would make ConfigPlugin require a
   // filesystem that the Workers runtime deliberately does not provide. Nor can
@@ -211,15 +227,29 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
     entryReExports: swap?.entryReExports ?? [],
     wranglerToml: swap?.wranglerToml ?? '',
     middleware: host.middleware,
-    localImports: [...(host.localImports ?? []), ...seamLocalImports(seams)],
+    localImports: [
+      ...(host.localImports ?? []),
+      ...seamLocalImports(seams),
+      ...(functional
+        ? [{ symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' }]
+        : []),
+    ],
     packageImports: host.packageImports ?? [],
     files: [
-      ...(host.files ?? []),
+      ...(host.filesForRuntime?.(runtime) ?? host.files ?? []),
       ...seamFiles(seams, host.seamArtifacts ?? {}),
       ...(swap?.files ?? []),
+      ...(functional
+        ? [
+            {
+              path: 'src/modules/index.ts',
+              contents: renderFunctionalModuleBarrel(host.seamArtifacts?.['modules'] ?? []),
+            },
+          ]
+        : []),
     ],
     pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
-    setupCalls: [...(host.setupCalls ?? []), ...seamSetupCalls(seams)],
+    setupCalls,
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     extraDependencies: {},
@@ -1208,12 +1238,16 @@ function denoTasks(
       : `deno run ${denoPermissions(manifest)} ${entry}`;
 
   // A3: every template emits a `test` task now. `setu generate module` writes a
-  // `*.service.test.ts`, and NO template declared a task that runs it — so the
+  // `<name>.test.ts`, and NO template declared a task that runs it — so the
   // generated test sat beside the generated service, unreachable from
   // `deno check main.ts setu.config.ts`, and both stayed broken through a full
   // green run of every gate a developer had.
   const test = {
-    test: runtime === 'cloudflare-workers' ? 'deno test -A --permit-no-files' : 'deno test -A',
+    test:
+      runtime === 'cloudflare-workers'
+        ? 'deno test -A --permit-no-files'
+        : "deno test -A --ignore='**/*.e2e.test.ts'",
+    ...(runtime === 'cloudflare-workers' ? {} : { 'test:e2e': "deno test -A '**/*.e2e.test.ts'" }),
   };
 
   if (manifest?.npmBuild === undefined) {
@@ -1233,6 +1267,9 @@ function denoTasks(
     // build, so a fresh project's first `deno task test` needs it as much as
     // `start` does — without it the test fails on a missing build (V8-39).
     test: `deno task build && ${test.test}`,
+    ...(test['test:e2e'] === undefined
+      ? {}
+      : { 'test:e2e': `deno task build && ${test['test:e2e']}` }),
     // The development entry runs Vite in-process and needs it installed, but
     // not the production build: Vite serves the route modules itself.
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
@@ -1519,11 +1556,15 @@ function denoCompilerOptions(
 function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record<string, string> {
   const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
   // A3 applies to every target, not just the Deno ones: `setu generate module`
-  // emits a `*.service.test.ts` here too, and before this nothing could run it.
+  // emits a `<name>.test.ts` here too, and before this nothing could run it.
   // Each runtime's own runner, matching the harness the schematic emits — `bun
   // test` for `bun:test`, and `node --test` under the same loader `start` uses,
   // since the generated test is TypeScript.
-  const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
+  const test =
+    runtime === 'bun'
+      ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
+      : `${NODE_RUNNER} --test '**/!(*.e2e).test.ts'`;
+  const e2e = runtime === 'bun' ? 'bun test .e2e.test' : `${NODE_RUNNER} --test '**/*.e2e.test.ts'`;
   // With a frontend build both scripts boot an app that loads the server
   // bundle, so both build first, as the Deno `start` and `test` tasks do. A
   // `start` without it is what the next-step hint and the README tell a new
@@ -1534,11 +1575,12 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
   const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
   const devEntry = manifest?.npmBuild?.devEntry;
   return manifest?.npmBuild === undefined
-    ? { start, test }
+    ? { start, test, 'test:e2e': e2e }
     : {
         build: manifest.npmBuild.script,
         start: `${build} && ${start}`,
         test: `${build} && ${test}`,
+        'test:e2e': `${build} && ${e2e}`,
         // No build first: Vite serves the route modules itself in development.
         ...(devEntry === undefined
           ? {}
@@ -1921,6 +1963,20 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
       contents: `${readme}\n## Testing\n\nThe application needs the platform environment to boot. No smoke test is emitted here;\n\`deno task test\` permits an empty suite until you add platform-aware tests.\n`,
     };
   } else {
+    files.push(
+      { path: 'test/support/server.ts', managed: true, contents: renderTestServer() },
+      {
+        path: 'test/e2e/app.e2e.test.ts',
+        contents: renderAppE2e(runtime, [
+          ...(host.appFactory !== undefined || host.plugins.some((p) => p.pkg === 'health-plugin')
+            ? ['/health', '/ready']
+            : ['/']),
+          ...host.routes
+            .filter((route) => route.path.startsWith('/greetings'))
+            .map((route) => route.path.replace(':name', 'Setu')),
+        ]),
+      },
+    );
     const hasAppFactory = host.appFactory !== undefined;
     const path =
       hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin') ? '/health' : '/';

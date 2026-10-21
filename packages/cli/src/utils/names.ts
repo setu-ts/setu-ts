@@ -71,6 +71,17 @@ export function deriveNames(raw: string): DerivedNames {
 }
 
 /**
+ * Reports whether a disk name can enter generated imports without normalization.
+ *
+ * @param name - The existing artifact or module's base name
+ * @returns Whether the name is already kebab-case and derives safe identifiers
+ */
+export function isKebabIdentifier(name: string): boolean {
+  const names = deriveNames(name);
+  return names.kebab === name && isIdentifierSafe(names);
+}
+
+/**
  * Reports whether these names are safe to use as both a TypeScript identifier
  * and a single filesystem path segment.
  *
