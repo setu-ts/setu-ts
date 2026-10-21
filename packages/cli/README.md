@@ -147,12 +147,12 @@ setu new my-app --agents # scaffold, then write the brief
 `setu agents` writes a framework-owned section between `<!-- setu-agents:begin -->` and
 `<!-- setu-agents:end -->` in `AGENTS.md`, regenerated from the project's installed packages, style,
 runtime and scripts; everything outside the markers is never touched. In a workspace it writes the
-root file and every member's `apps/<name>/AGENTS.md`, from any directory inside the workspace. The
-brief points each installed package at its `AGENT_CARD.md`, which every published library package
-ships in its npm tarball, so a normal install delivers it. `setu agents --check` is the CI step.
-After a successful `setu add` the CLI prints a reminder to run `agents` through the project's pinned
-CLI invocation (for example `npx @setu-ts/cli@<version> agents`) when the project already has a
-sectioned brief.
+root file and every member's `apps/<name>/AGENTS.md`, run from the root or from a member's own
+directory. The brief points each installed package at its `AGENT_CARD.md`, which every published
+library package ships in its npm tarball, so a normal install delivers it. `setu agents --check` is
+the CI step. After a successful `setu add` the CLI prints a reminder to run `agents` through the
+project's pinned CLI invocation (for example `npx @setu-ts/cli@<version> agents`) when the project
+already has a sectioned brief.
 
 The full behavior is in
 [the CLI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#agent-briefs-setu-agents).

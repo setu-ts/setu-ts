@@ -6,7 +6,7 @@ import { gatherFacts, type ProjectFacts } from '../agents/facts.ts';
 import { renderBrief, renderWorkspaceRoot } from '../agents/render.ts';
 import { briefSection, spliceBrief } from '../agents/brief-file.ts';
 import { cardWarnings } from '../agents/card-presence.ts';
-import { detectProject, findWorkspaceMarker } from '../utils/project-detector.ts';
+import { detectProject } from '../utils/project-detector.ts';
 import {
   dirName,
   joinPath,
@@ -18,7 +18,12 @@ import {
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
-import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
+import {
+  readWorkspaceManifest,
+  WORKSPACE_MANIFEST,
+  MEMBERS_DIR,
+  type WorkspaceManifest,
+} from '../workspace/manifest.ts';
 
 /** The same dependencies used when new invokes this writer after scaffolding. */
 export interface IAgentsDependencies {
@@ -31,6 +36,21 @@ export interface IAgentsDependencies {
 
 async function existingBrief(fs: IFileSystem, path: string): Promise<string> {
   return (await readExistingText(fs, path)) ?? '';
+}
+
+async function agentWorkspace(
+  fs: IFileSystem,
+  dir: string,
+): Promise<WorkspaceManifest | undefined> {
+  // Keep the canonical parser, but give it the bounded, regular-file-only reader.
+  const read = await readWorkspaceManifest(
+    {
+      ...fs,
+      readFile: async (path) => new TextEncoder().encode(await readExistingText(fs, path)),
+    },
+    dir,
+  );
+  return read.ok ? read.manifest : undefined;
 }
 
 /** Render all affected files before touching any of them. */
@@ -55,33 +75,40 @@ export async function runAgentsCommand(
   }
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   try {
-    // The marker helper classifies one directory. Walk parents to give every
-    // invocation inside a workspace the same root and complete member set.
+    // Like installSearchDirs, only a manifest listing this exact project can
+    // authorize adopting an ancestor. No other ancestor manifest is inspected.
     let root = dir;
     let workspaceRoot: string | undefined;
+    let workspace: WorkspaceManifest | undefined;
+    const slashes = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
     for (let current = dir; ; current = dirName(current)) {
-      if ((await findWorkspaceMarker(deps.fs, current)) !== undefined) {
+      const candidate = await agentWorkspace(deps.fs, current);
+      if (
+        candidate !== undefined &&
+        (current === dir ||
+          candidate.members.some(
+            (member) => slashes(joinPath(current, MEMBERS_DIR, member.name)) === slashes(dir),
+          ))
+      ) {
         workspaceRoot = current;
+        workspace = candidate;
         break;
       }
       if (dirName(current) === current || dirName(current) === '') break;
     }
     const briefs: { dir: string; section: string; facts?: ProjectFacts }[] = [];
-    if (workspaceRoot !== undefined) {
+    if (workspaceRoot !== undefined && workspace !== undefined) {
       root = workspaceRoot;
-      const workspace = await readWorkspaceManifest(deps.fs, root);
-      if (!workspace.ok)
-        throw new Error(
-          `Cannot read ${joinPath(root, WORKSPACE_MANIFEST)}: ${workspace.problem.kind}`,
-        );
-      briefs.push({ dir: root, section: renderWorkspaceRoot(workspace.manifest, VERSION) });
-      for (const member of workspace.manifest.members) {
+      briefs.push({ dir: root, section: renderWorkspaceRoot(workspace, VERSION) });
+      for (const member of workspace.members) {
         const memberDir = joinPath(root, 'apps', member.name);
         const facts = await gatherFacts(deps.fs, memberDir);
         briefs.push({ dir: memberDir, section: renderBrief(facts, true), facts });
       }
     } else {
       const project = await detectProject(deps.fs, dir);
+      if (project.kind === 'workspace-root')
+        throw new Error(`Cannot read ${joinPath(dir, WORKSPACE_MANIFEST)}: invalid workspace`);
       if (project.kind === 'none') {
         deps.error(
           `${escapeName(dir)} holds no Setu-TS project manifest; run inside a project or pass --dir.`,
@@ -130,7 +157,7 @@ export async function runAgentsCommand(
         brief.facts.installed,
         workspaceRoot,
       ))
-        deps.error(warning);
+        deps.error(escapeName(warning));
     }
     return EXIT_OK;
   } catch (cause) {

@@ -4,6 +4,7 @@ import { joinPath, MAX_EXISTING_FILE_BYTES, readExistingText } from '../utils/fi
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { TOOLING_PACKAGES } from './package-data.ts';
+import { isAgentPackageName } from './package-name.ts';
 
 /**
  * A special or overlarge file is treated as absent (the CLI will not open it),
@@ -49,7 +50,11 @@ export async function cardWarnings(
   }
   if (!modules) {
     const yarn = await optionalText(fs, joinPath(dir, '.yarnrc.yml'));
-    const linker = /^\s*nodeLinker\s*:\s*['"]?([\w-]+)/m.exec(yarn ?? '')?.[1];
+    let linker: string | undefined;
+    for (const line of (yarn ?? '').split(/\r\n|[\n\r]/)) {
+      linker = /^\s*nodeLinker\s*:\s*['"]?([\w-]+)/.exec(line)?.[1];
+      if (linker !== undefined) break;
+    }
     if (
       linker === 'pnp' ||
       (linker === undefined && (await exists(fs, joinPath(dir, '.pnp.cjs'))))
@@ -71,7 +76,7 @@ export async function cardWarnings(
   }
   const warnings: string[] = [];
   for (const pkg of [...installed].sort()) {
-    if (TOOLING_PACKAGES.has(pkg)) continue;
+    if (!isAgentPackageName(pkg) || TOOLING_PACKAGES.has(pkg)) continue;
     const path = `node_modules/@setu-ts/${pkg}/AGENT_CARD.md`;
     let found = false;
     for (const location of locations) {

@@ -28,6 +28,113 @@ function harness(
 }
 
 describe('setu agents', () => {
+  const workspaceText = JSON.stringify({
+    version: 1,
+    basePort: 3000,
+    runtime: 'node',
+    transport: 'http',
+    members: [{ name: 'a', port: 3000 }],
+  });
+  it.each(['agents', 'new'])(
+    'F3 %s writes only the standalone project under an unrelated workspace (audit P4/P13)',
+    async (command) => {
+      const reads: string[] = [];
+      const stats: string[] = [];
+      const h = harness(
+        {
+          '/work/setu.workspace.json': workspaceText,
+          '/work/package.json': '{"workspaces":["apps/*"]}',
+          '/work/AGENTS.md': 'CANARY-HANDWRITTEN',
+          '/work/apps/a/package.json': '{}',
+          '/work/vendor/standalone/package.json': '{}',
+        },
+        (fs) => ({
+          ...fs,
+          stat: (path) => {
+            stats.push(path);
+            return fs.stat(path);
+          },
+          readFile: (path) => {
+            reads.push(path);
+            return fs.readFile(path);
+          },
+        }),
+      );
+      const args =
+        command === 'agents'
+          ? ['agents', '--dir', 'vendor/standalone']
+          : ['new', 'fresh', '--agents', '--dir', 'vendor'];
+      const project = command === 'agents' ? '/work/vendor/standalone' : '/work/vendor/fresh';
+      expect(await h.run(args)).toBe(0);
+      expect(h.fs.has(`${project}/AGENTS.md`)).toBe(true);
+      expect(h.fs.read('/work/AGENTS.md')).toBe('CANARY-HANDWRITTEN');
+      expect(h.fs.has('/work/apps/a/AGENTS.md')).toBe(false);
+      for (const path of reads.filter((path) => !path.startsWith(`${project}/`)))
+        expect(path).toMatch(/\/setu\.workspace\.json$/);
+      if (command === 'agents') {
+        expect(stats).not.toContain('/work/package.json');
+        expect(await h.run(['agents', '--dir', 'vendor/standalone', '--check'])).toBe(0);
+      }
+    },
+  );
+  it.each(['fifo', 'oversize', 'stat-denied', 'read-denied', 'malformed'])(
+    'F3 walks past a %s ancestor marker to a workspace that lists this member',
+    async (kind) => {
+      const opened: string[] = [];
+      const h = harness(
+        {
+          '/work/setu.workspace.json': workspaceText,
+          '/work/apps/setu.workspace.json': 'not JSON',
+          '/work/apps/a/package.json': '{}',
+        },
+        (fs) => ({
+          ...fs,
+          stat: (path) => {
+            if (path !== '/work/apps/setu.workspace.json') return fs.stat(path);
+            if (kind === 'stat-denied') return Promise.reject(new Error('EACCES'));
+            if (kind === 'fifo')
+              return Promise.resolve({ isFile: false, isDirectory: false, size: 0 });
+            if (kind === 'oversize')
+              return Promise.resolve({ isFile: true, isDirectory: false, size: 1024 * 1024 + 1 });
+            return fs.stat(path);
+          },
+          readFile: (path) => {
+            opened.push(path);
+            if (
+              path === '/work/apps/setu.workspace.json' &&
+              ['fifo', 'oversize', 'stat-denied', 'read-denied'].includes(kind)
+            )
+              return Promise.reject(new Error('must not open unsafe ancestor'));
+            return fs.readFile(path);
+          },
+        }),
+      );
+      expect(await h.run(['agents', '--dir', 'apps/a'])).toBe(0);
+      expect(h.fs.has('/work/AGENTS.md')).toBe(true);
+      expect(h.fs.has('/work/apps/a/AGENTS.md')).toBe(true);
+      if (['fifo', 'oversize', 'stat-denied'].includes(kind))
+        expect(opened).not.toContain('/work/apps/setu.workspace.json');
+    },
+  );
+  it('F3 never inspects ancestor package or deno manifests (audit P6b)', async () => {
+    const opened: string[] = [];
+    const h = harness({ '/work/project/package.json': '{}' }, (fs) => ({
+      ...fs,
+      readFile: (path) => {
+        opened.push(path);
+        return path.startsWith('/work/project/') || path.endsWith('/setu.workspace.json')
+          ? fs.readFile(path)
+          : Promise.reject(new Error(`ancestor opened: ${path}`));
+      },
+    }));
+    expect(await h.run(['agents', '--dir', 'project'])).toBe(0);
+    expect(h.err.text()).not.toContain('ancestor opened');
+    expect(
+      opened
+        .filter((path) => !path.startsWith('/work/project/'))
+        .every((path) => path.endsWith('/setu.workspace.json')),
+    ).toBe(true);
+  });
   it('uses both workspace card locations when invoked from a member', async () => {
     for (const location of ['node_modules', 'apps/a/node_modules', undefined]) {
       const h = harness({
@@ -115,7 +222,7 @@ describe('setu agents', () => {
     expect(await h.run(['new', 'app'])).toBe(0);
     expect(h.fs.has('/work/app/AGENTS.md')).toBe(false);
   });
-  it('uses one workspace root from any descendant and checks every member', async () => {
+  it('uses one workspace root from a listed member and checks every member', async () => {
     const h = harness({
       '/work/setu.workspace.json': JSON.stringify({
         version: 1,
@@ -130,7 +237,7 @@ describe('setu agents', () => {
       '/work/apps/a/package.json': '{}',
       '/work/apps/b/package.json': '{}',
     });
-    expect(await h.run(['agents', '--dir', 'apps/a/src/nested'])).toBe(0);
+    expect(await h.run(['agents', '--dir', 'apps/a'])).toBe(0);
     for (const path of ['/work/AGENTS.md', '/work/apps/a/AGENTS.md', '/work/apps/b/AGENTS.md'])
       expect(h.fs.has(path)).toBe(true);
     expect(h.fs.read('/work/apps/a/AGENTS.md')).toContain('../../AGENTS.md');

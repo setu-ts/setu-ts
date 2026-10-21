@@ -19,6 +19,29 @@ describe('workspace briefs', () => {
       { name: 'billing', port: 3001, dependsOn: ['orders'] },
     ],
   };
+  it.each(['\n', '`', '|', '<', '>', '\r', '\u0000', '\u007f', '\u2028', '\u202e'])(
+    'F1 suppresses unsafe workspace display values containing %j',
+    (char) => {
+      const value = `CANARY${char}injection`;
+      const text = renderWorkspaceRoot(
+        {
+          ...manifest,
+          transportUrl: value,
+          members: [{ name: value, port: 3000, dependsOn: ['orders', value] }],
+        },
+        '1',
+      );
+      expect(text).not.toContain(value);
+      expect(text).toContain('| (not shown) | 3000 | orders, (not shown) |');
+      expect(text).toContain('apps/(not shown)/AGENTS.md');
+      expect(text).toContain('Endpoint override: (not shown).');
+    },
+  );
+  it('F1 refuses duplicate markers in a rendered workspace section', () => {
+    expect(() => renderWorkspaceRoot(manifest, '<!-- setu-agents:end -->')).toThrow(
+      'exactly one begin marker and one end marker',
+    );
+  });
   it('renders members, ports, dependencies and transport variable and URL', () => {
     const text = renderWorkspaceRoot(manifest, '1.0.0');
     for (const value of [

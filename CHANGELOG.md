@@ -436,11 +436,11 @@ All notable changes to this project are documented here. The format follows
   and `<!-- setu-agents:end -->` and leaving every other byte untouched; a marker arrangement it
   cannot read is refused instead of guessed at. `--check` reports a missing or stale section and
   exits nonzero without writing, for CI; `--dry-run` prints the paths; `--dir` selects the project.
-  In a workspace it writes the root `AGENTS.md` and every member's, from any directory inside the
-  workspace. `setu new --agents` runs the same writer after scaffolding, and a successful `setu add`
-  prints a reminder when a sectioned brief already exists. Every published library package now ships
-  a hand-written `AGENT_CARD.md` in its npm tarball, so a normal install delivers the card at the
-  `node_modules/@setu-ts/<pkg>/AGENT_CARD.md` path the brief names.
+  In a workspace it writes the root `AGENTS.md` and every member's, run from the root or from a
+  member's own directory. `setu new --agents` runs the same writer after scaffolding, and a
+  successful `setu add` prints a reminder when a sectioned brief already exists. Every published
+  library package now ships a hand-written `AGENT_CARD.md` in its npm tarball, so a normal install
+  delivers the card at the `node_modules/@setu-ts/<pkg>/AGENT_CARD.md` path the brief names.
 - **Self-contained feature modules, `--module` and `g schema` (M114, `@setu-ts/cli`).**
   `setu generate module <name>` makes a functional module self-contained: the whole feature lives in
   `src/modules/<name>/` (routes, service, schemas, tests, module index) and registers through
