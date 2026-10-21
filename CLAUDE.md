@@ -6606,7 +6606,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   rebuild was replaced by a per-service cache after the performance budget missed: `/vh` went from
   −8.3% (p = 0.001) to −5.1% (p = 0.118), accepted by the maintainer. Security audit round 3 passed
   on `c3c57069`; a scoped round 4 on `13edb024` (the cache and the `exportsSymbol` regex escape)
-  passed with no findings — complete (PR pending)
+  passed with no findings — complete (PR #480)
 - **Next milestone** — M113l (documentation that does not match the code, or is missing).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
