@@ -62,6 +62,35 @@ checked, so a client can mint a token naming any tenant. Use it only alongside a
 middleware which separately verifies the token (e.g. `AuthPlugin`). A `register()` warning fires
 whenever the resolved chain contains a `JwtResolver`.
 
+## Tenant from the signed-in principal
+
+Use a custom `ITenantResolver` when the tenant must come from a verified principal rather than the
+built-in resolver's unverified JWT decode. Register it above passive authentication's priority 300,
+for example 310:
+
+```typescript
+import { none, some, type ITenantResolver } from '@setu-ts/common';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+
+const resolver: ITenantResolver = {
+  resolve(request) {
+    const tenantId = request.user?.claims?.tenantId;
+    return Promise.resolve(typeof tenantId === 'string' ? some({ id: tenantId }): none());
+  },
+};
+const tenancy = MultiTenancyPlugin({ resolver, middlewarePriority: 310, required: true });
+```
+
+Compose `tenancy` with `AuthPlugin` configured to verify credentials. Everything before 310 sees no
+tenant: localization's `tenantLocale` at 45, and any cache, rate-limit or feature-flag lookup in the
+40–310 band cannot use it. Move dependent readers after resolution or use them per route. See
+[session tenant binding](https://github.com/setu-ts/setu-ts/blob/main/packages/session-plugin/README.md#tenant-binding)
+for the session check that also handles late resolution.
+
+`ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
+`delete`; it has no paging, ordering or expression-filter options. For those, use `IDatabaseService`
+repositories with the tenant column explicitly included in every query and write.
+
 ## Isolation strategies
 
 A strategy NAMES the isolation an `ITenantDataStore` is expected to implement — selecting one does

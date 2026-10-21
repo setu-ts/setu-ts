@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { IKernelApplication } from '@setu-ts/kernel';
-import { replaceLocale } from '@setu-ts/common';
+import { replaceLocale, respondWithError } from '@setu-ts/common';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { createTestApp } from '@setu-ts/testing';
 
@@ -51,6 +51,17 @@ async function start(extra: Partial<LocalizationPluginOptions> = {}): Promise<IK
   app.router.get('/boom', () => {
     throw new Error('handler failed');
   });
+  app.router.get('/refused', {
+    middleware: [
+      (ctx) => {
+        respondWithError(ctx, { status: 403, title: 'Forbidden', detail: 'Refused' });
+        return Promise.resolve();
+      },
+    ],
+    handler: () => {
+      throw new Error('refusal must short-circuit');
+    },
+  });
   app.router.get('/health', (ctx) => ctx.response.text('ok'));
   await app.start();
   return app;
@@ -91,7 +102,15 @@ describe('localization headers through a real application', () => {
     expect(response.headers.get('content-language')).toBe('fr');
   });
 
-  it('writes no Content-Language on an error response', async () => {
+  it('writes Content-Language on a non-throwing route refusal inside locale middleware', async () => {
+    await start();
+    const response = await get('/refused', { 'accept-language': 'de' });
+    expect(response.status).toBe(403);
+    expect(response.headers.get('content-language')).toBe('de');
+    expect(await response.json()).toEqual({ error: 'Forbidden', detail: 'Refused' });
+  });
+
+  it('writes no Content-Language when a thrown error unwinds locale middleware', async () => {
     await start();
     const response = await get('/boom', { 'accept-language': 'de' });
     await response.body?.cancel();

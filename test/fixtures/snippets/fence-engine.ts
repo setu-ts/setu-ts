@@ -79,7 +79,7 @@ export function fenceExtension(lang: string): 'ts' | 'tsx' {
   return lang === 'tsx' || lang === 'jsx' ? 'tsx' : 'ts';
 }
 
-/** The thirteen curated guides whose copyable fences must compile or be classified. */
+/** The fourteen curated guides whose copyable fences must compile or be classified. */
 export const GUIDES = [
   'docs/getting-started.md',
   'docs/programmatic-api.md',
@@ -94,6 +94,7 @@ export const GUIDES = [
   'docs/migration-nestjs.md',
   'docs/runtime-deployment.md',
   'docs/authorization.md',
+  'docs/webhooks.md',
 ] as const;
 
 /** The committed snippet compiler configuration used for all fence compilation. */

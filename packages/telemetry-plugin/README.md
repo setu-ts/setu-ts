@@ -3,10 +3,34 @@
 OpenTelemetry distributed tracing. Registers an `ITelemetryService` under `CAPABILITIES.TELEMETRY`
 (`'telemetry'`) and a request-span middleware at priority 30.
 
-The OTel SDK is an **optional** dependency, lazily imported via bare specifiers. Without an
-`exporter` the plugin runs in noop mode, so tracing can stay off in development at zero cost.
+Without an `exporter` the plugin runs in noop mode. With an exporter, install the optional peers for
+the features you enable; the SDK is loaded during registration.
 
 ## Installation
+
+| Feature                                               | Optional peer packages loaded                                                      |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Any exporter                                          | `@opentelemetry/sdk-trace-base`, `@opentelemetry/resources`, `@opentelemetry/api`  |
+| `exporter: 'console'`                                 | The common peers above; the console exporter is in `@opentelemetry/sdk-trace-base` |
+| `exporter: 'otlp'`                                    | Common peers plus `@opentelemetry/exporter-trace-otlp-http`                        |
+| `contextPropagation: true` (default with an exporter) | `@opentelemetry/context-async-hooks`                                               |
+| `instrumentations.http`                               | `@opentelemetry/instrumentation-http`                                              |
+| `instrumentations.fetch`                              | `@opentelemetry/instrumentation-undici`                                            |
+| `instrumentations.ioredis`                            | `@opentelemetry/instrumentation-ioredis`                                           |
+| `instrumentations.amqplib`                            | `@opentelemetry/instrumentation-amqplib`                                           |
+| `instrumentations.kafkajs`                            | `@opentelemetry/instrumentation-kafkajs`                                           |
+
+A common OTLP setup with nested spans:
+
+```bash
+npm install @setu-ts/telemetry-plugin @opentelemetry/sdk-trace-base @opentelemetry/resources @opentelemetry/api @opentelemetry/exporter-trace-otlp-http @opentelemetry/context-async-hooks
+```
+
+A missing common SDK peer makes `app.start()` reject with `OptionalDependencyUnavailableError`
+naming the package; it does not switch to noop. For example, without the SDK on Node:
+`Optional dependency '@opentelemetry/sdk-trace-base' could not be loaded. Install it in the application, or choose an option that does not need it on this runtime.`
+A missing instrumentation package is instead a logged no-op, as described below; a missing context
+manager leaves spans unnested, as described under Propagation.
 
 ```typescript
 import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';

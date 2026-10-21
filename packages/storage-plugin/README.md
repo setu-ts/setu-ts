@@ -12,6 +12,22 @@ Five providers ship: `MemoryProvider` (zero-dependency default), `LocalStoragePr
 import { StoragePlugin } from '@setu-ts/storage-plugin';
 ```
 
+Install the peers for the selected provider when using its built-in lazy loader:
+
+| `provider`            | Optional peer packages                                       |
+| --------------------- | ------------------------------------------------------------ |
+| `'s3'`, `'b2'`        | `@aws-sdk/client-s3` **and** `@aws-sdk/s3-request-presigner` |
+| `'gcs'`               | `@google-cloud/storage`                                      |
+| `'azure'`             | `@azure/storage-blob`                                        |
+| `'memory'`, `'local'` | none                                                         |
+
+Both S3 packages are loaded at startup, even before requesting a signed URL. A missing peer makes
+startup reject with `OptionalDependencyUnavailableError` naming that package. Installing only
+`@aws-sdk/client-s3` is insufficient.
+
+With only the S3 client installed, Node startup reports:
+`OptionalDependencyUnavailableError: Optional dependency '@aws-sdk/s3-request-presigner' could not be loaded. Install it in the application, or choose an option that does not need it on this runtime.`
+
 ## Usage
 
 In a full-stack starter composition, configure its `storage` arm in `setu.config.ts`. The starter

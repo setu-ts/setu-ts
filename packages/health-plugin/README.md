@@ -135,6 +135,10 @@ Every export and option is documented in
 
 ## What `degraded` means
 
+`/ready` runs every registered indicator except `self`, concurrently, each bounded by
+`indicatorTimeoutMs`. A timeout, a throw, or an invalid result counts as `down`. With only `self`
+registered, `/ready` answers 200 with no checks. `/live` runs only `self`.
+
 `/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
 return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live` remains 200.
 

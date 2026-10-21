@@ -444,7 +444,8 @@ CLI is a Node program. What an existing project changes depends on its target:
 - **Node, Bun or Workers project.** Replace each `npm:@jsr/setu-ts__<pkg>@^0.8.0` dependency with
   `^0.9.0` under the key it already has (`"@setu-ts/kernel": "^0.9.0"`), delete the
   `@jsr:registry=…` line from `.npmrc` (or the file, if that was its only line), and reinstall.
-- **Deno project.** Replace each `jsr:@setu-ts/<pkg>@^0.8.0` import with
+- **Deno project.** Search for `jsr:@setu-ts/[^"\s]+@[^"\s]+` (matching both `@^0.8.0` and
+  `@0.8.0`). Replace each `jsr:@setu-ts/<pkg>@…` import, whatever its range, with
   `npm:@setu-ts/<pkg>@^0.9.0`, add `"nodeModulesDir": "auto"` to `deno.json`, and run
   `deno install`. The CLI now imports `setu.config.ts` from Node to find plugin commands, so it
   reads the project's `node_modules`; until `deno install` has created it, `setu <command>` refuses
@@ -858,8 +859,8 @@ not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hon
 Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
 copy the fix from a fresh scaffold:
 
-- **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
-  `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
+- **Workers:** pin `"wrangler": "~4.148.0"` and `"@cloudflare/workers-types": "^5.20261006.1"` as a
+  fresh `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
   `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
   new entry carries, so a bindings-only deploy is picked up.
 - **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;

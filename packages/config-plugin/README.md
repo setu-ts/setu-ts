@@ -35,6 +35,30 @@ const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
 const port = config.get('PORT', { default: '3000' });
 ```
 
+## Configuration a plugin needs at construction
+
+Factory arguments are evaluated before `app.start()` registers `ConfigPlugin` and loads `.env`. Load
+a snapshot first when another plugin needs those values at construction, then register that same
+snapshot with `instance`; it is used verbatim without loading again:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
+import { ConfigPlugin, loadConfig } from '@setu-ts/config-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+const runtime = createRuntimeServices();
+const config = await loadConfig(runtime, { envFilePath: '.env', envFileOptional: true });
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    ConfigPlugin({ instance: config }),
+    AuthPlugin({ jwt: { secret: config.getOrThrow<string>('JWT_SECRET') } }),
+  ],
+});
+await app.start();
+```
+
 ## Options
 
 | Option             | Type                                | Default     | Description                                                                   |

@@ -6607,7 +6607,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   −8.3% (p = 0.001) to −5.1% (p = 0.118), accepted by the maintainer. Security audit round 3 passed
   on `c3c57069`; a scoped round 4 on `13edb024` (the cache and the `exportsSymbol` regex escape)
   passed with no findings — complete (PR #480)
-- **Next milestone** — M113l (documentation that does not match the code, or is missing).
+- **Milestone 113l** (documentation that does not match the code, or is missing; twenty V9 rows):
+  documented telemetry/storage peers and startup refusals, runtime test runners, locale headers and
+  formatter limits, worker hand-over sizing, repository/audit/health/OpenAPI/TOTP contracts,
+  principal-based tenancy, construction-time config, backup/restore, verified inbound webhooks,
+  tier-C scheduling, environment secrets and Node/standalone deployment. New fences compile;
+  integration tests pin the documented compositions. No package source changed — complete (PR
+  pending).
+- **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

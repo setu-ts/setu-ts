@@ -522,11 +522,10 @@ const database = defineConfigSection({
 
 app.register(
   ConfigPlugin({
-    // Optional: load .env files before reading `runtime.env` (requires a
-    // runtime with filesystem support). Validate with a structural schema
-    // (e.g. Zod) via `validationSchema` — `ConfigPluginOptions` has no `validate`
-    // field.
+    // Load.env into the config store; skip a missing file, but an existing
+    // unreadable file still throws. Requires filesystem support.
     envFilePath: '.env',
+    envFileOptional: true,
     sections: [database],
   }),
 );

@@ -46,6 +46,10 @@ building production-ready applications with our plugin-first, runtime-independen
   - Server views, React Router and browser clients
   - Caching localized responses
 
+- [Inbound webhooks](./webhooks.md)
+  - Raw-body signatures and replay windows
+  - Tier-C de-duplication, outbox events and queue retries
+
 ## Tooling
 
 - [CLI Guide](./cli.md)
