@@ -89,7 +89,18 @@ for the session check that also handles late resolution.
 
 `ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
 `delete`; it has no paging, ordering or expression-filter options. For those, use `IDatabaseService`
-repositories with the tenant column explicitly included in every query and write.
+repositories and scope every operation to the verified tenant yourself:
+
+- **Reads:** filter on the tenant column (`findOne({ where: { id, tenantId } })`), never
+  `findById(id)` with a client-supplied id.
+- **Writes:** use `updateWhere(id, { tenantId }, data)` and `deleteWhere(id, { tenantId })`, which
+  apply only while the stored row still carries that tenant. Key-only `update(id, data)` and
+  `delete(id)` select by key alone, so a client-supplied id can reach another tenant's row — putting
+  the tenant column in `data` does not prevent that.
+- Where a data source lacks conditional writes (the call rejects with `conditional-write`), do not
+  fall back to a key-only write or to a read-then-write ownership check, which races a concurrent
+  delete-and-recreate. Isolate the tenant's data physically instead (a schema or database per
+  tenant).
 
 ## Isolation strategies
 

@@ -129,8 +129,9 @@ inside `group('/internal', …)` is matched only by `'/internal/metrics'`. An en
 is silently ignored.
 
 The match is exact: there is no prefix or glob form. The exclusion set is read once when the plugin
-is constructed; mutating the input array later has no effect. Exclude a group with `excludeOwners`,
-or list each resolved path.
+is constructed; mutating the input array later has no effect. To omit an ordinary `router.group()`,
+list each of its resolved paths in `exclude`. `excludeOwners` does not match a group prefix: it
+matches `RouteInfo.owner`, so it only omits routes a plugin registered.
 
 A `security` requirement naming a scheme absent from `securitySchemes` is refused at `register()`,
 because emitting it produces a document that is invalid per the specification and nothing downstream

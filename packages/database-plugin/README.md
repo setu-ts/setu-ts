@@ -142,7 +142,7 @@ export async function readInvoices(invoices: IRepository<Invoice>): Promise<Invo
     const page = await invoices.findPage({
       limit: 100,
       orderBy: { id: 'asc' },
-...(cursor === null ? {}: { cursor }),
+      ...(cursor === null ? {} : { cursor }),
     });
     rows.push(...page.rows);
     cursor = page.nextCursor;
