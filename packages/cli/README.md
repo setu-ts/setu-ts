@@ -135,6 +135,27 @@ Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill 
 end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
 `generate` can leave the files it wrote, which the next run lists in its overwrite refusal.
 
+## Agent briefs
+
+```bash
+setu agents              # write or refresh this project's AGENTS.md
+setu agents --check      # report a missing or stale section and exit 1, writing nothing
+setu agents --dry-run    # print the paths that would be written
+setu new my-app --agents # scaffold, then write the brief
+```
+
+`setu agents` writes a framework-owned section between `<!-- setu-agents:begin -->` and
+`<!-- setu-agents:end -->` in `AGENTS.md`, regenerated from the project's installed packages, style,
+runtime and scripts; everything outside the markers is never touched. In a workspace it writes the
+root file and every member's `apps/<name>/AGENTS.md`, from any directory inside the workspace. The
+brief points each installed package at its `AGENT_CARD.md`, which every published library package
+ships in its npm tarball, so a normal install delivers it. `setu agents --check` is the CI step.
+After a successful `setu add` the CLI prints `Run \`setu agents\` to update AGENTS.md.` when the
+project already has a sectioned brief.
+
+The full behavior is in
+[the CLI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#agent-briefs-setu-agents).
+
 ## Generating code
 
 ```bash
