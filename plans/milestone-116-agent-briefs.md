@@ -271,12 +271,22 @@ from the pilot.
   library members from `scripts/release-packages.ts` so a new package without a card fails:
   1. every compilable fence compiles, through the existing fence engine (one engine, as the README
      gate's header requires), with the compilable-fence count pinned per card;
-  2. every backticked span's leading identifier is (a) exported by the card's own package, (b)
-     exported by `@setu-ts/common`, (c) on a fixed list of JavaScript/TypeScript globals and
-     keywords, (d) a path, command or package name (contains `/`, a space, or starts with `@`,
-     `npx`, `npm`, `bun`, `deno`, `setu`), or (e) listed on the card's own
-     `<!-- card-allow: a b c -->` comment — anything else fails, naming card and identifier; exports
-     come from `scripts/package-export-collection.ts`;
+  2. every backticked span whose leading identifier is **shaped like an export** — after an optional
+     leading `@` (so an invented `@Decorator` is caught), it starts with an uppercase letter, or it
+     is lowercase and immediately followed by `(` or `<` (a function call such as `validateBody(`) —
+     must name a symbol that is (a) exported by the card's own package, (b) exported by
+     `@setu-ts/common`, (c) exported by any other `@setu-ts/<pkg>` the card names, (d) on a fixed
+     list of JavaScript/TypeScript globals, or (e) listed on the card's own
+     `<!-- card-allow: a b c -->` comment (project symbols the CLI generates, such as `createApp`).
+     A lowercase identifier followed by `.` or nothing (`ctx.params.id`, `router.get`, `processors`,
+     `job.data`) is a local, field or option name and is not checked by this rule; fences are
+     type-checked by gate 1, which is where such names are verified. Spans that are paths, commands
+     or package names (contain `/` or a space, or start with `@setu-ts/`, `npx`, `npm`, `bun`,
+     `deno`, `setu`) are skipped. Anything else that fails names card and identifier; exports come
+     from `scripts/package-export-collection.ts`. **Amended after implementation:** the first rule
+     checked every leading identifier, so `ctx.params.id` and option names failed and the three
+     exemplar cards were written around it in vague prose — losing exactly the concrete accessors
+     that made the pilot's cards work;
   3. every card is at most 2560 bytes;
   4. `scripts/verify-release.ts` gains a check beside check 5 refusing a published library member
      with a missing or empty `AGENT_CARD.md`, and `packedManifestProblems`
