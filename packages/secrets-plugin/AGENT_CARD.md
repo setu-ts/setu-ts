@@ -22,7 +22,11 @@ import { SecretsPlugin } from '@setu-ts/secrets-plugin';
 
 export const secrets = SecretsPlugin({
   provider: 'vault',
-  options: { address: 'https://vault.example.com', token: 'a-vault-token', mount: 'secret' },
+  options: {
+    address: 'https://vault.example.com',
+    token: process.env.VAULT_TOKEN ?? '',
+    mount: 'secret',
+  },
 });
 ```
 

@@ -12,7 +12,7 @@ import { MailPlugin } from '@setu-ts/mail-plugin';
 app.register(
   MailPlugin({
     provider: 'sendgrid',
-    options: { apiKey: '<sendgrid-api-key>' },
+    options: { apiKey: process.env.SENDGRID_API_KEY ?? '' },
     defaults: { from: 'no-reply@example.com' },
     templates: { welcome: { html: '<p>Hello {{ name }}</p>' } },
   }),
