@@ -131,6 +131,19 @@ describe('local CI plan', () => {
     expect(started).toEqual(['static']);
   });
 
+  it('still runs an exclusive shard after a shared shard exits nonzero, as CI does', async () => {
+    const started: string[] = [];
+    const results = await scheduleShards(['static', 'node-build'], 2, (shard) => {
+      started.push(shard);
+      return Promise.resolve({ shard, code: shard === 'static' ? 1 : 0 });
+    });
+    expect(started).toEqual(['static', 'node-build']);
+    expect(results).toEqual([
+      { shard: 'static', code: 1 },
+      { shard: 'node-build', code: 0 },
+    ]);
+  });
+
   it('gives the tooling runner 8 GiB and every other runner 6 GiB', () => {
     expect(runnerMemory('tooling')).toBe('8g');
     for (const shard of [

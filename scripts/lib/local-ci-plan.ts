@@ -84,7 +84,10 @@ export function availableMemory(meminfo: string, fallback: number): number {
 /**
  * Run at most n shards concurrently; each worker releases resources before taking another.
  * Shards in {@linkcode EXCLUSIVE_SHARDS} start only after every other shard has finished, one at
- * a time. Results keep the selection order.
+ * a time. Results keep the selection order. Exclusivity is isolation, not a dependency: a shard
+ * that finished with a nonzero exit code still lets an exclusive shard run, as CI's `node-build`
+ * job (which has no `needs:`) runs whatever the test shards report. Only a rejected worker, which
+ * may still hold resources, stops it.
  */
 export async function scheduleShards<T>(
   shards: readonly Shard[],
