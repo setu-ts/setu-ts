@@ -21,18 +21,18 @@ Each shard has its own network namespace. CLI, messaging and packages each get a
 static gets Redis for the realtime and microservices app smokes; tooling gets none. Containers
 publish no host ports. PostgreSQL listens on 5433 and Keycloak on 8180, with its management port
 reserved at 9100. There is no CPU pinning by default. Containers have explicit memory caps,
-including 6 GiB for each test runner and 3 GiB for each Keycloak backend (it reached the earlier 2
-GiB cap in measured runs, so 3 GiB leaves headroom).
+including 6 GiB for each test runner (8 GiB for tooling, which has no backends) and 3 GiB for each
+Keycloak backend (it reached the earlier 2 GiB cap in measured runs, so 3 GiB leaves headroom).
 
-The automatic concurrency is `min(5, floor(available GiB / 7), floor(available threads / 2))`, with
+The automatic concurrency is `min(5, floor(available GiB / 8), floor(available threads / 2))`, with
 a minimum of one. Linux `MemAvailable` supplies the memory reading (falling back to `os.freemem()`);
 `os.availableParallelism()` supplies the CPU reading. The runner prints its decision. It refuses
 with exit 1 before creating anything on non-Linux systems, when the Docker CLI/daemon is
-unavailable, or when less than 7 GiB is available. Each refusal lists the standard gates. A
+unavailable, or when less than 8 GiB is available. Each refusal lists the standard gates. A
 requested `--parallel` that exceeds available memory also refuses. There is no resource override for
 bypassing preflight; the unit tests simulate low-memory decisions.
 
-The 7 GiB reservation per shard comes from prior sampled runs on the development host:
+The 8 GiB reservation per shard comes from sampled runs on the development host:
 
 | Shard     | Runner peak MiB | Sum of individual backend/namespace peaks MiB | Simultaneous shard peak MiB |
 | --------- | --------------: | --------------------------------------------: | --------------------------: |
@@ -43,15 +43,17 @@ The 7 GiB reservation per shard comes from prior sampled runs on the development
 | tooling   |           6,136 |                                             1 |                       6,136 |
 
 These are measurements, not guarantees: individual peaks need not coincide. The largest summed
-reservation (CLI: 6,804 MiB) is rounded up to 7,168 MiB. Two threads per active shard is a
-scheduling budget, not a Docker CPU quota. For example, 16 GiB **available** and eight threads
-chooses two shards; 8 GiB available and four threads chooses one. Installed memory alone does not
-determine capacity: the OS and other workloads need memory too. Existing host containers remain
-running.
+reservation is CLI's (6,804 MiB), and the tooling runner peaked at its earlier 6 GiB cap and was
+OOM-killed at 6,144 MiB, so tooling now gets an 8 GiB cap and the per-shard reservation is 8,192
+MiB. Two threads per active shard is a scheduling budget, not a Docker CPU quota. For example, 16
+GiB **available** and eight threads chooses two shards; 8 GiB available and four threads chooses
+one. Installed memory alone does not determine capacity: the OS and other workloads need memory too.
+Existing host containers remain running.
 
 Runners set V8's old-space limit to 4 GiB, matching Node's default on the host while staying inside
-the 6 GiB container cap. Node otherwise lowers its default heap in the container, which can make
-ESLint exhaust a roughly 2 GiB heap even when physical memory is available.
+the 6 GiB container cap (8 GiB for tooling). Node otherwise lowers its default heap in the
+container, which can make ESLint exhaust a roughly 2 GiB heap even when physical memory is
+available.
 
 The Docker socket is mounted in the test runners because real outage suites stop and restart their
 own backends. These suites discover containers by `setu.ci.shard` and `setu.ci.port.<port>` labels
@@ -75,10 +77,11 @@ separate namespace per shard. Lower concurrency trades more time for less memory
 release their containers before another shard starts. `--cpus <list>` passes a Docker cpuset (for
 example `0-3,6`) to every container; choose CPUs allowed on your host. Restricting CPUs can take
 longer and does not reduce the memory reservation. `--shard` limits the work and memory needed;
-`--shard` and `--include` are repeatable. Extras run without backends. `--keep` retains this run's
-**stopped** containers for debugging, releasing their RAM between shards; SIGINT/SIGTERM always
-cleans up. Default cleanup removes only containers with the invocation's unique `setu.ci.run` label,
-including stopped or paused containers.
+`--shard` and `--include` are repeatable. Extras run without backends. `node-build` runs its own
+`pnpm install` and `tsc -b` against the shared worktree, so it starts only after every other job has
+finished, never beside one. `--keep` retains this run's **stopped** containers for debugging,
+releasing their RAM between shards; SIGINT/SIGTERM always cleans up. Default cleanup removes only
+containers with the invocation's unique `setu.ci.run` label, including stopped or paused containers.
 
 Logs, listener snapshots, Docker memory samples and the JSON summary are kept under
 `.tmp/local-ci/<run-id>/`. Each shard reports exit code, wall seconds, passed/skipped/ignored/failed

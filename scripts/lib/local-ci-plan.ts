@@ -12,9 +12,27 @@ export interface ILocalOptions {
   parallel?: number;
   cpus?: string;
 }
-/** Conservative peak reservation: 3,961 MiB CLI runner + 2,843 MiB backend peaks,
- * rounded up to 7 GiB; tooling alone peaked at 6,136 MiB. */
-export const SHARD_BUDGET_BYTES = 7 * 1024 ** 3;
+/**
+ * Conservative peak reservation per shard: the CLI runner (3,961 MiB) plus its backend peaks
+ * (2,843 MiB) is 6.6 GiB, and the tooling runner, which has no backends, gets an 8 GiB cap
+ * because it peaked at 6,136 MiB under the earlier 6 GiB cap and was OOM-killed at 6,144 MiB.
+ */
+export const SHARD_BUDGET_BYTES = 8 * 1024 ** 3;
+/** The budget in whole GiB, for messages. */
+const SHARD_BUDGET_GIB = SHARD_BUDGET_BYTES / 1024 ** 3;
+
+/**
+ * Extras that rewrite the worktree's shared install while they run. `node-build`
+ * (`scripts/check-node-build.ts`) runs its own `pnpm install --frozen-lockfile` and `tsc -b`,
+ * which the workflow-step filter cannot see; run beside a test shard, it deleted vitest under
+ * that shard mid-run. These run one at a time, only after every other job has finished.
+ */
+export const EXCLUSIVE_SHARDS: readonly Shard[] = ['node-build'];
+
+/** The runner container's memory cap: tooling needs more and carries no backends. */
+export function runnerMemory(shard: Shard): string {
+  return shard === 'tooling' ? '8g' : '6g';
+}
 /** Standard validation remains available without this optional accelerator. */
 export const NORMAL_GATES =
   'pnpm run fmt:check, pnpm run lint, pnpm run check, pnpm test:coverage, pnpm run test:tooling:coverage';
@@ -27,7 +45,7 @@ export interface IHostResources {
   threads: number;
 }
 
-/** Choose a bounded worker count, reserving two threads and 7 GiB per shard. */
+/** Choose a bounded worker count, reserving two threads and 8 GiB per shard. */
 export function chooseParallelism(freeMemory: number, threads: number, requested?: number): number {
   return Math.max(
     1,
@@ -48,9 +66,9 @@ export function preflight(host: IHostResources, requested?: number): string | un
         : !host.dockerDaemon
           ? 'the Docker daemon is unavailable'
           : host.freeMemory < SHARD_BUDGET_BYTES
-            ? 'available memory is below the 7 GiB budget for one shard'
+            ? `available memory is below the ${SHARD_BUDGET_GIB} GiB budget for one shard`
             : requested !== undefined && requested * SHARD_BUDGET_BYTES > host.freeMemory
-              ? `--parallel ${requested} requires ${requested * 7} GiB available memory`
+              ? `--parallel ${requested} requires ${requested * SHARD_BUDGET_GIB} GiB available memory`
               : undefined;
   return reason === undefined
     ? undefined
@@ -63,18 +81,28 @@ export function availableMemory(meminfo: string, fallback: number): number {
   return value === null ? fallback : Number(value[1]) * 1024;
 }
 
-/** Run at most n shards concurrently; each worker releases resources before taking another. */
+/**
+ * Run at most n shards concurrently; each worker releases resources before taking another.
+ * Shards in {@linkcode EXCLUSIVE_SHARDS} start only after every other shard has finished, one at
+ * a time. Results keep the selection order. Exclusivity is isolation, not a dependency: a shard
+ * that finished with a nonzero exit code still lets an exclusive shard run, as CI's `node-build`
+ * job (which has no `needs:`) runs whatever the test shards report. Only a rejected worker, which
+ * may still hold resources, stops it.
+ */
 export async function scheduleShards<T>(
   shards: readonly Shard[],
   parallel: number,
   task: (shard: Shard) => Promise<T>,
 ): Promise<T[]> {
   const results: T[] = new Array(shards.length);
+  const indexes = shards.map((_, index) => index);
+  const shared = indexes.filter((index) => !EXCLUSIVE_SHARDS.includes(shards[index]!));
+  const exclusive = indexes.filter((index) => EXCLUSIVE_SHARDS.includes(shards[index]!));
   let next = 0;
   const workers = await Promise.allSettled(
-    Array.from({ length: Math.min(parallel, shards.length) }, async () => {
-      while (next < shards.length) {
-        const index = next++;
+    Array.from({ length: Math.min(parallel, shared.length) }, async () => {
+      while (next < shared.length) {
+        const index = shared[next++]!;
         results[index] = await task(shards[index]!);
       }
     }),
@@ -83,6 +111,7 @@ export async function scheduleShards<T>(
   // worker is still starting or using them.
   const failure = workers.find((worker) => worker.status === 'rejected');
   if (failure?.status === 'rejected') throw failure.reason;
+  for (const index of exclusive) results[index] = await task(shards[index]!);
   return results;
 }
 /** One CI command and its step-scoped environment. */
