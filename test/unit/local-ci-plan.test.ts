@@ -16,6 +16,8 @@ import {
   parseSummary,
   preflight,
   scheduleShards,
+  EXCLUSIVE_SHARDS,
+  runnerMemory,
   SHARD_BUDGET_BYTES,
   NORMAL_GATES,
   SHARDS,
@@ -51,14 +53,14 @@ describe('local CI plan', () => {
       [{ platform: 'darwin' }, 'Linux is required'],
       [{ dockerCli: false }, 'Docker CLI is unavailable'],
       [{ dockerDaemon: false }, 'Docker daemon is unavailable'],
-      [{ freeMemory: SHARD_BUDGET_BYTES - 1 }, 'below the 7 GiB budget'],
+      [{ freeMemory: SHARD_BUDGET_BYTES - 1 }, 'below the 8 GiB budget'],
     ] as const) {
       const message = preflight({ ...host, ...change });
       expect(message).toContain(reason);
       expect(message).toContain(NORMAL_GATES);
       expect(message).not.toContain('\n');
     }
-    expect(preflight(host, 2)).toContain('--parallel 2 requires 14 GiB');
+    expect(preflight(host, 2)).toContain('--parallel 2 requires 16 GiB');
   });
 
   it('honors concurrency limits and returns results in selection order', async () => {
@@ -86,6 +88,61 @@ describe('local CI plan', () => {
       }),
     ).rejects.toThrow('cleanup failed');
     expect(completed).toBe(true);
+  });
+
+  it('runs node-build alone, after every other shard has finished', async () => {
+    // node-build runs its own pnpm install and tsc -b on the shared worktree; beside a test
+    // shard it deleted vitest under that shard (run f6b66a35).
+    expect(EXCLUSIVE_SHARDS).toEqual(['node-build']);
+    const events: string[] = [];
+    let active = 0;
+    const results = await scheduleShards(
+      ['node-build', 'static', 'cli', 'deno-lane'],
+      5,
+      async (shard) => {
+        events.push(`start ${shard} active=${active}`);
+        active++;
+        await new Promise((resolve) => setTimeout(resolve, shard === 'cli' ? 20 : 5));
+        active--;
+        events.push(`end ${shard}`);
+        return shard;
+      },
+    );
+    expect(results).toEqual(['node-build', 'static', 'cli', 'deno-lane']);
+    const start = events.indexOf('start node-build active=0');
+    expect(start).toBe(events.length - 2);
+    for (const shard of ['static', 'cli', 'deno-lane'])
+      expect(events.indexOf(`end ${shard}`)).toBeLessThan(start);
+    expect(await scheduleShards(['node-build'], 3, (shard) => Promise.resolve(shard))).toEqual([
+      'node-build',
+    ]);
+  });
+
+  it('does not start an exclusive shard when a shared shard failed', async () => {
+    const started: string[] = [];
+    await expect(
+      scheduleShards(['static', 'node-build'], 2, (shard) => {
+        started.push(shard);
+        return shard === 'static'
+          ? Promise.reject(new Error('cleanup failed'))
+          : Promise.resolve(shard);
+      }),
+    ).rejects.toThrow('cleanup failed');
+    expect(started).toEqual(['static']);
+  });
+
+  it('gives the tooling runner 8 GiB and every other runner 6 GiB', () => {
+    expect(runnerMemory('tooling')).toBe('8g');
+    for (const shard of [
+      'static',
+      'cli',
+      'messaging',
+      'packages',
+      'deno-lane',
+      'compat',
+      'node-build',
+    ] as const)
+      expect(runnerMemory(shard)).toBe('6g');
   });
 
   it('accepts explicit parallelism and CPU sets, refusing malformed options', () => {

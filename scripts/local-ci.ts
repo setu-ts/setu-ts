@@ -21,6 +21,7 @@ import {
   parseOptions,
   parseSummary,
   preflight,
+  runnerMemory,
   scheduleShards,
   shardCommands,
 } from './lib/local-ci-plan.ts';
@@ -225,7 +226,7 @@ async function main(): Promise<void> {
         .join('\n');
       const name = containerName(id, shard, 'runner');
       await checked([
-        ...containerArgs(id, shard, 'runner', '6g', options.cpus),
+        ...containerArgs(id, shard, 'runner', runnerMemory(shard), options.cpus),
         '--user',
         `${process.getuid!()}:${process.getgid!()}`,
         '--group-add',
