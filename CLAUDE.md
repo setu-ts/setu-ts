@@ -6612,8 +6612,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   formatter limits, worker hand-over sizing, repository/audit/health/OpenAPI/TOTP contracts,
   principal-based tenancy, construction-time config, backup/restore, verified inbound webhooks,
   tier-C scheduling, environment secrets and Node/standalone deployment. New fences compile;
-  integration tests pin the documented compositions. No package source changed — complete (PR
-  pending).
+  integration tests pin the documented compositions. No package source changed — complete (PR #483).
 - **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
