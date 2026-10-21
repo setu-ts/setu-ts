@@ -28,10 +28,19 @@ All notable changes to this project are documented here. The format follows
   working:** their `src/controllers/<name>.routes.ts` files are still wired by the controllers
   barrel, and only newly generated modules use the new layout. To adopt the layout for a pre-M114
   functional module, move `src/controllers/<name>.routes.ts` into `src/modules/<name>/`, change its
-  service import to `./<name>.service.ts`, then run any `setu generate … --module <name>` command
-  (or add the import line and the `registerModules(app.router, app.services);` call, which
-  `setu generate module` prints for a project whose `setu.config.ts` does not call it yet) so the
-  module index and activation barrel are regenerated.
+  service import to `./<name>.service.ts`, widen its registrar to
+  `register<Pascal>Routes(router: IRouterApi, services?: IServiceRegistry)` (importing the type from
+  `@setu-ts/common`; the regenerated index passes both), replace `src/modules/<name>/index.ts` with
+  the registrar the CLI now generates — it imports `register<Pascal>Routes` from
+  `./<name>.routes.ts` and exports
+  `register<Pascal>Module(router: IRouterApi, services?: IServiceRegistry)`, which calls
+  `register<Pascal>Routes(router, services)` — in the same change. The module scan admits a
+  functional module only when its `index.ts` exports `register<Pascal>Module`, and the moved routes
+  file no longer reaches the controllers barrel, so until the index is replaced the routes are not
+  registered and every `--module <name>` command refuses the module. Then run any
+  `setu generate … --module <name>` command (or add the import line and the
+  `registerModules(app.router, app.services);` call, which `setu generate module` prints for a
+  project whose `setu.config.ts` does not call it yet) so the activation barrel is regenerated.
 - **Generated output: `rest` sample and generated tests (M114, `@setu-ts/cli`).** The `rest`
   template's sample is now emitted as a generated module at `src/modules/greeting/` (routes stay
   `/greetings` and `/greetings/:name`), so a new project's first files are exactly what `g module`

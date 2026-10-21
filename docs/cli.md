@@ -255,10 +255,11 @@ file a feature imports — [Domain modules](#domain-modules) says where shapes l
 
 `--module <name>` is the feature-scoped form of the four schematics a feature owns — `service`,
 `route`, `controller` and `schema`: it places the file inside the named module rather than the
-top-level folder, and every other schematic refuses the flag because it is app-wide. The module's
-CLI-owned `index.ts` is regenerated to register it (functional mode), and a class-based module is
-extended by a printed `@Module` line rather than an edited one. See
-[Domain modules — `--module`](#--module-place-a-file-inside-a-feature).
+top-level folder, and every other schematic refuses the flag because it is app-wide. In functional
+mode a module-scoped `route` or `controller` regenerates the module's CLI-owned `index.ts` to
+register it; a module-scoped `service` or `schema` is a file for the module's own code to import and
+registers nothing. A class-based module is extended by a printed `@Module` line rather than an
+edited one. See [Domain modules — `--module`](#--module-place-a-file-inside-a-feature).
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
 and names the `setu add` command that installs it:
@@ -388,10 +389,11 @@ setu g route summary --module invoices
 module the project already has; every other schematic is app-wide and refuses the flag, naming its
 top-level folder.
 
-- **Functional:** the file is written into `src/modules/<module>/` and the module's CLI-owned
-  `index.ts` is regenerated to call it. A module-scoped route or controller mounts at
-  `/<module>/<name>` — a static path such as `GET /invoices/summary` outranks `GET /invoices/:id`,
-  so an `id` equal to `summary` is unreachable through `/:id`.
+- **Functional:** the file is written into `src/modules/<module>/`. A route or controller is
+  registered by regenerating the module's CLI-owned `index.ts` to call it; a service or schema has
+  no registrar and is imported by the module's own code. A module-scoped route or controller mounts
+  at `/<module>/<name>` — a static path such as `GET /invoices/summary` outranks
+  `GET /invoices/:id`, so an `id` equal to `summary` is unreachable through `/:id`.
 - **Class-based:** the file is written and the CLI prints the line to add to
   `@Module({ providers | controllers })` in `src/modules/<module>/<module>.module.ts`; it never
   edits the module declaration. A module-scoped service is registered under the token

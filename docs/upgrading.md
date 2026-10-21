@@ -35,9 +35,19 @@ call to add.
 
 - **To adopt the new module layout for a pre-M114 functional module:** move
   `src/controllers/<name>.routes.ts` into `src/modules/<name>/`, change its service import to
-  `./<name>.service.ts`, then run any `setu generate … --module <name>` command (or add the two
-  lines the command prints) so the module index and activation barrel are regenerated. The module's
-  `index.ts` no longer re-exports the service — import it from `./<name>.service.ts` directly.
+  `./<name>.service.ts`, widen its registrar to
+  `register<Pascal>Routes(router: IRouterApi, services?: IServiceRegistry)` (importing the type from
+  `@setu-ts/common`; the regenerated index passes both), replace `src/modules/<name>/index.ts` with
+  the registrar the CLI now generates — it imports `register<Pascal>Routes` from
+  `./<name>.routes.ts` and exports
+  `register<Pascal>Module(router: IRouterApi, services?: IServiceRegistry)`, which calls
+  `register<Pascal>Routes(router, services)` — in the same change. The module scan admits a
+  functional module only when its `index.ts` exports `register<Pascal>Module`, and the moved routes
+  file no longer reaches the controllers barrel, so until the index is replaced the routes are not
+  registered and every `--module <name>` command refuses the module. Then run any
+  `setu generate … --module <name>` command (or add the two lines the command prints) so the
+  activation barrel is regenerated. The module's `index.ts` no longer re-exports the service —
+  import it from `./<name>.service.ts` directly.
 - **To stop casting validated values:** switch the
   `ctx.state.get(validatedStateKey('body')) as z.infer<typeof Schema>` read to the validator itself
   — declare `const body = validateBody(Schema);`, list it in the route's `middleware`, and read

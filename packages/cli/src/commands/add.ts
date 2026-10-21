@@ -79,8 +79,9 @@ interface IAddablePackage {
   readonly section?: 'dev';
   /**
    * Optional peer packages a package manager will not install for the
-   * consumer. Written into `package.json` `dependencies` only on the runtimes
-   * listed here, at their {@linkcode CLIENT_RANGES} range.
+   * consumer. Written on the runtimes listed here, at their
+   * {@linkcode CLIENT_RANGES} range: into `package.json` `dependencies`, or
+   * into a `deno.json`/`deno.jsonc` import map as `npm:<name>@<range>`.
    */
   readonly peers?: {
     readonly runtimes: readonly TargetRuntime[];
@@ -831,8 +832,9 @@ export async function runAddCommand(
 
     // Optional peers ride the SAME manifest rewrite — a second edit for one path
     // fails as a duplicate — and are applied even when the framework package is
-    // already pinned, so re-running `setu add websocket` is how an affected
-    // project recovers.
+    // already pinned, so re-running `setu add <name>` is how a project missing
+    // a peer recovers (for example `ws` after `setu add websocket`, or `zod`
+    // after `setu add validation`).
     {
       const merged = withPeerDependencies(
         updated ?? source,
