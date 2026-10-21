@@ -56,6 +56,7 @@
     "@setu-ts/messaging-plugin": "workspace:^",
     "@setu-ts/queue-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/scheduler-plugin": "workspace:^",
     "@setu-ts/sdk": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
     "@types/node": "^24",

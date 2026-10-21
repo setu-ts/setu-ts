@@ -531,6 +531,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Documentation gaps (M113l).** Corrected optional telemetry/storage peer installation, upgrade
+  and runtime test instructions, locale error headers, worker hand-over sizing,
+  repository/audit/health/OpenAPI/TOTP contracts, principal-based tenancy and construction-time
+  config. Added inbound-webhook and backup/restore guidance, tier-C scheduler wiring, process-env
+  secret loading, and Node/standalone deployment guidance. New examples compile and behavior tests
+  pin the documented compositions; no package source changed.
+
 - **An over-limit body on a validated route answers `413` (M114, `@setu-ts/validation-plugin`).** A
   body the runtime refuses for size (`RuntimePlugin({ maxBodyBytes })` set) now keeps its `413` on a
   route carrying `validateBody` — previously the validation middleware's own body read masked the

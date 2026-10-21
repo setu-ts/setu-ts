@@ -14389,6 +14389,13 @@ claims, `ttlMs` range and `ioredis` step are corrected.
 
 ### Milestone 113l: Documentation That Does Not Match the Code, or Is Missing
 
+**Shipped.** Closed the documentation work for all twenty rows below: source-backed reference tables
+and corrections, runtime test recipes, optional-peer and environment-loading guidance, webhook and
+restore recipes, and Node/standalone deployment coverage. New examples compile; integration tests
+pin locale refusal headers, audit readback, missing telemetry peers, tier-C scheduler composition
+and verified webhook de-duplication. No package source changed. The smoke register stays open until
+a newly published version is re-run.
+
 **Package(s):** docs only — one `docs/…` branch.
 
 V9-6 (telemetry's optional OTel peers), V9-7 (the 0.9.0 upgrade guide's Deno and Workers steps),
@@ -15105,7 +15112,7 @@ patch by construction and gains nothing new here.
 | 113i      | ✅     | cli — commands whose refusals and guidance mislead (fix branches)                                                                                                                                                                                                                         |
 | 113j      | ✅     | messaging-plugin + database-plugin — outbox and inbox signals; PR #469                                                                                                                                                                                                                    |
 | 113k      | ✅     | sdk + idempotency + http-security + database — the idempotency key from client to server; PR #476                                                                                                                                                                                         |
-| 113l      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
+| 113l      | ✅     | docs — documentation that does not match the code, or is missing; PR #483                                                                                                                                                                                                                 |
 | 113m      | ✅     | scheduler-plugin + auth-plugin — time the framework does not honour; PR #471                                                                                                                                                                                                              |
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |

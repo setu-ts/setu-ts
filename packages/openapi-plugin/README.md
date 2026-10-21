@@ -128,6 +128,11 @@ The remaining options come from `OpenApiGeneratorOptions` (title, version, serve
 inside `group('/internal', …)` is matched only by `'/internal/metrics'`. An entry matching no route
 is silently ignored.
 
+The match is exact: there is no prefix or glob form. The exclusion set is read once when the plugin
+is constructed; mutating the input array later has no effect. To omit an ordinary `router.group()`,
+list each of its resolved paths in `exclude`. `excludeOwners` does not match a group prefix: it
+matches `RouteInfo.owner`, so it only omits routes a plugin registered.
+
 A `security` requirement naming a scheme absent from `securitySchemes` is refused at `register()`,
 because emitting it produces a document that is invalid per the specification and nothing downstream
 can detect that.
@@ -182,6 +187,11 @@ Rules and limits:
 An id is derived from the method and the path with placeholders unwrapped: `GET /orders/{id}`
 becomes `get-orders-by-id`. Braces are URL-unsafe — Redocly's recommended ruleset flags them — and
 tools that put an `operationId` in an anchor, a filename or a URL are entitled to break on them.
+
+For example, `GET /api/v1/invoices` produces `get-api-v1-invoices`; the SDK generator names its
+method `getApiV1Invoices`. Programmatic routes have no `operationId` override: `RouteSchema`'s
+OpenAPI-specific fields are `tags` and `summary`. `@ApiOperation({ operationId })` accepts and
+stores the option but currently ignores it when building the route schema; ids remain derived.
 
 ## Documenting authentication
 
