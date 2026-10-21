@@ -81,6 +81,7 @@ import {
   writeFiles,
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+import { runAgentsCommand } from './agents.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -662,6 +663,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.log('  --yes, -y           Take every default and ask nothing');
     deps.log('  --dir <path>        Create the project under this directory');
     deps.log('  --dry-run           Print what would be created, write nothing');
+    deps.log('  --agents            Write an AGENTS.md brief after scaffolding');
     return EXIT_OK;
   }
 
@@ -791,6 +793,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
       deps.interrupt === undefined ? { root: root } : { root: root, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+    if (chosen.flags['agents'] === true) {
+      const code = await runAgentsCommand({ positionals: [], flags: {} }, { ...deps, cwd: root });
+      if (code !== EXIT_OK) return code;
+    }
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {

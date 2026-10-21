@@ -52,7 +52,15 @@ describe('@setu-ts/cli barrel', () => {
   });
 
   it('does not leak the command implementations', () => {
-    for (const name of ['runNewCommand', 'runGenerateCommand', 'writeFiles']) {
+    for (const name of [
+      'runNewCommand',
+      'runGenerateCommand',
+      'runAgentsCommand',
+      'renderBrief',
+      'gatherFacts',
+      'PACKAGE_DATA',
+      'writeFiles',
+    ]) {
       expect(Object.keys(barrel)).not.toContain(name);
     }
   });
