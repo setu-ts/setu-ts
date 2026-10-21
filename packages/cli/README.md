@@ -150,8 +150,9 @@ runtime and scripts; everything outside the markers is never touched. In a works
 root file and every member's `apps/<name>/AGENTS.md`, from any directory inside the workspace. The
 brief points each installed package at its `AGENT_CARD.md`, which every published library package
 ships in its npm tarball, so a normal install delivers it. `setu agents --check` is the CI step.
-After a successful `setu add` the CLI prints `Run \`setu agents\` to update AGENTS.md.` when the
-project already has a sectioned brief.
+After a successful `setu add` the CLI prints a reminder to run `agents` through the project's pinned
+CLI invocation (for example `npx @setu-ts/cli@<version> agents`) when the project already has a
+sectioned brief.
 
 The full behavior is in
 [the CLI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#agent-briefs-setu-agents).

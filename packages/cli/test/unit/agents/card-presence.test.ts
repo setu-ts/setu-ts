@@ -100,6 +100,7 @@ describe('advisory card checks', () => {
         installed,
       ),
     ).rejects.toThrow('stat denied');
+    await fs.writeFile('/app/.yarnrc.yml', new TextEncoder().encode('nodeLinker: pnp'));
     await expect(
       cardWarnings(
         { ...fs, readFile: () => Promise.reject(new Error('read denied')) },
@@ -121,5 +122,58 @@ describe('advisory card checks', () => {
         installed,
       ),
     ).rejects.toThrow('card denied');
+  });
+  it('gives a Deno workspace member install advice when the root already sets nodeModulesDir', async () => {
+    // A member may not declare nodeModulesDir (Deno refuses it there), so the
+    // member's own manifest is the wrong place to look.
+    const fs = createFakeFs({
+      '/work/deno.json': '{ "nodeModulesDir": "auto" }',
+      '/work/apps/a/deno.json': '{}',
+    });
+    expect(await cardWarnings(fs, '/work/apps/a', installed, '/work')).toEqual([
+      'card not found: ../../node_modules/@setu-ts/common/AGENT_CARD.md — run install',
+    ]);
+  });
+  it("detects Plug'n'Play by the presence of .pnp.cjs without reading it", async () => {
+    const fs = createFakeFs({ '/app/.pnp.cjs': 'x'.repeat(16) });
+    const opened: string[] = [];
+    const warnings = await cardWarnings(
+      {
+        ...fs,
+        readFile: (path) => {
+          opened.push(path);
+          return fs.readFile(path);
+        },
+      },
+      '/app',
+      installed,
+    );
+    expect(warnings).toEqual([
+      'cards require node_modules — set nodeLinker: node-modules and run install',
+    ]);
+    expect(opened.filter((path) => path.endsWith('.pnp.cjs'))).toEqual([]);
+  });
+  it('treats a special or overlarge .yarnrc.yml as unreadable instead of opening it', async () => {
+    const fs = createFakeFs({ '/app/.yarnrc.yml': 'nodeLinker: pnp' });
+    const opened: string[] = [];
+    const warnings = await cardWarnings(
+      {
+        ...fs,
+        stat: (path) =>
+          path.endsWith('.yarnrc.yml')
+            ? Promise.resolve({ isFile: false, isDirectory: false, size: 0 })
+            : fs.stat(path),
+        readFile: (path) => {
+          opened.push(path);
+          return fs.readFile(path);
+        },
+      },
+      '/app',
+      installed,
+    );
+    expect(opened.filter((path) => path.endsWith('.yarnrc.yml'))).toEqual([]);
+    expect(warnings).toEqual([
+      'card not found: node_modules/@setu-ts/common/AGENT_CARD.md — run install',
+    ]);
   });
 });

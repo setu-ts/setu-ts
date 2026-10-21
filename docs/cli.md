@@ -670,8 +670,11 @@ silently would edit a file the developer may not have staged. After a successful
 prints one reminder when the project already has a sectioned brief:
 
 ```
-Run `setu agents` to update AGENTS.md.
+Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md.
 ```
+
+The command named is the project's pinned CLI invocation for its runtime:
+`bunx @setu-ts/cli@<version>` on Bun and `deno run -A npm:@setu-ts/cli@<version>` on Deno.
 
 ## Plugin-contributed commands
 

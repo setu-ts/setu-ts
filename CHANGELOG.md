@@ -472,9 +472,10 @@ All notable changes to this project are documented here. The format follows
   `MiddlewareFunction` (so every existing call site type-checks unchanged) with one added member,
   `value(ctx)`. `ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults
   included — for Zod 3 and 4 alike, inferred from the schema, so the handler reads a typed value
-  with `validateBody(S).value(ctx)` and no cast. `value(ctx)` throws a `TypeError` naming the target
-  when that validator did not run on the request or a later validator for the same target overwrote
-  it. The `ctx.state.get(validatedStateKey(...))` read still works and is unchanged.
+  from the same instance it registered — `const body = validateBody(S)`, then `body.value(ctx)` —
+  with no cast. `value(ctx)` throws a `TypeError` naming the target when that validator did not run
+  on the request or a later validator for the same target overwrote it. The
+  `ctx.state.get(validatedStateKey(...))` read still works and is unchanged.
 - **Form-body validation (M114, `@setu-ts/validation-plugin`).**
   `validateBody(schema, { forms: true })` and `@ValidateBody(schema, { forms: true })` also validate
   `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they

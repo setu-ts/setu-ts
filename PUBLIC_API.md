@@ -10096,8 +10096,9 @@ project without `nodeModulesDir` gets the setting to change instead. `cli` and `
 card: they are run, never imported.
 
 `setu new --agents` runs the same writer after scaffolding. Nothing else runs it: `setu add` prints
-``Run `setu agents` to update AGENTS.md.`` after a successful add when the project already has a
-sectioned brief, and neither command edits an existing file silently.
+``Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md.`` (the project's pinned CLI
+invocation for its runtime) after a successful add when the project already has a sectioned brief,
+and neither command edits an existing file silently.
 
 ### Exit codes
 

@@ -411,6 +411,38 @@ async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array 
   }
 }
 
+/**
+ * Reads a developer-owned text file the CLI only inspects, with the same guard
+ * as {@linkcode previousBytes}: `stat` first, and only a regular file under
+ * {@linkcode MAX_EXISTING_FILE_BYTES} is opened, so a committed link to
+ * `/dev/zero` or a FIFO cannot hang the command.
+ *
+ * @param fs - The filesystem to read through
+ * @param path - The file to read
+ * @returns The decoded text, or `undefined` when the path does not exist
+ * @throws {Error} When the path is not a regular file, is larger than 1 MiB, or
+ *   is not valid UTF-8
+ */
+export async function readExistingText(fs: IFileSystem, path: string): Promise<string | undefined> {
+  let stat: StatResult;
+  try {
+    stat = await fs.stat(path);
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+  if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES)
+    throw new Error(`${path}: expected a regular file at most 1 MiB`);
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+      await fs.readFile(path),
+    );
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+}
+
 /** Classifies a write plan without mutating the filesystem. */
 export async function classifyFiles(
   fs: IFileSystem,

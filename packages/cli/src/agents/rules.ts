@@ -27,7 +27,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'functional',
     packages: [],
     applies: (f) => f.style === 'functional',
-    text: 'Routes use router.get or a `RouteDefinition` with middleware and handler. Return ctx.response.json(value); status(code) chains. `MiddlewareFunction` receives (ctx, next); await next() to continue, or write a response and return to refuse. Feature modules live under src/modules/<name>/; schemas belong in <name>.schemas.ts. With validation installed, use validateBody(S) as middleware and read validateBody(S).value(ctx).',
+    text: 'Routes use router.get or a `RouteDefinition` with middleware and handler. Return ctx.response.json(value); status(code) chains. `MiddlewareFunction` receives (ctx, next); await next() to continue, or write a response and return to refuse. Feature modules live under src/modules/<name>/; schemas belong in <name>.schemas.ts. With validation, bind once (const body = validateBody(S)), use body as middleware, read body.value(ctx).',
   },
   {
     id: 'class-based',

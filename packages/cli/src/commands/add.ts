@@ -27,12 +27,17 @@ import {
   PROGRAM_NAME,
   type TargetRuntime,
 } from '../constants.ts';
-import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
+import {
+  type GeneratedFile,
+  joinPath,
+  readExistingText,
+  resolveDir,
+  writeFiles,
+} from '../utils/file-writer.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import { stringFlag } from '../args.ts';
 import { BRIEF_BEGIN } from '../agents/brief-file.ts';
-import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
@@ -941,7 +946,7 @@ export async function runAddCommand(
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
-    if (args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir);
+    if (args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
     return EXIT_OK;
   }
 
@@ -996,17 +1001,22 @@ export async function runAddCommand(
   // Both notes concern a Deno start task's permission flags; on another target
   // they describe nothing the developer can act on.
   if (runtime === 'deno') printPermissionNote(specifier, deps.log);
-  await reportAgentsHint(deps, dir);
+  await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
 }
 
 /** An add is successful even when its advisory brief reminder cannot be read. */
-async function reportAgentsHint(deps: AddCommandDependencies, dir: string): Promise<void> {
+async function reportAgentsHint(
+  deps: AddCommandDependencies,
+  dir: string,
+  runtime: TargetRuntime,
+): Promise<void> {
   try {
-    const brief = new TextDecoder().decode(await deps.fs.readFile(joinPath(dir, 'AGENTS.md')));
-    if (brief.includes(BRIEF_BEGIN)) deps.log('Run `setu agents` to update AGENTS.md.');
+    const brief = await readExistingText(deps.fs, joinPath(dir, 'AGENTS.md'));
+    if (brief?.includes(BRIEF_BEGIN) === true)
+      deps.log(`Run \`${cliInvocation(runtime)} agents\` to update AGENTS.md.`);
   } catch (cause) {
-    if (!isMissingPath(cause)) deps.error(`Cannot inspect AGENTS.md: ${escapeName(String(cause))}`);
+    deps.error(`Cannot inspect AGENTS.md: ${escapeName(String(cause))}`);
   }
 }
 

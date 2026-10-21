@@ -13,10 +13,9 @@ import {
   resolveDir,
   writeFiles,
   assertInsideProject,
-  MAX_EXISTING_FILE_BYTES,
+  readExistingText,
   type GeneratedFile,
 } from '../utils/file-writer.ts';
-import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
@@ -31,17 +30,7 @@ export interface IAgentsDependencies {
 }
 
 async function existingBrief(fs: IFileSystem, path: string): Promise<string> {
-  try {
-    const stat = await fs.stat(path);
-    if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES)
-      throw new Error(`${path}: expected a regular file at most 1 MiB`);
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
-      await fs.readFile(path),
-    );
-  } catch (cause) {
-    if (!isMissingPath(cause)) throw cause;
-    return '';
-  }
+  return (await readExistingText(fs, path)) ?? '';
 }
 
 /** Render all affected files before touching any of them. */

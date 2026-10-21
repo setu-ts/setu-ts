@@ -42,4 +42,12 @@ describe('composition-specific rule blocks', () => {
       expect(await checkFences(rule.id, rule.text, '.tmp/agent-rule-fences')).toBe(0);
     }
   });
+  it('tells a functional project to read the validated value from the same validator instance', () => {
+    // Each validateBody(S) call makes a new instance whose value(ctx) throws unless
+    // that instance ran; "read validateBody(S).value(ctx)" invites a second call.
+    const functional = RULE_BLOCKS.find((rule) => rule.id === 'functional')!.text;
+    expect(functional).toContain('const body = validateBody(S)');
+    expect(functional).toContain('body.value(ctx)');
+    expect(functional).not.toContain('validateBody(S).value(ctx)');
+  });
 });

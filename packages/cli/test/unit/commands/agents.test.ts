@@ -181,13 +181,12 @@ describe('setu agents', () => {
     for (const brief of ['', 'personal', BRIEF_BEGIN]) {
       const h = harness({ '/work/package.json': '{}', '/work/AGENTS.md': brief });
       expect(await h.run(['add', 'cache'])).toBe(0);
-      expect(h.out.text().includes('Run `setu agents` to update AGENTS.md.')).toBe(
-        brief === BRIEF_BEGIN,
-      );
+      const hint = /agents` to update AGENTS\.md\./;
+      expect(hint.test(h.out.text())).toBe(brief === BRIEF_BEGIN);
       if (brief === BRIEF_BEGIN) {
-        const count = h.out.text().split('Run `setu agents`').length;
+        const count = h.out.text().split('to update AGENTS.md.').length;
         expect(await h.run(['add', 'cache'])).toBe(0);
-        expect(h.out.text().split('Run `setu agents`').length).toBe(count + 1);
+        expect(h.out.text().split('to update AGENTS.md.').length).toBe(count + 1);
       }
     }
   });
@@ -208,8 +207,32 @@ describe('setu agents', () => {
       expect(refused.fs.writes).toEqual([]);
     }
   });
+  it('names the pinned CLI invocation in the add hint', async () => {
+    const h = harness({ '/work/package.json': '{}', '/work/AGENTS.md': BRIEF_BEGIN });
+    expect(await h.run(['add', 'cache'])).toBe(0);
+    expect(h.out.text()).toMatch(/Run `npx @setu-ts\/cli@[^ `]+ agents` to update AGENTS\.md\./);
+  });
+  it('never opens a special or overlarge AGENTS.md for the add hint', async () => {
+    for (const stat of [
+      { isFile: false, isDirectory: false, size: 0 },
+      { isFile: true, isDirectory: false, size: 2 ** 21 },
+    ]) {
+      const opened: string[] = [];
+      const h = harness({ '/work/package.json': '{}', '/work/AGENTS.md': BRIEF_BEGIN }, (fs) => ({
+        ...fs,
+        stat: (path) => (path.endsWith('AGENTS.md') ? Promise.resolve(stat) : fs.stat(path)),
+        readFile: (path) => {
+          if (path.endsWith('AGENTS.md')) opened.push(path);
+          return fs.readFile(path);
+        },
+      }));
+      expect(await h.run(['add', 'cache'])).toBe(0);
+      expect(opened).toEqual([]);
+      expect(h.err.text()).toContain('Cannot inspect AGENTS.md');
+    }
+  });
   it('reports an unreadable add-hint file without hiding the successful add', async () => {
-    const h = harness(undefined, (fs) => ({
+    const h = harness({ '/work/package.json': '{}', '/work/AGENTS.md': BRIEF_BEGIN }, (fs) => ({
       ...fs,
       readFile: (p) =>
         p.endsWith('AGENTS.md') ? Promise.reject(new Error('denied')) : fs.readFile(p),
