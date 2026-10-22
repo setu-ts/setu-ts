@@ -646,16 +646,15 @@ member's own `AGENTS.md` before working in it. Each member's brief is the standa
 member plus a pointer at the root file for workspace layout, ports and transport.
 
 Writing a workspace on POSIX, from its root or a member, checks every target's directory chain up to
-`/`: each directory must belong to the invoking user or root and must not be other-writable, except
-root-owned sticky directories such as `/tmp`. A group-writable directory passes only when its group
-is your primary group (the `umask 002` case, where that group holds only you); a shared group is
-refused. Symlinked directories are refused too. `--check` writes nothing and skips the check;
-`--dry-run` applies it. A failure exits `1`, names the directory and reason, writes nothing, and
-asks you to run `setu agents` in a workspace you own; it never falls back to standalone. This check
-is skipped when ownership metadata or the invoking uid is unavailable (including Windows); it does
-not protect against another process running as the same user. Missing directories pass ownership
-validation only when their nearest existing ancestor and its chain pass; a missing member still
-exits `1` with `<member>: not a project`, writing nothing. Standalone projects are unchecked.
+`/`: each directory must belong to the invoking user or root and must not be a symlink, the same
+ownership rule as git's `safe.directory`. Permission bits are not checked, so a directory you own
+but others can write is trusted. `--check` writes nothing and skips the check; `--dry-run` applies
+it. A failure exits `1`, names the directory and reason, writes nothing, and asks you to run
+`setu agents` in a workspace you own; it never falls back to standalone. This check is skipped when
+ownership metadata or the invoking uid is unavailable (including Windows); it does not protect
+against another process running as the same user. Missing directories pass ownership validation only
+when their nearest existing ancestor and its chain pass; a missing member still exits `1` with
+`<member>: not a project`, writing nothing. Standalone projects are unchecked.
 
 ### Where cards come from
 

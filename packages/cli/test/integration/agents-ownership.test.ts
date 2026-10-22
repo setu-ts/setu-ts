@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../../../test/node-helpers.ts';
@@ -33,11 +33,10 @@ afterEach(async () => {
 describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'win32')(
   'Node agents workspace ownership',
   () => {
-    it('adopts a real group-writable chain owned by the invoking primary group (umask 002)', async () => {
-      const { stat } = await import('node:fs/promises');
+    it('trusts a real chain you own even when others can write it (the git model)', async () => {
+      // umask 002 leaves every directory 0775; permission bits are not checked, only owners.
       for (const dir of [root, `${root}/apps`, `${root}/apps/a`, `${root}/apps/b`])
-        await chmod(dir, 0o775);
-      expect((await stat(`${root}/apps`)).gid).toBe(process.getgid?.());
+        await chmod(dir, 0o777);
       const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
       const errors: string[] = [];
       const code = await runCli(['agents'], {
@@ -53,14 +52,16 @@ describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'wi
     });
 
     it.each(['member', 'root'] as const)(
-      'refuses a real other-writable member from the %s before writing any brief',
+      'refuses a real symlinked member from the %s before writing any brief',
       async (from) => {
-        await chmod(`${root}/apps/b`, 0o757);
+        await rm(`${root}/apps/b`, { recursive: true });
+        await mkdir(`${root}/elsewhere`, { mode: 0o755 });
+        await writeFile(`${root}/elsewhere/package.json`, '{}');
+        await symlink(`${root}/elsewhere`, `${root}/apps/b`);
         const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
         expect(await fs.directoryOwnership!(`${root}/apps/b`)).toMatchObject({
           uid: process.getuid?.(),
-          isDirectory: true,
-          isSymbolicLink: false,
+          isSymbolicLink: true,
         });
         const errors: string[] = [];
         const run = () =>
@@ -73,12 +74,14 @@ describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'wi
           });
         expect(await run()).toBe(1);
         expect(errors).toEqual([
-          `${root}/apps/b: writable by others; run \`setu agents\` in a workspace you own`,
+          `${root}/apps/b: symlink; run \`setu agents\` in a workspace you own`,
         ]);
-        expect(await readdir(root)).toEqual(['apps', 'setu.workspace.json']);
+        expect(await readdir(root)).toEqual(['apps', 'elsewhere', 'setu.workspace.json']);
         for (const member of ['a', 'b'])
           expect(await readdir(`${root}/apps/${member}`)).toEqual(['package.json']);
-        await chmod(`${root}/apps/b`, 0o755);
+        await rm(`${root}/apps/b`);
+        await mkdir(`${root}/apps/b`, { mode: 0o755 });
+        await writeFile(`${root}/apps/b/package.json`, '{}');
         errors.length = 0;
         expect(await run()).toBe(0);
         expect(errors).toEqual([]);
@@ -90,53 +93,43 @@ describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'wi
       },
     );
 
-    it.each([false, true])(
-      'checks a missing real member via its existing ancestor (writable=%s)',
-      async (writable) => {
-        await writeFile(
-          `${root}/setu.workspace.json`,
-          JSON.stringify({
-            ...workspace,
-            members: [{ name: 'b', port: 3001 }],
-          }),
-        );
-        await rm(`${root}/apps/b`, { recursive: true });
-        await chmod(`${root}/apps`, writable ? 0o757 : 0o755);
-        const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
-        const seen: string[] = [];
-        const errors: string[] = [];
-        const checkedFs: ICliFileSystem = {
-          ...fs,
-          directoryOwnership: (path) => {
-            seen.push(path);
-            return fs.directoryOwnership!(path);
-          },
-        };
-        const result = await runCli(['agents'], {
-          fs: checkedFs,
-          cwd: root,
-          now: () => 0,
-          log: () => {},
-          error: (message) => errors.push(message),
-        });
-        expect(seen).toContain(`${root}/apps/b`);
-        expect(seen).toContain(`${root}/apps`);
-        expect(result).toBe(1);
-        expect(await readdir(root)).toEqual(['apps', 'setu.workspace.json']);
-        expect(await readdir(`${root}/apps`)).toEqual(['a']);
-        expect(await readdir(`${root}/apps/a`)).toEqual(['package.json']);
-        if (writable) {
-          expect(errors).toEqual([
-            `${root}/apps: writable by others; run \`setu agents\` in a workspace you own`,
-          ]);
-        } else {
-          expect(errors).toEqual([`${root}/apps/b: not a project`]);
-          expect(errors.join('\n')).not.toMatch(
-            /cannot check directory ownership|workspace you own|ENOENT/,
-          );
-        }
-      },
-    );
+    it('checks a missing real member via its existing ancestor', async () => {
+      await writeFile(
+        `${root}/setu.workspace.json`,
+        JSON.stringify({
+          ...workspace,
+          members: [{ name: 'b', port: 3001 }],
+        }),
+      );
+      await rm(`${root}/apps/b`, { recursive: true });
+      const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
+      const seen: string[] = [];
+      const errors: string[] = [];
+      const checkedFs: ICliFileSystem = {
+        ...fs,
+        directoryOwnership: (path) => {
+          seen.push(path);
+          return fs.directoryOwnership!(path);
+        },
+      };
+      const result = await runCli(['agents'], {
+        fs: checkedFs,
+        cwd: root,
+        now: () => 0,
+        log: () => {},
+        error: (message) => errors.push(message),
+      });
+      expect(seen).toContain(`${root}/apps/b`);
+      expect(seen).toContain(`${root}/apps`);
+      expect(result).toBe(1);
+      expect(await readdir(root)).toEqual(['apps', 'setu.workspace.json']);
+      expect(await readdir(`${root}/apps`)).toEqual(['a']);
+      expect(await readdir(`${root}/apps/a`)).toEqual(['package.json']);
+      expect(errors).toEqual([`${root}/apps/b: not a project`]);
+      expect(errors.join('\n')).not.toMatch(
+        /cannot check directory ownership|workspace you own|ENOENT/,
+      );
+    });
 
     it('passes ownership through missing real directories, then refuses the missing project', async () => {
       await rm(`${root}/apps`, { recursive: true });

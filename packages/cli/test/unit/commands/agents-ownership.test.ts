@@ -15,14 +15,13 @@ const workspace = {
   ],
 };
 const manifest = JSON.stringify(workspace);
-const owned = { uid: 123, gid: 100, mode: 0o755, isSymbolicLink: false, isDirectory: true };
+const owned = { uid: 123, isSymbolicLink: false, isDirectory: true };
 type Ownership = typeof owned;
 
 function harness(
   overrides: Record<string, Partial<Ownership> | Error> = {},
   seam = true,
   uid = true,
-  gid = true,
 ) {
   const fs = createFakeFs({
     '/work/setu.workspace.json': manifest,
@@ -33,7 +32,6 @@ function harness(
   const capable: ICliFileSystem = {
     ...fs,
     ...(uid ? { invokingUid: 123 } : {}),
-    ...(gid ? { invokingGid: 100 } : {}),
     ...(seam
       ? {
           directoryOwnership: (path: string) => {
@@ -79,10 +77,6 @@ describe('agents workspace ownership', () => {
 
   it.each([
     ['/work/apps/b', { uid: 456 }, 'not owned by you'],
-    ['/work/apps/b', { mode: 0o757 }, 'writable by others'],
-    ['/work/apps', { mode: 0o775, gid: 999 }, 'writable by others'],
-    ['/work', { uid: 0, mode: 0o777 }, 'writable by others'],
-    ['/work/apps/b', { uid: 123, mode: 0o1777 }, 'writable by others'],
     ['/work/apps/b', { isSymbolicLink: true }, 'symlink'],
     ['/work/apps/b', { isDirectory: false }, 'not a directory'],
     ['/', { uid: 456 }, 'not owned by you'],
@@ -96,38 +90,29 @@ describe('agents workspace ownership', () => {
     ]);
   });
 
-  it('allows a group-writable directory whose group is the invoking primary group', async () => {
-    // umask 002 under a user-private group scheme: every directory is 0775 and group 100.
-    const h = harness({ '/work': { mode: 0o775 }, '/work/apps': { mode: 0o775 } });
+  it('trusts owned directories whatever their permission bits (the git model)', async () => {
+    // The seam reports no mode at all: only owner and symlink-ness decide.
+    const h = harness();
     expect(await h.run()).toBe(0);
     expect(h.fs.writes).toContain('/work/AGENTS.md');
   });
 
-  it('refuses group write when the invoking gid is unknown', async () => {
-    const h = harness({ '/work/apps': { mode: 0o775 } }, true, true, false);
-    expect(await h.run()).toBe(1);
-    expect(h.fs.writes).toEqual([]);
-    expect(h.error.lines).toEqual([
-      '/work/apps: writable by others; run `setu agents` in a workspace you own',
-    ]);
-  });
-
   it('skips the chain check for --check but keeps it for --dry-run', async () => {
-    const check = harness({ '/work/apps/b': { mode: 0o757 } });
+    const check = harness({ '/work/apps/b': { uid: 456 } });
     expect(await check.run('/work/apps/a', '--check')).toBe(1);
     expect(check.seen).toEqual([]);
     expect(
       check.error.lines.every((line) => line.endsWith('missing or stale setu agents section')),
     ).toBe(true);
-    const dry = harness({ '/work/apps/b': { mode: 0o757 } });
+    const dry = harness({ '/work/apps/b': { uid: 456 } });
     expect(await dry.run('/work/apps/a', '--dry-run')).toBe(1);
     expect(dry.error.lines).toEqual([
-      '/work/apps/b: writable by others; run `setu agents` in a workspace you own',
+      '/work/apps/b: not owned by you; run `setu agents` in a workspace you own',
     ]);
   });
 
-  it('allows a root-owned sticky writable directory and root-owned normal ancestors', async () => {
-    const h = harness({ '/work': { uid: 0, mode: 0o1777 }, '/': { uid: 0 } });
+  it('allows root-owned ancestors such as /tmp', async () => {
+    const h = harness({ '/work': { uid: 0 }, '/': { uid: 0 } });
     expect(await h.run()).toBe(0);
   });
 
@@ -140,14 +125,14 @@ describe('agents workspace ownership', () => {
     expect(h.seen).toEqual([]);
   });
 
-  it('refuses an other-writable member from the direct workspace root', async () => {
-    const h = harness({ '/work/apps/b': { mode: 0o757 } });
+  it('refuses a foreign-owned member from the direct workspace root', async () => {
+    const h = harness({ '/work/apps/b': { uid: 456 } });
     expect(await h.run('/work')).toBe(1);
     expect(h.fs.writes).toEqual([]);
     expect(h.fs.mkdirs).toEqual([]);
     expect(h.seen).toContain('/work/apps/b');
     expect(h.error.lines).toEqual([
-      '/work/apps/b: writable by others; run `setu agents` in a workspace you own',
+      '/work/apps/b: not owned by you; run `setu agents` in a workspace you own',
     ]);
   });
 
@@ -163,11 +148,11 @@ describe('agents workspace ownership', () => {
   });
 
   it.each([false, true])(
-    'checks a missing member via its nearest existing ancestor (writable=%s)',
-    async (writable) => {
+    'checks a missing member via its nearest existing ancestor (foreign=%s)',
+    async (foreign) => {
       const h = harness({
         '/work/apps/b': Object.assign(new Error('missing b'), { code: 'ENOENT' }),
-        '/work/apps': { mode: writable ? 0o757 : 0o755 },
+        '/work/apps': foreign ? { uid: 456 } : {},
       });
       await h.fs.writeFile(
         '/work/setu.workspace.json',
@@ -180,9 +165,9 @@ describe('agents workspace ownership', () => {
       expect(await h.run('/work')).toBe(1);
       expect(h.fs.writes).toEqual(writesBefore);
       expect(h.fs.mkdirs).toEqual([]);
-      if (writable) {
+      if (foreign) {
         expect(h.error.lines).toEqual([
-          '/work/apps: writable by others; run `setu agents` in a workspace you own',
+          '/work/apps: not owned by you; run `setu agents` in a workspace you own',
         ]);
       } else {
         expect(h.seen).toEqual(['/work', '/', '/work/apps/b', '/work/apps']);

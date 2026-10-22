@@ -187,13 +187,10 @@ export function withRegularFileReads(fs: IFileSystem): ICliFileSystem {
       ? {}
       : {
           invokingUid: process.getuid(),
-          ...(typeof process.getgid === 'function' ? { invokingGid: process.getgid() } : {}),
           directoryOwnership: async (path: string) => {
             const stat = await lstat(path);
             return {
               uid: stat.uid,
-              gid: stat.gid,
-              mode: stat.mode,
               isSymbolicLink: stat.isSymbolicLink(),
               isDirectory: stat.isDirectory(),
             };
