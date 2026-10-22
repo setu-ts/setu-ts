@@ -6,6 +6,7 @@
  */
 import type {
   DeadlineOptions,
+  IConfig,
   ILogger,
   IPlugin,
   IPluginContext,
@@ -48,6 +49,8 @@ const DEFAULT_PROVIDER: SecretsProviderType = 'env';
  * @param options - Provider-specific options
  * @param env - The runtime environment map (for `EnvProvider`)
  * @param timing - The runtime's timers, which bound each Vault request
+ * @param config - Config fallback for the env provider (strings only); pass it
+ *   only when the fallback is enabled
  * @returns The provider adapter
  * @throws {Error} If the provider type is unsupported
  */
@@ -56,6 +59,7 @@ export function createProvider(
   options: SecretsProviderOptions,
   env: Readonly<Record<string, string | undefined>>,
   timing?: DeadlineOptions['timing'],
+  config?: IConfig,
 ): SecretProvider {
   switch (type) {
     case 'aws-kms':
@@ -87,7 +91,12 @@ export function createProvider(
         ...(timing !== undefined && { timing }),
       });
     case 'env':
-      return new EnvProvider(env, { prefix: options.prefix });
+      // The caller decides whether to pass `config`; `options.configFallback`
+      // is read once by `SecretsPlugin`, never again here.
+      return new EnvProvider(env, {
+        prefix: options.prefix,
+        ...(config !== undefined ? { config } : {}),
+      });
     default:
       throw new Error(`Unsupported secrets provider: ${type as string}`);
   }
@@ -97,7 +106,9 @@ export function createProvider(
  * Creates the SecretsPlugin.
  *
  * Registers an {@linkcode ISecretManager} under `CAPABILITIES.SECRETS`. The
- * default provider is `'env'` (zero dependency, every runtime).
+ * default provider is `'env'` (zero dependency, every runtime), reading the
+ * environment first and falling back to string config values when CONFIG is
+ * registered. Set `options.configFallback: false` for environment-only reads.
  *
  * @example
  * ```typescript
@@ -114,25 +125,43 @@ export function createProvider(
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
+ * @throws {TypeError} If the env provider's `options.configFallback` is not a boolean
  * @since 0.1.0
  */
 export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
   const providerType = options?.provider ?? DEFAULT_PROVIDER;
   const providerOptions = options?.options ?? {};
+  // Read `configFallback` exactly once, with ordinary property access (so an
+  // inherited value or a getter is honoured), and act on that one value
+  // everywhere: validating one read and acting on a later one would let a
+  // mutated options object bypass the refusal below, or log a value other
+  // than the one used. The options object itself is passed through untouched.
+  // Other providers ignore the option, so it is not read for them at all.
+  const configFallbackOption: unknown =
+    providerType === 'env' ? providerOptions.configFallback : undefined;
+  if (configFallbackOption !== undefined && typeof configFallbackOption !== 'boolean') {
+    throw new TypeError('options.configFallback must be a boolean.');
+  }
+  const useConfigFallback = providerType === 'env' && configFallbackOption !== false;
 
   return {
     name: PLUGIN_NAME,
     version: VERSION,
-    optionalDependencies: ['logger'],
+    optionalDependencies: [CAPABILITIES.LOGGER, CAPABILITIES.CONFIG],
     provides: [CAPABILITIES.SECRETS],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
+      const config =
+        useConfigFallback && ctx.services.has(CAPABILITIES.CONFIG)
+          ? ctx.services.get<IConfig>(CAPABILITIES.CONFIG)
+          : undefined;
       const provider = createProvider(
         providerType,
         providerOptions,
         ctx.runtime.env,
         resolveProbeTiming(ctx.runtime),
+        config,
       );
       await provider.connect();
 
@@ -141,7 +170,10 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
 
       const logger = resolveLogger(ctx);
       // Log metadata only — never a secret value (AI_GUIDELINES §13.3).
-      logger?.debug('SecretsPlugin registered', { provider: providerType });
+      logger?.debug('SecretsPlugin registered', {
+        provider: providerType,
+        configFallback: config !== undefined,
+      });
 
       // M90b: reports BOTH signals. `isReady()` is lifecycle (never
       // started / shut down → `down`); the cached probe is reachability.

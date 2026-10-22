@@ -8,8 +8,8 @@
 /**
  * Supported secret provider backends.
  *
- * - `'env'` — environment variables via `IRuntimeServices.env` (default, zero
- *   dependency, works on every runtime including Cloudflare Workers).
+ * - `'env'` — environment variables via `IRuntimeServices.env`, then an optional
+ *   config snapshot (default, zero dependency, every runtime including Workers).
  * - `'aws-kms'` — AWS Secrets Manager (KMS-backed encryption).
  * - `'gcp'` — GCP Secret Manager.
  * - `'azure'` — Azure Key Vault.
@@ -134,6 +134,16 @@ export interface SecretsProviderOptions {
   cacheTtl?: number;
   /** (`env`) Prefix prepended to the derived environment key. */
   prefix?: string;
+  /**
+   * (`env`) Fall back to `CAPABILITIES.CONFIG` for missing environment keys.
+   * Default `true`; `false` reads only the environment. Only string config
+   * values are accepted. Silently reads env only when CONFIG is absent.
+   * A non-boolean value is refused at plugin construction; other providers
+   * ignore this option.
+   *
+   * @since 0.10.0
+   */
+  configFallback?: boolean;
   /** (`aws-kms`) AWS region for the lazily-loaded client. */
   region?: string;
   /** (`aws-kms`) AWS access key id for the lazily-loaded client. */

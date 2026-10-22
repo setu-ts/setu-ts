@@ -31,6 +31,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Environment secrets use the config snapshot as a fallback (V9-77, 0.10.0,
+  `@setu-ts/secrets-plugin`).** The default `EnvProvider` reads the environment first, then string
+  values from `CAPABILITIES.CONFIG` when available. `.env`-only secrets loaded by `ConfigPlugin` now
+  resolve, including `SessionPlugin`'s `SESSION_SECRET` and secrets in full-stack starter apps. As a
+  result, a dotenv file present at runtime now satisfies `SessionPlugin`'s missing-secret startup
+  refusal. Set `SecretsPlugin({ options: { configFallback: false } })` to retain environment-only
+  reads. Non-boolean values are refused at construction for the env provider; other providers ignore
+  the option. Schema-stripped keys remain missing, and config-sourced `${NAME}` references are
+  expanded unless ConfigPlugin's `expandVariables` is `false`. Environment strings are unchanged.
 - **`agents` is a built-in CLI command (M116, `@setu-ts/cli`).** Built-in verbs are matched before
   any plugin-registered command and always win, so a plugin command named `agents` is no longer
   reachable. No in-repo plugin registers one; rename the plugin command if yours does.

@@ -6613,6 +6613,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   principal-based tenancy, construction-time config, backup/restore, verified inbound webhooks,
   tier-C scheduling, environment secrets and Node/standalone deployment. New fences compile;
   integration tests pin the documented compositions. No package source changed — complete (PR #483).
+- **V9-77** (`secrets-plugin` — environment secrets fall back to config, 0.10.0): `EnvProvider`
+  reads environment strings first, then string values from the optional CONFIG capability.
+  `options.configFallback` defaults to true, is validated at construction for the env provider, and
+  can disable the fallback. Unit and real-kernel ConfigPlugin tests cover ordering, schema
+  stripping, expansion, cache semantics and silent operation without CONFIG — complete (PR #485).
 - **Milestone 116** (`packages/cli` + every published library package + `scripts/` — agent briefs):
   `setu agents` writes a marker-delimited section into `AGENTS.md` naming the project's installed
   and not-installed Setu-TS packages, the add-a-listed-package rule and the path to each installed
@@ -6625,10 +6630,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `AGENTS.md` or the terminal, and over the file writes. Later rounds moved every CLI write to a
   read-only snapshot plus an owner-only temp file renamed over the target (no existing inode is
   written through; owner, group and `0o777` bits kept, read-only targets refused), and made
-  `setu agents` refuse a workspace whose directories another user owns or can write. Round 6 passed
-  with nothing open; its one correctness observation was fixed afterwards and not re-audited.
-  Residuals: same-uid processes, Windows (no ownership check) and standalone parents resolved by
-  name — complete (PR #484)
+  `setu agents` refuse a workspace whose directories another user owns or that contains a symlink
+  (git's `safe.directory` rule). Round 6 passed with nothing open; its one correctness observation
+  was fixed afterwards and not re-audited. Residuals: same-uid processes, Windows (no ownership
+  check) and standalone parents resolved by name — complete (PR #484)
 - **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
