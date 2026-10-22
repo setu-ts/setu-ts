@@ -63,10 +63,12 @@
     "@azure/identity": "^4",
     "@azure/keyvault-secrets": "^4",
     "@google-cloud/secret-manager": "^5",
+    "@setu-ts/config-plugin": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
     "@types/node": "^24",
     "typescript": "6.0.3",
     "vitest": "5.0.3"

@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type { IConfig, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 /** A captured logger call. */
@@ -30,12 +30,15 @@ export interface FakeContext {
  *
  * @param env - The runtime env map exposed to the plugin
  * @param withLogger - When `true`, registers a capturing logger under `logger`
+ * @param registerRuntimeService - Whether to register the runtime capability
+ * @param config - Optional CONFIG service registered before the plugin runs
  * @returns The fake context and capture buffers
  */
 export function createFakeContext(
   env: Record<string, string | undefined> = {},
   withLogger = false,
   registerRuntimeService = true,
+  config?: IConfig,
 ): FakeContext {
   const registered = new Map<string, unknown>();
   const healthIndicators = new Map<string, () => Promise<{ status: string; data?: unknown }>>();
@@ -55,6 +58,9 @@ export function createFakeContext(
   if (registerRuntimeService) {
     registered.set(CAPABILITIES.RUNTIME, runtime);
   }
+  if (config !== undefined) {
+    registered.set(CAPABILITIES.CONFIG, config);
+  }
 
   if (withLogger) {
     registered.set(CAPABILITIES.LOGGER, {
@@ -62,7 +68,9 @@ export function createFakeContext(
         logs.push({ message, meta });
       },
       info: (): void => {},
-      warn: (): void => {},
+      warn: (message: string, meta?: Record<string, unknown>): void => {
+        logs.push({ message, meta });
+      },
       error: (): void => {},
       fatal: (): void => {},
       trace: (): void => {},

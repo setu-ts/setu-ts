@@ -2042,6 +2042,9 @@ importers:
       '@google-cloud/secret-manager':
         specifier: ^5
         version: 5.6.0
+      '@setu-ts/config-plugin':
+        specifier: workspace:^
+        version: link:../config-plugin
       '@setu-ts/exceptions':
         specifier: workspace:^
         version: link:../exceptions
@@ -2054,6 +2057,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../testing
       '@types/node':
         specifier: ^24
         version: 24.19.2
