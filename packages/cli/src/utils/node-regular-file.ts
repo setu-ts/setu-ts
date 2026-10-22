@@ -121,6 +121,8 @@ export async function writeRegularFile(
     `.${basename(path)}.setu-${randomBytes(16).toString('hex')}.tmp`,
   );
   let created = false;
+  // Thrown before rename, so the target is untouched: no undo is attempted.
+  let ownerRefusal: Error | undefined;
   try {
     const output = await open(
       temp,
@@ -145,7 +147,8 @@ export async function writeRegularFile(
         if (tempStat.uid !== existing.uid || tempStat.gid !== existing.gid) {
           const { uid, gid } = existing;
           await output.chown(uid, gid).catch((cause: unknown) => {
-            throw new Error(`${path}: cannot keep the file's owner or group`, { cause });
+            ownerRefusal = new Error(`${path}: cannot keep the file's owner or group`, { cause });
+            throw ownerRefusal;
           });
         }
         // After chown, which may clear permission bits.
@@ -161,6 +164,7 @@ export async function writeRegularFile(
       await unlink(temp).catch(() => {
         /* Best-effort cleanup; preserve the write failure. */
       });
+    if (cause === ownerRefusal) throw cause;
     throw new RegularFileWriteError(before, cause);
   }
 }

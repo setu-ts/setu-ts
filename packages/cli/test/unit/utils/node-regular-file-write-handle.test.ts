@@ -141,8 +141,9 @@ describe('snapshot then rename writer', () => {
     io.output.stat.mockResolvedValue({ uid: 0, gid: 1000 });
     io.output.chown.mockRejectedValue(cause);
     const error = await writeRegularFile('/target', bytes('new'), 10).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(RegularFileWriteError);
-    expect((error as RegularFileWriteError).cause).toMatchObject({
+    // A plain error: the target was never replaced, so writeFiles must not try to restore it.
+    expect(error).not.toBeInstanceOf(RegularFileWriteError);
+    expect(error).toMatchObject({
       message: "/target: cannot keep the file's owner or group",
       cause,
     });
