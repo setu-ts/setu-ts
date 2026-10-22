@@ -66,6 +66,16 @@ describe('project brief rendering', () => {
     expect(absent).not.toContain('`cloudflare`');
     expect(absent).toContain('`scheduler`');
   });
+  it('names the npm package beside each add name, so Rule 0 resolves to a real card', () => {
+    const absent = renderBrief(agentFacts({})).split('## Not installed')[1]!;
+    expect(absent).toContain('- `queue` (`@setu-ts/queue-plugin`) — ');
+    for (const [, name, pkg] of absent.matchAll(/^- `([^`]+)` \(`@setu-ts\/([^`]+)`\)/gm)) {
+      expect(pkg === name || pkg.startsWith(name)).toBe(true);
+    }
+    expect([...absent.matchAll(/^- `/gm)].length).toBe(
+      [...absent.matchAll(/^- `[^`]+` \(`@setu-ts\//gm)].length,
+    );
+  });
   it('lists no tooling package as an installed library: cli and create ship no card', () => {
     const text = renderBrief(agentFacts({ installed: new Set(['common', 'cli', 'create']) }));
     const installed = text.split('## Installed')[1]!.split('## Not installed')[0]!;

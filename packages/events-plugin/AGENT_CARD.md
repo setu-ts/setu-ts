@@ -15,7 +15,7 @@ export function registerOrderRoutes(router: IRouterApi): void {
     handler: async (ctx) => {
       const { DomainEvent } = defineDomainEvent(ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME));
       class OrderPlaced extends DomainEvent<{ orderId: string }> {
-        override readonly type = 'order.placed';
+        override readonly type = 'OrderPlaced';
       }
       const bus = ctx.services.get<IEventBus>(CAPABILITIES.EVENTS);
       await bus.publish(new OrderPlaced({ orderId: ctx.params.id! }));
@@ -25,29 +25,38 @@ export function registerOrderRoutes(router: IRouterApi): void {
 }
 ```
 
-## Register a subscriber in setu.config.ts
+## Handle the event
+
+`setu g event-handler order-placed` writes `src/events/order-placed.event-handler.ts` and wires it
+into `EventsPlugin({ handlers: EVENT_HANDLERS })`; fill in its `handle`:
 
 ```ts
-import { EventsPlugin } from '@setu-ts/events-plugin';
+import type { IDomainEvent } from '@setu-ts/common';
+import type { IEventHandler } from '@setu-ts/events-plugin';
 
-export const events = EventsPlugin({
-  handlers: [{
-    type: 'order.placed',
-    handler: { handle: async (event) => { console.log(event.data); } },
-  }],
-});
+export const ORDER_PLACED_EVENT = 'OrderPlaced';
+
+export let ordersPlaced = 0;
+
+export class OrderPlacedEventHandler implements IEventHandler<{ orderId: string }> {
+  async handle(_event: IDomainEvent<{ orderId: string }>): Promise<void> {
+    ordersPlaced += 1;
+  }
+}
+
+export function createOrderPlacedEventHandler(): OrderPlacedEventHandler {
+  return new OrderPlacedEventHandler();
+}
 ```
 
 ## Behaviour the types do not show
 
 - Dispatch defaults to `async: false`: handlers run in subscription order and publishing awaits
   them. With `async: true`, publishing does not await completion.
-- Handler failures go to `errorHandler`; the default logs when a logger exists and otherwise does
-  nothing. A custom error handler can itself throw.
-- Domain event IDs and timestamps come from the runtime. Optional aggregate metadata is omitted when
-  absent.
+- Handler failures go to `errorHandler`, which by default logs when a logger exists.
 - This bus is process-local; a restart loses its subscriptions and there is no message persistence.
-- Handler factories in `handlers` resolve at `onInit`, when registered capabilities are available.
+- State a route reads back can live in a module both files import. A handler factory may take
+  `services`; factories resolve at `onInit`, when capabilities are registered.
 
 ## Other options
 

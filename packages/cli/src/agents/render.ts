@@ -75,7 +75,9 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
       (restriction !== undefined && !restriction.runtimes.includes(facts.runtime))
     )
       continue;
-    sections.push(`- \`${name}\` — ${PACKAGE_DATA.get(pkg)!.description}`);
+    // Name the npm package too: Rule 0's card path is `@setu-ts/<package>`, and an add name such
+    // as `queue` is not one (`queue-plugin` is), so a bare add name sent agents to a missing card.
+    sections.push(`- \`${name}\` (\`@setu-ts/${pkg}\`) — ${PACKAGE_DATA.get(pkg)!.description}`);
   }
   return checkedSection(sections.join('\n') + `\n${BRIEF_END}`);
 }

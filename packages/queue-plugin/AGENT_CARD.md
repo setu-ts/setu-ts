@@ -22,29 +22,40 @@ export function registerReceiptRoutes(router: IRouterApi): void {
 }
 ```
 
-## Register the matching processor in setu.config.ts
+## Process the job
+
+`setu g job receipt` writes `src/jobs/receipt.job.ts` and wires it into
+`QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; fill in its factory:
 
 ```ts
-import { QueuePlugin } from '@setu-ts/queue-plugin';
-import type { IJob } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger, IServiceRegistry } from '@setu-ts/common';
+import type { QueueProcessorDefinition } from '@setu-ts/queue-plugin';
 
-export const queue = QueuePlugin({
-  processors: [{
+/** Shared with the routes that read it; both import this module. */
+export const sentReceipts: string[] = [];
+
+export function createReceiptJobProcessor(
+  services: IServiceRegistry,
+): QueueProcessorDefinition<{ orderId: string }> {
+  const logger = services.get<ILogger>(CAPABILITIES.LOGGER);
+  return {
     name: 'receipt',
-    processor: async (job: IJob<{ orderId: string }>) => {
-      console.log(job.data.orderId);
+    async processor(job) {
+      sentReceipts.push(job.data.orderId);
+      logger.info('receipt sent');
     },
-    options: { concurrency: 2 },
-  }],
-});
+  };
+}
 ```
 
 ## Behaviour the types do not show
 
 - `add` resolves to the job ID, before processing completes; `delayMs` is milliseconds.
+- State a route reads back (a list, a counter) can live in a module both files import; the factory
+  gets `services` for capabilities.
 - `job.attempts` is 1 on first delivery. Throwing fails an attempt; make effects safe to repeat.
-- `onFailed` runs once after attempts are exhausted, before dead-lettering. It does not run for
-  attempts that will be retried; its own errors are logged and swallowed.
+- `onFailed` runs once after attempts are exhausted, before dead-lettering, not on retries.
 - Default processor concurrency is 1 per name; default `pollIntervalMs` is 1000 milliseconds.
 - The default memory adapter is process-local. Processor factories resolve at `onInit`, when
   capabilities are registered; shutdown stops polling and disconnects the adapter.

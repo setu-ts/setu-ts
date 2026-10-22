@@ -107,8 +107,11 @@ from the pilot.
   7. **Installed packages** — one row per detected `@setu-ts` package: name, capability token(s)
      from §3.6, description from §3.6, card path.
   8. **Not installed** — one line per `ADDABLE` short name whose package is absent and which
-     `RUNTIME_RESTRICTIONS` allows on this runtime: `` `<short name>` — <description> ``, under a
-     heading telling the agent to run `setu add <name>` and install before use.
+     `RUNTIME_RESTRICTIONS` allows on this runtime:
+     `` `<short name>` (`@setu-ts/<package>`) — <description> ``, under a heading telling the agent
+     to run `setu add <name>` and install before use. The package name is there because Rule 0's
+     card path uses it: measured, a bare `queue` sent all three T8 runs to a nonexistent
+     `@setu-ts/queue/AGENT_CARD.md`.
 - **Why:** one render function keeps `--check` and a write byte-identical by construction; every
   fact is read from the project rather than from which template created it, because no project
   records its template (`WorkspaceMember` has no such field, §1) and a project changes after
