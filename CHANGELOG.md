@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Agent brief writes (M116, `@setu-ts/cli`):** the Node CLI snapshots, replaces and restores
+  regular files through one no-follow handle, refusing leaf symlinks, hard links, special files and
+  prior content over 1 MiB even when the target changes after preflight.
+
 - **CLI file reads and member paths:** manifest reads now refuse non-regular files, files over 1 MiB
   and files that are not valid UTF-8; runtime-marker checks use metadata without opening content. A
   POSIX path containing `\` is no longer read as a workspace member path.

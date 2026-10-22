@@ -10,10 +10,33 @@ import { isMissingPath } from './filesystem-errors.ts';
 import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 import { escapeName } from './names.ts';
 
-/** Optional CLI-only bounded read, supplied by the executable's process boundary. */
+/** Optional CLI-only handle-based I/O, supplied by the executable's process boundary. */
 export interface ICliFileSystem extends IFileSystem {
   /** Opens non-blocking, checks the opened handle is regular, and reads at most maxBytes + 1. */
   readRegularFile?(path: string, maxBytes: number): Promise<Uint8Array>;
+  /**
+   * Opens without following the leaf link, bounds the prior bytes, and replaces via that handle.
+   * A failure after capturing prior bytes throws RegularFileWriteError so rollback can recover.
+   */
+  writeRegularFile?(
+    path: string,
+    bytes: Uint8Array,
+    maxExistingBytes: number,
+  ): Promise<{ before: Uint8Array | undefined }>;
+}
+
+/** Carries undo bytes when a handle-based write or close fails after the snapshot. */
+export class RegularFileWriteError extends Error {
+  readonly before: Uint8Array | undefined;
+
+  /** @param before - Previous bytes, or undefined for a file created by this attempt.
+   * @param cause - The write or close failure.
+   */
+  constructor(before: Uint8Array | undefined, cause: unknown) {
+    super(failureMessage(cause), { cause });
+    this.before = before;
+    this.name = 'RegularFileWriteError';
+  }
 }
 
 /**
@@ -509,7 +532,7 @@ export async function reportDryRunPlan(
 }
 
 /** Restores even a write that rejected after truncating its target. */
-async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
+async function restoreFile(fs: ICliFileSystem, undo: FileUndo): Promise<void> {
   const { before } = undo;
   if (before === undefined) {
     try {
@@ -517,6 +540,10 @@ async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
     } catch (cause) {
       if (!isMissingPath(cause)) throw cause;
     }
+    return;
+  }
+  if (fs.writeRegularFile !== undefined) {
+    await fs.writeRegularFile(undo.path, before, MAX_EXISTING_FILE_BYTES);
     return;
   }
   const current = await previousBytes(fs, undo.path);
@@ -547,12 +574,15 @@ function failureMessage(cause: unknown): string {
  * @throws The original failure, or an AggregateError naming incomplete recovery
  */
 export async function writeFiles(
-  fs: IFileSystem,
+  fs: ICliFileSystem,
   files: readonly GeneratedFile[],
   options: { readonly root: string; readonly signal?: AbortSignal },
 ): Promise<readonly WriteOutcome[]> {
   // Every target is checked BEFORE the first write, so a link anywhere in the
   // plan refuses the whole batch with nothing written.
+  // assertInsideProject checks the parent directories; the Node capability's
+  // O_NOFOLLOW checks the final component at open. A parent-directory swap by
+  // the root's owner remains outside this fix.
   for (const file of files) await assertInsideProject(fs, options.root, file.path);
   const encoder = new TextEncoder();
   const directories: string[] = [];
@@ -563,11 +593,24 @@ export async function writeFiles(
     for (const file of files) {
       throwIfInterrupted(options.signal);
       await ensureDirectory(fs, dirName(file.path), directories, known, options.signal);
-      const before = await previousBytes(fs, file.path);
-      attempted.push({ path: file.path, before });
-      await fs.writeFile(file.path, encoder.encode(file.contents));
+      const bytes = encoder.encode(file.contents);
+      let before: Uint8Array | undefined;
+      if (fs.writeRegularFile !== undefined) {
+        try {
+          ({ before } = await fs.writeRegularFile(file.path, bytes, MAX_EXISTING_FILE_BYTES));
+        } catch (cause) {
+          if (cause instanceof RegularFileWriteError)
+            attempted.push({ path: file.path, before: cause.before });
+          throw cause;
+        }
+        attempted.push({ path: file.path, before });
+      } else {
+        before = await previousBytes(fs, file.path);
+        attempted.push({ path: file.path, before });
+        await fs.writeFile(file.path, bytes);
+      }
       throwIfInterrupted(options.signal);
-      outcomes.push(outcomeFor(file.path, before, encoder.encode(file.contents)));
+      outcomes.push(outcomeFor(file.path, before, bytes));
     }
     return outcomes;
   } catch (cause) {

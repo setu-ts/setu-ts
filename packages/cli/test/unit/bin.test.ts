@@ -1,6 +1,5 @@
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
-import { readRegularFile } from '../../src/utils/node-regular-file.ts';
 
 const boundary = vi.hoisted(() => ({
   process: { exitCode: 0 },
@@ -17,14 +16,29 @@ vi.mock('../../src/main.ts', () => ({
   nodeProcess: boundary.nodeProcess,
 }));
 
-it('installs the bounded reader at the executable boundary and returns its exit code', async () => {
+beforeEach(() => {
+  vi.resetModules();
+  vi.clearAllMocks();
+});
+
+it('installs the bounded reader and writer at the executable boundary and returns its exit code', async () => {
+  const { readRegularFile, writeRegularFile } =
+    await import('../../src/utils/node-regular-file.ts');
   const fs = createFakeFs();
   const runtime = { fs, now: () => 5 };
   boundary.createNodeRuntimeServices.mockReturnValue(runtime);
   await import('../../src/bin.ts');
   expect(boundary.runMain).toHaveBeenCalledWith(
-    { ...runtime, fs: expect.objectContaining({ readRegularFile }) },
+    { ...runtime, fs: expect.objectContaining({ readRegularFile, writeRegularFile }) },
     { host: true },
   );
+  expect(boundary.process.exitCode).toBe(7);
+});
+
+it('passes a runtime without a filesystem through the executable boundary', async () => {
+  const runtime = { now: () => 5 };
+  boundary.createNodeRuntimeServices.mockReturnValue(runtime);
+  await import('../../src/bin.ts');
+  expect(boundary.runMain).toHaveBeenCalledExactlyOnceWith(runtime, { host: true });
   expect(boundary.process.exitCode).toBe(7);
 });
