@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- an example entry reports shutdown failures. */
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
@@ -13,3 +14,17 @@ await app.start({ port: Number(runtime.env.PORT ?? '3000') });
 // application's own startup hooks — before that there is no repository to
 // write to.
 await seedProducts(app.services.get<IDatabaseService>(CAPABILITIES.DATABASE));
+
+// Without a handler, SIGTERM ends the process before `app.stop()` can run its shutdown hooks.
+// `onSignal` is absent where no signal can be caught (Windows). See docs/deployment.md.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
+    void app
+      .stop()
+      .then(() => runtime.exit(0))
+      .catch((error: unknown) => {
+        console.error('Graceful shutdown failed:', error);
+        runtime.exit(1);
+      });
+  });
+}

@@ -1,96 +1,122 @@
-import { createRestExampleApp, issueDemoToken } from './src/app.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { issueDemoToken } from './src/auth/demo-token.ts';
+import { createApp } from './setu.config.ts';
 
-const app = createRestExampleApp();
-await app.start();
-try {
-  const token = await issueDemoToken(app);
-  if (token.length === 0) {
-    throw new Error('The authentication capability did not issue a JWT.');
-  }
-  const unauthorized = await app.inject({
-    method: 'POST',
-    url: 'http://example.test/todos',
-    body: { title: 'Unauthenticated writes must fail' },
-  });
-  if (unauthorized.statusCode !== 401) {
-    throw new Error(
-      `Expected unauthenticated POST /todos to return 401, received ${unauthorized.statusCode}`,
-    );
-  }
-  const headers = { authorization: `Bearer ${token}` };
-  const create = await app.inject({
-    method: 'POST',
-    url: 'http://example.test/todos',
-    headers,
-    body: { title: 'Write an example' },
-  });
-  if (create.statusCode !== 201) {
-    throw new Error(`Expected POST /todos to return 201, received ${create.statusCode}`);
-  }
-  const todo = create.json<{ id: string; title: string }>();
-  const read = await app.inject({
-    method: 'GET',
-    url: `http://example.test/todos/${todo.id}`,
-    headers,
-  });
-  if (read.statusCode !== 200 || read.json<{ title: string }>().title !== todo.title) {
-    throw new Error('The written todo was not readable through the REST API.');
-  }
-  const openapi = await app.inject({
-    method: 'GET',
-    url: 'http://example.test/openapi.json',
-  });
-  if (openapi.statusCode !== 200 || !openapi.body?.includes('/todos')) {
-    throw new Error('The OpenAPI document did not include the served todo routes.');
-  }
-
-  // The document has to be usable, not merely present: a client (human in
-  // Swagger UI, or generated from this spec) must be able to authenticate,
-  // must not be handed the documentation endpoints as API operations, and must
-  // get a typed path parameter rather than `any`.
-  const spec = openapi.json<{
-    security?: unknown;
-    components?: { securitySchemes?: Record<string, unknown> };
-    paths: Record<string, Record<string, { parameters?: { schema?: unknown }[] }>>;
-  }>();
-
-  if (spec.components?.securitySchemes?.bearerAuth === undefined) {
-    throw new Error(
-      'The OpenAPI document declared no bearerAuth scheme, so Swagger UI would ' +
-        'render no Authorize button and every protected route would be untryable.',
-    );
-  }
-  if (JSON.stringify(spec.security) !== JSON.stringify([{ bearerAuth: [] }])) {
-    throw new Error(
-      `Expected a document-level bearerAuth requirement, received ${JSON.stringify(spec.security)}`,
-    );
-  }
-
-  const documented = Object.keys(spec.paths).sort();
-  const selfDocumented = documented.filter((path) => path === '/openapi.json' || path === '/docs');
-  if (selfDocumented.length > 0) {
-    throw new Error(
-      `The OpenAPI document listed its own delivery endpoints as API operations: ${selfDocumented.join(
-        ', ',
-      )}`,
-    );
-  }
-  if (JSON.stringify(documented) !== JSON.stringify(['/todos', '/todos/{id}'])) {
-    throw new Error(
-      `Expected exactly the two todo operations to be documented, received ${documented.join(
-        ', ',
-      )}`,
-    );
-  }
-
-  const idParam = spec.paths['/todos/{id}']?.get?.parameters?.[0];
-  if (JSON.stringify(idParam?.schema) !== JSON.stringify({ type: 'string' })) {
-    throw new Error(
-      `Expected the id path parameter to be typed as a string, received ${JSON.stringify(
-        idParam?.schema,
-      )}`,
-    );
-  }
-} finally {
-  await app.stop();
+interface OpenApiDocument {
+  readonly security?: unknown;
+  readonly components?: { readonly securitySchemes?: Record<string, unknown> };
+  readonly paths: Record<
+    string,
+    Record<string, { readonly parameters?: readonly { readonly schema?: unknown }[] }>
+  >;
 }
+
+describe('rest-api example', () => {
+  let app: IKernelApplication;
+  let authorization: { authorization: string };
+
+  before(async () => {
+    app = createApp();
+    await app.start();
+    authorization = { authorization: `Bearer ${await issueDemoToken(app)}` };
+  });
+
+  after(async () => {
+    await app.stop();
+  });
+
+  it('refuses an unauthenticated write', async () => {
+    const response = await app.inject({ method: 'POST', url: '/todos', body: { title: 'x' } });
+
+    assert.equal(response.statusCode, 401);
+  });
+
+  it('refuses an invalid body before creating anything', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/todos',
+      headers: authorization,
+      body: { title: '' },
+    });
+
+    assert.equal(response.statusCode, 400);
+  });
+
+  it('reads back a todo it created', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/todos',
+      headers: authorization,
+      body: { title: 'Write an example' },
+    });
+    assert.equal(created.statusCode, 201);
+    const todo = created.json<{ id: string; title: string }>();
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/todos/${todo.id}`,
+      headers: authorization,
+    });
+
+    assert.equal(read.statusCode, 200);
+    assert.deepEqual(read.json(), todo);
+  });
+
+  it('keeps each application its own store', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/todos',
+      headers: authorization,
+      body: { title: 'Only in the first application' },
+    });
+    const { id } = created.json<{ id: string }>();
+
+    const other = createApp();
+    await other.start();
+    try {
+      const token = { authorization: `Bearer ${await issueDemoToken(other)}` };
+      const read = await other.inject({ method: 'GET', url: `/todos/${id}`, headers: token });
+
+      assert.equal(read.statusCode, 404);
+    } finally {
+      await other.stop();
+    }
+  });
+
+  it('answers an unknown todo with a Problem Details 404', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/todos/missing',
+      headers: authorization,
+    });
+
+    assert.equal(response.statusCode, 404);
+    assert.equal(response.json<{ status: number }>().status, 404);
+  });
+
+  describe('the OpenAPI document', () => {
+    let spec: OpenApiDocument;
+
+    before(async () => {
+      const response = await app.inject({ method: 'GET', url: '/openapi.json' });
+      assert.equal(response.statusCode, 200);
+      spec = response.json<OpenApiDocument>();
+    });
+
+    it('declares the bearer scheme Swagger UI needs for its Authorize button', () => {
+      assert.ok(spec.components?.securitySchemes?.['bearerAuth']);
+      assert.deepEqual(spec.security, [{ bearerAuth: [] }]);
+    });
+
+    it('documents exactly the todo operations', () => {
+      assert.deepEqual(Object.keys(spec.paths).sort(), ['/todos', '/todos/{id}']);
+    });
+
+    it('types the undeclared id path parameter as a string', () => {
+      const parameter = spec.paths['/todos/{id}']?.['get']?.parameters?.[0];
+      assert.deepEqual(parameter?.schema, { type: 'string' });
+    });
+  });
+});

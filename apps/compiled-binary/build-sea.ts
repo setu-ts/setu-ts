@@ -36,12 +36,8 @@ await writeFile(
     disableExperimentalSEAWarning: true,
   }),
 );
-for (const [command, args] of [
-  [process.execPath, ['--experimental-sea-config', config]],
-] as const) {
-  const result = await run(command, args, { inherit: true });
-  if (result.code !== 0) throw new Error('Node could not generate the SEA blob.');
-}
+const blob = await run(process.execPath, ['--experimental-sea-config', config], { inherit: true });
+if (blob.code !== 0) throw new Error('Node could not generate the SEA blob.');
 const binary = `${out}/server`;
 await copyFile(process.execPath, binary);
 await chmod(binary, 0o755);

@@ -798,7 +798,7 @@ describe('real-backend CI wiring', () => {
     // only then starting a ten-second readiness budget loses that budget to the
     // download. Resolving it first pays the install outside the window.
     const smoke = await readFile('apps/realtime-clients/smoke.ts', 'utf8');
-    const preflight = smoke.indexOf("await run('npx', ['--yes', 'wrangler', '--version']);");
+    const preflight = smoke.indexOf("await runOrFail('npx', ['--yes', 'wrangler', '--version']);");
     const spawn = smoke.indexOf("startHost('npx'");
     expect(preflight).toBeGreaterThan(-1);
     expect(spawn).toBeGreaterThan(preflight);
@@ -810,10 +810,10 @@ describe('real-backend CI wiring', () => {
     // label alone passes while it sits in a comment and the call has gone back
     // to taking one argument, which is the state the fix replaced. `\s*` so a
     // later `deno fmt` rewrap across lines does not read as a regression.
-    expect(smoke).toMatch(/waitForServer\(\s*baseUrl,\s*'Realtime client server'/);
     expect(smoke).toMatch(
-      /waitForServer\(\s*`http:\/\/127\.0\.0\.1:\$\{workerdPort\}`,\s*'workerd client host'/,
+      /waitForHttp\(\s*`\$\{baseUrl\}\/resume`,\s*\{\s*label:\s*'Realtime client server'/,
     );
+    expect(smoke).toMatch(/waitForHttp\(\s*workerdUrl,\s*\{\s*label:\s*'workerd client host'/);
   });
 
   it('has REDIS_URL available whenever CI provides the container', () => {

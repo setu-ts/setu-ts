@@ -1,7 +1,12 @@
-/* eslint-disable no-console -- interactive example entry point. */
-import { addAndRead, createCqrsApp } from './src/app.ts';
+/* eslint-disable no-console -- an example entry reports what it did. */
+import { addNote, readNotes } from './src/modules/notes/index.ts';
+import { createApp } from './setu.config.ts';
 
-const app = createCqrsApp();
+const app = createApp();
 await app.start();
-console.log(await addAndRead(app, 'CQRS keeps commands and queries separate.'));
-await app.stop();
+try {
+  await addNote(app.services, 'CQRS keeps commands and queries separate.');
+  console.log(await readNotes(app.services));
+} finally {
+  await app.stop();
+}

@@ -290,15 +290,24 @@ importers:
       '@setu-ts/database-plugin':
         specifier: workspace:^
         version: link:../../packages/database-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../../packages/exceptions
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../../packages/kernel
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../../packages/runtime
+      '@setu-ts/validation-plugin':
+        specifier: workspace:^
+        version: link:../../packages/validation-plugin
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
 
   apps/di-decorators:
     dependencies:
@@ -571,9 +580,21 @@ importers:
       '@setu-ts/common':
         specifier: workspace:^
         version: link:../../packages/common
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../../packages/exceptions
+      '@setu-ts/kernel':
+        specifier: workspace:^
+        version: link:../../packages/kernel
       '@setu-ts/rest-starter':
         specifier: workspace:^
         version: link:../../packages/starters/rest-starter
+      '@setu-ts/runtime':
+        specifier: workspace:^
+        version: link:../../packages/runtime
+      '@setu-ts/validation-plugin':
+        specifier: workspace:^
+        version: link:../../packages/validation-plugin
       swagger-ui-dist:
         specifier: ^5
         version: 5.34.0
