@@ -11,9 +11,12 @@ All notable changes to this project are documented here. The format follows
 - **CLI writes (M116, `@setu-ts/cli`):** every Node CLI write (`new`, `generate`, `add`, `agents`,
   …) snapshots regular files read-only, then writes and restores through a fresh same-directory temp
   file renamed over the target. Existing inodes are never written through; static leaf symlinks,
-  hard links, special files and prior content over 1 MiB are refused independently of ownership.
-  Replacement preserves only `0o777` permissions, never setuid, setgid or sticky bits. Cleanup
-  covers handled failures only: a process killed between temp creation and rename can leave a
+  hard links, special files and prior content over 1 MiB are refused independently of ownership. An
+  existing file's temp is created owner-only (`0o600`), so its contents are never readable by others
+  mid-write; the replacement then keeps the file's owner and group and only its `0o777` permissions,
+  never setuid, setgid or sticky bits. A file the user cannot write, or whose owner or group cannot
+  be kept, is refused unchanged; ACLs and extended attributes are not carried over. Cleanup covers
+  handled failures only: a process killed between temp creation and rename can leave a
   `.<name>.setu-<hex>.tmp` file. Specific to `setu agents` workspace writes on POSIX, every root and
   member target's directory chain is checked for ownership, write permissions and symlinks;
   untrusted chains are refused with nothing written, whether invoked from the root or a member.

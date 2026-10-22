@@ -96,6 +96,20 @@ describe('Node regular-file writer', () => {
     expect(await readFile(path)).toEqual(Buffer.from(before));
   });
 
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'refuses a read-only file and leaves it unchanged',
+    async () => {
+      const target = `${root}/AGENTS.md`;
+      await writeFile(target, 'read only');
+      await chmod(target, 0o444);
+      await expect(writeRegularFile(target, bytes('new'), MAX_EXISTING_FILE_BYTES)).rejects.toThrow(
+        `${target}: not writable`,
+      );
+      expect(await readFile(target, 'utf8')).toBe('read only');
+      expect((await stat(target)).mode & 0o777).toBe(0o444);
+    },
+  );
+
   it('refuses a directory', async () => {
     await expect(writeRegularFile(root, bytes('new'), MAX_EXISTING_FILE_BYTES)).rejects.toThrow();
   });

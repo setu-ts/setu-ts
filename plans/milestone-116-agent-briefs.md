@@ -503,10 +503,14 @@ Decisions:
   writer's temp-then-rename replacement and ownership-independent file refusals. Never write an
   existing inode. Snapshot via read-only no-follow/non-blocking/ no-controlling-terminal open, fstat
   regular/size/static-nlink checks and bounded reads; ENOENT means absent. Static hard-link refusal
-  is diagnostic, not the race protection. Create a random exclusive same-directory temp at mode 0666
-  (umask applies), write it, preserve only existing `stat.mode & 0o777` permissions with chmod
-  (never setuid, setgid or sticky), close, then rename over the entry. Cleanup covers handled
-  failures only: a process killed between temp creation and rename can leave a
+  is diagnostic, not the race protection. Refuse an existing target the user cannot write
+  (`access W_OK`; a name that vanished after the snapshot is recreated). Create a random exclusive
+  same-directory temp at 0600 for an existing target (R5-1: its private bytes are never
+  other-readable mid-write) or 0666 minus the umask for a new one, write it, then for an existing
+  target restore its owner and group with `fchown` when they differ (refused unchanged if that
+  fails) and only `stat.mode & 0o777` with chmod after the chown (never setuid, setgid or sticky),
+  close, then rename over the entry. ACLs and extended attributes are not carried over. Cleanup
+  covers handled failures only: a process killed between temp creation and rename can leave a
   `.<name>.setu-<hex>.tmp` file. Clean failed temps best-effort and retain
   `RegularFileWriteError.before` for undo. Snapshot close completes before temp creation: if it
   fails, the target is untouched and the error needs no undo wrapper. Restoration uses this same

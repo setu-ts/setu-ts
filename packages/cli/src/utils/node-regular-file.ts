@@ -1,7 +1,7 @@
 /** Node-only handle-based I/O, installed at the CLI executable's process boundary. */
 import { constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { lstat, open, rename, unlink } from 'node:fs/promises';
+import { access, lstat, open, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { IFileSystem } from '@setu-ts/common';
 import { type ICliFileSystem, RegularFileWriteError } from './file-writer.ts';
@@ -50,7 +50,11 @@ export function regularFileWriteFlags(flags: {
 
 /**
  * Snapshots read-only, then replaces the directory entry with a fresh same-directory inode.
- * Copies only the existing 0o777 permission bits, never setuid, setgid or sticky bits.
+ * An existing target's temp is created owner-only (0o600), so its private bytes are never
+ * readable by others mid-write; after writing it receives the target's owner and group and
+ * only its 0o777 permission bits, never setuid, setgid or sticky. A target the invoking user
+ * cannot write is refused, as is one whose owner or group cannot be kept. ACLs and extended
+ * attributes are not carried over. A new target's temp uses 0o666 minus the umask.
  * Cleanup covers handled failures only: a process killed between temp creation and rename
  * can leave a .<name>.setu-<hex>.tmp file in the target directory.
  * @param path - Target whose parent chain the caller has checked.
@@ -76,7 +80,7 @@ export async function writeRegularFile(
     },
   );
   let before: Uint8Array | undefined;
-  let mode: number | undefined;
+  let existing: { mode: number; uid: number; gid: number } | undefined;
   if (handle !== undefined) {
     try {
       const stat = await handle.stat();
@@ -85,7 +89,7 @@ export async function writeRegularFile(
       if (!stat.isFile() || stat.nlink > 1 || stat.size > maxExistingBytes) {
         throw new Error(refusal);
       }
-      mode = stat.mode & 0o777;
+      existing = { mode: stat.mode & 0o777, uid: stat.uid, gid: stat.gid };
       const previous = new Uint8Array(maxExistingBytes);
       let length = 0;
       while (length < previous.length) {
@@ -103,6 +107,14 @@ export async function writeRegularFile(
       // therefore leaves the target untouched and needs no RegularFileWriteError undo.
       await handle.close();
     }
+    // The old in-place writer could not open a read-only target; renaming over it
+    // would silently replace it, so keep refusing. This is a usability guard, not
+    // the security boundary (no existing inode is ever written through).
+    await access(path, constants.W_OK).catch((cause: unknown) => {
+      // The name vanished after the snapshot: the rename recreates it.
+      if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') return;
+      throw new Error(`${path}: not writable`, { cause });
+    });
   }
   const temp = join(
     dirname(path),
@@ -110,7 +122,11 @@ export async function writeRegularFile(
   );
   let created = false;
   try {
-    const output = await open(temp, regularFileWriteFlags(constants), 0o666);
+    const output = await open(
+      temp,
+      regularFileWriteFlags(constants),
+      existing === undefined ? 0o666 : 0o600,
+    );
     created = true;
     try {
       let written = 0;
@@ -124,7 +140,17 @@ export async function writeRegularFile(
         if (bytesWritten === 0) throw new Error(`${path}: write made no progress`);
         written += bytesWritten;
       }
-      if (mode !== undefined) await output.chmod(mode);
+      if (existing !== undefined) {
+        const tempStat = await output.stat();
+        if (tempStat.uid !== existing.uid || tempStat.gid !== existing.gid) {
+          const { uid, gid } = existing;
+          await output.chown(uid, gid).catch((cause: unknown) => {
+            throw new Error(`${path}: cannot keep the file's owner or group`, { cause });
+          });
+        }
+        // After chown, which may clear permission bits.
+        await output.chmod(existing.mode);
+      }
     } finally {
       await output.close();
     }

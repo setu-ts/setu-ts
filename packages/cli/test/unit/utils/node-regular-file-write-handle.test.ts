@@ -5,12 +5,18 @@ import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 const io = vi.hoisted(() => ({
   input: { stat: vi.fn(), read: vi.fn(), close: vi.fn() },
-  output: { write: vi.fn(), chmod: vi.fn(), close: vi.fn() },
+  output: { write: vi.fn(), chmod: vi.fn(), chown: vi.fn(), stat: vi.fn(), close: vi.fn() },
   open: vi.fn(),
   rename: vi.fn(),
   unlink: vi.fn(),
+  access: vi.fn(),
 }));
-vi.mock('node:fs/promises', () => ({ open: io.open, rename: io.rename, unlink: io.unlink }));
+vi.mock('node:fs/promises', () => ({
+  open: io.open,
+  rename: io.rename,
+  unlink: io.unlink,
+  access: io.access,
+}));
 import {
   regularFileFlags,
   regularFileWriteFlags,
@@ -22,10 +28,26 @@ const ioError = (code: string): Error => Object.assign(new Error(code), { code }
 
 beforeEach(() => {
   vi.resetAllMocks();
-  for (const method of [io.input.close, io.output.close, io.output.chmod, io.rename, io.unlink])
+  for (const method of [
+    io.input.close,
+    io.output.close,
+    io.output.chmod,
+    io.output.chown,
+    io.rename,
+    io.unlink,
+    io.access,
+  ])
     method.mockResolvedValue(undefined);
   io.open.mockResolvedValueOnce(io.input).mockResolvedValue(io.output);
-  io.input.stat.mockResolvedValue({ isFile: () => true, size: 3, nlink: 1, mode: 0o100640 });
+  io.input.stat.mockResolvedValue({
+    isFile: () => true,
+    size: 3,
+    nlink: 1,
+    mode: 0o100640,
+    uid: 1000,
+    gid: 1000,
+  });
+  io.output.stat.mockResolvedValue({ uid: 1000, gid: 1000 });
   io.input.read
     .mockImplementationOnce((buffer: Uint8Array) => {
       buffer.set(bytes('old'));
@@ -47,9 +69,10 @@ describe('snapshot then rename writer', () => {
     expect(io.open.mock.calls[1]).toEqual([
       expect.stringMatching(/^\/\.target\.setu-[a-f0-9]{32}\.tmp$/),
       regularFileWriteFlags(constants),
-      0o666,
+      0o600,
     ]);
     expect(io.output.chmod).toHaveBeenCalledWith(0o640);
+    expect(io.output.chown).not.toHaveBeenCalled();
     expect(io.output.write).toHaveBeenCalledWith(bytes('new'), 0, 3, 0);
     expect(io.input.close.mock.invocationCallOrder[0]).toBeLessThan(
       io.output.write.mock.invocationCallOrder[0]!,
@@ -83,6 +106,48 @@ describe('snapshot then rename writer', () => {
     io.open.mockReset().mockRejectedValueOnce(ioError('ENOENT')).mockResolvedValue(io.output);
     expect(await writeRegularFile('/new', bytes('new'), 10)).toEqual({ before: undefined });
     expect(io.output.chmod).not.toHaveBeenCalled();
+    expect(io.open.mock.calls[1]![2]).toBe(0o666);
+    expect(io.access).not.toHaveBeenCalled();
+  });
+
+  it('refuses a target the invoking user cannot write, before creating a temp', async () => {
+    const cause = ioError('EACCES');
+    io.access.mockRejectedValue(cause);
+    await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
+      message: '/target: not writable',
+      cause,
+    });
+    expect(io.access).toHaveBeenCalledWith('/target', constants.W_OK);
+    expect(io.open).toHaveBeenCalledOnce();
+  });
+
+  it('proceeds when the target name vanished after the snapshot', async () => {
+    io.access.mockRejectedValue(ioError('ENOENT'));
+    expect(await writeRegularFile('/target', bytes('new'), 10)).toEqual({ before: bytes('old') });
+    expect(io.rename).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the owner and group, then applies the mode after chown', async () => {
+    io.output.stat.mockResolvedValue({ uid: 1000, gid: 50 });
+    await writeRegularFile('/target', bytes('new'), 10);
+    expect(io.output.chown).toHaveBeenCalledWith(1000, 1000);
+    expect(io.output.chown.mock.invocationCallOrder[0]).toBeLessThan(
+      io.output.chmod.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('refuses when the owner or group cannot be kept, leaving the target untouched', async () => {
+    const cause = ioError('EPERM');
+    io.output.stat.mockResolvedValue({ uid: 0, gid: 1000 });
+    io.output.chown.mockRejectedValue(cause);
+    const error = await writeRegularFile('/target', bytes('new'), 10).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RegularFileWriteError);
+    expect((error as RegularFileWriteError).cause).toMatchObject({
+      message: "/target: cannot keep the file's owner or group",
+      cause,
+    });
+    expect(io.rename).not.toHaveBeenCalled();
+    expect(io.unlink).toHaveBeenCalledOnce();
   });
 
   it.each([
