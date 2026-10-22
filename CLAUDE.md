@@ -6627,7 +6627,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   group and `0o777` bits kept, read-only targets refused), and made `setu agents` refuse a workspace
   whose directories another user owns or can write. Round 6 passed with nothing open; its one
   correctness observation was fixed afterwards and not re-audited. Residuals: same-uid processes,
-  Windows (no ownership check) and standalone parents resolved by name — complete (PR pending)
+  Windows (no ownership check) and standalone parents resolved by name — complete (PR #484)
 - **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
