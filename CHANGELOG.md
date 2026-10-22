@@ -31,6 +31,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The supported Node floor is a patched release (0.10.0, every package).** Every manifest now
+  declares `engines.node ^22.23.4 || >=24.22.1` (was `>=22`): the first release on each supported
+  line carrying the Node.js security fixes of 2026-10-20. The compatibility workflow pins Node
+  24.22.1. npm warns rather than refuses on a mismatch unless `engine-strict` is set; see the
+  upgrade guide for rebuilding images. The lockfile is refreshed in the same change (issue #449).
+
 - **Declared OpenAPI operation metadata now reaches the document (#487, 0.10.0, `@setu-ts/common`,
   `@setu-ts/decorator-plugin`, `@setu-ts/openapi-plugin`).** Optional `RouteSchema.operationId` and
   `RouteSchema.description` carry programmatic declarations and `@ApiOperation` metadata. A declared

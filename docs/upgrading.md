@@ -12,6 +12,15 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Run a patched Node release (`engines.node ^22.23.4 || >=24.22.1`, 0.10.0)
+
+Every package now declares `"node": "^22.23.4 || >=24.22.1"`: the first releases of each supported
+line carrying the Node.js security fixes of 2026-10-20 (among them Permission Model bypasses and TLS
+certificate name matching). Upgrade Node on developer machines, CI and servers, and rebuild
+production images — a cached `node:24-alpine` layer stays on the release it was pulled at, so
+rebuild with `--pull`. npm only warns on an `engines` mismatch unless `engine-strict` is set, so an
+older Node keeps installing; the range records the floor, it does not enforce it.
+
 ### Declared `@ApiOperation` ids and descriptions (0.10.0)
 
 `@ApiOperation({ operationId, description })` now reaches the document through optional
