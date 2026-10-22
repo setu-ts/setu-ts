@@ -14843,15 +14843,15 @@ follow-on; the pilot did not test any of them.
 
 **Deliverables**
 
-- [ ] `plans/milestone-116-agent-briefs.md`, settling the open questions above
-- [ ] `setu agents` and `setu agents --check`, with standalone and workspace output
-- [ ] A card in every published library package, and the four card gates
-- [ ] The CLI's not-installed description table and its drift gate
-- [ ] A scaffold e2e: scaffold, `setu add` a plugin, install, run `setu agents`, and assert the
+- [x] `plans/milestone-116-agent-briefs.md`, settling the open questions above
+- [x] `setu agents` and `setu agents --check`, with standalone and workspace output
+- [x] A card in every published library package, and the four card gates
+- [x] The CLI's not-installed description table and its drift gate
+- [x] A scaffold e2e: scaffold, `setu add` a plugin, install, run `setu agents`, and assert the
       brief names the installed and not-installed sets correctly and the card is reachable from the
       path the brief gives
-- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `116`
+- [x] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `116`
 
 ---
 
@@ -15124,4 +15124,4 @@ patch by construction and gains nothing new here.
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |
 | 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
-| 116       | ⬜     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
+| 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
