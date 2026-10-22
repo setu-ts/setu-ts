@@ -1,58 +1,58 @@
-# @setu-ts/messaging-plugin — cross-service brokers and integration events
+# @setu-ts/messaging-plugin — publish and consume broker messages
 
-`setu add messaging` installs it and, in a recognized functional config, registers
-`MessagingPlugin()`; otherwise add that line in `setu.config.ts`. The default broker is in-memory;
-`CAPABILITIES.MESSAGING` resolves only after `app.start`.
+**Add it:** `setu add messaging` installs it and wires `MessagingPlugin()` in a recognized
+functional config. It provides `CAPABILITIES.MESSAGING` (`IMessageBroker`).
+
+## Publish an order from a route
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMessageBroker } from '@setu-ts/common';
+import type { IMessageBroker, IRouterApi } from '@setu-ts/common';
+
+export function registerOrderRoutes(router: IRouterApi): void {
+  router.post('/orders/:id/placed', {
+    handler: async (ctx) => {
+      const broker = ctx.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+      await broker.publish('orders.placed', { orderId: ctx.params.id! });
+      return ctx.response.status(202).json({ accepted: true });
+    },
+  });
+}
+```
+
+## Subscribe in setu.config.ts
+
+```ts
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
-
-app.register(MessagingPlugin());
-
-await app.start();
-const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-await broker.publish('orders.placed', { orderId: 'o-1' });
-```
-
-Integration events add a versioned envelope:
-
-```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMessageBroker, IRuntimeServices } from '@setu-ts/common';
-import {
-  defineIntegrationEvent,
-  onIntegrationEvent,
-  publishIntegrationEvent,
-} from '@setu-ts/messaging-plugin';
+import type { ILogger } from '@setu-ts/common';
 
-const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
-  type: 'orders.placed',
-  version: 1,
-  topic: 'orders.placed.v1', // must end with `.v${version}`
-  parse: (value) => {
-    if (typeof (value as { orderId?: unknown }).orderId !== 'string') throw new TypeError('bad');
-    return value as { orderId: string };
-  },
+export const messaging = MessagingPlugin({
+  subscriptions: [(services) => ({
+    topic: 'orders.placed',
+    options: { queue: 'billing' },
+    handler: async (message) => {
+      services.get<ILogger>(CAPABILITIES.LOGGER).info('Order received', { message });
+    },
+  })],
 });
-
-await app.start();
-const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-const d = onIntegrationEvent(orderPlaced, async (payload) => void payload.orderId);
-await broker.subscribe(d.topic, d.handler);
-await publishIntegrationEvent(runtime, broker, orderPlaced, { orderId: 'o-1' });
 ```
 
-- `publish` resolves when delivery is handed to dispatch, not when handlers finish; a throwing
-  handler is logged, never rethrown. Handlers must be idempotent.
-- `broker` selects `'memory'` (default), `'redis-streams'`, `'rabbitmq'`, `'nats'`, `'kafka'`,
-  `'pubsub'`, `'service-bus'` or `'custom'` (`instance`). `name` registers token `messaging.<name>`
-  and plugin `messaging-plugin.<name>`.
-- `broker.subscribe` takes a topic, handler and `{queue}`. `broker.publish` accepts `orderingKey`,
-  `deduplicationId` and `headers`; invalid values reject with RangeError.
-- `parse` runs only on the consumer; a malformed envelope becomes `IntegrationEventRejectedError`
-  and is not retried. Delivered headers are hints, not authorization.
-- Also exported: outbox, inbox, `broker.request`/`broker.respond`, `EventsMessagingBridge`; see
-  README.
+## Behaviour the types do not show
+
+- Memory is the default broker: messages and subscriptions do not survive a restart.
+- In memory, subscribers without a queue all receive a copy; subscribers sharing a queue receive one
+  copy per group, selected round-robin.
+- Memory `publish` resolves on dispatch hand-off, before handlers finish. Handler failures go to the
+  logger when available and never reject that publish. Make consumers idempotent.
+- Subscription factories resolve at `onInit`, after capabilities are registered.
+- `name` registers a named capability such as `messaging.orders`, replacing the bare token for that
+  instance.
+
+## Other options
+
+- `broker` also selects `'redis-streams'`, `'rabbitmq'`, `'nats'`, `'kafka'`, `'pubsub'`,
+  `'service-bus'` or `'custom'` with `instance`.
+- `request` and `respond` provide request/reply; `behaviors` wraps incoming handlers.
+- `defineIntegrationEvent`, `publishIntegrationEvent` and `onIntegrationEvent` add versioned
+  contracts; `outbox` and `inbox` configure durable publication and consumer deduplication.

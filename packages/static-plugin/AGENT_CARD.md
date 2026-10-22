@@ -1,8 +1,9 @@
-# @setu-ts/static-plugin — serve files from a directory
+# @setu-ts/static-plugin — files and single-page applications
 
-`setu add static` adds the dependency and prints the registration line; add `StaticPlugin({ root })`
-to the `plugins` array in `setu.config.ts`. `root` is required. The plugin mounts `<urlPrefix>/*`
-for GET and HEAD.
+**Add it:** `setu add static` installs it and prints `StaticPlugin({ root })`; put that registration
+in `setu.config.ts`. It provides `CAPABILITIES.STATIC_FILES` (`IStaticFiles`).
+
+## Serve built assets beside API routes
 
 ```ts
 import { StaticPlugin } from '@setu-ts/static-plugin';
@@ -10,22 +11,39 @@ import { StaticPlugin } from '@setu-ts/static-plugin';
 export const assets = StaticPlugin({
   root: './public',
   urlPrefix: '/assets',
-  fallback: 'index.html',
-  cacheControl: (requestPath) =>
-    requestPath.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+  cacheControl: 'public, max-age=3600',
 });
 ```
 
-- `root` is the directory to serve; `urlPrefix` defaults to `'/'` and `index` to `'index.html'`
-  (`''` disables index resolution).
-- A root mount claims `GET /*`. An application serving SSR at the root cannot also mount static
-  files there — give them their own `urlPrefix`; the kernel refuses a duplicate method and path.
-- `fallback` serves the SPA shell when the path is missing and Accept includes `text/html`.
-- `cacheControl` takes a string or a per-path function. The function's argument is the full
-  leading-slash request path INCLUDING `urlPrefix`, never the filesystem path or a sidecar's.
-  Defaults: immutable for content-hashed names, `public, max-age=0, must-revalidate` otherwise.
-- `etag`, `ranges` and `compressed` default to `true`: conditional requests, Range responses, and
-  `.br`/`.gz` sidecar negotiation, which sends the matching Content-Encoding header.
-- `maxBufferBytes` defaults to `1048576`; larger files stream. On a runtime with no filesystem
-  (Workers) no route is registered and the `static-files` health indicator reports `up` with
+## Serve a single-page application
+
+Use this instead of the asset-only registration when the client owns root routing:
+
+```ts
+import { StaticPlugin } from '@setu-ts/static-plugin';
+
+export const frontend = StaticPlugin({
+  root: './build/client',
+  fallback: 'index.html',
+  cacheControl: (path) => path.endsWith('.html') ? 'no-cache' : 'public, max-age=3600',
+});
+```
+
+## Behaviour the types do not show
+
+- `urlPrefix` defaults to `/`, `index` to `index.html`; an empty `index` disables index lookup.
+- The plugin mounts both GET and HEAD. A root wildcard cannot share its method and path with an SSR
+  catch-all; mount assets at their own prefix.
+- `fallback` is used only for a missing path whose Accept header includes `text/html`.
+- The `cacheControl` callback receives the full request path, including `urlPrefix`.
+- `etag`, `ranges` and `compressed` default to `true`; compression negotiates `.br`/`.gz` sidecars.
+- `maxBufferBytes` defaults to 1048576 bytes; larger files stream when the filesystem supports it.
+  Without a filesystem, no routes are mounted and the health indicator reports up with
   `data.fs: false`.
+
+## Other options
+
+- Omit `cacheControl` for immutable caching of content-hashed names and revalidation otherwise.
+- `root` selects the filesystem directory; `urlPrefix` selects the public mount.
+- `createStaticHandler` builds a handler separately; `StaticFilesService` offers the service
+  directly.

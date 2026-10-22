@@ -1,56 +1,56 @@
 # @setu-ts/events-plugin — in-process domain events
 
-`setu add events` prints `EventsPlugin()` and installs the package; it is zero-configuration. It
-registers an `IEventBus` (an `InMemoryEventBus`) under `CAPABILITIES.EVENTS`. For events that cross
-a process boundary use `@setu-ts/messaging-plugin` and its `EventsMessagingBridge`.
+**Add it:** `setu add events` installs it and wires `EventsPlugin()` in a recognized functional
+config. It provides `CAPABILITIES.EVENTS` (`IEventBus`).
+
+## Publish a domain fact from a route
 
 ```ts
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IEventBus, IRouterApi, IRuntimeServices } from '@setu-ts/common';
+import { defineDomainEvent } from '@setu-ts/events-plugin';
+
+export function registerOrderRoutes(router: IRouterApi): void {
+  router.post('/orders/:id/placed', {
+    handler: async (ctx) => {
+      const { DomainEvent } = defineDomainEvent(ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME));
+      class OrderPlaced extends DomainEvent<{ orderId: string }> {
+        override readonly type = 'order.placed';
+      }
+      const bus = ctx.services.get<IEventBus>(CAPABILITIES.EVENTS);
+      await bus.publish(new OrderPlaced({ orderId: ctx.params.id! }));
+      return ctx.response.json({ ok: true });
+    },
+  });
+}
+```
+
+## Register a subscriber in setu.config.ts
+
+```ts
 import { EventsPlugin } from '@setu-ts/events-plugin';
 
-export function createEventsApp() {
-  return createApplication({
-    plugins: [RuntimePlugin(), EventsPlugin({ async: false })],
-  });
-}
+export const events = EventsPlugin({
+  handlers: [{
+    type: 'order.placed',
+    handler: { handle: async (event) => { console.log(event.data); } },
+  }],
+});
 ```
 
-```ts
-import { defineDomainEvent, type IEventBus } from '@setu-ts/events-plugin';
-import { type IRuntimeServices } from '@setu-ts/common';
+## Behaviour the types do not show
 
-export function createUserCreated(runtime: IRuntimeServices, userId: string) {
-  const { DomainEvent } = defineDomainEvent(runtime);
-  class UserCreated extends DomainEvent<{ userId: string }> {
-    override readonly type = 'user.created';
-  }
-  return new UserCreated({ userId });
-}
+- Dispatch defaults to `async: false`: handlers run in subscription order and publishing awaits
+  them. With `async: true`, publishing does not await completion.
+- Handler failures go to `errorHandler`; the default logs when a logger exists and otherwise does
+  nothing. A custom error handler can itself throw.
+- Domain event IDs and timestamps come from the runtime. Optional aggregate metadata is omitted when
+  absent.
+- This bus is process-local; a restart loses its subscriptions and there is no message persistence.
+- Handler factories in `handlers` resolve at `onInit`, when registered capabilities are available.
 
-export async function announce(
-  bus: IEventBus,
-  runtime: IRuntimeServices,
-  userId: string,
-): Promise<void> {
-  bus.subscribe<{ userId: string }>('user.created', async (event) => {
-    await Promise.resolve(event.data.userId);
-  });
-  await bus.publish(createUserCreated(runtime, userId));
-}
-```
+## Other options
 
-- `async` defaults to `false`, so `publish` and `publishBatch` await every handler in order; `true`
-  is fire-and-forget. A failing handler never rejects `publish` — errors go to `errorHandler`, which
-  defaults to the `logger` capability when present, otherwise a no-op.
-- `handlers` is `{ type, handler }[]`; `handler` may be an instance or a factory
-  `(services) => handler`, called at `onInit` so it can resolve any capability. Both routes use
-  `subscribeHandler`.
-- `defineDomainEvent(runtime)` returns `DomainEvent` and `IntegrationEvent` bases bound to the
-  runtime clock; subclass and set `type`. `IntegrationEvent` marks cross-service facts; the typed
-  wire contract is `defineIntegrationEvent` in `@setu-ts/messaging-plugin`.
-- `createDomainEvents()` is an aggregate-local recorder: `record`, `pending` (ordered snapshot),
-  `remove` (reference equality, first match, returns `false` when absent) and `clear`. It never
-  publishes; dispatch after saving.
-- `diagnostics: { enabled: true, alias, events }` opts into the diagnostics connector's
-  `GET /v1/event` observations; `events` is an exact type→alias allowlist of at most 64 entries.
+- `publishBatch` publishes events in array order; `subscribe` returns an unsubscribe function.
+- `createDomainEvents` records ordered pending facts locally; it never publishes them.
+- `diagnostics` enables observations only for the configured event type allowlist.

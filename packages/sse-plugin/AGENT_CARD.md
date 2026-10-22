@@ -1,40 +1,54 @@
-# @setu-ts/sse-plugin — one-way server-to-client streaming
+# @setu-ts/sse-plugin — stream server events to browsers
 
-`setu add sse` installs it and registers `SsePlugin()` in a recognized functional config; otherwise
-add that line in `setu.config.ts`. `CAPABILITIES.SSE` resolves after `app.start`. Use it when only
-the server sends; use `@setu-ts/websocket-plugin` when the client also sends.
+**Add it:** `setu add sse` installs it and wires `SsePlugin()` in a recognized functional config. It
+provides `CAPABILITIES.SSE` (`ISseService`).
+
+## Subscribe a browser to a channel
+
+```ts
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRouterApi, ISseService } from '@setu-ts/common';
+
+export function registerEventRoutes(router: IRouterApi): void {
+  router.get('/events', {
+    handler: (ctx) => {
+      const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+      const conn = sse.open(ctx);
+      sse.channel('deploys').add(conn);
+      conn.send({ event: 'ready', data: 'connected' });
+      return conn.result;
+    },
+  });
+}
+```
+
+## Publish an update to connected clients
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ISseService } from '@setu-ts/common';
-import { SsePlugin } from '@setu-ts/sse-plugin';
 
-app.register(SsePlugin({ heartbeatMs: 15_000, retryMs: 3_000 }));
-
-await app.start({ port: 3000 });
-app.router.get('/events', (ctx) => {
-  const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
-  const conn = sse.open(ctx);
-  conn.send({ id: '1', event: 'greeting', data: 'hello' });
-  return conn.result;
-});
-
-const sse = app.services.get<ISseService>(CAPABILITIES.SSE);
-sse.channel('deploys').publish({ data: { build: 412, status: 'live' } });
+const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+sse.peek('deploys')?.publish({ id: '412', event: 'deployment', data: { build: 412 } });
 ```
 
-- `sse.open(ctx)` writes the stream headers and returns a connection; you must return `conn.result`
-  from the handler. `conn.send`, `conn.comment` and `conn.close` use the open stream.
-- `sse.channel(name)` gets or creates a channel; `.add`, `.remove`, `.publish` and `.size` address
-  it. **Nothing reclaims a channel before shutdown**, so on a caller-supplied name use
-  `sse.peek(name)` instead — it returns `undefined` without registering one.
-- `data` is a JSON-safe value: a string is written literally, anything else is `JSON.stringify`-ed.
-  Declare object payloads with a type alias, not an interface, so they assign. NaN/Infinity become
-  null; a circular value throws.
-- A channel is process-local until a cross-process backplane is registered. Register
-  `@setu-ts/realtime-backplane-plugin` with `transport: 'redis'` (or `'messaging'`); its default
-  `'memory'` transport is still one process. `scalingNotice: false` silences the startup warning
-  without changing delivery.
-- A browser's EventSource sends cookies only; guard the route with session-based auth, not a bearer
-  header. Set `id` on messages so a reconnect can resume from Last-Event-ID.
-- `heartbeatMs` and `retryMs` are off when omitted.
+## Behaviour the types do not show
+
+- `open` sets stream headers; return the connection's `result` from the handler. Disconnects remove
+  channel membership automatically.
+- `channel` creates a channel; `peek` returns `undefined` without creating one. Channel names remain
+  registered until shutdown even when empty, so avoid creating unbounded names.
+- String `data` is written literally; other values are JSON-encoded. Undefined data throws; circular
+  values also throw. Messages to a closed connection are ignored.
+- The incoming last-event-id header is exposed as `lastEventId` (or `null`). There is no automatic
+  replay: application code must supply missed events.
+- Channels are process-local without a cross-process backplane. A backplane failure logs and
+  preserves local delivery; channel size still counts only local connections.
+- `heartbeatMs` and `retryMs` are omitted by default. They use milliseconds; heartbeat writes a
+  comment, while retry sends the browser's reconnect delay.
+
+## Other options
+
+- `SsePlugin({ heartbeatMs: 15000, retryMs: 3000 })` configures connection keepalive and retries.
+- `send`, `comment` and `close` operate on one connection; channel `remove` detaches a member.
+- `diagnostics` enables observations; `scalingNotice: false` suppresses the local-only notice.

@@ -1,11 +1,13 @@
-# @setu-ts/feature-flags-plugin — feature flags with a route guard
+# @setu-ts/feature-flags-plugin — control feature rollout and route access
 
-`setu add feature-flags` adds the dependency and prints the registration line — it does not rewrite
-the config. Add `FeatureFlagsPlugin(...)` to the `plugins` array in `setu.config.ts`; the built-in
-providers need no npm package. It registers `CAPABILITIES.FEATURE_FLAGS`.
+**Add it:** `setu add feature-flags` installs it and prints the registration for `setu.config.ts`;
+add `FeatureFlagsPlugin` with a provider. It provides `CAPABILITIES.FEATURE_FLAGS`
+(`IFeatureFlags`).
+
+## Define a targeted rollout
 
 ```ts
-import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
+import { FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 
 export const flags = FeatureFlagsPlugin({
   provider: 'config',
@@ -16,29 +18,43 @@ export const flags = FeatureFlagsPlugin({
     },
   },
 });
-
-export const betaOnly = createFlagGuard('new-checkout', { fallback: '/waitlist' });
 ```
+
+## Guard a route and evaluate a flag
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IFeatureFlags, IRequestContext } from '@setu-ts/common';
+import type { IFeatureFlags, IRouterApi } from '@setu-ts/common';
+import { createFlagGuard } from '@setu-ts/feature-flags-plugin';
 
-export function darkModeFor(context: IRequestContext): boolean {
-  const flags = context.services.get<IFeatureFlags>(CAPABILITIES.FEATURE_FLAGS);
-  return flags.isEnabled('dark-mode', { userId: context.params.id });
+export function registerCheckoutRoutes(router: IRouterApi): void {
+  router.get('/checkout', {
+    middleware: [createFlagGuard('new-checkout', { fallback: '/waitlist' })],
+    handler: (ctx) => {
+      const flags = ctx.services.get<IFeatureFlags>(CAPABILITIES.FEATURE_FLAGS);
+      const dark = flags.isEnabled('dark-mode', ctx.request.user ? { userId: ctx.request.user.id } : undefined);
+      return ctx.response.json({ dark });
+    },
+  });
 }
 ```
 
-- `provider` is `'config'`, `'memory'`, `'database'`, `'launchdarkly'` or `'custom'`. The options
-  type is discriminated on it, so a missing per-arm field is a compile error.
-- `options` is required for `config`, `database`, `launchdarkly` and `custom`, and optional for
-  `memory`. Only the memory provider is mutable: `setFlag`, `removeFlag`, `replaceFlags`.
-- Evaluation order is a `tenants` restriction, then a `users` allowlist, then `enabled`, then
-  `percentage`. A partial rollout with no `userId` evaluates to `false`.
-- `isEnabled` is synchronous. The optional `isEnabledAsync` awaits the SDK — use it where a cold
-  context's fallback answer would matter.
-- `createFlagGuard` never calls next: it redirects `302` to `fallback`, else answers `statusCode`
-  (default `404`). Put it in a route's `middleware` array.
-- LaunchDarkly takes `sdkKey` or an injected `client`, plus `fallbackValue`, `initTimeoutSeconds`
-  (default `5`) and `ldOptions`, forwarded to the SDK's `init`.
+## Behaviour the types do not show
+
+- For local definitions, unknown flags are false. A non-empty `tenants` list restricts first, then a
+  matching `users` entry overrides even `enabled: false`.
+- Partial percentage rollouts need `userId`; their bucket is deterministic for flag plus user.
+  `percentage: 100` does not require a user id.
+- The guard derives user and tenant ids from the request unless `context` overrides them. An enabled
+  flag calls the handler; disabled redirects to `fallback` or returns 404 by default.
+- Missing `CAPABILITIES.FEATURE_FLAGS` propagates the registry error instead of silently allowing.
+- `isEnabled` is synchronous. `isEnabledAsync` awaits an asynchronous provider when available,
+  otherwise resolves the synchronous result.
+
+## Other options
+
+- `provider` also selects `'memory'`, `'database'`, `'launchdarkly'` or `'custom'`.
+- `MemoryProvider` supports `setFlag`, `removeFlag` and `replaceFlags`; config flags stay fixed.
+- `statusCode` overrides the guard's refusal status; `fallback` takes precedence.
+- LaunchDarkly accepts `sdkKey` or injected `client`, `fallbackValue`, `initTimeoutSeconds` and
+  `ldOptions` in `options`.

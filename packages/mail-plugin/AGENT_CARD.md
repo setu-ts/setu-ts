@@ -1,38 +1,56 @@
-# @setu-ts/mail-plugin — transactional email
+# @setu-ts/mail-plugin — send transactional email
 
-`setu add mail` installs it and registers `MailPlugin()` in a recognized functional config;
-otherwise add that line in `setu.config.ts`. The default provider only logs. `CAPABILITIES.MAIL`
-resolves after `app.start`.
+**Add it:** `setu add mail` installs it and wires `MailPlugin()` in a recognized functional config.
+It provides `CAPABILITIES.MAIL` (`IMailer`); the default provider only logs.
+
+## Configure a provider and a welcome template
+
+Use this registration in `setu.config.ts`:
+
+```ts
+import { MailPlugin } from '@setu-ts/mail-plugin';
+
+export const mail = MailPlugin({
+  provider: 'sendgrid',
+  options: { apiKey: process.env.SENDGRID_API_KEY! },
+  defaults: { from: 'no-reply@example.com' },
+  templates: { welcome: { html: '<p>Hello {{ name }}</p>' } },
+});
+```
+
+## Send a welcome email from a route
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMailer } from '@setu-ts/common';
-import { MailPlugin } from '@setu-ts/mail-plugin';
+import type { IMailer, IRouterApi } from '@setu-ts/common';
 
-app.register(
-  MailPlugin({
-    provider: 'sendgrid',
-    options: { apiKey: process.env.SENDGRID_API_KEY ?? '' },
-    defaults: { from: 'no-reply@example.com' },
-    templates: { welcome: { html: '<p>Hello {{ name }}</p>' } },
-  }),
-);
-
-await app.start();
-const mailer = app.services.get<IMailer>(CAPABILITIES.MAIL);
-await mailer.send({ to: 'ada@example.com', subject: 'Hi', text: 'Hello' });
-await mailer.sendTemplate('welcome', { to: 'ada@example.com', subject: 'Welcome' }, { name: 'Ada' });
+export function registerWelcomeRoutes(router: IRouterApi): void {
+  router.post('/welcome', {
+    handler: async (ctx) => {
+      const { email, name } = await ctx.request.json<{ email: string; name: string }>();
+      const mailer = ctx.services.get<IMailer>(CAPABILITIES.MAIL);
+      await mailer.sendTemplate('welcome', { to: email, subject: 'Welcome' }, { name });
+      return ctx.response.json({ accepted: true });
+    },
+  });
+}
 ```
 
-- `provider` is `'log'` (default), `'smtp'` (`options.host`, `port`, `secure`, `auth`), `'ses'`
-  (`options.region`, `accessKeyId`, `secretAccessKey`) or `'sendgrid'` (`options.apiKey`,
-  `endpoint`). `'smtp'` needs raw sockets, so Node/Deno/Bun only; the others also run on Workers.
-- Give `options.client` (SES) or `options.transport` (SMTP) an injected facade to skip the lazy SDK
-  import; `options.http` replaces `fetch` for SendGrid.
-- `from` comes from the message or `defaults.from`; with neither, `send` throws. `sendTemplate`'s
-  `subject` is required — the template supplies only `html`/`text`.
-- A string template uses `{{ variable }}` and HTML-escapes `html`; a missing variable or unknown
-  template name throws. A component template `{ view, text? }` renders through `CAPABILITIES.VIEW`,
-  so register a view provider or `MailPlugin` refuses at registration. Never mix `view` with `html`
-  in one template.
-- `mailer.send` resolves when the provider accepts the message, not when it is delivered.
+## Behaviour the types do not show
+
+- The sender comes from the message's `from` or `defaults.from`; neither present means sending
+  rejects. Templates supply bodies only: the message still needs `subject`.
+- String templates HTML-escape substituted values in `html`; `text` substitutions stay raw. Unknown
+  template names or missing placeholder variables reject.
+- Component templates require `CAPABILITIES.VIEW` at registration; an absent provider fails startup.
+  Their data is passed as props without the string arm's missing-variable check.
+- Sending resolves when the provider accepts the message; it does not prove recipient delivery.
+- SMTP needs raw sockets on Node, Deno or Bun; the other providers also work on Workers.
+
+## Other options
+
+- `provider` also selects `'log'`, `'smtp'` or `'ses'`; `send` sends an untemplated message.
+- SMTP uses `host`, `port`, `secure`, `auth` or injected `transport`; SES uses `region`,
+  `accessKeyId`, `secretAccessKey` or injected `client` inside `options`.
+- SendGrid's `options.http` replaces its HTTP transport; component templates use `{ view, text? }`
+  and cannot mix `view` with `html`.

@@ -1,53 +1,64 @@
-# @setu-ts/common — routing, context and capabilities
+# @setu-ts/common — routes, context and service contracts
 
-Every scaffold installs this; no plugin to register. Import service interfaces and their matching
-`CAPABILITIES` tokens here. A token does not install its provider.
+**Add it:** Scaffolds install this package; `setu add common` adds it elsewhere. No plugin or
+capability is provided: import service interfaces and matching `CAPABILITIES` tokens here.
 
-```ts
-import type { MiddlewareFunction } from '@setu-ts/common';
-
-export const audit: MiddlewareFunction = async (ctx, next) => {
-  ctx.state.set('audit', ctx.request.headers.get('x-audit'));
-  await next();
-  ctx.response.header('x-audit', 'yes');
-};
-```
+## Register a module route
 
 ```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IConfig, IRouterApi, MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES } from "@setu-ts/common";
+import type { IConfig, IRouterApi } from "@setu-ts/common";
 
-export function registerRoutes(router: IRouterApi, audit: MiddlewareFunction): void {
-  router.get('/greeting/:id', {
-    middleware: [audit],
+export function registerGreetingRoutes(router: IRouterApi): void {
+  router.get("/greeting/:id", {
     handler: (ctx) => {
       const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
-      return ctx.response.status(200).json({
+      return ctx.response.json({
         id: ctx.params.id,
-        q: ctx.query.q,
-        greeting: config.get('GREETING', { default: 'Hello' }),
+        query: ctx.query.q,
+        greeting: config.get("GREETING", { default: "Hello" }),
       });
     },
   });
 }
 ```
 
-- `router.get(path,handler)` also has post, put, patch, delete, head and options forms. Pass a
-  `RouteDefinition` with `handler`, `middleware?`, `schema?`; group with `router.group(prefix,fn)`.
-- `ctx.params.id` and `ctx.query.q` read path/query strings; `ctx.request.headers.get('x')` reads a
-  header. `await ctx.request.json<T>()`, `ctx.request.text()`, `ctx.request.bytes()` read the body;
-  validate untrusted input before using it. `ctx.state` is a per-request `Map<string,unknown>`.
-- `ctx.response.status(code)` and `ctx.response.header(name,value)` chain. Return a writer:
-  `ctx.response.json(value)`, `ctx.response.text(s)`, `ctx.response.html(s)`,
-  `ctx.response.redirect(url,status?)`, `ctx.response.send(bytes?)`.
-- To refuse in middleware, write a response and return without calling next. Continue with
-  `await next()`.
-- `ctx.services.get<IConfig>(CAPABILITIES.CONFIG)` needs a registered config provider.
-  `ctx.startTime` is monotonic milliseconds: use `runtime.hrtime()-ctx.startTime`, with
-  `IRuntimeServices` from `CAPABILITIES.RUNTIME`, for a duration.
-- Functional `setu g module orders` writes `src/modules/orders/orders.routes.ts`,
-  `orders.service.ts` and `index.ts` there; `orders.schemas.ts` appears with validation installed.
-  The managed `src/modules/index.ts` feeds `registerModules(app.router,app.services)` in
-  `setu.config.ts`. Edit feature files; generate to update managed indexes.
+Register a config provider before using that route.
 
-<!-- card-allow: registerModules -->
+## Add middleware around a route
+
+```ts
+import type { IRouterApi, MiddlewareFunction } from "@setu-ts/common";
+
+const audit: MiddlewareFunction = async (ctx, next) => {
+  ctx.state.set("audit", ctx.request.headers.get("x-audit"));
+  await next();
+  ctx.response.header("x-audit", "yes");
+};
+
+export function registerStatusRoutes(router: IRouterApi): void {
+  router.get("/status", {
+    middleware: [audit],
+    handler: (ctx) => ctx.response.json({ ok: true }),
+  });
+}
+```
+
+## Behaviour the types do not show
+
+- A capability token does not install its provider. Resolve services in handlers through
+  `ctx.services`; application-level services exist after `app.start()` registers plugins.
+- Path and query values are strings. `ctx.request.json<T>()` parses JSON but its type argument does
+  not validate the result.
+- `ctx.state` belongs to one request and carries values between middleware and handlers.
+- Middleware continues with `await next()`; to refuse, return a response without calling it. Code
+  after that await runs as the chain unwinds.
+- `ctx.startTime` is monotonic milliseconds; subtract it from the runtime high-resolution clock,
+  never from a wall-clock timestamp.
+
+## Other options
+
+- `IRouterApi` also has `post`, `put`, `patch`, `delete`, `head`, `options` and `group`.
+- `ctx.response.status` and `ctx.response.header` chain; terminals include `json`, `text`, `html`,
+  `redirect` and `send`.
+- `RouteDefinition.schema` carries documentation metadata; enforcing validation requires middleware.

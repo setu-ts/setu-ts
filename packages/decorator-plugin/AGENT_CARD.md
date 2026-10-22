@@ -1,48 +1,52 @@
-# @setu-ts/decorator-plugin — class-based controllers and services
+# @setu-ts/decorator-plugin — class controllers and injection
 
-`setu new app --template class-based` installs and registers decorators and DI. In an existing app,
-run `setu add decorator`, install, then register `DecoratorPlugin` in `setu.config.ts`.
+**Add it:** `setu add decorator` adds the dependency; register `DecoratorPlugin({ controllers })` in
+`setu.config.ts`. It provides `CAPABILITIES.METADATA_STORE` (`IMetadataStore`); class-based
+scaffolds already register it.
 
-TC39 standard decorators: put `@Params(...)` on the method, one source per argument. `@Body()` on a
-parameter does not compile. Put `@Inject(...)` on the class, one token per constructor argument;
-framework contracts come from `@setu-ts/common`.
+## Serve a controller with injected configuration
 
 ```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IConfig } from '@setu-ts/common';
-import { Controller, DecoratorPlugin, Get, HttpCode, Inject, Param, Params } from '@setu-ts/decorator-plugin';
+import { CAPABILITIES } from "@setu-ts/common";
+import type { IConfig } from "@setu-ts/common";
+import { Controller, DecoratorPlugin, Get, Inject, Param, Params } from "@setu-ts/decorator-plugin";
 
-@Controller('/orders')
+@Controller("/orders")
 @Inject(CAPABILITIES.CONFIG)
-class OrdersController {
+export class OrdersController {
   constructor(private readonly config: IConfig) {}
 
-  @Get('/:id')
-  @HttpCode(200)
-  @Params(Param('id'))
+  @Get("/:id")
+  @Params(Param("id"))
   find(id: string): { id: string; currency: string } {
-    return { id, currency: this.config.get('CURRENCY', { default: 'INR' }) };
+    return { id, currency: this.config.get("CURRENCY", { default: "INR" }) };
   }
 }
 
-export const decorators = DecoratorPlugin({ controllers: [OrdersController] });
+app.register(DecoratorPlugin({ controllers: [OrdersController] }));
 ```
 
-- Register a config provider for that token. A plain handler return becomes JSON; `@HttpCode(n)`,
-  `@ResponseHeader(name,value)`, `@Redirect(url)` shape it. `Ctx()` supplies `IRequestContext` for
-  `ctx.response.status(201).json(value)`.
-- Argument sources: `Body<T>()`, `Param('id')`, `Query('q')`, `Header('x')`, `Cookie('sid')`,
-  `CurrentUser()`, `Ctx()`. `@ValidateBody(schema)` enforces only with a validation provider and
-  `enforceSchemas: true` (default); otherwise the schema is descriptive.
-- `setu g controller orders` writes `src/controllers/orders.controller.ts`; its managed
-  `src/controllers/index.ts` exports `APP_CONTROLLERS` for `controllers`. `setu g service orders`
-  writes `src/services/orders.service.ts` with `@Injectable({token:'orders-service'})`;
-  `src/services/index.ts` exports `APP_SERVICES` for `services`.
-- `setu g module orders` writes `src/modules/orders/orders.module.ts`. Edit its
-  `@Module({controllers,providers,imports})`; `src/modules/index.ts` exports `MODULES` for
-  `modules`. These arrays feed `DecoratorPlugin` in `setu.config.ts`.
-- Non-HTTP classes go in `ingress`: `src/ingress/index.ts` supplies `INGRESS_HANDLERS`. Register the
-  matching queue/events/messaging/etc. provider too. A class with HTTP and non-HTTP handlers needs
-  both `controllers` and `ingress`.
+Register a config provider for that token; add the class to the existing controller registration.
 
-<!-- card-allow: APP_CONTROLLERS APP_SERVICES MODULES INGRESS_HANDLERS -->
+## Behaviour the types do not show
+
+- Decorators only capture metadata; routes become active when the plugin registers their classes.
+- These are standard decorators: `@Params(...)` goes on the method with one source per argument.
+  Constructor injection uses class-level `@Inject(...)`, one token per constructor argument.
+- A plain handler return is serialized as JSON. `Ctx()` supplies request context for returning a
+  response writer directly; an explicit writer result takes precedence over response-shaping
+  metadata.
+- `enforceSchemas` defaults to `true`; validation decorators enforce only when a validation service
+  is registered, otherwise they remain descriptive and the plugin warns.
+- `enforceRoles` defaults to `true`; role/permission routes without an authorization provider fail
+  closed with `501` instead of running unguarded.
+- Imported modules are visited depth-first; each module contributes providers before controllers.
+
+## Other options
+
+- `Body`, `Query`, `Header`, `Cookie`, `CurrentUser` and `Ctx` are argument sources for `Params`.
+- `services` lists injectable classes; `modules` expands `Module` definitions; `ingress` lists
+  classes with non-HTTP handlers (HTTP plus non-HTTP classes need both lists).
+- `HttpCode`, `ResponseHeader` and `Redirect` shape responses; `UseGuards`, `UseInterceptors` and
+  `UseFilters` add route middleware.
+- `autoDiscover` scans `controllersPath`; `policies` registers policy classes before controllers.

@@ -1,54 +1,56 @@
-# @setu-ts/grpc-plugin — Connect and gRPC-Web beside your routes
+# @setu-ts/grpc-plugin — Connect and gRPC-Web services
 
-`setu add grpc` pins the package and prints `GrpcPlugin({ services: [] })` for `setu.config.ts`.
-Install `@connectrpc/connect` and `@bufbuild/protobuf`; both are lazy-loaded on first use. The
-plugin registers `CAPABILITIES.GRPC` during `app.start()`, and the kernel dispatches RPC after the
-middleware pipeline.
+**Add it:** `setu add grpc` installs it and prints `GrpcPlugin({ services: [] })` for
+`setu.config.ts`; install `@connectrpc/connect` and `@bufbuild/protobuf` too. It provides
+`CAPABILITIES.GRPC` (`IGrpcService`).
+
+## Serve generated service descriptors
+
+Pass your generated descriptor and implementation into this config helper:
 
 ```ts
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
-import type { GrpcServiceDefinition } from '@setu-ts/grpc-plugin';
+import type { GrpcServiceDefinition } from '@setu-ts/common';
 
-declare const userDefinition: GrpcServiceDefinition;
-declare const userImplementation: Record<string, unknown>;
-
-export const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    GrpcPlugin({
-      services: [{ definition: userDefinition, implementation: userImplementation }],
-      basePath: '/',
-    }),
-  ],
-});
-```
-
-Register more services after boot through the capability; `addService` refuses a duplicate type
-name:
-
-```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { GrpcServiceDefinition, IGrpcService } from '@setu-ts/common';
-import type { IKernelApplication } from '@setu-ts/kernel';
-
-export async function addAuditService(app: IKernelApplication, definition: GrpcServiceDefinition) {
-  await app.start({ port: 3000 });
-  app.services.get<IGrpcService>(CAPABILITIES.GRPC).addService(definition);
+export function rpcPlugin(definition: GrpcServiceDefinition, implementation: unknown) {
+  return GrpcPlugin({
+    services: [{ definition, implementation }],
+    basePath: '/',
+  });
 }
 ```
 
-- Options: `basePath` (`'/'`; RPC is claimed by path prefix, so a client's base URL must point at
-  it), `reflection` and `health` (both on), `services`, `connectModule`, and `interceptors` (applied
-  after the built-in handler-error logging).
-- Only Connect and gRPC-Web are served. A native `application/grpc` request is refused with a
-  Trailers-Only unimplemented response (`grpc-status: 12`), so `grpcurl` cannot reach this server;
-  `buf curl --protocol connect` can.
-- Bidi streaming needs HTTP/2, or in-process `app.fetch`. Unary, server-streaming and
-  client-streaming work on every transport.
-- Health reads `CAPABILITIES.HEALTH` when that plugin is registered and answers serving without it;
-  a degraded aggregate counts as not serving.
-- `GrpcRuntimeLoadError` means a Connect/Protobuf-ES module could not be imported;
-  `GrpcDescriptorError` means a descriptor would not decode. `GrpcUnavailableError` is exported but
-  never thrown since the kernel dispatches RPC itself.
+## Add another service after startup
+
+Call from a module initializer once services are available:
+
+```ts
+import { CAPABILITIES } from '@setu-ts/common';
+import type { GrpcServiceDefinition, IGrpcService, IServiceRegistry } from '@setu-ts/common';
+
+export function registerRpcService(
+  services: IServiceRegistry,
+  definition: GrpcServiceDefinition,
+  implementation: unknown,
+): void {
+  services.get<IGrpcService>(CAPABILITIES.GRPC).addService(definition, implementation);
+}
+```
+
+## Behaviour the types do not show
+
+- `basePath` defaults to `/`; a prefixed deployment needs a matching client base URL.
+- `reflection` and `health` default to `true`.
+- Native `application/grpc` requests are refused with gRPC status 12 (HTTP 200); Connect and
+  gRPC-Web are served.
+- Registering the same service type name twice throws. Omitting the implementation registers a
+  service for reflection only.
+- The health bridge reports serving without a health capability; an aggregate degraded status is not
+  serving.
+
+## Other options
+
+- `interceptors` installs application Connect interceptors.
+- `connectModule` injects an already-loaded runtime; `adaptConnectModule` adapts loaded modules.
+- `GrpcRuntimeLoadError` reports a missing runtime; `GrpcDescriptorError` reports invalid
+  descriptors.

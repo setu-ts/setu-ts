@@ -1,34 +1,57 @@
-# @setu-ts/realtime-backplane-plugin — cross-replica WebSocket and SSE fan-out
+# @setu-ts/realtime-backplane-plugin — share room and channel broadcasts
 
-`setu add realtime-backplane` installs it and registers `RealtimeBackplanePlugin()` in a recognized
-functional config; otherwise add that line in `setu.config.ts`. Register it **before** the WebSocket
-or SSE plugin. `CAPABILITIES.REALTIME_BACKPLANE` resolves after `app.start`.
+**Add it:** `setu add realtime-backplane` installs it and wires `RealtimeBackplanePlugin()` in a
+recognized functional config. It provides `CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`);
+use a cross-process transport for replicas.
+
+## Connect replicas through Redis
+
+Replace the default registration in `setu.config.ts`:
+
+```ts
+import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
+
+export const backplane = RealtimeBackplanePlugin({
+  transport: 'redis', url: 'redis://localhost:6379', topic: 'setu-ts.realtime',
+});
+```
+
+## Broadcast through the existing SSE service
+
+With SSE registered, use its channel API; it publishes through the backplane automatically:
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IRealtimeBackplane } from '@setu-ts/common';
-import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
+import type { IRouterApi, ISseService } from '@setu-ts/common';
 
-app.register(
-  RealtimeBackplanePlugin({ transport: 'redis', url: 'redis://localhost:6379' }),
-);
-
-await app.start({ port: 3000 });
-const backplane = app.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE);
+export function registerDeployRoutes(router: IRouterApi): void {
+  router.post('/deployments', {
+    handler: (ctx) => {
+      const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+      sse.channel('deploys').publish({ event: 'deployment', data: { status: 'live' } });
+      return ctx.response.json({ accepted: true });
+    },
+  });
+}
 ```
 
-- `transport` is `'memory'` (default), `'messaging'`, `'redis'` or `'custom'`. Only the last three
-  can cross processes — `'memory'` is a real bus but single-process, so a bare plugin changes
-  nothing. `localNotice: false` silences the startup line that says so.
-- `'messaging'` publishes over whatever broker is registered under `CAPABILITIES.MESSAGING`; with no
-  such provider, registration throws. `'redis'` takes `url`, or a `client` **and** `subscriber`
-  injected together (two connections are required).
-- `'custom'` takes `instance: IRealtimeBackplane`. Every replica must share `topic` (default
-  `'setu-ts.realtime'`); `origin` defaults to a generated id.
-- `ws.room` and `sse.channel` membership become cluster-wide, but `.size` still reports local
-  membership, and `.except` is honored only on the originating replica.
-- Delivery is at-most-once and inherits the transport: a Redis publish that times out may still
-  arrive later, so de-duplicate where a duplicate matters. `commandTimeoutMs` defaults to `15000` on
-  the lazily built Redis connections.
-- The health indicator stays `up` during a fan-out outage (local delivery still works); read
-  `data.reachable` to detect the backend.
+## Behaviour the types do not show
+
+- The default `'memory'` transport shares frames only inside one process. Its default bus name is
+  `default`; a bare registration does not connect replicas.
+- Redis needs two connections: injected `client` and `subscriber` must be supplied together.
+  Otherwise the transport lazily loads `ioredis` and builds both.
+- Instances must share `topic`, default `setu-ts.realtime`; `origin` defaults to a generated id and
+  prevents replaying an instance's own frames.
+- The plugin orders before its WebSocket and SSE consumers. Their room/channel broadcasts fan out
+  automatically; membership counts stay local and exclusions apply only on the sender.
+- Health remains up during a backend outage; inspect `data.reachable`. Local delivery continues.
+- Redis commands on built connections have a 15000 ms bound. A timed-out publication can still
+  arrive later, so do not treat failure as proof of non-delivery.
+
+## Other options
+
+- `'messaging'` requires `CAPABILITIES.MESSAGING`; its reach depends on that broker's transport.
+- `'custom'` uses `instance: IRealtimeBackplane`; `'memory'` accepts a named `bus`.
+- `commandTimeoutMs: 0` disables the Redis bound; `diagnostics` observes transport activity and
+  `localNotice: false` suppresses the memory notice.

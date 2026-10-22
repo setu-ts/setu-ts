@@ -1,48 +1,58 @@
-# @setu-ts/full-stack-starter — every capability plugin, pre-composed
+# @setu-ts/full-stack-starter — compose a full application
 
-`createFullStackApp(options?)` is the microservice set plus caching, events, CQRS, scheduling,
-audit, secrets, storage and mail, with gated `featureFlags`, `notifications`, `multiTenancy`,
-`reactRouter` and `static`. `createFullStackAppFromConfig` closes the ordering gap: plugin options
-must be decided before configuration exists. `setu new my-app --template full-stack` generates a
-`setu.config.ts` that calls it. Starters are composition libraries, and `setu add` has no short name
-for them.
+**Add it:** scaffolding with `setu new my-app --template full-stack` wires this factory in
+`setu.config.ts`; there is no `setu add` entry. The starter itself provides no capability; it
+composes the microservice tier plus cache, events, CQRS, scheduling, audit, secrets, storage and
+mail.
+
+## Serve an application with the full plugin set
+
+Use this instead of the scaffold's application construction; move the route function to the module's
+routes file:
+
+```ts
+import type { IRouterApi } from '@setu-ts/common';
+import { createFullStackApp } from '@setu-ts/full-stack-starter';
+
+export function registerGreetingRoutes(router: IRouterApi): void {
+  router.get('/greeting', {
+    handler: (ctx) => ctx.response.json({ hello: 'world' }),
+  });
+}
+
+const app = createFullStackApp({ openapi: { swagger: { assets: 'cdn' } } });
+registerGreetingRoutes(app.router);
+await app.start({ port: 3000 });
+```
+
+## Load one configuration snapshot for composition and handlers
 
 ```ts
 import { createFullStackAppFromConfig, fullStackConfigOf } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig(
-  (config) => ({
-    database: { type: 'memory' },
-    session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-    reactRouter: { serverBuildPath: '/srv/app/build/server/index.js' },
-    static: { root: './build/client', urlPrefix: '/assets' },
+  () => ({
+    logger: { level: 'debug' },
+    openapi: { swagger: { assets: 'cdn' } },
   }),
   { config: { envFilePath: ['.env.local', '.env'] } },
 );
-
 const config = fullStackConfigOf(app);
 await app.start({ port: 3000 });
 ```
 
-```ts
-import { createFullStackApp } from '@setu-ts/full-stack-starter';
+## Behaviour the types do not show
 
-const app = createFullStackApp({ cache: { store: 'memory' }, events: {} });
-await app.start({ port: 3000 });
-```
+- Factories return unstarted applications with the RFC 9457 error handler at priority 0.
+- The config factory loads once before constructing plugins; `CAPABILITIES.CONFIG` (`IConfig`)
+  receives the same snapshot the callback saw.
+- `fullStackConfigOf` throws `FullStackConfigUnavailableError` for apps from another factory.
+- On Workers, pass platform `env` to the config factory; non-string bindings are ignored.
+- Workers omit scheduling unless `scheduler` is supplied; explicitly enabling it fails startup.
+- A root static wildcard collides with the SSR catch-all; give `static` a separate `urlPrefix`.
 
-- Always-on arms: the REST eight, `messaging`, `queue`, `resilience`, `telemetry`, then `cache`,
-  `events`, `cqrs`, `scheduler`, `audit`, `secrets`, `storage` and `mail`.
-- Gated arms register nothing unless supplied: `featureFlags`, `notifications`, `multiTenancy`,
-  `reactRouter`, `static`. Give `static` its own `urlPrefix`: a root wildcard collides with the SSR
-  catch-all.
-- On Cloudflare Workers the scheduler plugin is left out unless you pass the `scheduler` arm;
-  schedule there with `WorkersCron` from `@setu-ts/cloudflare-plugin`. Memory arms are process-local
-  and a Workers isolate is short-lived.
-- `createFullStackAppFromConfig(build, options?)` loads configuration once, passes that snapshot to
-  `build`, and registers the same object under `CAPABILITIES.CONFIG`; `fullStackConfigOf(app)` reads
-  it back and throws `FullStackConfigUnavailableError` for an app from another factory. On Workers
-  pass the request `env` as `options.env`.
-- `di: {}` turns every decorated class into a container provider; loaders reach services through
-  `populateLoadContext` and `contextKeyFor` from `@setu-ts/react-router-plugin`.
-- No arm sets a plugin `name`; register extra instances on the returned app.
+## Other options
+
+- `featureFlags`, `notifications`, `multiTenancy`, `reactRouter` and `static` are gated arms.
+- REST and microservice options pass through; omitted always-on arms use plugin defaults.
+- `buildFullStackPlugins` returns only the plugins, without error middleware.

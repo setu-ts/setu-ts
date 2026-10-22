@@ -1,50 +1,60 @@
-# @setu-ts/worker-pool-plugin — CPU-bound work off the event loop
+# @setu-ts/worker-pool-plugin — run CPU work on threads
 
-`setu add worker-pool` adds the package and, in a recognized functional config, inserts
-`WorkerPoolPlugin()` after the devtool spread. It registers `CAPABILITIES.WORKER_POOL` during
-`app.start()`. A task is a module your application owns that calls `defineWorkerTask` at top level;
-the pool addresses it by specifier and payloads cross by structured clone.
+**Add it:** `setu add worker-pool` installs it and inserts `WorkerPoolPlugin()` into a recognized
+functional `setu.config.ts`. It provides `CAPABILITIES.WORKER_POOL` (`IWorkerPool`).
+
+## Submit an existing task from a route
+
+The application-owned task module must register its worker handler through the worker-side helper
+from `@setu-ts/runtime/worker` before it can receive work.
 
 ```ts
-import { defineWorkerTask } from '@setu-ts/runtime/worker';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRouterApi, IWorkerPool } from '@setu-ts/common';
 
-declare function resize(imageBytes: Uint8Array): Promise<Uint8Array>;
-
-defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => await resize(imageBytes));
+export function registerThumbnailRoutes(router: IRouterApi): void {
+  router.post('/thumbnail', {
+    handler: async (ctx) => {
+      const pool = ctx.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      const image = await pool.run<Uint8Array, Uint8Array>(
+        new URL('./tasks/resize-image.ts', import.meta.url).href,
+        await ctx.request.bytes(),
+        { timeoutMs: 15_000 },
+      );
+      return ctx.response.header('content-type', 'image/png').send(image);
+    },
+  });
+}
 ```
 
+## Inspect pool load
+
 ```ts
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
-import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IWorkerPool } from '@setu-ts/common';
 
-export const app = createApplication({
-  plugins: [RuntimePlugin(), WorkerPoolPlugin({ maxWorkers: 4, taskTimeoutMs: 10_000 })],
-});
-
-app.router.post('/thumbnail', async (ctx) => {
-  const pool = ctx.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
-  const thumb = await pool.run<Uint8Array, Uint8Array>(
-    new URL('./tasks/resize-image.ts', import.meta.url).href,
-    await ctx.request.bytes(),
-    { timeoutMs: 15_000 },
-  );
-  return ctx.response.header('content-type', 'image/png').send(thumb);
-});
+const pools = ctx.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL).stats();
+ctx.response.json(pools);
 ```
 
-- Options: `maxWorkers` (Infinity disables the cap), `startupTimeoutMs` (10000; cannot be disabled),
-  `defaultPoolSize`, `maxQueue` (1024), `taskTimeoutMs` (30000; `0` disables), `pools` keyed by
-  module specifier with `{ size, maxQueue, taskTimeoutMs }`, and `host`.
-- One pool per module specifier, created on first use. `run` takes an optional `{ timeoutMs }` and
-  `stats` reports one `{ taskModule, workers, busy, queued, completed, failed }` per pool.
-- Errors: `WorkerPoolUnavailableError`, `WorkerTaskError`, `WorkerTaskTimeoutError`,
-  `WorkerQueueFullError`, `WorkerExitError`.
-- No threads on Cloudflare Workers: it registers, `run` rejects with `WorkerPoolUnavailableError`,
-  and the `worker-pool` health indicator reports `available: false`.
-- Deno cannot report a worker that ended its own thread (`exitDetection`), so keep a timeout there;
-  a timed-out CPU-bound worker can hold its thread after its slot is released.
-- Payloads are structured-clone data: no functions or class instances. A SharedArrayBuffer is
-  shared, not copied — do not reuse it after a rejected run.
+## Behaviour the types do not show
+
+- A pool is created on first use of each task-module specifier.
+- Payloads cross by structured clone; functions cannot be sent. Shared memory remains shared.
+- `taskTimeoutMs` defaults to 30000 milliseconds; `0` disables it. Per-call `timeoutMs` overrides
+  it.
+- `maxQueue` defaults to 1024; `startupTimeoutMs` defaults to 10000 milliseconds and cannot be
+  disabled.
+- Without runtime worker support, registration succeeds but `run` rejects with
+  `WorkerPoolUnavailableError`; the health indicator reports up with `available: false`.
+- Application shutdown terminates workers and rejects pending tasks.
+
+## Other options
+
+- `maxWorkers` caps all pools together; `Infinity` disables that cap.
+- `defaultPoolSize` sets per-module sizing; `pools` overrides `size`, `maxQueue` and `taskTimeoutMs`
+  by specifier.
+- `host` injects a worker host; `WorkerQueueFullError` and `WorkerTaskTimeoutError` identify
+  overload and deadlines.
+
+<!-- card-allow: Infinity -->
