@@ -4,11 +4,12 @@ Each directory is a member of the pnpm workspace (`pnpm-workspace.yaml` lists `a
 private `package.json`: `@setu-ts/*` as `workspace:^` dependencies, `start` and `smoke` scripts that
 run through `tsx`, and a generated `tsconfig.json` extending `../../tsconfig.apps.json`. `tsx`
 applies that config's `paths`, so an example runs HEAD source with no build first. Run its `smoke`
-script to verify the claim below. Every example has the layout `setu new` scaffolds — a
-`setu.config.ts` factory, a `main.ts` entry and `src/modules/<feature>/` — described in the
-[examples guide](../docs/examples.md#how-every-example-is-laid-out). `test/apps-layout.test.ts`
-checks every example against projects the CLI scaffolds from this tree, so the two cannot drift
-apart.
+script to verify the claim below. Examples have the layout `setu new` scaffolds — a `setu.config.ts`
+factory, a `main.ts` entry and `src/modules/<feature>/` — described in the
+[examples guide](../docs/examples.md#how-every-example-is-laid-out), except where the guide says
+otherwise: `microservices`, for one, composes two services with one factory each.
+`test/apps-layout.test.ts` checks every example against projects the CLI scaffolds from this tree,
+so the two cannot drift apart.
 
 M37 kept the examples out of the Deno workspace so an application-only npm dependency could never
 reach a published package's graph. They are members of the pnpm workspace because a published

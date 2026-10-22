@@ -3,7 +3,7 @@ import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { SsePlugin } from '@setu-ts/sse-plugin';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
-import { registerEventsRoutes } from './src/modules/events/events.routes.ts';
+import { registerModules } from './src/modules/index.ts';
 import { IdleSocketPlugin } from './src/plugins/idle-socket.plugin.ts';
 
 /**
@@ -21,7 +21,7 @@ export function createApp(): IKernelApplication {
     ],
   });
 
-  registerEventsRoutes(app.router);
+  registerModules(app.router);
 
   return app;
 }

@@ -37,7 +37,10 @@ describe('static-site example', () => {
     });
 
     it('refuses path traversal', async () => {
-      assert.equal((await get('/../package.json')).response.status, 404);
+      // An encoded separator survives URL parsing (`/../` would be normalized
+      // away first); the plugin decodes it into `../package.json`, a real file
+      // outside ./public.
+      assert.equal((await get('/..%2fpackage.json')).response.status, 404);
     });
   });
 

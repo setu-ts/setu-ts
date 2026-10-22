@@ -104,6 +104,20 @@ function mentions(source: string, name: string): boolean {
   return new RegExp(`\\b${name}\\b`).test(source);
 }
 
+/** The feature folders under `src/modules/`. */
+function featureFolders(app: Snapshot): Set<string> {
+  return new Set(
+    [...app.keys()]
+      .map((path) => /^src\/modules\/([^/]+)\//.exec(path)?.[1])
+      .filter((feature): feature is string => feature !== undefined),
+  );
+}
+
+/** The source with its import statements removed, so an unused import counts as no use. */
+function withoutImports(source: string): string {
+  return source.replace(/^import[\s\S]*?from '[^']+';$/gm, '');
+}
+
 /** Reads the layout facts this gate holds the examples to. */
 function readLayout(functional: Snapshot, classBased: Snapshot): Layout {
   const main = required(functional, 'main.ts');
@@ -207,8 +221,11 @@ const RULES = {
 
   /** A module index exports the generated symbol, imports every feature the generated way, and is wired. */
   moduleIndex(app, layout) {
+    const features = featureFolders(app);
     const index = app.get('src/modules/index.ts');
-    if (index === undefined) return [];
+    if (index === undefined) {
+      return features.size === 0 ? [] : ['has feature folders but no src/modules/index.ts'];
+    }
     const style = index.includes(`export const ${layout.moduleIndexSymbol.classBased}`)
       ? 'classBased'
       : 'functional';
@@ -217,18 +234,19 @@ const RULES = {
     if (!new RegExp(`export (?:function|const) ${symbol}\\b`).test(index)) {
       problems.push(`src/modules/index.ts does not export ${symbol}`);
     }
-    const features = new Set(
-      [...app.keys()]
-        .map((path) => /^src\/modules\/([^/]+)\//.exec(path)?.[1])
-        .filter((feature): feature is string => feature !== undefined),
-    );
     for (const feature of features) {
       const expected = layout.featureImport[style].replaceAll('<feature>', feature);
       if (!index.includes(`'${expected}'`)) {
         problems.push(`src/modules/index.ts does not import ${expected}`);
       }
     }
-    if (!(app.get(layout.configFile) ?? '').includes(symbol)) {
+    // Used, not merely imported: a function index must be called, an array spread or passed.
+    const config = withoutImports(app.get(layout.configFile) ?? '');
+    const wired =
+      style === 'functional'
+        ? new RegExp(`\\b${symbol}\\s*\\(`).test(config)
+        : mentions(config, symbol);
+    if (!wired) {
       problems.push(`${layout.configFile} does not use ${symbol} from src/modules/index.ts`);
     }
     return problems;
@@ -249,6 +267,14 @@ const EXCEPTIONS: Readonly<Record<string, Partial<Record<RuleName, string>>>> = 
   },
   cqrs: {
     entry: 'main.ts is a run-and-exit demonstration, not a server.',
+    moduleIndex: 'Its feature registers CQRS handlers through CqrsPlugin options, not routes.',
+  },
+  'graphql-demo': {
+    moduleIndex:
+      'Its feature is a schema and resolvers passed to GraphqlPlugin options, not routes.',
+  },
+  grpc: {
+    moduleIndex: 'Its feature is an RPC service registered through GrpcPlugin options, not routes.',
   },
   microservices: {
     composition:
@@ -368,6 +394,25 @@ describe('each layout rule can fail', () => {
     };
     expect(RULES.moduleIndex(app(files), layout)).toEqual([
       'src/modules/index.ts does not import ./news/index.ts',
+    ]);
+  });
+
+  it('moduleIndex: refuses feature folders with no module index', () => {
+    expect(RULES.moduleIndex(app({ 'src/modules/news/news.routes.ts': '' }), layout)).toEqual([
+      'has feature folders but no src/modules/index.ts',
+    ]);
+  });
+
+  it('moduleIndex: refuses a module index that is imported but never called', () => {
+    const files = {
+      'setu.config.ts':
+        "import { registerModules } from './src/modules/index.ts';\nexport function createApp() {}",
+      'src/modules/index.ts':
+        "import {} from './news/index.ts';\nexport function registerModules() {}",
+      'src/modules/news/index.ts': '',
+    };
+    expect(RULES.moduleIndex(app(files), layout)).toEqual([
+      'setu.config.ts does not use registerModules from src/modules/index.ts',
     ]);
   });
 

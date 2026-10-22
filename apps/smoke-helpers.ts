@@ -64,18 +64,30 @@ export function startHost(command: string, args: readonly string[], env = proces
 /**
  * Stops a host and resolves with its exit code, or `null` when it could not be started.
  *
+ * Sends SIGTERM, then SIGKILL if the host has not exited after `graceMs`.
+ *
  * Safe to call from a `finally` block or an `after` hook: a host that already
  * exited is not an error here, so it cannot replace the failure being reported.
  * A caller that owns the entry point asserts the code, since a non-zero exit
  * means its own shutdown failed.
  */
-export async function stopHost(host: Host): Promise<number | null> {
+export async function stopHost(host: Host, graceMs = 10_000): Promise<number | null> {
+  const signal = (name: NodeJS.Signals): void => {
+    try {
+      host.kill(name);
+    } catch {
+      // Already exited.
+    }
+  };
+  signal('SIGTERM');
+  // A host that ignores SIGTERM would otherwise hang the suite. SIGKILL makes
+  // it exit non-zero, which a caller asserting a clean exit then reports.
+  const escalation = setTimeout(() => signal('SIGKILL'), graceMs);
   try {
-    host.kill('SIGTERM');
-  } catch {
-    // Already exited.
+    return await host.status.catch(() => null);
+  } finally {
+    clearTimeout(escalation);
   }
-  return await host.status.catch(() => null);
 }
 
 /** Options for {@link waitForHttp}. */
