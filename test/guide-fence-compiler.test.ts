@@ -52,12 +52,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // 22/12 until the cold-read pass: three byte-identical per-runtime
     // `app.start()` blocks collapsed into one, and a "Stopping Cleanly" fence
     // showing the portable signal handler was added.
-    total: 20,
-    ts: 10,
-    compile: 10,
+    // M113l: Node and Bun test recipes beside Deno (+2 TS, +4 shell).
+    total: 26,
+    ts: 12,
+    compile: 12,
     external: 0,
     pseudocode: 0,
-    skipped: 10,
+    skipped: 14,
   },
   'docs/programmatic-api.md': {
     total: 41,
@@ -209,6 +210,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
+  'docs/webhooks.md': {
+    total: 3,
+    ts: 3,
+    compile: 3,
+    external: 0,
+    pseudocode: 0,
+    skipped: 0,
+  },
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
@@ -236,12 +245,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 278 once docs/how-it-fits-together.md joins the corpus (+4, all compiling).
   // 282 in M110a: docs/authorization.md joins the corpus (+4, all compiling).
   // 286 in M110b: its Scoped Roles section (+4, all compiling).
-  total: 287,
-  ts: 224,
-  compile: 191,
+  // M113l: +6 getting-started fences and +3 webhook fences.
+  total: 296,
+  ts: 229,
+  compile: 196,
   external: 33,
   pseudocode: 0,
-  skipped: 63,
+  skipped: 67,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

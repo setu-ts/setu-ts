@@ -1407,6 +1407,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/scheduler-plugin':
+        specifier: workspace:^
+        version: link:../scheduler-plugin
       '@setu-ts/sdk':
         specifier: workspace:^
         version: link:../sdk

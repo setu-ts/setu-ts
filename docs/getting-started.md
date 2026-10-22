@@ -124,13 +124,77 @@ curl http://localhost:3000/hello
 
 ## Testing Your Application
 
-Add the testing utilities and the standard test library:
+Choose your runtime's runner below. Each example puts the same test in `test/app.test.ts`: create a
+test application, register `/hello`, inject a request, check the response, and stop it.
+`createTestApp` starts without binding a port. The Node and Bun runners match the CLI-generated test
+harness.
+
+### Node
+
+```bash
+npm install -D @setu-ts/testing tsx
+```
+
+```typescript
+import { describe, it } from 'node:test';
+import assert from 'node:assert';
+import { createTestApp, inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+describe('My Application', () => {
+  it('handles GET /hello', async () => {
+    const app = await createTestApp({ plugins: [RuntimePlugin()] });
+    try {
+      app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+      const response = await inject(app, { method: 'GET', url: '/hello' });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(response.json(), { message: 'Hello, World!' });
+    } finally {
+      await app.stop();
+    }
+  });
+});
+```
+
+```bash
+npx tsx --test test/app.test.ts
+```
+
+### Bun
+
+```bash
+bun add -d @setu-ts/testing
+```
+
+```typescript
+import { describe, it, expect } from 'bun:test';
+import { createTestApp, inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+describe('My Application', () => {
+  it('handles GET /hello', async () => {
+    const app = await createTestApp({ plugins: [RuntimePlugin()] });
+    try {
+      app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+      const response = await inject(app, { method: 'GET', url: '/hello' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ message: 'Hello, World!' });
+    } finally {
+      await app.stop();
+    }
+  });
+});
+```
+
+```bash
+bun test
+```
+
+### Deno
 
 ```bash
 deno add npm:@setu-ts/testing jsr:@std/testing jsr:@std/expect
 ```
-
-Create `test/app.test.ts`:
 
 ```typescript
 import { describe, it } from '@std/testing/bdd';
@@ -140,27 +204,18 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 describe('My Application', () => {
   it('handles GET /hello', async () => {
-    // createTestApp builds AND starts the application without binding a port,
-    // so requests go straight to the handler through inject().
-    const app = await createTestApp({
-      plugins: [RuntimePlugin()],
-    });
-
-    app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
-
-    const response = await inject(app, {
-      method: 'GET',
-      url: '/hello',
-    });
-
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body).toEqual({ message: 'Hello, World!' });
+    const app = await createTestApp({ plugins: [RuntimePlugin()] });
+    try {
+      app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+      const response = await inject(app, { method: 'GET', url: '/hello' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ message: 'Hello, World!' });
+    } finally {
+      await app.stop();
+    }
   });
 });
 ```
-
-Run it:
 
 ```bash
 deno test --allow-env
@@ -201,9 +256,9 @@ const database = defineConfigSection({
 
 app.register(
   ConfigPlugin({
-    // Optional: also load a .env file (not available on edge platforms). Without
-    // it, configuration comes from the process environment only.
+    // Skip a missing .env; an existing but unreadable file still throws.
     envFilePath: '.env',
+    envFileOptional: true,
     sections: [database],
   }),
 );

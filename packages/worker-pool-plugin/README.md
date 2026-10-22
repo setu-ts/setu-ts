@@ -173,8 +173,14 @@ worker the pool terminates (on a timeout, a startup deadline or a hand-over) lea
 once, but on Deno `Worker.terminate()` does not stop a thread that never yields: a timed-out
 CPU-bound task keeps its thread, memory and CPU until its code returns. Measured on Deno with
 `maxWorkers: 1`: five timed-out busy-loop tasks left 0 slots and four extra threads at about 500%
-CPU. Node and Bun were not measured. Treat a task timeout as a correctness bound rather than a
-resource bound for CPU-bound code that can loop, and have long tasks check a deadline and return.
+CPU. That timed-out CPU-bound-thread measurement was taken on Deno only. Treat a task timeout as a
+correctness bound rather than a resource bound for CPU-bound code that can loop, and have long tasks
+check a deadline and return.
+
+At a hand-over, the terminated thread and its replacement can briefly be alive together: OS threads
+can exceed `maxWorkers` by 1–2 for 20–60 ms on Node, Bun and Deno. This was measured on 0.9.0 with
+20 ms sampling and `maxWorkers: 3`; some sampled runs showed no overshoot, so it does not happen at
+every hand-over.
 
 **Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
 serialization and scheduling do not cost more than the computation.

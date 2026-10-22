@@ -64,7 +64,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/messaging-plugin/README.md': 16,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
-  'packages/multi-tenancy-plugin/README.md': 3,
+  'packages/multi-tenancy-plugin/README.md': 4,
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 10,
@@ -92,7 +92,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
   'packages/session-plugin/README.md': 12,
-  'packages/audit-plugin/README.md': 3,
+  'packages/audit-plugin/README.md': 4,
   // M101h: +1 for the Redaction policy-shape example.
   'packages/common/README.md': 3,
   // M92: +1 for the @Render example.
@@ -107,7 +107,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M103: the new package's README is born gated — usage, a catalogue source,
   // the view-rendering path, the React Router loader recipe, and both halves
   // of the browser recipe (the exposing plugin and the `/format` client).
-  'packages/localization-plugin/README.md': 6,
+  'packages/localization-plugin/README.md': 7,
   'packages/validation-plugin/README.md': 3,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 10,
@@ -127,7 +127,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M101h: the events README is born gated — installation, usage, the
   // aggregate-local recorder and the new dispatch-diagnostics example.
   'packages/events-plugin/README.md': 4,
-  'packages/config-plugin/README.md': 6,
+  'packages/config-plugin/README.md': 7,
   'packages/di-plugin/README.md': 2,
   'packages/exceptions/README.md': 3,
   'packages/feature-flags-plugin/README.md': 2,

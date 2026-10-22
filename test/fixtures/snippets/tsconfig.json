@@ -55,6 +55,7 @@
       "@setu-ts/runtime/worker": ["../../../packages/runtime/src/worker/define-worker-task.ts"],
       "@std/testing/bdd": ["./shims/std-testing-bdd.ts"],
       "@std/expect": ["./shims/std-expect.ts"],
+      "bun:test": ["./shims/bun-test.ts"],
       "cloudflare:workers": ["./shims/cloudflare-workers.ts"],
       "@setu-ts/localization-plugin/format": [
         "../../../packages/localization-plugin/src/format/index.ts"

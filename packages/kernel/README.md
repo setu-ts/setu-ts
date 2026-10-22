@@ -103,11 +103,15 @@ console.log(res.statusCode, res.json());
 
 ## Options
 
-`createApplication(options?)` takes one option:
+`createApplication(options?)` takes two options:
 
-| Option    | Type        | Default | Description                                    |
-| --------- | ----------- | ------- | ---------------------------------------------- |
-| `plugins` | `IPlugin[]` | `[]`    | Plugins registered before `start()` is called. |
+| Option        | Type                       | Default  | Description                                                   |
+| ------------- | -------------------------- | -------- | ------------------------------------------------------------- |
+| `plugins`     | `IPlugin[]`                | `[]`     | Plugins registered before `start()` is called.                |
+| `diagnostics` | `KernelDiagnosticsOptions` | disabled | Opt-in kernel diagnostics; see the diagnostics section above. |
+
+For plugin options needed before registration, see
+[Configuration a plugin needs at construction](https://github.com/setu-ts/setu-ts/blob/main/packages/config-plugin/README.md#configuration-a-plugin-needs-at-construction).
 
 Everything else is configured on the application itself: `app.register(plugin)` adds a plugin after
 construction, `app.middleware.add()` installs global middleware, and `app.start({ port })` binds the

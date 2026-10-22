@@ -68,6 +68,102 @@ await db.transaction(async (uow) => {
 });
 ```
 
+## The repository surface
+
+`IDatabaseService.getRepository<Entity, Id>(name)` returns `IRepository<Entity, Id>`. This table
+describes the port and `BaseRepository`; see the backend restrictions below rather than assuming
+every backend supports every query.
+
+| Method                                                                  | Promise result / missing record / refusal                                        |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `findById(id: Id)`                                                      | `Entity \| null`                                                                 |
+| `findAll(options?: FindOptions)`                                        | `Entity[]`; no matches gives `[]`                                                |
+| `findOne(options?: FindOptions)`                                        | `Entity \| null`; applies a limit of one                                         |
+| `create(data: Partial<Entity>)`                                         | Persisted `Entity`, including generated fields                                   |
+| `update(id: Id, data: Partial<Entity>)`                                 | Updated `Entity`; missing record rejects                                         |
+| `delete(id: Id)`                                                        | `boolean`; `false` when missing                                                  |
+| `updateWhere?(id: Id, where: WritePrecondition, data: Partial<Entity>)` | `Entity \| null`; `null` when missing or predicate mismatches                    |
+| `deleteWhere?(id: Id, where: WritePrecondition)`                        | `boolean`; `false` when missing or predicate mismatches                          |
+| `exists(id: Id)`                                                        | `boolean`; `false` when missing                                                  |
+| `count(options?: CountOptions)`                                         | `number`; zero when no matches                                                   |
+| `findPage(options: PageOptions)`                                        | `Page<Entity>`; `UnsupportedQueryFeatureError` if the source lacks cursor paging |
+
+The interface's `@since` annotations record introduction history:
+
+<!-- version:history -->
+
+| First release | Methods                                                                |
+| ------------- | ---------------------------------------------------------------------- |
+| 0.1.0         | `findById`, `findAll`, `create`, `update`, `delete`, `exists`, `count` |
+| 0.2.0         | `findOne`, `findPage`                                                  |
+| 0.9.0         | `updateWhere`, `deleteWhere`                                           |
+
+Conditional methods are optional on the port. `BaseRepository` exposes them but rejects with
+`UnsupportedQueryFeatureError` before I/O if the data source lacks them or the precondition/update
+is invalid. `WritePrecondition` is `Readonly<Record<string, string | number>>`: a non-empty equality
+map conjoined with the primary key. See the backend limits for
+[Cosmos](#what-this-adapter-deliberately-cannot-do) and
+[Bigtable](#what-this-adapter-deliberately-cannot-do-1). Precondition field names must be non-empty
+and may not start with `$`, contain a dot, or equal `__proto__`; values must be strings or finite
+numbers.
+
+`FindOptions` fields:
+
+| Field     | Type                             | Meaning                                    |
+| --------- | -------------------------------- | ------------------------------------------ |
+| `where`   | `Record<string, unknown>`        | Equality conditions                        |
+| `filter`  | `FilterExpression`               | Portable expression conjoined with `where` |
+| `orderBy` | `Record<string, OrderDirection>` | Field directions (`'asc'` / `'desc'`)      |
+| `limit`   | `number`                         | Maximum results                            |
+| `offset`  | `number`                         | Results to skip                            |
+| `select`  | `readonly string[]`              | Projected fields                           |
+| `cursor`  | `string`                         | Continuation position for `findPage`       |
+
+`PageOptions` is an alias of `FindOptions`. `findPage` refuses a cursor with a non-zero offset with
+`PageNormalizationError`; `findAll` is the offset/limit path and does not consume a cursor. See the
+[Cosmos](#what-this-adapter-deliberately-cannot-do) and
+[Bigtable](#what-this-adapter-deliberately-cannot-do-1) backend tables for query refusals.
+
+| Other shape    | Fields                                                                   |
+| -------------- | ------------------------------------------------------------------------ |
+| `CountOptions` | Optional `where: Record<string, unknown>` and `filter: FilterExpression` |
+| `Page<Entity>` | `rows: Entity[]`, `nextCursor: string \| null` (`null` ends traversal)   |
+
+Use the same query on each page:
+
+```typescript
+import type { IRepository } from '@setu-ts/database-plugin';
+
+interface Invoice { id: string; status: string; }
+export async function readInvoices(invoices: IRepository<Invoice>): Promise<Invoice[]> {
+  const rows: Invoice[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await invoices.findPage({
+      limit: 100,
+      orderBy: { id: 'asc' },
+      ...(cursor === null ? {} : { cursor }),
+    });
+    rows.push(...page.rows);
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return rows;
+}
+```
+
+Check for the optional conditional method, then distinguish a mismatch from a successful write:
+
+```typescript
+import type { IRepository } from '@setu-ts/database-plugin';
+
+interface Invoice { id: string; status: string; }
+export async function payInvoice(invoices: IRepository<Invoice>, id: string): Promise<boolean> {
+  if (!invoices.updateWhere) throw new Error('Conditional writes are required');
+  const updated = await invoices.updateWhere(id, { status: 'pending' }, { status: 'paid' });
+  return updated !== null;
+}
+```
+
 ## Transaction isolation
 
 Pass an isolation level when a read-modify-write needs an explicit concurrency guarantee:

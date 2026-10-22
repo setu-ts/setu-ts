@@ -48,6 +48,48 @@ const dbPassword = await secrets.get('database/password'); // → env DATABASE_P
 const exists = await secrets.has('database/password');
 ```
 
+## Environment secrets and `.env`
+
+`EnvProvider` reads `IRuntimeServices.env`, not the config store. Its key mapping prepends
+`options.prefix` (default `''`), uppercases, then replaces `/`, `-`, and `.` with `_`:
+`database/password` with prefix `APP_` reads `APP_DATABASE_PASSWORD`. `ConfigPlugin` loads `.env`
+into its config snapshot only; a secret present only there is invisible to `EnvProvider`.
+
+Dotenv files are for local development only. In production, inject variables through the
+orchestrator or secret store; see
+[Dotenv files never reach an image](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#dotenv-files-never-reach-an-image).
+For local development, load the process environment before constructing the runtime with the command
+for your runtime:
+
+```bash
+# Node: tsx passes these Node flags through.
+npx tsx --env-file=.env main.ts
+# Skip an absent file instead:
+npx tsx --env-file-if-exists=.env main.ts
+# Deno: load it before the runtime reads the environment.
+deno run --allow-env --allow-read --allow-net --env-file=.env main.ts
+# Bun loads .env into the process environment automatically.
+bun run main.ts
+```
+
+Keep `.env` and local secret files out of version control.
+
+Workers have no ambient process environment: only string entries of the `env` record passed to
+`RuntimePlugin({ env })` reach `runtime.env`; without it the map is empty. Pass the platform's
+bindings record so deployed secrets and local development bindings reach `EnvProvider`. Provisioning
+a secret alone does not pass that record to the runtime:
+
+```typescript
+import { env } from 'cloudflare:workers';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SecretsPlugin } from '@setu-ts/secrets-plugin';
+
+const app = createApplication({ plugins: [RuntimePlugin({ env }), SecretsPlugin()] });
+await app.start();
+export default { fetch: (request: Request): Promise<Response> => app.fetch(request) };
+```
+
 ### HashiCorp Vault
 
 ```typescript

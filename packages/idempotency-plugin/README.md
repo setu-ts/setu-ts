@@ -193,6 +193,12 @@ Configure it with `IdempotencyPlugin({ transactional: { store } })`, where `stor
 `createDatabaseIdempotencyStore()` from `@setu-ts/database-plugin` (or any
 `ITransactionalIdempotencyStore`). The store is resolved and `verify()`d at `onInit`.
 
+The default purge is scheduled, so the example registers `SchedulerPlugin()`. Without
+`CAPABILITIES.SCHEDULER`, startup rejects with `IdempotencyConfigurationError`. Alternatively set
+`transactional.purge: { schedule: false }` and call `idempotency.purgeTransactional()` yourself.
+That alternative is mandatory on Workers, where `SchedulerPlugin` throws; call the purge from a Cron
+Trigger.
+
 A handler that creates an order calls `within` itself, because middleware cannot own the handler's
 transaction. The scope comes from the authenticated principal and tenant only — never from the
 request body — and is encoded with `JSON.stringify`, so no tenant or user id can be crafted to
@@ -203,6 +209,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IIdempotencyService } from '@setu-ts/common';
 import { createDatabaseIdempotencyStore, DatabasePlugin } from '@setu-ts/database-plugin';
 import type { IUnitOfWork } from '@setu-ts/database-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -211,6 +218,7 @@ const app = createApplication({
   plugins: [
     RuntimePlugin(),
     DatabasePlugin(),
+    SchedulerPlugin(),
     IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } }),
   ],
 });

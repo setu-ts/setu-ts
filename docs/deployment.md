@@ -456,11 +456,20 @@ NAMESPACE=acme WORKSPACE=acme envsubst < k8s/members.yaml | kubectl apply -f -
 ```
 
 They carry the findings on this page rather than repeating the mistakes: the build context is the
-workspace root, the base image tag is pinned, the user is numeric, permissions are explicit, the
-grace period is real because the generated entry handles `SIGTERM`, and the start writes no lockfile
-— so the generated manifest's own read-only root filesystem cannot crash it.
+workspace root, the base image tag is pinned, the user is numeric, the grace period is real because
+the generated entry handles `SIGTERM`, and the start writes no lockfile — so the generated
+manifest's own read-only root filesystem cannot crash it.
 
-### The image is the member's only dependency source at runtime
+### The default Node workspace image
+
+A workspace defaults to Node. Its generated `docker/Dockerfile` uses `node:24-alpine`, selects a
+member with `ARG MEMBER`, and installs from the workspace root: it copies the root manifest and
+`package-lock.json`, the member manifest, and shared libraries before `npm install`, then copies the
+member source. It runs as numeric UID 1000 from `/srv/apps/${MEMBER}`, starting with
+`npx tsx main.ts`. Build with the workspace root as context; the member directory alone omits the
+workspace manifest and shared libraries.
+
+### The Deno image is the member's only dependency source at runtime
 
 The generated Deno image first removes the development-only diagnostics-plugin pin from the member
 and root import maps. It accepts comments and trailing commas in `deno.json` or `deno.jsonc`, and a
@@ -537,6 +546,44 @@ address as the fallback.
 - **HTTP probes.** The generated probes are `tcpSocket`, because `/live` and `/ready` exist only
   when the member registers `HealthPlugin`. Switch them once it does — it is the better signal,
   since it waits for the plugins rather than for the socket.
+
+### A standalone project
+
+The default standalone `setu new` emits no Dockerfile, Compose file or Kubernetes manifest. A
+standalone template with `--broker` or `--queue` can additionally emit `docker/compose.yaml` for the
+selected backing services; that does not supply an application image or Kubernetes manifest. Use
+`setu new --workspace` for generated deployment artifacts, or `setu adopt` to bring an existing
+project into a workspace. For an independently maintained image, use this repository's
+[`docker/Dockerfile`](../docker/Dockerfile) pattern as a starting point and adapt its entrypoint and
+dependency installation to your runtime.
+
+## Backup and restore
+
+Back up the database state your composition actually uses: application tables, the migration ledger,
+and configured outbox, inbox, tier-C idempotency and audit tables. These stores are described in
+[database migrations](../packages/database-plugin/README.md#migrations-and-readiness),
+[outbox](../packages/messaging-plugin/README.md#transactional-outbox),
+[inbox](../packages/messaging-plugin/README.md#consumer-inbox),
+[tier C](../packages/idempotency-plugin/README.md#tier-c-the-work-and-its-record-commit-together),
+and [audit row shape](../packages/audit-plugin/README.md#database-row-shape).
+
+Database backups do not include Redis-backed sessions or caches, or broker queues. Use each
+backend's own persistence and backup procedures; Setu-TS ships no backup tool. See the
+[session stores](../packages/session-plugin/README.md),
+[cache stores](../packages/cache-plugin/README.md), and
+[broker backends](../packages/messaging-plugin/README.md).
+
+After a restore, `/ready` detects missing applied migrations only when the application configures
+`DatabasePlugin({ readiness: { migrations } })`; connection readiness alone does not verify the
+schema ([migration readiness](../packages/database-plugin/README.md#migrations-and-readiness)).
+Restored pending outbox rows can publish again: delivery is at least once, and only consumers using
+the inbox whose markers survived the same restore can de-duplicate them
+([outbox promise](../packages/messaging-plugin/README.md#the-promise),
+[inbox promise](../packages/messaging-plugin/README.md#the-promise-1)). Tier-C idempotency records
+written after the backup are lost, so a client or provider re-send can run that work again
+([tier-C guarantee](../packages/idempotency-plugin/README.md#tier-c-the-work-and-its-record-commit-together)).
+Restore related business rows and their delivery/idempotency records consistently, then check
+readiness and reconcile external side effects before reopening traffic.
 
 ## Cloudflare Workers
 
