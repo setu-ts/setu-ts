@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { beforeAll, describe, expect, it } from 'vitest';
+import type { Worker } from 'node:worker_threads';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
 import {
   allowedCardIdentifiers,
@@ -161,11 +162,16 @@ describe('published agent cards', () => {
       expect(prematureResolutions(await readFile(path, 'utf8')), path).toEqual([]);
     }
   });
+  // One compiler worker for the whole inventory; a worker per card exhausted an 8 GiB runner.
+  const compiler: { worker?: Worker } = {};
+  afterAll(async () => {
+    await compiler.worker?.terminate();
+  });
   it('compiles every fence and pins the compilable count', async () => {
     for (const pkg of ready) {
       const path = `${pkg}/AGENT_CARD.md`;
       expect(
-        await checkFences(path, await readFile(path, 'utf8'), '.tmp/agent-card-fences'),
+        await checkFences(path, await readFile(path, 'utf8'), '.tmp/agent-card-fences', compiler),
         path,
       ).toBe(FENCE_COUNTS[pkg]);
     }

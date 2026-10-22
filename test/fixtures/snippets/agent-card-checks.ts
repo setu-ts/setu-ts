@@ -1,5 +1,6 @@
 /** Shared card/rule checks; all fence classification stays in fence-engine. */
 import { mkdir, writeFile } from 'node:fs/promises';
+import type { Worker } from 'node:worker_threads';
 import { collectPackageExports } from '../../../scripts/package-export-collection.ts';
 import {
   assembleSource,
@@ -116,10 +117,20 @@ export function identifierProblems(
 }
 
 /** Compile every TypeScript fence through the existing engine and return its count. */
-export async function checkFences(label: string, source: string, scratch: string): Promise<number> {
+/**
+ * Compiles every TypeScript fence in `source` and returns how many there were.
+ * Pass one `context` across a whole inventory: each context owns a compiler
+ * worker thread with its cache, and a context per card leaves one live worker
+ * per card (about 25 GB for the full card set). The caller terminates it.
+ */
+export async function checkFences(
+  label: string,
+  source: string,
+  scratch: string,
+  context: { worker?: Worker } = {},
+): Promise<number> {
   await mkdir(scratch, { recursive: true });
   await writeProjectStubs(scratch);
-  const context = {};
   let count = 0;
   for (const fence of extractFences(label, source).filter((f) => TS_ALIASES.has(f.lang))) {
     const classified = classify(fence);

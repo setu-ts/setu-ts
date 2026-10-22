@@ -686,8 +686,8 @@ prints one reminder when the project already has a sectioned brief:
 Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md.
 ```
 
-The command named is the project's pinned CLI invocation for its runtime:
-`bunx @setu-ts/cli@<version>` on Bun and `deno run -A npm:@setu-ts/cli@<version>` on Deno.
+The command named is the project's pinned CLI invocation for its runtime: on Bun it is
+`bunx @setu-ts/cli@<version>`, and on Deno it is `deno run -A npm:@setu-ts/cli@<version>`.
 
 ## Plugin-contributed commands
 
