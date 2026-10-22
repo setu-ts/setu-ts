@@ -16,8 +16,9 @@ export interface ICliFileSystem extends IFileSystem {
   readRegularFile?(path: string, maxBytes: number): Promise<Uint8Array>;
   /**
    * Snapshots without following the leaf link, then replaces using a fresh inode and rename.
-   * Failures after temp creation starts carry RegularFileWriteError for rollback.
-   * Snapshot failures (including close) precede any mutation and need no undo.
+   * Failures after temp creation starts carry RegularFileWriteError; only those whose
+   * `mayHaveChanged` is true (the rename was attempted) are rolled back. Snapshot failures
+   * (including close) precede any mutation and need no undo.
    */
   writeRegularFile?(
     path: string,
@@ -37,13 +38,17 @@ export interface ICliFileSystem extends IFileSystem {
 /** Carries undo bytes when a handle-based write or close fails after the snapshot. */
 export class RegularFileWriteError extends Error {
   readonly before: Uint8Array | undefined;
+  /** False when the failure provably left the target untouched, so no rollback is due. */
+  readonly mayHaveChanged: boolean;
 
   /** @param before - Previous bytes, or undefined for a file created by this attempt.
    * @param cause - The write or close failure.
+   * @param mayHaveChanged - Whether the target may have been altered; defaults to true.
    */
-  constructor(before: Uint8Array | undefined, cause: unknown) {
+  constructor(before: Uint8Array | undefined, cause: unknown, mayHaveChanged = true) {
     super(failureMessage(cause), { cause });
     this.before = before;
+    this.mayHaveChanged = mayHaveChanged;
     this.name = 'RegularFileWriteError';
   }
 }
@@ -609,7 +614,10 @@ export async function writeFiles(
         try {
           ({ before } = await fs.writeRegularFile(file.path, bytes, MAX_EXISTING_FILE_BYTES));
         } catch (cause) {
-          if (cause instanceof RegularFileWriteError)
+          // A failure before the rename left the target untouched: undoing it would only
+          // risk reporting a spurious incomplete rollback, or removing a file another
+          // process created at an absent target meanwhile.
+          if (cause instanceof RegularFileWriteError && cause.mayHaveChanged)
             attempted.push({ path: file.path, before: cause.before });
           throw cause;
         }

@@ -62,7 +62,8 @@ export function regularFileWriteFlags(flags: {
  * @param maxExistingBytes - Maximum prior content to retain for undo.
  * @returns Prior bytes, or undefined when the snapshot found no target.
  * @throws Snapshot errors (including close) before any mutation; no undo is needed.
- * @throws RegularFileWriteError with undo bytes if temp creation, writing, close or rename fails.
+ * @throws RegularFileWriteError with undo bytes if temp creation, writing, close or rename fails;
+ *   `mayHaveChanged` is true only when the rename was attempted.
  */
 export async function writeRegularFile(
   path: string,
@@ -121,6 +122,8 @@ export async function writeRegularFile(
     `.${basename(path)}.setu-${randomBytes(16).toString('hex')}.tmp`,
   );
   let created = false;
+  // rename is the only step that can alter the target; earlier failures leave it untouched.
+  let renameStarted = false;
   // Thrown before rename, so the target is untouched: no undo is attempted.
   let ownerRefusal: Error | undefined;
   try {
@@ -157,6 +160,7 @@ export async function writeRegularFile(
     } finally {
       await output.close();
     }
+    renameStarted = true;
     await rename(temp, path);
     return { before };
   } catch (cause) {
@@ -165,7 +169,7 @@ export async function writeRegularFile(
         /* Best-effort cleanup; preserve the write failure. */
       });
     if (cause === ownerRefusal) throw cause;
-    throw new RegularFileWriteError(before, cause);
+    throw new RegularFileWriteError(before, cause, renameStarted);
   }
 }
 

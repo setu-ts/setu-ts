@@ -216,6 +216,7 @@ describe('snapshot then rename writer', () => {
     await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
       name: 'RegularFileWriteError',
       before: bytes('old'),
+      mayHaveChanged: false,
       cause,
     });
     expect(io.unlink).not.toHaveBeenCalled();
@@ -229,6 +230,7 @@ describe('snapshot then rename writer', () => {
       await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
         name: 'RegularFileWriteError',
         before: bytes('old'),
+        mayHaveChanged: false,
         cause,
       });
       expect(io.output.close).toHaveBeenCalledOnce();
@@ -244,6 +246,7 @@ describe('snapshot then rename writer', () => {
     await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
       name: 'RegularFileWriteError',
       before: bytes('old'),
+      mayHaveChanged: true,
       cause,
     });
     expect(io.unlink).toHaveBeenCalledOnce();
@@ -254,6 +257,7 @@ describe('snapshot then rename writer', () => {
     await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
       name: 'RegularFileWriteError',
       before: bytes('old'),
+      mayHaveChanged: false,
       message: '/target: write made no progress',
     });
     expect(io.unlink).toHaveBeenCalledOnce();
@@ -283,6 +287,35 @@ describe('writeFiles handle-error recovery', () => {
       if (prior === undefined) expect(fs.has('/project/target')).toBe(false);
       else expect(fs.read('/project/target')).toBe(prior);
       expect(calls).toBe(prior === undefined ? 1 : 2);
+    },
+  );
+
+  it.each([undefined, 'original'])(
+    'does not roll back a failure that left the target untouched (prior %j)',
+    async (prior) => {
+      const fs = createFakeFs(prior === undefined ? {} : { '/project/target': prior });
+      let calls = 0;
+      const cause = new Error('temp write failed');
+      const capable = {
+        ...fs,
+        async writeRegularFile(path: string) {
+          calls++;
+          // Another process creates the absent target while this write fails before rename.
+          if (prior === undefined) await fs.writeFile(path, bytes('someone else'));
+          throw new RegularFileWriteError(
+            prior === undefined ? undefined : bytes(prior),
+            cause,
+            false,
+          );
+        },
+      };
+      const error = await writeFiles(capable, [{ path: '/project/target', contents: 'new' }], {
+        root: '/project',
+      }).catch((e: unknown) => e);
+      expect(error).toMatchObject({ name: 'RegularFileWriteError', cause });
+      expect(String((error as Error).message)).not.toMatch(/rollback incomplete/);
+      expect(calls).toBe(1);
+      expect(fs.read('/project/target')).toBe(prior ?? 'someone else');
     },
   );
 });
