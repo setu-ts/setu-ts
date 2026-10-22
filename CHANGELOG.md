@@ -31,7 +31,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Environment secrets use the config snapshot as a fallback (V9-77, 0.10.0,
+- **Environment secrets use the config snapshot as a fallback (V9-77, #485, 0.10.0,
   `@setu-ts/secrets-plugin`).** The default `EnvProvider` reads the environment first, then string
   values from `CAPABILITIES.CONFIG` when available. `.env`-only secrets loaded by `ConfigPlugin` now
   resolve, including `SessionPlugin`'s `SESSION_SECRET` and secrets in full-stack starter apps. As a
