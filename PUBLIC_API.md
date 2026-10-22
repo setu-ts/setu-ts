@@ -5381,20 +5381,21 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ### Options
 
-| Option                                               | Provider                | Description                                                                                                                      |
-| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                   |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                          |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                         |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                              |
-| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                   |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                               |
-| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).    |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                   |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                        |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                        |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                   |
-| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. A value outside `0`–`2147483647` throws `RangeError` at startup. |
+| Option                                               | Provider                | Description                                                                                                                                                                                                                                                |
+| ---------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                                                                                                                                             |
+| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                                                                                                                                                    |
+| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                                                                                                                                                   |
+| `options.configFallback`                             | `env`                   | Default `true`: fall back to string values from `CAPABILITIES.CONFIG` for missing environment keys. `false` reads env only. Non-booleans throw at plugin construction naming `options.configFallback`; other providers ignore it. Absent CONFIG is silent. |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                                                                                                                                                        |
+| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                                                                                                                                             |
+| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                                                                                                                                                         |
+| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).                                                                                                                              |
+| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                                                                                                                                             |
+| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                                                                                                                                                  |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                                                                                                                                                  |
+| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                                                                                                                                             |
+| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. A value outside `0`–`2147483647` throws `RangeError` at startup.                                                                                                                           |
 
 ### Exports
 
@@ -5463,11 +5464,28 @@ bounded at 2 seconds through `createCachedProbe`.
 
 ### Notes
 
-- `EnvProvider` is read-only: `rotate()` and provider `set` throw, since environment variables
-  cannot be mutated at runtime. It reads env through `IRuntimeServices.env`, resolving Workers/Deno
-  bindings.
+- `EnvProvider` is read-only: `rotate()` and provider `set` reject. It reads `IRuntimeServices.env`
+  first, then the config snapshot for a missing key when `options.configFallback` is enabled
+  (default `true`). Both paths accept strings only, including empty strings; environment strings are
+  returned unchanged, including `${NAME}` references. Non-string config values are missing, never
+  coerced. Without CONFIG it silently reads only env. The optional CONFIG dependency orders even a
+  replacement config provider before secrets.
+- Direct construction accepts `new EnvProvider(env, { prefix?, config? })`, where `config` is
+  `Pick<IConfig, 'get'>` and is consulted only when the environment lacks a string at the derived
+  key. On Node the environment map is live; Deno and Workers use copies. The service's normal
+  `options.cacheTtl` applies to found values from either source; misses are never cached. Provider
+  health remains lifecycle-only.
+- ConfigPlugin's `.env`-only keys now resolve through this fallback. A validation schema must
+  declare the secret key or pass it through; a stripped key remains missing. `${NAME}` references in
+  config-sourced secrets are expanded by default: use `ConfigPlugin({ expandVariables: false })` for
+  literal references in secrets containing `$`, or supply the secret in the real environment.
+- Workers normally build config from the same string bindings as `runtime.env`, so the fallback adds
+  no keys and `envFilePath` requires unavailable filesystem support. An injected
+  `ConfigPlugin({ instance })` or another `IConfig` can supply keys the environment lacks, including
+  the snapshot used by `createFullStackAppFromConfig`.
 - Secret names use provider-specific path syntax; `EnvProvider` maps a name to an env key by
-  uppercasing and replacing `/`, `-`, `.` with `_` (e.g. `database/password` → `DATABASE_PASSWORD`).
+  prepending `options.prefix`, uppercasing and replacing `/`, `-`, `.` with `_` (e.g.
+  `database/password` → `DATABASE_PASSWORD`). The same key is used for config.
 
 ---
 

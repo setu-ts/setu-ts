@@ -5,13 +5,13 @@ a pluggable provider with a read-through cache.
 
 Providers:
 
-| Provider                   | `provider` id | Backend                                      | Dependency                                         |
-| -------------------------- | ------------- | -------------------------------------------- | -------------------------------------------------- |
-| `EnvProvider` (default)    | `env`         | Environment variables via `IRuntimeServices` | none (every runtime, incl. Cloudflare Workers)     |
-| `AwsKmsProvider`           | `aws-kms`     | AWS Secrets Manager (KMS-backed encryption)  | lazy `@aws-sdk/client-secrets-manager` (or inject) |
-| `GcpSecretManagerProvider` | `gcp`         | GCP Secret Manager                           | lazy `@google-cloud/secret-manager` (or inject)    |
-| `AzureKeyVaultProvider`    | `azure`       | Azure Key Vault                              | lazy `@azure/keyvault-secrets` (or inject)         |
-| `HashiCorpVaultProvider`   | `vault`       | HashiCorp Vault KV v2 over `fetch`           | none (zero-dependency, Workers-compatible)         |
+| Provider                   | `provider` id | Backend                                     | Dependency                                         |
+| -------------------------- | ------------- | ------------------------------------------- | -------------------------------------------------- |
+| `EnvProvider` (default)    | `env`         | Environment, then optional config snapshot  | none (every runtime, incl. Cloudflare Workers)     |
+| `AwsKmsProvider`           | `aws-kms`     | AWS Secrets Manager (KMS-backed encryption) | lazy `@aws-sdk/client-secrets-manager` (or inject) |
+| `GcpSecretManagerProvider` | `gcp`         | GCP Secret Manager                          | lazy `@google-cloud/secret-manager` (or inject)    |
+| `AzureKeyVaultProvider`    | `azure`       | Azure Key Vault                             | lazy `@azure/keyvault-secrets` (or inject)         |
+| `HashiCorpVaultProvider`   | `vault`       | HashiCorp Vault KV v2 over `fetch`          | none (zero-dependency, Workers-compatible)         |
 
 No cloud SDK is a hard dependency: a provider either receives an injected client facade through
 options, or lazily imports the SDK at `connect()` time (AI_GUIDELINES §12.2). Secrets are never
@@ -50,16 +50,37 @@ const exists = await secrets.has('database/password');
 
 ## Environment secrets and `.env`
 
-`EnvProvider` reads `IRuntimeServices.env`, not the config store. Its key mapping prepends
+`EnvProvider` reads `IRuntimeServices.env` first, then falls back to `CAPABILITIES.CONFIG` when
+registered and the environment has no string value for the key. Its key mapping prepends
 `options.prefix` (default `''`), uppercases, then replaces `/`, `-`, and `.` with `_`:
-`database/password` with prefix `APP_` reads `APP_DATABASE_PASSWORD`. `ConfigPlugin` loads `.env`
-into its config snapshot only; a secret present only there is invisible to `EnvProvider`.
+`database/password` with prefix `APP_` reads `APP_DATABASE_PASSWORD` from either source. Only string
+config values are accepted; numbers, booleans and objects are treated as missing, without coercion.
+Environment strings, including empty strings and `${NAME}` references, are returned unchanged.
+
+Register `ConfigPlugin({ envFilePath: '.env' })` to make `.env`-only secrets available. The optional
+CONFIG dependency orders its provider before secrets regardless of their order in the plugin list,
+including replacement CONFIG providers. The fallback defaults to `true`; opt out with
+`SecretsPlugin({ options: { configFallback: false } })`. A non-boolean `options.configFallback`
+throws at plugin construction for the env provider; other providers ignore it. With no CONFIG
+capability, reads silently use the environment only.
+
+Config values retain ConfigPlugin's loading rules:
+
+- A validation schema must declare the secret key (or pass unknown keys through); an undeclared key
+  stripped by a schema is unavailable and `secrets.get()` throws "Secret not found".
+- `${NAME}` references in `.env`-only secrets are expanded by default. For literal references in
+  secrets containing `$`, use `ConfigPlugin({ expandVariables: false })` or supply the secret in the
+  real environment. The environment path always returns its string unchanged.
+
+The fallback also applies to `SessionPlugin`'s `SESSION_SECRET` and full-stack starter apps, which
+always compose `SecretsPlugin`. Found values use the normal `options.cacheTtl` read cache; missing
+values are never cached. `EnvProvider` remains read-only and its health is lifecycle-only.
 
 Dotenv files are for local development only. In production, inject variables through the
 orchestrator or secret store; see
 [Dotenv files never reach an image](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#dotenv-files-never-reach-an-image).
-For local development, load the process environment before constructing the runtime with the command
-for your runtime:
+For local development, loading the process environment directly is an optional alternative to
+ConfigPlugin's fallback:
 
 ```bash
 # Node: tsx passes these Node flags through.
@@ -89,6 +110,11 @@ const app = createApplication({ plugins: [RuntimePlugin({ env }), SecretsPlugin(
 await app.start();
 export default { fetch: (request: Request): Promise<Response> => app.fetch(request) };
 ```
+
+On Workers, ConfigPlugin normally sees the same string bindings as the environment, so the fallback
+adds no keys; `envFilePath` requires filesystem support and cannot load files there. An injected
+`ConfigPlugin({ instance })` or another `IConfig` provider can supply additional keys, including the
+snapshot used by `createFullStackAppFromConfig`.
 
 ### HashiCorp Vault
 

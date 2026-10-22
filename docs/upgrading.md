@@ -12,6 +12,28 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Environment secrets fall back to config (V9-77, 0.10.0, `@setu-ts/secrets-plugin`)
+
+When CONFIG is registered, the default `EnvProvider` now resolves string secrets present only in
+ConfigPlugin's snapshot, including `.env` values. Environment strings still win and are returned
+unchanged. This also affects `SessionPlugin`'s `SESSION_SECRET` and full-stack starter apps, which
+always compose `SecretsPlugin`. To preserve environment-only reads, use:
+
+```typescript
+SecretsPlugin({ options: { configFallback: false } });
+```
+
+`configFallback` defaults to `true`. A non-boolean value throws at plugin construction naming
+`options.configFallback`; other providers ignore the option. With no CONFIG capability, the env
+provider silently reads only the environment.
+
+A validation schema must declare the secret key or pass unknown keys through; stripped keys stay
+missing. Config-sourced secrets follow `${NAME}` expansion: for literal references in secrets
+containing `$`, use `ConfigPlugin({ expandVariables: false })` or set the secret in the real
+environment. Only string config values qualify. On Workers, config normally contains the same string
+bindings as `runtime.env` and adds no keys; an injected `ConfigPlugin({ instance })` or another
+`IConfig` provider can supply additional keys. `envFilePath` requires filesystem support.
+
 ### Declare JSON media types on validated bodies (M114, 0.10.0, `@setu-ts/validation-plugin`)
 
 Send `Content-Type: application/json` on JSON requests to `validateBody` or `@ValidateBody` routes

@@ -1,6 +1,6 @@
 /**
  * Compile-time assertion that the secrets provider option interfaces carry the
- * `endpoint` option (M99d §4.1).
+ * `endpoint` option (M99d §4.1) and boolean `configFallback` (V9-77).
  *
  * `pnpm run check` type-checks the package `test/` trees `tsconfig.check.json`
  * includes, and this file is deliberately NOT named `*.test.ts`, so the test
@@ -43,6 +43,11 @@ const pluginWithEndpoint: SecretsProviderOptions = {
 };
 const pluginWithoutEndpoint: SecretsProviderOptions = { region: 'us-east-1' };
 
+const configFallbackEnabled: SecretsProviderOptions = { configFallback: true };
+const configFallbackDisabled: SecretsProviderOptions = { configFallback: false };
+// @ts-expect-error V9-77: configFallback accepts booleans, never string flags.
+const configFallbackInvalid: SecretsProviderOptions = { configFallback: 'false' };
+
 // Consumed by exports so `noUnusedLocals` cannot strip the assignments — and
 // so a reader who follows a symbol finds this file rather than a dead value.
 export const AWS_OPTIONS_ASSERTIONS: readonly AwsKmsProviderOptions[] = [
@@ -56,4 +61,7 @@ export const GCP_OPTIONS_ASSERTIONS: readonly GcpSecretManagerProviderOptions[] 
 export const PLUGIN_OPTIONS_ASSERTIONS: readonly SecretsProviderOptions[] = [
   pluginWithEndpoint,
   pluginWithoutEndpoint,
+  configFallbackEnabled,
+  configFallbackDisabled,
+  configFallbackInvalid,
 ];

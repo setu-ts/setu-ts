@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { ISecretManager } from '@setu-ts/common';
@@ -9,8 +9,13 @@ import { AwsKmsProvider } from '../../src/providers/aws-kms.ts';
 import { GcpSecretManagerProvider } from '../../src/providers/gcp-secret-manager.ts';
 import { AzureKeyVaultProvider } from '../../src/providers/azure-key-vault.ts';
 import { HashiCorpVaultProvider } from '../../src/providers/vault.ts';
-import type { IVaultHttp, SecretsProviderType } from '../../src/interfaces/index.ts';
+import type {
+  IVaultHttp,
+  SecretsProviderOptions,
+  SecretsProviderType,
+} from '../../src/interfaces/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import { createFakeConfig } from '../fixtures/fake-config.ts';
 import manifest from '../../deno.json' with { type: 'json' };
 
 describe('SecretsPlugin metadata', () => {
@@ -19,12 +24,114 @@ describe('SecretsPlugin metadata', () => {
     expect(plugin.name).toBe('secrets-plugin');
     expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toContain(CAPABILITIES.SECRETS);
-    expect(plugin.optionalDependencies).toEqual(['logger']);
+    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.LOGGER, CAPABILITIES.CONFIG]);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
   });
 });
 
+describe('SecretsPlugin configFallback', () => {
+  it.each(['false', 0, 1, null, {}, []])('rejects non-booleans at construction (%j)', (value) => {
+    const options = { configFallback: value } as unknown as SecretsProviderOptions;
+    expect(() => SecretsPlugin({ options })).toThrow(TypeError);
+    expect(() => SecretsPlugin({ provider: 'env', options })).toThrow('options.configFallback');
+  });
+
+  it.each(['aws-kms', 'gcp', 'azure', 'vault'] as const)(
+    'ignores configFallback for %s',
+    (provider) => {
+      expect(() =>
+        SecretsPlugin({
+          provider,
+          options: { configFallback: 'ignored' } as unknown as SecretsProviderOptions,
+        }),
+      ).not.toThrow();
+    },
+  );
+
+  it.each([undefined, true])(
+    'wires config by default or when explicitly enabled (%j)',
+    async (flag) => {
+      const config = createFakeConfig({ TOKEN: 'config-only-do-not-log' });
+      const { ctx, logs } = createFakeContext({}, true, true, config);
+      const plugin = SecretsPlugin({ options: flag === undefined ? {} : { configFallback: flag } });
+      await plugin.register(ctx);
+      const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+      expect(await service.get('token')).toBe('config-only-do-not-log');
+      expect(logs).toEqual([
+        {
+          message: 'SecretsPlugin registered',
+          meta: { provider: 'env', configFallback: true },
+        },
+      ]);
+    },
+  );
+
+  it('configFallback false wires no config and never resolves the CONFIG service', async () => {
+    const config = createFakeConfig({ TOKEN: 'config-only' });
+    const { ctx, logs } = createFakeContext({ ENV_TOKEN: 'env' }, true, true, config);
+    const resolve = vi.spyOn(ctx.services, 'get');
+    await SecretsPlugin({ options: { configFallback: false } }).register(ctx);
+    expect(resolve.mock.calls.some(([token]) => token === CAPABILITIES.CONFIG)).toBe(false);
+    const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+    expect(await service.has('token')).toBe(false);
+    expect(await service.get('env/token')).toBe('env');
+    expect(logs[0].meta).toEqual({ provider: 'env', configFallback: false });
+  });
+
+  it('is silent when CONFIG is absent and reads only the environment', async () => {
+    const { ctx, logs } = createFakeContext({ TOKEN: 'env' }, true);
+    await SecretsPlugin({ options: { configFallback: true } }).register(ctx);
+    const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+    expect(await service.get('token')).toBe('env');
+    expect(await service.has('missing')).toBe(false);
+    expect(logs).toEqual([
+      {
+        message: 'SecretsPlugin registered',
+        meta: { provider: 'env', configFallback: false },
+      },
+    ]);
+  });
+
+  it('leaves other providers on their own backend even when CONFIG is present', async () => {
+    const config = createFakeConfig({ TOKEN: 'config' });
+    const get = vi.spyOn(config, 'get');
+    const { ctx, logs } = createFakeContext({}, true, true, config);
+    const client = {
+      getSecretValue: (): Promise<string | null> => Promise.resolve(null),
+      putSecretValue: (): Promise<void> => Promise.resolve(),
+    };
+    await SecretsPlugin({ provider: 'aws-kms', options: { client } }).register(ctx);
+    expect(await ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS).has('token')).toBe(false);
+    expect(get).not.toHaveBeenCalled();
+    expect(logs[0].meta).toEqual({ provider: 'aws-kms', configFallback: false });
+  });
+
+  it('does not cache misses and caches config values with the configured TTL', async () => {
+    const data: Record<string, unknown> = {};
+    const { ctx } = createFakeContext({}, false, true, createFakeConfig(data));
+    let now = 0;
+    (ctx.runtime as { hrtime: () => number }).hrtime = () => now;
+    await SecretsPlugin({ options: { cacheTtl: 1 } }).register(ctx);
+    const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+    expect(await service.has('token')).toBe(false);
+    await expect(service.get('token')).rejects.toThrow('Secret not found');
+    data.TOKEN = 'first';
+    expect(await service.get('token')).toBe('first');
+    data.TOKEN = 'next';
+    expect(await service.get('token')).toBe('first');
+    now = 1000;
+    expect(await service.get('token')).toBe('next');
+  });
+});
+
 describe('createProvider', () => {
+  it('honors the fallback opt-out when called directly', async () => {
+    const config = createFakeConfig({ TOKEN: 'config' });
+    const enabled = createProvider('env', {}, {}, undefined, config);
+    const disabled = createProvider('env', { configFallback: false }, {}, undefined, config);
+    expect(await enabled.get('token')).toBe('config');
+    expect(await disabled.get('token')).toBeNull();
+  });
   it('builds the matching provider for each id', () => {
     expect(createProvider('env', {}, {})).toBeInstanceOf(EnvProvider);
     expect(createProvider('aws-kms', {}, {})).toBeInstanceOf(AwsKmsProvider);
@@ -100,7 +207,7 @@ describe('SecretsPlugin.register', () => {
 
     expect(logs.length).toBe(1);
     expect(logs[0].message).toBe('SecretsPlugin registered');
-    expect(logs[0].meta).toEqual({ provider: 'env' });
+    expect(logs[0].meta).toEqual({ provider: 'env', configFallback: false });
     // No secret value leaks into the log metadata.
     expect(JSON.stringify(logs[0])).not.toContain('do-not-log-me');
   });
