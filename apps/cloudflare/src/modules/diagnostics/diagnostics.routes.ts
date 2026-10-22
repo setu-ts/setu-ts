@@ -8,7 +8,7 @@ import { detectRuntime } from '@setu-ts/runtime';
  * `detected` is the check that matters: the registered runtime is fixed by
  * this example's own runtime plugin, so only detection can be wrong.
  */
-export function registerPlatformRoutes(router: IRouterApi): void {
+export function registerDiagnosticsRoutes(router: IRouterApi): void {
   router.get('/diag/platform', (ctx) =>
     ctx.response.json({
       detected: detectRuntime(),

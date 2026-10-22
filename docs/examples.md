@@ -438,7 +438,12 @@ skip fails the job unless the app is in the `ALLOW_SKIP` list; see
    [above](#how-every-example-is-laid-out).
 2. Make `smoke.ts` assert the behaviour the example exists for, not only that it started.
 3. Add it to [`apps/README.md`](../apps/README.md) and to this guide.
-4. Run `pnpm run check:apps`.
+4. Run `pnpm run check:apps`, and `pnpm run test:tooling test/apps-layout.test.ts`. The second
+   scaffolds projects with this tree's CLI and checks every example against them: the composition
+   file and factory, the entry's shutdown handling, the smoke check's test runner, how feature
+   folders are named, and how the module index imports and wires them. Where an example cannot
+   follow a rule, add it to that test's exceptions with the reason; an exception that stops being
+   needed fails the test.
 
 ## Next Steps
 
