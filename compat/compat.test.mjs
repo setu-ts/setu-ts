@@ -82,20 +82,35 @@ function rebind(target) {
 }
 
 /**
- * Reads the Deno workspace and returns every member's npm package name.
+ * Reads the pnpm workspace and returns every published member's npm package name.
  *
  * The workspace is the authority on what the framework ships, so the compat
  * suite derives its expected surface from it rather than from its own
  * `package.json` — otherwise a new package could be added to the repo and
  * silently never checked on Node or Bun.
  *
+ * This suite installs only the published packages, so it cannot import the
+ * repository's `scripts/lib/workspace.ts` (which needs `yaml`). The members are
+ * the `packages/…` entries of the top-level `packages:` list, one plain
+ * `- <path>` item per line; `apps/*` is skipped, and so is any private member.
+ *
  * @returns {string[]} Sorted `@setu-ts/*` names.
  */
 function workspacePackageNames() {
-  const root = JSON.parse(readFileSync('../deno.json', 'utf8'));
-  return root.workspace
-    .map((entry) => JSON.parse(readFileSync(`../${entry.replace(/^\.\//, '')}/deno.json`, 'utf8')))
-    .map((cfg) => cfg.name.replace('@setu-ts/', '@setu-ts/'))
+  const lines = readFileSync('../pnpm-workspace.yaml', 'utf8').split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === 'packages:');
+  if (start === -1) throw new Error('../pnpm-workspace.yaml: no top-level packages: list');
+  const members = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) break;
+    const item = /^\s+-\s+['"]?([^'"#\s]+)['"]?\s*(?:#.*)?$/.exec(line);
+    if (item !== null && item[1].startsWith('packages/')) members.push(item[1]);
+  }
+  if (members.length === 0) throw new Error('../pnpm-workspace.yaml: no packages/ members');
+  return members
+    .map((member) => JSON.parse(readFileSync(`../${member}/package.json`, 'utf8')))
+    .filter((manifest) => manifest.private !== true)
+    .map((manifest) => manifest.name)
     .sort();
 }
 
