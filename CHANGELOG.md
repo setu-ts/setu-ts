@@ -18,11 +18,12 @@ All notable changes to this project are documented here. The format follows
   be kept, is refused unchanged; ACLs and extended attributes are not carried over. Cleanup covers
   handled failures only: a process killed between temp creation and rename can leave a
   `.<name>.setu-<hex>.tmp` file. Specific to `setu agents` workspace writes on POSIX, every root and
-  member target's directory chain is checked for ownership, write permissions and symlinks;
-  untrusted chains are refused with nothing written, whether invoked from the root or a member.
-  Missing directories are checked from their nearest existing ancestor; a missing member still exits
-  `1` with `<member>: not a project`, writing nothing. The ownership check is skipped where
-  uid/metadata are unavailable, including Windows; standalone projects are unchecked.
+  member target's directory chain is checked for ownership, write permissions (group write passes
+  only for the invoking user's primary group) and symlinks; untrusted chains are refused with
+  nothing written, whether invoked from the root or a member, and `--check` skips the check. Missing
+  directories are checked from their nearest existing ancestor; a missing member still exits `1`
+  with `<member>: not a project`, writing nothing. The ownership check is skipped where uid/metadata
+  are unavailable, including Windows; standalone projects are unchecked.
 
 - **CLI file reads and member paths:** manifest reads now refuse non-regular files, files over 1 MiB
   and files that are not valid UTF-8; runtime-marker checks use metadata without opening content. A

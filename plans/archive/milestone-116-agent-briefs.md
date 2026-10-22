@@ -487,18 +487,20 @@ Decisions:
 - **F6 (R4-1, R5):** before writing a workspace, from its root or a member, check the root and every
   member write target's directory chain through `/` with an optional CLI-only `directoryOwnership`
   lstat seam and `invokingUid`, installed at the Node boundary. Refuse symlinks, non-directories,
-  owners other than the invoking uid or 0, and group/other-writable directories except root-owned
-  sticky ones. Report one escaped directory and reason, exit 1, write nothing, and recommend running
-  `setu agents` in a workspace you own. No standalone fallback; standalone projects remain
-  unchecked. An ENOENT from the seam for a missing directory walks up to the nearest existing
-  ancestor, whose chain must pass the same rule; any other seam error uses the same escaped refusal
-  path. Passing ownership validation does not create a project: a missing member still fails
-  `gatherFacts` with `<member>: not a project`, exits 1 and writes nothing. If `writeFiles` later
-  creates directories for valid projects, they are created by the invoking user inside a chain that
-  just passed. Residual: group/other-write permissions from a permissive umask on a newly created
-  directory are not re-checked. Missing seam or getuid skips the check (Windows is not protected).
-  Same-uid processes remain trusted; owned chains cannot be rearranged by another user under these
-  permission rules.
+  owners other than the invoking uid or 0, other-writable directories, and group-writable ones whose
+  group is not the invoking primary gid (`invokingGid`), except root-owned sticky ones; the
+  primary-group allowance keeps `umask 002` user-private-group machines working. `--check` writes
+  nothing and skips the check; `--dry-run` keeps it. Report one escaped directory and reason, exit
+  1, write nothing, and recommend running `setu agents` in a workspace you own. No standalone
+  fallback; standalone projects remain unchecked. An ENOENT from the seam for a missing directory
+  walks up to the nearest existing ancestor, whose chain must pass the same rule; any other seam
+  error uses the same escaped refusal path. Passing ownership validation does not create a project:
+  a missing member still fails `gatherFacts` with `<member>: not a project`, exits 1 and writes
+  nothing. If `writeFiles` later creates directories for valid projects, they are created by the
+  invoking user inside a chain that just passed. Residual: group/other-write permissions from a
+  permissive umask on a newly created directory are not re-checked. Missing seam or getuid skips the
+  check (Windows is not protected). Same-uid processes remain trusted; owned chains cannot be
+  rearranged by another user under these permission rules.
 - **F7 (R4-2, R5):** every CLI write (`new`, `generate`, `add`, `agents`, …) uses the shared
   writer's temp-then-rename replacement and ownership-independent file refusals. Never write an
   existing inode. Snapshot via read-only no-follow/non-blocking/ no-controlling-terminal open, fstat

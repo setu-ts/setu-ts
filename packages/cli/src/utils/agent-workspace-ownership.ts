@@ -8,6 +8,10 @@ import { isMissingPath } from './filesystem-errors.ts';
  * This validates ownership only; a missing member still fails project detection.
  * Any directories writeFiles later creates for valid projects use the invoking user inside that chain;
  * group/other-write bits from a permissive umask on new directories are not re-checked.
+ * Group write is accepted only when the directory's group is the invoking user's primary
+ * group: under a user-private-group scheme (umask 002) that group holds only the user, so
+ * refusing it would refuse every workspace on such a machine. A shared group, or one the
+ * invoking gid is unknown for, still refuses.
  * Without the optional ownership seam or invoking uid (fakes and Windows), this
  * check is skipped; Windows is not protected by this POSIX ownership rule.
  * Paths in thrown errors are escaped by the agents command's terminal boundary.
@@ -35,7 +39,9 @@ export async function assertAgentWorkspaceOwnership(
           ? 'not a directory'
           : stat.uid !== fs.invokingUid && stat.uid !== 0
             ? 'not owned by you'
-            : (stat.mode & 0o022) !== 0 && !(stat.uid === 0 && (stat.mode & 0o1000) !== 0)
+            : !(stat.uid === 0 && (stat.mode & 0o1000) !== 0) &&
+                ((stat.mode & 0o002) !== 0 ||
+                  ((stat.mode & 0o020) !== 0 && stat.gid !== fs.invokingGid))
               ? 'writable by others'
               : undefined;
       if (reason !== undefined)

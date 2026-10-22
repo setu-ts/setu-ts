@@ -6620,14 +6620,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   refuses a missing or stale section. Every published library ships a task-shaped card (at most 2560
   bytes, fences type-checked, identifiers checked against exports) behind four root gates. Measured
   with coding agents on three tasks × 3 runs: 9/9 hidden tests at 1.38M input tokens per run, 1.08×
-  the no-card baseline and inside the plan's 1.2× bar. The security audit ran six fresh-context
-  rounds over every caller-, workspace- and package-controlled string reaching `AGENTS.md` or the
-  terminal, and over the file writes. Later rounds moved every CLI write to a read-only snapshot
-  plus an owner-only temp file renamed over the target (no existing inode is written through; owner,
-  group and `0o777` bits kept, read-only targets refused), and made `setu agents` refuse a workspace
-  whose directories another user owns or can write. Round 6 passed with nothing open; its one
-  correctness observation was fixed afterwards and not re-audited. Residuals: same-uid processes,
-  Windows (no ownership check) and standalone parents resolved by name — complete (PR #484)
+  pilot variant F (its hand-made brief) and inside the plan's 1.2× bar. The security audit ran six
+  fresh-context rounds over every caller-, workspace- and package-controlled string reaching
+  `AGENTS.md` or the terminal, and over the file writes. Later rounds moved every CLI write to a
+  read-only snapshot plus an owner-only temp file renamed over the target (no existing inode is
+  written through; owner, group and `0o777` bits kept, read-only targets refused), and made
+  `setu agents` refuse a workspace whose directories another user owns or can write. Round 6 passed
+  with nothing open; its one correctness observation was fixed afterwards and not re-audited.
+  Residuals: same-uid processes, Windows (no ownership check) and standalone parents resolved by
+  name — complete (PR #484)
 - **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

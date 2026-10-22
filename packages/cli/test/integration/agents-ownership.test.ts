@@ -33,6 +33,25 @@ afterEach(async () => {
 describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'win32')(
   'Node agents workspace ownership',
   () => {
+    it('adopts a real group-writable chain owned by the invoking primary group (umask 002)', async () => {
+      const { stat } = await import('node:fs/promises');
+      for (const dir of [root, `${root}/apps`, `${root}/apps/a`, `${root}/apps/b`])
+        await chmod(dir, 0o775);
+      expect((await stat(`${root}/apps`)).gid).toBe(process.getgid?.());
+      const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
+      const errors: string[] = [];
+      const code = await runCli(['agents'], {
+        fs,
+        cwd: `${root}/apps/a`,
+        now: () => 0,
+        log: () => {},
+        error: (message) => errors.push(message),
+      });
+      expect(errors).toEqual([]);
+      expect(code).toBe(0);
+      expect(await readFile(`${root}/AGENTS.md`, 'utf8')).toContain('setu-agents:begin');
+    });
+
     it.each(['member', 'root'] as const)(
       'refuses a real other-writable member from the %s before writing any brief',
       async (from) => {

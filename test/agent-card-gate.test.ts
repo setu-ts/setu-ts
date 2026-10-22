@@ -67,9 +67,11 @@ const FENCE_COUNTS: Readonly<Record<string, number>> = {
 const libraries = PUBLISHED_PACKAGES.filter((p) => p !== 'packages/cli' && p !== 'packages/create');
 const ready = libraries.filter((p) => !PENDING_CARDS.includes(p));
 let inventory: ReadonlyMap<string, ReadonlySet<string>>;
+// Collecting every package's exports runs the TypeScript compiler over all of them; on a loaded
+// CI runner that exceeds Vitest's 30 s default hook bound.
 beforeAll(async () => {
   inventory = await exportedIdentifiers(PUBLISHED_PACKAGES);
-});
+}, 180_000);
 
 describe('export-shaped inline identifiers', () => {
   it.each([

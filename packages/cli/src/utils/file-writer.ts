@@ -26,9 +26,12 @@ export interface ICliFileSystem extends IFileSystem {
   ): Promise<{ before: Uint8Array | undefined }>;
   /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
   readonly invokingUid?: number;
+  /** Primary group id; group-writable chain directories are trusted only for this group. */
+  readonly invokingGid?: number;
   /** lstat metadata for agents workspace directory-chain trust checks; never follows the leaf. */
   directoryOwnership?(path: string): Promise<{
     readonly uid: number;
+    readonly gid: number;
     readonly mode: number;
     readonly isSymbolicLink: boolean;
     readonly isDirectory: boolean;

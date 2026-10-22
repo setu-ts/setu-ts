@@ -45,7 +45,8 @@ export const messaging = MessagingPlugin({
   copy per group, selected round-robin.
 - Memory `publish` resolves on dispatch hand-off, before handlers finish. Handler failures go to the
   logger when available and never reject that publish. Make consumers idempotent.
-- Subscription factories resolve at `onInit`, after capabilities are registered.
+- Subscription factories resolve at `onInit`, after capabilities are registered. The example's
+  `CAPABILITIES.LOGGER` needs `LoggerPlugin` (every template registers it).
 - `name` registers a named capability such as `messaging.orders`, replacing the bare token for that
   instance.
 
@@ -56,3 +57,5 @@ export const messaging = MessagingPlugin({
 - `request` and `respond` provide request/reply; `behaviors` wraps incoming handlers.
 - `defineIntegrationEvent`, `publishIntegrationEvent` and `onIntegrationEvent` add versioned
   contracts; `outbox` and `inbox` configure durable publication and consumer deduplication.
+
+<!-- card-allow: LoggerPlugin -->

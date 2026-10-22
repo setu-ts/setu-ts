@@ -99,10 +99,13 @@ export async function runAgentsCommand(
     }
     const briefs: { dir: string; section: string; facts?: ProjectFacts }[] = [];
     if (workspaceRoot !== undefined && workspace !== undefined) {
-      await assertAgentWorkspaceOwnership(deps.fs, [
-        workspaceRoot,
-        ...workspace.members.map((member) => joinPath(workspaceRoot, MEMBERS_DIR, member.name)),
-      ]);
+      // --check writes nothing, so a tree other users can rearrange is no risk to it.
+      // --dry-run keeps the check, so it never promises a plan the real run refuses.
+      if (args.flags['check'] !== true)
+        await assertAgentWorkspaceOwnership(deps.fs, [
+          workspaceRoot,
+          ...workspace.members.map((member) => joinPath(workspaceRoot, MEMBERS_DIR, member.name)),
+        ]);
       root = workspaceRoot;
       briefs.push({ dir: root, section: renderWorkspaceRoot(workspace, VERSION) });
       for (const member of workspace.members) {

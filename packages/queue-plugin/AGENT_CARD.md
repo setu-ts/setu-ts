@@ -28,22 +28,19 @@ export function registerReceiptRoutes(router: IRouterApi): void {
 `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; fill in its factory:
 
 ```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { ILogger, IServiceRegistry } from '@setu-ts/common';
+import type { IServiceRegistry } from '@setu-ts/common';
 import type { QueueProcessorDefinition } from '@setu-ts/queue-plugin';
 
 /** Shared with the routes that read it; both import this module. */
 export const sentReceipts: string[] = [];
 
 export function createReceiptJobProcessor(
-  services: IServiceRegistry,
+  _services: IServiceRegistry,
 ): QueueProcessorDefinition<{ orderId: string }> {
-  const logger = services.get<ILogger>(CAPABILITIES.LOGGER);
   return {
     name: 'receipt',
     async processor(job) {
       sentReceipts.push(job.data.orderId);
-      logger.info('receipt sent');
     },
   };
 }
@@ -53,7 +50,8 @@ export function createReceiptJobProcessor(
 
 - `add` resolves to the job ID only; the job runs on a later poll (`pollIntervalMs`, default 1000
   ms), so a test polls its read-back route until the result appears. `delayMs` is milliseconds.
-- Read-back state can live in a module both files import; the factory gets `services`.
+- Read-back state can live in a module both files import; the factory gets `services` to resolve
+  capabilities at `onInit` (a capability resolved there must be registered, e.g. `LoggerPlugin`).
 - `job.attempts` is 1 on first delivery. Throwing fails an attempt; make effects safe to repeat.
 - `onFailed` runs once after attempts are exhausted, before dead-lettering, not on retries.
 - Default processor concurrency is 1 per name.
@@ -65,3 +63,5 @@ export function createReceiptJobProcessor(
 - `adapter: 'redis'` or `'rabbitmq'` uses `url`; `'sqs'` uses `sqs`.
 - `schedule` registers recurring jobs with a cron expression.
 - `behaviors` wraps processor execution; `diagnostics` observes approved queue names only.
+
+<!-- card-allow: LoggerPlugin -->
