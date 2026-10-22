@@ -1,33 +1,36 @@
-import { createDiDecoratorsApp } from './src/app.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import type { LifetimesReport } from './src/modules/lifetimes/lifetimes.controller.ts';
+import { createApp } from './setu.config.ts';
 
-const app = createDiDecoratorsApp();
-await app.start();
-try {
-  const greeting = await app.inject({
-    method: 'GET',
-    url: 'http://example.test/greetings/',
+describe('di-decorators example', () => {
+  let app: IKernelApplication;
+
+  before(async () => {
+    app = createApp();
+    await app.start();
   });
-  if (
-    greeting.statusCode !== 200 ||
-    greeting.json<{ greeting: string }>().greeting !== 'Hello, decorators!'
-  ) {
-    throw new Error('The decorated route did not answer through its injected service.');
-  }
 
-  const lifetimes = await app.inject({ method: 'GET', url: 'http://example.test/lifetimes' });
-  const result = lifetimes.json<{
-    singletonShared: boolean;
-    scopeRetainsInstance: boolean;
-    scopesAreDistinct: boolean;
-  }>();
-  if (
-    lifetimes.statusCode !== 200 ||
-    !result.singletonShared ||
-    !result.scopeRetainsInstance ||
-    !result.scopesAreDistinct
-  ) {
-    throw new Error('The DI container did not preserve singleton and scoped lifetimes.');
-  }
-} finally {
-  await app.stop();
-}
+  after(async () => {
+    await app.stop();
+  });
+
+  it('answers through the service injected into the controller', async () => {
+    const response = await app.inject({ method: 'GET', url: '/greetings/' });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { greeting: 'Hello, decorators!' });
+  });
+
+  it('shares singletons across scopes and keeps scoped instances per scope', async () => {
+    const response = await app.inject({ method: 'GET', url: '/lifetimes/' });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json<LifetimesReport>(), {
+      singletonShared: true,
+      scopeRetainsInstance: true,
+      scopesAreDistinct: true,
+    });
+  });
+});

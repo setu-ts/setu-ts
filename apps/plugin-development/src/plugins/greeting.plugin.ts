@@ -1,8 +1,10 @@
 import { createCapabilityToken } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';
 
+/** The capability token the plugin registers its service under. */
 export const GREETING = createCapabilityToken('example.greeting');
 
+/** The service the plugin provides. */
 export interface IGreetingService {
   greet(name: string): string;
 }
@@ -13,17 +15,17 @@ class GreetingService implements IGreetingService {
   }
 }
 
-/** A complete custom plugin: capability registration plus a route that resolves it. */
+/** A complete custom plugin: it provides a capability and a route that resolves it. */
 export function GreetingPlugin(): IPlugin {
   return {
     name: 'example-greeting-plugin',
     version: '0.1.0',
     provides: [GREETING],
-    register(ctx): void {
-      ctx.services.register<IGreetingService>(GREETING, new GreetingService());
-      ctx.router.get('/greet/:name', (request) => {
-        const service = request.services.get<IGreetingService>(GREETING);
-        return request.response.json({ message: service.greet(request.params.name) });
+    register(plugin): void {
+      plugin.services.register<IGreetingService>(GREETING, new GreetingService());
+      plugin.router.get('/greet/:name', (ctx) => {
+        const greetings = ctx.services.get<IGreetingService>(GREETING);
+        return ctx.response.json({ message: greetings.greet(ctx.params.name) });
       });
     },
   };

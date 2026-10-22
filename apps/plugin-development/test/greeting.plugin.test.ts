@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { createTestApp } from '@setu-ts/testing';
-import { GreetingPlugin } from '../src/greeting-plugin.ts';
+import { GreetingPlugin } from '../src/plugins/greeting.plugin.ts';
 
 describe('GreetingPlugin', () => {
   it('resolves its capability from its own route', async () => {
