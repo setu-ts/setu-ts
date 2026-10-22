@@ -78,6 +78,37 @@ describe('SecretsPlugin configFallback', () => {
     expect(logs[0].meta).toEqual({ provider: 'env', configFallback: false });
   });
 
+  it('acts on the configFallback value read at construction, not a later mutation', async () => {
+    const config = createFakeConfig({ TOKEN: 'config-only' });
+    const { ctx, logs } = createFakeContext({}, true, true, config);
+    const options: { configFallback?: unknown } = { configFallback: false };
+    const plugin = SecretsPlugin({ options: options as SecretsProviderOptions });
+    // A string would have been refused at construction; it must not take effect now.
+    options.configFallback = 'false';
+    await plugin.register(ctx);
+    const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+    expect(await service.has('token')).toBe(false);
+    expect(logs[0].meta).toEqual({ provider: 'env', configFallback: false });
+  });
+
+  it('reads a configFallback getter exactly once', async () => {
+    const config = createFakeConfig({ TOKEN: 'config-only' });
+    const { ctx, logs } = createFakeContext({}, true, true, config);
+    let reads = 0;
+    const options = {
+      get configFallback(): boolean {
+        reads += 1;
+        return reads > 1;
+      },
+    };
+    const plugin = SecretsPlugin({ options });
+    await plugin.register(ctx);
+    expect(reads).toBe(1);
+    const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+    expect(await service.has('token')).toBe(false);
+    expect(logs[0].meta).toEqual({ provider: 'env', configFallback: false });
+  });
+
   it('is silent when CONFIG is absent and reads only the environment', async () => {
     const { ctx, logs } = createFakeContext({ TOKEN: 'env' }, true);
     await SecretsPlugin({ options: { configFallback: true } }).register(ctx);

@@ -127,14 +127,24 @@ export function createProvider(
  */
 export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
   const providerType = options?.provider ?? DEFAULT_PROVIDER;
-  const providerOptions = options?.options ?? {};
+  // Snapshot the caller's options once: validating one read and acting on a
+  // later one would let a caller who mutates (or defines a getter on) the
+  // options object bypass the refusal below, or log a value other than the
+  // one used. Every later read uses this copy.
+  const providerOptions: SecretsProviderOptions = { ...(options?.options ?? {}) };
+  const configFallbackOption: unknown = providerOptions.configFallback;
   if (
     providerType === 'env' &&
-    providerOptions.configFallback !== undefined &&
-    typeof providerOptions.configFallback !== 'boolean'
+    configFallbackOption !== undefined &&
+    typeof configFallbackOption !== 'boolean'
   ) {
     throw new TypeError('options.configFallback must be a boolean.');
   }
+  const useConfigFallback = providerType === 'env' && configFallbackOption !== false;
+  const resolvedOptions: SecretsProviderOptions = {
+    ...providerOptions,
+    configFallback: useConfigFallback,
+  };
 
   return {
     name: PLUGIN_NAME,
@@ -145,21 +155,19 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const config =
-        providerType === 'env' &&
-        providerOptions.configFallback !== false &&
-        ctx.services.has(CAPABILITIES.CONFIG)
+        useConfigFallback && ctx.services.has(CAPABILITIES.CONFIG)
           ? ctx.services.get<IConfig>(CAPABILITIES.CONFIG)
           : undefined;
       const provider = createProvider(
         providerType,
-        providerOptions,
+        resolvedOptions,
         ctx.runtime.env,
         resolveProbeTiming(ctx.runtime),
         config,
       );
       await provider.connect();
 
-      const service = new SecretsService(provider, buildServiceOptions(providerOptions, ctx));
+      const service = new SecretsService(provider, buildServiceOptions(resolvedOptions, ctx));
       ctx.services.register<ISecretManager>(CAPABILITIES.SECRETS, service);
 
       const logger = resolveLogger(ctx);

@@ -17,7 +17,10 @@ cutting a release renames that heading to the version and is a rename, not a rec
 When CONFIG is registered, the default `EnvProvider` now resolves string secrets present only in
 ConfigPlugin's snapshot, including `.env` values. Environment strings still win and are returned
 unchanged. This also affects `SessionPlugin`'s `SESSION_SECRET` and full-stack starter apps, which
-always compose `SecretsPlugin`. To preserve environment-only reads, use:
+always compose `SecretsPlugin`. A consequence to check: `SessionPlugin` used to refuse to start when
+no `SESSION_SECRET` existed outside a dotenv file; a dotenv file present at runtime now satisfies
+that check. If a deployment relied on the refusal, keep dotenv files out of production or set
+`configFallback: false`. To preserve environment-only reads, use:
 
 ```typescript
 SecretsPlugin({ options: { configFallback: false } });
