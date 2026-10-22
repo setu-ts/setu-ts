@@ -13899,7 +13899,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-npm install @setu-ts/sdk@^0.9.0
+npm install @setu-ts/sdk@^0.10.0
 ```
 
 ### createClient()

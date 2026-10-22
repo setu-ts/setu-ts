@@ -568,7 +568,7 @@ my-plugin/
   "version": "1.0.0",
   "exports": "./src/index.ts",
   "imports": {
-    "@setu-ts/common": "npm:@setu-ts/common@^0.9.0"
+    "@setu-ts/common": "npm:@setu-ts/common@^0.10.0"
   }
 }
 ```

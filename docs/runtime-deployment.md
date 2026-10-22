@@ -265,9 +265,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "deno run --watch --allow-net --allow-env main.ts"
   },
   "imports": {
-    "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.9.0",
-    "@setu-ts/runtime": "npm:@setu-ts/runtime@^0.9.0",
-    "@setu-ts/common": "npm:@setu-ts/common@^0.9.0"
+    "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.10.0",
+    "@setu-ts/runtime": "npm:@setu-ts/runtime@^0.10.0",
+    "@setu-ts/common": "npm:@setu-ts/common@^0.10.0"
   }
 }
 ```

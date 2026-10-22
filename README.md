@@ -197,13 +197,13 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Node (pnpm add / yarn add work the same way)
-npm install @setu-ts/kernel@^0.9.0 @setu-ts/runtime@^0.9.0
+npm install @setu-ts/kernel@^0.10.0 @setu-ts/runtime@^0.10.0
 
 # Bun
-bun add @setu-ts/kernel@^0.9.0 @setu-ts/runtime@^0.9.0
+bun add @setu-ts/kernel@^0.10.0 @setu-ts/runtime@^0.10.0
 
 # Deno
-deno add npm:@setu-ts/kernel@^0.9.0 npm:@setu-ts/runtime@^0.9.0
+deno add npm:@setu-ts/kernel@^0.10.0 npm:@setu-ts/runtime@^0.10.0
 ```
 
 **The `@^0.9.0` is recommended, not required.** npm points `latest` at the current release, so a
@@ -272,7 +272,7 @@ Node/Bun compatibility suites as release gates. Until then, read the CHANGELOG b
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`npm install @setu-ts/logger-plugin@^0.9.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.10.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
