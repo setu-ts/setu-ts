@@ -483,3 +483,22 @@ Decisions:
 - **R2-4 (O9):** the secrets and mail cards' two credential literals were replaced by configuration
   reads in commit `57ede20d`. This repair does not change cards.
 - **Re-audit:** after F1–F5 land, a fresh-context audit re-runs O4, O5, O7 and O9.
+
+- **F6 (R4-1):** before adopting an ancestor workspace, check every write target's directory chain
+  through `/` with an optional CLI-only `directoryOwnership` lstat seam and `invokingUid`, installed
+  at the Node boundary. Refuse symlinks, non-directories, owners other than the invoking uid or 0,
+  and group/other-writable directories except root-owned sticky ones. Report one escaped directory
+  and reason, exit 1, write nothing, and recommend running `setu agents` in a workspace you own. No
+  standalone fallback; direct-root and standalone invocations are unchanged. Missing seam or getuid
+  skips the check (Windows is not protected). Same-uid processes remain trusted; owned chains cannot
+  be rearranged by another user under these permission rules.
+- **F7 (R4-2):** never write an existing inode. Snapshot via read-only no-follow/non-blocking/
+  no-controlling-terminal open, fstat regular/size/static-nlink checks and bounded reads; ENOENT
+  means absent. Static hard-link refusal is diagnostic, not the race protection. Create a random
+  exclusive same-directory temp at mode 0666 (umask applies), write it, preserve existing permission
+  bits with chmod, close, then rename over the entry. Clean failed temps best-effort and retain
+  `RegularFileWriteError.before` for undo. Snapshot close completes before temp creation: if it
+  fails, the target is untouched and the error needs no undo wrapper. Restoration uses this same
+  writer; created targets are removed. Parent resolution remains by name outside ancestor adoption;
+  same-user races are trusted for F6. Deterministic real-inode races and removed-guard negative
+  controls verify both decisions.

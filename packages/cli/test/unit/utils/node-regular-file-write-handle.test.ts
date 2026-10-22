@@ -3,205 +3,196 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RegularFileWriteError, writeFiles } from '../../../src/utils/file-writer.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
-const handle = vi.hoisted(() => ({
-  stat: vi.fn(),
-  read: vi.fn(),
-  truncate: vi.fn(),
-  write: vi.fn(),
-  close: vi.fn(),
+const io = vi.hoisted(() => ({
+  input: { stat: vi.fn(), read: vi.fn(), close: vi.fn() },
+  output: { write: vi.fn(), chmod: vi.fn(), close: vi.fn() },
+  open: vi.fn(),
+  rename: vi.fn(),
+  unlink: vi.fn(),
 }));
-const open = vi.hoisted(() => vi.fn());
-vi.mock('node:fs/promises', () => ({ open }));
-import { regularFileWriteFlags, writeRegularFile } from '../../../src/utils/node-regular-file.ts';
+vi.mock('node:fs/promises', () => ({ open: io.open, rename: io.rename, unlink: io.unlink }));
+import {
+  regularFileFlags,
+  regularFileWriteFlags,
+  writeRegularFile,
+} from '../../../src/utils/node-regular-file.ts';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 const ioError = (code: string): Error => Object.assign(new Error(code), { code });
 
 beforeEach(() => {
   vi.resetAllMocks();
-  // Default to an existing file containing "old".
-  open.mockRejectedValueOnce(ioError('EEXIST')).mockResolvedValue(handle);
-  handle.stat.mockResolvedValue({ isFile: () => true, size: 3 });
-  handle.read
+  for (const method of [io.input.close, io.output.close, io.output.chmod, io.rename, io.unlink])
+    method.mockResolvedValue(undefined);
+  io.open.mockResolvedValueOnce(io.input).mockResolvedValue(io.output);
+  io.input.stat.mockResolvedValue({ isFile: () => true, size: 3, nlink: 1, mode: 0o100640 });
+  io.input.read
     .mockImplementationOnce((buffer: Uint8Array) => {
       buffer.set(bytes('old'));
       return Promise.resolve({ bytesRead: 3 });
     })
     .mockResolvedValue({ bytesRead: 0 });
-  handle.truncate.mockResolvedValue(undefined);
-  handle.write.mockImplementation((_buffer: Uint8Array, _offset: number, length: number) =>
+  io.output.write.mockImplementation((_buffer: Uint8Array, _offset: number, length: number) =>
     Promise.resolve({ bytesWritten: length }),
   );
-  handle.close.mockResolvedValue(undefined);
 });
 
-describe('opened-handle bounded write', () => {
-  it('opens exclusively first, then opens an existing file without create or truncate flags', async () => {
+describe('snapshot then rename writer', () => {
+  it('reads without write/create flags, writes a fresh exclusive temp, chmods and closes before rename', async () => {
     expect(await writeRegularFile('/target', bytes('new'), 10)).toEqual({ before: bytes('old') });
-    const flags = regularFileWriteFlags(constants);
-    expect(open.mock.calls).toEqual([
-      ['/target', flags | constants.O_EXCL, 0o666],
-      ['/target', flags & ~constants.O_CREAT, 0o666],
+    expect(io.open.mock.calls[0]).toEqual([
+      '/target',
+      regularFileFlags(constants) | constants.O_NOFOLLOW,
     ]);
-    expect(handle.stat.mock.invocationCallOrder[0]).toBeLessThan(
-      handle.read.mock.invocationCallOrder[0]!,
+    expect(io.open.mock.calls[1]).toEqual([
+      expect.stringMatching(/^\/\.target\.setu-[a-f0-9]{32}\.tmp$/),
+      regularFileWriteFlags(constants),
+      0o666,
+    ]);
+    expect(io.output.chmod).toHaveBeenCalledWith(0o640);
+    expect(io.output.write).toHaveBeenCalledWith(bytes('new'), 0, 3, 0);
+    expect(io.input.close.mock.invocationCallOrder[0]).toBeLessThan(
+      io.output.write.mock.invocationCallOrder[0]!,
     );
-    expect(handle.read.mock.invocationCallOrder[1]).toBeLessThan(
-      handle.truncate.mock.invocationCallOrder[0]!,
+    expect(io.output.close.mock.invocationCallOrder[0]).toBeLessThan(
+      io.rename.mock.invocationCallOrder[0]!,
     );
-    expect(handle.truncate).toHaveBeenCalledWith(0);
-    expect(handle.write).toHaveBeenCalledWith(bytes('new'), 0, 3, 0);
-    expect(handle.close).toHaveBeenCalledOnce();
+    expect(io.rename).toHaveBeenCalledWith(io.open.mock.calls[1]![0], '/target');
+    expect(io.unlink).not.toHaveBeenCalled();
   });
 
-  it.each([new Error('denied'), 'open failed', { code: 'EEXIST' }])(
-    'preserves non-EEXIST open failures without attempting another open: %j',
+  it.each([new Error('denied'), 'open failed', { code: 'ENOENT' }])(
+    'preserves unrecognized snapshot open errors: %j',
     async (cause) => {
-      open.mockReset().mockRejectedValue(cause);
+      io.open.mockReset().mockRejectedValue(cause);
       await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toBe(cause);
-      expect(open).toHaveBeenCalledOnce();
-      expect(handle.close).not.toHaveBeenCalled();
+      expect(io.open).toHaveBeenCalledOnce();
     },
   );
 
-  it.each([ioError('ENOENT'), new Error('denied'), 'fallback failed', { code: 'ELOOP' }])(
-    'preserves fallback failures without creating a disappeared leaf: %j',
-    async (cause) => {
-      open.mockReset().mockRejectedValueOnce(ioError('EEXIST')).mockRejectedValueOnce(cause);
-      await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toBe(cause);
-      expect(open).toHaveBeenCalledTimes(2);
-      expect(handle.stat).not.toHaveBeenCalled();
-      expect(handle.close).not.toHaveBeenCalled();
-    },
-  );
-
-  it('maps ELOOP to the regular-file refusal and preserves its cause', async () => {
+  it('maps ELOOP to the existing refusal', async () => {
     const cause = ioError('ELOOP');
-    open.mockReset().mockRejectedValueOnce(ioError('EEXIST')).mockRejectedValueOnce(cause);
+    io.open.mockReset().mockRejectedValue(cause);
     await expect(writeRegularFile('/link', bytes('new'), 10)).rejects.toMatchObject({
       message: '/link: expected a regular file at most 1 MiB',
       cause,
     });
-    expect(handle.truncate).not.toHaveBeenCalled();
+  });
+
+  it('creates an absent target without chmod', async () => {
+    io.open.mockReset().mockRejectedValueOnce(ioError('ENOENT')).mockResolvedValue(io.output);
+    expect(await writeRegularFile('/new', bytes('new'), 10)).toEqual({ before: undefined });
+    expect(io.output.chmod).not.toHaveBeenCalled();
   });
 
   it.each([
-    { isFile: () => false, size: 0 },
-    { isFile: () => true, size: 11 },
-  ])('refuses handle metadata before reading or truncating: %j', async (stat) => {
-    handle.stat.mockResolvedValue(stat);
+    { isFile: () => false, size: 0, nlink: 1 },
+    { isFile: () => true, size: 11, nlink: 1 },
+    { isFile: () => true, size: 3, nlink: 2 },
+  ])('refuses unsafe metadata before reading: %j', async (stat) => {
+    io.input.stat.mockResolvedValue(stat);
     await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toThrow(
       'expected a regular file',
     );
-    expect(handle.read).not.toHaveBeenCalled();
-    expect(handle.truncate).not.toHaveBeenCalled();
-    expect(handle.close).toHaveBeenCalledOnce();
+    expect(io.input.read).not.toHaveBeenCalled();
+    expect(io.open).toHaveBeenCalledOnce();
+    expect(io.input.close).toHaveBeenCalledOnce();
   });
 
-  it('bounds a file growing after fstat without truncating it', async () => {
-    handle.read
+  it('bounds growth after fstat with a single overflow byte', async () => {
+    io.input.read
       .mockReset()
       .mockImplementation((buffer: Uint8Array, offset: number, length: number) => {
-        expect(buffer.length).toBe(11);
+        expect(buffer.length).toBeLessThanOrEqual(10);
         buffer.fill(65, offset, offset + length);
         return Promise.resolve({ bytesRead: length });
       });
-    await expect(writeRegularFile('/growing', bytes('new'), 10)).rejects.toThrow(
+    await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toThrow(
       'expected a regular file',
     );
-    expect(handle.read.mock.calls[0]?.slice(1)).toEqual([0, 11, null]);
-    expect(handle.read).toHaveBeenCalledOnce();
-    expect(handle.truncate).not.toHaveBeenCalled();
-    expect(handle.close).toHaveBeenCalledOnce();
+    expect(io.input.read.mock.calls.map((call) => call.slice(1))).toEqual([
+      [0, 10, null],
+      [0, 1, null],
+    ]);
+    expect(io.open).toHaveBeenCalledOnce();
   });
 
-  it('continues short reads and positioned writes through the same handle', async () => {
+  it('continues short reads and short writes', async () => {
     let reads = 0;
-    handle.read.mockReset().mockImplementation((buffer: Uint8Array, offset: number) => {
+    io.input.read.mockReset().mockImplementation((buffer: Uint8Array, offset: number) => {
       if (reads++ === 2) return Promise.resolve({ bytesRead: 0 });
       buffer[offset] = 65 + offset;
       return Promise.resolve({ bytesRead: 1 });
     });
-    handle.write.mockResolvedValue({ bytesWritten: 1 });
-    expect(await writeRegularFile('/partial', bytes('new'), 10)).toEqual({ before: bytes('AB') });
-    expect(handle.read.mock.calls.map((call) => call.slice(1))).toEqual([
-      [0, 11, null],
-      [1, 10, null],
-      [2, 9, null],
-    ]);
-    expect(handle.write.mock.calls.map((call) => call.slice(1))).toEqual([
+    io.output.write.mockResolvedValue({ bytesWritten: 1 });
+    expect(await writeRegularFile('/target', bytes('new'), 10)).toEqual({ before: bytes('AB') });
+    expect(io.output.write.mock.calls.map((call) => call.slice(1))).toEqual([
       [0, 3, 0],
       [1, 2, 1],
       [2, 1, 2],
     ]);
-    expect(handle.close).toHaveBeenCalledOnce();
   });
 
-  it.each(['stat', 'read'] as const)(
-    'closes but does not record undo when existing handle.%s fails before capture',
+  it.each(['stat', 'read', 'close'] as const)(
+    'closes the snapshot on %s failure without creating a temp',
     async (method) => {
-      const cause = new Error(`${method} failed`);
-      handle[method].mockReset().mockRejectedValue(cause);
-      await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toBe(cause);
-      expect(handle.truncate).not.toHaveBeenCalled();
-      expect(handle.close).toHaveBeenCalledOnce();
+      const cause = new Error(method);
+      io.input[method].mockReset().mockRejectedValue(cause);
+      await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toThrow(method);
+      expect(io.input.close).toHaveBeenCalledOnce();
+      expect(io.open).toHaveBeenCalledOnce();
     },
   );
 
-  it.each(['stat', 'read'] as const)(
-    'records absent undo for cleanup when a newly created handle.%s fails',
-    async (method) => {
-      open.mockReset().mockResolvedValue(handle);
-      const cause = new Error(`${method} failed`);
-      handle[method].mockReset().mockRejectedValue(cause);
-      await expect(writeRegularFile('/new', bytes('new'), 10)).rejects.toMatchObject({
-        name: 'RegularFileWriteError',
-        before: undefined,
-        cause,
-      });
-      expect(handle.truncate).not.toHaveBeenCalled();
-      expect(handle.close).toHaveBeenCalledOnce();
-    },
-  );
+  it('does not unlink a temp it failed to create', async () => {
+    const cause = ioError('EEXIST');
+    io.open.mockReset().mockResolvedValueOnce(io.input).mockRejectedValue(cause);
+    await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
+      name: 'RegularFileWriteError',
+      before: bytes('old'),
+      cause,
+    });
+    expect(io.unlink).not.toHaveBeenCalled();
+  });
 
-  it.each(['truncate', 'write', 'close'] as const)(
-    'retains undo and cause when handle.%s fails after capture',
+  it.each(['write', 'chmod', 'close'] as const)(
+    'cleans temp and retains undo on output %s failure',
     async (method) => {
-      const cause = new Error(`${method} failed`);
-      handle[method].mockRejectedValue(cause);
+      const cause = new Error(method);
+      io.output[method].mockRejectedValue(cause);
       await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
         name: 'RegularFileWriteError',
         before: bytes('old'),
         cause,
-        message: cause.message,
       });
-      expect(handle.close).toHaveBeenCalledOnce();
+      expect(io.output.close).toHaveBeenCalledOnce();
+      expect(io.rename).not.toHaveBeenCalled();
+      expect(io.unlink).toHaveBeenCalledWith(io.open.mock.calls[1]![0]);
     },
   );
 
-  it('rejects zero-progress writes with undo instead of looping forever', async () => {
-    handle.write.mockResolvedValue({ bytesWritten: 0 });
+  it('preserves rename failure when cleanup also fails', async () => {
+    const cause = new Error('rename denied');
+    io.rename.mockRejectedValue(cause);
+    io.unlink.mockRejectedValue(new Error('cleanup denied'));
+    await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
+      name: 'RegularFileWriteError',
+      before: bytes('old'),
+      cause,
+    });
+    expect(io.unlink).toHaveBeenCalledOnce();
+  });
+
+  it('rejects zero-progress writes and cleans temp', async () => {
+    io.output.write.mockResolvedValue({ bytesWritten: 0 });
     await expect(writeRegularFile('/target', bytes('new'), 10)).rejects.toMatchObject({
       name: 'RegularFileWriteError',
       before: bytes('old'),
       message: '/target: write made no progress',
     });
-    expect(handle.write).toHaveBeenCalledOnce();
-    expect(handle.close).toHaveBeenCalledOnce();
-  });
-
-  it('retains absent undo when close fails after creating a file', async () => {
-    open.mockReset().mockResolvedValue(handle);
-    handle.close.mockRejectedValue('close failed');
-    await expect(writeRegularFile('/new', bytes('new'), 10)).rejects.toMatchObject({
-      name: 'RegularFileWriteError',
-      before: undefined,
-      cause: 'close failed',
-      message: 'close failed',
-    });
+    expect(io.unlink).toHaveBeenCalledOnce();
   });
 });
-
 describe('writeFiles handle-error recovery', () => {
   it.each([undefined, '', 'original'])(
     'recovers the failing write itself with prior bytes %j',

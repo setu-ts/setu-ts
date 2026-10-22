@@ -154,6 +154,14 @@ the CI step. After a successful `setu add` the CLI prints a reminder to run `age
 project's pinned CLI invocation (for example `npx @setu-ts/cli@<version> agents`) when the project
 already has a sectioned brief.
 
+When invoked from a member, ancestor workspace adoption on POSIX checks every target's directory
+chain up to `/`: each directory must belong to the invoking user or root and must not be group- or
+other-writable, except root-owned sticky directories such as `/tmp`. Symlinked directories are
+refused too. A failure exits `1`, names the directory and reason, writes nothing, and asks you to
+run `setu agents` in a workspace you own; it never falls back to standalone. This check is skipped
+when ownership metadata or the invoking uid is unavailable (including Windows); it does not protect
+against another process running as the same user. Standalone projects are unchanged.
+
 The full behavior is in
 [the CLI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#agent-briefs-setu-agents).
 

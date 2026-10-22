@@ -10086,6 +10086,14 @@ and every member's `apps/<name>/AGENTS.md`, and `--check` checks all of them. Th
 the workspace commands, the member table and the transport; each member's brief is its standalone
 brief plus a pointer at the root file.
 
+When invoked from a member, ancestor workspace adoption on POSIX checks every target's directory
+chain up to `/`: each directory must belong to the invoking user or root and must not be group- or
+other-writable, except root-owned sticky directories such as `/tmp`. Symlinked directories are
+refused too. A failure exits `1`, names the directory and reason, writes nothing, and asks you to
+run `setu agents` in a workspace you own; it never falls back to standalone. This check is skipped
+when ownership metadata or the invoking uid is unavailable (including Windows); it does not protect
+against another process running as the same user. Standalone projects are unchanged.
+
 Every published library package ships an `AGENT_CARD.md` in its npm tarball — beside `dist`, `src`,
 `README.md` and `LICENSE` in the generated `files` list — so a normal install delivers it to
 `node_modules/@setu-ts/<pkg>/AGENT_CARD.md`, the path the brief names. In a workspace member the

@@ -1,6 +1,16 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { link, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  link,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../../../../test/node-helpers.ts';
@@ -18,6 +28,8 @@ beforeEach(async () => {
   root = await tempDir({ prefix: 'm116-write-' });
 });
 afterEach(async () => {
+  for (const entry of await readdir(root, { recursive: true }))
+    expect(entry).not.toMatch(/\.setu-[a-f0-9]+\.tmp$/);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -35,10 +47,12 @@ describe('Node regular-file writer', () => {
     async (before) => {
       const path = `${root}/existing`;
       await writeFile(path, before);
+      await chmod(path, 0o640);
       expect(await writeRegularFile(path, bytes('new'), MAX_EXISTING_FILE_BYTES)).toEqual({
         before: bytes(before),
       });
       expect(await readFile(path, 'utf8')).toBe('new');
+      if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o640);
     },
   );
 
@@ -109,13 +123,13 @@ describe('Node regular-file writer', () => {
   );
 
   it('uses only available platform write flags', () => {
-    expect(regularFileWriteFlags({ O_RDWR: 1, O_CREAT: 2 })).toBe(3);
+    expect(regularFileWriteFlags({ O_WRONLY: 1, O_CREAT: 2, O_EXCL: 4 })).toBe(7);
     expect(
       regularFileWriteFlags({
-        O_RDWR: 1,
+        O_WRONLY: 1,
         O_CREAT: 2,
-        O_NOFOLLOW: 4,
-        O_NONBLOCK: 8,
+        O_EXCL: 4,
+        O_NOFOLLOW: 8,
         O_NOCTTY: 16,
       }),
     ).toBe(31);

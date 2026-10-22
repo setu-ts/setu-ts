@@ -19,6 +19,7 @@ import {
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
 import { memberPath } from '../utils/member-path.ts';
+import { assertAgentWorkspaceOwnership } from '../utils/agent-workspace-ownership.ts';
 import {
   readWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -98,6 +99,11 @@ export async function runAgentsCommand(
     }
     const briefs: { dir: string; section: string; facts?: ProjectFacts }[] = [];
     if (workspaceRoot !== undefined && workspace !== undefined) {
+      if (workspaceRoot !== dir)
+        await assertAgentWorkspaceOwnership(deps.fs, [
+          workspaceRoot,
+          ...workspace.members.map((member) => joinPath(workspaceRoot, MEMBERS_DIR, member.name)),
+        ]);
       root = workspaceRoot;
       briefs.push({ dir: root, section: renderWorkspaceRoot(workspace, VERSION) });
       for (const member of workspace.members) {

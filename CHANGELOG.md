@@ -8,9 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Agent brief writes (M116, `@setu-ts/cli`):** the Node CLI snapshots, replaces and restores
-  regular files through one no-follow handle, refusing leaf symlinks, hard links, special files and
-  prior content over 1 MiB even when the target changes after preflight.
+- **Agent brief writes (M116, `@setu-ts/cli`):** the Node CLI snapshots regular files read-only,
+  then writes and restores through a fresh same-directory temp file renamed over the target.
+  Existing inodes are never written through; static leaf symlinks, hard links, special files and
+  prior content over 1 MiB are refused. On POSIX, adopting an ancestor workspace refuses directory
+  chains another user can rearrange (ownership, write permissions and symlinks), writing nothing.
+  The ownership check is skipped where uid/metadata are unavailable, including Windows.
 
 - **CLI file reads and member paths:** manifest reads now refuse non-regular files, files over 1 MiB
   and files that are not valid UTF-8; runtime-marker checks use metadata without opening content. A

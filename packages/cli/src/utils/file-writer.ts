@@ -15,14 +15,24 @@ export interface ICliFileSystem extends IFileSystem {
   /** Opens non-blocking, checks the opened handle is regular, and reads at most maxBytes + 1. */
   readRegularFile?(path: string, maxBytes: number): Promise<Uint8Array>;
   /**
-   * Opens without following the leaf link, bounds the prior bytes, and replaces via that handle.
-   * A failure after capturing prior bytes throws RegularFileWriteError so rollback can recover.
+   * Snapshots without following the leaf link, then replaces using a fresh inode and rename.
+   * Failures after temp creation starts carry RegularFileWriteError for rollback.
+   * Snapshot failures (including close) precede any mutation and need no undo.
    */
   writeRegularFile?(
     path: string,
     bytes: Uint8Array,
     maxExistingBytes: number,
   ): Promise<{ before: Uint8Array | undefined }>;
+  /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
+  readonly invokingUid?: number;
+  /** lstat metadata for adoption's directory-chain trust check; never follows the leaf. */
+  directoryOwnership?(path: string): Promise<{
+    readonly uid: number;
+    readonly mode: number;
+    readonly isSymbolicLink: boolean;
+    readonly isDirectory: boolean;
+  }>;
 }
 
 /** Carries undo bytes when a handle-based write or close fails after the snapshot. */
@@ -580,9 +590,10 @@ export async function writeFiles(
 ): Promise<readonly WriteOutcome[]> {
   // Every target is checked BEFORE the first write, so a link anywhere in the
   // plan refuses the whole batch with nothing written.
-  // assertInsideProject checks the parent directories; the Node capability's
-  // O_NOFOLLOW checks the final component at open. A parent-directory swap by
-  // the root's owner remains outside this fix.
+  // assertInsideProject checks the parents; the Node writer replaces the leaf
+  // via rename. Ancestor workspace adoption also checks directory ownership:
+  // a chain owned by the invoking user cannot be rearranged by another user.
+  // Non-adopted writes still resolve parents by name.
   for (const file of files) await assertInsideProject(fs, options.root, file.path);
   const encoder = new TextEncoder();
   const directories: string[] = [];
