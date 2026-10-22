@@ -14855,6 +14855,103 @@ follow-on; the pilot did not test any of them.
 
 ---
 
+## Milestone 117: node-redis as a Supported Redis Client
+
+**Package(s):** `packages/cache-plugin`, `packages/queue-plugin`, `packages/messaging-plugin`,
+`packages/realtime-backplane-plugin`, `packages/scheduler-plugin`, `packages/idempotency-plugin`,
+`packages/auth-plugin` (the rate-limit store), `packages/common` (connection-fault classification),
+`packages/telemetry-plugin` (instrumentation) and `packages/cli` (scaffold choice). The list is
+provisional: the plan confirms each entry against source.
+
+**Objective:** let an application use node-redis (`redis`), which Redis recommends for new projects,
+anywhere the framework uses Redis today, without writing its own plugin. ioredis stays the default.
+
+**Where things stand (checked against source, 2026-10-22).** Every Redis consumer is typed against a
+structural facade rather than ioredis, and every one accepts an injected client:
+
+| Package                   | Facade                    | Injection               |
+| ------------------------- | ------------------------- | ----------------------- |
+| cache-plugin              | `IRedisClient`            | `client`                |
+| queue-plugin              | `IRedisQueueClient`       | `client`                |
+| messaging-plugin          | `IRedisStreamsClient`     | `client`                |
+| realtime-backplane-plugin | `IRedisBackplaneClient`   | `client` + `subscriber` |
+| scheduler-plugin          | `IRedisLockClient`        | `client`                |
+| idempotency-plugin        | `IRedisIdempotencyClient` | `client` (inject arm)   |
+| auth-plugin               | `IRateLimitRedisClient`   | `client`                |
+
+So node-redis already works through the existing seams, but only behind an adapter the user writes
+for each facade. The facades take ioredis's call shapes, so nothing tells that user when an adapter
+is wrong.
+
+**What an adapter must translate.** The node-redis facts below come from knowledge of its v4/v5 API
+and are NOT yet verified. node-redis is not installed in the repository, and the plan must check
+each fact against its shipped `.d.ts` and a real server before relying on it.
+
+1. **Positional arguments vs option objects.** For example `set(k, v, 'EX', n)` against
+   `set(k, v, { EX: n })`, `zrangebyscore(..., 'LIMIT', o, c)` against
+   `zRangeByScore(..., { LIMIT })`, and `eval(script, numKeys, ...)` against
+   `eval(script, { keys, arguments })`. The raw `sendCommand([...])` takes ioredis's argument array,
+   which may make most of these one-liners.
+2. **Stream reply shapes.** The Redis Streams broker parses `xreadgroup`/`xpending`/`xclaim`/`xinfo`
+   as ioredis's raw nested arrays, while node-redis's typed stream methods return objects. This
+   carries the most risk, since M75 found the fake's nesting wrong and a whole delivery path had
+   never run.
+3. **Pub/sub model.** ioredis does `subscribe(channel)` plus `'message'` events; node-redis does
+   `subscribe(channel, listener)` on a duplicated connection. The backplane adapter keeps its own
+   listener registry behind `on`/`off`.
+4. **Lifecycle.** node-redis must be connected before its first command and deprecates `quit()` in
+   favour of `close()`.
+
+**Gaps an adapter cannot close.**
+
+- **Connection-fault classification.** `isConnectionFault` in `common` was measured on ioredis
+  errors. If it misclassifies node-redis errors, Redis outages answer `500` where they should answer
+  `503`, undoing M113b for those users. It must be measured against node-redis's real errors and
+  widened if needed.
+- **Command timeouts.** `commandTimeoutMs` (M101a/M113b) is applied only when the framework builds
+  an ioredis client. The plan decides what bounds a call on an injected node-redis client and
+  documents it, rather than leaving a hung server unbounded.
+- **Telemetry.** `telemetry-plugin`'s `ioredis` instrumentation does not cover node-redis. Whether
+  to add an `@opentelemetry/instrumentation-redis` arm is a plan decision.
+
+**Design rules.**
+
+- **No dependency on `redis`.** Each `fromNodeRedis(client)` helper accepts a client the user built
+  and types it structurally; no file under `packages/*/src` imports `redis`. Installing a plugin
+  therefore installs neither client: `ioredis` stays an optional peer, and `redis` needs no entry at
+  all.
+- **The default does not change.** With no client injected, every plugin keeps lazily loading
+  ioredis exactly as today.
+- **One Redis client per scaffolded project.** The CLI adds only the client the user chose, never
+  both. A choice (for example `--redis-client ioredis|node-redis` plus a prompt; the plan settles
+  the shape) defaults to `ioredis`, and that default output must stay byte-identical. The
+  `node-redis` arm writes `redis` instead of `ioredis` and emits the wiring the lazy default
+  provides for free: building and connecting the client, `fromNodeRedis(...)`, and the backplane's
+  second connection. The plan may instead ship the adapters first and leave the scaffold choice to a
+  follow-up letter.
+
+**Dependencies.** After the M113 series, per the maintainer's earlier decision to evaluate
+node-redis only then. It has no ordering dependency on M115 or M116.
+
+**Deliverables**
+
+- [ ] A `fromNodeRedis(client)` adapter for each of the seven facades, typed structurally, with no
+      `redis` import in any `src` file
+- [ ] Each adapter driven against a real Redis 7 through a kernel app, with writes read back; the
+      streams and backplane adapters run through the same real-backend scenarios as their ioredis
+      counterparts, and CI runs them
+- [ ] `isConnectionFault` measured against node-redis's outage errors (stopped, paused, refused) and
+      widened if needed, so outages answer `503` with either client
+- [ ] A decided and documented command-timeout story for an injected node-redis client
+- [ ] Telemetry: an instrumentation arm for node-redis, or a documented decision not to add one
+- [ ] CLI: the client choice, with `ioredis` output byte-identical and both variants booted by the
+      scaffold e2e (or the scaffold choice explicitly deferred to a follow-up letter)
+- [ ] Docs: each package README, `PUBLIC_API.md`, CHANGELOG, and a node-redis section in the
+      relevant guides
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `117`
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -15125,3 +15222,4 @@ patch by construction and gains nothing new here.
 | 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
+| 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
