@@ -1,16 +1,28 @@
-import { createDemoApp } from './src/app.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApp } from './setu.config.ts';
 
-const app = createDemoApp();
-await app.start();
-try {
-  const response = await app.inject({
-    method: 'POST',
-    url: 'http://example.test/graphql',
-    body: { query: '{ hello }' },
+describe('graphql-demo example', () => {
+  let app: IKernelApplication;
+
+  before(async () => {
+    app = createApp();
+    await app.start();
   });
-  if (response.statusCode !== 200 || !response.body?.includes('hello')) {
-    throw new Error('The GraphQL endpoint did not answer a basic query.');
-  }
-} finally {
-  await app.stop();
-}
+
+  after(async () => {
+    await app.stop();
+  });
+
+  it('answers a basic query', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/graphql',
+      body: { query: '{ hello }' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { data: { hello: 'world' } });
+  });
+});

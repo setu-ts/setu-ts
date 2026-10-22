@@ -23,39 +23,65 @@ result and exit rather than servers: `cqrs` and `microservices`.
 
 ## How every example is laid out
 
-Each app splits the same three ways, which is also the shape to copy into your own project. A
-factory in `src/app.ts` builds the application without starting it. `main.ts` starts it on a port.
-`smoke.ts` starts it with no port and drives it with `app.inject()`, so the proof needs no socket.
-This is `minimal`'s factory and smoke check, joined into one listing:
+Each example has the layout `setu new` scaffolds, so the shape to copy is the shape the CLI gives
+you:
+
+```text
+apps/<name>/
+  setu.config.ts          createApp(): the plugin composition, without starting it
+  main.ts                 starts createApp() on a port and stops it cleanly on SIGTERM
+  src/modules/<feature>/  one folder per feature: <feature>.routes.ts, .service.ts, .schemas.ts
+  smoke.ts                proves the example's claim with node:test against createApp()
+```
+
+`setu.config.ts` composes and does not start, so `main.ts` and `smoke.ts` run the same application.
+The smoke check starts it with no port and drives it with `app.inject()`, so most proofs need no
+socket. This is `minimal`'s factory and smoke check, joined into one listing:
 
 ```typescript
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
-// src/app.ts — builds the application and does not start it.
-export function createMinimalApp(): IKernelApplication {
+// setu.config.ts — builds the application and does not start it.
+export function createApp(): IKernelApplication {
   const app = createApplication({ plugins: [RuntimePlugin()] });
   app.router.get('/', (ctx) => ctx.response.json({ hello: 'world' }));
   return app;
 }
 
 // smoke.ts — starts it with no port, so nothing binds a socket.
-const app = createMinimalApp();
-await app.start();
-try {
-  const response = await app.inject({ method: 'GET', url: 'http://example.test/' });
-  if (response.statusCode !== 200 || response.body !== '{"hello":"world"}') {
-    throw new Error(`Expected GET / to return the greeting, received ${response.statusCode}`);
-  }
-} finally {
-  await app.stop();
-}
+describe('minimal example', () => {
+  let app: IKernelApplication;
+
+  before(async () => {
+    app = createApp();
+    await app.start();
+  });
+
+  after(async () => {
+    await app.stop();
+  });
+
+  it('answers GET / with a greeting', async () => {
+    const response = await app.inject({ method: 'GET', url: '/' });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { hello: 'world' });
+  });
+});
 ```
 
 `main.ts` adds the port and the `SIGTERM` handling that lets `app.stop()` run on shutdown; see
 [`apps/minimal/main.ts`](../apps/minimal/main.ts) and
 [Getting Started — Stopping Cleanly](./getting-started.md#stopping-cleanly).
+
+A few examples need more than one entry point, and say why: `cloudflare` adds the Worker entry
+`worker.ts`, `compiled-binary` adds the CommonJS entry `sea.ts` its executable is built from,
+`realtime-clients` adds a client driver that runs on several runtimes, and `microservices` composes
+two services, so it has one factory per service under `src/service-a/` and `src/service-b/`.
 
 ## Examples by capability
 
@@ -91,7 +117,7 @@ pnpm --dir apps/minimal run start 3400
 curl localhost:3400/            # {"hello":"world"}
 ```
 
-Read: [`src/app.ts`](../apps/minimal/src/app.ts).
+Read: [`setu.config.ts`](../apps/minimal/setu.config.ts).
 
 ---
 
@@ -109,21 +135,22 @@ curl -X POST localhost:3400/todos -H 'content-type: application/json' -d '{"titl
 # Swagger UI at http://localhost:3400/docs, the document at /openapi.json
 ```
 
-The route `schema` documents the body for OpenAPI; it does not validate it. Validation needs
-`validateBody(...)` in the route's middleware (see
-[Pipelines (Validation)](./migration-nestjs.md#pipelines-validation)). The smoke check issues a
-token through `issueDemoToken` and reads the written todo back.
+The write route validates its body with `validateBody(...)`, which also documents it for OpenAPI
+(see [Pipelines (Validation)](./migration-nestjs.md#pipelines-validation)), and a todo that does not
+exist answers a Problem Details `404`. The smoke check issues a token through `issueDemoToken` and
+reads the written todo back.
 
-Read: [`src/app.ts`](../apps/rest-api/src/app.ts), [`smoke.ts`](../apps/rest-api/smoke.ts).
+Read: [`src/modules/todos/`](../apps/rest-api/src/modules/todos),
+[`setu.config.ts`](../apps/rest-api/setu.config.ts), [`smoke.ts`](../apps/rest-api/smoke.ts).
 
 ---
 
 ### di-decorators
 
 A `@Controller` class whose constructor receives an `@Injectable` service through
-`@Inject('greeting-service')`, with `DiPlugin` providing the container. A second route shows that
-the framework creates no per-request scope: the app creates two scopes itself and compares what each
-returns.
+`@Inject(GREETING_SERVICE)`, with `DiPlugin` providing the container; each feature is a `@Module`. A
+second controller shows that the framework creates no per-request scope: it creates two scopes
+itself and compares what each returns.
 
 ```bash
 pnpm --dir apps/di-decorators run start 3400
@@ -131,9 +158,8 @@ curl localhost:3400/greetings   # {"greeting":"Hello, decorators!"}
 curl localhost:3400/lifetimes   # {"singletonShared":true,"scopeRetainsInstance":true,"scopesAreDistinct":true}
 ```
 
-Read: [`src/greeting-controller.ts`](../apps/di-decorators/src/greeting-controller.ts),
-[`src/greeting-service.ts`](../apps/di-decorators/src/greeting-service.ts),
-[`src/app.ts`](../apps/di-decorators/src/app.ts). See also
+Read: [`src/modules/greeting/`](../apps/di-decorators/src/modules/greeting),
+[`src/modules/lifetimes/`](../apps/di-decorators/src/modules/lifetimes). See also
 [Decorators — Scoped Injection](./decorators.md#scoped-injection).
 
 ---
@@ -154,7 +180,8 @@ The memory adapter is for development and tests; the same repository code runs a
 through Drizzle or Prisma, or MongoDB and the other adapters. See
 [`@setu-ts/database-plugin`](./plugins.md#setu-tsdatabase-plugin).
 
-Read: [`src/app.ts`](../apps/database/src/app.ts), [`smoke.ts`](../apps/database/smoke.ts).
+Read: [`src/modules/notes/`](../apps/database/src/modules/notes),
+[`smoke.ts`](../apps/database/smoke.ts).
 
 ---
 
@@ -170,7 +197,7 @@ pnpm --dir apps/cqrs run start
 # [ "CQRS keeps commands and queries separate. @ 1791396240491" ]
 ```
 
-Read: [`src/app.ts`](../apps/cqrs/src/app.ts).
+Read: [`src/modules/notes/`](../apps/cqrs/src/modules/notes).
 
 ---
 
@@ -187,7 +214,7 @@ curl localhost:3400/notes -H 'x-tenant-id: globex'                        # []
 curl localhost:3400/notes                                                 # 400 Tenant Required
 ```
 
-Read: [`src/app.ts`](../apps/multi-tenant/src/app.ts).
+Read: [`src/modules/notes/`](../apps/multi-tenant/src/modules/notes).
 
 ---
 
@@ -202,8 +229,8 @@ curl localhost:3400/greet/ada   # {"message":"Hello, ada!"}
 pnpm --dir apps/plugin-development run test                  # the plugin's own tests
 ```
 
-Read: [`src/greeting-plugin.ts`](../apps/plugin-development/src/greeting-plugin.ts). See
-[Custom Plugins](./custom-plugins.md).
+Read: [`src/plugins/greeting.plugin.ts`](../apps/plugin-development/src/plugins/greeting.plugin.ts).
+See [Custom Plugins](./custom-plugins.md).
 
 ---
 
@@ -223,7 +250,9 @@ REDIS_URL=redis://127.0.0.1:6379 pnpm --dir apps/microservices run start 3300 33
 
 The two arguments are service A's and service B's ports (defaults `3000` and `3001`).
 
-Read: [`src/app.ts`](../apps/microservices/src/app.ts).
+Read: [`src/greeting.contract.ts`](../apps/microservices/src/greeting.contract.ts),
+[`src/service-a/`](../apps/microservices/src/service-a),
+[`src/service-b/`](../apps/microservices/src/service-b).
 
 ---
 
@@ -243,19 +272,20 @@ curl -X POST localhost:3400/publish -H 'content-type: application/json' -d '{"me
 WebSocket rooms are shown in [realtime-clients](#realtime-clients) and in the
 [`@setu-ts/websocket-plugin` README](https://github.com/setu-ts/setu-ts/blob/main/packages/websocket-plugin/README.md).
 
-Read: [`src/app.ts`](../apps/realtime/src/app.ts), [`smoke.ts`](../apps/realtime/smoke.ts).
+Read: [`src/modules/news/`](../apps/realtime/src/modules/news),
+[`smoke.ts`](../apps/realtime/smoke.ts).
 
 ---
 
 ### realtime-clients
 
-A server with SSE and WebSocket routes, driven by the `@setu-ts/sdk` realtime clients from Deno,
-Node, Bun and workerd: SSE reconnection resumes from the last event id, authenticated streams send
-their credentials, and a WebSocket stays alive across the server's keep-alive. Its smoke check needs
-Node and Bun installed.
+A server with SSE and WebSocket routes, driven by the `@setu-ts/sdk` realtime clients from Node
+(with and without type stripping), Bun and workerd: SSE reconnection resumes from the last event id,
+authenticated streams send their credentials, and a WebSocket stays alive across the server's
+keep-alive. Its smoke check needs Node and Bun installed.
 
-Read: [`src/app.ts`](../apps/realtime-clients/src/app.ts),
-[`smoke.ts`](../apps/realtime-clients/smoke.ts).
+Read: [`setu.config.ts`](../apps/realtime-clients/setu.config.ts),
+[`driver.ts`](../apps/realtime-clients/driver.ts), [`smoke.ts`](../apps/realtime-clients/smoke.ts).
 
 ---
 
@@ -274,8 +304,8 @@ curl -X POST localhost:4000/graphql -H 'content-type: application/json' -d '{"qu
 `pnpm --dir apps/graphql-demo run interop` drives the same server with the reference `graphql-ws`
 client and Apollo's persisted-query link; it needs their npm packages, so CI does not run it.
 
-Read: [`src/app.ts`](../apps/graphql-demo/src/app.ts),
-[`src/schema.ts`](../apps/graphql-demo/src/schema.ts).
+Read: [`setu.config.ts`](../apps/graphql-demo/setu.config.ts),
+[`src/modules/books/`](../apps/graphql-demo/src/modules/books).
 
 ---
 
@@ -290,7 +320,7 @@ pnpm --dir apps/grpc run start                  # port 5000
 curl localhost:5000/health                       # {"status":"ok"}
 ```
 
-Read: [`src/app.ts`](../apps/grpc/src/app.ts), [`smoke.ts`](../apps/grpc/smoke.ts). See
+Read: [`src/modules/echo/`](../apps/grpc/src/modules/echo), [`smoke.ts`](../apps/grpc/smoke.ts). See
 [`@setu-ts/grpc-plugin`](./plugins.md#setu-tsgrpc-plugin).
 
 ---
@@ -323,7 +353,8 @@ pnpm --dir apps/compiled-binary run build:sea     # writes ./.tmp/compiled-binar
 curl localhost:3400/health        # {"status":"ok"}
 ```
 
-Read: [`src/app.ts`](../apps/compiled-binary/src/app.ts). See
+Read: [`setu.config.ts`](../apps/compiled-binary/setu.config.ts),
+[`sea.ts`](../apps/compiled-binary/sea.ts). See
 [Runtime Deployment — Standalone binaries](./runtime-deployment.md).
 
 ---
@@ -346,12 +377,28 @@ Read: [`setu.config.ts`](../apps/full-stack/setu.config.ts), the routes under
 
 ---
 
+### worker-pool
+
+CPU-bound task modules sharing one worker slot. The smoke check proves main-thread timers keep
+running during a spin, that a second task module is not starved behind a queue of the first, that
+worker writes to a `SharedArrayBuffer` are visible to the caller, and that `/health` reports the
+budget.
+
+```bash
+pnpm --dir apps/worker-pool run start 3400      # loopback-only, http://127.0.0.1:3400/health
+pnpm --dir apps/worker-pool run smoke
+```
+
+Read: [`src/tasks/`](../apps/worker-pool/src/tasks), [`smoke.ts`](../apps/worker-pool/smoke.ts).
+
+---
+
 ### static-site
 
-`StaticPlugin` serving `./public` at the root, beside a `GET /health` route. The smoke check
-requests the cases that once failed: a `HEAD` that must not open a body, a hashed asset that keeps
-its `immutable` policy when the brotli copy is served, conditional requests, and a resumed download
-through `Range` and `If-Range`.
+`StaticPlugin` serving `./public` at the root with an SPA fallback, beside a `GET /health` route.
+The smoke check requests the cases that once failed: a `HEAD` that must not open a body, a hashed
+asset that keeps its `immutable` policy when the brotli copy is served, conditional requests, and a
+resumed download through `Range` and `If-Range`.
 
 ```bash
 pnpm --dir apps/static-site run start 3400      # the port; defaults to 8000
@@ -360,14 +407,16 @@ curl -I localhost:3400/index.html
 
 The default port `8000` is also DynamoDB Local's default, so pass another port when that is running.
 
-Read: [`main.ts`](../apps/static-site/main.ts), [`smoke.ts`](../apps/static-site/smoke.ts).
+Read: [`setu.config.ts`](../apps/static-site/setu.config.ts),
+[`smoke.ts`](../apps/static-site/smoke.ts).
 
 ## Smoke checks
 
-A smoke check asserts one behaviour and fails loudly. An app’s `smoke` script exits non-zero on the
-first failed assertion, with a message naming what did not happen. A check whose external
+A smoke check is a `node:test` file: each `it` asserts one behaviour with `node:assert/strict`, so a
+failure reports every check that failed and the values it compared. A check whose external
 prerequisite is missing (Redis, Wrangler) prints why and exits with code `77`, which `check:apps`
-records as a skip rather than a pass.
+records as a skip rather than a pass. The skip applies only when every check that could run passed;
+a real failure still exits non-zero.
 
 ## Running every example
 
@@ -383,7 +432,8 @@ skip fails the job unless the app is in the `ALLOW_SKIP` list; see
 ## Contributing an example
 
 1. Create it under `apps/<name>/` with a private `package.json` declaring `start`, `smoke` and
-   `check` scripts and a `tsconfig.json` extending `../../tsconfig.apps.json`.
+   `check` scripts and a `tsconfig.json` extending `../../tsconfig.apps.json`, laid out as
+   [above](#how-every-example-is-laid-out).
 2. Make `smoke.ts` assert the behaviour the example exists for, not only that it started.
 3. Add it to [`apps/README.md`](../apps/README.md) and to this guide.
 4. Run `pnpm run check:apps`.
@@ -394,11 +444,3 @@ skip fails the job unless the app is in the `ALLOW_SKIP` list; see
 - [Plugin Architecture](./plugin-architecture.md) - Deep dive into plugins
 - [Runtime Deployment](./runtime-deployment.md) - Deploy to production
 - [Docker and Kubernetes](./deployment.md) - Containerize and orchestrate an example
-
-### worker-pool
-
-Run `pnpm --dir apps/worker-pool run smoke`. Run `pnpm --dir apps/worker-pool run start` for a
-loopback-only health listener at `http://127.0.0.1:3000/health` (PORT overrides the port). The
-scripts run on Node through `tsx`. The app shares one worker between CPU-bound spins and buffer
-fills, proves main-thread timers keep running, and reads the budget through `/health`. Read:
-[`src/app.ts`](../apps/worker-pool/src/app.ts), [`smoke.ts`](../apps/worker-pool/smoke.ts).

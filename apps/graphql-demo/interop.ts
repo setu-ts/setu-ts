@@ -30,8 +30,9 @@ import { createClient } from 'graphql-ws';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client/core/index.js';
 import { createPersistedQueryLink } from '@apollo/client/link/persisted-queries/index.js';
 import { sha256 } from 'js-sha256';
-import { createDemoApp, freePort } from './src/app.ts';
-import { INTERNAL_SECRET } from './src/schema.ts';
+import { freePort } from '../smoke-helpers.ts';
+import { INTERNAL_SECRET } from './src/modules/books/books.resolvers.ts';
+import { createApp } from './setu.config.ts';
 
 const results: { ok: boolean; label: string; detail: string }[] = [];
 
@@ -51,7 +52,7 @@ async function until(predicate: () => boolean, ms = 5000): Promise<boolean> {
 }
 
 const port = await freePort();
-const app = createDemoApp();
+const app = createApp();
 await app.start({ port });
 const http = `http://localhost:${port}/graphql`;
 

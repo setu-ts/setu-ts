@@ -1,31 +1,33 @@
-/** Build the single executable and exercise its real HTTP listener. */
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { run } from '../../scripts/lib/run.ts';
-import { freePort, startHost } from '../smoke-helpers.ts';
+import { freePort, startHost, stopHost, waitForHttp } from '../smoke-helpers.ts';
+import type { Host } from '../smoke-helpers.ts';
 
-const built = await run('pnpm', ['run', 'build:sea'], { inherit: true });
-if (built.code !== 0) throw new Error('Node SEA build failed.');
-const port = await freePort();
-const server = startHost(
-  fileURLToPath(new URL('../../.tmp/compiled-binary/server', import.meta.url)),
-  [String(port)],
-);
-try {
-  let ready = false;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/health`);
-      if (!response.ok || ((await response.json()) as { status: string }).status !== 'ok') {
-        throw new Error('The SEA did not serve GET /health.');
-      }
-      ready = true;
-      break;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-  if (!ready) throw new Error('The SEA did not start within five seconds.');
-} finally {
-  server.kill();
-  await server.status;
-}
+const BINARY = fileURLToPath(new URL('../../.tmp/compiled-binary/server', import.meta.url));
+
+describe('compiled-binary example', () => {
+  let server: Host;
+  let baseUrl: string;
+
+  before(async () => {
+    const built = await run('pnpm', ['run', 'build:sea'], { inherit: true });
+    assert.equal(built.code, 0, 'the single-executable build failed');
+    const port = await freePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+    server = startHost(BINARY, [String(port)]);
+    await waitForHttp(`${baseUrl}/health`, { label: 'The compiled executable' });
+  });
+
+  after(async () => {
+    await stopHost(server);
+  });
+
+  it('serves /health from the standalone executable', async () => {
+    const response = await fetch(`${baseUrl}/health`);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: 'ok' });
+  });
+});

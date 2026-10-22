@@ -1,42 +1,8 @@
 /**
- * The demo schema — schema-first, so it exercises the arm that has to attach
- * resolvers itself (including a subscription's `subscribe`).
- *
- * @module
+ * Resolvers for the books schema, including a subscription's `subscribe`.
  */
-
 import type { ResolverMap } from '@setu-ts/graphql-plugin';
-
-/** A book record as the demo stores it. */
-export interface Book {
-  id: string;
-  title: string;
-  author: string;
-}
-
-/** The SDL served by the demo. */
-export const typeDefs = `
-  type Book { id: ID!, title: String!, author: String! }
-
-  type Query {
-    hello: String!
-    books: [Book!]!
-    book(id: ID!): Book
-    """Always throws, to show internal-error masking on every transport."""
-    boom: String!
-  }
-
-  type Mutation {
-    addBook(title: String!, author: String!): Book!
-  }
-
-  type Subscription {
-    """Emits \`from\` down to 0, then completes."""
-    countdown(from: Int!): Int!
-    """Emits every book added by the addBook mutation, on any transport."""
-    bookAdded: Book!
-  }
-`;
+import type { Book } from './books.schema.ts';
 
 /**
  * The value an internal error carries, so a test can assert that masking
@@ -45,7 +11,7 @@ export const typeDefs = `
 export const INTERNAL_SECRET = 'postgres://admin:hunter2@db.internal:5432';
 
 /** Builds a fresh resolver set over its own state, so each run starts clean. */
-export function createResolvers(): { resolvers: ResolverMap; books: Book[] } {
+export function createResolvers(): ResolverMap {
   const books: Book[] = [
     { id: '1', title: 'The Left Hand of Darkness', author: 'Le Guin' },
     { id: '2', title: 'Piranesi', author: 'Clarke' },
@@ -118,5 +84,5 @@ export function createResolvers(): { resolvers: ResolverMap; books: Book[] } {
     },
   };
 
-  return { resolvers, books };
+  return resolvers;
 }
